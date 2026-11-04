@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+!.env.example
+pogo.json
+*.json.env
+*.json.lock
+.pogo/
+.local/
+.agents/workspace/

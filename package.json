@@ -1,0 +1,36 @@
+{
+  "name": "pogo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pogo": "./src/main.ts"
+  },
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "packageManager": "bun@1.4.4",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "check": "bun run typecheck && bun run lint && bun test"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "@opencode/client": "^2.2.5",
+    "@slack/socket-mode": "^3.1.1",
+    "@slack/web-api": "^8.3.0",
+    "pino": "^10.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.5",
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
+}

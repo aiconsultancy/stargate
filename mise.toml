@@ -1,0 +1,56 @@
+[tools]
+bun = "1.4.4"
+
+[tasks.deps]
+description = "Install dependencies from the lockfile"
+run = "bun install --frozen-lockfile"
+
+[tasks.pogo]
+description = "Run any Pogo CLI command"
+run = "bun run src/main.ts"
+raw = true
+
+[tasks.init]
+description = "Run the interactive Slack setup wizard"
+run = "bun run src/main.ts init"
+raw = true
+
+[tasks.start]
+description = "Run configured Slack bots"
+run = "bun run src/main.ts start"
+raw = true
+
+[tasks.config-check]
+description = "Validate Pogo configuration and token references"
+run = "bun run src/main.ts config check"
+raw = true
+
+[tasks.manifest]
+description = "Generate a Slack app manifest"
+run = "bun run src/main.ts manifest"
+raw = true
+
+[tasks.service]
+description = "Manage the systemd user service (install/start/stop/status/uninstall)"
+run = "bun run src/main.ts service"
+raw = true
+
+[tasks.check]
+description = "Run typecheck, lint, and tests"
+run = "bun run check"
+
+[tasks.test]
+description = "Run tests"
+run = "bun test"
+
+[tasks.typecheck]
+description = "Check TypeScript types"
+run = "bun run typecheck"
+
+[tasks.lint]
+description = "Check lint and formatting"
+run = "bun run lint"
+
+[tasks.format]
+description = "Apply lint and formatting fixes"
+run = "bun run format"

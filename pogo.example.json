@@ -1,0 +1,35 @@
+{
+  "dataDirectory": ".pogo",
+  "bots": [
+    {
+      "id": "code-helper",
+      "slack": {
+        "appId": "A123",
+        "appTokenEnv": "POGO_CODE_APP_TOKEN",
+        "botTokenEnv": "POGO_CODE_BOT_TOKEN"
+      },
+      "access": { "users": ["U123"], "channels": ["C123"] },
+      "backend": {
+        "type": "opencode",
+        "url": "http://localhost:4096",
+        "directory": "/srv/project",
+        "permissions": [{ "action": "*", "resource": "*", "effect": "deny" }]
+      }
+    },
+    {
+      "id": "pi-helper",
+      "slack": {
+        "appId": "A456",
+        "appTokenEnv": "POGO_PI_APP_TOKEN",
+        "botTokenEnv": "POGO_PI_BOT_TOKEN"
+      },
+      "access": { "users": ["U123"], "channels": ["C123"] },
+      "backend": {
+        "type": "pi-durable",
+        "directory": "/srv/project",
+        "model": "openai/gpt-5",
+        "tools": "none"
+      }
+    }
+  ]
+}

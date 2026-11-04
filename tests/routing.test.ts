@@ -1,0 +1,114 @@
+import { describe, expect, test } from "bun:test";
+import { backendSchema, configSchema, secret } from "../src/config";
+import { botKey, chunks, routeEvent } from "../src/routing";
+import { bot, event, identity } from "./fixtures";
+
+describe("routing", () => {
+  test("isolates bots, teams, threads, and backend settings", () => {
+    const first = routeEvent(event(), bot(), identity);
+    expect(first?.text).toBe("hello");
+    expect(first?.conversation).not.toBe(
+      routeEvent(event(), bot("other"), identity)?.conversation,
+    );
+    expect(botKey(bot(), identity)).not.toBe(
+      botKey(bot(), { ...identity, team: "T456" }),
+    );
+    expect(first?.conversation).not.toBe(
+      routeEvent(event("<@UBOT> other", "2.000"), bot(), identity)
+        ?.conversation,
+    );
+    const changed = bot();
+    if (changed.backend.type === "opencode")
+      changed.backend.directory = "/different";
+    expect(botKey(changed, identity)).not.toBe(botKey(bot(), identity));
+  });
+
+  test("deduplicates mention and message events by message timestamp", () => {
+    const message = event();
+    const mention = routeEvent(message, bot(), identity);
+    message.event.type = "message";
+    message.event_id = "EvDifferent";
+    expect(routeEvent(message, bot(), identity)?.eventId).toBe(
+      mention?.eventId,
+    );
+  });
+
+  test("rejects wrong identity, denied people/channels, bots and edits", () => {
+    const cases = [
+      { ...event(), api_app_id: "A999" },
+      { ...event(), team_id: "T999" },
+      { ...event(), event: { ...event().event, user: "U999" } },
+      { ...event(), event: { ...event().event, channel: "C999" } },
+      { ...event(), event: { ...event().event, user: "UBOT" } },
+      { ...event(), event: { ...event().event, bot_id: "B123" } },
+      { ...event(), event: { ...event().event, subtype: "message_changed" } },
+      { ...event(), event: { ...event().event, hidden: true } },
+      event("<@UBOT> "),
+      {},
+    ];
+    for (const value of cases)
+      expect(routeEvent(value, bot(), identity)).toBeUndefined();
+  });
+
+  test("thread replies require subscription; mention-only overrides it", () => {
+    const reply = {
+      ...event(),
+      event: {
+        ...event("continue", "2.000").event,
+        type: "message",
+        thread_ts: "1.000",
+      },
+    };
+    const result = routeEvent(reply, bot(), identity);
+    expect(result?.startsConversation).toBe(false);
+    expect(result?.conversation).toBe(
+      routeEvent(event(), bot(), identity)?.conversation,
+    );
+    const config = bot();
+    config.access.mentionOnly = true;
+    expect(routeEvent(reply, config, identity)).toBeUndefined();
+  });
+
+  test("allowed DMs can start conversations without mentions", () => {
+    const dm = {
+      ...event(),
+      event: { ...event("hello").event, channel: "D123", channel_type: "im" },
+    };
+    expect(routeEvent(dm, bot(), identity)?.startsConversation).toBe(true);
+  });
+
+  test("chunks preserve Unicode and bound response size", () => {
+    const text = "🦘".repeat(3000);
+    const result = chunks(text);
+    expect(result.join("")).toBe(text);
+    expect(Array.from(result[0] ?? "")).toHaveLength(2800);
+    expect(chunks("")).toEqual(["Agent finished without a text reply."]);
+    expect(chunks("a".repeat(70_000)).join("")).toEndWith(
+      "[Response truncated by Pogo.]",
+    );
+  });
+});
+
+test("config fails closed and rejects duplicate registrations", () => {
+  expect(
+    configSchema.safeParse({
+      bots: [{ ...bot(), access: { users: [], channels: [] } }],
+    }).success,
+  ).toBe(false);
+  expect(configSchema.safeParse({ bots: [bot(), bot()] }).success).toBe(false);
+  expect(
+    backendSchema.safeParse({
+      type: "opencode",
+      url: "file:///secret",
+      directory: "/work",
+    }).success,
+  ).toBe(false);
+  expect(
+    backendSchema.safeParse({
+      type: "pi-durable",
+      directory: "/work",
+      model: "unknown/model",
+    }).success,
+  ).toBe(false);
+  expect(() => secret("MISSING", {})).toThrow("Missing environment variable");
+});
