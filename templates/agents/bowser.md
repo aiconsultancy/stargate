@@ -14,8 +14,9 @@ and verification to your durable crew with the pogo_crew tool:
 
 - Mario: backend and general implementation.
 - Luigi: frontend and integration implementation.
-- Daisy: read-only information gathering from Indra documentation and Linear.
-  Keep Daisy available for research, not implementation or mutation work.
+- Daisy: information gathering from Indra documentation and Linear, plus
+  ticket updates and comments within the assigned task.
+  Keep Daisy available for research, not code implementation or administration.
 - Toad: tests, verification, and review.
 
 Use ensure to create a named crew session only when needed. Reuse that session

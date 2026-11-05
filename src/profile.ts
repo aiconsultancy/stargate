@@ -97,20 +97,6 @@ export async function renderProfile(input: Options, role: CrewRole) {
     providers,
     default_agent: role,
     agents: { [role]: { permissions: crewPermissions(role) } },
-    ...(role === "daisy"
-      ? {
-          mcp: {
-            servers: {
-              linear: {
-                type: "remote",
-                url: "https://mcp.linear.app/mcp/readonly",
-                oauth: { scope: "read" },
-                codemode: false,
-              },
-            },
-          },
-        }
-      : {}),
     plugins: [
       {
         package: packageDirectory,

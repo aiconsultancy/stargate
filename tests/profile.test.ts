@@ -51,18 +51,7 @@ test("default profile uses proxy, durable crew, and 20% compaction buffer", asyn
   expect(config.default_agent).toBe("daisy");
   expect(config.compaction).toMatchObject({ auto: true, buffer: "20%" });
   expect(config.experimental).toMatchObject({ background_compaction: true });
-  expect(config).toMatchObject({
-    mcp: {
-      servers: {
-        linear: {
-          type: "remote",
-          url: "https://mcp.linear.app/mcp/readonly",
-          oauth: { scope: "read" },
-          codemode: false,
-        },
-      },
-    },
-  });
+  expect(Object.hasOwn(config, "mcp")).toBe(false);
   expect(JSON.stringify(config.providers)).toContain(
     "{env:CLIPROXYAPI_API_KEY}",
   );
@@ -81,6 +70,16 @@ test("default profile uses proxy, durable crew, and 20% compaction buffer", asyn
     resource: "*",
     effect: "allow",
   });
+});
+
+test("all crew roles permit the user's global Linear read/write tools", () => {
+  for (const role of ["bowser", "mario", "luigi", "daisy", "toad"] as const) {
+    expect(crewPermissions(role)).toContainEqual({
+      action: "linear_*",
+      resource: "*",
+      effect: "allow",
+    });
+  }
 });
 
 test("profile init creates named feature worktrees, preserves source and reuses paths", async () => {

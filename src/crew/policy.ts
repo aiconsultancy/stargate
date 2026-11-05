@@ -31,12 +31,10 @@ export function crewPermissions(role: CrewRole): Rule[] {
   if (role !== "bowser" && role !== "daisy") {
     rules.push(allow("edit"), allow("shell"), allow("browser"));
   }
-  // Daisy receives Linear's read-only tools directly, without arbitrary
+  // Daisy receives the user's global Linear tools directly, without arbitrary
   // Code Mode fetch. Session-scoped rules also constrain her child agents.
   if (role !== "daisy") rules.push(allow("execute"));
-  for (const operation of ["get", "list", "search", "fetch"]) {
-    rules.push(allow(`*linear*_${operation}*`));
-  }
+  rules.push(allow("linear_*"));
   for (const resource of ["*.env", "*.env.*", "*.key", "*.pem"]) {
     rules.push({ action: "read", resource, effect: "deny" });
   }

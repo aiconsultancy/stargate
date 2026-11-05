@@ -12,7 +12,7 @@ crew can edit files and run commands under the OpenCode service's OS account.
 | Bowser        | Answer simple questions; coordinate substantial work; return Slack replies | One existing Pogo session per Slack thread |
 | Mario         | Backend and general implementation                                         | One durable session per bot                |
 | Luigi         | Frontend and integration implementation                                    | One durable session per bot                |
-| Daisy         | Read-only documentation and Linear research                                | One durable session per bot                |
+| Daisy         | Documentation/Linear research; assigned ticket updates and comments        | One durable session per bot                |
 | Toad          | Verification and review                                                    | One durable session per bot                |
 
 The four crew sessions are root OpenCode sessions, not temporary children of a
@@ -26,15 +26,38 @@ Crew may use temporary model-named child agents, but must consult the global
 [`agent-profiles` routing skill](agent-profiles.md) before selecting one.
 The default global child profiles also use CLIProxyAPI, not direct-provider
 fallbacks. Global profile switches do not change a crew session's stored model.
-They must never create additional root sessions. Daisy's session-scoped
-read-only permissions also constrain her children. Her Linear tools permit
-information gathering, not issue/comment/status changes. A fresh machine may
-need its own Linear sign-in; local files do not transfer that connection.
-Daisy's generated config uses Linear's `/mcp/readonly` endpoint and requests
-only the `read` OAuth scope. Its tools are direct, so Daisy and her children
-do not need shell or arbitrary Code Mode access. In Daisy's OpenCode worktree,
-run `/mcps`, select `linear`, and complete the operator sign-in. Configuration
-alone is not a verified connection; check its status and one read-only call.
+They must never create additional root sessions. Daisy's session-scoped file,
+shell, and Code Mode restrictions also constrain her children. All crew roles
+may use Linear read/write tools for their assigned tasks, including ticket
+updates and comments. This is not permission for unrelated changes or
+workspace administration. Follow Indra's Linear delivery and mirror rules.
+
+Configure Linear once in the user's global OpenCode configuration; generated
+crew profiles inherit it rather than overriding it with a read-only endpoint:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "linear": {
+        "type": "remote",
+        "url": "https://mcp.linear.app/mcp",
+        "codemode": false
+      }
+    }
+  }
+}
+```
+
+Merge this with existing configuration, never replace the whole file. Remote
+OAuth is enabled by default; the standard Linear endpoint requests read/write
+access. Direct tools let Daisy use Linear without shell or arbitrary Code
+Mode access. From any OpenCode workspace, open `/mcps`, select `linear`, and
+complete the operator sign-in; a terminal is not required. On a remote iPad,
+paste an unreachable callback URL into the sign-in dialog, not agent chat.
+Keep OAuth credentials outside the configuration. A fresh machine needs its
+own sign-in. Configuration alone is not a verified connection: check status
+and one read-only call before any explicitly authorised write.
 
 ## Fresh-machine setup
 
