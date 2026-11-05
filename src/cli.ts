@@ -1,5 +1,7 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { initializeProfile } from "./profile";
+import { provisionBots } from "./provision";
 import { manageService } from "./service";
 import {
   addBot,
@@ -23,6 +25,8 @@ Commands:
   start             Run configured bots (also the default command)
   init              Interactive setup; append a bot safely
   bot add           Add a bot using flags, or interactively with no flags
+  bot provision     Plan or resume a batch of Slack registrations
+  crew init         Install the default OpenCode captain/crew profile
   config check      Validate config and Slack token references
   manifest          Print Slack manifest JSON and prefilled creation URL
   service install   Install Linux systemd user unit; does not enable/start
@@ -40,6 +44,12 @@ Creates a prefilled Slack manifest link, collects IDs and backend settings,
 and appends a validated bot. Existing bots/credentials are never overwritten.
 ${slackInstructions}`,
   bot: `Usage: pogo bot add [--config PATH] [options]
+Batch: pogo bot provision --plan PATH [--apply] [--config PATH]
+  --journal PATH         Private resumable journal (default: .local/provision/)
+  --record-app BOT=APP    Reconcile an app created through the browser
+  --json                 Print sanitized plan/status JSON
+Without --apply, provisioning only plans. Review before remote creation.
+Persistent tokens are read from environment references, never arguments.
 No bot options: interactive setup. With options: noninteractive, never prompts.
 Required:
   --id ID                 Unique lowercase bot ID [a-z0-9_-], max 64
@@ -77,6 +87,20 @@ Example:
 Scripted setup stores references only; supply secrets through the environment
 or create <config>.env securely. Exit status is nonzero on invalid input.
 ${slackInstructions}`,
+  crew: `Usage: pogo crew init --directory PATH --project PATH --worktrees PATH [options]
+--directory PATH       Captain workspace (outside the crew configuration tree)
+--project PATH         Existing target Git repository, e.g. an Indra checkout
+--worktrees PATH       Parent of mario, luigi, daisy, and toad worktrees
+--id ID                Bot namespace (default: bowser)
+--base REF             Committed source ref (default: origin/main)
+--mesij-command PATH   Absolute Mesij executable (default: resolved from PATH)
+--proxy-url URL        CLIProxyAPI endpoint (default: http://127.0.0.1:8317/v1)
+--proxy-key-file PATH  Reference an existing private key file; never a key value
+Creates named feature branches, local agent/config overlays, and private state.
+Existing conflicting files are not overwritten. No sessions, apps, or services
+are started. Crew sessions are created lazily by Bowser and then reused.
+The trusted crew profile enables implementation tools; it is not a sandbox.
+Default model: openai-proxy/gpt-6.1-sol. Global authentication is unchanged.`,
   config: `Usage: pogo config check [--config PATH] [--schema-only]\n${common}
 Checks JSON/schema and Slack token references using environment and <config>.env.
 --schema-only  Check JSON/schema without requiring any credentials
@@ -135,6 +159,16 @@ function parseCli(args: string[]) {
         model: { type: "string" },
         agent: { type: "string" },
         "mention-only": { type: "boolean" },
+        plan: { type: "string" },
+        apply: { type: "boolean" },
+        journal: { type: "string" },
+        "record-app": { type: "string" },
+        project: { type: "string" },
+        worktrees: { type: "string" },
+        base: { type: "string" },
+        "mesij-command": { type: "string" },
+        "proxy-url": { type: "string" },
+        "proxy-key-file": { type: "string" },
       },
     });
   } catch {
@@ -173,14 +207,27 @@ export async function runCli(args: string[]): Promise<CliResult> {
   const allowed = new Set([
     "config",
     ...(command === "bot"
-      ? botOptions
-      : command === "manifest"
-        ? ["name", "json"]
-        : command === "service"
-          ? ["name"]
-          : command === "config"
-            ? ["schema-only"]
-            : []),
+      ? p[1] === "provision"
+        ? ["plan", "apply", "journal", "record-app", "json"]
+        : botOptions
+      : command === "crew"
+        ? [
+            "directory",
+            "project",
+            "worktrees",
+            "id",
+            "base",
+            "mesij-command",
+            "proxy-url",
+            "proxy-key-file",
+          ]
+        : command === "manifest"
+          ? ["name", "json"]
+          : command === "service"
+            ? ["name"]
+            : command === "config"
+              ? ["schema-only"]
+              : []),
   ]);
   if (Object.keys(v).some((key) => !allowed.has(key)))
     throw new Error(
@@ -188,7 +235,43 @@ export async function runCli(args: string[]): Promise<CliResult> {
     );
   if (command === "start" && p.length <= 1)
     return { command: "start", configPath };
-  if (command === "init" && p.length === 1) await setupWizard(configPath);
+  if (command === "crew" && p[1] === "init" && p.length === 2) {
+    if (!v.directory || !v.project || !v.worktrees)
+      throw new Error("--directory, --project, and --worktrees are required.");
+    const mesijCommand = v["mesij-command"] ?? Bun.which("mesij");
+    if (!mesijCommand)
+      throw new Error(
+        "Mesij is unavailable. Run mise install or provide --mesij-command.",
+      );
+    const result = await initializeProfile({
+      directory: resolve(v.directory),
+      projectDirectory: resolve(v.project),
+      worktreeDirectory: resolve(v.worktrees),
+      mesijCommand: resolve(mesijCommand),
+      ...(v.id ? { namespace: v.id } : {}),
+      ...(v.base ? { base: v.base } : {}),
+      ...(v["proxy-url"] ? { proxyURL: v["proxy-url"] } : {}),
+      ...(v["proxy-key-file"]
+        ? { apiKeyReference: `{file:${resolve(v["proxy-key-file"])}}` }
+        : {}),
+    });
+    console.log(JSON.stringify(result, null, 2));
+  } else if (command === "bot" && p[1] === "provision" && p.length === 2) {
+    if (!v.plan) throw new Error("--plan is required.");
+    const result = await provisionBots({
+      planPath: resolve(v.plan),
+      apply: v.apply ?? false,
+      ...(v.config ? { configPath } : {}),
+      ...(v.journal ? { journalPath: resolve(v.journal) } : {}),
+      ...(v["record-app"] ? { recordApp: v["record-app"] } : {}),
+    });
+    if (v.json) console.log(JSON.stringify(result, null, 2));
+    else {
+      console.log(`Workspace ${result.teamId}; journal ${result.journalPath}`);
+      for (const bot of result.bots) console.log(JSON.stringify(bot));
+    }
+  } else if (command === "init" && p.length === 1)
+    await setupWizard(configPath);
   else if (command === "config" && p[1] === "check" && p.length === 2) {
     const config = await readConfiguration(configPath);
     if (!v["schema-only"]) await checkCredentials(configPath, config.bots);

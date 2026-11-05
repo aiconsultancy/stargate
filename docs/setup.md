@@ -4,6 +4,182 @@ This guide creates **Slack app registrations for the existing Pogo gateway**.
 It does not create a Bolt starter, replace Pogo, or run a second bot runtime.
 Repeat app registration for each bot; one Pogo process can host them all.
 
+## Quick batch setup on another machine
+
+Install mise and OpenCode V2 first. The checkout pins Bun and Mesij, not Node
+or the OpenCode executable. Follow the [portable proxy bootstrap](cliproxyapi.md)
+for CLIProxyAPI and subscription sign-in before testing inference. Do not copy
+another machine's credentials, state, or installed service files.
+
+```sh
+mise install
+make deps
+make pogo ARGS='bot provision --help'
+```
+
+For end-to-end model-led setup, ask OpenCode to read the
+[agent-profile setup prompt and routing skill][agent-profile-gist], inspect this
+machine, and present its proposal before global migrations or authentication
+changes. Follow the [local application procedure](agents/agent-profiles.md),
+then install the [default captain/crew profile](agents/default-opencode.md).
+The gist's example models, reasoning syntax, and commands must be adapted to
+the installed V2 version, not copied without verification.
+
+Copy [`bots.example.json`](../bots.example.json) to a private local plan, such
+as `.local/bots.json`. Replace every example workspace, app, user, channel,
+directory, and server setting before applying it. Each entry has explicit
+`id`, `name`, `app`, `slack` token environment references, `access`, and
+`backend`. Plans are strict version-1 JSON: unknown fields are rejected.
+They contain no tokens or provider credentials. There are no shared defaults.
+
+- `app: { "mode": "reuse", "appId": "A…" }` uses an existing registration.
+- `app: { "mode": "create" }` requests a new registration.
+- The example reuses Bowser. **Replace its placeholder App ID with the live
+  Bowser App ID; never change Bowser to `create`.** Existing matching Pogo
+  registrations remain unchanged. Conflicting settings fail, not overwrite.
+- `agent: "bowser"` selects the captain agent. Do not assign it to crew bots.
+  Configure that agent on the OpenCode server before use. The example provider
+  `openai-proxy` and model `gpt-6.1-sol` must exist on that server.
+- Tool permissions remain deny-all unless explicitly configured. Do not enable
+  tools merely to make provisioning or a connectivity test pass.
+
+Plan first; this command does not write files or contact Slack:
+
+```sh
+make pogo ARGS='bot provision --plan .local/bots.json --json'
+```
+
+Review every bot, workspace, existing App ID, manifest, and creation link.
+Both access allowlists must be nonempty. Wildcards require explicit operator
+approval. The full batch is checked against existing bot IDs, App IDs, token
+references, and settings before any app is created. A reused app receives a
+settings link, not a new-app link. No existing Slack manifest is modified.
+
+### API creation or browser creation
+
+Prefer the Manifest API when the operator can supply a configuration token
+privately. The optional plan field `configTokenEnv` defaults to
+`SLACK_APP_CONFIG_TOKEN`. The token must belong to the intended workspace and
+have `app_configurations:write`; the plan's `teamId` records the expected
+workspace, not verified Slack authentication. One user/workspace configuration
+token can create multiple apps, and expires after 12 hours. CLI login is not a
+substitute. Never put the token value in the plan, CLI arguments, or chat.
+
+After explicit approval of the reviewed batch:
+
+```sh
+make pogo ARGS='bot provision --plan .local/bots.json --apply --json'
+```
+
+Known App IDs are reused. New apps are created sequentially only when the
+configuration-token environment variable is present. Without that token,
+creation stays pending and the output supplies manifest links for the browser.
+The command does not install apps, generate runtime tokens, invite bots, run
+inference, start listeners, or change services.
+
+For each browser-created app, record its non-secret App ID:
+
+```sh
+make pogo ARGS='bot provision --plan .local/bots.json --record-app research=A012NEWAPP --json'
+make pogo ARGS='bot provision --plan .local/bots.json --apply --json'
+```
+
+`--record-app BOT_ID=APP_ID` saves only the reconciliation checkpoint; without
+`--apply` it does not register bots locally. It accepts only a planned `create`
+bot and cannot replace a known App ID. Record other browser-created bots with
+the same command, then apply once. Applying registers all known bots with
+environment references only, even if runtime tokens are not yet present.
+
+### Resume and status
+
+The default journal is `.local/provision/bots.json` beside the Pogo config.
+It is gitignored through `.local/`, written atomically with mode `0600`, and
+protected by a writer lock. Use `--journal PATH` to select another private
+journal. Use a separate journal for a distinct batch, never to bypass an
+uncertain creation. Keep the same plan and config path when resuming.
+A terminated writer can leave `<journal>.lock`. Confirm that no provisioning
+writer remains before removing only that stale lock; preserve the journal.
+
+Each result includes `app`, `registration`, `credentials`, and `needsHuman`,
+plus a manifest and actionable link. Token presence/prefixes are local checks,
+not proof of installation or successful Slack/provider authentication.
+
+- Repeating `--apply` skips known apps and matching local registrations.
+- HTTP 429 stops further creation in that run. `retryAfterSeconds` reports the
+  wait; an early rerun does not repeat that request before its checkpoint time.
+- Lost or malformed responses, partial server errors, and interrupted creates
+  become `outcome_unknown`. They are **not retried automatically**.
+- Inspect the correct workspace's app settings, identify the app actually
+  created, and use `--record-app` to reconcile that exact bot. Do not delete
+  the journal or follow a new creation link to clear uncertainty. If no app can
+  be identified, stop and resolve the outcome before creating another one.
+- Missing runtime tokens leave a separate human task. Put them in the named
+  private environment variables or `<config>.env` with mode `0600`. The batch
+  command does not write or overwrite credentials. The hidden-input wizard is
+  an alternative single-bot registration workflow, not a token-update command
+  for an already registered bot.
+
+Before starting on another host, arrange an explicit listener handover.
+**Never run a second Bowser Socket Mode listener with the live credentials.**
+For genuinely separate concurrent deployments, use separate Slack apps. Follow
+the staged verification below; provisioning alone is not setup completion.
+
+## Browser-assisted registration
+
+Use OpenCode's built-in browser tools when they are available. Load the browser
+skill, confirm access with its tab-list operation, and reuse that browser.
+Do not install a second driver merely to duplicate a working built-in browser.
+
+The agent can navigate non-secret setup forms, open the generated manifest
+link, and help review names, workspace, scopes, and settings. The operator
+completes sign-in, SSO/MFA, CAPTCHA, and OAuth installation approval. Workspace
+admin approval can still block installation. Do not claim silent approval or
+fully unattended installation.
+
+Keep browser-generated persistent tokens out of agent context. Do not read
+token-bearing pages with snapshots, screenshots, DOM/eval, clipboard tools,
+console output, network dumps, or recordings. The human handles token pages
+and stores credentials directly in a private local source. Record only the
+App ID with `--record-app`. No private browser-to-credential transfer helper
+is implemented; a browser can also be on a different machine from Pogo.
+
+### Optional portable driver
+
+If built-in browser tools are unavailable, Vercel Labs
+[agent-browser](https://agent-browser.dev/installation) is an optional portable
+browser driver. Its documented `0.41.2` release is dated November 3, 2026.
+The optional mise task pins Node 24.21.0 and agent-browser 0.41.2 separately
+from Pogo's Bun runtime. Obtain permission before installing the CLI, browser,
+or system packages:
+
+```sh
+make cua-install
+make cua ARGS='--version'
+make cua ARGS='skills get core'
+make cua ARGS='--session pogo-slack-setup --headed open https://api.slack.com/apps'
+make cua ARGS='--session pogo-slack-setup stream disable'
+```
+
+On Linux, `agent-browser install --with-deps` also installs system libraries
+and invokes `sudo` for non-root users. Request separate approval before using
+it. A headed browser needs a desktop the operator can use for login/approval;
+browser automation does not replace native desktop-dialog control.
+
+Read the current [security](https://agent-browser.dev/security) and
+[session](https://agent-browser.dev/sessions) documentation before use:
+
+- Streaming is enabled by default. Disable it before human token handling.
+  Do not start dashboards, traces, HAR capture, screenshots, or recordings.
+- `get value`, `eval`, snapshots, and errors can contain secrets. JSON output
+  and `--omit-command` are not credential redaction.
+- The auth vault protects saved login passwords, not arbitrary Slack tokens.
+- Navigation/action restrictions are opt-in. Domain allowlists must include
+  required CDN and SSO domains. They cannot be combined with profile reuse,
+  saved-state replay, or pre-existing CDP attachment.
+- Do not export login cookies/state into the checkout. Saved state can contain
+  plaintext session tokens unless explicitly encrypted. Close this named
+  session when finished: `make cua ARGS='--session pogo-slack-setup close'`.
+
 ## 1. Confirm the target
 
 Ask the operator for:
@@ -347,6 +523,7 @@ or runtime databases. Link to this guide rather than copying a live transcript.
 
 ## Official references
 
+[agent-profile-gist]: https://gist.github.com/withakay/1c20e455063bc9be4c4ede76ef866a71
 - [Slack agent setup](https://docs.slack.dev/agent-setup/prompt.md)
 - [Hosted Slack CLI skill](https://docs.slack.dev/.well-known/skills/slack-cli/SKILL.md)
 - [App manifests and configuration tokens](https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests)
