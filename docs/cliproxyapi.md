@@ -31,6 +31,33 @@ The local callback ports are 1455 and 54545 respectively. Authentication files
 are discovered by the running proxy. Subscription limits and provider terms
 still apply. No provider request is made by the installation health check.
 
+## OpenCode Go upstream
+
+OpenCode Go is configured as a separate v8 `api-keys.openai-compatibility`
+upstream named `opencode-go`, using
+`https://opencode.ai/inference/go/openai/v1`. Its aliases are explicitly named
+`opencode-go/<model-id>` so they cannot silently share a route with a Codex or
+Claude subscription model. No global prefix-routing setting was changed.
+
+The upstream model list is a snapshot of Go's public catalog, not automatic
+discovery. Refresh that list when new Go models are needed. Existing Bowser
+OpenCode model definitions are separate; proxy discovery does not add them to
+the OpenCode config automatically.
+
+Go requires coding-agent traffic, an identifying User-Agent, and a stable
+session ID per conversation. The upstream forwards the caller's `User-Agent`
+and `x-opencode-session` headers. Clients must supply them; a missing session
+header is not replaced by a fabricated global session ID.
+
+The API token is stored in the private proxy config. The private input file
+`~/.config/cliproxyapi/opencode-go.key` must also remain mode `0600`. Never print
+either file. A private config backup was made before adding this upstream.
+The running proxy required one restart before the new routes were published;
+check model discovery after configuration changes rather than assuming reload.
+
+See [OpenCode Go](https://opencode.ai/v2/docs/console/go) for current model
+availability, session-header requirements, quota, and privacy settings.
+
 ## Automatic updates
 
 `cliproxyapi-update.timer` checks daily at **04:00 local time**, with a random

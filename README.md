@@ -10,6 +10,10 @@ agent settings, and thread sessions. No public HTTP endpoint is required.
 
 Requires [mise](https://mise.jdx.dev/). Bun **1.4.4** is pinned in `mise.toml`.
 
+For agent-led app registration, CLI authentication, human approvals, and live
+verification, follow the [setup guide](docs/setup.md). It provisions Slack apps
+for Pogo without scaffolding a separate Bolt application.
+
 ```sh
 mise install
 mise run deps
@@ -27,6 +31,36 @@ Replies in that thread continue its session without another mention.
 Allowed DMs can start sessions without mentions. Both user and channel must
 be allowed; messages from bots, edits, and empty prompts are ignored.
 Set `access.mentionOnly` to require a mention for every turn.
+
+To respond wherever the bot is invited, allow all humans and accessible
+channels/DMs explicitly:
+
+```json
+"access": {
+  "users": ["*"],
+  "channels": ["*"],
+  "deniedUsers": [],
+  "deniedChannels": []
+}
+```
+
+**Deny always beats allow**, including explicit allows and wildcards. Add user
+or channel IDs to `deniedUsers` or `deniedChannels` to exclude them later.
+Missing deny lists default to empty. Both allow lists must remain nonempty;
+empty allow lists are invalid, not shorthand for everyone. Only whole `*`
+wildcards are supported; partial globs such as `C*` are invalid. A deny list
+containing `*` blocks everyone or every channel/DM, respectively.
+
+CLI options: `--allowed-users '*'`, `--allowed-channels '*'`,
+`--denied-users U123,U456`, and `--denied-channels C123,G456`.
+Quote wildcards to prevent shell expansion. The wizard supports the same rules;
+leave its deny prompts blank when no exclusions are needed.
+
+Wildcards do not grant Slack channel membership or bypass Slack permissions.
+App/workspace routing checks and bot rejection remain in force. Accessible DMs
+and human participants in shared channels are included, so consider exclusions
+before enabling tools. Restart Pogo after changing access rules. Denies are
+also checked before queued work and pending reply delivery.
 
 Optional local command link:
 
@@ -97,6 +131,11 @@ Slack App IDs begin with `A`; member IDs with `U` or `W`; channel IDs with
 channel details show the channel ID. `--help` includes these instructions.
 
 ## Scripted and agent-operated setup
+
+Agents should follow [Agent-led Pogo setup](docs/setup.md) first. It covers
+Slack skill/CLI installation, the `/slackauthticket` challenge exchange, manifest
+creation, secure token handoff, and the difference between CLI login and app
+installation. Persistent tokens must not be requested in chat.
 
 ```sh
 pogo bot add --config /srv/pogo/pogo.json \

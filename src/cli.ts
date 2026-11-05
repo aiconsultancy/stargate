@@ -33,7 +33,7 @@ Commands:
 Use <command> --help for full options.\n${common}`,
   start: `Usage: pogo start [--config PATH]\n${common}
 Provide token values through environment variables or <config>.env.
-Both allowed user and channel must match; bot messages are rejected.`,
+Both user and channel must be allowed; deny rules always win. Bots are rejected.`,
   init: `Usage: pogo init [--config PATH]\n${common}
 Requires an interactive terminal; token input is hidden.
 Creates a prefilled Slack manifest link, collects IDs and backend settings,
@@ -46,8 +46,8 @@ Required:
   --app-id A...           Slack App ID
   --app-token-env NAME    Environment reference for xapp- token
   --bot-token-env NAME    Environment reference for xoxb- token
-  --allowed-users U...,W...  Comma-separated human Slack IDs (nonempty)
-  --allowed-channels C...,G...,D...  Comma-separated channel/DM IDs (nonempty)
+  --allowed-users U...,W...  Human Slack IDs, or '*' for all workspace humans
+  --allowed-channels C...,G...,D...  Channel/DM IDs, or '*' for all accessible channels/DMs
   --backend TYPE         opencode or pi-durable
   --directory PATH       Backend working directory (resolved to absolute)
 OpenCode:
@@ -63,6 +63,11 @@ pi-durable:
   read/write/edit/bash; it is not a sandbox. Edit config to opt in.
 Optional:
   --mention-only         Only respond to mentions
+  --denied-users IDS     Comma-separated user IDs to block (default: none)
+  --denied-channels IDS  Comma-separated channel/DM IDs to block (default: none)
+Deny always beats allow, including explicit allows and '*'. Denies accept '*'
+to block everyone/everywhere. Only a whole '*' is supported, not partial globs.
+Wildcards do not grant Slack membership or allow bot messages. Quote '*'.
 ${common}
 Environment names must match [A-Z_][A-Z0-9_]* and be unique.
 Example:
@@ -121,6 +126,8 @@ function parseCli(args: string[]) {
         "bot-token-env": { type: "string" },
         "allowed-users": { type: "string" },
         "allowed-channels": { type: "string" },
+        "denied-users": { type: "string" },
+        "denied-channels": { type: "string" },
         backend: { type: "string" },
         directory: { type: "string" },
         url: { type: "string" },
@@ -153,6 +160,8 @@ export async function runCli(args: string[]): Promise<CliResult> {
     "bot-token-env",
     "allowed-users",
     "allowed-channels",
+    "denied-users",
+    "denied-channels",
     "backend",
     "directory",
     "url",
@@ -233,6 +242,14 @@ export async function runCli(args: string[]): Promise<CliResult> {
         access: {
           users: v["allowed-users"]?.split(",").map((s) => s.trim()),
           channels: v["allowed-channels"]?.split(",").map((s) => s.trim()),
+          deniedUsers: v["denied-users"]
+            ?.split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          deniedChannels: v["denied-channels"]
+            ?.split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
           mentionOnly: v["mention-only"] ?? false,
         },
         backend,

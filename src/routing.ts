@@ -48,6 +48,24 @@ export function conversationKey(key: string, channel: string, thread: string) {
   return JSON.stringify([key, channel, thread]);
 }
 
+function matchesId(rules: readonly string[], id: string) {
+  return rules.includes("*") || rules.includes(id);
+}
+
+export function isAllowedUser(config: BotConfig, user: string) {
+  return (
+    !matchesId(config.access.deniedUsers, user) &&
+    matchesId(config.access.users, user)
+  );
+}
+
+export function isAllowedChannel(config: BotConfig, channel: string) {
+  return (
+    !matchesId(config.access.deniedChannels, channel) &&
+    matchesId(config.access.channels, channel)
+  );
+}
+
 export function routeEvent(
   raw: unknown,
   config: BotConfig,
@@ -69,8 +87,8 @@ export function routeEvent(
   )
     return;
   if (
-    !config.access.users.includes(event.user) ||
-    !config.access.channels.includes(event.channel)
+    !isAllowedUser(config, event.user) ||
+    !isAllowedChannel(config, event.channel)
   )
     return;
   const mention = `<@${identity.user}>`;

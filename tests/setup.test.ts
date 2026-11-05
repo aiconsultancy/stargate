@@ -44,9 +44,13 @@ test("manifest prefill round-trips and grants only intended scopes/events", () =
   const manifest = buildManifest("Test app");
   expect(
     JSON.parse(
-      new URL(manifestUrl("Test app")).searchParams.get("manifest") ?? "",
+      new URL(manifestUrl("Test app")).searchParams.get("manifest_json") ?? "",
     ),
   ).toEqual(manifest);
+  expect(manifest.features.app_home).toEqual({
+    messages_tab_enabled: true,
+    messages_tab_read_only_enabled: false,
+  });
   expect(manifest.settings.socket_mode_enabled).toBe(true);
   expect(manifest.oauth_config.scopes.bot).toEqual([
     "app_mentions:read",
@@ -127,15 +131,26 @@ test("scripted add stores references, validates without secrets, rejects token a
       "--bot-token-env",
       "ONE_BOT",
       "--allowed-users",
-      "U123",
+      "*",
       "--allowed-channels",
-      "C123",
+      "*",
+      "--denied-users",
+      "U999",
+      "--denied-channels",
+      "C999,G999",
       "--backend",
       "opencode",
       "--directory",
       "/project",
     ]),
   ).toEqual({ command: "exit" });
+  expect((await readConfiguration(config)).bots[0]?.access).toEqual({
+    users: ["*"],
+    channels: ["*"],
+    deniedUsers: ["U999"],
+    deniedChannels: ["C999", "G999"],
+    mentionOnly: false,
+  });
   expect(
     await runCli(["config", "check", "--config", config, "--schema-only"]),
   ).toEqual({

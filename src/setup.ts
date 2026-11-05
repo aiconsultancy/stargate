@@ -22,7 +22,10 @@ export function buildManifest(name = "Pogo") {
     display_information: { name, description: "AI assistant for Slack" },
     features: {
       bot_user: { display_name: name, always_online: false },
-      app_home: { messages_tab_enabled: true, messages_tab_read_only: false },
+      app_home: {
+        messages_tab_enabled: true,
+        messages_tab_read_only_enabled: false,
+      },
     },
     oauth_config: {
       scopes: {
@@ -50,7 +53,7 @@ export function buildManifest(name = "Pogo") {
 }
 
 export function manifestUrl(name = "Pogo") {
-  return `https://api.slack.com/apps?new_app=1&manifest=${encodeURIComponent(JSON.stringify(buildManifest(name)))}`;
+  return `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(JSON.stringify(buildManifest(name)))}`;
 }
 
 export const slackInstructions = `Create the app using the prefilled manifest link.
@@ -63,6 +66,8 @@ Find user IDs: member profile → More → Copy member ID.
 Find channel IDs: channel details → channel ID at the bottom.
 No additional Slack permissions are needed.
 Access is denied unless BOTH the user ID and channel ID are allowed.
+Use * for allowed users/channels to permit all accessible humans/channels.
+Deny rules always beat allow rules, including *. Empty deny lists block nobody.
 Messages from bots are never allowed. Backend permissions are separate.`;
 
 function validBot(input: unknown): BotConfig {
@@ -264,12 +269,32 @@ export async function setupWizard(configPath: string) {
       } else console.log("Open the printed Slack link manually.");
     }
     const appId = await ask("Slack App ID: ");
-    const users = (await ask("Allowed human user IDs (comma-separated): "))
+    const users = (
+      await ask(
+        "Allowed human user IDs (comma-separated, or * for all workspace humans): ",
+      )
+    )
       .split(",")
       .map((v) => v.trim());
-    const channels = (await ask("Allowed channel/DM IDs (comma-separated): "))
+    const channels = (
+      await ask(
+        "Allowed channel/DM IDs (comma-separated, or * for all accessible channels/DMs): ",
+      )
+    )
       .split(",")
       .map((v) => v.trim());
+    const deniedUsers = (
+      await ask("Denied human user IDs (comma-separated, blank for none): ")
+    )
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const deniedChannels = (
+      await ask("Denied channel/DM IDs (comma-separated, blank for none): ")
+    )
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
     const type = await ask("Backend (opencode or pi-durable): ");
     const directory = resolve(
       (await ask("Backend working directory: ")) || ".",
@@ -309,7 +334,7 @@ export async function setupWizard(configPath: string) {
         appTokenEnv: `${prefix}_APP_TOKEN`,
         botTokenEnv: `${prefix}_BOT_TOKEN`,
       },
-      access: { users, channels },
+      access: { users, channels, deniedUsers, deniedChannels },
       backend,
     });
     const app = await askSecret("App token (xapp-..., hidden): ");

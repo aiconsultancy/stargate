@@ -3,6 +3,11 @@ import { z } from "zod";
 
 const absolutePath = z.string().refine(isAbsolute, "Use an absolute path");
 const envName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
+const userRule = z.union([z.literal("*"), z.string().regex(/^[UW][A-Z0-9]+$/)]);
+const channelRule = z.union([
+  z.literal("*"),
+  z.string().regex(/^[CGD][A-Z0-9]+$/),
+]);
 
 export const backendSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -55,8 +60,10 @@ export const botSchema = z.strictObject({
     botTokenEnv: envName,
   }),
   access: z.strictObject({
-    users: z.array(z.string().regex(/^[UW][A-Z0-9]+$/)).min(1),
-    channels: z.array(z.string().regex(/^[CGD][A-Z0-9]+$/)).min(1),
+    users: z.array(userRule).min(1),
+    channels: z.array(channelRule).min(1),
+    deniedUsers: z.array(userRule).default([]),
+    deniedChannels: z.array(channelRule).default([]),
     mentionOnly: z.boolean().default(false),
   }),
   backend: backendSchema,

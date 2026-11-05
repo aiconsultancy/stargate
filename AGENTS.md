@@ -8,6 +8,8 @@ trusted local modules can implement the same adapter interface.
 
 Read `README.md` for setup and limits, `docs/design.md` for architecture, and
 `docs/cliproxyapi.md` for the separate local proxy installation.
+For Slack bot provisioning, follow `docs/setup.md`. Create registrations for
+this gateway; do not scaffold or run a replacement Bolt application.
 
 ## Commands
 
@@ -61,8 +63,14 @@ selects a new session namespace; never reuse another backend's session ID.
 - Never commit `pogo.json`, its `.env` companion, provider credentials, runtime
   databases, copied API responses, or installed machine-specific service files.
 - Never request tokens in chat or accept secret values as CLI arguments.
+- For the operator-approved Slack CLI login flow, a single-use challenge may
+  be relayed only to complete `login --ticket --challenge`. Never persist that
+  exchange, or confuse it with permission to collect persistent credentials.
 - Never log raw SDK exceptions, request headers, prompts, or credential files.
 - Keep allowlists nonempty and fail closed. Reject messages sent by bots.
+- Only on explicit operator request, allow `*` for users or channels/DMs.
+  `deniedUsers` and `deniedChannels` always override allows, including `*`.
+  Keep app/workspace routing and bot rejection; missing deny lists default empty.
 - Tool access is separate from Slack access. Default OpenCode tools to deny
   and Pi tools to none; directories are starting locations, not sandboxes.
 - Persist accepted requests before Slack ACK. Delivery retries must not rerun

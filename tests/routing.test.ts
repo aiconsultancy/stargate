@@ -4,6 +4,105 @@ import { botKey, chunks, routeEvent } from "../src/routing";
 import { bot, event, identity } from "./fixtures";
 
 describe("routing", () => {
+  test("explicit user wildcard allows humans without widening other boundaries", () => {
+    const config = bot();
+    config.access.users = ["*"];
+    const request = { ...event(), event: { ...event().event, user: "U999" } };
+    expect(configSchema.safeParse({ bots: [config] }).success).toBe(true);
+    expect(routeEvent(request, config, identity)?.user).toBe("U999");
+    expect(
+      routeEvent({ ...request, team_id: "T999" }, config, identity),
+    ).toBeUndefined();
+    expect(
+      routeEvent(
+        { ...request, event: { ...request.event, channel: "C999" } },
+        config,
+        identity,
+      ),
+    ).toBeUndefined();
+    expect(
+      routeEvent(
+        { ...request, event: { ...request.event, bot_id: "B123" } },
+        config,
+        identity,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("channel wildcard permits new channels and DMs without widening identity", () => {
+    const config = bot();
+    config.access.users = ["*"];
+    config.access.channels = ["*"];
+    expect(configSchema.safeParse({ bots: [config] }).success).toBe(true);
+    const request = {
+      ...event(),
+      event: { ...event().event, user: "U999", channel: "C999" },
+    };
+    expect(routeEvent(request, config, identity)?.channel).toBe("C999");
+    expect(
+      routeEvent(
+        {
+          ...request,
+          event: { ...request.event, channel: "D999", channel_type: "im" },
+        },
+        config,
+        identity,
+      )?.channel,
+    ).toBe("D999");
+    expect(
+      routeEvent({ ...request, team_id: "T999" }, config, identity),
+    ).toBeUndefined();
+    expect(
+      routeEvent({ ...request, api_app_id: "A999" }, config, identity),
+    ).toBeUndefined();
+    expect(
+      routeEvent(
+        { ...request, event: { ...request.event, bot_id: "B999" } },
+        config,
+        identity,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("user and channel denies beat exact and wildcard allows", () => {
+    for (const wildcard of [false, true]) {
+      for (const dimension of ["users", "channels"] as const) {
+        const config = bot();
+        if (wildcard) {
+          config.access.users = ["*"];
+          config.access.channels = ["*"];
+        }
+        if (dimension === "users") config.access.deniedUsers = ["U123"];
+        else config.access.deniedChannels = ["C123"];
+        expect(routeEvent(event(), config, identity)).toBeUndefined();
+      }
+    }
+    for (const field of ["deniedUsers", "deniedChannels"] as const) {
+      const config = bot();
+      config.access[field] = ["*"];
+      expect(routeEvent(event(), config, identity)).toBeUndefined();
+    }
+  });
+
+  test("denies do not block unrelated IDs and malformed rules are rejected", () => {
+    const config = bot();
+    config.access.users = ["*"];
+    config.access.channels = ["*"];
+    config.access.deniedUsers = ["U999"];
+    config.access.deniedChannels = ["C999"];
+    expect(routeEvent(event(), config, identity)?.text).toBe("hello");
+    expect(configSchema.safeParse({ bots: [config] }).success).toBe(true);
+    for (const access of [
+      { ...config.access, channels: ["C*"] },
+      { ...config.access, deniedUsers: ["C123"] },
+      { ...config.access, deniedChannels: ["U123"] },
+    ]) {
+      expect(
+        configSchema.safeParse({ bots: [{ ...config, access }] }).success,
+      ).toBe(false);
+    }
+  });
+
   test("isolates bots, teams, threads, and backend settings", () => {
     const first = routeEvent(event(), bot(), identity);
     expect(first?.text).toBe("hello");

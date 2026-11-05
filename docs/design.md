@@ -75,6 +75,10 @@ One shared SQLite database stores all registrations' queue rows. Private Pi
 storage lives in per-bot/per-backend directories. This is logical separation,
 not an OS security boundary. ACLs are checked at admission and before work or
 delivery; removed users cannot receive a pending response after restart.
+User and channel allow lists accept explicit IDs or a whole `*`. Optional
+`deniedUsers` and `deniedChannels` default to empty and always override allows.
+Wildcard channel access follows Slack's membership/visibility boundary; it does
+not join channels. Denies also block queued turns and persisted replies.
 
 ## Execution and delivery
 

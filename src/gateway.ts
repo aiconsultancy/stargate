@@ -2,7 +2,14 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import type { AgentBackend } from "./backend";
 import type { BotConfig } from "./config";
-import { botKey, chunks, type Identity, routeEvent } from "./routing";
+import {
+  botKey,
+  chunks,
+  type Identity,
+  isAllowedChannel,
+  isAllowedUser,
+  routeEvent,
+} from "./routing";
 import type { Job, Store } from "./store";
 
 export interface SlackDelivery {
@@ -74,8 +81,8 @@ export class Gateway {
   async process(job: Job, shutdown: AbortSignal) {
     // Recheck policy for queued inputs and pending delivery after a restart.
     if (
-      !this.config.access.users.includes(job.user) ||
-      !this.config.access.channels.includes(job.channel)
+      !isAllowedUser(this.config, job.user) ||
+      !isAllowedChannel(this.config, job.channel)
     ) {
       this.store.finish(job.id, "failed");
       return;

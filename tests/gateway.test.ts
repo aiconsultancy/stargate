@@ -74,6 +74,58 @@ test("unmentioned messages cannot open new conversations", () => {
   expect(fixture().gateway.accept(event("hello"))).toBe(false);
 });
 
+test("workspace-wide humans pass both admission and execution policy", async () => {
+  const f = fixture();
+  f.config.access.users = ["*"];
+  const request = { ...event(), event: { ...event().event, user: "U999" } };
+  expect(f.gateway.accept(request)).toBe(true);
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(f.prompts).toEqual([{ session: "session-1", text: "hello" }]);
+  expect(f.delivered).toEqual(["answer: hello"]);
+});
+
+test("removing wildcard blocks pending delivery to a formerly allowed user", async () => {
+  const f = fixture();
+  f.config.access.users = ["*"];
+  f.gateway.accept({ ...event(), event: { ...event().event, user: "U999" } });
+  f.store.respond(f.next().id, ["private reply"]);
+  f.config.access.users = ["U123"];
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(f.delivered).toEqual([]);
+});
+
+test("channel wildcard works through execution and delivery", async () => {
+  const f = fixture();
+  f.config.access.channels = ["*"];
+  expect(
+    f.gateway.accept({
+      ...event(),
+      event: { ...event().event, channel: "C999" },
+    }),
+  ).toBe(true);
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(f.delivered).toEqual(["answer: hello"]);
+});
+
+test("denies block queued execution and already-persisted replies", async () => {
+  for (const field of ["deniedUsers", "deniedChannels"] as const) {
+    for (const responding of [false, true]) {
+      const f = fixture();
+      f.config.access.users = ["*"];
+      f.config.access.channels = ["*"];
+      expect(f.gateway.accept(event())).toBe(true);
+      if (responding) f.store.respond(f.next().id, ["private reply"]);
+      f.config.access[field] = [field === "deniedUsers" ? "U123" : "C123"];
+      await f.gateway.process(f.next(), new AbortController().signal);
+      expect(f.prompts).toEqual([]);
+      expect(f.delivered).toEqual([]);
+      expect(f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 1)).toEqual(
+        [],
+      );
+    }
+  }
+});
+
 test("FIFO blocks the next turn but permits other threads", () => {
   const f = fixture();
   f.gateway.accept(event());
