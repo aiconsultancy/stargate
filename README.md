@@ -14,6 +14,12 @@ For agent-led app registration, CLI authentication, human approvals, and live
 verification, follow the [setup guide](docs/setup.md). It provisions Slack apps
 for Pogo without scaffolding a separate Bolt application.
 
+For trusted Indra work, use the [default OpenCode captain/crew profile](docs/agents/default-opencode.md):
+Bowser coordinates four durable crew sessions through CLIProxyAPI and Mesij.
+Use the [shared global agent-profile prompt and skill](docs/agents/agent-profiles.md)
+to discover subscription models and install switchable model-named sub-agents.
+Review and approve its migration plan before changing global configuration.
+
 ```sh
 mise install
 mise run deps
@@ -81,6 +87,10 @@ commands. Both wrappers preserve terminal input for the setup wizard.
 make help
 make deps
 make init
+make crew-init ARGS='--directory /srv/pogo/bowser --project /srv/indra --worktrees /srv/pogo/indra-crew'
+make provision ARGS='--plan bots.example.json --json'
+make cua-install
+make cua ARGS='--help'
 make start
 make check
 make config-check ARGS='--config pogo.example.json --schema-only'

@@ -3,7 +3,7 @@
 MISE ?= mise
 ARGS ?=
 
-TASKS := deps pogo init start config-check manifest service check test typecheck lint format
+TASKS := deps pogo init crew-init provision cua-install cua start config-check manifest service check test typecheck lint format
 
 .PHONY: help $(TASKS)
 
@@ -12,6 +12,10 @@ help:
 	  'Pogo commands (Make delegates to mise):' \
 	  '  make deps          Install locked dependencies' \
 	  '  make init          Start the Slack setup wizard' \
+	  '  make crew-init     Install the default OpenCode captain/crew profile' \
+	  '  make provision     Plan or resume a batch of Slack registrations' \
+	  '  make cua-install   Install the optional portable browser driver' \
+	  '  make cua ARGS="--help"     Run the browser driver' \
 	  '  make start         Run configured bots' \
 	  '  make config-check  Validate config and token references' \
 	  '  make manifest      Generate the Slack app manifest' \

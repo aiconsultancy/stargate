@@ -10,6 +10,9 @@ Read `README.md` for setup and limits, `docs/design.md` for architecture, and
 `docs/cliproxyapi.md` for the separate local proxy installation.
 For Slack bot provisioning, follow `docs/setup.md`. Create registrations for
 this gateway; do not scaffold or run a replacement Bolt application.
+For the trusted OpenCode captain/crew profile, use
+`docs/agents/default-opencode.md`. Global model-named sub-agents use the
+discovery/approval procedure linked from `docs/agents/agent-profiles.md`.
 
 ## Commands
 

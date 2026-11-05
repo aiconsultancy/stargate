@@ -3,7 +3,7 @@ import { runCli } from "./cli";
 import { start } from "./runtime";
 
 const result = await runCli(process.argv.slice(2)).catch((error: unknown) => {
-  // CLI helpers sanitize validation/credential errors; they do not run SDKs.
+  // CLI helpers sanitize errors; never expose raw SDK or credential failures.
   console.error(error instanceof Error ? error.message : "Pogo CLI failed.");
   process.exitCode = 1;
 });

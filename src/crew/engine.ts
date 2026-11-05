@@ -1,0 +1,713 @@
+import { createHash } from "node:crypto";
+import { isAbsolute, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import type {
+  AgentGetInput,
+  AgentInfo,
+  OpenCodeClient,
+  SessionCompactInput,
+  SessionCreateInput,
+  SessionGetInput,
+  SessionInfo,
+  SessionInterruptInput,
+  SessionPromptInput,
+  SessionSyntheticInput,
+} from "@opencode/client";
+import { z } from "zod";
+import { MesijClient } from "./mesij";
+import { crewPermissions } from "./policy";
+import {
+  CrewError,
+  type CrewID,
+  type CrewNotice,
+  CrewState,
+  type CrewTask,
+  crewIDs,
+  type Peer,
+} from "./state";
+
+const directory = z
+  .string()
+  .refine((value) => isAbsolute(value) && !value.includes("\0"));
+export const crewOptionsSchema = z.strictObject({
+  namespace: z.string().min(1).max(256),
+  stateDirectory: directory,
+  captainDirectory: directory,
+  projectDirectory: directory,
+  worktrees: z.strictObject({
+    mario: directory,
+    luigi: directory,
+    daisy: directory,
+    toad: directory,
+  }),
+  mesijCommand: directory,
+});
+export type CrewOptions = z.infer<typeof crewOptionsSchema>;
+const taskID = z.string().startsWith("task_").max(100);
+const text = z.string().min(1).max(64000);
+export const crewInputSchema = z.discriminatedUnion("op", [
+  z.strictObject({ op: z.literal("ensure"), crew: z.enum(crewIDs).optional() }),
+  z.strictObject({ op: z.literal("dispatch"), crew: z.enum(crewIDs), text }),
+  z.strictObject({
+    op: z.literal("wait"),
+    taskID,
+    afterNoticeID: z.number().int().nonnegative().default(0),
+  }),
+  z.strictObject({ op: z.literal("status"), taskID }),
+  z.strictObject({ op: z.literal("complete"), taskID, result: text }),
+  z.strictObject({ op: z.literal("compact"), crew: z.enum(crewIDs) }),
+  z.strictObject({
+    op: z.literal("urgent"),
+    taskID,
+    to: z.enum(["captain", ...crewIDs]),
+    text,
+  }),
+]);
+export type CrewInput = z.infer<typeof crewInputSchema>;
+export const mailInputSchema = z.discriminatedUnion("op", [
+  z.strictObject({
+    op: z.literal("send"),
+    taskID,
+    to: z.enum(["captain", ...crewIDs]),
+    text,
+    key: z.string().min(1).max(100),
+    replyTo: z
+      .string()
+      .regex(/^[a-f0-9]{32}$/)
+      .optional(),
+  }),
+  z.strictObject({
+    op: z.literal("inbox"),
+    taskID,
+    after: z.number().int().safe().nonnegative().optional(),
+    limit: z.number().int().min(1).max(100).default(20),
+  }),
+]);
+const mailEnvelopeSchema = z.strictObject({
+  namespace: z.string(),
+  sourceTaskID: taskID,
+  targetTaskID: taskID,
+  originCaptainID: z.string(),
+  sender: z.string(),
+  recipient: z.string(),
+  text,
+});
+export type CrewCaller = {
+  sessionID: string;
+  agent: string;
+  signal: AbortSignal;
+};
+export type CrewSession = Pick<
+  SessionInfo,
+  "id" | "parentID" | "agent" | "location" | "metadata"
+>;
+type RequestOptions = NonNullable<
+  Parameters<OpenCodeClient["session"]["get"]>[1]
+>;
+// Narrow SDK boundary keeps tests local and avoids fabricating full SDK objects.
+export interface CrewSessions {
+  get(input: SessionGetInput, request?: RequestOptions): Promise<CrewSession>;
+  create(
+    input: SessionCreateInput,
+    request?: RequestOptions,
+  ): Promise<CrewSession>;
+  prompt(
+    input: SessionPromptInput,
+    request?: RequestOptions,
+  ): Promise<{ id: string; sessionID: string }>;
+  synthetic(
+    input: SessionSyntheticInput,
+    request?: RequestOptions,
+  ): Promise<unknown>;
+  compact(
+    input: SessionCompactInput,
+    request?: RequestOptions,
+  ): Promise<unknown>;
+  wait(input: SessionGetInput, request?: RequestOptions): Promise<void>;
+  interrupt(
+    input: SessionInterruptInput,
+    request?: RequestOptions,
+  ): Promise<unknown>;
+}
+export interface CrewAgents {
+  get(
+    input: AgentGetInput,
+    request?: RequestOptions,
+  ): Promise<{
+    data: Pick<AgentInfo, "mode" | "model">;
+  }>;
+}
+export type CrewResult = {
+  status: string;
+  peers?: Peer[];
+  task?: CrewTask;
+  notices?: CrewNotice[];
+};
+
+function notFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "_tag" in error &&
+    error._tag === "SessionNotFoundError"
+  );
+}
+
+export class CrewEngine {
+  private constructor(
+    readonly options: CrewOptions,
+    readonly state: CrewState,
+    private readonly sessions: CrewSessions,
+    private readonly mailer: Pick<MesijClient, "register" | "send" | "inbox">,
+    private readonly agents?: CrewAgents,
+  ) {}
+
+  static async open(
+    input: unknown,
+    sessions: CrewSessions,
+    mailer?: Pick<MesijClient, "register" | "send" | "inbox">,
+    agents?: CrewAgents,
+  ) {
+    const parsed = crewOptionsSchema.safeParse(input);
+    if (!parsed.success)
+      throw new CrewError(
+        "Invalid crew plugin options. Supply namespace and absolute state/project/worktree directories.",
+      );
+    const options = parsed.data;
+    const fingerprint = JSON.stringify([
+      options.namespace,
+      resolve(options.projectDirectory),
+      resolve(options.captainDirectory),
+      ...crewIDs.map((id) => resolve(options.worktrees[id])),
+    ]);
+    const state = await CrewState.open(
+      options.stateDirectory,
+      options.namespace,
+      fingerprint,
+    );
+    return new CrewEngine(
+      options,
+      state,
+      sessions,
+      mailer ??
+        new MesijClient({
+          command: options.mesijCommand,
+          projectDirectory: options.projectDirectory,
+          dataDirectory: join(
+            options.stateDirectory,
+            "mesij",
+            createHash("sha256").update(options.namespace).digest("hex"),
+          ),
+        }),
+      agents,
+    );
+  }
+
+  private actor(sessionID: string): string {
+    const role =
+      this.state.peerBySession(sessionID)?.crewID ?? `bowser:${sessionID}`;
+    const namespace = createHash("sha256")
+      .update(this.options.namespace)
+      .digest("hex");
+    return `pogo:${namespace}:${role}`;
+  }
+
+  async mail(raw: unknown, caller: CrewCaller) {
+    const parsed = mailInputSchema.safeParse(raw);
+    if (!parsed.success)
+      throw new CrewError(
+        "Invalid pogo_mail input. Supply a task ID and the operation's declared fields.",
+      );
+    const input = parsed.data;
+    try {
+      let source: CrewTask;
+      if (caller.agent === "bowser") {
+        await this.captain(caller);
+        source = this.ownedCaptainTask(input.taskID, caller);
+      } else source = this.ownedWorkerTask(input.taskID, caller);
+      const actor = this.actor(caller.sessionID);
+      await this.mailer.register(actor, caller.sessionID, caller.signal);
+      if (input.op === "send") {
+        const target =
+          input.to === "captain" ? source : this.state.activeTask(input.to);
+        if (!target || target.originCaptainID !== source.originCaptainID)
+          throw new CrewError(
+            "Mail recipient must have an active task in the same captain lineage.",
+          );
+        const recipient =
+          input.to === "captain"
+            ? source.originCaptainID
+            : target.workerSessionID;
+        await this.mailer.register(
+          this.actor(recipient),
+          recipient,
+          caller.signal,
+        );
+        const receipt = await this.mailer.send(
+          {
+            actor,
+            sessionID: caller.sessionID,
+            to: recipient,
+            text: JSON.stringify({
+              namespace: this.options.namespace,
+              sourceTaskID: source.id,
+              targetTaskID: target.id,
+              originCaptainID: source.originCaptainID,
+              sender: caller.sessionID,
+              recipient,
+              text: input.text,
+            }),
+            key: createHash("sha256")
+              .update(
+                JSON.stringify([
+                  this.options.namespace,
+                  source.id,
+                  target.id,
+                  caller.sessionID,
+                  recipient,
+                  input.key,
+                ]),
+              )
+              .digest("hex"),
+            ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+          },
+          caller.signal,
+        );
+        return { status: "sent", ...receipt };
+      }
+      const after = this.state.mailCursor(
+        caller.sessionID,
+        source.id,
+        input.after,
+      );
+      const events = await this.mailer.inbox(
+        { sessionID: caller.sessionID, after, limit: input.limit },
+        caller.signal,
+      );
+      const messages: {
+        id: string;
+        sequence: number;
+        from: string;
+        text: string;
+        sourceTaskID: string;
+      }[] = [];
+      for (const event of events) {
+        if (event.to !== caller.sessionID) continue; // Mesij also returns sent/mentioned messages.
+        let value: unknown;
+        try {
+          value = JSON.parse(event.text);
+        } catch {
+          continue;
+        }
+        const envelope = mailEnvelopeSchema.safeParse(value);
+        if (!envelope.success) continue;
+        const mail = envelope.data;
+        const origin = this.state.task(mail.sourceTaskID);
+        if (
+          !origin ||
+          mail.namespace !== this.options.namespace ||
+          mail.originCaptainID !== source.originCaptainID ||
+          origin.originCaptainID !== source.originCaptainID ||
+          mail.targetTaskID !== source.id ||
+          mail.recipient !== caller.sessionID ||
+          mail.sender !== event.sessionID ||
+          event.actor !== this.actor(mail.sender) ||
+          (mail.sender !== origin.originCaptainID &&
+            mail.sender !== origin.workerSessionID)
+        )
+          continue;
+        messages.push({
+          id: event.id,
+          sequence: event.sequence,
+          from: this.state.peerBySession(mail.sender)?.crewID ?? "bowser",
+          text: mail.text,
+          sourceTaskID: origin.id,
+        });
+      }
+      // Explicit after acknowledges the prior page. A lost response can be read again.
+      return {
+        status: "inbox",
+        messages,
+        nextAfter: events.at(-1)?.sequence ?? after,
+      };
+    } catch (error) {
+      if (error instanceof CrewError) throw error;
+      throw new CrewError(
+        "Mesij operation unavailable or unconfirmed. Retry sends with the same key; raw details withheld.",
+      );
+    }
+  }
+
+  async run(raw: unknown, caller: CrewCaller): Promise<CrewResult> {
+    const parsed = crewInputSchema.safeParse(raw);
+    if (!parsed.success)
+      throw new CrewError(
+        "Invalid pogo_crew input. Use the operation's declared fields.",
+      );
+    const input = parsed.data;
+    try {
+      if (input.op === "complete") {
+        const task = this.ownedWorkerTask(input.taskID, caller);
+        this.state.complete(task.id, caller.sessionID, input.result);
+        return { status: "completed" };
+      }
+      if (input.op === "urgent") return await this.urgent(input, caller);
+      await this.captain(caller);
+      if (input.op === "ensure") {
+        const peers: Peer[] = [];
+        for (const id of input.crew ? [input.crew] : crewIDs)
+          peers.push(await this.ensure(id, caller.signal));
+        return { status: "ready", peers };
+      }
+      if (input.op === "dispatch") return await this.dispatch(input, caller);
+      if (input.op === "compact") {
+        const peer = await this.ensure(input.crew, caller.signal);
+        const active = this.state.activeTask(input.crew);
+        // No controls from another Slack thread may affect an active task.
+        if (active && active.originCaptainID !== caller.sessionID)
+          throw new CrewError("This crew member is busy for another captain.");
+        await this.sessions.compact(
+          { sessionID: peer.sessionID, delivery: "steer" },
+          { signal: caller.signal },
+        );
+        return { status: "compaction-admitted" };
+      }
+      const task = this.ownedCaptainTask(input.taskID, caller);
+      if (input.op === "status")
+        return {
+          status: task.status,
+          task,
+          notices: this.state.notices(task.id, 0),
+        };
+      return await this.wait(task, input.afterNoticeID, caller);
+    } catch (error) {
+      if (
+        input.op === "wait" &&
+        caller.agent === "bowser" &&
+        caller.signal.aborted
+      ) {
+        const task = this.ownedCaptainTask(input.taskID, caller);
+        await this.cancel(task, caller);
+        throw new CrewError(
+          "Wait cancelled; task outcome uncertain. Inspect worker before further work.",
+        );
+      }
+      if (error instanceof CrewError) throw error;
+      throw new CrewError(
+        "Crew operation unavailable. Inspect OpenCode and crew state; raw SDK details withheld.",
+      );
+    }
+  }
+
+  private async captain(caller: CrewCaller) {
+    if (caller.agent !== "bowser" || this.state.peerBySession(caller.sessionID))
+      throw new CrewError(
+        "Only Bowser captain sessions may perform this operation.",
+      );
+    const session = await this.sessions.get(
+      { sessionID: caller.sessionID },
+      { signal: caller.signal },
+    );
+    if (
+      session.parentID ||
+      session.agent !== "bowser" ||
+      resolve(session.location.directory) !==
+        resolve(this.options.captainDirectory)
+    )
+      throw new CrewError(
+        "Captain must be a root Bowser session in the configured project directory.",
+      );
+  }
+
+  private validPeer(session: CrewSession, peer: Peer) {
+    const metadata = session.metadata?.pogoCrew;
+    if (
+      session.id !== peer.sessionID ||
+      session.parentID ||
+      session.agent !== peer.crewID ||
+      resolve(session.location.directory) !==
+        resolve(this.options.worktrees[peer.crewID]) ||
+      typeof metadata !== "object" ||
+      metadata === null ||
+      Array.isArray(metadata) ||
+      metadata.namespace !== this.options.namespace ||
+      metadata.crewID !== peer.crewID
+    )
+      throw new CrewError(
+        "Crew session identity changed. Restore its agent, directory and metadata; do not recreate it.",
+      );
+  }
+
+  private async ensure(crewID: CrewID, signal: AbortSignal): Promise<Peer> {
+    const peer = this.state.reservePeer(crewID);
+    let session: CrewSession;
+    try {
+      session = await this.sessions.get(
+        { sessionID: peer.sessionID },
+        { signal },
+      );
+    } catch (error) {
+      if (!notFound(error)) throw error;
+      if (peer.status === "ready")
+        throw new CrewError(
+          `Crew session ${peer.sessionID} is missing. Restore OpenCode data; automatic recreation is disabled.`,
+        );
+      try {
+        const agent = await this.agents?.get(
+          {
+            agentID: crewID,
+            location: { directory: this.options.worktrees[crewID] },
+          },
+          { signal },
+        );
+        if (agent && agent.data.mode !== "primary")
+          throw new CrewError(
+            "Crew agent definitions must use mode primary. Validate the generated profile before ensuring sessions.",
+          );
+        // Stable ID persisted BEFORE creation; retries cannot create new peers.
+        session = await this.sessions.create(
+          {
+            id: peer.sessionID,
+            agent: crewID,
+            title: `Pogo ${crewID}`,
+            location: { directory: this.options.worktrees[crewID] },
+            metadata: {
+              pogoCrew: { namespace: this.options.namespace, crewID },
+            },
+            permissions: crewPermissions(crewID),
+            ...(agent?.data.model ? { model: agent.data.model } : {}),
+          },
+          { signal },
+        );
+      } catch (error) {
+        if (error instanceof CrewError) throw error;
+        throw new CrewError(
+          "Crew creation not confirmed. Retry ensure to inspect/adopt the reserved session ID; do not delete state.",
+        );
+      }
+    }
+    this.validPeer(session, peer);
+    this.state.readyPeer(crewID);
+    return { ...peer, status: "ready" };
+  }
+
+  private ownedCaptainTask(id: string, caller: CrewCaller): CrewTask {
+    const task = this.state.task(id);
+    if (!task || task.originCaptainID !== caller.sessionID)
+      throw new CrewError("This captain does not own the requested task.");
+    return task;
+  }
+
+  private ownedWorkerTask(id: string, caller: CrewCaller): CrewTask {
+    const task = this.state.task(id);
+    if (
+      !task ||
+      task.workerSessionID !== caller.sessionID ||
+      caller.agent !== task.crewID
+    )
+      throw new CrewError(
+        "Only the assigned worker may use this task operation.",
+      );
+    return task;
+  }
+
+  private async dispatch(
+    input: Extract<CrewInput, { op: "dispatch" }>,
+    caller: CrewCaller,
+  ): Promise<CrewResult> {
+    const peer = await this.ensure(input.crew, caller.signal);
+    const active = this.state.activeTask(input.crew);
+    const busy: CrewResult = {
+      status: "busy",
+      ...(active?.originCaptainID === caller.sessionID ? { task: active } : {}),
+    };
+    if (active) {
+      if (active.status !== "completed" || active.notifying) return busy;
+      try {
+        await this.sessions.wait(
+          { sessionID: peer.sessionID },
+          {
+            signal: AbortSignal.any([caller.signal, AbortSignal.timeout(100)]),
+          },
+        );
+      } catch {
+        return busy;
+      }
+      if (!this.state.release(active.id)) return busy;
+    }
+    caller.signal.throwIfAborted();
+    const task = this.state.reserveTask(peer, caller.sessionID);
+    if (!task) return { status: "busy" };
+    const envelope = JSON.stringify({
+      taskID: task.id,
+      crewID: task.crewID,
+      originCaptainID: task.originCaptainID,
+      inputID: task.inputID,
+    });
+    try {
+      await this.sessions.prompt(
+        {
+          sessionID: peer.sessionID,
+          id: task.inputID,
+          text:
+            `Pogo task envelope: ${envelope}\n\n${input.text}\n\n` +
+            `Complete only this assignment with pogo_crew ` +
+            `op=complete, taskID=${task.id}, result=<your result>. ` +
+            "Do not create peer/root sessions or send prompts to captains. " +
+            "Use pogo_crew urgent for task-scoped urgent communication.",
+          metadata: {
+            pogoCrew: {
+              taskID: task.id,
+              originCaptainID: task.originCaptainID,
+            },
+          },
+          delivery: "queue",
+          resume: true,
+        },
+        { signal: caller.signal },
+      );
+      this.state.running(task.id);
+      return { status: "running", task: this.state.task(task.id) ?? task };
+    } catch {
+      if (caller.signal.aborted) await this.cancel(task, caller);
+      this.state.uncertain(task.id);
+      throw new CrewError(
+        `Task ${task.id} admission uncertain. Inspect worker ${task.workerSessionID}; work will not be replayed automatically.`,
+      );
+    }
+  }
+
+  private async cancel(task: CrewTask, caller: CrewCaller) {
+    if (!this.state.beginCancel(task.id, caller.sessionID)) return;
+    try {
+      await this.sessions.interrupt(
+        { sessionID: task.workerSessionID, resume: false },
+        {
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+    } catch {
+      // Interruption can fail independently; keep the reservation uncertain.
+    } finally {
+      this.state.uncertain(task.id);
+    }
+  }
+
+  private async wait(
+    task: CrewTask,
+    after: number,
+    caller: CrewCaller,
+  ): Promise<CrewResult> {
+    const controller = new AbortController();
+    let idle = false;
+    let failed = false;
+    const observed = this.sessions
+      .wait(
+        { sessionID: task.workerSessionID },
+        {
+          signal: AbortSignal.any([caller.signal, controller.signal]),
+        },
+      )
+      .then(
+        () => {
+          idle = true;
+        },
+        () => {
+          failed = true;
+        },
+      );
+    try {
+      for (;;) {
+        const current = this.ownedCaptainTask(task.id, caller);
+        const notices = this.state.notices(task.id, after);
+        if (caller.signal.aborted) {
+          await this.cancel(current, caller);
+          throw new CrewError(
+            "Wait cancelled; task outcome uncertain. Inspect worker before further work.",
+          );
+        }
+        if (
+          current.status === "completed" ||
+          current.status === "uncertain" ||
+          notices.length
+        )
+          return { status: current.status, task: current, notices };
+        if (idle || failed) {
+          this.state.uncertain(task.id);
+          throw new CrewError(
+            "Worker ended or became unavailable without a confirmed result; task outcome uncertain.",
+          );
+        }
+        await delay(25, undefined, { signal: caller.signal });
+      }
+    } catch (error) {
+      if (caller.signal.aborted) {
+        await this.cancel(task, caller);
+        throw new CrewError(
+          "Wait cancelled; task outcome uncertain. Inspect worker before further work.",
+        );
+      }
+      throw error;
+    } finally {
+      controller.abort();
+      await observed;
+    }
+  }
+
+  private async urgent(
+    input: Extract<CrewInput, { op: "urgent" }>,
+    caller: CrewCaller,
+  ): Promise<CrewResult> {
+    let source: CrewTask;
+    if (caller.agent === "bowser") {
+      await this.captain(caller);
+      source = this.ownedCaptainTask(input.taskID, caller);
+    } else source = this.ownedWorkerTask(input.taskID, caller);
+    if (source.status !== "running" && source.status !== "dispatching")
+      throw new CrewError("Urgency requires an active task lineage.");
+    if (input.to === "captain") {
+      this.state.notice(source.id, input.text);
+      return { status: "mailed" };
+    }
+    const target = this.state.activeTask(input.to);
+    if (
+      !target ||
+      target.originCaptainID !== source.originCaptainID ||
+      !this.state.beginNotify(target.id)
+    )
+      throw new CrewError(
+        "Colleague urgency requires an active task in the same captain lineage.",
+      );
+    try {
+      await this.sessions.synthetic(
+        {
+          sessionID: target.workerSessionID,
+          text: `Pogo urgent notice for task ${target.id}; source task ${source.id}.\n${input.text}`,
+          description: "Task-scoped crew urgency",
+          metadata: {
+            pogoCrew: {
+              taskID: target.id,
+              sourceTaskID: source.id,
+              originCaptainID: source.originCaptainID,
+            },
+          },
+          delivery: "steer",
+          resume: true,
+        },
+        { signal: caller.signal },
+      );
+      return { status: "steered" };
+    } catch {
+      this.state.uncertain(target.id);
+      throw new CrewError(
+        "Urgent delivery uncertain. Inspect worker session; notice was not automatically replayed.",
+      );
+    } finally {
+      this.state.endNotify(target.id);
+    }
+  }
+
+  close() {
+    this.state.close();
+  }
+}

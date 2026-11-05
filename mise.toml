@@ -1,5 +1,6 @@
 [tools]
 bun = "1.4.4"
+"github:withakay/mesij" = "0.1.0"
 
 [tasks.deps]
 description = "Install dependencies from the lockfile"
@@ -13,6 +14,25 @@ raw = true
 [tasks.init]
 description = "Run the interactive Slack setup wizard"
 run = "bun run src/main.ts init"
+raw = true
+
+[tasks.crew-init]
+description = "Install the default OpenCode captain/crew profile"
+run = "bun run src/main.ts crew init"
+raw = true
+
+[tasks.provision]
+description = "Plan or resume batch Slack app provisioning"
+run = "bun run src/main.ts bot provision"
+raw = true
+
+[tasks.cua-install]
+description = "Install the optional pinned agent-browser Chromium driver"
+run = "mise exec node@24.21.0 npm:agent-browser@0.41.2 -- agent-browser install"
+
+[tasks.cua]
+description = "Run the optional portable browser driver"
+run = "mise exec node@24.21.0 npm:agent-browser@0.41.2 -- agent-browser"
 raw = true
 
 [tasks.start]
