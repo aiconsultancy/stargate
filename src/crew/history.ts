@@ -224,8 +224,9 @@ export class CrewHistory {
         const page = await this.options.sessions.list(
           {
             limit: request.limit,
-            order: "desc",
-            ...(request.cursor && { cursor: request.cursor }),
+            ...(request.cursor
+              ? { cursor: request.cursor }
+              : { order: "desc" as const }),
           },
           { signal },
         );
@@ -257,8 +258,9 @@ export class CrewHistory {
         {
           sessionID: request.sessionID,
           limit: request.limit,
-          order: "asc",
-          ...(request.cursor && { cursor: request.cursor }),
+          ...(request.cursor
+            ? { cursor: request.cursor }
+            : { order: "asc" as const }),
         },
         { signal },
       );
@@ -309,8 +311,9 @@ export class CrewHistory {
         const page = await this.options.sessions.list(
           {
             limit: 1,
-            order: "desc",
-            ...(position.cursor && { cursor: position.cursor }),
+            ...(position.cursor
+              ? { cursor: position.cursor }
+              : { order: "desc" as const }),
           },
           { signal },
         );
@@ -350,8 +353,9 @@ export class CrewHistory {
         {
           sessionID: position.sessionID,
           limit: remaining,
-          order: "asc",
-          ...(position.cursor && { cursor: position.cursor }),
+          ...(position.cursor
+            ? { cursor: position.cursor }
+            : { order: "asc" as const }),
         },
         { signal },
       );

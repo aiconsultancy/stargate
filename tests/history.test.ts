@@ -40,6 +40,9 @@ function fixture() {
   const sessions: HistorySessions = {
     async list(input, options) {
       expect(options?.signal).toBe(signal);
+      if (input?.cursor && input.order !== undefined)
+        throw new Error("API cursor cannot be combined with order");
+      expect(input?.order).toBe(input?.cursor ? undefined : "desc");
       calls.push({
         method: "sessions",
         ...(input?.cursor && { cursor: input.cursor }),
@@ -59,6 +62,9 @@ function fixture() {
   const messages: HistoryMessages = {
     async list(input, options) {
       expect(options?.signal).toBe(signal);
+      if (input.cursor && input.order !== undefined)
+        throw new Error("API cursor cannot be combined with order");
+      expect(input.order).toBe(input.cursor ? undefined : "asc");
       calls.push({
         method: "messages",
         sessionID: input.sessionID,
@@ -109,6 +115,59 @@ test("history narrow clients accept installed SDK API objects", () => {
     });
   expect(typeof compatible).toBe("function");
 });
+
+for (const operation of [
+  "sessions",
+  "messages",
+  "search sessions",
+  "search messages",
+] as const)
+  test(`${operation} continuations respect the cursor-bound API ordering`, async () => {
+    const f = fixture();
+    f.sessionPages.set("", {
+      data: [f.add(session("one"))],
+      cursor: operation === "search messages" ? {} : { next: "sessions-next" },
+    });
+    f.sessionPages.set("sessions-next", {
+      data: [f.add(session("two"))],
+      cursor: {},
+    });
+    f.messagePages.set("one:", {
+      data: [user("first", "hit")],
+      cursor: operation === "search sessions" ? {} : { next: "messages-next" },
+    });
+    f.messagePages.set("one:messages-next", {
+      data: [user("second", "hit")],
+      cursor: {},
+    });
+    if (operation === "sessions" || operation === "messages") {
+      const input =
+        operation === "sessions"
+          ? ({ op: "sessions" } as const)
+          : ({ op: "messages", sessionID: "one" } as const);
+      const first = await f.history.run(input, f.signal);
+      expect(first.partial).toBe(true);
+      const next = await f.history.run(
+        { ...input, cursor: first.cursor },
+        f.signal,
+      );
+      expect(next.partial).toBe(false);
+      return;
+    }
+    const result = await f.history.run(
+      { op: "search", query: "hit" },
+      f.signal,
+    );
+    expect(result.op).toBe("search");
+    expect(result.partial).toBe(false);
+    expect(
+      f.calls.some((call) =>
+        operation === "search sessions"
+          ? call.method === "sessions" && call.cursor === "sessions-next"
+          : call.method === "messages" && call.cursor === "messages-next",
+      ),
+    ).toBe(true);
+  });
 
 test("history validates bounded, literal inputs", () => {
   for (const input of [
