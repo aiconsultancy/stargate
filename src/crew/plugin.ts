@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin";
 import { Error as ToolError } from "@opencode/plugin/promise/tool";
 import { connectHistoryAPI, historyVisible } from "./api";
-import { compactAndWait } from "./compaction";
+import { compactOnServer } from "./compaction";
 import { CrewEngine, crewInputSchema, mailInputSchema } from "./engine";
 import { CrewHistory, historyInputSchema } from "./history";
 import { CrewModels, modelInputSchema } from "./models";
@@ -33,7 +33,7 @@ export default Plugin.define({
       ctx.session,
       ctx.model,
       (sessionID, signal) =>
-        compactAndWait(ctx.session, ctx.event, sessionID, signal),
+        compactOnServer(engine.options.team, ctx.session, sessionID, signal),
     );
     try {
       await ctx.tool.transform((editor) => {
