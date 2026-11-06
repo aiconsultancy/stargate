@@ -1,8 +1,12 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type {
   ConversationId,
   ConversationView,
+  EntryId,
+  EntryRecord,
+  Observer,
 } from "@earendil-works/pi-durable";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { PiDurableBackend, piPartialText } from "../src/backends/pi-durable";
@@ -399,6 +403,95 @@ test("Pi partial text excludes thinking and tools and tolerates missing or malfo
       }),
     ),
   ).toBe("Visible answer");
+});
+
+test("Pi ignores historical observer advances before attachment resolves", async () => {
+  const id = 1 as ConversationId;
+  const assistant = (entryId: number, text: string): EntryRecord => ({
+    id: entryId as EntryId,
+    conversationId: id,
+    kind: "pi.assistant",
+    model: [
+      {
+        role: "assistant",
+        content: [{ type: "text", text }],
+        api: "openai-responses",
+        provider: "openai",
+        model: "local-test",
+        stopReason: "stop",
+        timestamp: 0,
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+      },
+    ],
+  });
+  const historical = assistant(10, "OLD HISTORY");
+  const beforeResolution = assistant(11, "PRE-RESOLUTION HISTORY");
+  const current = assistant(13, "NEW ANSWER");
+  const view = (entries: readonly EntryRecord[]): ConversationView => ({
+    conversation: { id },
+    entries,
+    docs: {},
+  });
+  let observer: Observer<ConversationView> | undefined;
+  let detached = false;
+  const advance = (value: ConversationView) => {
+    if (!observer) throw new Error("Observer not attached");
+    observer.advance(
+      { kind: "value", value, ops: [], retired: false },
+      BACKGROUND_CONTEXT,
+    );
+  };
+  const harness = {
+    async observeConversation(
+      _id: ConversationId,
+      attached: Observer<ConversationView>,
+    ) {
+      observer = attached;
+      // Durable permits publication before the attachment promise resolves.
+      advance(view([historical, beforeResolution]));
+      return {
+        value: view([historical]),
+        detach() {
+          detached = true;
+        },
+      };
+    },
+    async conversation() {
+      return {
+        async submit() {
+          advance(view([historical, beforeResolution, current]));
+          return {
+            async wait() {
+              return { status: "done", type: "input", answer: current.id };
+            },
+          };
+        },
+        async commit() {
+          return current;
+        },
+      };
+    },
+  };
+  // Inject the harness without opening storage or contacting a provider.
+  const backend: PiDurableBackend = Reflect.construct(PiDurableBackend, [
+    harness,
+    {},
+  ]);
+  const snapshots: string[] = [];
+  expect(
+    await backend.prompt("1", "hello", new AbortController().signal, (text) => {
+      snapshots.push(text);
+    }),
+  ).toBe("NEW ANSWER");
+  expect(snapshots).toEqual(["NEW ANSWER"]);
+  expect(detached).toBe(true);
 });
 
 test("real Pi Durable harness persists sessions under Bun SQLite", async () => {

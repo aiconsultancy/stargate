@@ -1,6 +1,7 @@
 import { SocketModeClient } from "@slack/socket-mode";
 import { LogLevel, WebClient, type WebClientOptions } from "@slack/web-api";
 import type { Logger } from "pino";
+import { stopBlock } from "./cancellation";
 import type { CronUIApi } from "./cron-ui";
 import type { SlackDelivery } from "./gateway";
 import type { ReactionName } from "./reactions";
@@ -137,11 +138,17 @@ export class SlackConnection implements SlackDelivery {
     thread: string,
     text: string,
     format: "markdown" | "plain",
+    stopJob?: number,
   ) {
+    const content = slackContent(text, format);
     const result = await this.web.chat.postMessage({
       channel,
       ...(thread ? { thread_ts: thread } : {}),
-      ...slackContent(text, format),
+      ...content,
+      blocks: [
+        ...content.blocks,
+        ...(stopJob === undefined ? [] : [stopBlock(stopJob)]),
+      ],
       mrkdwn: false,
       parse: "none",
       unfurl_links: false,
@@ -151,8 +158,8 @@ export class SlackConnection implements SlackDelivery {
     return result.ts;
   }
 
-  async post(channel: string, thread: string, text: string) {
-    return this.send(channel, thread, text, "markdown");
+  async post(channel: string, thread: string, text: string, stopJob?: number) {
+    return this.send(channel, thread, text, "markdown", stopJob);
   }
 
   async announce(channel: string, text: string, signal?: AbortSignal) {
@@ -172,12 +179,17 @@ export class SlackConnection implements SlackDelivery {
     },
   };
 
-  async update(channel: string, ts: string, text: string) {
+  async update(channel: string, ts: string, text: string, stopJob?: number) {
     try {
+      const content = slackContent(text);
       await this.web.chat.update({
         channel,
         ts,
-        ...slackContent(text),
+        ...content,
+        blocks: [
+          ...content.blocks,
+          ...(stopJob === undefined ? [] : [stopBlock(stopJob)]),
+        ],
         parse: "none",
       });
       return true;

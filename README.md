@@ -52,10 +52,20 @@ same message becomes the answer when text arrives. See [waiting settings](docs/w
 for configurable delays, disabling feedback, and captain-managed changes.
 Existing module backends can still return a final answer without streaming.
 
+Select **Stop** on a live reply or waiting message to request cancellation.
+Only the original requester can stop that request. Existing tool effects are
+not rolled back. See [cancellation](docs/cancellation.md) for setup and limits.
+
 `/cron` opens an interactive list of your scheduled prompts in the current
 channel. Add a name, cron schedule, timezone, and prompt; remove jobs with a
 confirmation button. Scheduled results start a new thread in that channel.
 See [cron jobs](docs/cron.md) for app setup and execution limits.
+
+Set `threadContext: true` on a bot to import bounded prior messages when its
+first request starts inside an existing Slack thread. This is off by default.
+Only the requester's and this bot's text can be included; other participants,
+files, and attachments are excluded. See [thread context](docs/thread-context.md)
+for limits, privacy, and Slack access requirements.
 
 To respond wherever the bot is invited, allow all humans and accessible
 channels/DMs explicitly:
@@ -301,9 +311,10 @@ SQLite file lock that the OS releases on exit.
 - Events Slack does not deliver during an outage are not recovered from history.
 - Backend-setting changes create a new session namespace. Pending jobs for an
   old backend identity remain on disk; they are not executed with new settings.
-- Responses use plain text, no tool output or reasoning, at most 60,000 Unicode
-  characters. Files, streaming, Slack actions, slash commands, scheduling,
-  and approval buttons are not implemented.
+- Responses render Markdown, with no tool output or reasoning, at most 60,000
+  Unicode characters. Streaming, `/cron`, and its interactive controls are
+  supported. File transport and backend approval buttons are not implemented.
+  See the [Slack feature comparison](docs/slack-parity.md) for remaining gaps.
 - Database files contain prompts and replies. There is no automatic retention
   policy. Keep the data directory private and back it up only while stopped.
 

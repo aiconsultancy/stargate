@@ -129,7 +129,8 @@ export class PiDurableBackend implements AgentBackend {
       | Awaited<ReturnType<Harness["observeConversation"]>>
       | undefined;
     const visible = new Map<number, string>();
-    let baseline = 0;
+    let baseline: number | undefined;
+    let earlyEntryId = 0;
     try {
       if (onText) {
         observation = await this.harness.observeConversation(
@@ -137,6 +138,14 @@ export class PiDurableBackend implements AgentBackend {
           {
             advance(call) {
               if (call.kind !== "value") return;
+              // Advances can precede resolution and exceed the initial view.
+              if (baseline === undefined) {
+                earlyEntryId = Math.max(
+                  earlyEntryId,
+                  ...call.value.entries.map((entry) => entry.id),
+                );
+                return;
+              }
               for (const entry of call.value.entries) {
                 if (entry.id <= baseline || !AssistantEntry.is(entry)) continue;
                 visible.set(
@@ -163,7 +172,7 @@ export class PiDurableBackend implements AgentBackend {
           context,
         );
         baseline = Math.max(
-          0,
+          earlyEntryId,
           ...observation.value.entries.map((entry) => entry.id),
         );
       }

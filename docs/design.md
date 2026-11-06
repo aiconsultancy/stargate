@@ -77,6 +77,9 @@ validation. Module import and execution are trusted-code operations.
 
 ## Identity and state
 
+See the [state-machine inventory](agents/state-machines.md) for transition
+owners and invariants across the gateway, backends, crew, and scheduled work.
+
 Bot identity includes config ID, Slack App ID, authenticated workspace/user,
 and a hash of normalized backend settings. A conversation adds channel and
 thread timestamp. Environment **names**, not token values, enter settings.

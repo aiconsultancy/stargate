@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
+import { stopBlock } from "../src/cancellation";
 import { handleSlackRequest, SlackConnection } from "../src/slack";
 
 test("Slack previews and edits keep plain text; reactions use the fixed target", async () => {
@@ -52,6 +53,44 @@ test("Slack previews and edits keep plain text; reactions use the fixed target",
     expect(calls[2]?.fields.get("timestamp")).toBe("1.000");
     expect(calls[2]?.fields.get("name")).toBe("eyes");
     expect(await slack.update("C123", "missing", "Replacement")).toBe(false);
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("Stop controls appear only on live posts and edits and disappear on final delivery", async () => {
+  const payloads: URLSearchParams[] = [];
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      payloads.push(new URLSearchParams(await request.text()));
+      return Response.json({ ok: true, ts: "2.000" });
+    },
+  });
+  const slack = new SlackConnection(
+    "local-app-token",
+    "local-bot-token",
+    pino({ enabled: false }),
+    { slackApiUrl: server.url.href },
+  );
+  try {
+    await slack.post("C123", "1.000", "Working", 42);
+    await slack.update("C123", "2.000", "Partial", 42);
+    await slack.update("C123", "2.000", "Final");
+    for (const payload of payloads.slice(0, 2)) {
+      const blocks = JSON.parse(payload.get("blocks") ?? "null");
+      expect(blocks.at(-1)).toEqual(stopBlock(42));
+      expect(blocks.at(-1).elements[0]).toMatchObject({
+        type: "button",
+        action_id: "pogo_stop",
+        value: "42",
+        text: { type: "plain_text", text: "Stop" },
+      });
+    }
+    expect(JSON.parse(payloads[2]?.get("blocks") ?? "null")).toEqual([
+      { type: "markdown", text: "Final" },
+    ]);
   } finally {
     await server.stop(true);
   }
