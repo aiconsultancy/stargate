@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { cancellationNotice } from "./cancellation";
 
 export type Incoming = {
   eventId: string;
@@ -46,6 +47,15 @@ export class Store {
         ts TEXT NOT NULL, PRIMARY KEY(job, part)
       );
     `);
+    if (
+      !this.db
+        .query<{ name: string }, []>("PRAGMA table_info(jobs)")
+        .all()
+        .some((column) => column.name === "cancel_requested")
+    )
+      this.db.exec(
+        "ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
+      );
   }
 
   enqueue(input: Incoming): boolean {
@@ -100,7 +110,44 @@ export class Store {
   }
 
   running(id: number) {
-    this.db.query("UPDATE jobs SET status='running' WHERE id=?").run(id);
+    return (
+      this.db
+        .query(
+          "UPDATE jobs SET status='running' WHERE id=? AND status='queued' AND cancel_requested=0",
+        )
+        .run(id).changes > 0
+    );
+  }
+
+  cancel(
+    botKey: string,
+    target: {
+      id: number;
+      user: string;
+      channel: string;
+      thread: string;
+      ts: string;
+    },
+  ) {
+    // Never infer a target from the conversation's most recent request.
+    return (
+      this.db
+        .query(`UPDATE jobs SET cancel_requested=1,
+      response=CASE WHEN status='queued' THEN ? ELSE response END,
+      status=CASE WHEN status='queued' THEN 'responding' ELSE status END
+      WHERE botKey=? AND id=? AND user=? AND channel=? AND thread=?
+      AND status IN ('queued','running') AND EXISTS (
+        SELECT 1 FROM previews WHERE job=jobs.id AND part=0 AND ts=?)`)
+        .run(
+          JSON.stringify([cancellationNotice]),
+          botKey,
+          target.id,
+          target.user,
+          target.channel,
+          target.thread,
+          target.ts,
+        ).changes > 0
+    );
   }
 
   queuedJob(botKey: string, eventId: string) {
@@ -120,9 +167,16 @@ export class Store {
   }
 
   respond(id: number, chunks: string[]) {
-    this.db
-      .query("UPDATE jobs SET status='responding',response=?,sent=0 WHERE id=?")
-      .run(JSON.stringify(chunks), id);
+    const row = this.db
+      .query<
+        { response: string },
+        [string, string, number]
+      >(`UPDATE jobs SET status='responding',
+        response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,sent=0
+        WHERE id=? RETURNING response`)
+      .get(JSON.stringify([cancellationNotice]), JSON.stringify(chunks), id);
+    if (!row) throw new Error("Response job not found");
+    return JSON.parse(row.response) as string[];
   }
 
   sent(id: number, count: number) {
@@ -161,9 +215,10 @@ export class Store {
     // greybeard: unknown tool outcomes are never retried automatically.
     // Reconciliation requires a backend-specific execution identifier.
     this.db
-      .query(`UPDATE jobs SET status='responding',response=?,sent=0
+      .query(`UPDATE jobs SET status='responding',response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,sent=0
       WHERE botKey=? AND status='running'`)
       .run(
+        JSON.stringify([cancellationNotice]),
         JSON.stringify([
           "Pogo stopped during this request. Work may have run; it was not repeated. Check agent state before sending another request.",
         ]),

@@ -86,7 +86,13 @@ export async function start(configPath: string) {
       await slack.start(
         (body) => !controller.signal.aborted && gateway.accept(body),
         botLog,
-        cronUI,
+        {
+          command: (body, ack) => cronUI.command(body, ack),
+          interactive: async (body, ack) => {
+            if (gateway.cancel(body)) await ack();
+            else await cronUI.interactive(body, ack);
+          },
+        },
       );
       const worker = gateway.work(controller.signal).catch(() => {
         botLog.error("Worker stopped unexpectedly");

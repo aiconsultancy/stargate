@@ -1,0 +1,65 @@
+# Slack agent feature comparison
+
+Comparison date: 2026-11-06. This is a product capability comparison, not a
+claim that Pogo has the same security model or deployment architecture.
+
+## Products compared
+
+- [Claude Code in Slack](https://code.claude.com/docs/en/slack) starts coding
+  sessions under an individual account. Its documented controls include
+  repository selection, progress, **View session**, and **Create PR**.
+  This earlier integration is distinct from the organization-managed
+  [Claude Tag](https://claude.com/docs/claude-tag/overview).
+- [ChatGPT in Slack](https://developers.openai.com/codex/third-party/slack)
+  can delegate repository work to Codex Cloud when the deployment supports
+  it. Its documented controls include private approvals, **Follow along**,
+  and requester cancellation. The documentation directs former `@Codex`
+  users to start new requests with `@ChatGPT`.
+- A Slack connection used to search Slack _from ChatGPT_ is the opposite
+  direction. It does not establish feature parity for a bot invoked in Slack.
+
+Vendor features depend on plan, workspace configuration, and account access.
+The linked documentation can change after this comparison.
+
+## Capability gaps
+
+| Capability                    | Vendor evidence                                                              | Pogo status                                                                                                 |
+| ----------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Start work from a mention     | Both coding integrations                                                     | Supported, with explicit user/channel access rules.                                                         |
+| Continue a thread             | Both coding integrations                                                     | Supported through durable per-thread sessions.                                                              |
+| Direct messages               | General ChatGPT/Claude offerings differ; earlier Claude Code is channel-only | Supported for allowed DMs.                                                                                  |
+| Visible progress              | Claude Code progress; ChatGPT task-start messages                            | Streaming replies and named waiting feedback.                                                               |
+| Scheduled prompts             | Claude Tag                                                                   | Supported through `/cron`; not evidence of every vendor's scheduling behavior.                              |
+| Current model inspection      | Not established by these vendor pages                                        | `pogo_model` can read the current captain session, including its stored variant.                            |
+| Requester cancellation        | ChatGPT documents requester task controls                                    | Supported through a requester-only Stop button on live previews; see [limits](cancellation.md).             |
+| Initial Slack context         | Claude Code documents gathering invocation context                           | Gap: accepted messages reach the agent, but earlier channel/thread messages are not imported automatically. |
+| Open the task/session         | Claude Code **View session**; ChatGPT **Follow along**                       | Gap: no backend-neutral task link in Slack.                                                                 |
+| Repository/environment choice | Claude repository picker; ChatGPT accessible Cloud environments              | Gap: backend directory is configured per bot, not selected in Slack.                                        |
+| Approval cards                | ChatGPT private **Allow**/**Deny**                                           | Gap: no Slack approval bridge for backend permissions. Deny-by-default remains required.                    |
+| Create-PR control             | Claude Code **Create PR**                                                    | Gap in native UI. An authorized agent may use GitHub tools; that is not a Pogo PR button.                   |
+| Per-user repository identity  | Claude individual accounts; ChatGPT account/environment access               | Architectural gap: Pogo uses a shared configured backend, not each Slack user's repository credentials.     |
+| Files/artifact transport      | Not established by the compared coding pages                                 | Pogo does not provide a gateway attachment pipeline. Do not claim vendor equivalence.                       |
+
+## Incremental delivery order
+
+1. Current-model reads: completed. Read the authenticated session, not an
+   agent default or a guessed reasoning level. Missing variant is
+   `default/unspecified`.
+2. Requester cancellation: implemented with a durable job and requester binding.
+   Preserve bot/workspace/channel checks and stop the underlying work.
+   Cancellation does not roll back external effects or guarantee termination
+   of an external system that does not honor interruption.
+3. Explicit context import: opt in and bound the channel, thread, message
+   count, and bytes. Treat imported text as untrusted data. Verify Slack token
+   and endpoint requirements before implementation; event subscriptions alone
+   do not prove that history fetches are permitted.
+4. Session links: require an adapter-provided safe URL and an audience check.
+   Do not construct links with credentials or assume Slack membership grants
+   access to the backend transcript.
+5. Repository selection and approvals: define the authorization boundary
+   first. A directory is not a sandbox, and a new UI must not expand access.
+
+Each feature uses an isolated branch, focused regression tests, the full
+`make check` gate, documentation, and independent review before its PR merges.
+Do not bypass branch rules or required checks. Stop an iteration when a
+material authorization or privacy decision needs an operator's input.
