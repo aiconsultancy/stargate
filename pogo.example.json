@@ -4,6 +4,7 @@
     {
       "id": "code-helper",
       "displayName": "Code Helper",
+      "threadContext": false,
       "waiting": { "delayMs": 5000, "intervalMs": 10000 },
       "slack": {
         "appId": "A123",

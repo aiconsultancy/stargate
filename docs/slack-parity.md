@@ -23,22 +23,22 @@ The linked documentation can change after this comparison.
 
 ## Capability gaps
 
-| Capability                    | Vendor evidence                                                              | Pogo status                                                                                                 |
-| ----------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Start work from a mention     | Both coding integrations                                                     | Supported, with explicit user/channel access rules.                                                         |
-| Continue a thread             | Both coding integrations                                                     | Supported through durable per-thread sessions.                                                              |
-| Direct messages               | General ChatGPT/Claude offerings differ; earlier Claude Code is channel-only | Supported for allowed DMs.                                                                                  |
-| Visible progress              | Claude Code progress; ChatGPT task-start messages                            | Streaming replies and named waiting feedback.                                                               |
-| Scheduled prompts             | Claude Tag                                                                   | Supported through `/cron`; not evidence of every vendor's scheduling behavior.                              |
-| Current model inspection      | Not established by these vendor pages                                        | `pogo_model` can read the current captain session, including its stored variant.                            |
-| Requester cancellation        | ChatGPT documents requester task controls                                    | Supported through a requester-only Stop button on live previews; see [limits](cancellation.md).             |
-| Initial Slack context         | Claude Code documents gathering invocation context                           | Gap: accepted messages reach the agent, but earlier channel/thread messages are not imported automatically. |
-| Open the task/session         | Claude Code **View session**; ChatGPT **Follow along**                       | Gap: no backend-neutral task link in Slack.                                                                 |
-| Repository/environment choice | Claude repository picker; ChatGPT accessible Cloud environments              | Gap: backend directory is configured per bot, not selected in Slack.                                        |
-| Approval cards                | ChatGPT private **Allow**/**Deny**                                           | Gap: no Slack approval bridge for backend permissions. Deny-by-default remains required.                    |
-| Create-PR control             | Claude Code **Create PR**                                                    | Gap in native UI. An authorized agent may use GitHub tools; that is not a Pogo PR button.                   |
-| Per-user repository identity  | Claude individual accounts; ChatGPT account/environment access               | Architectural gap: Pogo uses a shared configured backend, not each Slack user's repository credentials.     |
-| Files/artifact transport      | Not established by the compared coding pages                                 | Pogo does not provide a gateway attachment pipeline. Do not claim vendor equivalence.                       |
+| Capability                    | Vendor evidence                                                              | Pogo status                                                                                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Start work from a mention     | Both coding integrations                                                     | Supported, with explicit user/channel access rules.                                                                                                          |
+| Continue a thread             | Both coding integrations                                                     | Supported through durable per-thread sessions.                                                                                                               |
+| Direct messages               | General ChatGPT/Claude offerings differ; earlier Claude Code is channel-only | Supported for allowed DMs.                                                                                                                                   |
+| Visible progress              | Claude Code progress; ChatGPT task-start messages                            | Streaming replies and named waiting feedback.                                                                                                                |
+| Scheduled prompts             | Claude Tag                                                                   | Supported through `/cron`; not evidence of every vendor's scheduling behavior.                                                                               |
+| Current model inspection      | Not established by these vendor pages                                        | `pogo_model` can read the current captain session, including its stored variant.                                                                             |
+| Requester cancellation        | ChatGPT documents requester task controls                                    | Supported through a requester-only Stop button on live previews; see [limits](cancellation.md).                                                              |
+| Initial Slack context         | Claude Code documents gathering invocation context                           | Opt-in initial thread context imports bounded requester/bot text. No automatic channel context or other participants' text; see [limits](thread-context.md). |
+| Open the task/session         | Claude Code **View session**; ChatGPT **Follow along**                       | Gap: no backend-neutral task link in Slack.                                                                                                                  |
+| Repository/environment choice | Claude repository picker; ChatGPT accessible Cloud environments              | Gap: backend directory is configured per bot, not selected in Slack.                                                                                         |
+| Approval cards                | ChatGPT private **Allow**/**Deny**                                           | Gap: no Slack approval bridge for backend permissions. Deny-by-default remains required.                                                                     |
+| Create-PR control             | Claude Code **Create PR**                                                    | Gap in native UI. An authorized agent may use GitHub tools; that is not a Pogo PR button.                                                                    |
+| Per-user repository identity  | Claude individual accounts; ChatGPT account/environment access               | Architectural gap: Pogo uses a shared configured backend, not each Slack user's repository credentials.                                                      |
+| Files/artifact transport      | Not established by the compared coding pages                                 | Pogo does not provide a gateway attachment pipeline. Do not claim vendor equivalence.                                                                        |
 
 ## Incremental delivery order
 
@@ -49,10 +49,12 @@ The linked documentation can change after this comparison.
    Preserve bot/workspace/channel checks and stop the underlying work.
    Cancellation does not roll back external effects or guarantee termination
    of an external system that does not honor interruption.
-3. Explicit context import: opt in and bound the channel, thread, message
-   count, and bytes. Treat imported text as untrusted data. Verify Slack token
-   and endpoint requirements before implementation; event subscriptions alone
-   do not prove that history fetches are permitted.
+3. Explicit context import: implemented as an opt-in initial thread read.
+   Limits: one page of 50 fetched messages, 20 imported messages, and 12,000
+   text codepoints. Only the requester and this bot are included. Imported
+   text is untrusted reference data. The current Slack method contract lists
+   bot-token history scopes; membership and API errors still apply. This does
+   not import channel history or establish per-user repository isolation.
 4. Session links: require an adapter-provided safe URL and an audience check.
    Do not construct links with credentials or assume Slack membership grants
    access to the backend transcript.

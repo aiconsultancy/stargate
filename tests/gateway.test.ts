@@ -1,8 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { Gateway } from "../src/gateway";
+import { Gateway, type SlackDelivery } from "../src/gateway";
+import { handleSlackRequest } from "../src/slack";
 import { Store } from "../src/store";
+import { ThreadContextUnavailable } from "../src/thread-context";
 import { bot, event, identity } from "./fixtures";
 
 const stores: Store[] = [];
@@ -26,7 +28,7 @@ function fixture() {
     async close() {},
   };
   const delivered: string[] = [];
-  const slack = {
+  const slack: SlackDelivery = {
     async post(_channel: string, _thread: string, text: string) {
       delivered.push(text);
     },
@@ -265,6 +267,221 @@ test("scheduled prompts recheck creator and channel access", () => {
     f.gateway.enqueueScheduled({ ...input, channel: "COTHER" }),
   ).toBeUndefined();
   expect(f.store.ready(f.gateway.key, Date.now(), 10)).toEqual([]);
+});
+
+function initialThreadReply(text = "<@UBOT> summarize", ts = "3.000") {
+  return {
+    ...event(),
+    event: { ...event(text, ts).event, thread_ts: "1.000" },
+  };
+}
+
+test("initial context is off by default and does not change the prompt", async () => {
+  const f = fixture();
+  let historyCalls = 0;
+  f.slack.threadContext = async () => {
+    historyCalls++;
+    throw new Error("History must not be fetched");
+  };
+  f.gateway.accept(initialThreadReply());
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(historyCalls).toBe(0);
+  expect(f.prompts).toEqual([{ session: "session-1", text: "summarize" }]);
+});
+
+test("context starts after durable accept and ACK, only for the first session turn", async () => {
+  const f = fixture();
+  f.config.threadContext = true;
+  const steps: string[] = [];
+  await handleSlackRequest(
+    {
+      type: "events_api",
+      body: initialThreadReply(),
+      ack: async () => {
+        expect(f.next().text).toBe("summarize");
+        steps.push("ack");
+      },
+    },
+    (body) => {
+      const accepted = f.gateway.accept(body);
+      steps.push("persist");
+      return accepted;
+    },
+    pino({ enabled: false }),
+  );
+  expect(steps).toEqual(["persist", "ack"]);
+  const job = f.next();
+  // ready() no longer returns running jobs; use the durable accepted ID here.
+  f.slack.threadContext = async (input) => {
+    expect(f.store.jobStatus(f.gateway.key, job.id)).toBe("running");
+    expect(input).toMatchObject({
+      channel: "C123",
+      thread: "1.000",
+      before: "3.000",
+      user: "U123",
+      botUser: "UBOT",
+      appId: "A123",
+      team: "T123",
+    });
+    expect(input.signal.aborted).toBe(false);
+    steps.push("history");
+    return {
+      messages: [{ author: "requester", text: "prior text" }],
+      truncated: true,
+    };
+  };
+  await f.gateway.process(job, new AbortController().signal);
+  expect(steps).toEqual(["persist", "ack", "history"]);
+  expect(f.prompts[0]?.text).toContain('"truncated":true');
+  expect(f.prompts[0]?.text).toContain('"text":"prior text"');
+  expect(f.prompts[0]?.text).toEndWith("Current user instruction:\nsummarize");
+  f.gateway.accept(initialThreadReply("continue", "4.000"));
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(steps).toEqual(["persist", "ack", "history"]);
+  expect(f.prompts[1]).toEqual({ session: "session-1", text: "continue" });
+});
+
+test("roots, scheduled runs and existing sessions never fetch initial context", async () => {
+  for (const kind of ["root", "scheduled", "existing"] as const) {
+    const f = fixture();
+    f.config.threadContext = true;
+    let historyCalls = 0;
+    f.slack.threadContext = async () => {
+      historyCalls++;
+      throw new Error("History must not be fetched");
+    };
+    if (kind === "scheduled") {
+      f.gateway.enqueueScheduled({
+        runId: "run-1",
+        channel: "C123",
+        thread: "1.000",
+        user: "U123",
+        prompt: "scheduled instruction",
+        name: "Task",
+      });
+    } else {
+      f.gateway.accept(kind === "root" ? event() : initialThreadReply());
+    }
+    const job = f.next();
+    if (kind === "existing") f.store.saveSession(job.conversation, "existing");
+    await f.gateway.process(job, new AbortController().signal);
+    expect(historyCalls).toBe(0);
+    expect(f.prompts).toHaveLength(1);
+    expect(f.prompts[0]?.text).not.toContain("untrustedSlackThreadContext");
+  }
+});
+
+test("context rechecks user and channel access before history or backend calls", async () => {
+  for (const field of ["deniedUsers", "deniedChannels"] as const) {
+    const f = fixture();
+    f.config.threadContext = true;
+    let historyCalls = 0;
+    f.slack.threadContext = async () => {
+      historyCalls++;
+      return { messages: [], truncated: false };
+    };
+    expect(f.gateway.accept(initialThreadReply())).toBe(true);
+    f.config.access[field] = [field === "deniedUsers" ? "U123" : "C123"];
+    await f.gateway.process(f.next(), new AbortController().signal);
+    expect(historyCalls).toBe(0);
+    expect(f.prompts).toEqual([]);
+    expect(f.delivered).toEqual([]);
+  }
+  const f = fixture();
+  f.config.threadContext = true;
+  for (const request of [
+    { ...initialThreadReply(), team_id: "TOTHER" },
+    { ...initialThreadReply(), api_app_id: "AOTHER" },
+    {
+      ...initialThreadReply(),
+      event: { ...initialThreadReply().event, user: "UOTHER" },
+    },
+    {
+      ...initialThreadReply(),
+      event: { ...initialThreadReply().event, channel: "COTHER" },
+    },
+  ]) {
+    expect(f.gateway.accept(request)).toBe(false);
+  }
+  expect(f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10)).toEqual([]);
+});
+
+test("empty eligible history preserves the original user instruction", async () => {
+  const f = fixture();
+  f.config.threadContext = true;
+  f.slack.threadContext = async () => ({ messages: [], truncated: false });
+  f.gateway.accept(initialThreadReply());
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(f.prompts).toEqual([{ session: "session-1", text: "summarize" }]);
+});
+
+test("delivery retries do not reload initial history", async () => {
+  const f = fixture();
+  f.config.threadContext = true;
+  let historyCalls = 0;
+  f.slack.threadContext = async () => {
+    historyCalls++;
+    return {
+      messages: [{ author: "requester", text: "earlier" }],
+      truncated: false,
+    };
+  };
+  f.slack.post = async () => {
+    throw new Error("Delivery unavailable");
+  };
+  f.gateway.accept(initialThreadReply());
+  await f.gateway.process(f.next(), new AbortController().signal);
+  f.slack.post = async (_channel, _thread, text) => {
+    f.delivered.push(text);
+  };
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(historyCalls).toBe(1);
+  expect(f.prompts).toHaveLength(1);
+  expect(f.delivered).toHaveLength(1);
+});
+
+test("context failures and unsupported delivery fail closed before creating a session", async () => {
+  for (const missing of [false, true]) {
+    const f = fixture();
+    f.config.threadContext = true;
+    if (!missing)
+      f.slack.threadContext = async () => {
+        throw new ThreadContextUnavailable();
+      };
+    f.gateway.accept(initialThreadReply());
+    const job = f.next();
+    await f.gateway.process(job, new AbortController().signal);
+    expect(f.store.session(job.conversation)).toBeUndefined();
+    expect(f.prompts).toEqual([]);
+    expect(f.delivered).toEqual([
+      "Pogo could not load initial thread context. No agent turn was started. Check Slack history access and try again.",
+    ]);
+  }
+});
+
+test("canceling history prevents session creation and backend work", async () => {
+  const f = fixture();
+  f.config.threadContext = true;
+  const started = Promise.withResolvers<void>();
+  const controller = new AbortController();
+  f.slack.threadContext = async ({ signal }) => {
+    started.resolve();
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      });
+    });
+  };
+  f.gateway.accept(initialThreadReply());
+  const job = f.next();
+  const pending = f.gateway.process(job, controller.signal);
+  await started.promise;
+  controller.abort();
+  await pending;
+  expect(f.store.session(job.conversation)).toBeUndefined();
+  expect(f.prompts).toEqual([]);
+  expect(f.delivered).toEqual([]);
+  expect(f.next().status).toBe("responding");
 });
 
 test("scheduled status lookups do not cross bot namespaces", () => {

@@ -61,6 +61,12 @@ channel. Add a name, cron schedule, timezone, and prompt; remove jobs with a
 confirmation button. Scheduled results start a new thread in that channel.
 See [cron jobs](docs/cron.md) for app setup and execution limits.
 
+Set `threadContext: true` on a bot to import bounded prior messages when its
+first request starts inside an existing Slack thread. This is off by default.
+Only the requester's and this bot's text can be included; other participants,
+files, and attachments are excluded. See [thread context](docs/thread-context.md)
+for limits, privacy, and Slack access requirements.
+
 To respond wherever the bot is invited, allow all humans and accessible
 channels/DMs explicitly:
 

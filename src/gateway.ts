@@ -19,9 +19,16 @@ import {
 } from "./routing";
 import type { Job, Store } from "./store";
 import { LiveReply } from "./streaming";
+import {
+  type ThreadContext,
+  type ThreadContextRequest,
+  ThreadContextUnavailable,
+  withThreadContext,
+} from "./thread-context";
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
 
 export interface SlackDelivery {
+  threadContext?(input: ThreadContextRequest): Promise<ThreadContext>;
   post(
     channel: string,
     thread: string,
@@ -196,7 +203,28 @@ export class Gateway {
         try {
           signal.throwIfAborted();
           let session = this.store.session(job.conversation);
+          let text = job.text;
           if (!session) {
+            const before = job.eventId.slice(job.channel.length + 1);
+            // Roots (including scheduled runs) have no earlier thread messages.
+            if (this.config.threadContext && before !== job.thread) {
+              if (!this.slack.threadContext)
+                throw new ThreadContextUnavailable();
+              text = withThreadContext(
+                text,
+                await this.slack.threadContext({
+                  channel: job.channel,
+                  thread: job.thread,
+                  before,
+                  user: job.user,
+                  botUser: this.identity.user,
+                  appId: this.config.slack.appId,
+                  team: this.identity.team,
+                  signal,
+                }),
+              );
+              signal.throwIfAborted();
+            }
             session = await this.backend.createSession({
               key: job.conversation,
               title: `Slack ${job.channel} ${job.thread}`,
@@ -206,8 +234,8 @@ export class Gateway {
           }
           signal.throwIfAborted();
           const prompt = this.slack.react
-            ? `${reactionInstructions}\n\nUser message:\n${job.text}`
-            : job.text;
+            ? `${reactionInstructions}\n\nUser message:\n${text}`
+            : text;
           const answer = reply(
             await this.backend.prompt(session, prompt, signal, (text) =>
               live.push(reply(text, false)),
@@ -215,10 +243,12 @@ export class Gateway {
             true,
           );
           output = reacted && !answer.trim() ? [] : chunks(answer);
-        } catch {
+        } catch (error) {
           this.log.warn({ job: job.id }, "Agent request failed or timed out");
           output = [
-            "Pogo could not finish this request. Work may have run; it was not repeated. Check the agent before trying again.",
+            error instanceof ThreadContextUnavailable
+              ? "Pogo could not load initial thread context. No agent turn was started. Check Slack history access and try again."
+              : "Pogo could not finish this request. Work may have run; it was not repeated. Check the agent before trying again.",
           ];
         }
         // A reaction-only reply has no answer to preserve until delivery settles.

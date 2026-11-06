@@ -1,5 +1,5 @@
 import { SocketModeClient } from "@slack/socket-mode";
-import { LogLevel, WebClient } from "@slack/web-api";
+import { LogLevel, WebClient, type WebClientOptions } from "@slack/web-api";
 import type { Logger } from "pino";
 import { stopBlock } from "./cancellation";
 import type { CronUIApi } from "./cron-ui";
@@ -7,6 +7,7 @@ import type { SlackDelivery } from "./gateway";
 import type { ReactionName } from "./reactions";
 import type { Identity } from "./routing";
 import { slackContent } from "./slack-format";
+import { loadThreadContext, type ThreadContextRequest } from "./thread-context";
 
 function slackError(error: unknown, code: string) {
   return (
@@ -55,11 +56,12 @@ export async function handleSlackRequest(
 export class SlackConnection implements SlackDelivery {
   private readonly socket;
   private readonly web;
+  private readonly historyWeb: (signal: AbortSignal) => WebClient;
   constructor(
     appToken: string,
     botToken: string,
     log: Logger,
-    web?: WebClient,
+    webOptions: Pick<WebClientOptions, "slackApiUrl" | "fetch"> = {},
   ) {
     // Third-party errors can contain request headers/bodies. Do not log them.
     const logger = {
@@ -83,7 +85,21 @@ export class SlackConnection implements SlackDelivery {
       retryConfig: { retries: 0 },
       rejectRateLimitedCalls: true,
     };
-    this.web = web ?? new WebClient(botToken, options);
+    this.web = new WebClient(botToken, { ...webOptions, ...options });
+    // SDK v8 has no per-method signal. A request-scoped client uses the same
+    // token/options, without leaking cancellation through its shared queue.
+    this.historyWeb = (signal) =>
+      new WebClient(botToken, {
+        ...webOptions,
+        ...options,
+        fetch: (url, init) =>
+          (webOptions.fetch ?? globalThis.fetch)(url, {
+            ...init,
+            signal: init?.signal
+              ? AbortSignal.any([signal, init.signal])
+              : signal,
+          }),
+      });
     this.socket = new SocketModeClient({
       appToken,
       logger,
@@ -96,6 +112,12 @@ export class SlackConnection implements SlackDelivery {
     if (!auth.team_id || !auth.user_id || !auth.bot_id)
       throw new Error("Slack requires a workspace bot token");
     return { team: auth.team_id, user: auth.user_id };
+  }
+
+  async threadContext(input: ThreadContextRequest) {
+    return loadThreadContext(input, (args) =>
+      this.historyWeb(input.signal).conversations.replies(args),
+    );
   }
 
   async start(
