@@ -13,6 +13,8 @@ import {
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import plugin from "../src/crew/plugin";
 import { defaultTeam, type Team } from "../src/crew/team";
+import { CrewWaiting } from "../src/crew/waiting";
+import { waitingSettingsPath } from "../src/waiting";
 
 async function fixture(team?: Team) {
   const definition = team ?? defaultTeam;
@@ -178,6 +180,44 @@ async function fixture(team?: Team) {
     },
   };
 }
+
+test("waiting changes reject children, foreign roots and worker impersonation", async () => {
+  const f = await fixture();
+  try {
+    const waiting = new CrewWaiting(f.engine);
+    const path = waitingSettingsPath(f.options.captainDirectory, "bowser");
+    const captain = f.sessions.get("ses_captain_a");
+    if (!captain) throw new Error("missing captain fixture");
+    f.sessions.set("ses_child", {
+      ...captain,
+      id: "ses_child",
+      parentID: captain.id,
+    });
+    f.sessions.set("ses_foreign", {
+      ...captain,
+      id: "ses_foreign",
+      location: { directory: "/foreign" },
+    });
+    for (const sessionID of ["ses_child", "ses_foreign"]) {
+      await expect(
+        waiting.run({ seconds: 3 }, f.captain(sessionID)),
+      ).rejects.toThrow("root configured captain");
+    }
+    const peers = (await f.engine.run({ op: "ensure" }, f.captain())).peers;
+    const workerID = peers?.[0]?.sessionID ?? "missing";
+    await expect(
+      waiting.run({ seconds: 3 }, f.worker(workerID)),
+    ).rejects.toThrow("captain sessions");
+    await expect(
+      waiting.run({ seconds: 3 }, f.captain(workerID)),
+    ).rejects.toThrow("captain sessions");
+    expect(await Bun.file(path).exists()).toBe(false);
+    await waiting.run({ seconds: 3 }, f.captain());
+    expect(await Bun.file(path).json()).toEqual({ delayMs: 3000 });
+  } finally {
+    await f.close();
+  }
+});
 
 test("crew reuses four bot-wide roots across captains and reopening", async () => {
   const f = await fixture();

@@ -3,6 +3,8 @@
   "bots": [
     {
       "id": "code-helper",
+      "displayName": "Code Helper",
+      "waiting": { "delayMs": 5000, "intervalMs": 10000 },
       "slack": {
         "appId": "A123",
         "appTokenEnv": "POGO_CODE_APP_TOKEN",

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { BotConfig } from "./config";
+import { markdownChunks } from "./markdown-chunks";
 
 const eventSchema = z.object({
   type: z.enum(["app_mention", "message"]),
@@ -122,8 +123,5 @@ export function chunks(text: string): string[] {
   const truncated = points.length > 60_000;
   const bounded = points.slice(0, 60_000);
   if (truncated) bounded.push(...Array.from("\n[Response truncated by Pogo.]"));
-  const result: string[] = [];
-  for (let i = 0; i < bounded.length; i += 2800)
-    result.push(bounded.slice(i, i + 2800).join(""));
-  return result;
+  return markdownChunks(bounded);
 }

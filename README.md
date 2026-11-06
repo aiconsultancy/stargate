@@ -42,6 +42,21 @@ Allowed DMs can start sessions without mentions. Both user and channel must
 be allowed; messages from bots, edits, and empty prompts are ignored.
 Set `access.mentionOnly` to require a mention for every turn.
 
+Built-in backends stream visible response text through coalesced Slack message
+updates. Agent replies use Slack's native Markdown blocks for headings, links,
+lists, tables, and code. Long replies prefer paragraph boundaries and keep
+ordinary fenced code blocks balanced across messages. Chunks with Slack mention
+or broadcast controls stay literal to avoid accidental notifications.
+Slow responses show named, rotating feedback after five seconds; the
+same message becomes the answer when text arrives. See [waiting settings](docs/waiting.md)
+for configurable delays, disabling feedback, and captain-managed changes.
+Existing module backends can still return a final answer without streaming.
+
+`/cron` opens an interactive list of your scheduled prompts in the current
+channel. Add a name, cron schedule, timezone, and prompt; remove jobs with a
+confirmation button. Scheduled results start a new thread in that channel.
+See [cron jobs](docs/cron.md) for app setup and execution limits.
+
 To respond wherever the bot is invited, allow all humans and accessible
 channels/DMs explicitly:
 
@@ -125,6 +140,8 @@ Each bot needs its own Slack app with Socket Mode enabled:
 | `groups:history`    | Receive private-channel thread replies |
 | `im:history`        | Receive direct messages                |
 | `chat:write`        | Send replies                           |
+| `reactions:write`   | Add context-selected emoji reactions   |
+| `commands`          | Open the `/cron` job manager           |
 
 Create an app-level `xapp-…` token with **`connections:write`** under
 **Basic Information → App-Level Tokens**. Install the app to your workspace

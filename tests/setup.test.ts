@@ -58,7 +58,18 @@ test("manifest prefill round-trips and grants only intended scopes/events", () =
     "groups:history",
     "im:history",
     "chat:write",
+    "reactions:write",
+    "commands",
   ]);
+  expect(manifest.features.slash_commands).toEqual([
+    {
+      command: "/cron",
+      description: "Manage scheduled agent prompts",
+      usage_hint: "[list|add|remove]",
+      should_escape: true,
+    },
+  ]);
+  expect(manifest.settings.interactivity).toEqual({ is_enabled: true });
   expect(manifest.settings.event_subscriptions.bot_events).toEqual([
     "app_mention",
     "message.channels",

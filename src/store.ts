@@ -41,6 +41,10 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS jobs_pending ON jobs(botKey, status, retry_at);
       CREATE INDEX IF NOT EXISTS jobs_conversation ON jobs(conversation, id);
+      CREATE TABLE IF NOT EXISTS previews (
+        job INTEGER NOT NULL REFERENCES jobs(id), part INTEGER NOT NULL,
+        ts TEXT NOT NULL, PRIMARY KEY(job, part)
+      );
     `);
   }
 
@@ -99,6 +103,22 @@ export class Store {
     this.db.query("UPDATE jobs SET status='running' WHERE id=?").run(id);
   }
 
+  queuedJob(botKey: string, eventId: string) {
+    return this.db
+      .query<{ id: number; status: Job["status"] }, [string, string]>(
+        "SELECT id,status FROM jobs WHERE botKey=? AND eventId=?",
+      )
+      .get(botKey, eventId);
+  }
+
+  jobStatus(botKey: string, id: number): Job["status"] | undefined {
+    return this.db
+      .query<{ status: Job["status"] }, [string, number]>(
+        "SELECT status FROM jobs WHERE botKey=? AND id=?",
+      )
+      .get(botKey, id)?.status;
+  }
+
   respond(id: number, chunks: string[]) {
     this.db
       .query("UPDATE jobs SET status='responding',response=?,sent=0 WHERE id=?")
@@ -107,6 +127,24 @@ export class Store {
 
   sent(id: number, count: number) {
     this.db.query("UPDATE jobs SET sent=? WHERE id=?").run(count, id);
+  }
+
+  previews(id: number): { part: number; ts: string }[] {
+    return this.db
+      .query<{ part: number; ts: string }, [number]>(
+        "SELECT part,ts FROM previews WHERE job=? ORDER BY part",
+      )
+      .all(id);
+  }
+
+  savePreview(id: number, part: number, ts: string) {
+    this.db
+      .query("INSERT INTO previews (job,part,ts) VALUES (?,?,?)")
+      .run(id, part, ts);
+  }
+
+  removePreview(id: number, part: number) {
+    this.db.query("DELETE FROM previews WHERE job=? AND part=?").run(id, part);
   }
 
   finish(id: number, status: "done" | "failed" = "done") {

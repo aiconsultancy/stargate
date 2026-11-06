@@ -1,5 +1,6 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { OpenCode } from "@opencode/client";
-import type { AgentBackend } from "../backend";
+import type { AgentBackend, TextSink } from "../backend";
 import { type BackendConfig, secret } from "../config";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
@@ -35,8 +36,66 @@ export class OpenCodeBackend implements AgentBackend {
     return session.id;
   }
 
-  async prompt(sessionId: string, text: string, signal: AbortSignal) {
+  async prompt(
+    sessionId: string,
+    text: string,
+    signal: AbortSignal,
+    onText?: TextSink,
+  ) {
+    const stop = new AbortController();
+    const timer = new AbortController();
+    const connected = Promise.withResolvers<void>();
+    let armed = false;
+    const messages = new Map<string, Map<number, string>>();
+    // Consume promptly: slow Slack writes must not block the shared event source.
+    const events = onText
+      ? (async () => {
+          for await (const event of this.client.event.subscribe({
+            types: ["session.text.delta", "session.text.ended"],
+            signal: AbortSignal.any([signal, stop.signal]),
+          })) {
+            if (event.type === "server.connected") {
+              connected.resolve();
+              continue;
+            }
+            if (!armed || event.data.sessionID !== sessionId) continue;
+            const { assistantMessageID, ordinal } = event.data;
+            let parts = messages.get(assistantMessageID);
+            if (!parts) {
+              parts = new Map();
+              messages.set(assistantMessageID, parts);
+            }
+            parts.set(
+              ordinal,
+              event.type === "session.text.delta"
+                ? (parts.get(ordinal) ?? "") + event.data.delta
+                : event.data.text,
+            );
+            onText(
+              [...messages.values()]
+                .map((parts) =>
+                  [...parts]
+                    .sort(([a], [b]) => a - b)
+                    .map(([, text]) => text)
+                    .join("\n"),
+                )
+                .join("\n\n"),
+            );
+          }
+        })().catch(() => {
+          // Live-only events are best effort; history remains authoritative.
+          connected.resolve();
+        })
+      : Promise.resolve();
     try {
+      if (onText) {
+        await Promise.race([
+          connected.promise,
+          delay(2000, undefined, { signal: timer.signal }),
+        ]);
+        timer.abort();
+      }
+      armed = true;
       const input = await this.client.session.prompt(
         { sessionID: sessionId, text, delivery: "queue" },
         { signal },
@@ -76,6 +135,10 @@ export class OpenCodeBackend implements AgentBackend {
         )
         .catch(() => {});
       throw error;
+    } finally {
+      timer.abort();
+      stop.abort();
+      await events;
     }
   }
 

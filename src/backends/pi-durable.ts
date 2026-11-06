@@ -9,6 +9,7 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import {
   AssistantEntry,
   type ConversationId,
+  type ConversationView,
   createRegistry,
   Harness,
 } from "@earendil-works/pi-durable";
@@ -16,7 +17,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { z } from "zod";
-import type { AgentBackend, BackendContext } from "../backend";
+import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import { type BackendConfig, secret } from "../config";
 
 type Config = Extract<BackendConfig, { type: "pi-durable" }>;
@@ -25,6 +26,32 @@ const conversationId = z
   .regex(/^\d+$/)
   .transform(Number)
   .pipe(z.number().int().nonnegative());
+
+const liveText = z.object({
+  generation: z
+    .object({
+      message: z
+        .object({
+          content: z.array(
+            z.object({ type: z.string(), text: z.string().optional() }),
+          ),
+        })
+        .optional(),
+    })
+    .optional(),
+});
+
+/** Read visible text only; never publish thinking, tool arguments, or results. */
+export function piPartialText(view: ConversationView): string {
+  const live = liveText.safeParse(view.docs["pi.live"]);
+  return live.success
+    ? (live.data.generation?.message?.content ?? [])
+        .flatMap((block) =>
+          block.type === "text" && block.text ? [block.text] : [],
+        )
+        .join("")
+    : "";
+}
 
 export class PiDurableBackend implements AgentBackend {
   private constructor(
@@ -86,14 +113,60 @@ export class PiDurableBackend implements AgentBackend {
     return String(conversation.id);
   }
 
-  async prompt(sessionId: string, text: string, signal: AbortSignal) {
+  async prompt(
+    sessionId: string,
+    text: string,
+    signal: AbortSignal,
+    onText?: TextSink,
+  ) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
     const conversation = await this.harness.conversation(
       conversationId.parse(sessionId) as ConversationId,
       context,
     );
     if (!conversation) throw new Error("Pi conversation not found");
+    let observation:
+      | Awaited<ReturnType<Harness["observeConversation"]>>
+      | undefined;
+    const visible = new Map<number, string>();
+    let baseline = 0;
     try {
+      if (onText) {
+        observation = await this.harness.observeConversation(
+          conversationId.parse(sessionId) as ConversationId,
+          {
+            advance(call) {
+              if (call.kind !== "value") return;
+              for (const entry of call.value.entries) {
+                if (entry.id <= baseline || !AssistantEntry.is(entry)) continue;
+                visible.set(
+                  entry.id,
+                  (entry.model ?? [])
+                    .flatMap((message) =>
+                      message.role === "assistant"
+                        ? message.content.flatMap((block) =>
+                            block.type === "text" ? [block.text] : [],
+                          )
+                        : [],
+                    )
+                    .join(""),
+                );
+              }
+              onText(
+                [...visible.values(), piPartialText(call.value)]
+                  .filter(Boolean)
+                  .join("\n\n"),
+              );
+            },
+            end() {},
+          },
+          context,
+        );
+        baseline = Math.max(
+          0,
+          ...observation.value.entries.map((entry) => entry.id),
+        );
+      }
       const submission = await conversation.submit(
         { type: "input", content: text, whenBusy: "followUp" },
         context,
@@ -106,7 +179,7 @@ export class PiDurableBackend implements AgentBackend {
         context,
       );
       if (!entry) throw new Error("Pi answer not found");
-      return (entry.model ?? [])
+      const answer = (entry.model ?? [])
         .flatMap((message) =>
           message.role === "assistant"
             ? message.content.flatMap((block) =>
@@ -115,11 +188,16 @@ export class PiDurableBackend implements AgentBackend {
             : [],
         )
         .join("");
+      if (!onText) return answer;
+      visible.set(entry.id, answer);
+      return [...visible.values()].filter(Boolean).join("\n\n");
     } catch (error) {
       await this.interrupt(sessionId, AbortSignal.timeout(5000)).catch(
         () => {},
       );
       throw error;
+    } finally {
+      observation?.detach();
     }
   }
 

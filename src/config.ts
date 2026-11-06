@@ -1,5 +1,6 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
+import { waitingSchema } from "./waiting";
 
 const absolutePath = z.string().refine(isAbsolute, "Use an absolute path");
 const envName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
@@ -54,6 +55,7 @@ export const backendSchema = z.discriminatedUnion("type", [
 
 export const botSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+  displayName: z.string().trim().min(1).max(100).optional(),
   slack: z.strictObject({
     appId: z.string().regex(/^A[A-Z0-9]+$/),
     appTokenEnv: envName,
@@ -67,6 +69,7 @@ export const botSchema = z.strictObject({
     mentionOnly: z.boolean().default(false),
   }),
   backend: backendSchema,
+  waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),
   concurrency: z.number().int().min(1).max(32).default(4),
   turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(300_000),
 });

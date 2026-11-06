@@ -35,6 +35,11 @@ workspace administration. Follow the target project's delivery rules.
 
 ## Configured teams
 
+Captains can persist a waiting-response delay with `pogo_waiting` when a user
+asks to change it. This uses the existing `pogo_crew` permission and verifies
+the caller's real captain session. See [waiting responses](../waiting.md) for
+defaults, off versus zero, workspace persistence and plugin activation.
+
 Copy [`team.example.json`](../../team.example.json), a portable Galactica team
 with captain `adama` and three workers, including researcher `gaeta`:
 

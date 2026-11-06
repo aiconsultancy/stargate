@@ -26,6 +26,14 @@ export function buildManifest(name = "Pogo") {
         messages_tab_enabled: true,
         messages_tab_read_only_enabled: false,
       },
+      slash_commands: [
+        {
+          command: "/cron",
+          description: "Manage scheduled agent prompts",
+          usage_hint: "[list|add|remove]",
+          should_escape: true,
+        },
+      ],
     },
     oauth_config: {
       scopes: {
@@ -35,11 +43,14 @@ export function buildManifest(name = "Pogo") {
           "groups:history",
           "im:history",
           "chat:write",
+          "reactions:write",
+          "commands",
         ],
       },
     },
     settings: {
       socket_mode_enabled: true,
+      interactivity: { is_enabled: true },
       event_subscriptions: {
         bot_events: [
           "app_mention",
@@ -57,7 +68,7 @@ export function manifestUrl(name = "Pogo") {
 }
 
 export const slackInstructions = `Create the app using the prefilled manifest link.
-Scopes: app_mentions:read, channels:history, groups:history, im:history, chat:write.
+Scopes: app_mentions:read, channels:history, groups:history, im:history, chat:write, reactions:write, commands.
 In Basic Information, copy the App ID (A...). Create an app-level token
 (xapp-...) with connections:write. Install/reinstall the app to your workspace
 after scope changes; copy the Bot User OAuth Token (xoxb-...). Invite the bot

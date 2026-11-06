@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import type {
+  ConversationId,
+  ConversationView,
+} from "@earendil-works/pi-durable";
 import { OpenCodeBackend } from "../src/backends/opencode";
-import { PiDurableBackend } from "../src/backends/pi-durable";
+import { PiDurableBackend, piPartialText } from "../src/backends/pi-durable";
 import { backendSchema } from "../src/config";
 
 test("OpenCode V2 creates, queues, waits and reads paginated replies", async () => {
@@ -119,6 +123,282 @@ test("OpenCode failure explicitly interrupts server-side execution", async () =>
   } finally {
     await server.stop(true);
   }
+});
+
+function openCodeStreamFixture() {
+  const waiting = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
+  const disconnected = Promise.withResolvers<void>();
+  const interrupted = Promise.withResolvers<void>();
+  let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let sequence = 0;
+  let historyReads = 0;
+  const encoder = new TextEncoder();
+  const emit = (type: string, data: Record<string, unknown>) => {
+    if (!stream) throw new Error("Fixture SSE connection is not open");
+    stream.enqueue(
+      encoder.encode(
+        `data: ${JSON.stringify({
+          id: `event-${++sequence}`,
+          created: sequence,
+          type,
+          location: { directory: "/workspace" },
+          data,
+        })}\n\n`,
+      ),
+    );
+  };
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      const path = new URL(request.url).pathname;
+      if (path === "/api/event") {
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              stream = controller;
+              emit("server.connected", {});
+            },
+            cancel() {
+              stream = undefined;
+              disconnected.resolve();
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      if (path.endsWith("/prompt")) {
+        if (!stream) throw new Error("Prompt preceded event connection");
+        return Response.json({ data: { id: "input-current" } });
+      }
+      if (path.endsWith("/wait")) {
+        waiting.resolve();
+        await finish.promise;
+        return new Response(null, { status: 204 });
+      }
+      if (path.endsWith("/message")) {
+        historyReads++;
+        return Response.json({
+          data: [
+            {
+              id: "answer-current",
+              type: "assistant",
+              content: [
+                { type: "reasoning", text: "HISTORY REASONING SECRET" },
+                { type: "tool", text: "HISTORY TOOL SECRET" },
+                { type: "text", text: "Canonical final answer." },
+              ],
+            },
+            { id: "input-current", type: "user" },
+            {
+              id: "old-answer",
+              type: "assistant",
+              content: [{ type: "text", text: "DO NOT REPEAT" }],
+            },
+          ],
+          cursor: {},
+        });
+      }
+      if (path.endsWith("/interrupt")) {
+        interrupted.resolve();
+        return Response.json({ success: true });
+      }
+      return new Response(null, { status: 404 });
+    },
+  });
+  const config = backendSchema.parse({
+    type: "opencode",
+    url: server.url.href,
+    directory: "/workspace",
+  });
+  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  return {
+    backend: new OpenCodeBackend(config),
+    waiting: waiting.promise,
+    disconnected: disconnected.promise,
+    interrupted: interrupted.promise,
+    finish: () => finish.resolve(),
+    historyReads: () => historyReads,
+    emit,
+    disconnect() {
+      stream?.close();
+      stream = undefined;
+    },
+    async close() {
+      finish.resolve();
+      await server.stop(true);
+    },
+  };
+}
+
+test("OpenCode streams only current-session visible text before canonical history completes", async () => {
+  const fixture = openCodeStreamFixture();
+  const received = Promise.withResolvers<void>();
+  const snapshots: string[] = [];
+  const controller = new AbortController();
+  const result = fixture.backend.prompt(
+    "session-current",
+    "Review this PR",
+    controller.signal,
+    (text) => {
+      snapshots.push(text);
+      if (text === "First block.\nCorrected second block.") received.resolve();
+    },
+  );
+  try {
+    await fixture.waiting;
+    const current = {
+      sessionID: "session-current",
+      assistantMessageID: "answer-current",
+    };
+    fixture.emit("session.text.delta", {
+      ...current,
+      sessionID: "session-other",
+      ordinal: 0,
+      delta: "OTHER SESSION SECRET",
+    });
+    fixture.emit("session.reasoning.delta", {
+      ...current,
+      ordinal: 0,
+      delta: "REASONING SECRET",
+    });
+    fixture.emit("session.tool.input.delta", {
+      ...current,
+      id: "tool-secret",
+      delta: "TOOL SECRET",
+    });
+    fixture.emit("session.text.delta", {
+      ...current,
+      ordinal: 2,
+      delta: "Second ",
+    });
+    fixture.emit("session.text.delta", {
+      ...current,
+      ordinal: 2,
+      delta: "block.",
+    });
+    fixture.emit("session.text.delta", {
+      ...current,
+      ordinal: 0,
+      delta: "First block.",
+    });
+    fixture.emit("session.text.ended", {
+      ...current,
+      ordinal: 2,
+      text: "Corrected second block.",
+    });
+    await received.promise;
+    expect(snapshots).toEqual([
+      "Second ",
+      "Second block.",
+      "First block.\nSecond block.",
+      "First block.\nCorrected second block.",
+    ]);
+    expect(fixture.historyReads()).toBe(0);
+    fixture.finish();
+    expect(await result).toBe("Canonical final answer.");
+    expect(fixture.historyReads()).toBe(1);
+    await fixture.disconnected;
+  } finally {
+    controller.abort();
+    await result.catch(() => {});
+    await fixture.close();
+  }
+});
+
+test("OpenCode event disconnect retains authoritative final history", async () => {
+  const fixture = openCodeStreamFixture();
+  const received = Promise.withResolvers<void>();
+  const controller = new AbortController();
+  const snapshots: string[] = [];
+  const result = fixture.backend.prompt(
+    "session-current",
+    "hello",
+    controller.signal,
+    (text) => {
+      snapshots.push(text);
+      received.resolve();
+    },
+  );
+  try {
+    await fixture.waiting;
+    fixture.emit("session.text.delta", {
+      sessionID: "session-current",
+      assistantMessageID: "answer-current",
+      ordinal: 0,
+      delta: "Incomplete draft",
+    });
+    await received.promise;
+    fixture.disconnect();
+    fixture.finish();
+    expect(await result).toBe("Canonical final answer.");
+    expect(snapshots).toEqual(["Incomplete draft"]);
+  } finally {
+    controller.abort();
+    await result.catch(() => {});
+    await fixture.close();
+  }
+});
+
+test("OpenCode cancellation closes the event subscription and interrupts execution", async () => {
+  const fixture = openCodeStreamFixture();
+  const controller = new AbortController();
+  const result = fixture.backend.prompt(
+    "session-current",
+    "hello",
+    controller.signal,
+    () => {},
+  );
+  try {
+    await fixture.waiting;
+    controller.abort();
+    await expect(result).rejects.toThrow();
+    await fixture.interrupted;
+    await fixture.disconnected;
+    expect(fixture.historyReads()).toBe(0);
+  } finally {
+    controller.abort();
+    await result.catch(() => {});
+    await fixture.close();
+  }
+});
+
+test("Pi partial text excludes thinking and tools and tolerates missing or malformed live state", () => {
+  const view = (docs: ConversationView["docs"]): ConversationView => ({
+    conversation: { id: 1 as ConversationId },
+    entries: [],
+    docs,
+  });
+  expect(piPartialText(view({}))).toBe("");
+  expect(piPartialText(view({ "pi.live": {} }))).toBe("");
+  expect(
+    piPartialText(
+      view({ "pi.live": { generation: { message: { content: "bad" } } } }),
+    ),
+  ).toBe("");
+  expect(
+    piPartialText(
+      view({
+        "pi.live": {
+          generation: {
+            message: {
+              content: [
+                { type: "thinking", text: "THINKING SECRET" },
+                { type: "text", text: "Visible " },
+                {
+                  type: "toolCall",
+                  text: "TOOL SECRET",
+                  arguments: { token: "secret" },
+                },
+                { type: "text", text: "answer" },
+              ],
+            },
+          },
+        },
+      }),
+    ),
+  ).toBe("Visible answer");
 });
 
 test("real Pi Durable harness persists sessions under Bun SQLite", async () => {

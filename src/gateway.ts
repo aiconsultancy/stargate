@@ -3,17 +3,37 @@ import type { Logger } from "pino";
 import type { AgentBackend } from "./backend";
 import type { BotConfig } from "./config";
 import {
+  parseReactionReply,
+  type ReactionName,
+  reactionInstructions,
+} from "./reactions";
+import {
   botKey,
   chunks,
+  conversationKey,
   type Identity,
   isAllowedChannel,
   isAllowedUser,
   routeEvent,
 } from "./routing";
 import type { Job, Store } from "./store";
+import { LiveReply } from "./streaming";
+import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
 
 export interface SlackDelivery {
-  post(channel: string, thread: string, text: string): Promise<void>;
+  post(
+    channel: string,
+    thread: string,
+    text: string,
+  ): Promise<string> | Promise<void>;
+  /** false means the user removed the preview; post a replacement. */
+  update?(
+    channel: string,
+    ts: string,
+    text: string,
+  ): Promise<boolean> | Promise<void>;
+  remove?(channel: string, ts: string): Promise<void>;
+  react?(channel: string, ts: string, name: ReactionName): Promise<void>;
 }
 
 export class Gateway {
@@ -38,6 +58,36 @@ export class Gateway {
     )
       return false;
     return this.store.enqueue(input);
+  }
+
+  enqueueScheduled(input: {
+    runId: string;
+    channel: string;
+    user: string;
+    prompt: string;
+    thread: string;
+    name: string;
+  }): number | undefined {
+    if (
+      !isAllowedUser(this.config, input.user) ||
+      !isAllowedChannel(this.config, input.channel)
+    )
+      return;
+    const eventId = `${input.channel}:${input.thread}`;
+    this.store.enqueue({
+      eventId,
+      botKey: this.key,
+      conversation: conversationKey(this.key, input.channel, input.thread),
+      channel: input.channel,
+      thread: input.thread,
+      user: input.user,
+      text: input.prompt,
+    });
+    return this.store.queuedJob(this.key, eventId)?.id;
+  }
+
+  scheduledStatus(jobId: number) {
+    return this.store.jobStatus(this.key, jobId);
   }
 
   async work(signal: AbortSignal) {
@@ -94,6 +144,39 @@ export class Gateway {
         shutdown,
         AbortSignal.timeout(this.config.turnTimeoutMs),
       ]);
+      const waiting = await resolveWaiting(this.config);
+      const live = new LiveReply(
+        job,
+        this.store,
+        this.slack,
+        signal,
+        this.log,
+        {
+          waiting: { ...waiting, name: botDisplayName(this.config) },
+          phrase: waitingPhrase,
+        },
+      );
+      let reacted = false;
+      let reactionDelivered = false;
+      let reactionTask: Promise<void> | undefined;
+      const reply = (text: string, complete: boolean) => {
+        if (!this.slack.react) return text;
+        const parsed = parseReactionReply(text, complete);
+        if (parsed.reaction && !reacted && !signal.aborted) {
+          reacted = true;
+          // eventId deduplicates by channel:message-ts, not Slack's envelope ID.
+          const messageTs = job.eventId.slice(job.channel.length + 1);
+          reactionTask = this.slack
+            .react(job.channel, messageTs, parsed.reaction)
+            .then(() => {
+              reactionDelivered = true;
+            })
+            .catch(() =>
+              this.log.warn({ job: job.id }, "Slack reaction unavailable"),
+            );
+        }
+        return parsed.text;
+      };
       try {
         signal.throwIfAborted();
         let session = this.store.session(job.conversation);
@@ -105,23 +188,59 @@ export class Gateway {
           });
           this.store.saveSession(job.conversation, session);
         }
-        output = chunks(await this.backend.prompt(session, job.text, signal));
+        const prompt = this.slack.react
+          ? `${reactionInstructions}\n\nUser message:\n${job.text}`
+          : job.text;
+        const answer = reply(
+          await this.backend.prompt(session, prompt, signal, (text) =>
+            live.push(reply(text, false)),
+          ),
+          true,
+        );
+        output = reacted && !answer.trim() ? [] : chunks(answer);
       } catch {
         this.log.warn({ job: job.id }, "Agent request failed or timed out");
         output = [
           "Pogo could not finish this request. Work may have run; it was not repeated. Check the agent before trying again.",
         ];
+      } finally {
+        await live.close();
+        await reactionTask;
       }
+      if (output.length === 0 && !reactionDelivered)
+        output = ["Pogo could not add that reaction."];
       this.store.respond(job.id, output);
     } else {
       output = JSON.parse(job.response ?? "[]") as string[];
     }
     try {
+      const previews = new Map(
+        this.store.previews(job.id).map(({ part, ts }) => [part, ts]),
+      );
+      // A corrected answer, error, or recovery notice may be shorter than its preview.
+      for (const [part, ts] of previews) {
+        if (part < output.length) continue;
+        if (shutdown.aborted) return;
+        if (!this.slack.remove)
+          throw new Error("Slack preview cleanup unavailable");
+        await this.slack.remove(job.channel, ts);
+        this.store.removePreview(job.id, part);
+      }
       for (let i = job.sent; i < output.length; i++) {
         if (shutdown.aborted) return;
         const text = output[i];
         if (text === undefined) continue;
-        await this.slack.post(job.channel, job.thread, text);
+        const ts = previews.get(i);
+        if (ts) {
+          if (!this.slack.update)
+            throw new Error("Slack preview update unavailable");
+          if ((await this.slack.update(job.channel, ts, text)) === false) {
+            this.store.removePreview(job.id, i);
+            await this.slack.post(job.channel, job.thread, text);
+          }
+        } else {
+          await this.slack.post(job.channel, job.thread, text);
+        }
         this.store.sent(job.id, i + 1);
       }
       this.store.finish(job.id);

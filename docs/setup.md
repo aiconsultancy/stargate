@@ -420,6 +420,22 @@ Pogo's manifest enables Socket Mode and subscribes to `app_mention`,
 | `groups:history`    | Receive private-channel thread replies |
 | `im:history`        | Receive direct messages                |
 | `chat:write`        | Send replies                           |
+| `reactions:write`   | Add context-selected emoji reactions   |
+| `commands`          | Open the `/cron` job manager           |
+
+For `/cron`, apply the updated app manifest: it registers the command and
+enables interactivity over Socket Mode. No public request URL is needed.
+Reinstall existing apps after adding `commands` or `reactions:write`.
+Editing a local manifest file alone does not change the installed app.
+See [recurring prompts](cron.md) for ownership and execution limits.
+
+Reactions use
+[`reactions.add`](https://docs.slack.dev/reference/methods/reactions.add):
+POST with the bot token, channel, emoji name, and original message timestamp.
+An `already_reacted` response means the reaction is already present.
+Pogo does not react to every question. The model can select `eyes` for a request
+to inspect a concrete item, or another supported reaction when context calls for
+it. Reaction targets stay fixed to the current user's message.
 
 Guide the operator through these human-controlled steps:
 

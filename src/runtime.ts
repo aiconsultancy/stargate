@@ -6,6 +6,9 @@ import { parseEnv } from "node:util";
 import pino from "pino";
 import { createBackend } from "./backend";
 import { loadConfig, secret } from "./config";
+import { CronScheduler } from "./cron";
+import { CronStore } from "./cron-store";
+import { CronUI } from "./cron-ui";
 import { Gateway } from "./gateway";
 import { botKey } from "./routing";
 import { SlackConnection } from "./slack";
@@ -46,7 +49,9 @@ export async function start(configPath: string) {
   process.on("SIGTERM", stop);
   const resources: { close(): Promise<void> }[] = [];
   const workers: Promise<void>[] = [];
+  let cronStore: CronStore | undefined;
   try {
+    cronStore = new CronStore(join(config.dataDirectory, "cron.sqlite"));
     const identities = new Set<string>();
     for (const bot of config.bots) {
       const botLog = log.child({ bot: bot.id });
@@ -69,15 +74,31 @@ export async function start(configPath: string) {
       const backend = await createBackend(bot.backend, { dataDirectory });
       resources.push(backend);
       const gateway = new Gateway(bot, identity, store, backend, slack, botLog);
+      const cronUI = new CronUI(bot, identity, cronStore, slack.cronUI, botLog);
+      const cron = new CronScheduler(
+        bot,
+        identity,
+        cronStore,
+        gateway,
+        slack,
+        botLog,
+      );
       await slack.start(
         (body) => !controller.signal.aborted && gateway.accept(body),
         botLog,
+        cronUI,
       );
       const worker = gateway.work(controller.signal).catch(() => {
         botLog.error("Worker stopped unexpectedly");
         controller.abort();
       });
       workers.push(worker);
+      workers.push(
+        cron.work(controller.signal).catch(() => {
+          botLog.error("Cron worker stopped unexpectedly");
+          controller.abort();
+        }),
+      );
       botLog.info("Bot connected");
     }
     log.info("Pogo ready");
@@ -92,6 +113,7 @@ export async function start(configPath: string) {
     await Promise.all(workers);
     for (const resource of resources.reverse())
       await resource.close().catch(() => log.warn("Resource cleanup failed"));
+    cronStore?.close();
     store.close();
     lock.close();
     process.off("SIGINT", stop);

@@ -6,6 +6,7 @@ import { CrewEngine, crewInputSchema, mailInputSchema } from "./engine";
 import { CrewHistory, historyInputSchema } from "./history";
 import { CrewModels, modelInputSchema } from "./models";
 import { CrewError } from "./state";
+import { CrewWaiting, waitingInputSchema } from "./waiting";
 
 // greybeard: configured shared workers, one active task each; no captain wakeups.
 // Autonomous continuations require correlated Slack delivery first.
@@ -35,8 +36,42 @@ export default Plugin.define({
       (sessionID, signal) =>
         compactOnServer(engine.options.team, ctx.session, sessionID, signal),
     );
+    const waiting = new CrewWaiting(engine);
     try {
       await ctx.tool.transform((editor) => {
+        editor.add({
+          name: "pogo_waiting",
+          description:
+            "Captain-only persistent waiting response delay. Use only when the user asks to change waiting response time: 3 seconds means seconds=3, 5 seconds means seconds=5, off means seconds=off, zero seconds means seconds=0 (immediate, not disabled). Applies to subsequent Slack turns for this captain workspace and agent; never changes tools or access permissions.",
+          input: waitingInputSchema,
+          options: { codemode: false, permission: "pogo_crew" },
+          async execute(input, context) {
+            await ctx.permission.assert({
+              sessionID: context.sessionID,
+              agent: context.agent,
+              source: {
+                type: "tool",
+                messageID: context.messageID,
+                id: context.id,
+              },
+              action: "pogo_crew",
+              resources: ["waiting"],
+              save: ["waiting"],
+            });
+            try {
+              return {
+                content: JSON.stringify(await waiting.run(input, context)),
+              };
+            } catch (error) {
+              throw new ToolError({
+                message:
+                  error instanceof CrewError
+                    ? error.message
+                    : "Waiting setting change unconfirmed; raw details withheld.",
+              });
+            }
+          },
+        });
         editor.add({
           name: "pogo_crew",
           description: `Manage ${engine.options.team.captain.id}'s configured persistent crew: ${engine.options.team.crew.map(({ id }) => id).join(", ")}. Captain may ensure, dispatch, wait, status and compact. Assigned workers complete tasks or send task-scoped urgency. Busy dispatch queues only with queue=true. Never auto-wake captains.`,

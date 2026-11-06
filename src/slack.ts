@@ -1,13 +1,65 @@
 import { SocketModeClient } from "@slack/socket-mode";
 import { LogLevel, WebClient } from "@slack/web-api";
 import type { Logger } from "pino";
+import type { CronUIApi } from "./cron-ui";
 import type { SlackDelivery } from "./gateway";
+import type { ReactionName } from "./reactions";
 import type { Identity } from "./routing";
+import { slackContent } from "./slack-format";
+
+function slackError(error: unknown, code: string) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "data" in error &&
+    typeof error.data === "object" &&
+    error.data !== null &&
+    "error" in error.data &&
+    error.data.error === code
+  );
+}
+
+export type SocketRequest = {
+  type: string;
+  body: unknown;
+  ack: (payload?: Record<string, unknown>) => Promise<void>;
+};
+
+export interface SlackInteractions {
+  command(body: unknown, ack: SocketRequest["ack"]): Promise<void>;
+  interactive(body: unknown, ack: SocketRequest["ack"]): Promise<void>;
+}
+
+/** Socket Mode's generic event includes commands too; acknowledge each only once. */
+export async function handleSlackRequest(
+  request: SocketRequest,
+  accept: (body: unknown) => boolean,
+  log: Logger,
+  interactions?: SlackInteractions,
+) {
+  try {
+    if (request.type === "slash_commands" && interactions) {
+      await interactions.command(request.body, request.ack);
+    } else if (request.type === "interactive" && interactions) {
+      await interactions.interactive(request.body, request.ack);
+    } else {
+      if (request.type === "events_api") accept(request.body);
+      await request.ack();
+    }
+  } catch {
+    log.error("Could not handle or acknowledge Slack request");
+  }
+}
 
 export class SlackConnection implements SlackDelivery {
   private readonly socket;
   private readonly web;
-  constructor(appToken: string, botToken: string, log: Logger) {
+  constructor(
+    appToken: string,
+    botToken: string,
+    log: Logger,
+    web?: WebClient,
+  ) {
     // Third-party errors can contain request headers/bodies. Do not log them.
     const logger = {
       debug() {},
@@ -30,7 +82,7 @@ export class SlackConnection implements SlackDelivery {
       retryConfig: { retries: 0 },
       rejectRateLimitedCalls: true,
     };
-    this.web = new WebClient(botToken, options);
+    this.web = web ?? new WebClient(botToken, options);
     this.socket = new SocketModeClient({
       appToken,
       logger,
@@ -45,40 +97,89 @@ export class SlackConnection implements SlackDelivery {
     return { team: auth.team_id, user: auth.user_id };
   }
 
-  async start(accept: (body: unknown) => boolean, log: Logger) {
-    this.socket.on(
-      "slack_event",
-      (request: { body: unknown; ack: () => Promise<void> }) => {
-        const handle = async () => {
-          // Commit to SQLite before ACK. Slack can retry if the process stops here.
-          accept(request.body);
-          await request.ack();
-        };
-        handle().catch(() =>
-          log.error("Could not persist or acknowledge Slack event"),
-        );
-      },
-    );
+  async start(
+    accept: (body: unknown) => boolean,
+    log: Logger,
+    interactions?: SlackInteractions,
+  ) {
+    this.socket.on("slack_event", async (request: SocketRequest) => {
+      // handleSlackRequest catches errors without exposing SDK payloads.
+      await handleSlackRequest(request, accept, log, interactions);
+    });
     this.socket.on("error", () => log.error("Slack socket error"));
     await this.socket.start();
   }
 
-  async post(channel: string, thread: string, text: string) {
-    await this.web.chat.postMessage({
+  private async send(
+    channel: string,
+    thread: string,
+    text: string,
+    format: "markdown" | "plain",
+  ) {
+    const result = await this.web.chat.postMessage({
       channel,
-      thread_ts: thread,
-      text: text
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;"),
-      blocks: [
-        { type: "section", text: { type: "plain_text", text, emoji: false } },
-      ],
+      ...(thread ? { thread_ts: thread } : {}),
+      ...slackContent(text, format),
       mrkdwn: false,
       parse: "none",
       unfurl_links: false,
       unfurl_media: false,
     });
+    if (!result.ts) throw new Error("Slack did not return a message timestamp");
+    return result.ts;
+  }
+
+  async post(channel: string, thread: string, text: string) {
+    return this.send(channel, thread, text, "markdown");
+  }
+
+  async announce(channel: string, text: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    return this.send(channel, "", text, "plain");
+  }
+
+  readonly cronUI: CronUIApi = {
+    open: async (triggerId, view) => {
+      await this.web.views.open({ trigger_id: triggerId, view });
+    },
+    push: async (triggerId, view) => {
+      await this.web.views.push({ trigger_id: triggerId, view });
+    },
+    update: async (viewId, hash, view) => {
+      await this.web.views.update({ view_id: viewId, hash, view });
+    },
+  };
+
+  async update(channel: string, ts: string, text: string) {
+    try {
+      await this.web.chat.update({
+        channel,
+        ts,
+        ...slackContent(text),
+        parse: "none",
+      });
+      return true;
+    } catch (error) {
+      if (slackError(error, "message_not_found")) return false;
+      throw error;
+    }
+  }
+
+  async remove(channel: string, ts: string) {
+    try {
+      await this.web.chat.delete({ channel, ts });
+    } catch (error) {
+      // Retrying a confirmed or ambiguous delete must remain safe.
+      if (!slackError(error, "message_not_found")) throw error;
+    }
+  }
+
+  async react(channel: string, timestamp: string, name: ReactionName) {
+    try {
+      await this.web.reactions.add({ channel, timestamp, name });
+    } catch (error) {
+      if (!slackError(error, "already_reacted")) throw error;
+    }
   }
 
   async close() {

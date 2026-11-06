@@ -215,3 +215,60 @@ test("cancellation prevents work and persists a delivery for restart", async () 
   expect(f.delivered).toEqual([]);
   expect(f.next().status).toBe("responding");
 });
+
+test("scheduled prompts enter the durable thread queue once and permit follow-up", async () => {
+  const f = fixture();
+  const scheduled = {
+    runId: "run-1",
+    name: "Daily review",
+    channel: "C123",
+    thread: "9.000",
+    user: "U123",
+    prompt: "Review today's changes",
+  };
+  const id = f.gateway.enqueueScheduled(scheduled);
+  expect(id).toBeNumber();
+  expect(f.gateway.enqueueScheduled(scheduled)).toBe(id);
+  if (id === undefined) throw new Error("Missing scheduled job");
+  expect(f.gateway.scheduledStatus(id)).toBe("queued");
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(f.gateway.scheduledStatus(id)).toBe("done");
+  expect(f.prompts).toEqual([{ session: "session-1", text: scheduled.prompt }]);
+  expect(
+    f.gateway.accept({
+      ...event(),
+      event: {
+        ...event("Explain", "10.000").event,
+        type: "message",
+        thread_ts: "9.000",
+      },
+    }),
+  ).toBe(true);
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(f.prompts[1]).toEqual({ session: "session-1", text: "Explain" });
+});
+
+test("scheduled prompts recheck creator and channel access", () => {
+  const f = fixture();
+  const input = {
+    runId: "run-1",
+    name: "Review",
+    channel: "C123",
+    thread: "9.000",
+    user: "U123",
+    prompt: "Review changes",
+  };
+  expect(
+    f.gateway.enqueueScheduled({ ...input, user: "UOTHER" }),
+  ).toBeUndefined();
+  expect(
+    f.gateway.enqueueScheduled({ ...input, channel: "COTHER" }),
+  ).toBeUndefined();
+  expect(f.store.ready(f.gateway.key, Date.now(), 10)).toEqual([]);
+});
+
+test("scheduled status lookups do not cross bot namespaces", () => {
+  const f = fixture();
+  f.gateway.accept(event());
+  expect(f.store.jobStatus("another-bot", f.next().id)).toBeUndefined();
+});

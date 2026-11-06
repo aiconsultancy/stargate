@@ -36,7 +36,12 @@ interface AgentBackend {
     signal: AbortSignal;
   }): Promise<string>;
 
-  prompt(sessionId: string, text: string, signal: AbortSignal): Promise<string>;
+  prompt(
+    sessionId: string,
+    text: string,
+    signal: AbortSignal,
+    onText?: (text: string) => void,
+  ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }
@@ -47,6 +52,13 @@ must return only the current turn's assistant text, not reasoning or prior
 replies. Prompt must honour cancellation and stop underlying work, not only
 the wait. Close releases owned resources, never an attached external service.
 Implement interrupt if work can survive the gateway process.
+
+`onText` receives cumulative visible text for the current turn. It is optional;
+existing module adapters can continue returning only their final answer.
+Callbacks must not include reasoning, tool arguments, or tool results. The
+gateway buffers snapshots and performs Slack writes separately. OpenCode uses
+live text events and reads final history as the source of truth. If the event
+connection fails, final delivery continues without replaying agent work.
 
 Custom modules export:
 
@@ -107,10 +119,48 @@ Delivery stores all chunks and a sent cursor. A successful API call advances
 the cursor. Transport ambiguity still permits duplicate Slack replies. This
 release does not claim exactly-once execution or delivery.
 
+Live replies use ordinary Slack posts and edits with the existing `chat:write`
+scope. Both posts and edits use native `markdown` blocks, without converting
+standard Markdown to Slack's separate `mrkdwn` syntax. The top-level text remains
+an escaped notification/accessibility fallback. Chunks with explicit Slack
+mention or broadcast controls use literal `plain_text` blocks instead; ordinary
+code contents are not rewritten. Scheduled announcement names also stay literal.
+Updates are coalesced, not sent for every token. Preview timestamps are
+stored in SQLite; completion, errors, and restart recovery update those same
+messages. If the final reply is shorter, Pogo removes its extra preview messages.
+Slack failures stop live updates but do not stop or rerun tools. Final delivery
+uses the durable response and retry cursor. A crash between a Slack post and
+timestamp persistence can still leave an extra preview.
+
+Replies keep the existing 60,000-codepoint ceiling and 2800-codepoint message
+budget. Splitting prefers paragraphs or lines and closes/reopens ordinary
+top-level backtick and tilde fences with their language. Very long tables,
+inline constructs, nested Markdown containers, and fence lines over 512
+codepoints are not structurally reconstructed across messages.
+
+Waiting feedback starts only if no visible text arrives before the configured
+delay. It reuses the first preview message. Visible text stops rotations, and
+completion or cancellation stops all feedback timers. See [waiting settings](waiting.md).
+
+## Scheduled prompts
+
+`/cron` uses Socket Mode command and interactive payloads, not agent-generated
+commands. The modal lists only jobs owned by the caller in the current channel.
+Creation and removal recheck the bot, workspace, user, and channel boundaries.
+
+Schedules and run claims live in a separate private `cron.sqlite` database.
+Each run posts a new thread root, then enters the existing durable gateway
+queue. The creator's current access rules still apply. Scheduled thread replies
+use the same conversation routing as human-started threads. Agent failures and
+delivery retries retain the gateway's no-blind-replay rules.
+
+See [cron jobs](cron.md) for schedule syntax, timezone handling, restart
+behavior, and required Slack app configuration.
+
 ## Initial ceilings
 
 The initial release supports text conversations, explicit allowlists, two built-in
 adapters, trusted module adapters, local setup, and user services. It does not
-add file transfer, live event streaming, interactive approvals, OAuth SaaS
+add file transfer, tool-event streaming, interactive approvals, OAuth SaaS
 installation, clustering, or a plugin discovery/package system. Those require
 specific use cases before extending these boundaries.

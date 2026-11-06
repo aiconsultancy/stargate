@@ -3,6 +3,9 @@ import { OpenCodeBackend } from "./backends/opencode";
 import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
 
+/** Latest complete visible text for this turn, not reasoning or tool output. */
+export type TextSink = (text: string) => void;
+
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
   createSession(input: {
@@ -10,7 +13,12 @@ export interface AgentBackend {
     title: string;
     signal: AbortSignal;
   }): Promise<string>;
-  prompt(sessionId: string, text: string, signal: AbortSignal): Promise<string>;
+  prompt(
+    sessionId: string,
+    text: string,
+    signal: AbortSignal,
+    onText?: TextSink,
+  ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }
