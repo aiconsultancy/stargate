@@ -67,8 +67,9 @@ optional, requires discovery/approval, and does not create crew root sessions.
 Copy [`teams/pegasus.example.json`](../teams/pegasus.example.json) to a private
 instance directory. Change its captain, crew, roles and explicit models before
 initialization. Do not omit `--team`: omission selects the Bowser starter.
-Do not infer permissions from names. `coding` grants host commands and edits;
-`research` does not. Review these grants before creating the profile.
+Do not infer authority from names. All trusted OpenCode profiles grant broad
+host commands and edits, including `research`; specialisms guide assignments.
+Review these grants before creating the profile. Pi tools remain explicit.
 
 Set these non-secret inputs in the setup shell. Replace all placeholders:
 
@@ -278,3 +279,12 @@ reuse a live instance's unit or copy machine-specific service files.
 Setup is complete only after authenticated Slack → captain → crew → Slack
 verification succeeds and existing instances remain unchanged. A new instance
 has not been created merely because these templates exist.
+
+## Search readiness
+
+Follow [session, documentation and code search](knowledge-search.md). Verify
+`pogo_history` and stored permissions in each existing session. For an Indra
+target, run `make wiki-setup` in the project and each crew checkout, then one
+wrapper keyword search per checkout. Keep the CLI on the agent host's PATH.
+Load Indra's existing `indra-qmd` guidance; do not create a global mixed-project
+index. These checks need no embedding downloads or provider inference.

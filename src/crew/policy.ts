@@ -25,15 +25,14 @@ export function crewPermissions(profile: PermissionProfile): Rule[] {
     allow("pogo_history"),
   ];
   if (profile === "captain") rules.push(allow("pogo_model"));
-  if (profile !== "captain") {
-    rules.push(allow("subagent"));
-  }
-  if (profile === "coding") {
-    rules.push(allow("edit"), allow("shell"), allow("browser"));
-  }
-  // Researchers receive the user's global Linear tools without arbitrary
-  // Code Mode fetch. Session-scoped rules also constrain her child agents.
-  if (profile !== "research") rules.push(allow("execute"));
+  // Specialisms guide assignments, not host-tool access in this trusted profile.
+  rules.push(
+    allow("subagent"),
+    allow("edit"),
+    allow("shell"),
+    allow("browser"),
+    allow("execute"),
+  );
   rules.push(allow("linear_*"));
   for (const resource of ["*.env", "*.env.*", "*.key", "*.pem"]) {
     rules.push({ action: "read", resource, effect: "deny" });

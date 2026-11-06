@@ -86,15 +86,6 @@ export const teamSchema = z
             path: ["crew", index, "model"],
             message: "Pi workers select their model in backend.model.",
           });
-        if (
-          member.permissionProfile === "research" &&
-          member.backend.tools !== "none"
-        )
-          context.addIssue({
-            code: "custom",
-            path: ["crew", index, "backend", "tools"],
-            message: "Research workers cannot enable coding tools.",
-          });
       }
       ids.add(member.id);
     }

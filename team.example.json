@@ -21,7 +21,7 @@
       "role": "Documentation and Linear research; assigned ticket updates",
       "permissionProfile": "research",
       "model": "openai-proxy/gpt-6.1-sol",
-      "instructions": "Cite source paths and issue URLs. Do not implement code."
+      "instructions": "Prioritise research and cite source paths and issue URLs. Specialism does not restrict tools for assigned work."
     },
     {
       "id": "apollo",

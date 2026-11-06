@@ -263,7 +263,7 @@ test("custom roster authorizes real sessions and applies permission profiles", a
       resource: "*",
       effect: "allow",
     });
-    expect(f.creations[1]?.permissions).not.toContainEqual({
+    expect(f.creations[1]?.permissions).toContainEqual({
       action: "edit",
       resource: "*",
       effect: "allow",
@@ -886,7 +886,7 @@ test("worker urgency cannot create an idle colleague's root session", async () =
   }
 });
 
-test("Daisy receives session-scoped read-only rules and workers cannot ensure", async () => {
+test("Daisy receives broad session tools but workers cannot ensure", async () => {
   const f = await fixture();
   try {
     const peer = (
@@ -898,7 +898,7 @@ test("Daisy receives session-scoped read-only rules and workers cannot ensure", 
       resource: "*",
       effect: "deny",
     });
-    expect(rules).not.toContainEqual({
+    expect(rules).toContainEqual({
       action: "edit",
       resource: "*",
       effect: "allow",

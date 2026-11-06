@@ -68,13 +68,13 @@ test("default profile uses proxy, durable crew, and 20% compaction buffer", asyn
   const rules = crewPermissions("research");
   expect(
     rules.some((rule) => rule.action === "shell" && rule.effect === "allow"),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     rules.some((rule) => rule.action === "edit" && rule.effect === "allow"),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     rules.some((rule) => rule.action === "execute" && rule.effect === "allow"),
-  ).toBe(false);
+  ).toBe(true);
   expect(rules).toContainEqual({
     action: "subagent",
     resource: "*",
@@ -88,6 +88,26 @@ test("all crew roles permit the user's global Linear read/write tools", () => {
       action: "linear_*",
       resource: "*",
       effect: "allow",
+    });
+  }
+});
+
+test("specialisms retain broad host tools and session history", () => {
+  for (const role of ["captain", "coding", "research"] as const) {
+    const rules = crewPermissions(role);
+    for (const action of [
+      "shell",
+      "edit",
+      "execute",
+      "browser",
+      "subagent",
+      "pogo_history",
+    ])
+      expect(rules).toContainEqual({ action, resource: "*", effect: "allow" });
+    expect(rules).toContainEqual({
+      action: "read",
+      resource: "*.key",
+      effect: "deny",
     });
   }
 });

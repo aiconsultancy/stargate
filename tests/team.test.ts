@@ -42,11 +42,11 @@ test("team configuration rejects ambiguous identities and implicit tool access",
   expect(teamSchema.safeParse({ ...team, unknown: true }).success).toBe(false);
 });
 
-test("research permissions depend on profile, not persona name", () => {
+test("specialisms share broad tools without granting captain model controls", () => {
   const research = crewPermissions("research");
   const coding = crewPermissions("coding");
   for (const action of ["shell", "edit", "execute", "browser"]) {
-    expect(research).not.toContainEqual({
+    expect(research).toContainEqual({
       action,
       resource: "*",
       effect: "allow",
@@ -94,6 +94,26 @@ test("history endpoints require safe transport and environment references", () =
         url: "http://127.0.0.1:4096",
         headersEnv: { authorization: "OPENCODE_AUTHORIZATION" },
       },
+    }).success,
+  ).toBe(true);
+});
+
+test("a Pi research specialism does not restrict explicitly enabled host tools", () => {
+  expect(
+    teamSchema.safeParse({
+      ...team,
+      crew: [
+        {
+          id: "researcher",
+          role: "Research",
+          permissionProfile: "research",
+          backend: {
+            type: "pi-durable",
+            model: "openai/opencode-go/deepseek-v4.1-flash",
+            tools: "coding",
+          },
+        },
+      ],
     }).success,
   ).toBe(true);
 });

@@ -27,8 +27,10 @@ Crew may use temporary model-named child agents, but must consult the global
 [`agent-profiles` routing skill](agent-profiles.md) before selecting one.
 The default global child profiles also use CLIProxyAPI, not direct-provider
 fallbacks. Global profile switches do not change a crew session's stored model.
-They must never create additional root sessions. Research-profile file,
-shell, and Code Mode restrictions also constrain child agents. All crew roles
+They must never create additional root sessions. All trusted profiles permit
+broad shell, file edits, browser and Code Mode access; specialisms guide
+assignments rather than restricting these tools. Task authority and privacy
+rules also apply to child agents. All crew roles
 may use Linear read/write tools for their assigned tasks, including ticket
 updates and comments. This is not permission for unrelated changes or
 workspace administration. Follow the target project's delivery rules.
@@ -186,8 +188,8 @@ boundary; the profile initializer still refuses conflicting overlays.
 `tools` defaults to `none`. `coding` grants trusted read/write/edit/bash in the
 host OS account; a worktree is **not a sandbox**, and there is no Slack tool
 approval UI. Approval instructions are cooperative, not enforced isolation.
-Do not grant coding tools to untrusted tasks. Research-profile Pi workers must
-keep `tools: "none"`.
+Do not grant coding tools to untrusted tasks. A Pi worker's explicit `tools`
+setting, not its specialism, controls host-tool access.
 
 ## Linear connection
 

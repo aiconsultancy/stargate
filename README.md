@@ -22,6 +22,8 @@ Each team needs separate namespace, state, captain and crew directories, but
 can share an OpenCode V2 server. Existing Bowser/global settings are unchanged.
 Use the [repeatable instance procedure](docs/instances.md) for a second team,
 pinned inputs, generated registration plans, authentication and retry rules.
+See [knowledge search](docs/knowledge-search.md) for session history, QMD
+documentation retrieval and source-code lookup.
 Use the [shared global agent-profile prompt and skill](docs/agents/agent-profiles.md)
 to discover subscription models and install switchable model-named sub-agents.
 Review and approve its migration plan before changing global configuration.
