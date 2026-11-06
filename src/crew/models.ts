@@ -12,6 +12,10 @@ import { agentIDSchema, defaultModelProviders, type Team } from "./team";
 
 const target = agentIDSchema.default("captain");
 export const modelInputSchema = z.discriminatedUnion("op", [
+  z.strictObject({
+    op: z.literal("get"),
+    target: z.literal("captain").default("captain"),
+  }),
   z.strictObject({ op: z.literal("list"), target }),
   z.strictObject({
     op: z.literal("switch"),
@@ -75,6 +79,24 @@ export class CrewModels {
     try {
       caller.signal.throwIfAborted();
       await this.authority.captain(caller);
+      if (input.op === "get") {
+        const { model } = await this.sessions.get(
+          { sessionID: caller.sessionID },
+          { signal: caller.signal },
+        );
+        if (!model)
+          throw new CrewError(
+            "Session has no selected model; no default inferred.",
+          );
+        return {
+          sessionID: caller.sessionID,
+          model: {
+            providerID: model.providerID,
+            id: model.id,
+            variant: model.variant ?? "default/unspecified",
+          },
+        };
+      }
       const { team } = this.authority.options;
       const directory =
         input.target === "captain"

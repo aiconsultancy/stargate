@@ -78,7 +78,7 @@ function fixture() {
   const tool = new CrewModels(authority, sessions, models, async () => {
     calls.push("compacted");
   });
-  return { tool, calls, caller, sessions };
+  return { tool, calls, caller, sessions, models };
 }
 
 test("captain switches its session model without replacing the session", async () => {
@@ -99,6 +99,62 @@ test("captain switches its session model without replacing the session", async (
     effect: "subsequent-provider-turns",
   });
   expect(f.calls).toEqual(["switch:ses_captain"]);
+});
+
+test("get reads the caller session and reports its stored variant without mutations", async () => {
+  const f = fixture();
+  f.models.list = async () => {
+    throw new Error("Catalog must not be queried");
+  };
+  f.sessions.get = async (input, request) => {
+    expect(input).toEqual({ sessionID: f.caller.sessionID });
+    expect(request?.signal).toBe(f.caller.signal);
+    return {
+      model: { providerID: "outside-catalog", id: "stored", variant: "high" },
+    };
+  };
+  expect(await f.tool.run({ op: "get" }, f.caller)).toEqual({
+    sessionID: "ses_captain",
+    model: { providerID: "outside-catalog", id: "stored", variant: "high" },
+  });
+  expect(f.calls).toEqual([]);
+});
+
+test("get reports absent variant as default/unspecified, not a guessed level", async () => {
+  const f = fixture();
+  expect(await f.tool.run({ op: "get", target: "captain" }, f.caller)).toEqual({
+    sessionID: "ses_captain",
+    model: {
+      providerID: "openai-proxy",
+      id: "old",
+      variant: "default/unspecified",
+    },
+  });
+  expect(f.calls).toEqual([]);
+});
+
+test("get fails closed on missing model, unauthorized caller, abort and API failure", async () => {
+  const f = fixture();
+  await expect(
+    f.tool.run({ op: "get" }, { ...f.caller, agent: "mario" }),
+  ).rejects.toThrow("Model operation unavailable");
+  await expect(
+    f.tool.run({ op: "get" }, { ...f.caller, signal: AbortSignal.abort() }),
+  ).rejects.toThrow("cancelled");
+  await expect(
+    f.tool.run({ op: "get", target: "mario" }, f.caller),
+  ).rejects.toThrow("Invalid pogo_model");
+  f.sessions.get = async () => ({});
+  await expect(f.tool.run({ op: "get" }, f.caller)).rejects.toThrow(
+    "Session has no selected model",
+  );
+  f.sessions.get = async () => {
+    throw new Error("PRIVATE_CREDENTIAL");
+  };
+  await expect(f.tool.run({ op: "get" }, f.caller)).rejects.toThrow(
+    "Raw details withheld",
+  );
+  expect(f.calls).toEqual([]);
 });
 
 test("self compact-first is two-phase and never waits on its own running turn", async () => {

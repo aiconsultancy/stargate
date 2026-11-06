@@ -106,7 +106,7 @@ export default Plugin.define({
         editor.add({
           name: "pogo_model",
           description:
-            "Captain-only model discovery and session model selection. Target captain means this caller, otherwise a configured crew ID. Workers must be idle. compactFirst waits for worker compaction; for self it only admits compaction, then requires a later switch call. Changes apply to subsequent provider turns; never recreate sessions or silently fall back.",
+            "Captain-only model tool. get reads this caller's current session model and reasoning variant without changing anything; absent variant is default/unspecified, never guessed. list discovers models; switch selects a model. For list/switch, target captain means this caller, otherwise a configured crew ID. Workers must be idle for switch. compactFirst waits for worker compaction; for self it only admits compaction, then requires a later switch call. Changes apply to subsequent provider turns; never recreate sessions or silently fall back.",
           input: modelInputSchema,
           options: { codemode: false, permission: "pogo_model" },
           async execute(input, context) {
