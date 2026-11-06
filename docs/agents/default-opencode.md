@@ -228,6 +228,15 @@ threshold. Held summaries are in memory and can be lost on restart. They cost
 tokens even when never applied. Native provider compaction does not use this
 background-summary mechanism. See [V2 compaction][compaction].
 
+The captain can read its current session model with
+`pogo_model({ "op": "get" })`. This uses the existing authenticated session
+connection and returns `sessionID` and `model: { providerID, id, variant }`.
+An absent variant returns `default/unspecified`, not an inferred reasoning level.
+If the session has no selected model, the tool reports an error instead of
+guessing. This operation supports only the caller's captain session. It does
+not query the model catalog, create sessions, change models, or restart anything.
+Existing sessions need permission for the `pogo_model` operation `get`.
+
 The captain can discover models and switch its own or a worker's session model
 with `pogo_model`. Load `agent-profiles` before selecting a route. Optional
 `compactFirst` waits for worker compaction completion before switching workers.
