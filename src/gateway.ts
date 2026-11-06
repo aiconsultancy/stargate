@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import type { AgentBackend } from "./backend";
+import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "./config";
 import {
   parseReactionReply,
@@ -25,12 +26,14 @@ export interface SlackDelivery {
     channel: string,
     thread: string,
     text: string,
+    stopJob?: number,
   ): Promise<string> | Promise<void>;
   /** false means the user removed the preview; post a replacement. */
   update?(
     channel: string,
     ts: string,
     text: string,
+    stopJob?: number,
   ): Promise<boolean> | Promise<void>;
   remove?(channel: string, ts: string): Promise<void>;
   react?(channel: string, ts: string, name: ReactionName): Promise<void>;
@@ -38,6 +41,7 @@ export interface SlackDelivery {
 
 export class Gateway {
   private readonly active = new Map<string, Promise<void>>();
+  private readonly cancellations = new Map<number, AbortController>();
   readonly key: string;
   constructor(
     private readonly config: BotConfig,
@@ -58,6 +62,14 @@ export class Gateway {
     )
       return false;
     return this.store.enqueue(input);
+  }
+
+  /** Commit the exact requester-authorized target before Socket Mode ACK. */
+  cancel(body: unknown) {
+    const target = cancellationTarget(body, this.config, this.identity);
+    if (!target || !this.store.cancel(this.key, target)) return false;
+    this.cancellations.get(target.id)?.abort();
+    return true;
   }
 
   enqueueScheduled(input: {
@@ -139,9 +151,12 @@ export class Gateway {
     }
     let output: string[];
     if (job.status === "queued") {
-      this.store.running(job.id);
+      if (!this.store.running(job.id)) return;
+      const cancellation = new AbortController();
+      this.cancellations.set(job.id, cancellation);
       const signal = AbortSignal.any([
         shutdown,
+        cancellation.signal,
         AbortSignal.timeout(this.config.turnTimeoutMs),
       ]);
       const waiting = await resolveWaiting(this.config);
@@ -178,38 +193,47 @@ export class Gateway {
         return parsed.text;
       };
       try {
-        signal.throwIfAborted();
-        let session = this.store.session(job.conversation);
-        if (!session) {
-          session = await this.backend.createSession({
-            key: job.conversation,
-            title: `Slack ${job.channel} ${job.thread}`,
-            signal,
-          });
-          this.store.saveSession(job.conversation, session);
+        try {
+          signal.throwIfAborted();
+          let session = this.store.session(job.conversation);
+          if (!session) {
+            session = await this.backend.createSession({
+              key: job.conversation,
+              title: `Slack ${job.channel} ${job.thread}`,
+              signal,
+            });
+            this.store.saveSession(job.conversation, session);
+          }
+          signal.throwIfAborted();
+          const prompt = this.slack.react
+            ? `${reactionInstructions}\n\nUser message:\n${job.text}`
+            : job.text;
+          const answer = reply(
+            await this.backend.prompt(session, prompt, signal, (text) =>
+              live.push(reply(text, false)),
+            ),
+            true,
+          );
+          output = reacted && !answer.trim() ? [] : chunks(answer);
+        } catch {
+          this.log.warn({ job: job.id }, "Agent request failed or timed out");
+          output = [
+            "Pogo could not finish this request. Work may have run; it was not repeated. Check the agent before trying again.",
+          ];
         }
-        const prompt = this.slack.react
-          ? `${reactionInstructions}\n\nUser message:\n${job.text}`
-          : job.text;
-        const answer = reply(
-          await this.backend.prompt(session, prompt, signal, (text) =>
-            live.push(reply(text, false)),
-          ),
-          true,
-        );
-        output = reacted && !answer.trim() ? [] : chunks(answer);
-      } catch {
-        this.log.warn({ job: job.id }, "Agent request failed or timed out");
-        output = [
-          "Pogo could not finish this request. Work may have run; it was not repeated. Check the agent before trying again.",
-        ];
+        // A reaction-only reply has no answer to preserve until delivery settles.
+        if (output.length === 0) {
+          await reactionTask;
+          if (!reactionDelivered)
+            output = ["Pogo could not add that reaction."];
+        }
+        // Completion commits before awaiting preview cleanup. A late Stop cannot erase it.
+        output = this.store.respond(job.id, output);
       } finally {
+        this.cancellations.delete(job.id);
         await live.close();
         await reactionTask;
       }
-      if (output.length === 0 && !reactionDelivered)
-        output = ["Pogo could not add that reaction."];
-      this.store.respond(job.id, output);
     } else {
       output = JSON.parse(job.response ?? "[]") as string[];
     }

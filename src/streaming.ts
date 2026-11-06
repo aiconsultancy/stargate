@@ -116,13 +116,19 @@ export class LiveReply {
         const ts = previews.get(i);
         if (
           !ts ||
-          (await this.slack.update?.(this.job.channel, ts, part)) === false
+          (await this.slack.update?.(
+            this.job.channel,
+            ts,
+            part,
+            i === 0 ? this.job.id : undefined,
+          )) === false
         ) {
           if (ts) this.store.removePreview(this.job.id, i);
           const created = await this.slack.post(
             this.job.channel,
             this.job.thread,
             part,
+            i === 0 ? this.job.id : undefined,
           );
           if (!created)
             throw new Error("Slack did not return a message timestamp");
