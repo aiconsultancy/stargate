@@ -10,7 +10,8 @@ import {
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { type CrewRole, crewNames, crewPermissions } from "./crew/policy";
+import { crewPermissions } from "./crew/policy";
+import { defaultModelProviders, defaultTeam, teamSchema } from "./crew/team";
 
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const absolute = z
@@ -24,7 +25,8 @@ const optionsSchema = z.strictObject({
   namespace: z
     .string()
     .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)
-    .default("bowser"),
+    .optional(),
+  team: teamSchema.default(defaultTeam),
   base: z
     .string()
     .min(1)
@@ -52,9 +54,12 @@ function parseOptions(input: Options) {
   const parsed = optionsSchema.safeParse(input);
   if (!parsed.success)
     throw new Error(
-      "Invalid profile paths, namespace, proxy URL, or credential reference.",
+      "Invalid profile paths, team, namespace, proxy URL, or credential reference.",
     );
-  const options = parsed.data;
+  const options = {
+    ...parsed.data,
+    namespace: parsed.data.namespace ?? parsed.data.team.captain.id,
+  };
   const proxy = new URL(options.proxyURL);
   if (
     !["http:", "https:"].includes(proxy.protocol) ||
@@ -65,17 +70,30 @@ function parseOptions(input: Options) {
   }
   if (
     options.directory === options.worktreeDirectory ||
-    options.worktreeDirectory.startsWith(`${options.directory}/`)
+    options.worktreeDirectory.startsWith(`${options.directory}/`) ||
+    options.team.crew.some(({ id }) => {
+      const worker = join(options.worktreeDirectory, id);
+      return (
+        options.directory === worker ||
+        options.directory.startsWith(`${worker}/`)
+      );
+    })
   ) {
     throw new Error(
-      "Crew worktrees must not be inside the captain's configuration tree.",
+      "Captain and crew configuration trees must be distinct and non-nested.",
     );
   }
   return options;
 }
 
-export async function renderProfile(input: Options, role: CrewRole) {
+export async function renderProfile(input: Options, role: string) {
   const options = parseOptions(input);
+  const captain = role === options.team.captain.id;
+  const member = options.team.crew.find((member) => member.id === role);
+  const agent = captain ? options.team.captain : member;
+  if (!agent) throw new Error("Agent does not belong to the configured team.");
+  const profile = captain ? "captain" : member?.permissionProfile;
+  if (!profile) throw new Error("Missing team permission profile.");
   const config = await Bun.file(
     join(packageDirectory, "templates", "opencode.json"),
   ).json();
@@ -90,18 +108,27 @@ export async function renderProfile(input: Options, role: CrewRole) {
     };
   }
   const worktrees = Object.fromEntries(
-    crewNames.map((name) => [name, join(options.worktreeDirectory, name)]),
+    options.team.crew.map(({ id }) => [
+      id,
+      join(options.worktreeDirectory, id),
+    ]),
   );
   return {
     ...parsed,
     providers,
     default_agent: role,
-    agents: { [role]: { permissions: crewPermissions(role) } },
+    agents: {
+      [agent.id]: {
+        ...(agent.model ? { model: agent.model } : {}),
+        permissions: crewPermissions(profile),
+      },
+    },
     plugins: [
       {
         package: packageDirectory,
         options: {
           namespace: options.namespace,
+          team: options.team,
           captainDirectory: options.directory,
           stateDirectory: join(options.directory, ".local", "pogo-crew"),
           projectDirectory: options.projectDirectory,
@@ -179,7 +206,11 @@ async function configDirectory(directory: string) {
   return compatible;
 }
 
-async function excludeGenerated(project: string) {
+async function excludeGenerated(
+  project: string,
+  agentIDs: string[],
+  compatibilitySymlink = false,
+) {
   const common = resolve(
     project,
     git(project, "rev-parse", "--git-common-dir"),
@@ -190,7 +221,9 @@ async function excludeGenerated(project: string) {
     throw new Error("Git excludes must be a regular file.");
   const previous = info ? await readFile(path, "utf8") : "";
   const patterns = ["/.opencode/opencode.json", "/.agents/opco/opencode.json"];
-  for (const role of ["bowser", ...crewNames]) {
+  // Ignore compatibility symlinks, not unrelated source .opencode directories.
+  if (compatibilitySymlink) patterns.push("/.opencode", "!/.opencode/");
+  for (const role of agentIDs) {
     patterns.push(
       `/.opencode/agents/${role}.md`,
       `/.agents/opco/agents/${role}.md`,
@@ -226,18 +259,29 @@ export async function initializeProfile(input: Options) {
     `${options.base}^{commit}`,
   );
   const worktrees = Object.fromEntries(
-    crewNames.map((name) => [name, join(options.worktreeDirectory, name)]),
+    options.team.crew.map(({ id }) => [
+      id,
+      join(options.worktreeDirectory, id),
+    ]),
   );
   await mkdir(options.directory, { recursive: true, mode: 0o700 });
   const state = join(options.directory, ".local", "pogo-crew");
   await mkdir(state, { recursive: true, mode: 0o700 });
   if (((await lstat(state)).mode & 0o077) !== 0)
     throw new Error("Crew state directory must be private (0700).");
-  await excludeGenerated(options.projectDirectory);
-  for (const role of ["bowser", ...crewNames] as const) {
-    const directory = role === "bowser" ? options.directory : worktrees[role];
+  const agents = [options.team.captain, ...options.team.crew];
+  await excludeGenerated(
+    options.projectDirectory,
+    agents.map(({ id }) => id),
+  );
+  const legacy = JSON.stringify(options.team) === JSON.stringify(defaultTeam);
+  for (const agent of agents) {
+    const role = agent.id;
+    const captain = role === options.team.captain.id;
+    const member = options.team.crew.find((member) => member.id === role);
+    const directory = captain ? options.directory : worktrees[role];
     if (!directory) throw new Error("Missing crew directory.");
-    if (role !== "bowser") {
+    if (!captain) {
       const info = await present(directory);
       if (info && !info.isDirectory())
         throw new Error(
@@ -273,8 +317,11 @@ export async function initializeProfile(input: Options) {
       }
     }
     const configPath = await configDirectory(directory);
+    if (!captain && configPath === join(directory, ".agents", "opco")) {
+      await excludeGenerated(options.projectDirectory, [], true);
+    }
     // Never hide a replacement of tracked Indra configuration as local setup.
-    if (role !== "bowser") {
+    if (!captain) {
       const relative = configPath.slice(directory.length + 1);
       if (
         git(
@@ -291,13 +338,42 @@ export async function initializeProfile(input: Options) {
       }
     }
     const template = await readFile(
-      join(packageDirectory, "templates", "agents", `${role}.md`),
+      join(
+        packageDirectory,
+        "templates",
+        "agents",
+        `${legacy ? role : captain ? "captain" : "crew"}.md`,
+      ),
       "utf8",
     );
+    const substitutions: Record<string, string> = {
+      projectDirectory: options.projectDirectory,
+      worktreeDirectory: options.worktreeDirectory,
+      namespace: options.namespace,
+      historyScope: options.team.historyScope ?? "team",
+      modelProviders: (
+        options.team.modelProviders ?? defaultModelProviders
+      ).join(", "),
+      agentID: role,
+      agentName: agent.name ?? role,
+      captainID: options.team.captain.id,
+      captainName: options.team.captain.name ?? options.team.captain.id,
+      directory,
+      role: member?.role ?? "Captain and Slack coordinator",
+      permissionProfile: member?.permissionProfile ?? "captain",
+      roster: options.team.crew
+        .map(
+          (member) =>
+            `- ${member.id} (${member.name ?? member.id}): ${member.role}; permissions: ${member.permissionProfile}`,
+        )
+        .join("\n"),
+      instructions:
+        agent.instructions ??
+        "Follow the assigned task and project instructions.",
+    };
     const prompt = template.replace(
-      /\{\{(projectDirectory|worktreeDirectory|namespace)\}\}/g,
-      (_, key: "projectDirectory" | "worktreeDirectory" | "namespace") =>
-        options[key],
+      /\{\{(\w+)\}\}/g,
+      (match, key: string) => substitutions[key] ?? match,
     );
     await writeNewOrSame(join(configPath, "agents", `${role}.md`), prompt);
     await writeNewOrSame(
@@ -305,5 +381,12 @@ export async function initializeProfile(input: Options) {
       `${JSON.stringify(await renderProfile(options, role), null, 2)}\n`,
     );
   }
-  return { directory: options.directory, worktrees, stateDirectory: state };
+  return {
+    directory: options.directory,
+    worktrees,
+    stateDirectory: state,
+    namespace: options.namespace,
+    agent: options.team.captain.id,
+    permissions: crewPermissions("captain"),
+  };
 }

@@ -19,6 +19,19 @@ and verification to your durable crew with the pogo_crew tool:
   Keep Daisy available for research, not code implementation or administration.
 - Toad: tests, verification, and review.
 
+Use pogo_history to find relevant prior work before assigning substantial
+tasks. Prefer a suitable experienced member, but use a suitable idle member
+for urgent work. If all suitable members are busy, dispatch with queue: true
+to persist a FIFO assignment for the selected member. Poll its status or wait;
+queued work does not advance without captain polling.
+
+Use pogo_model to list allowed models and switch your own session (target:
+captain) or an idle crew member (target: member ID). Load agent-profiles first.
+Switches affect subsequent provider turns. Self compactFirst admits compaction
+without changing the model; after compaction, call switch with compactFirst:
+false. Worker compactFirst confirms compaction before switching. Never bypass
+an unavailable route with another provider or replace a durable session.
+
 Use ensure to create a named crew session only when needed. Reuse that session
 for later jobs; never create replacements to get a clean context or bypass a
 busy member. There are at most four crew sessions for this bot across all Slack

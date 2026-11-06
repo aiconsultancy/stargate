@@ -2,10 +2,7 @@ import { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
-import { type CrewName, crewNames } from "./policy";
-
-export const crewIDs = crewNames;
-export type CrewID = CrewName;
+export type CrewID = string;
 export type Peer = {
   crewID: CrewID;
   sessionID: string;
@@ -17,7 +14,14 @@ export type CrewTask = {
   workerSessionID: string;
   originCaptainID: string;
   inputID: string;
-  status: "dispatching" | "running" | "completed" | "cancelling" | "uncertain";
+  status:
+    | "queued"
+    | "cancelled"
+    | "dispatching"
+    | "running"
+    | "completed"
+    | "cancelling"
+    | "uncertain";
   result: string | null;
   released: number;
   notifying: number;
@@ -26,13 +30,22 @@ export type CrewNotice = { id: number; taskID: string; text: string };
 
 export class CrewError extends Error {}
 
+/** greybeard: bounded FIFO, polled by its captain; no background scheduler. */
+export const pendingTaskLimit = 100;
+type QueuedTask = CrewTask & { text: string };
+
 export class CrewState {
   private constructor(
     readonly path: string,
     private readonly db: Database,
   ) {}
 
-  static async open(directory: string, namespace: string, fingerprint: string) {
+  static async open(
+    directory: string,
+    namespace: string,
+    fingerprint: string,
+    legacyFingerprint?: string,
+  ) {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await chmod(directory, 0o700);
     const hash = createHash("sha256").update(namespace).digest("hex");
@@ -47,7 +60,7 @@ export class CrewState {
         PRAGMA foreign_keys=ON;
         CREATE TABLE IF NOT EXISTS identity (value TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS peers (
-          crewID TEXT PRIMARY KEY CHECK(crewID IN ('mario','luigi','daisy','toad')),
+          crewID TEXT PRIMARY KEY,
           sessionID TEXT NOT NULL UNIQUE,
           status TEXT NOT NULL CHECK(status IN ('pending','ready'))
         );
@@ -73,14 +86,40 @@ export class CrewState {
           sessionID TEXT NOT NULL, taskID TEXT NOT NULL REFERENCES tasks(id),
           sequence INTEGER NOT NULL, PRIMARY KEY(sessionID,taskID)
         );
+        CREATE TABLE IF NOT EXISTS pending_tasks (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          id TEXT NOT NULL UNIQUE,
+          crewID TEXT NOT NULL REFERENCES peers(crewID),
+          workerSessionID TEXT NOT NULL,
+          originCaptainID TEXT NOT NULL,
+          inputID TEXT NOT NULL UNIQUE,
+          text TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('queued','cancelled')) DEFAULT 'queued',
+          result TEXT DEFAULT NULL,
+          released INTEGER NOT NULL DEFAULT 0,
+          notifying INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS pending_worker ON pending_tasks(crewID,status,sequence);
+        CREATE TABLE IF NOT EXISTS worker_controls (
+          crewID TEXT PRIMARY KEY REFERENCES peers(crewID), token TEXT NOT NULL
+        );
       `);
       db.transaction(() => {
         const identity = db
           .query<{ value: string }, []>("SELECT value FROM identity")
           .get();
-        if (identity && identity.value !== fingerprint)
+        if (
+          identity &&
+          identity.value !== fingerprint &&
+          identity.value !== legacyFingerprint
+        )
           throw new CrewError(
-            "Crew configuration changed. Restore its original namespace and directories; do not delete state.",
+            "Crew configuration changed. Restore its original identity and directories or use a new namespace; do not delete state.",
+          );
+        if (identity && identity.value !== fingerprint)
+          db.query("UPDATE identity SET value=? WHERE value=?").run(
+            fingerprint,
+            identity.value,
           );
         if (!identity)
           db.query("INSERT INTO identity VALUES (?)").run(fingerprint);
@@ -126,9 +165,16 @@ export class CrewState {
   }
 
   task(id: string): CrewTask | null {
-    return this.db
-      .query<CrewTask, [string]>("SELECT * FROM tasks WHERE id=?")
-      .get(id);
+    return (
+      this.db
+        .query<CrewTask, [string]>("SELECT * FROM tasks WHERE id=?")
+        .get(id) ??
+      this.db
+        .query<CrewTask, [string]>(
+          `SELECT id,crewID,workerSessionID,originCaptainID,inputID,status,result,released,notifying FROM pending_tasks WHERE id=?`,
+        )
+        .get(id)
+    );
   }
 
   activeTask(crewID: CrewID): CrewTask | null {
@@ -142,7 +188,12 @@ export class CrewState {
   reserveTask(peer: Peer, captainID: string): CrewTask | null {
     return this.db
       .transaction(() => {
-        if (this.activeTask(peer.crewID)) return null;
+        if (
+          this.activeTask(peer.crewID) ||
+          this.controlled(peer.crewID) ||
+          this.nextQueued(peer.crewID)
+        )
+          return null;
         const id = `task_${randomUUID()}`;
         this.db
           .query(`INSERT INTO tasks
@@ -158,6 +209,123 @@ export class CrewState {
         return this.task(id);
       })
       .immediate();
+  }
+
+  private controlled(crewID: string): boolean {
+    return Boolean(
+      this.db.query("SELECT 1 FROM worker_controls WHERE crewID=?").get(crewID),
+    );
+  }
+
+  private nextQueued(crewID: string): QueuedTask | null {
+    return this.db
+      .query<QueuedTask, [string]>(
+        "SELECT * FROM pending_tasks WHERE crewID=? AND status='queued' ORDER BY sequence LIMIT 1",
+      )
+      .get(crewID);
+  }
+
+  enqueue(peer: Peer, captainID: string, text: string): CrewTask {
+    return this.db
+      .transaction(() => {
+        const count =
+          this.db
+            .query<{ count: number }, [string]>(
+              "SELECT COUNT(*) AS count FROM pending_tasks WHERE crewID=? AND status='queued'",
+            )
+            .get(peer.crewID)?.count ?? 0;
+        if (count >= pendingTaskLimit)
+          throw new CrewError(
+            `Worker queue full: limit ${pendingTaskLimit} pending tasks per worker.`,
+          );
+        const id = `task_${randomUUID()}`;
+        this.db
+          .query(
+            `INSERT INTO pending_tasks (id,crewID,workerSessionID,originCaptainID,inputID,text) VALUES (?,?,?,?,?,?)`,
+          )
+          .run(
+            id,
+            peer.crewID,
+            peer.sessionID,
+            captainID,
+            `msg_${randomUUID()}`,
+            text,
+          );
+        const task = this.task(id);
+        if (!task) throw new CrewError("Queue reservation failed.");
+        return task;
+      })
+      .immediate();
+  }
+
+  /** Called only after SDK idle confirmation. Snapshot guards concurrent reuse. */
+  promote(
+    id: string,
+    previousID: string | null,
+  ): { task: CrewTask; text: string } | null {
+    return this.db
+      .transaction(() => {
+        const queued = this.task(id);
+        if (queued?.status !== "queued" || this.controlled(queued.crewID))
+          return null;
+        const head = this.nextQueued(queued.crewID);
+        const active = this.activeTask(queued.crewID);
+        if (head?.id !== id || (active?.id ?? null) !== previousID) return null;
+        if (active && !this.release(active.id)) return null;
+        this.db
+          .query(
+            `INSERT INTO tasks (id,crewID,workerSessionID,originCaptainID,inputID,status) VALUES (?,?,?,?,?,'dispatching')`,
+          )
+          .run(
+            head.id,
+            head.crewID,
+            head.workerSessionID,
+            head.originCaptainID,
+            head.inputID,
+          );
+        this.db.query("DELETE FROM pending_tasks WHERE id=?").run(id);
+        const task = this.task(id);
+        if (!task) throw new CrewError("Queue promotion failed.");
+        return { task, text: head.text };
+      })
+      .immediate();
+  }
+
+  cancelQueued(id: string, captainID: string): boolean {
+    return (
+      this.db
+        .query(
+          "UPDATE pending_tasks SET status='cancelled',released=1 WHERE id=? AND originCaptainID=? AND status='queued'",
+        )
+        .run(id, captainID).changes === 1
+    );
+  }
+
+  reserveControl(crewID: string): string {
+    return this.db
+      .transaction(() => {
+        if (this.controlled(crewID))
+          throw new CrewError(
+            "Worker control already reserved; reconcile crash-held controls manually.",
+          );
+        const active = this.activeTask(crewID);
+        if (active && (active.status !== "completed" || active.notifying))
+          throw new CrewError(
+            "Worker has running or uncertain work; control refused.",
+          );
+        const token = randomUUID();
+        this.db
+          .query("INSERT INTO worker_controls VALUES (?,?)")
+          .run(crewID, token);
+        return token;
+      })
+      .immediate();
+  }
+
+  releaseControl(crewID: string, token: string) {
+    this.db
+      .query("DELETE FROM worker_controls WHERE crewID=? AND token=?")
+      .run(crewID, token);
   }
 
   running(id: string) {
