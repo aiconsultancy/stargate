@@ -42,6 +42,12 @@ Allowed DMs can start sessions without mentions. Both user and channel must
 be allowed; messages from bots, edits, and empty prompts are ignored.
 Set `access.mentionOnly` to require a mention for every turn.
 
+New sessions use `<bot name> (slack <conversation ID>)` as their title, for
+example `Galactica Captain (slack D123)`. Set `displayName` on the bot to choose
+its name; otherwise Pogo uses the OpenCode agent name, then the bot ID.
+Existing titles stay unchanged. Threads keep separate sessions even when their
+titles match.
+
 Built-in backends stream visible response text through coalesced Slack message
 updates. Agent replies use Slack's native Markdown blocks for headings, links,
 lists, tables, and code. Long replies prefer paragraph boundaries and keep

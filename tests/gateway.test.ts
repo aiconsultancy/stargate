@@ -12,13 +12,15 @@ afterEach(() => {
   for (const store of stores.splice(0)) store.close();
 });
 
-function fixture() {
+function fixture(config = bot()) {
   const store = new Store(":memory:");
   stores.push(store);
   const prompts: { session: string; text: string }[] = [];
+  const titles: string[] = [];
   let sessions = 0;
   const backend: AgentBackend = {
-    async createSession() {
+    async createSession({ title }) {
+      titles.push(title);
       return `session-${++sessions}`;
     },
     async prompt(session, text) {
@@ -33,7 +35,6 @@ function fixture() {
       delivered.push(text);
     },
   };
-  const config = bot();
   const gateway = new Gateway(
     config,
     identity,
@@ -47,7 +48,17 @@ function fixture() {
     if (!job) throw new Error("Expected a job");
     return job;
   }
-  return { store, backend, config, gateway, prompts, delivered, slack, next };
+  return {
+    store,
+    backend,
+    config,
+    gateway,
+    prompts,
+    titles,
+    delivered,
+    slack,
+    next,
+  };
 }
 
 test("persists once and resumes the same session on thread replies", async () => {
@@ -69,6 +80,36 @@ test("persists once and resumes the same session on thread replies", async () =>
   expect(f.prompts).toEqual([
     { session: "session-1", text: "hello" },
     { session: "session-1", text: "continue" },
+  ]);
+  expect(f.titles).toEqual(["helper (slack C123)"]);
+});
+
+test("friendly session titles use the bot name without merging Slack threads", async () => {
+  const config = bot();
+  config.displayName = "Galactica Captain";
+  const f = fixture(config);
+  for (const ts of ["1.000", "2.000"]) {
+    const request = event("hello", ts);
+    expect(
+      f.gateway.accept({
+        ...request,
+        event: {
+          ...request.event,
+          type: "message",
+          channel: "D123",
+          channel_type: "im",
+        },
+      }),
+    ).toBe(true);
+    await f.gateway.process(f.next(), new AbortController().signal);
+  }
+  expect(f.titles).toEqual([
+    "Galactica Captain (slack D123)",
+    "Galactica Captain (slack D123)",
+  ]);
+  expect(f.prompts).toEqual([
+    { session: "session-1", text: "hello" },
+    { session: "session-2", text: "hello" },
   ]);
 });
 

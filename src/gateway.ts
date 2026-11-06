@@ -227,7 +227,7 @@ export class Gateway {
             }
             session = await this.backend.createSession({
               key: job.conversation,
-              title: `Slack ${job.channel} ${job.thread}`,
+              title: `${botDisplayName(this.config)} (slack ${job.channel})`,
               signal,
             });
             this.store.saveSession(job.conversation, session);
