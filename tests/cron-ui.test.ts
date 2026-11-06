@@ -297,7 +297,47 @@ test("storage failure returns a safe form error without success ACK", async () =
   expect(f.logs.join("")).not.toContain("private payload");
 });
 
-test("ACL revocation while acknowledging a button prevents mutation", async () => {
+test("remove persists before ambiguous ACK failure and retries idempotently", async () => {
+  const f = fixture();
+  const job = f.store.add(f.scope, input);
+  await f.ui.command(command(), f.ack);
+  const view = f.calls[0]?.view;
+  if (!view) throw new Error("missing view");
+  const body = action(view, "cron_remove", job.id);
+  const enabledAtAck: boolean[] = [];
+  let attempts = 0;
+  await f.ui.interactive(body, async (payload) => {
+    attempts++;
+    enabledAtAck.push(f.store.enabled(job.id));
+    await f.ack(payload);
+    throw new Error("ACK outcome unknown");
+  });
+  expect(enabledAtAck).toEqual([false]);
+  expect(f.store.enabled(job.id)).toBe(false);
+  expect(attempts).toBe(1);
+  expect(f.calls).toHaveLength(1);
+  await f.ui.interactive(body, async (payload) => {
+    enabledAtAck.push(f.store.enabled(job.id));
+    await f.ack(payload);
+  });
+  expect(enabledAtAck).toEqual([false, false]);
+  expect(f.store.list(f.scope)).toEqual([]);
+  expect(f.calls.at(-1)).toMatchObject({ kind: "update", hash: "hash-1" });
+});
+
+test("ACL revocation before removing a schedule prevents mutation", async () => {
+  const f = fixture();
+  const job = f.store.add(f.scope, input);
+  await f.ui.command(command(), f.ack);
+  const view = f.calls[0]?.view;
+  if (!view) throw new Error("missing view");
+  f.config.access.deniedUsers = ["U123"];
+  await f.ui.interactive(action(view, "cron_remove", job.id), f.ack);
+  expect(f.store.enabled(job.id)).toBe(true);
+  expect(f.calls).toHaveLength(1);
+});
+
+test("ACL revocation during ACK does not undo durable removal", async () => {
   const f = fixture();
   const job = f.store.add(f.scope, input);
   await f.ui.command(command(), f.ack);
@@ -306,6 +346,6 @@ test("ACL revocation while acknowledging a button prevents mutation", async () =
   await f.ui.interactive(action(view, "cron_remove", job.id), async () => {
     f.config.access.deniedUsers = ["U123"];
   });
-  expect(f.store.list(f.scope)).toHaveLength(1);
+  expect(f.store.list(f.scope)).toEqual([]);
   expect(f.calls).toHaveLength(1);
 });

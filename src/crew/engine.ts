@@ -872,21 +872,7 @@ export class CrewEngine {
     const controller = new AbortController();
     let idle = false;
     let failed = false;
-    const observed = this.sessions
-      .wait(
-        { sessionID: task.workerSessionID },
-        {
-          signal: AbortSignal.any([caller.signal, controller.signal]),
-        },
-      )
-      .then(
-        () => {
-          idle = true;
-        },
-        () => {
-          failed = true;
-        },
-      );
+    let observed: Promise<void> | undefined;
     try {
       for (;;) {
         const current = this.ownedCaptainTask(task.id, caller);
@@ -903,6 +889,24 @@ export class CrewEngine {
           notices.length
         )
           return { status: current.status, task: current, notices };
+        // A concurrent promotion reserves dispatching before SDK admission.
+        // Observe idle only after admission; pre-admission idle is expected.
+        if (current.status === "running" && !observed)
+          observed = this.sessions
+            .wait(
+              { sessionID: task.workerSessionID },
+              {
+                signal: AbortSignal.any([caller.signal, controller.signal]),
+              },
+            )
+            .then(
+              () => {
+                idle = true;
+              },
+              () => {
+                failed = true;
+              },
+            );
         if (idle || failed) {
           this.state.uncertain(task.id);
           throw new CrewError(

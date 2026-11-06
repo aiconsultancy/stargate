@@ -702,6 +702,127 @@ test("queued wait promotes once under contention and returns the owned result", 
   }
 });
 
+test("concurrent queued wait does not treat pre-admission idle as worker exit", async () => {
+  const f = await fixture(customTeam);
+  const second = await CrewEngine.open(f.options, f.client, f.mailer, f.agents);
+  const admissionStarted = Promise.withResolvers<void>();
+  const allowAdmission = Promise.withResolvers<void>();
+  const admitted = Promise.withResolvers<void>();
+  const dispatchingObserved = Promise.withResolvers<void>();
+  const runningObserved = Promise.withResolvers<void>();
+  const controller = new AbortController();
+  const waits: Promise<unknown>[] = [];
+  try {
+    const first = (
+      await f.engine.run(
+        { op: "dispatch", crew: "builder", text: "First" },
+        f.captain(),
+      )
+    ).task;
+    const queued = (
+      await f.engine.run(
+        { op: "dispatch", crew: "builder", text: "Second", queue: true },
+        f.captain(),
+      )
+    ).task;
+    if (!first || !queued) throw new Error("Missing task fixture");
+    await f.engine.run(
+      { op: "complete", taskID: first.id, result: "First done" },
+      f.worker(first.workerSessionID),
+    );
+    f.busy.delete(first.workerSessionID);
+    const prompt = f.client.prompt.bind(f.client);
+    f.client.prompt = async (input, request) => {
+      admissionStarted.resolve();
+      await allowAdmission.promise;
+      const result = await prompt(input, request);
+      admitted.resolve();
+      return result;
+    };
+    const notices = second.state.notices.bind(second.state);
+    let dispatchingPolls = 0;
+    second.state.notices = (id, after) => {
+      if (
+        id === queued.id &&
+        second.state.task(id)?.status === "dispatching" &&
+        ++dispatchingPolls === 2
+      )
+        dispatchingObserved.resolve();
+      return notices(id, after);
+    };
+    const wait = f.client.wait.bind(f.client);
+    f.client.wait = async (input, request) => {
+      if (second.state.task(queued.id)?.status === "running")
+        runningObserved.resolve();
+      return wait(input, request);
+    };
+    const collect = (engine: CrewEngine) =>
+      engine
+        .run(
+          { op: "wait", taskID: queued.id },
+          f.captain("ses_captain_a", controller.signal),
+        )
+        .then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+    const promoting = collect(f.engine);
+    waits.push(promoting);
+    await admissionStarted.promise;
+    const observing = collect(second);
+    waits.push(observing);
+    await dispatchingObserved.promise;
+    expect(second.state.task(queued.id)?.status).toBe("dispatching");
+    allowAdmission.resolve();
+    await admitted.promise;
+    await runningObserved.promise;
+    expect(second.state.task(queued.id)?.status).toBe("running");
+    await f.engine.run(
+      { op: "complete", taskID: queued.id, result: "Second done" },
+      f.worker(queued.workerSessionID),
+    );
+    f.busy.delete(queued.workerSessionID);
+    for (const result of await Promise.all([promoting, observing]))
+      expect(result).toMatchObject({
+        result: { status: "completed", task: { result: "Second done" } },
+      });
+  } finally {
+    controller.abort();
+    allowAdmission.resolve();
+    await Promise.allSettled(waits);
+    second.close();
+    await f.close();
+  }
+});
+
+test("admitted worker exit without completion stays uncertain and is not replayed", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "builder", text: "Interrupted work" },
+        f.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing task fixture");
+    expect(task.status).toBe("running");
+    f.busy.delete(task.workerSessionID);
+    await expect(
+      f.engine.run({ op: "wait", taskID: task.id }, f.captain()),
+    ).rejects.toThrow("without a confirmed result");
+    expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+    expect(
+      await f.engine.run(
+        { op: "dispatch", crew: "builder", text: "Do not replay" },
+        f.captain(),
+      ),
+    ).toMatchObject({ status: "busy" });
+    expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
 test("external worker activity blocks admission and controls always release", async () => {
   const f = await fixture(customTeam);
   try {

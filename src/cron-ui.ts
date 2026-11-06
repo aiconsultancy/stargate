@@ -423,6 +423,16 @@ export class CronUI {
           await once();
           return;
         }
+        let message: string | undefined;
+        if (action.action_id === "cron_remove") {
+          // Commit before ACK: a lost ACK must not lose an authorized removal.
+          const removed =
+            action.value &&
+            this.store.remove(scopeSchema.parse(scope), action.value);
+          message = removed
+            ? "Recurring prompt removed. Future runs stop; queued or running requests may still finish."
+            : "Recurring prompt not found. The list is refreshed.";
+        }
         await once();
         if (
           !this.metadata(
@@ -436,15 +446,6 @@ export class CronUI {
         if (action.action_id === "cron_add") {
           await this.api.push(data.trigger_id, addView(scope));
           return;
-        }
-        let message: string | undefined;
-        if (action.action_id === "cron_remove") {
-          const removed =
-            action.value &&
-            this.store.remove(scopeSchema.parse(scope), action.value);
-          message = removed
-            ? "Recurring prompt removed. Future runs stop; queued or running requests may still finish."
-            : "Recurring prompt not found. The list is refreshed.";
         }
         const page = Math.max(
           0,
