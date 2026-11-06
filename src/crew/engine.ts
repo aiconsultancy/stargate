@@ -198,7 +198,7 @@ function notFound(error: unknown): boolean {
     typeof error === "object" &&
     error !== null &&
     "_tag" in error &&
-    error._tag === "SessionNotFoundError"
+    error._tag === "Session.NotFoundError"
   );
 }
 

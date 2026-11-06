@@ -47,7 +47,7 @@ async function fixture(team?: Team) {
   const client: CrewSessions = {
     async get({ sessionID }) {
       const session = sessions.get(sessionID);
-      if (!session) throw { _tag: "SessionNotFoundError" };
+      if (!session) throw { _tag: "Session.NotFoundError" };
       return session;
     },
     async create(input) {
@@ -1131,6 +1131,37 @@ test("urgent captain mail stays durable and cross-captain colleague input is rej
       ),
     ).rejects.toThrow("lineage");
   } finally {
+    await f.close();
+  }
+});
+
+test("unrelated lookup failures preserve the pending reservation without creating a session", async () => {
+  const f = await fixture();
+  const get = f.client.get;
+  try {
+    f.client.get = async (input, request) => {
+      if (input.sessionID === "ses_captain_a") return get(input, request);
+      throw { _tag: "Location.NotFoundError", message: "secret raw SDK error" };
+    };
+    await expect(
+      f.engine.run({ op: "ensure", crew: "mario" }, f.captain()),
+    ).rejects.toThrow(
+      "Crew operation unavailable. Inspect OpenCode and crew state; raw SDK details withheld.",
+    );
+    const pending = f.engine.state.peer("mario");
+    expect(pending?.status).toBe("pending");
+    expect(f.creations).toHaveLength(0);
+    if (!pending) throw new Error("Missing fixture reservation");
+    f.client.get = get;
+    const result = await f.engine.run(
+      { op: "ensure", crew: "mario" },
+      f.captain(),
+    );
+    expect(result.peers?.[0]?.sessionID).toBe(pending.sessionID);
+    expect(f.creations).toHaveLength(1);
+    expect(f.creations[0]?.id).toBe(pending.sessionID);
+  } finally {
+    f.client.get = get;
     await f.close();
   }
 });
