@@ -168,8 +168,10 @@ test("custom profiles select captain, agent models, and permissions independent 
   } = await fixture();
   const captain = await renderProfile({ ...options, team }, "adama");
   expect(captain.default_agent).toBe("adama");
-  expect(captain.agents.adama?.model).toBe(team.captain.model);
-  expect(captain.agents.adama?.permissions).toEqual(crewPermissions("captain"));
+  expect(captain.agents["adama"]?.model).toBe(team.captain.model);
+  expect(captain.agents["adama"]?.permissions).toEqual(
+    crewPermissions("captain"),
+  );
   expect(captain.plugins[0]?.options.namespace).toBe("adama");
   expect(captain.plugins[0]?.options.team).toEqual(team);
   expect(Object.keys(captain.plugins[0]?.options.worktrees ?? {})).toEqual([
@@ -177,9 +179,9 @@ test("custom profiles select captain, agent models, and permissions independent 
     "mario",
   ]);
   const coding = await renderProfile({ ...options, team }, "starbuck");
-  expect(coding.agents.starbuck?.model).toBe(team.crew[0]?.model);
+  expect(coding.agents["starbuck"]?.model).toBe(team.crew[0]?.model);
   const research = await renderProfile({ ...options, team }, "mario");
-  expect(research.agents.mario?.permissions).toEqual(
+  expect(research.agents["mario"]?.permissions).toEqual(
     crewPermissions("research"),
   );
   await expect(renderProfile({ ...options, team }, "bowser")).rejects.toThrow(
@@ -267,7 +269,7 @@ test("independent team namespaces and captains share a source without sharing di
   expect(second.namespace).toBe("pegasus");
   expect(second.agent).toBe("cain");
   expect(first.stateDirectory).not.toBe(second.stateDirectory);
-  expect(first.worktrees.starbuck).not.toBe(second.worktrees.starbuck);
+  expect(first.worktrees["starbuck"]).not.toBe(second.worktrees["starbuck"]);
   expect(git("branch", "--list", "crew/*")).toContain("crew/adama-starbuck");
   expect(git("branch", "--list", "crew/*")).toContain("crew/pegasus-starbuck");
   expect(git("status", "--porcelain")).toBe("");
@@ -306,7 +308,7 @@ test("custom init preserves canonical config and refuses tracked config", async 
   const before = git("status", "--porcelain");
   const result = await initializeProfile({ ...options, team });
   expect(git("status", "--porcelain")).toBe(before);
-  const worker = result.worktrees.starbuck;
+  const worker = result.worktrees["starbuck"];
   expect(worker).toBeDefined();
   expect(await realpath(join(worker ?? "", ".opencode"))).toBe(
     join(worker ?? "", ".agents", "opco"),

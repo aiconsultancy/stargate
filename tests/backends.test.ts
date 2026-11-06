@@ -496,8 +496,8 @@ test("Pi ignores historical observer advances before attachment resolves", async
 
 test("real Pi Durable harness persists sessions under Bun SQLite", async () => {
   const directory = await mkdtemp("/tmp/opencode/pogo-pi-");
-  const previous = process.env.OPENAI_API_KEY;
-  process.env.OPENAI_API_KEY = "local-test-not-sent";
+  const previous = process.env["OPENAI_API_KEY"];
+  process.env["OPENAI_API_KEY"] = "local-test-not-sent";
   try {
     const config = backendSchema.parse({
       type: "pi-durable",
@@ -528,8 +528,8 @@ test("real Pi Durable harness persists sessions under Bun SQLite", async () => {
       await reopened.close();
     }
   } finally {
-    if (previous === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = previous;
+    if (previous === undefined) delete process.env["OPENAI_API_KEY"];
+    else process.env["OPENAI_API_KEY"] = previous;
     await rm(directory, { recursive: true, force: true });
   }
 });

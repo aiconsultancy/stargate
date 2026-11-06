@@ -1,0 +1,42 @@
+minimum_prek_version = "0.5.10"
+default_stages = ["pre-commit"]
+default_install_hook_types = ["pre-commit"]
+fail_fast = true
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "check-merge-conflict" },
+  { id = "check-case-conflict" },
+  { id = "check-symlinks" },
+  { id = "check-added-large-files", args = ["--maxkb=1024"] },
+  { id = "detect-private-key" },
+  { id = "end-of-file-fixer" },
+  { id = "trailing-whitespace", args = ["--markdown-linebreak-ext=md"] },
+  { id = "check-toml" },
+  { id = "check-yaml" },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "workflow-lint"
+name = "GitHub Actions validation"
+entry = "mise run workflow-check"
+language = "system"
+pass_filenames = false
+always_run = true
+
+[[repos.hooks]]
+id = "pogo-check"
+name = "Strict TypeScript, Biome, and tests"
+# Fixtures create other repositories; do not inherit this commit's Git state.
+entry = """
+unset $(git rev-parse --local-env-vars)
+exec mise run check
+"""
+shell = "sh"
+language = "system"
+pass_filenames = false
+always_run = true

@@ -213,10 +213,11 @@ export class MesijClient {
     if (signal.aborted) throw new MesijError("cancelled");
     const env = { ...process.env };
     // Never let inherited Mesij overrides redirect this roster to another DB.
-    delete env.MESIJ_DB;
-    delete env.MESIJ_PROJECT;
-    delete env.MESIJ_HOME;
-    if (this.options.dataDirectory) env.MESIJ_HOME = this.options.dataDirectory;
+    delete env["MESIJ_DB"];
+    delete env["MESIJ_PROJECT"];
+    delete env["MESIJ_HOME"];
+    if (this.options.dataDirectory)
+      env["MESIJ_HOME"] = this.options.dataDirectory;
 
     return new Promise((resolve, reject) => {
       let failure: MesijErrorCode | undefined;

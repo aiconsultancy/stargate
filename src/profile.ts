@@ -101,8 +101,8 @@ export async function renderProfile(input: Options, role: string) {
   const parsed = templateSchema.parse(config);
   const providers = parsed.providers;
   for (const provider of Object.values(providers)) {
-    provider.settings = {
-      ...document.parse(provider.settings),
+    provider["settings"] = {
+      ...document.parse(provider["settings"]),
       baseURL: options.proxyURL,
       apiKey: options.apiKeyReference,
     };

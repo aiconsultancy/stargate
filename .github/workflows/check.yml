@@ -1,0 +1,48 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify dependency commit provenance
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          count=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.commits')
+          gh api --paginate --slurp "repos/$GH_REPO/pulls/$PR_NUMBER/commits?per_page=100" |
+            jq -e --argjson count "$count" --arg head "$HEAD_SHA" '
+              add | length == $count and $count > 0 and .[-1].sha == $head and
+              all(.[]; .author.login == "dependabot[bot]" and .commit.verification.verified == true)
+            '
+      - name: Install pinned tools
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - name: Install locked dependencies
+        run: mise run deps
+      - name: Prepare test scratch directory
+        run: mkdir -p /tmp/opencode
+      - name: Run pre-commit and quality checks
+        run: mise run hooks

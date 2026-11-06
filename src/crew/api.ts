@@ -17,14 +17,14 @@ export function historyVisible(
   peer: Peer | null,
   session: HistorySession,
 ): boolean {
-  const identity = session.metadata?.pogoCrew;
+  const identity = session.metadata?.["pogoCrew"];
   const metadata =
     typeof identity === "object" &&
     identity !== null &&
     !Array.isArray(identity)
       ? identity
       : undefined;
-  if (metadata && metadata.namespace !== options.namespace) return false;
+  if (metadata && metadata["namespace"] !== options.namespace) return false;
   const directory = resolve(session.location.directory);
   if (
     !session.parentID &&
@@ -40,8 +40,8 @@ export function historyVisible(
       session.agent === peer.crewID &&
       !!worktree &&
       directory === resolve(worktree) &&
-      metadata?.namespace === options.namespace &&
-      metadata.crewID === peer.crewID
+      metadata?.["namespace"] === options.namespace &&
+      metadata["crewID"] === peer.crewID
     );
   }
   const project = resolve(options.projectDirectory);
@@ -99,8 +99,8 @@ export async function connectHistoryAPI(
       observed.parentID !== caller.parentID ||
       resolve(observed.location.directory) !==
         resolve(caller.location.directory) ||
-      JSON.stringify(observed.metadata?.pogoCrew) !==
-        JSON.stringify(caller.metadata?.pogoCrew)
+      JSON.stringify(observed.metadata?.["pogoCrew"]) !==
+        JSON.stringify(caller.metadata?.["pogoCrew"])
     )
       throw new CrewError(
         "History endpoint must address the same OpenCode server and caller session.",

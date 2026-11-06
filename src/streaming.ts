@@ -60,7 +60,7 @@ export class LiveReply {
     )
       return;
     this.pending = text;
-    if (this.task) return;
+    if (this.task !== undefined) return;
     this.task = this.flush()
       .catch(() => {
         if (!this.signal.aborted)

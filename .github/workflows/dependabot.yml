@@ -1,0 +1,54 @@
+name: Dependabot automation
+
+on:
+  # Auto-merge needs writes. Only verified same-repo bot metadata runs below.
+  # No PR checkout or code execution is permitted in this workflow.
+  # jactionlint ignore=dangerous-triggers
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: dependabot-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  updates:
+    name: Review and queue dependency updates
+    if: >-
+      github.repository == 'aiconsultancy/pogo' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main' &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      # Never check out or execute PR code in this privileged workflow.
+      # Full, head-scoped provenance is part of the required Quality checks job.
+      # fetch-metadata alone checks only the first commit.
+      - name: Verify Dependabot PR and read metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+      - name: Request advisory Copilot review for Actions changes
+        if: steps.metadata.outputs.package-ecosystem == 'github-actions'
+        continue-on-error: true
+        run: >-
+          gh api --method POST
+          "repos/$GH_REPO/pulls/$PR_NUMBER/requested_reviewers"
+          -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+      - name: Enable auto-merge after required checks pass
+        if: >-
+          steps.metadata.outputs.package-ecosystem == 'bun' ||
+          steps.metadata.outputs.package-ecosystem == 'github-actions'
+        run: gh pr merge --auto --squash --match-head-commit "$HEAD_SHA" "$PR_URL"

@@ -3,7 +3,9 @@
 MISE ?= mise
 ARGS ?=
 
-TASKS := deps pogo init crew-init provision cua-install cua start config-check manifest service check test typecheck lint format
+TASKS := deps pogo init crew-init provision cua-install cua start \
+	config-check manifest service check test typecheck lint format \
+	hooks-install hooks workflow-check
 
 .PHONY: help $(TASKS)
 
@@ -23,6 +25,9 @@ help:
 	  '  make pogo ARGS="--help"    Run any CLI command' \
 	  '  make check         Run typecheck, lint, and tests' \
 	  '  make test | typecheck | lint | format' \
+	  '  make hooks-install Install prek pre-commit hooks' \
+	  '  make hooks         Run all pre-commit checks' \
+	  '  make workflow-check Validate GitHub Actions workflows' \
 	  '' \
 	  'Forward options with ARGS, e.g.:' \
 	  '  make config-check ARGS="--config pogo.example.json --schema-only"' \

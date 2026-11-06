@@ -30,6 +30,13 @@ make config-check ARGS='--config pogo.example.json --schema-only'
 
 `make check` runs TypeScript, Biome, and Bun tests. Run the smallest relevant
 test while changing behavior, then the full check before completing code work.
+Run `make hooks-install` once per clone. `make hooks` runs the same prek gate as
+CI, including workflow and file hygiene checks. Use `make format` for safe fixes;
+do not suppress or weaken type-safety rules to pass the gate. Index-signature
+properties require bracket access; Biome's conflicting `useLiteralKeys` rule is
+intentionally disabled. Dependency declaration checks remain excluded because
+installed SDK declarations have upstream type errors; first-party code and tests
+must pass every configured check.
 `make init` requires a real terminal and collects tokens without echoing them.
 Pass non-secret CLI options through `ARGS`, or `mise run TASK -- OPTIONS`.
 

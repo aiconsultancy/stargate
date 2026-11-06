@@ -3,5 +3,24 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": { "includes": ["**", "!bun.lock"] },
   "formatter": { "indentStyle": "space", "lineWidth": 80 },
-  "linter": { "rules": { "preset": "recommended" } }
+  "linter": {
+    "domains": { "types": "recommended", "project": "recommended" },
+    "rules": {
+      "preset": "recommended",
+      "complexity": { "useLiteralKeys": "off" },
+      "style": { "noNonNullAssertion": "error" },
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noImplicitAnyLet": "error",
+        "noTsIgnore": "error"
+      },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error",
+        "noUnsafeReturn": "error",
+        "useAwaitThenable": "error",
+        "useExhaustiveSwitchCases": "error"
+      }
+    }
+  }
 }

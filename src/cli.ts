@@ -186,7 +186,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
   const command = p[0] ?? "start";
   if (v.help || command === "help") {
     const topic = command === "help" ? p[1] : p[0];
-    console.log(help[topic ?? "root"] ?? help.root);
+    console.log(help[topic ?? "root"] ?? help["root"]);
     return { command: "exit" };
   }
   const configPath = resolve(v.config ?? "pogo.json");

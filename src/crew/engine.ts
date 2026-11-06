@@ -614,7 +614,7 @@ export class CrewEngine {
 
   private validPeer(session: CrewSession, peer: Peer) {
     this.member(peer.crewID);
-    const metadata = session.metadata?.pogoCrew;
+    const metadata = session.metadata?.["pogoCrew"];
     if (
       session.id !== peer.sessionID ||
       session.parentID ||
@@ -624,8 +624,8 @@ export class CrewEngine {
       typeof metadata !== "object" ||
       metadata === null ||
       Array.isArray(metadata) ||
-      metadata.namespace !== this.options.namespace ||
-      metadata.crewID !== peer.crewID
+      metadata["namespace"] !== this.options.namespace ||
+      metadata["crewID"] !== peer.crewID
     )
       throw new CrewError(
         "Crew session identity changed. Restore its agent, directory and metadata; do not recreate it.",

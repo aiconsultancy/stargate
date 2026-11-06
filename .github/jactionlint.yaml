@@ -1,0 +1,4 @@
+required-checks:
+  - name: Quality checks
+    events: [pull_request]
+    branches: [main]
