@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import type { ActivityWatch } from "./activity";
 import { OpenCodeBackend } from "./backends/opencode";
 import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
@@ -20,6 +21,12 @@ export interface AgentBackend {
     onText?: TextSink,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
+  startActivity?(
+    sessionId: string,
+    requestID: string,
+    reporter: string,
+    signal: AbortSignal,
+  ): Promise<ActivityWatch>;
   close(): Promise<void>;
 }
 

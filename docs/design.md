@@ -43,6 +43,12 @@ interface AgentBackend {
     onText?: (text: string) => void,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
+  startActivity?(
+    sessionId: string,
+    requestID: string,
+    reporter: string,
+    signal: AbortSignal,
+  ): Promise<ActivityWatch>;
   close(): Promise<void>;
 }
 ```
@@ -59,6 +65,13 @@ Callbacks must not include reasoning, tool arguments, or tool results. The
 gateway buffers snapshots and performs Slack writes separately. OpenCode uses
 live text events and reads final history as the source of truth. If the event
 connection fails, final delivery continues without replaying agent work.
+
+`startActivity` is an optional, request-scoped reporting capability. Its
+`ActivityWatch` reads bounded visible task activity and can finish or cancel
+the capture. OpenCode implements it through the location-scoped Pogo reporting
+RPC. Other adapters remain compatible without it. The gateway manages report
+delivery separately from answer delivery, with its own deadline and access
+rechecks. See [crew activity](crew-activity.md) and [`activity.ts`](../src/activity.ts).
 
 Custom modules export:
 

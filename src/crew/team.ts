@@ -1,6 +1,14 @@
 import { z } from "zod";
+import { piDurableBackendSchema } from "../config";
 
 export const agentIDSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+export function agentIDForName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 const agentSchema = z.strictObject({
   id: agentIDSchema,
   name: z
@@ -47,11 +55,21 @@ export const teamSchema = z
         agentSchema.extend({
           role: z.string().trim().min(1).max(1000),
           permissionProfile: z.enum(["coding", "research"]),
+          backend: piDurableBackendSchema.omit({ directory: true }).optional(),
         }),
       )
       .min(1),
   })
   .superRefine((team, context) => {
+    for (const [index, agent] of [team.captain, ...team.crew].entries()) {
+      if (agent.name && agent.id !== agentIDForName(agent.name))
+        context.addIssue({
+          code: "custom",
+          path: index === 0 ? ["captain", "id"] : ["crew", index - 1, "id"],
+          message:
+            "Agent IDs must match assigned names; hidden legacy aliases are not allowed.",
+        });
+    }
     const ids = new Set([team.captain.id, "captain"]);
     for (const [index, member] of team.crew.entries()) {
       if (ids.has(member.id)) {
@@ -60,6 +78,23 @@ export const teamSchema = z
           path: ["crew", index, "id"],
           message: "Crew IDs must be unique and distinct from the captain.",
         });
+      }
+      if (member.backend) {
+        if (member.model)
+          context.addIssue({
+            code: "custom",
+            path: ["crew", index, "model"],
+            message: "Pi workers select their model in backend.model.",
+          });
+        if (
+          member.permissionProfile === "research" &&
+          member.backend.tools !== "none"
+        )
+          context.addIssue({
+            code: "custom",
+            path: ["crew", index, "backend", "tools"],
+            message: "Research workers cannot enable coding tools.",
+          });
       }
       ids.add(member.id);
     }

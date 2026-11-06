@@ -1,5 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
+import type { ActivityView } from "./activity";
+import { ActivityDelivery, type ActivityHandle } from "./activity-delivery";
 import type { AgentBackend } from "./backend";
 import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "./config";
@@ -28,6 +30,13 @@ import {
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
 
 export interface SlackDelivery {
+  activity?(
+    channel: string,
+    thread: string,
+    view: ActivityView,
+    ts?: string,
+    signal?: AbortSignal,
+  ): Promise<string>;
   threadContext?(input: ThreadContextRequest): Promise<ThreadContext>;
   post(
     channel: string,
@@ -47,6 +56,7 @@ export interface SlackDelivery {
 }
 
 export class Gateway {
+  private readonly activity: ActivityDelivery;
   private readonly active = new Map<string, Promise<void>>();
   private readonly cancellations = new Map<number, AbortController>();
   readonly key: string;
@@ -59,6 +69,15 @@ export class Gateway {
     private readonly log: Logger,
   ) {
     this.key = botKey(config, identity);
+    this.activity = new ActivityDelivery(
+      backend,
+      slack,
+      () => config.crewActivity,
+      (job) =>
+        isAllowedUser(config, job.user) &&
+        isAllowedChannel(config, job.channel),
+      log,
+    );
   }
 
   accept(body: unknown) {
@@ -143,6 +162,7 @@ export class Gateway {
       if (!signal.aborted) throw error;
     } finally {
       await Promise.all(this.active.values());
+      await this.activity.close();
     }
   }
 
@@ -181,6 +201,7 @@ export class Gateway {
       let reacted = false;
       let reactionDelivered = false;
       let reactionTask: Promise<void> | undefined;
+      let activity: ActivityHandle | undefined;
       const reply = (text: string, complete: boolean) => {
         if (!this.slack.react) return text;
         const parsed = parseReactionReply(text, complete);
@@ -236,14 +257,17 @@ export class Gateway {
           const prompt = this.slack.react
             ? `${reactionInstructions}\n\nUser message:\n${text}`
             : text;
+          activity = await this.activity.start(job, session, signal, shutdown);
           const answer = reply(
             await this.backend.prompt(session, prompt, signal, (text) =>
               live.push(reply(text, false)),
             ),
             true,
           );
+          activity?.finish();
           output = reacted && !answer.trim() ? [] : chunks(answer);
         } catch (error) {
+          activity?.cancel();
           this.log.warn({ job: job.id }, "Agent request failed or timed out");
           output = [
             error instanceof ThreadContextUnavailable
@@ -307,5 +331,9 @@ export class Gateway {
           Date.now() + Math.min(60_000, 1000 * 2 ** job.attempts),
         );
     }
+  }
+
+  async close() {
+    await this.activity.close();
   }
 }

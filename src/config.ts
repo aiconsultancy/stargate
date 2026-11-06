@@ -1,5 +1,6 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
+import { crewActivitySchema } from "./activity";
 import { waitingSchema } from "./waiting";
 
 const absolutePath = z.string().refine(isAbsolute, "Use an absolute path");
@@ -9,6 +10,41 @@ const channelRule = z.union([
   z.literal("*"),
   z.string().regex(/^[CGD][A-Z0-9]+$/),
 ]);
+
+const piProxyURL = z.url().refine((value) => {
+  const url = new URL(value);
+  const loopback =
+    url.hostname === "localhost" ||
+    url.hostname === "[::1]" ||
+    /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
+  return (
+    (url.protocol === "https:" || (url.protocol === "http:" && loopback)) &&
+    !url.username &&
+    !url.password &&
+    !url.search &&
+    !url.hash &&
+    !value.includes("?") &&
+    !value.includes("#")
+  );
+}, "Use HTTPS or loopback HTTP without credentials, query, or fragment");
+
+export const piDurableBackendSchema = z.strictObject({
+  type: z.literal("pi-durable"),
+  directory: absolutePath,
+  model: z
+    .string()
+    .regex(
+      /^(openai|anthropic)\/.+$/,
+      "Use openai/model-id or anthropic/model-id",
+    ),
+  provider: z
+    .strictObject({ baseURL: piProxyURL, apiKeyEnv: envName })
+    .optional(),
+  systemPrompt: z
+    .string()
+    .default("You are a helpful assistant responding in Slack."),
+  tools: z.enum(["none", "coding"]).default("none"),
+});
 
 export const backendSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -32,20 +68,7 @@ export const backendSchema = z.discriminatedUnion("type", [
       )
       .default([{ action: "*", resource: "*", effect: "deny" }]),
   }),
-  z.strictObject({
-    type: z.literal("pi-durable"),
-    directory: absolutePath,
-    model: z
-      .string()
-      .regex(
-        /^(openai|anthropic)\/.+$/,
-        "Use openai/model-id or anthropic/model-id",
-      ),
-    systemPrompt: z
-      .string()
-      .default("You are a helpful assistant responding in Slack."),
-    tools: z.enum(["none", "coding"]).default("none"),
-  }),
+  piDurableBackendSchema,
   z.strictObject({
     type: z.literal("module"),
     module: absolutePath,
@@ -71,6 +94,10 @@ export const botSchema = z.strictObject({
   backend: backendSchema,
   threadContext: z.boolean().default(false),
   waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),
+  crewActivity: crewActivitySchema.default({
+    detail: "off",
+    reporter: "twiki",
+  }),
   concurrency: z.number().int().min(1).max(32).default(4),
   turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(300_000),
 });

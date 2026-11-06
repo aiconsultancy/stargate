@@ -175,7 +175,7 @@ async function fixture(team?: Team) {
       interruptFailure = true;
     },
     async close() {
-      engine.close();
+      await engine.close();
       await rm(directory, { recursive: true, force: true });
     },
   };
@@ -238,7 +238,7 @@ test("crew reuses four bot-wide roots across captains and reopening", async () =
         first.peers,
       );
     } finally {
-      reopened.close();
+      await reopened.close();
     }
   } finally {
     await f.close();
@@ -342,7 +342,7 @@ test("durable queue is opt-in, FIFO and promotes only after completion plus idle
         .status,
     ).toBe("running");
   } finally {
-    reopened.close();
+    await reopened.close();
     await f.close();
   }
 });
@@ -416,7 +416,7 @@ test("worker control reserves across instances without blocking other slots", as
       f.engine.withWorkerControl("builder", f.captain(), async () => {}),
     ).rejects.toThrow("running");
   } finally {
-    second.close();
+    await second.close();
     await f.close();
   }
 });
@@ -510,7 +510,7 @@ test("two teams sharing one server isolate roots, results, mail and urgency", as
         .task?.result,
     ).toBeNull();
   } finally {
-    other.close();
+    await other.close();
     await a.close();
     await b.close();
   }
@@ -651,7 +651,7 @@ test("default Bowser legacy fingerprint reopens with the same task and worker ID
           .peers?.[0]?.sessionID,
       ).toBe(task?.workerSessionID);
     } finally {
-      reopened.close();
+      await reopened.close();
     }
   } finally {
     await f.close();
@@ -697,7 +697,7 @@ test("queued wait promotes once under contention and returns the owned result", 
     expect(results[0]?.status).toBe("completed");
     expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(2);
   } finally {
-    second.close();
+    await second.close();
     await f.close();
   }
 });
@@ -790,7 +790,7 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
     controller.abort();
     allowAdmission.resolve();
     await Promise.allSettled(waits);
-    second.close();
+    await second.close();
     await f.close();
   }
 });
@@ -943,7 +943,7 @@ test("independent plugin instances atomically reserve the same worker", async ()
     expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(1);
     expect(new Set(f.creations.map((input) => input.id)).size).toBe(1);
   } finally {
-    second.close();
+    await second.close();
     await f.close();
   }
 });
@@ -1156,7 +1156,7 @@ test("busy assignments stay bounded and task results belong to their captain", a
           .task?.result,
       ).toBe("Verified result");
     } finally {
-      reopened.close();
+      await reopened.close();
     }
     expect(f.calls.some((call) => call.sessionID === "ses_captain_a")).toBe(
       false,

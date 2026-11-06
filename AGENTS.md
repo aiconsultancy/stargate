@@ -90,8 +90,8 @@ selects a new session namespace; never reuse another backend's session ID.
   an error without explicit authorization and an appropriate backup.
 - Do not install/start/stop user services, change global OpenCode configuration,
   or edit the separate CLIProxyAPI installation unless the user requests it.
-- Pogo's Pi adapter currently lacks configurable proxy endpoints; do not assume
-  installing CLIProxyAPI makes that backend use the proxy automatically.
+- Pi proxy routing requires explicit provider endpoint and credential-reference
+  configuration. Installing CLIProxyAPI does not select it automatically.
 
 ## Git
 

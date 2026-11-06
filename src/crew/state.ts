@@ -2,6 +2,8 @@ import { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
+import { canExpandCrew } from "./identity";
+import { ReportingStore, redactActivity } from "./reporting";
 export type CrewID = string;
 export type Peer = {
   crewID: CrewID;
@@ -35,16 +37,20 @@ export const pendingTaskLimit = 100;
 type QueuedTask = CrewTask & { text: string };
 
 export class CrewState {
+  readonly reporting: ReportingStore;
   private constructor(
     readonly path: string,
     private readonly db: Database,
-  ) {}
+  ) {
+    this.reporting = new ReportingStore(db);
+  }
 
   static async open(
     directory: string,
     namespace: string,
     fingerprint: string,
     legacyFingerprint?: string,
+    allowCrewExpansion = false,
   ) {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await chmod(directory, 0o700);
@@ -103,19 +109,54 @@ export class CrewState {
         CREATE TABLE IF NOT EXISTS worker_controls (
           crewID TEXT PRIMARY KEY REFERENCES peers(crewID), token TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS pi_peers (
+          sessionID TEXT PRIMARY KEY REFERENCES peers(sessionID),
+          conversationID TEXT
+        );
       `);
+      const legacyPeers = /CHECK\s*\(\s*crewID\s+IN\s*\(/i.test(
+        db
+          .query<{ sql: string }, []>(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='peers'",
+          )
+          .get()?.sql ?? "",
+      );
+      if (allowCrewExpansion && legacyPeers) db.exec("PRAGMA foreign_keys=OFF");
       db.transaction(() => {
         const identity = db
           .query<{ value: string }, []>("SELECT value FROM identity")
           .get();
+        const expansion =
+          identity &&
+          allowCrewExpansion &&
+          canExpandCrew(identity.value, fingerprint);
         if (
           identity &&
           identity.value !== fingerprint &&
-          identity.value !== legacyFingerprint
+          identity.value !== legacyFingerprint &&
+          !expansion
         )
           throw new CrewError(
             "Crew configuration changed. Restore its original identity and directories or use a new namespace; do not delete state.",
           );
+        if (expansion && legacyPeers) {
+          // Rebuild only the obsolete fixed-roster constraint; child IDs and
+          // every existing row remain unchanged in this same transaction.
+          db.exec(`
+            CREATE TABLE peers_expansion (
+              crewID TEXT PRIMARY KEY,
+              sessionID TEXT NOT NULL UNIQUE,
+              status TEXT NOT NULL CHECK(status IN ('pending','ready'))
+            );
+            INSERT INTO peers_expansion SELECT crewID,sessionID,status FROM peers;
+            DROP TABLE peers;
+            ALTER TABLE peers_expansion RENAME TO peers;
+          `);
+          if (db.query("PRAGMA foreign_key_check").all().length)
+            throw new CrewError(
+              "Crew expansion failed its reference check; original state retained.",
+            );
+        }
         if (identity && identity.value !== fingerprint)
           db.query("UPDATE identity SET value=? WHERE value=?").run(
             fingerprint,
@@ -124,6 +165,7 @@ export class CrewState {
         if (!identity)
           db.query("INSERT INTO identity VALUES (?)").run(fingerprint);
       }).immediate();
+      db.exec("PRAGMA foreign_keys=ON");
       return new CrewState(path, db);
     } catch (error) {
       db.close();
@@ -164,6 +206,35 @@ export class CrewState {
     this.db.query("UPDATE peers SET status='ready' WHERE crewID=?").run(crewID);
   }
 
+  piPeer(sessionID: string) {
+    return this.db
+      .query<{ conversationID: string | null }, [string]>(
+        "SELECT conversationID FROM pi_peers WHERE sessionID=?",
+      )
+      .get(sessionID);
+  }
+
+  reservePiPeer(sessionID: string): boolean {
+    return (
+      this.db
+        .query("INSERT OR IGNORE INTO pi_peers(sessionID) VALUES (?)")
+        .run(sessionID).changes === 1
+    );
+  }
+
+  readyPiPeer(sessionID: string, conversationID: string) {
+    if (
+      this.db
+        .query(
+          "UPDATE pi_peers SET conversationID=? WHERE sessionID=? AND conversationID IS NULL",
+        )
+        .run(conversationID, sessionID).changes !== 1
+    )
+      throw new CrewError(
+        "Pi conversation reservation changed; inspect crew state.",
+      );
+  }
+
   task(id: string): CrewTask | null {
     return (
       this.db
@@ -185,7 +256,7 @@ export class CrewState {
       .get(crewID);
   }
 
-  reserveTask(peer: Peer, captainID: string): CrewTask | null {
+  reserveTask(peer: Peer, captainID: string, text = ""): CrewTask | null {
     return this.db
       .transaction(() => {
         if (
@@ -206,7 +277,9 @@ export class CrewState {
             captainID,
             `msg_${randomUUID()}`,
           );
-        return this.task(id);
+        const task = this.task(id);
+        if (task) this.reporting.assignment(task, text);
+        return task;
       })
       .immediate();
   }
@@ -225,9 +298,31 @@ export class CrewState {
       .get(crewID);
   }
 
-  enqueue(peer: Peer, captainID: string, text: string): CrewTask {
+  enqueue(
+    peer: Peer,
+    captainID: string,
+    text: string,
+    reportCaptureID?: string,
+  ): CrewTask {
     return this.db
       .transaction(() => {
+        if (reportCaptureID) {
+          const capture = this.reporting.owned(captainID, reportCaptureID);
+          const previous = this.reporting.reportTaskID(reportCaptureID);
+          if (previous) {
+            const task = this.task(previous);
+            if (!task)
+              throw new CrewError("Reporting task reservation missing.");
+            return task;
+          }
+          if (
+            capture.status !== "summarizing" ||
+            capture.reporterID !== peer.crewID
+          )
+            throw new CrewError(
+              "Reporting capture is not eligible for admission.",
+            );
+        }
         const count =
           this.db
             .query<{ count: number }, [string]>(
@@ -253,6 +348,8 @@ export class CrewState {
           );
         const task = this.task(id);
         if (!task) throw new CrewError("Queue reservation failed.");
+        if (reportCaptureID) this.reporting.markReport(id, reportCaptureID);
+        else this.reporting.assignment(task, text);
         return task;
       })
       .immediate();
@@ -292,13 +389,15 @@ export class CrewState {
   }
 
   cancelQueued(id: string, captainID: string): boolean {
-    return (
+    const cancelled =
       this.db
         .query(
           "UPDATE pending_tasks SET status='cancelled',released=1 WHERE id=? AND originCaptainID=? AND status='queued'",
         )
-        .run(id, captainID).changes === 1
-    );
+        .run(id, captainID).changes === 1;
+    const task = this.task(id);
+    if (cancelled && task) this.reporting.record(task, "update", "Cancelled");
+    return cancelled;
   }
 
   reserveControl(crewID: string): string {
@@ -329,22 +428,29 @@ export class CrewState {
   }
 
   running(id: string) {
-    this.db
+    const changed = this.db
       .query(
         "UPDATE tasks SET status='running' WHERE id=? AND status='dispatching'",
       )
       .run(id);
+    const task = this.task(id);
+    if (changed.changes && task)
+      this.reporting.record(task, "update", "Running");
   }
 
   uncertain(id: string) {
-    this.db
+    const changed = this.db
       .query(
-        "UPDATE tasks SET status='uncertain' WHERE id=? AND status!='completed'",
+        "UPDATE tasks SET status='uncertain' WHERE id=? AND status NOT IN ('completed','uncertain')",
       )
       .run(id);
+    const task = this.task(id);
+    if (changed.changes && task)
+      this.reporting.record(task, "update", "Outcome uncertain");
   }
 
   complete(id: string, workerSessionID: string, result: string) {
+    if (this.reporting.isReport(id)) result = redactActivity(result, 3000);
     return this.db
       .transaction(() => {
         const task = this.task(id);
@@ -360,6 +466,7 @@ export class CrewState {
         this.db
           .query("UPDATE tasks SET status='completed',result=? WHERE id=?")
           .run(result, id);
+        this.reporting.record(task, "result", result);
       })
       .immediate();
   }

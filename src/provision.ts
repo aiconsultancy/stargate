@@ -116,13 +116,10 @@ function stateFor(journal: Journal, id: string) {
 }
 
 function runtimeBot(entry: Plan["bots"][number], appId = "APLANNED") {
+  const { name: _name, app: _app, ...runtime } = entry;
   return botSchema.parse({
-    id: entry.id,
+    ...runtime,
     slack: { ...entry.slack, appId },
-    access: entry.access,
-    backend: entry.backend,
-    concurrency: entry.concurrency,
-    turnTimeoutMs: entry.turnTimeoutMs,
   });
 }
 

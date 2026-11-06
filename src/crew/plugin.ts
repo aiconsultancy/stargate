@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import { Error as ToolError } from "@opencode/plugin/promise/tool";
 import { connectHistoryAPI, historyVisible } from "./api";
@@ -5,6 +6,7 @@ import { compactOnServer } from "./compaction";
 import { CrewEngine, crewInputSchema, mailInputSchema } from "./engine";
 import { CrewHistory, historyInputSchema } from "./history";
 import { CrewModels, modelInputSchema } from "./models";
+import { CrewReporting } from "./report-rpc";
 import { CrewError } from "./state";
 import { CrewWaiting, waitingInputSchema } from "./waiting";
 
@@ -37,7 +39,50 @@ export default Plugin.define({
         compactOnServer(engine.options.team, ctx.session, sessionID, signal),
     );
     const waiting = new CrewWaiting(engine);
+    let reportingRegistration:
+      | Awaited<ReturnType<typeof ctx.rpc.register<typeof CrewReporting>>>
+      | undefined;
+    const report = async <T>(
+      signal: AbortSignal,
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      try {
+        signal.throwIfAborted();
+        if (
+          resolve(ctx.location.directory) !==
+          resolve(engine.options.captainDirectory)
+        )
+          throw new CrewError(
+            "Activity RPC requires the configured captain location.",
+          );
+        return await operation();
+      } catch (error) {
+        throw new Error(
+          error instanceof CrewError
+            ? error.message
+            : "Activity operation unavailable or cancelled; raw details withheld.",
+        );
+      }
+    };
     try {
+      reportingRegistration = await ctx.rpc.register(CrewReporting, {
+        start: (input, context) =>
+          report(context.signal, () =>
+            engine.reporting.start(input, context.signal),
+          ),
+        read: (input, context) =>
+          report(context.signal, () =>
+            engine.reporting.read(input, context.signal),
+          ),
+        finish: (input, context) =>
+          report(context.signal, () =>
+            engine.reporting.finish(input, context.signal),
+          ),
+        cancel: (input, context) =>
+          report(context.signal, () =>
+            engine.reporting.cancel(input, context.signal),
+          ),
+      });
       await ctx.tool.transform((editor) => {
         editor.add({
           name: "pogo_waiting",
@@ -74,7 +119,7 @@ export default Plugin.define({
         });
         editor.add({
           name: "pogo_crew",
-          description: `Manage ${engine.options.team.captain.id}'s configured persistent crew: ${engine.options.team.crew.map(({ id }) => id).join(", ")}. Captain may ensure, dispatch, wait, status and compact. Assigned workers complete tasks or send task-scoped urgency. Busy dispatch queues only with queue=true. Never auto-wake captains.`,
+          description: `Manage ${engine.options.team.captain.id}'s configured persistent crew: ${engine.options.team.crew.map(({ id }) => id).join(", ")}. Captain may ensure, dispatch, wait, status and compact. Pi workers auto-complete with their final answer; compaction, mail, model controls and urgency are OpenCode-only. Assigned OpenCode workers complete tasks or send task-scoped urgency. Busy dispatch queues only with queue=true. Never auto-wake captains.`,
           input: crewInputSchema,
           options: { codemode: false, permission: "pogo_crew" },
           async execute(input, context) {
@@ -226,11 +271,21 @@ export default Plugin.define({
         });
       });
     } catch {
-      engine.close();
+      try {
+        await reportingRegistration?.dispose();
+      } finally {
+        await engine.close();
+      }
       throw new Error(
         "Pogo crew tool registration failed; check plugin compatibility.",
       );
     }
-    return () => engine.close();
+    return async () => {
+      try {
+        await reportingRegistration?.dispose();
+      } finally {
+        await engine.close();
+      }
+    };
   },
 });

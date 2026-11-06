@@ -3,7 +3,7 @@ import { crewPermissions } from "../src/crew/policy";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 
 const team = {
-  captain: { id: "galactica", name: "Galactica Captain" },
+  captain: { id: "galactica-captain", name: "Galactica Captain" },
   crew: [
     {
       id: "starbuck",
@@ -30,7 +30,7 @@ test("team configuration rejects ambiguous identities and implicit tool access",
   for (const crew of [
     [],
     [team.crew[0], team.crew[0]],
-    [{ ...team.crew[0], id: "galactica" }],
+    [{ ...team.crew[0], id: "galactica-captain" }],
     [{ ...team.crew[0], id: "captain" }],
     [{ ...team.crew[0], id: "../escape" }],
     [{ id: "reader", role: "Research" }],

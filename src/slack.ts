@@ -1,6 +1,8 @@
 import { SocketModeClient } from "@slack/socket-mode";
 import { LogLevel, WebClient, type WebClientOptions } from "@slack/web-api";
 import type { Logger } from "pino";
+import type { ActivityView } from "./activity";
+import { activityContent } from "./activity-slack";
 import { stopBlock } from "./cancellation";
 import type { CronUIApi } from "./cron-ui";
 import type { SlackDelivery } from "./gateway";
@@ -165,6 +167,36 @@ export class SlackConnection implements SlackDelivery {
   async announce(channel: string, text: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
     return this.send(channel, "", text, "plain");
+  }
+
+  async activity(
+    channel: string,
+    thread: string,
+    view: ActivityView,
+    ts?: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    signal?.throwIfAborted();
+    const web = signal ? this.historyWeb(signal) : this.web;
+    const content = {
+      channel,
+      ...activityContent(view),
+      parse: "none" as const,
+      mrkdwn: false,
+      unfurl_links: false,
+      unfurl_media: false,
+    };
+    if (ts !== undefined) {
+      // Missing/ambiguous updates must not create duplicate activity messages.
+      await web.chat.update({ ...content, ts });
+      return ts;
+    }
+    const result = await web.chat.postMessage({
+      ...content,
+      thread_ts: thread,
+    });
+    if (!result.ts) throw new Error("Slack did not return a message timestamp");
+    return result.ts;
   }
 
   readonly cronUI: CronUIApi = {

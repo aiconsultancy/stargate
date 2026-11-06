@@ -3,6 +3,8 @@
 This guide creates **Slack app registrations for the existing Pogo gateway**.
 It does not create a Bolt starter, replace Pogo, or run a second bot runtime.
 Repeat app registration for each bot; one Pogo process can host them all.
+For a separate installation with different captain and crew identities, use
+the [repeatable instance procedure](instances.md).
 
 ## Quick batch setup on another machine
 
@@ -207,7 +209,8 @@ Ask the operator for:
 
 Choose **OpenCode** for the initial CLIProxyAPI test. Configure the proxy as
 an OpenCode provider separately; installing it does not route Pogo automatically.
-Pogo's Pi Durable adapter currently lacks configurable proxy endpoints.
+Pi Durable uses a proxy only with explicit provider configuration; see
+[Pi Durable crew](agents/default-opencode.md#pi-durable-crew).
 Do not substitute the proxy URL for `backend.url`: that field addresses the
 OpenCode server, not the model API. Keep tools disabled for the first test.
 

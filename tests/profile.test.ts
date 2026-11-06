@@ -12,7 +12,7 @@ import {
 import { join } from "node:path";
 import { runCli } from "../src/cli";
 import { crewPermissions } from "../src/crew/policy";
-import type { Team } from "../src/crew/team";
+import { type Team, teamSchema } from "../src/crew/team";
 import { initializeProfile, renderProfile } from "../src/profile";
 
 const directories: string[] = [];
@@ -137,6 +137,41 @@ test("profile init refuses conflicting files rather than overwriting work", asyn
   expect(await readFile(path, "utf8")).toBe("User's custom instructions\n");
 });
 
+test("Pi crew receives a worktree but no OpenCode agent or session profile", async () => {
+  const { options } = await fixture();
+  const mixed = teamSchema.parse({
+    captain: { id: "adama" },
+    crew: [
+      {
+        id: "twiki",
+        name: "Twiki",
+        role: "Cleanup and maintenance",
+        permissionProfile: "coding",
+        backend: {
+          type: "pi-durable",
+          model: "openai/opencode-go/deepseek-v4.1-flash",
+          tools: "coding",
+        },
+      },
+    ],
+  });
+  const created = await initializeProfile({ ...options, team: mixed });
+  const worktree = created.worktrees["twiki"];
+  if (!worktree) throw new Error("Twiki worktree missing");
+  expect(
+    await Bun.file(join(worktree, ".opencode", "opencode.json")).exists(),
+  ).toBe(false);
+  const prompt = await readFile(
+    join(options.directory, ".opencode", "agents", "adama.md"),
+    "utf8",
+  );
+  expect(prompt).toContain("twiki (Twiki)");
+  expect(prompt).toContain("backend: Pi Durable");
+  await expect(
+    renderProfile({ ...options, team: mixed }, "twiki"),
+  ).rejects.toThrow("do not use OpenCode");
+});
+
 const team: Team = {
   captain: {
     id: "adama",
@@ -153,7 +188,7 @@ const team: Team = {
       model: "claude-proxy/claude-opus-4-8",
     },
     {
-      id: "mario",
+      id: "gaeta",
       name: "Gaeta",
       role: "Research",
       permissionProfile: "research",
@@ -161,6 +196,40 @@ const team: Team = {
     },
   ],
 };
+
+test("agent IDs must match assigned names without legacy aliases", () => {
+  expect(teamSchema.safeParse(team).success).toBe(true);
+  for (const [id, name] of [
+    ["mario", "Chief"],
+    ["luigi", "Starbuck"],
+    ["daisy", "Roslin"],
+    ["toad", "Apollo"],
+  ]) {
+    expect(
+      teamSchema.safeParse({
+        ...team,
+        crew: [{ id, name, role: "Worker", permissionProfile: "coding" }],
+      }).success,
+    ).toBe(false);
+  }
+  expect(
+    teamSchema.safeParse({ ...team, captain: { id: "bowser", name: "Adama" } })
+      .success,
+  ).toBe(false);
+  expect(
+    teamSchema.safeParse({
+      ...team,
+      crew: [
+        {
+          id: "chief-engineer",
+          name: "Chief Engineer",
+          role: "Worker",
+          permissionProfile: "coding",
+        },
+      ],
+    }).success,
+  ).toBe(true);
+});
 
 test("custom profiles select captain, agent models, and permissions independent of names", async () => {
   const {
@@ -176,12 +245,12 @@ test("custom profiles select captain, agent models, and permissions independent 
   expect(captain.plugins[0]?.options.team).toEqual(team);
   expect(Object.keys(captain.plugins[0]?.options.worktrees ?? {})).toEqual([
     "starbuck",
-    "mario",
+    "gaeta",
   ]);
   const coding = await renderProfile({ ...options, team }, "starbuck");
   expect(coding.agents["starbuck"]?.model).toBe(team.crew[0]?.model);
-  const research = await renderProfile({ ...options, team }, "mario");
-  expect(research.agents["mario"]?.permissions).toEqual(
+  const research = await renderProfile({ ...options, team }, "gaeta");
+  expect(research.agents["gaeta"]?.permissions).toEqual(
     crewPermissions("research"),
   );
   await expect(renderProfile({ ...options, team }, "bowser")).rejects.toThrow(
@@ -200,7 +269,7 @@ test("custom init creates only configured worktrees, generic prompts, and genera
   );
   const before = git("status", "--porcelain");
   const result = await initializeProfile({ ...options, team });
-  expect(Object.keys(result.worktrees)).toEqual(["starbuck", "mario"]);
+  expect(Object.keys(result.worktrees)).toEqual(["starbuck", "gaeta"]);
   expect(result.agent).toBe("adama");
   expect(result.permissions).toEqual(crewPermissions("captain"));
   expect(git("status", "--porcelain")).toBe(before);
@@ -238,7 +307,7 @@ test("custom init creates only configured worktrees, generic prompts, and genera
     expect(worker).toContain("pogo_crew complete");
     expect(worker).toContain("pogo_history");
     expect(worker).toContain("Never create");
-    if (id === "mario") {
+    if (id === "gaeta") {
       expect(worker).toContain("research");
       expect(worker).toContain("Cite fleet records.");
     }
@@ -247,7 +316,7 @@ test("custom init creates only configured worktrees, generic prompts, and genera
     join(options.projectDirectory, ".git", "info", "exclude"),
     "utf8",
   );
-  for (const id of ["adama", "starbuck", "mario"])
+  for (const id of ["adama", "starbuck", "gaeta"])
     expect(excludes).toContain(`/.agents/opco/agents/${id}.md`);
   expect(await initializeProfile({ ...options, team })).toEqual(result);
 });

@@ -90,6 +90,8 @@ export async function renderProfile(input: Options, role: string) {
   const options = parseOptions(input);
   const captain = role === options.team.captain.id;
   const member = options.team.crew.find((member) => member.id === role);
+  if (member?.backend)
+    throw new Error("Pi workers do not use OpenCode agent profiles.");
   const agent = captain ? options.team.captain : member;
   if (!agent) throw new Error("Agent does not belong to the configured team.");
   const profile = captain ? "captain" : member?.permissionProfile;
@@ -316,6 +318,7 @@ export async function initializeProfile(input: Options) {
         );
       }
     }
+    if (member?.backend) continue;
     const configPath = await configDirectory(directory);
     if (!captain && configPath === join(directory, ".agents", "opco")) {
       await excludeGenerated(options.projectDirectory, [], true);
@@ -364,7 +367,7 @@ export async function initializeProfile(input: Options) {
       roster: options.team.crew
         .map(
           (member) =>
-            `- ${member.id} (${member.name ?? member.id}): ${member.role}; permissions: ${member.permissionProfile}`,
+            `- ${member.id} (${member.name ?? member.id}): ${member.role}; permissions: ${member.permissionProfile}${member.backend ? "; backend: Pi Durable (dispatch/wait/status only)" : ""}`,
         )
         .join("\n"),
       instructions:

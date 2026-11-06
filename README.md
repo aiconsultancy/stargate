@@ -20,6 +20,8 @@ CLIProxyAPI and Mesij. `pogo crew init --team team.example.json` selects a
 configured captain and variable roster; the portable example uses Galactica.
 Each team needs separate namespace, state, captain and crew directories, but
 can share an OpenCode V2 server. Existing Bowser/global settings are unchanged.
+Use the [repeatable instance procedure](docs/instances.md) for a second team,
+pinned inputs, generated registration plans, authentication and retry rules.
 Use the [shared global agent-profile prompt and skill](docs/agents/agent-profiles.md)
 to discover subscription models and install switchable model-named sub-agents.
 Review and approve its migration plan before changing global configuration.
@@ -57,6 +59,13 @@ Slow responses show named, rotating feedback after five seconds; the
 same message becomes the answer when text arrives. See [waiting settings](docs/waiting.md)
 for configurable delays, disabling feedback, and captain-managed changes.
 Existing module backends can still return a final answer without streaming.
+
+Opt into a separate collapsible crew activity message with
+`crewActivity: { "detail": "summary", "reporter": "twiki" }` on the bot.
+`detailed` also shows attributed assignments, messages and results; `off` is
+the default. Twiki shares its maintenance queue and prepares the report without
+blocking the captain's answer. See [crew activity](docs/crew-activity.md) for
+setup, privacy, and delivery limits.
 
 Select **Stop** on a live reply or waiting message to request cancellation.
 Only the original requester can stop that request. Existing tool effects are
@@ -252,9 +261,19 @@ the three direct Pi packages are pinned together.
 - `tools`: `none` by default; `coding` enables read, write, edit, and bash.
 - `directory`: initial working directory, **not a sandbox**.
 
-Pi credentials use standard provider environment variables. Registrations in
-one process share those provider credentials; use separate Pogo processes for
-credential or OS-level isolation. OpenCode header mappings can differ per bot.
+Optional `provider: { baseURL, apiKeyEnv }` selects an explicit proxy instead
+of native provider credentials. The supported proxy model is
+`openai/opencode-go/deepseek-v4.1-flash`. Use loopback HTTP or HTTPS, with no
+URL credentials, query or fragment. `apiKeyEnv` names the private proxy client
+key variable; never place its value in JSON. Requests identify Pogo and retain
+a stable Go session header per Pi conversation. There is no native-provider
+fallback when a proxy is configured.
+
+Without `provider`, Pi uses standard provider environment variables.
+Registrations in one process can share credentials; use separate processes
+for credential or OS-level isolation. OpenCode header mappings can differ per
+bot. The captain can also manage [Pi Durable crew members](docs/agents/default-opencode.md#pi-durable-crew),
+without another Slack app or OpenCode root session.
 
 ### Custom adapters
 

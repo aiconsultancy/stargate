@@ -1,0 +1,26 @@
+{
+  "captain": {
+    "id": "cain",
+    "name": "Cain",
+    "model": "openai-proxy/gpt-6.1-sol",
+    "instructions": "Coordinate only this team's assigned project. Preserve unrelated work. Report verified results and blockers."
+  },
+  "historyScope": "team",
+  "modelProviders": ["openai-proxy", "claude-proxy", "go-proxy"],
+  "crew": [
+    {
+      "id": "shaw",
+      "name": "Shaw",
+      "role": "Implementation and focused tests",
+      "permissionProfile": "coding",
+      "model": "openai-proxy/gpt-6.1-sol"
+    },
+    {
+      "id": "fisk",
+      "name": "Fisk",
+      "role": "Documentation and assigned Linear research",
+      "permissionProfile": "research",
+      "model": "openai-proxy/gpt-6.1-sol"
+    }
+  ]
+}

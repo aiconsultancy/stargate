@@ -66,6 +66,32 @@ test("offline planning returns manifests and links without creating files", asyn
   expect(await Bun.file(options.journalPath).exists()).toBe(false);
 });
 
+test("provisioning preserves all runtime settings and repeats without changes", async () => {
+  const entry = {
+    ...bot("pegasus"),
+    app: { mode: "reuse", appId: "APEGASUS" },
+    displayName: "Cain",
+    threadContext: true,
+    waiting: { delayMs: 3000, intervalMs: 15000 },
+    crewActivity: { detail: "summary", reporter: "twiki" },
+    concurrency: 2,
+    turnTimeoutMs: 60000,
+  };
+  const options = { ...(await fixture([entry])), apply: true };
+  const dependencies = { fetch: noNetwork, environment: {} };
+  await provisionBots(options, dependencies);
+  const { name: _name, app: _app, ...runtime } = entry;
+  const config = await readConfiguration(options.configPath);
+  expect(config.bots[0]).toMatchObject({
+    ...runtime,
+    slack: { ...runtime.slack, appId: "APEGASUS" },
+  });
+  const before = await readFile(options.configPath, "utf8");
+  const result = await provisionBots(options, dependencies);
+  expect(result.bots[0]?.registration).toBe("unchanged");
+  expect(await readFile(options.configPath, "utf8")).toBe(before);
+});
+
 test("strict plans reject unknown fields and validate every bot before writes", async () => {
   const options = await fixture([bot(), { ...bot("other"), token: "secret" }]);
   await expect(

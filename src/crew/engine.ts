@@ -24,7 +24,9 @@ import type {
 } from "@opencode/client";
 import { z } from "zod";
 import { MesijClient } from "./mesij";
+import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
+import { CrewReporter } from "./reporting";
 import {
   CrewError,
   type CrewID,
@@ -51,6 +53,7 @@ export const crewOptionsSchema = z
     projectDirectory: directory,
     worktrees: z.record(agentIDSchema, directory),
     team: teamSchema.optional(),
+    allowCrewExpansion: z.boolean().optional(),
     mesijCommand: directory,
   })
   .superRefine((options, context) => {
@@ -219,20 +222,36 @@ async function physicalDirectory(path: string): Promise<string> {
   }
 }
 
+// Locations share the same worker slots. Join an in-flight report admission
+// rather than racing Pi's durable conversation-creation reservation.
+const reportAdmissions = new Map<string, Promise<void>>();
+
 export class CrewEngine {
+  private readonly pi: PiCrewWorkers;
+  readonly reporting: CrewReporter;
+  private closing?: Promise<void>;
   private constructor(
     readonly options: CrewOptions & { team: NonNullable<CrewOptions["team"]> },
     readonly state: CrewState,
     private readonly sessions: CrewSessions,
     private readonly mailer: Pick<MesijClient, "register" | "send" | "inbox">,
     private readonly agents?: CrewAgents,
-  ) {}
+    piFactory?: PiWorkerFactory,
+  ) {
+    this.pi = new PiCrewWorkers(state, options.stateDirectory, piFactory);
+    state.reporting.configureNames([
+      options.team.captain,
+      ...options.team.crew,
+    ]);
+    this.reporting = new CrewReporter(this);
+  }
 
   static async open(
     input: unknown,
     sessions: CrewSessions,
     mailer?: Pick<MesijClient, "register" | "send" | "inbox">,
     agents?: CrewAgents,
+    piFactory?: PiWorkerFactory,
   ) {
     const parsed = crewOptionsSchema.safeParse(input);
     if (!parsed.success)
@@ -280,10 +299,11 @@ export class CrewEngine {
         directory: resolve(options.captainDirectory),
       },
       crew: options.team.crew
-        .map(({ id, permissionProfile }) => ({
+        .map(({ id, permissionProfile, backend }) => ({
           id,
           permissionProfile,
           directory: resolve(options.worktrees[id] ?? ""),
+          ...(backend ? { backend } : {}),
         }))
         .sort((a, b) => a.id.localeCompare(b.id)),
     });
@@ -302,6 +322,7 @@ export class CrewEngine {
       options.namespace,
       fingerprint,
       legacyCompatible ? legacyFingerprint : undefined,
+      options.allowCrewExpansion,
     );
     return new CrewEngine(
       options,
@@ -318,6 +339,7 @@ export class CrewEngine {
           ),
         }),
       agents,
+      piFactory,
     );
   }
 
@@ -340,7 +362,12 @@ export class CrewEngine {
     const input = parsed.data;
     try {
       await this.authorize(caller);
-      if (input.op === "send" && input.to !== "captain") this.member(input.to);
+      if (input.op === "send" && input.to !== "captain") {
+        if (this.member(input.to).backend)
+          throw new CrewError(
+            "Pi workers receive dispatch assignments, not Mesij mail.",
+          );
+      }
       let source: CrewTask;
       if (caller.agent === this.options.team.captain.id) {
         await this.captain(caller);
@@ -398,6 +425,14 @@ export class CrewEngine {
             ...(input.replyTo ? { replyTo: input.replyTo } : {}),
           },
           caller.signal,
+        );
+        this.state.reporting.message(
+          source,
+          caller.agent,
+          input.to === "captain" ? this.options.team.captain.id : input.to,
+          input.text,
+          target.id,
+          caller.sessionID,
         );
         return { status: "sent", ...receipt };
       }
@@ -510,6 +545,7 @@ export class CrewEngine {
         return { status: "compaction-admitted" };
       }
       let task = this.ownedCaptainTask(input.taskID, caller);
+      if (this.member(task.crewID).backend) task = this.pi.reconcile(task);
       if (task.status === "queued") task = await this.promote(task, caller);
       if (input.op === "status")
         return {
@@ -573,6 +609,10 @@ export class CrewEngine {
         "Only the configured captain or assigned worker may use crew operations.",
       );
     this.member(peer.crewID);
+    if (this.member(peer.crewID).backend)
+      throw new CrewError(
+        "Pi workers cannot impersonate OpenCode tool callers.",
+      );
     const session = await this.sessions.get(
       { sessionID: caller.sessionID },
       { signal: caller.signal },
@@ -592,7 +632,10 @@ export class CrewEngine {
     operation: (peer: Peer) => Promise<T>,
   ): Promise<T> {
     await this.captain(caller);
-    this.member(crewID);
+    if (this.member(crewID).backend)
+      throw new CrewError(
+        "Pi worker compaction and live model switching are not supported.",
+      );
     const peer = await this.ensure(crewID, caller.signal);
     const active = this.state.activeTask(crewID);
     if (
@@ -637,6 +680,11 @@ export class CrewEngine {
     const worktree = this.options.worktrees[crewID];
     if (!worktree) throw new CrewError("Missing configured worker directory.");
     const peer = this.state.reservePeer(crewID);
+    if (member.backend) {
+      await this.pi.ensure(member, worktree, peer, signal);
+      this.state.readyPeer(crewID);
+      return { ...peer, status: "ready" };
+    }
     let session: CrewSession;
     try {
       session = await this.sessions.get(
@@ -750,7 +798,7 @@ export class CrewEngine {
         : busy;
     }
     caller.signal.throwIfAborted();
-    const task = this.state.reserveTask(peer, caller.sessionID);
+    const task = this.state.reserveTask(peer, caller.sessionID, input.text);
     if (!task)
       return input.queue
         ? {
@@ -762,6 +810,7 @@ export class CrewEngine {
   }
 
   private async idle(peer: Peer, signal: AbortSignal): Promise<boolean> {
+    if (this.member(peer.crewID).backend) return this.pi.idle(peer);
     try {
       await this.sessions.wait(
         { sessionID: peer.sessionID },
@@ -794,6 +843,23 @@ export class CrewEngine {
     text: string,
     caller: CrewCaller,
   ): Promise<CrewResult> {
+    const member = this.member(task.crewID);
+    if (member.backend) {
+      try {
+        caller.signal.throwIfAborted();
+        const peer = this.state.peer(task.crewID);
+        const worktree = this.options.worktrees[task.crewID];
+        if (!peer || !worktree)
+          throw new CrewError("Pi worker reservation missing.");
+        this.pi.start(member, worktree, peer, task, text);
+        return { status: "running", task: this.state.task(task.id) ?? task };
+      } catch {
+        this.state.uncertain(task.id);
+        throw new CrewError(
+          "Pi task admission unconfirmed; work will not be replayed automatically.",
+        );
+      }
+    }
     const envelope = JSON.stringify({
       taskID: task.id,
       crewID: task.crewID,
@@ -837,6 +903,11 @@ export class CrewEngine {
     if (this.state.cancelQueued(task.id, caller.sessionID)) return;
     if (!this.state.beginCancel(task.id, caller.sessionID)) return;
     try {
+      if (this.member(task.crewID).backend) {
+        const peer = this.state.peer(task.crewID);
+        if (peer) await this.pi.interrupt(peer);
+        return;
+      }
       await this.sessions.interrupt(
         { sessionID: task.workerSessionID, resume: false },
         {
@@ -848,6 +919,72 @@ export class CrewEngine {
     } finally {
       this.state.uncertain(task.id);
     }
+  }
+
+  /** Report tasks use the same slot/FIFO, but never join activity collection. */
+  queueReport(
+    sessionID: string,
+    reporter: string,
+    captureID: string,
+    text: string,
+  ): CrewTask {
+    if (!this.member(reporter).backend)
+      throw new CrewError(
+        "Activity reporter must be a configured Pi Durable worker.",
+      );
+    return this.state.enqueue(
+      this.state.reservePeer(reporter),
+      sessionID,
+      text,
+      captureID,
+    );
+  }
+
+  reportingTask(id: string): CrewTask | null {
+    const task = this.state.task(id);
+    return task && this.member(task.crewID).backend
+      ? this.pi.reconcile(task)
+      : task;
+  }
+
+  async progressReport(id: string, caller: CrewCaller) {
+    if (!this.state.reporting.isReport(id))
+      throw new CrewError("Not a reporting task.");
+    const task = this.ownedCaptainTask(id, caller);
+    const key = `${this.state.path}:${id}`;
+    let admission = reportAdmissions.get(key);
+    if (!admission) {
+      admission = this.admitReport(task, caller).finally(() => {
+        reportAdmissions.delete(key);
+      });
+      reportAdmissions.set(key, admission);
+    }
+    await admission;
+  }
+
+  private async admitReport(task: CrewTask, caller: CrewCaller) {
+    if (task.status === "queued") {
+      const directory = this.options.worktrees[task.crewID];
+      if (
+        !directory ||
+        !(await this.pi.canReport(this.member(task.crewID), directory))
+      ) {
+        this.state.cancelQueued(task.id, caller.sessionID);
+        throw new CrewError(
+          "Activity reporter unavailable: Pi backend cannot enforce tools-off, capture-only reporting; maintenance was not run.",
+        );
+      }
+      // Cancellation can occur while opening the backend. Recheck before any
+      // durable admission; a cancelled queued report must not start maintenance.
+      caller.signal.throwIfAborted();
+      await this.promote(this.ownedCaptainTask(task.id, caller), caller);
+    } else this.reportingTask(task.id);
+  }
+
+  async cancelReport(id: string, caller: CrewCaller) {
+    if (!this.state.reporting.isReport(id))
+      throw new CrewError("Not a reporting task.");
+    await this.cancel(this.ownedCaptainTask(id, caller), caller);
   }
 
   private async wait(
@@ -875,7 +1012,9 @@ export class CrewEngine {
     let observed: Promise<void> | undefined;
     try {
       for (;;) {
-        const current = this.ownedCaptainTask(task.id, caller);
+        let current = this.ownedCaptainTask(task.id, caller);
+        const piWorker = Boolean(this.member(current.crewID).backend);
+        if (piWorker) current = this.pi.reconcile(current);
         const notices = this.state.notices(task.id, after);
         if (caller.signal.aborted) {
           await this.cancel(current, caller);
@@ -891,7 +1030,7 @@ export class CrewEngine {
           return { status: current.status, task: current, notices };
         // A concurrent promotion reserves dispatching before SDK admission.
         // Observe idle only after admission; pre-admission idle is expected.
-        if (current.status === "running" && !observed)
+        if (current.status === "running" && !observed && !piWorker)
           observed = this.sessions
             .wait(
               { sessionID: task.workerSessionID },
@@ -942,8 +1081,20 @@ export class CrewEngine {
       throw new CrewError("Urgency requires an active task lineage.");
     if (input.to === "captain") {
       this.state.notice(source.id, input.text);
+      this.state.reporting.message(
+        source,
+        caller.agent,
+        this.options.team.captain.id,
+        `Urgent: ${input.text}`,
+        source.id,
+        caller.sessionID,
+      );
       return { status: "mailed" };
     }
+    if (this.member(input.to).backend)
+      throw new CrewError(
+        "Pi workers do not support live steering; use a subsequent assignment.",
+      );
     const target = this.state.activeTask(input.to);
     if (
       !target ||
@@ -972,6 +1123,14 @@ export class CrewEngine {
         },
         { signal: caller.signal },
       );
+      this.state.reporting.message(
+        source,
+        caller.agent,
+        input.to,
+        `Urgent: ${input.text}`,
+        target.id,
+        caller.sessionID,
+      );
       return { status: "steered" };
     } catch {
       this.state.uncertain(target.id);
@@ -984,6 +1143,17 @@ export class CrewEngine {
   }
 
   close() {
-    this.state.close();
+    this.closing ??= (async () => {
+      try {
+        await this.reporting.close();
+      } finally {
+        try {
+          await this.pi.close();
+        } finally {
+          this.state.close();
+        }
+      }
+    })();
+    return this.closing;
   }
 }

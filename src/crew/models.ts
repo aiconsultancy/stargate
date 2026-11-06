@@ -98,6 +98,10 @@ export class CrewModels {
         };
       }
       const { team } = this.authority.options;
+      if (team.crew.find(({ id }) => id === input.target)?.backend)
+        throw new CrewError(
+          "Pi worker models are configured in team JSON; live model tools apply only to OpenCode.",
+        );
       const directory =
         input.target === "captain"
           ? this.authority.options.captainDirectory

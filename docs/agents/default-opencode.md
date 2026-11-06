@@ -55,6 +55,10 @@ and `permissionProfile` (`coding` or `research`). IDs use lowercase letters,
 digits, `_` and `-`, at most 64 characters. IDs must be unique and distinct
 from the captain. `captain` is reserved as a worker-message recipient.
 Names/instructions are non-secret text, not credentials. Unknown fields fail.
+Agent IDs must match their assigned names, normalized to lowercase with word
+separators as hyphens. Hidden legacy aliases are rejected: Chief is `chief`,
+not `mario`; Adama is `adama`, not `bowser`. Existing mismatched installations
+need an explicit backed-up identity migration; never delete session history.
 Optional `historyScope` is `team` (default) or explicit `project`. Captain and
 crew use `pogo_history` to search OpenCode history through the API. Project
 scope may include other conversations in the target project; approve that
@@ -121,6 +125,69 @@ conflicting overlays; it does not overwrite a live Bowser installation.
 Existing sessions also keep their stored permission rules. New agent defaults
 do not grant history/model tools to old sessions; update session permissions
 only during an operator-approved rollout.
+
+## Pi Durable crew
+
+A crew member can opt into Pi Durable with `backend`. Other members remain
+OpenCode workers. For example, add this member to the team's `crew` array:
+
+```json
+{
+  "id": "twiki",
+  "name": "Twiki",
+  "role": "Bounded cleanup and maintenance tasks",
+  "permissionProfile": "coding",
+  "instructions": "Preserve unrelated work. Propose destructive cleanup before execution; require explicit operator approval from the captain.",
+  "backend": {
+    "type": "pi-durable",
+    "model": "openai/opencode-go/deepseek-v4.1-flash",
+    "provider": {
+      "baseURL": "http://127.0.0.1:8317/v1",
+      "apiKeyEnv": "CLIPROXYAPI_API_KEY"
+    },
+    "systemPrompt": "Perform only the captain's assigned maintenance task. Return changed files, checks and blockers. Never communicate directly with Slack.",
+    "tools": "coding"
+  }
+}
+```
+
+Do not set the member's OpenCode `model` field as well. `backend.model` selects
+the Pi model; `backend.directory` is not accepted because the crew worktree
+supplies it. The proxy must publish `opencode-go/deepseek-v4.1-flash`.
+The key variable must exist in the **OpenCode plugin host's** environment,
+not only the Slack gateway's environment. No paid/native route is substituted.
+
+Profile initialization creates Twiki's feature worktree, but not an OpenCode
+agent overlay. `pogo_crew ensure` creates one private Pi conversation, reused
+across assignments and host restarts. Pi storage lives under the team's private
+state directory, separate from OpenCode sessions. Its peer ID is a Pogo handle,
+not an OpenCode session that can be opened with `opencode mini`.
+
+The captain uses the existing `dispatch`, `wait`, `status`, and `queue: true`
+operations. Final Pi text completes the assigned task automatically; Twiki does
+not call `pogo_crew complete`. Only the originating captain can collect it.
+There is no extra Slack registration or unsolicited captain wakeup. Pi members
+do not support Mesij mail, live urgency, OpenCode history, compaction or model
+switching. Work stops after five minutes or the adapter's 50-turn ceiling.
+
+An interrupted or failed Pi task becomes `uncertain`; it blocks the worker
+instead of resubmitting maintenance automatically. Unconfirmed conversation
+creation is also not repeated. Inspect private state before recovery; never
+delete it to clear a reservation. Plugin shutdown cancels and closes Pi work.
+
+For an existing roster, an approved append-only rollout may set
+`allowCrewExpansion: true` in **each generated Pogo plugin's options**. Supply
+the same updated team and add Twiki's path to `worktrees`. This accepts only
+new Pi members, preserving every existing worker's ID, permission profile,
+directory, session, tasks and results. It rejects removal or rebinding. Clear
+the flag after rollout. Back up private state first and update at an idle
+boundary; the profile initializer still refuses conflicting overlays.
+
+`tools` defaults to `none`. `coding` grants trusted read/write/edit/bash in the
+host OS account; a worktree is **not a sandbox**, and there is no Slack tool
+approval UI. Approval instructions are cooperative, not enforced isolation.
+Do not grant coding tools to untrusted tasks. Research-profile Pi workers must
+keep `tools: "none"`.
 
 ## Linear connection
 
