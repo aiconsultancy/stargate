@@ -69,6 +69,7 @@ export const botSchema = z.strictObject({
     mentionOnly: z.boolean().default(false),
   }),
   backend: backendSchema,
+  threadContext: z.boolean().default(false),
   waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),
   concurrency: z.number().int().min(1).max(32).default(4),
   turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(300_000),

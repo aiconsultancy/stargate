@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import { WebClient } from "@slack/web-api";
 import pino from "pino";
 import { handleSlackRequest, SlackConnection } from "../src/slack";
 
@@ -23,15 +22,11 @@ test("Slack previews and edits keep plain text; reactions use the fixed target",
       return Response.json({ ok: true, ts: "2.000" });
     },
   });
-  const web = new WebClient("local-test-token", {
-    slackApiUrl: server.url.href,
-    retryConfig: { retries: 0 },
-  });
   const slack = new SlackConnection(
     "local-app-token",
     "local-bot-token",
     pino({ enabled: false }),
-    web,
+    { slackApiUrl: server.url.href },
   );
   try {
     const text = "<@UOTHER> & <https://example.test>";
@@ -72,15 +67,11 @@ test("Slack posts and streamed edits render agent Markdown without rewriting it"
       return Response.json({ ok: true, ts: "2.000" });
     },
   });
-  const web = new WebClient("local-test-token", {
-    slackApiUrl: server.url.href,
-    retryConfig: { retries: 0 },
-  });
   const slack = new SlackConnection(
     "local-app-token",
     "local-bot-token",
     pino({ enabled: false }),
-    web,
+    { slackApiUrl: server.url.href },
   );
   const text =
     "# Result\n\n**Bold**, _italic_, [docs](https://example.test).\n\n> Quote\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```ts\nconst x = a < b && c > d;\n```";
@@ -171,15 +162,11 @@ test("Slack opens, pushes, and updates cron views and posts scheduled roots", as
       return Response.json({ ok: true, ts: "8.000" });
     },
   });
-  const web = new WebClient("local-test-token", {
-    slackApiUrl: server.url.href,
-    retryConfig: { retries: 0 },
-  });
   const slack = new SlackConnection(
     "local-app-token",
     "local-bot-token",
     pino({ enabled: false }),
-    web,
+    { slackApiUrl: server.url.href },
   );
   const view = {
     type: "modal" as const,
