@@ -14,8 +14,12 @@ For agent-led app registration, CLI authentication, human approvals, and live
 verification, follow the [setup guide](docs/setup.md). It provisions Slack apps
 for Pogo without scaffolding a separate Bolt application.
 
-For trusted Indra work, use the [default OpenCode captain/crew profile](docs/agents/default-opencode.md):
-Bowser coordinates four durable crew sessions through CLIProxyAPI and Mesij.
+For trusted project work, use the [OpenCode captain/crew profile](docs/agents/default-opencode.md).
+Without `--team`, Bowser coordinates the four-member starter crew through
+CLIProxyAPI and Mesij. `pogo crew init --team team.example.json` selects a
+configured captain and variable roster; the portable example uses Galactica.
+Each team needs separate namespace, state, captain and crew directories, but
+can share an OpenCode V2 server. Existing Bowser/global settings are unchanged.
 Use the [shared global agent-profile prompt and skill](docs/agents/agent-profiles.md)
 to discover subscription models and install switchable model-named sub-agents.
 Review and approve its migration plan before changing global configuration.

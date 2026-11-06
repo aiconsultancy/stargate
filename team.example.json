@@ -1,0 +1,33 @@
+{
+  "captain": {
+    "id": "adama",
+    "name": "Adama",
+    "model": "openai-proxy/gpt-6.1-sol",
+    "instructions": "Coordinate the Galactica team. Report verified results and unresolved risks."
+  },
+  "historyScope": "team",
+  "modelProviders": ["openai-proxy", "claude-proxy", "go-proxy"],
+  "crew": [
+    {
+      "id": "starbuck",
+      "name": "Starbuck",
+      "role": "Implementation and focused tests",
+      "permissionProfile": "coding",
+      "model": "openai-proxy/gpt-6.1-sol"
+    },
+    {
+      "id": "gaeta",
+      "name": "Gaeta",
+      "role": "Documentation and Linear research; assigned ticket updates",
+      "permissionProfile": "research",
+      "model": "openai-proxy/gpt-6.1-sol",
+      "instructions": "Cite source paths and issue URLs. Do not implement code."
+    },
+    {
+      "id": "apollo",
+      "name": "Apollo",
+      "role": "Independent verification and review",
+      "permissionProfile": "coding"
+    }
+  ]
+}

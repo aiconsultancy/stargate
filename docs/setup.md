@@ -21,7 +21,15 @@ For end-to-end model-led setup, ask OpenCode to read the
 [agent-profile setup prompt and routing skill][agent-profile-gist], inspect this
 machine, and present its proposal before global migrations or authentication
 changes. Follow the [local application procedure](agents/agent-profiles.md),
-then install the [default captain/crew profile](agents/default-opencode.md).
+then install an [OpenCode captain/crew profile](agents/default-opencode.md).
+Omit `--team` for Bowser's starter roster. For a separate Galactica team, use
+`pogo crew init --team team.example.json` with new captain/crew directories.
+The non-secret JSON selects captain ID, worker IDs, roles, permission profiles
+and optional models/instructions. See the profile guide for required flags.
+Use separate namespace, state, captain and crew paths per team, even on one
+OpenCode server. Do not change live Bowser settings or rebind persisted team
+identities. Setup output supplies captain `agent` and `permissions` for gateway
+registration; register only the captain, never its workers, as a Slack bot.
 The gist's example models, reasoning syntax, and commands must be adapted to
 the installed V2 version, not copied without verification.
 
