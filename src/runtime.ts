@@ -10,6 +10,8 @@ import { CronScheduler } from "./cron";
 import { CronStore } from "./cron-store";
 import { CronUI } from "./cron-ui";
 import { Gateway } from "./gateway";
+import { controlInteractions } from "./interactions";
+import { PairingUI } from "./pairing";
 import { botKey } from "./routing";
 import { SlackConnection } from "./slack";
 import { Store } from "./store";
@@ -75,6 +77,14 @@ export async function start(configPath: string) {
       resources.push(backend);
       const gateway = new Gateway(bot, identity, store, backend, slack, botLog);
       const cronUI = new CronUI(bot, identity, cronStore, slack.cronUI, botLog);
+      const pairingUI = new PairingUI(
+        bot,
+        identity,
+        backend,
+        slack.cronUI,
+        botLog,
+        controller.signal,
+      );
       const cron = new CronScheduler(
         bot,
         identity,
@@ -86,13 +96,7 @@ export async function start(configPath: string) {
       await slack.start(
         (body) => !controller.signal.aborted && gateway.accept(body),
         botLog,
-        {
-          command: (body, ack) => cronUI.command(body, ack),
-          interactive: async (body, ack) => {
-            if (gateway.cancel(body)) await ack();
-            else await cronUI.interactive(body, ack);
-          },
-        },
+        controlInteractions(cronUI, pairingUI, (body) => gateway.cancel(body)),
       );
       const worker = gateway.work(controller.signal).catch(() => {
         botLog.error("Worker stopped unexpectedly");

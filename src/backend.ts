@@ -27,6 +27,8 @@ export interface AgentBackend {
     reporter: string,
     signal: AbortSignal,
   ): Promise<ActivityWatch>;
+  /** Sensitive, single-use pairing code. Never pass through model or storage. */
+  pair?(signal: AbortSignal): Promise<{ code: string; expiresIn: number }>;
   close(): Promise<void>;
 }
 

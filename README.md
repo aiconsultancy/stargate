@@ -84,6 +84,13 @@ Only the requester's and this bot's text can be included; other participants,
 files, and attachments are excluded. See [thread context](docs/thread-context.md)
 for limits, privacy, and Slack access requirements.
 
+`/pogo pair` lets configured operators request standard OpenCode device
+pairing in a private modal. Pairing is disabled until explicitly configured.
+It uses the existing authenticated server and configured Tailscale or
+Cloudflare addresses; it never enables remote access or creates a tunnel.
+Pairing grants server access, not access to only one Slack conversation.
+See [device pairing](docs/pairing.md) for authorization and expiry details.
+
 To respond wherever the bot is invited, allow all humans and accessible
 channels/DMs explicitly:
 

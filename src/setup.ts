@@ -28,6 +28,12 @@ export function buildManifest(name = "Pogo") {
       },
       slash_commands: [
         {
+          command: "/pogo",
+          description: "Manage Pogo operator controls",
+          usage_hint: "pair",
+          should_escape: true,
+        },
+        {
           command: "/cron",
           description: "Manage scheduled agent prompts",
           usage_hint: "[list|add|remove]",

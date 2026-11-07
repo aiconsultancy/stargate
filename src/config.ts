@@ -46,6 +46,46 @@ export const piDurableBackendSchema = z.strictObject({
   tools: z.enum(["none", "coding"]).default("none"),
 });
 
+// HTTP is permitted only for Tailscale names/addresses. Public routes need TLS.
+const pairingOrigin = z
+  .url()
+  .max(2048)
+  .refine((value) => {
+    if (!URL.canParse(value) || !/^https?:\/\//i.test(value)) return false;
+    const url = new URL(value);
+    if (
+      /[\s\\?#@]/.test(value) ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/"
+    )
+      return false;
+    if (url.protocol === "https:") return true;
+    if (url.protocol !== "http:") return false;
+    const host = url.hostname;
+    const parts = host.split(".").map(Number);
+    return (
+      host.endsWith(".ts.net") ||
+      (parts.length === 4 &&
+        parts.every(
+          (part) => Number.isInteger(part) && part >= 0 && part <= 255,
+        ) &&
+        parts[0] === 100 &&
+        (parts[1] ?? 0) >= 64 &&
+        (parts[1] ?? 256) <= 127) ||
+      host.startsWith("[fd7a:115c:a1e0:")
+    );
+  }, "Use an HTTPS origin, or an HTTP Tailscale origin, without credentials, path, query or fragment")
+  .transform((value) => new URL(value).origin);
+
+const pairingSchema = z.strictObject({
+  operators: z
+    .array(z.string().regex(/^[UW][A-Z0-9]+$/))
+    .min(1)
+    .max(100),
+  urls: z.array(pairingOrigin).min(1).max(5),
+});
+
 export const backendSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("opencode"),
@@ -92,6 +132,7 @@ export const botSchema = z.strictObject({
     mentionOnly: z.boolean().default(false),
   }),
   backend: backendSchema,
+  pairing: pairingSchema.optional(),
   threadContext: z.boolean().default(false),
   waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),
   crewActivity: crewActivitySchema.default({

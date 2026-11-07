@@ -424,13 +424,19 @@ Pogo's manifest enables Socket Mode and subscribes to `app_mention`,
 | `im:history`        | Receive direct messages                |
 | `chat:write`        | Send replies                           |
 | `reactions:write`   | Add context-selected emoji reactions   |
-| `commands`          | Open the `/cron` job manager           |
+| `commands`          | Open `/cron` and `/pogo pair` modals   |
 
 For `/cron`, apply the updated app manifest: it registers the command and
 enables interactivity over Socket Mode. No public request URL is needed.
 Reinstall existing apps after adding `commands` or `reactions:write`.
 Editing a local manifest file alone does not change the installed app.
 See [recurring prompts](cron.md) for ownership and execution limits.
+
+The generated manifest also registers `/pogo` for the optional operator-only
+`/pogo pair` command. Pairing stays disabled until the bot has an explicit
+`pairing.operators` list and `pairing.urls`. No extra scope is required.
+Read [pairing](pairing.md) before enabling it: a redeemed link grants full
+OpenCode server access for 30 days, not read-only conversation access.
 
 Reactions use
 [`reactions.add`](https://docs.slack.dev/reference/methods/reactions.add):

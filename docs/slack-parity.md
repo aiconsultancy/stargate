@@ -55,9 +55,12 @@ The linked documentation can change after this comparison.
    text is untrusted reference data. The current Slack method contract lists
    bot-token history scopes; membership and API errors still apply. This does
    not import channel history or establish per-user repository isolation.
-4. Session links: require an adapter-provided safe URL and an audience check.
-   Do not construct links with credentials or assume Slack membership grants
-   access to the backend transcript.
+4. Device pairing: `/pogo pair` can privately issue standard OpenCode pairing
+   URLs to explicitly configured operators. It never enables remote access or
+   a tunnel. After pairing, find the session by title in OpenCode. See
+   [pairing](pairing.md) for full-server access, expiry and privacy limits.
+   Session-specific links remain unavailable; do not guess UI routes or assume
+   Slack membership grants access to a backend transcript.
 5. Repository selection and approvals: define the authorization boundary
    first. A directory is not a sandbox, and a new UI must not expand access.
 

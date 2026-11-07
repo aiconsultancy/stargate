@@ -1,16 +1,22 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { OpenCode } from "@opencode/client";
+import { z } from "zod";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
 import type { AgentBackend, TextSink } from "../backend";
 import { type BackendConfig, secret } from "../config";
 import { CrewReporting } from "../crew/report-rpc";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
+const pairingCode = z.object({
+  code: z.string().regex(/^[A-Za-z0-9_-]{1,512}$/),
+  expires_in: z.number().int().positive().max(86_400),
+});
 
 export class OpenCodeBackend implements AgentBackend {
   private readonly client;
+  private readonly pairingClient;
   constructor(private readonly config: Config) {
-    this.client = OpenCode.make({
+    const options = {
       baseUrl: config.url,
       headers: Object.fromEntries(
         Object.entries(config.headersEnv).map(([header, env]) => [
@@ -18,7 +24,31 @@ export class OpenCodeBackend implements AgentBackend {
           secret(env),
         ]),
       ),
+    };
+    this.client = OpenCode.make(options);
+    // Same endpoint and authentication; never follow a pairing redirect.
+    this.pairingClient = OpenCode.make({
+      ...options,
+      fetch: Object.assign(
+        (url: URL | RequestInfo, init?: RequestInit) =>
+          fetch(url, { ...init, redirect: "error" }),
+        { preconnect: fetch.preconnect },
+      ),
     });
+  }
+
+  async pair(signal: AbortSignal) {
+    try {
+      signal.throwIfAborted();
+      const result = pairingCode.parse(
+        await this.pairingClient.server.pair({ signal }),
+      );
+      signal.throwIfAborted();
+      return { code: result.code, expiresIn: result.expires_in };
+    } catch {
+      // SDK failures and validation errors can contain credentials or codes.
+      throw new Error("OpenCode pairing failed; outcome may be unknown");
+    }
   }
 
   async createSession({

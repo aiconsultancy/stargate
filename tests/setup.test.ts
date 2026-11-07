@@ -63,6 +63,12 @@ test("manifest prefill round-trips and grants only intended scopes/events", () =
   ]);
   expect(manifest.features.slash_commands).toEqual([
     {
+      command: "/pogo",
+      description: "Manage Pogo operator controls",
+      usage_hint: "pair",
+      should_escape: true,
+    },
+    {
       command: "/cron",
       description: "Manage scheduled agent prompts",
       usage_hint: "[list|add|remove]",
