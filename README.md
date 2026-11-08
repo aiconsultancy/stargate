@@ -4,7 +4,9 @@ One Slack gateway. Multiple bot registrations. Pluggable agent backends.
 
 Pogo connects Slack to **OpenCode V2** over its TypeScript client or embeds
 **Pi Durable** directly. Each bot has separate Slack credentials, access rules,
-agent settings, and thread sessions. No public HTTP endpoint is required.
+agent settings, and sessions. Captains use one durable session across chat
+sources; ordinary bots can use separate thread sessions. No public HTTP
+endpoint is required.
 
 ## Quick start
 
@@ -56,8 +58,15 @@ Set `access.mentionOnly` to require a mention for every turn.
 New sessions use `<bot name> (slack <conversation ID>)` as their title, for
 example `Galactica Captain (slack D123)`. Set `displayName` on the bot to choose
 its name; otherwise Pogo uses the OpenCode agent name, then the bot ID.
-Existing titles stay unchanged. Threads keep separate sessions even when their
-titles match.
+Existing titles stay unchanged. Ordinary bots keep separate thread sessions
+even when their titles match. A captain instead uses its configured existing
+session for DMs, channels, threads and scheduled requests.
+
+For a captain, set OpenCode `backend.sessionID` to that native root session's ID
+and set the same `captainSessionID` in every crew plugin's options. Pogo never
+creates a replacement when a pinned session is unavailable or incompatible.
+Use the same session in OpenCode's native interfaces. See
+[captain session binding](docs/agents/default-opencode.md#one-captain-session).
 
 Built-in backends stream visible response text through coalesced Slack message
 updates. Agent replies use Slack's native Markdown blocks for headings, links,
@@ -359,11 +368,14 @@ SQLite file lock that the OS releases on exit.
 
 ## Guarantees and limits
 
-- Bot/app/workspace/backend/channel/thread identity separates sessions.
+- Bot/app/workspace/backend identity separates session namespaces. Ordinary
+  bots add channel/thread identity; a pinned captain shares one session across
+  its allowed chat sources. Its memory is shared, not a privacy boundary.
 - Messages queue in SQLite before Slack acknowledgement. Duplicate deliveries
   and overlapping `message`/`app_mention` events do not run the agent twice.
-- Turns run in order per thread; different threads run concurrently. Each bot
-  defaults to four concurrent turns and a 30-minute turn timeout (maximum one hour).
+- Ordinary turns run in order per thread; different threads can run concurrently.
+  Captain turns use one FIFO across sources. Each bot defaults to four concurrent
+  turns and a 30-minute turn timeout (maximum one hour).
 - Replies persist separately from execution; Slack retries do not rerun tools.
   Up to eight delivery attempts use bounded exponential delays.
 - A stopped process can leave tool outcomes unknown. On restart, Pogo attempts
@@ -379,9 +391,17 @@ SQLite file lock that the OS releases on exit.
   starts with a note that earlier replies may be missing. Existing threads
   start at current history, without backfill. Continuations are not
   guaranteed exactly once.
+  Pinned captains instead use one source-attributed cursor. Their replies go to
+  the originating job's destination, not every old chat. Unowned native UI
+  output stays in native history. Per-thread transcript repair is unsupported
+  for pinned captains.
 - Events Slack does not deliver during an outage are not recovered from history.
 - Backend-setting changes create a new session namespace. Pending jobs for an
   old backend identity remain on disk; they are not executed with new settings.
+  Adding `backend.sessionID` only binds an existing native session; it does not
+  change the namespace, thread admission or cron schedules. Changing that pin
+  requires an explicit idle migration. One pinned session can have only one bot
+  registration and one Pogo process owner.
 - Responses render Markdown, with no tool output or reasoning, at most 60,000
   Unicode characters; OpenCode transcript replies are not clipped. Streaming,
   `/cron`, and its interactive controls are supported. File transport and

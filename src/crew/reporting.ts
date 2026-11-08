@@ -57,7 +57,11 @@ export class ReportingStore {
   private names = new Map<string, string>();
   readonly journal: JournalStore;
 
-  constructor(private readonly db: Database) {
+  constructor(
+    private readonly db: Database,
+    /** Journal context for a stored origin; pinned teams use their root. */
+    private readonly captainRoute: (id: string) => string = (id) => id,
+  ) {
     this.journal = new JournalStore(db);
     db.exec(`
       CREATE TABLE IF NOT EXISTS activity_captures (
@@ -250,10 +254,11 @@ export class ReportingStore {
   assignment(task: CrewTask, text: string) {
     this.expire();
     if (this.isReport(task.id)) return;
+    const captainID = this.captainRoute(task.originCaptainID);
     this.journal.append(
       {
         member: task.crewID,
-        captainID: task.originCaptainID,
+        captainID,
         taskID: task.id,
         kind: "assignment",
         text: `${task.status === "queued" ? "Queued: " : ""}${text}`,
@@ -264,7 +269,7 @@ export class ReportingStore {
       .query<Capture, [string]>(
         "SELECT * FROM activity_captures WHERE sessionID=? AND status='collecting'",
       )
-      .get(task.originCaptainID);
+      .get(captainID);
     // The reporter's own maintenance must not create reports of itself.
     if (!capture || task.crewID === capture.reporterID) return;
     const count =
@@ -308,7 +313,7 @@ export class ReportingStore {
     this.journal.append(
       {
         member: task.crewID,
-        captainID: task.originCaptainID,
+        captainID: this.captainRoute(task.originCaptainID),
         taskID: task.id,
         kind,
         text,

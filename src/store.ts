@@ -20,6 +20,21 @@ export type Job = Incoming & {
   sent: number;
   attempts: number;
   failure?: RequestFailure | null;
+  input?: string | null;
+};
+
+export type CaptainCursor = {
+  cursor: string | undefined;
+  owner: number | null;
+};
+
+export type CaptainTranscript = {
+  botKey: string;
+  sessionID: string;
+  from: CaptainCursor;
+  cursor: string;
+  owner: number | null;
+  replies: { job: number; eventId: string; chunks: string[] }[];
 };
 
 const activityProgress = z.strictObject({
@@ -64,6 +79,10 @@ export class Store {
         job INTEGER NOT NULL REFERENCES jobs(id), part INTEGER NOT NULL,
         ts TEXT NOT NULL, PRIMARY KEY(job, part)
       );
+      CREATE TABLE IF NOT EXISTS captain_cursors (
+        botKey TEXT NOT NULL, session_id TEXT NOT NULL, cursor TEXT,
+        owner INTEGER, PRIMARY KEY(botKey, session_id)
+      );
     `);
     const column = (table: string, name: string, type: string) => {
       if (
@@ -71,12 +90,22 @@ export class Store {
           .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
           .all()
           .some((column) => column.name === name)
-      )
+      ) {
         this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+        return true;
+      }
+      return false;
     };
     column("jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "failure", "TEXT");
     column("jobs", "activity", "TEXT");
+    column("jobs", "input", "TEXT");
+    // Preserve source-first context and legacy ownership; keep statuses intact.
+    if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
+      this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
+      AND status!='queued' AND failure IS NOT 'context'
+      AND failure IS NOT 'cancelled' AND text!='';`);
+    this.db.exec("CREATE INDEX IF NOT EXISTS jobs_input ON jobs(botKey,input)");
     // Newest native message accounted for in Slack; NULL needs a baseline.
     column("sessions", "cursor", "TEXT");
     // Server-wide settle events look up mappings by native session ID.
@@ -124,6 +153,152 @@ export class Store {
         "SELECT * FROM jobs WHERE botKey=? AND conversation=? AND activity IS NOT NULL ORDER BY id DESC LIMIT 1",
       )
       .get(botKey, conversation);
+  }
+
+  latestBotActivity(botKey: string): Job | null {
+    return this.db
+      .query<Job, [string]>(
+        "SELECT * FROM jobs WHERE botKey=? AND activity IS NOT NULL ORDER BY id DESC LIMIT 1",
+      )
+      .get(botKey);
+  }
+
+  sourceStarted(conversation: string, before: number): boolean {
+    return (
+      this.db
+        .query(
+          "SELECT 1 FROM jobs WHERE conversation=? AND id<? AND started=1 AND failure IS NOT 'context' LIMIT 1",
+        )
+        .get(conversation, before) !== null
+    );
+  }
+
+  /** Persist admission correlation before the backend submits any native work. */
+  saveInput(botKey: string, id: number, input: string, sessionID?: string) {
+    this.db.transaction(() => {
+      if (
+        this.db
+          .query(
+            "UPDATE jobs SET input=? WHERE botKey=? AND id=? AND status='running' AND input IS NULL",
+          )
+          .run(input, botKey, id).changes !== 1
+      )
+        throw new Error("Native input could not be recorded");
+      // Failed initial baselines still have a durable, owned lower bound.
+      if (sessionID)
+        this.db
+          .query(`UPDATE captain_cursors SET cursor=?,owner=?
+        WHERE botKey=? AND session_id=? AND cursor IS NULL`)
+          .run(input, id, botKey, sessionID);
+    })();
+  }
+
+  jobByInput(botKey: string, input: string): Job | null {
+    return this.db
+      .query<Job, [string, string]>(
+        "SELECT * FROM jobs WHERE botKey=? AND input=? ORDER BY id DESC LIMIT 1",
+      )
+      .get(botKey, input);
+  }
+
+  /** One cursor per pin. Old thread mappings and all outbox rows stay intact. */
+  captainCursor(botKey: string, sessionID: string): CaptainCursor {
+    return this.db.transaction(() => {
+      const legacy = this.db
+        .query<
+          { cursor: string | null; owner: number },
+          [string, string]
+        >(`SELECT s.cursor,j.id AS owner FROM sessions s
+        JOIN jobs j ON j.conversation=s.conversation
+        WHERE j.botKey=? AND s.session_id=? AND j.started=1 AND j.failure IS NOT 'context'
+        ORDER BY j.id DESC LIMIT 1`)
+        .get(botKey, sessionID);
+      this.db
+        .query(`INSERT OR IGNORE INTO captain_cursors
+        (botKey,session_id,cursor,owner) VALUES (?,?,?,?)`)
+        .run(botKey, sessionID, legacy?.cursor ?? null, legacy?.owner ?? null);
+      const row = this.db
+        .query<
+          { cursor: string | null; owner: number | null },
+          [string, string]
+        >(
+          "SELECT cursor,owner FROM captain_cursors WHERE botKey=? AND session_id=?",
+        )
+        .get(botKey, sessionID);
+      if (!row) throw new Error("Captain cursor not found");
+      return { cursor: row.cursor ?? undefined, owner: row.owner };
+    })();
+  }
+
+  captainBusy(botKey: string): boolean {
+    return (
+      this.db
+        .query(`SELECT 1 FROM jobs WHERE botKey=?
+      AND status IN ('queued','running') LIMIT 1`)
+        .get(botKey) !== null
+    );
+  }
+
+  baselineCaptain(
+    botKey: string,
+    sessionID: string,
+    cursor: string,
+  ): CaptainCursor {
+    this.db
+      .query(`UPDATE captain_cursors SET cursor=?
+      WHERE botKey=? AND session_id=? AND cursor IS NULL`)
+      .run(cursor, botKey, sessionID);
+    return this.captainCursor(botKey, sessionID);
+  }
+
+  interruptedInput(botKey: string): string | undefined {
+    return this.db
+      .query<{ input: string }, [string]>(
+        "SELECT input FROM jobs WHERE botKey=? AND status='running' AND input IS NOT NULL ORDER BY id DESC LIMIT 1",
+      )
+      .get(botKey)?.input;
+  }
+
+  /** Atomic shared cursor and source-provenanced delivery; never broadcasts. */
+  private commitCaptain(input: CaptainTranscript) {
+    if (
+      this.db
+        .query(`UPDATE captain_cursors SET cursor=?,owner=?
+      WHERE botKey=? AND session_id=? AND cursor IS ? AND owner IS ?`)
+        .run(
+          input.cursor,
+          input.owner,
+          input.botKey,
+          input.sessionID,
+          input.from.cursor ?? null,
+          input.from.owner,
+        ).changes !== 1
+    )
+      throw new TranscriptConflict();
+    for (const reply of input.replies) {
+      if (
+        this.db
+          .query(`INSERT OR IGNORE INTO jobs
+        (eventId,botKey,conversation,channel,thread,user,text,status,response)
+        SELECT ?,botKey,conversation,channel,thread,user,'','responding',?
+        FROM jobs WHERE botKey=? AND id=?`)
+          .run(
+            reply.eventId,
+            JSON.stringify(reply.chunks),
+            input.botKey,
+            reply.job,
+          ).changes !== 1
+      )
+        throw new TranscriptConflict();
+    }
+  }
+
+  appendCaptainTranscript(input: CaptainTranscript): boolean {
+    return this.db.transaction(() => {
+      if (this.captainBusy(input.botKey)) return false;
+      this.commitCaptain(input);
+      return true;
+    })();
   }
 
   follows(conversation: string): boolean {
@@ -304,13 +479,20 @@ export class Store {
     })();
   }
 
-  ready(botKey: string, now: number, limit: number): Job[] {
+  ready(botKey: string, now: number, limit: number, serial = false): Job[] {
     return this.db
       .query<Job, [string, number, number]>(`SELECT * FROM jobs j
       WHERE botKey = ? AND status IN ('queued','responding') AND retry_at <= ?
       AND NOT EXISTS (SELECT 1 FROM jobs earlier
         WHERE earlier.conversation=j.conversation AND earlier.id < j.id
-        AND earlier.status IN ('queued','running','responding'))
+         AND earlier.status IN ('queued','running','responding'))
+      ${
+        serial
+          ? `AND (j.status!='queued' OR NOT EXISTS
+        (SELECT 1 FROM jobs pending WHERE pending.botKey=j.botKey
+        AND pending.id<j.id AND pending.status IN ('queued','running')))`
+          : ""
+      }
       ORDER BY id LIMIT ?`)
       .all(botKey, now, limit);
   }
@@ -323,6 +505,12 @@ export class Store {
         )
         .run(id).changes > 0
     );
+  }
+
+  started(id: number) {
+    this.db
+      .query("UPDATE jobs SET started=1 WHERE id=? AND status='running'")
+      .run(id);
   }
 
   cancel(
@@ -386,6 +574,7 @@ export class Store {
     options: {
       keep?: number;
       transcript?: { from: string | undefined; cursor: string };
+      captain?: CaptainTranscript;
     } = {},
   ) {
     return this.db.transaction(() => {
@@ -401,7 +590,7 @@ export class Store {
         : chunks;
       this.db
         .query(
-          "UPDATE jobs SET status='responding',response=?,failure=?,sent=0 WHERE id=?",
+          "UPDATE jobs SET started=CASE WHEN status='running' THEN 1 ELSE started END,status='responding',response=?,failure=?,sent=0 WHERE id=?",
         )
         .run(
           JSON.stringify(response),
@@ -422,6 +611,7 @@ export class Store {
           ).changes === 0
       )
         throw new TranscriptConflict();
+      if (options.captain) this.commitCaptain(options.captain);
       return response;
     })();
   }

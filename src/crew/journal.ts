@@ -73,16 +73,20 @@ export class JournalStore {
     );
   }
 
-  read(captainID: string, after: number, limit: number, member?: string) {
+  /** `null` reads every captain context of a pinned single-captain team. */
+  read(
+    captainID: string | null,
+    after: number,
+    limit: number,
+    member?: string,
+  ) {
+    const scope = captainID === null ? "captainID!=''" : "captainID=?1";
     const entries = this.db
-      .query<
-        JournalEntry,
-        [string, number, string | null, string | null, number]
-      >(
+      .query<JournalEntry, [string, number, string | null, number]>(
         `SELECT id,created,member,captainID,taskID,kind,text FROM journal
-       WHERE captainID=? AND id>? AND (? IS NULL OR member=?) ORDER BY id LIMIT ?`,
+       WHERE ${scope} AND id>?2 AND (?3 IS NULL OR member=?3) ORDER BY id LIMIT ?4`,
       )
-      .all(captainID, after, member ?? null, member ?? null, limit + 1);
+      .all(captainID ?? "", after, member ?? null, limit + 1);
     const truncated = entries.length > limit;
     if (truncated) entries.pop();
     return { entries, nextAfter: entries.at(-1)?.id ?? after, truncated };

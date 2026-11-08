@@ -92,6 +92,12 @@ export const crewOptionsSchema = z
     team: teamSchema.optional(),
     allowCrewExpansion: z.boolean().optional(),
     mesijCommand: directory,
+    /** The one native captain root; earlier roots stay history. */
+    captainSessionID: z
+      .string()
+      .max(256)
+      .regex(/^ses_[A-Za-z0-9]+$/)
+      .optional(),
   })
   .superRefine((options, context) => {
     const team = options.team ?? defaultTeam;
@@ -465,6 +471,7 @@ export class CrewEngine {
       fingerprint,
       legacyCompatible ? legacyFingerprint : undefined,
       options.allowCrewExpansion,
+      options.captainSessionID,
     );
     return new CrewEngine(
       options,
@@ -499,6 +506,33 @@ export class CrewEngine {
 
   mailActor(sessionID: string) {
     return this.actor(sessionID);
+  }
+
+  /** Same captain context: equal IDs, or both lineage of the pinned root. */
+  sameCaptain(stored: string | undefined, captainID: string): boolean {
+    return (
+      stored === captainID ||
+      (stored !== undefined &&
+        this.state.captainLineage(stored) &&
+        this.state.captainLineage(captainID))
+    );
+  }
+
+  /** Authority: only an authenticated pinned root inherits earlier roots. */
+  private ownsCaptainLineage(stored: string, caller: CrewCaller): boolean {
+    return (
+      stored === caller.sessionID ||
+      (caller.agent === this.options.team.captain.id &&
+        caller.sessionID === this.options.captainSessionID &&
+        this.state.captainLineage(stored))
+    );
+  }
+
+  /** Stored origin for state guards when this captain owns the task. */
+  private captainOrigin(task: CrewTask, caller: CrewCaller): string {
+    return this.ownsCaptainLineage(task.originCaptainID, caller)
+      ? task.originCaptainID
+      : caller.sessionID;
   }
 
   mailTask(
@@ -652,7 +686,7 @@ export class CrewEngine {
         this.state.hasQueued(peer.crewID) ||
         (task &&
           ((task.status !== "completed" &&
-            task.originCaptainID !== route.captainID) ||
+            !this.sameCaptain(task.originCaptainID, route.captainID)) ||
             !["running", "dispatching", "completed"].includes(task.status) ||
             task.notifying)))
     )
@@ -663,13 +697,14 @@ export class CrewEngine {
       caller.agent === this.options.team.captain.id
         ? caller.sessionID
         : this.mailTask(caller)?.originCaptainID;
-    if (busy && senderCaptainID !== route.captainID) return "deferred";
+    if (busy && !this.sameCaptain(senderCaptainID, route.captainID))
+      return "deferred";
     if (busy && delivery === "queue" && !this.member(busy.crewID).backend)
       return "unsupported";
     const framing = `Pogo DM ${route.id} from ${caller.agent}.\n${text}\n\nReply through pogo_mail or pogo_dm with replyTo=${route.id}; a final answer is not a peer reply.${busy ? ` Your final answer remains task ${busy.id}'s result; restate it if you had already finished.` : ""}`;
     if (!peer && route.sourceTaskID) {
       const source = this.state.task(route.sourceTaskID);
-      if (source?.originCaptainID === route.recipient)
+      if (source && this.sameCaptain(source.originCaptainID, route.recipient))
         this.state.noticeOnce(route.id, source.id, framing);
     }
     if (busy && !this.state.beginNotify(busy.id)) return "deferred";
@@ -770,10 +805,12 @@ export class CrewEngine {
         ? caller.sessionID
         : (task?.originCaptainID ?? "");
     const store = this.state.reporting.journal;
+    // A pinned team has one captain; its lineage shares one journal context.
+    const lineage = this.state.captainLineage(captainID);
     if (input.data.op === "read")
       return {
         ...store.read(
-          captainID,
+          lineage ? null : captainID,
           input.data.after,
           input.data.limit,
           captainID ? input.data.member : caller.agent,
@@ -785,7 +822,7 @@ export class CrewEngine {
     const entry = store.append(
       {
         member: caller.agent,
-        captainID,
+        captainID: this.state.captainRoute(captainID),
         taskID: task?.id ?? null,
         kind: "note",
         text: input.data.text,
@@ -869,7 +906,7 @@ export class CrewEngine {
           mail.recipient !== caller.sessionID ||
           mail.sender !== event.sessionID ||
           event.actor !== this.actor(mail.sender) ||
-          (source.originCaptainID !== caller.sessionID &&
+          (!this.ownsCaptainLineage(source.originCaptainID, caller) &&
             caller.agent === this.options.team.captain.id &&
             !statusLineage) ||
           (mail.sender !== origin.originCaptainID &&
@@ -1014,6 +1051,11 @@ export class CrewEngine {
       throw new CrewError(
         `Only ${this.options.team.captain.name ?? this.options.team.captain.id} captain sessions may perform this operation.`,
       );
+    const pin = this.options.captainSessionID;
+    if (pin && caller.sessionID !== pin)
+      throw new CrewError(
+        `Only the configured ${this.options.team.captain.name ?? this.options.team.captain.id} session may perform this operation; earlier captain sessions are retained history.`,
+      );
     const session = await this.sessions.get(
       { sessionID: caller.sessionID },
       { signal: caller.signal },
@@ -1071,6 +1113,7 @@ export class CrewEngine {
     caller: CrewCaller,
     operation: (peer: Peer) => Promise<T>,
   ): Promise<T> {
+    caller = this.logicalCaller(caller);
     await this.captain(caller);
     if (this.member(crewID).backend)
       throw new CrewError(
@@ -1081,7 +1124,7 @@ export class CrewEngine {
     if (
       active &&
       active.status !== "completed" &&
-      active.originCaptainID !== caller.sessionID
+      !this.ownsCaptainLineage(active.originCaptainID, caller)
     )
       throw new CrewError("This crew member is busy for another captain.");
     const token = this.state.reserveControl(crewID);
@@ -1183,7 +1226,7 @@ export class CrewEngine {
 
   private ownedCaptainTask(id: string, caller: CrewCaller): CrewTask {
     const task = this.state.task(id);
-    if (!task || task.originCaptainID !== caller.sessionID)
+    if (!task || !this.ownsCaptainLineage(task.originCaptainID, caller))
       throw new CrewError("This captain does not own the requested task.");
     return task;
   }
@@ -1773,7 +1816,7 @@ export class CrewEngine {
     if (recovered) active = recovered.task;
     const busy: CrewResult = {
       status: "busy",
-      ...(active?.originCaptainID === caller.sessionID
+      ...(active && this.ownsCaptainLineage(active.originCaptainID, caller)
         ? {
             task: active,
             ...(recovered?.diagnostic
@@ -1941,9 +1984,10 @@ export class CrewEngine {
   }
 
   private async cancel(task: CrewTask, caller: CrewCaller) {
-    if (this.state.cancelQueued(task.id, caller.sessionID)) return;
+    const origin = this.captainOrigin(task, caller);
+    if (this.state.cancelQueued(task.id, origin)) return;
     const previous = this.state.task(task.id)?.status ?? task.status;
-    if (!this.state.beginCancel(task.id, caller.sessionID)) return;
+    if (!this.state.beginCancel(task.id, origin)) return;
     try {
       if (this.member(task.crewID).backend) {
         const peer = this.state.peer(task.crewID);
@@ -1953,7 +1997,12 @@ export class CrewEngine {
       // Withdraw the own queued input first; interrupt only proven placement.
       const stop = await this.stopOwnInput(task, caller, previous);
       if (stop.withdrawn)
-        this.state.withdrawCancelled(task, caller.sessionID, stop.detail);
+        this.state.withdrawCancelled(
+          task,
+          origin,
+          stop.detail,
+          caller.sessionID,
+        );
     } catch {
       // Native stop can fail independently; keep the reservation uncertain.
     } finally {
@@ -2047,7 +2096,7 @@ export class CrewEngine {
         !directory ||
         !(await this.pi.canReport(this.member(task.crewID), directory))
       ) {
-        this.state.cancelQueued(task.id, caller.sessionID);
+        this.state.cancelQueued(task.id, this.captainOrigin(task, caller));
         throw new CrewError(
           "Activity reporter unavailable: Pi backend cannot enforce tools-off, capture-only reporting; maintenance was not run.",
         );

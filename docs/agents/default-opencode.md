@@ -10,7 +10,7 @@ crew can edit files and run commands under the OpenCode service's OS account.
 
 | Primary agent | Role                                                                       | Lifetime                                   |
 | ------------- | -------------------------------------------------------------------------- | ------------------------------------------ |
-| Bowser        | Answer simple questions; coordinate substantial work; return Slack replies | One existing Pogo session per Slack thread |
+| Bowser        | Answer simple questions; coordinate substantial work; return Slack replies | One durable session per configured captain |
 | Mario         | Backend and general implementation                                         | One durable session per bot                |
 | Luigi         | Frontend and integration implementation                                    | One durable session per bot                |
 | Daisy         | Documentation/Linear research; assigned ticket updates and comments        | One durable session per bot                |
@@ -18,6 +18,9 @@ crew can edit files and run commands under the OpenCode service's OS account.
 
 Crew sessions are root OpenCode sessions, not temporary children of a Slack
 thread. The captain creates them lazily through the V2 API and reuses them.
+The captain also has one durable session. DMs, channels, threads and scheduled
+work select reply destinations, not new captain identities. Captain memory is
+shared across these sources; use separate teams for separate trust boundaries.
 There is one per configured member, across all the team's threads. Each member
 has a named worktree and manages feature branches there. Never work on or
 commit to `main` or `master`. The captain workspace stores coordination state,
@@ -110,6 +113,57 @@ Optional `modelProviders` bounds model-tool discovery/switches. It defaults to
 another provider. The example records this allowlist explicitly.
 For the gateway captain session, select `backend.agent` and, when needed,
 `backend.model` explicitly; changing agents does not replace a stored model.
+
+## One captain session
+
+Bind one existing native root session before starting the captain gateway.
+Set its ID in two places:
+
+- Gateway registration: OpenCode `backend.sessionID`.
+- Every team location's Pogo plugin options: `captainSessionID`.
+
+The IDs must match. For example, the gateway backend can contain:
+
+```json
+{
+  "type": "opencode",
+  "url": "http://127.0.0.1:4096",
+  "directory": "/srv/pogo/galactica/captain",
+  "agent": "galactica-captain-adama",
+  "sessionID": "ses_existingCaptain"
+}
+```
+
+This fragment omits permissions. Keep the trusted profile's explicit rules.
+A pinned session keeps its stored model and permissions; binding does not
+replace them. Pogo validates the session ID, root identity, agent and directory.
+Missing or incompatible sessions fail instead of creating replacement roots.
+Use the same session in OpenCode's native interfaces.
+
+For a fresh installation, generate the profiles first, then select or create
+one root session with the configured captain agent and directory. Creating a
+native session does not start a model turn. Record its ID and set both pins.
+For a profile generated around an existing session, `crew init --session-id`
+puts the plugin pin in each generated location and returns `sessionID` for the
+gateway. `bot add --session-id` sets the gateway pin. Existing conflicting
+profile files are not overwritten; update existing pins explicitly.
+
+Only one bot registration and one gateway process may own that pinned session.
+Pogo rejects duplicate pins within one configuration. Separate processes cannot
+detect each other's pins, so cross-process sharing is unsupported.
+
+When migrating, retain the original captain and archive duplicate roots only
+after confirming they are idle. Keep their history and raw task ownership IDs.
+The canonical captain can collect legacy tasks and receives new captain-alias
+messages. Old Mesij messages already addressed to duplicate roots remain in
+those mailboxes; they are not copied into the canonical inbox.
+A previously unconfirmed captain-bound send retried after binding can store
+a second copy for the canonical recipient because its destination key changes.
+Check its retained receipt before retrying.
+
+OpenCode's plugin API has no session-create hook. An operator can still create
+another native root manually, but the pinned crew plugin refuses it captain
+authority. Pogo neither creates nor wakes replacement captain roots.
 
 The namespace defaults to the captain ID (`adama` here); `--id` overrides it.
 Worktrees use member IDs and branches `crew/<namespace>-<member ID>`.

@@ -25,6 +25,13 @@ import {
 } from "../maintenance";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
+const pinnedSessionSchema = z.object({
+  id: z.string(),
+  parentID: z.string().optional(),
+  fork: z.unknown().optional(),
+  agent: z.string().optional(),
+  location: z.object({ directory: z.string() }),
+});
 const pairingCode = z.object({
   code: z.string().regex(/^[A-Za-z0-9_-]{1,512}$/),
   expires_in: z.number().int().positive().max(86_400),
@@ -110,6 +117,33 @@ export class OpenCodeBackend implements AgentBackend {
     title,
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
+    if (this.sessionID !== undefined) {
+      signal.throwIfAborted();
+      try {
+        const session = pinnedSessionSchema.parse(
+          await this.client.session.get(
+            { sessionID: this.sessionID },
+            { signal },
+          ),
+        );
+        signal.throwIfAborted();
+        if (
+          session.id !== this.sessionID ||
+          session.parentID !== undefined ||
+          session.fork !== undefined ||
+          session.location.directory !== this.config.directory ||
+          (this.config.agent !== undefined &&
+            session.agent !== this.config.agent)
+        ) {
+          throw new Error("Incompatible pinned session");
+        }
+        // Operator-selected roots retain their stored model and permissions.
+        return this.sessionID;
+      } catch {
+        signal.throwIfAborted();
+        throw new Error("Pinned OpenCode session unavailable or incompatible");
+      }
+    }
     const session = await this.client.session.create(
       {
         title,
@@ -123,11 +157,16 @@ export class OpenCodeBackend implements AgentBackend {
     return session.id;
   }
 
+  get sessionID(): string | undefined {
+    return this.config.sessionID;
+  }
+
   async prompt(
     sessionId: string,
     text: string,
     signal: AbortSignal,
     onText?: TextSink,
+    onInput?: (id: string) => void,
   ) {
     this.inputs.delete(sessionId);
     signal.throwIfAborted();
@@ -228,6 +267,8 @@ export class OpenCodeBackend implements AgentBackend {
       }
       signal.throwIfAborted();
       const id = SessionMessage.ID.create();
+      onInput?.(id);
+      signal.throwIfAborted();
       phase = { type: "submitting", input: id };
       this.inputs.set(sessionId, id);
       const input = await this.client.session.prompt(
@@ -242,7 +283,7 @@ export class OpenCodeBackend implements AgentBackend {
       );
       phase = { type: "settled" };
       // Read backwards to the submitted input; do not resend earlier replies.
-      const replies: string[] = [];
+      const replies: { text: string; failed: boolean }[] = [];
       let cursor: string | undefined;
       do {
         // A continuation cursor carries the first page's order.
@@ -253,15 +294,27 @@ export class OpenCodeBackend implements AgentBackend {
           { signal },
         );
         for (const message of page.data) {
-          if (message.id === input.id) return replies.reverse().join("\n\n");
+          if (message.id === input.id) {
+            if (replies.some((reply) => reply.failed))
+              throw new Error("OpenCode generation failed");
+            return replies
+              .reverse()
+              .map((reply) => reply.text)
+              .join("\n\n");
+          }
+          if (message.type === "user" || message.type === "shell") {
+            // Later native UI turns cannot become this prompt's public reply.
+            replies.length = 0;
+            continue;
+          }
           if (message.type !== "assistant") continue;
-          if (message.error) throw new Error("OpenCode generation failed");
-          replies.push(
-            message.content
+          replies.push({
+            failed: message.error !== undefined,
+            text: message.content
               .filter((part) => part.type === "text")
               .map((part) => part.text)
               .join("\n"),
-          );
+          });
         }
         cursor = page.cursor.next ?? undefined;
       } while (cursor);
@@ -272,20 +325,7 @@ export class OpenCodeBackend implements AgentBackend {
       if (phase.type === "submitting" || phase.type === "submitted") {
         const input = phase.input;
         const cleanup = AbortSignal.timeout(5000);
-        // First withdraw our inbox item. It may race placement; history, not
-        // connection readiness, determines whether session interruption is ours.
-        await this.client.session.inbox
-          .cancel({ sessionID: sessionId, inboxID: input }, { signal: cleanup })
-          .catch(() => {});
-        await this.followsInput(sessionId, input, cleanup)
-          .then(async (placed) => {
-            if (placed)
-              await this.client.session.interrupt(
-                { sessionID: sessionId },
-                { signal: cleanup },
-              );
-          })
-          .catch(() => {});
+        await this.interruptInput(sessionId, input, cleanup).catch(() => {});
       }
       throw error;
     } finally {
@@ -326,7 +366,10 @@ export class OpenCodeBackend implements AgentBackend {
         { signal },
       );
       for (const message of page.data) {
-        if (message.id === input) return found;
+        if (message.type === "user" || message.type === "shell") {
+          if (found) return message.id === input;
+          if (message.id === input) return false;
+        }
         if (message.id === assistant && message.type === "assistant")
           found = true;
       }
@@ -350,6 +393,22 @@ export class OpenCodeBackend implements AgentBackend {
       // Typed SDK error only; never parse raw messages.
       if (!isSessionNotFoundError(error)) throw error;
     }
+  }
+
+  async interruptInput(
+    sessionId: string,
+    inputId: string,
+    signal: AbortSignal,
+  ) {
+    signal.throwIfAborted();
+    // Exact withdrawal cannot cancel another queued input. Placement can race
+    // it, so only the latest raw input, not a settled transcript, permits stop.
+    await this.client.session.inbox
+      .cancel({ sessionID: sessionId, inboxID: inputId }, { signal })
+      .catch(() => {});
+    signal.throwIfAborted();
+    if (await this.followsInput(sessionId, inputId, signal))
+      await this.interrupt(sessionId, signal);
   }
 
   async startMaintenance(
@@ -424,8 +483,12 @@ export class OpenCodeBackend implements AgentBackend {
       message.error !== undefined ||
       (idle !== undefined && message.time.created <= idle);
     // Keep compact records; long gaps must not retain tool payloads.
-    const newer: { id: string; settled: boolean; entry?: TranscriptEntry }[] =
-      [];
+    const newer: {
+      id: string;
+      settled: boolean;
+      entry?: TranscriptEntry;
+      input?: string;
+    }[] = [];
     const cursors = new Set<string>();
     let cursor: string | undefined;
     let reached = false;
@@ -448,6 +511,9 @@ export class OpenCodeBackend implements AgentBackend {
           id: message.id,
           settled: settled(message),
           ...(entry ? { entry } : {}),
+          ...(message.type === "user" || message.type === "shell"
+            ? { input: message.id }
+            : {}),
         });
       }
       cursor = result.cursor.next ?? undefined;
@@ -462,18 +528,31 @@ export class OpenCodeBackend implements AgentBackend {
     const open = chronological.findIndex((message) => !message.settled);
     const done = open < 0 ? chronological : chronological.slice(0, open);
     const head = done.at(-1)?.id;
+    let input: string | undefined;
+    const entries: TranscriptEntry[] = [];
+    for (const message of done) {
+      if (message.input !== undefined) input = message.input;
+      if (message.entry)
+        entries.push({
+          ...message.entry,
+          ...(input !== undefined ? { input } : {}),
+        });
+    }
     if (after !== undefined)
       return {
         cursor: head ?? after,
-        entries: done.flatMap((message) =>
-          message.entry ? [message.entry] : [],
-        ),
+        entries,
+        ...(input !== undefined ? { input } : {}),
         ...(open < 0 ? {} : { pending: true as const }),
       };
     // A baseline never delivers earlier history.
     if (head === undefined && cursor)
       throw new Error("OpenCode transcript baseline unavailable");
-    return { cursor: head ?? "", entries: [] };
+    return {
+      cursor: head ?? "",
+      entries: [],
+      ...(input !== undefined ? { input } : {}),
+    };
   }
 
   async watch(

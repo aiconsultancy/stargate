@@ -52,6 +52,8 @@ export async function repairTranscript(input: {
   limit?: number;
   signal?: AbortSignal;
 }): Promise<TranscriptRepair> {
+  if (input.backend.sessionID)
+    throw new Error("Captain-scoped transcript repair unsupported");
   if (!input.backend.transcript)
     throw new Error("Backend has no transcript support");
   const conversation = conversationKey(

@@ -87,13 +87,15 @@ test("OpenCode transcript returns settled public text after the cursor only", as
     const signal = new AbortController().signal;
     expect(await f.backend.transcript("session-1", "m2", signal)).toEqual({
       cursor: "m7",
+      input: "m3",
       entries: [
         {
           id: "m4",
           text: "Compile failure found.\nFixes in place.",
           created: 40,
+          input: "m3",
         },
-        { id: "m6", text: "Pushed 79233.", created: 60 },
+        { id: "m6", text: "Pushed 79233.", created: 60, input: "m3" },
       ],
       pending: true, // m8 is still streaming; the cursor stops before it.
     });

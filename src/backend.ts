@@ -11,7 +11,13 @@ import type { MaintenanceWatch } from "./maintenance";
 export type TextSink = (text: string) => void;
 
 /** Public text of one settled assistant message; never reasoning or tools. */
-export type TranscriptEntry = { id: string; text: string; created: number };
+export type TranscriptEntry = {
+  id: string;
+  text: string;
+  created: number;
+  /** Closest preceding user/shell input in this read window, if present. */
+  input?: string;
+};
 
 /**
  * Settled entries after a native message cursor, oldest first. `cursor` is the
@@ -22,6 +28,8 @@ export type TranscriptEntry = { id: string; text: string; created: number };
 export type Transcript = {
   cursor: string;
   entries: TranscriptEntry[];
+  /** Last user/shell input in the settled window; absent means inherit owner. */
+  input?: string;
   pending?: true;
 };
 
@@ -44,6 +52,8 @@ export const latestInput = "\u0000latest-input";
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
+  /** Explicit durable identity; the gateway scopes routing to this session. */
+  readonly sessionID?: string | undefined;
   createSession(input: {
     key: string;
     title: string;
@@ -54,8 +64,16 @@ export interface AgentBackend {
     text: string,
     signal: AbortSignal,
     onText?: TextSink,
+    /** Persist the allocated native input ID synchronously before admission. */
+    onInput?: (id: string) => void,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
+  /** Withdraw this input; interrupt only if raw history proves it is current. */
+  interruptInput?(
+    sessionId: string,
+    inputId: string,
+    signal: AbortSignal,
+  ): Promise<void>;
   startMaintenance?(
     sessionId: string,
     requestID: string,

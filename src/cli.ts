@@ -66,6 +66,7 @@ OpenCode:
   --provider ID          Model provider; requires --model
   --model ID             Model ID; requires --provider
   --agent NAME           Optional OpenCode agent
+  --session-id ses_...    Reuse one existing durable session across chat sources
   Tool permissions default to deny; edit backend.permissions explicitly.
 pi-durable:
   --model MODEL          Required openai/modelId or anthropic/modelId
@@ -94,6 +95,7 @@ ${slackInstructions}`,
 --worktrees PATH       Parent of the configured crew worktrees
 --team PATH            Non-secret team JSON (default: Bowser's starter roster)
 --id ID                Bot namespace (default: configured captain ID; bowser)
+--session-id ses_...    Bind all crew locations to one existing captain session
 --base REF             Committed source ref (default: origin/main)
 --mesij-command PATH   Absolute Mesij executable (default: resolved from PATH)
 --proxy-url URL        CLIProxyAPI endpoint (default: http://127.0.0.1:8317/v1)
@@ -160,6 +162,7 @@ function parseCli(args: string[]) {
         provider: { type: "string" },
         model: { type: "string" },
         agent: { type: "string" },
+        "session-id": { type: "string" },
         "mention-only": { type: "boolean" },
         plan: { type: "string" },
         apply: { type: "boolean" },
@@ -205,6 +208,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
     "provider",
     "model",
     "agent",
+    "session-id",
     "mention-only",
   ];
   const allowed = new Set([
@@ -220,6 +224,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
             "worktrees",
             "team",
             "id",
+            "session-id",
             "base",
             "mesij-command",
             "proxy-url",
@@ -256,6 +261,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
       mesijCommand: resolve(mesijCommand),
       ...(team ? { team } : {}),
       ...(v.id ? { namespace: v.id } : {}),
+      ...(v["session-id"] ? { captainSessionID: v["session-id"] } : {}),
       ...(v.base ? { base: v.base } : {}),
       ...(v["proxy-url"] ? { proxyURL: v["proxy-url"] } : {}),
       ...(v["proxy-key-file"]
@@ -302,9 +308,12 @@ export async function runCli(args: string[]): Promise<CliResult> {
         throw new Error(
           "OpenCode --provider and --model must be supplied together.",
         );
-      if (v.backend === "pi-durable" && (v.provider || v.url || v.agent))
+      if (
+        v.backend === "pi-durable" &&
+        (v.provider || v.url || v.agent || v["session-id"])
+      )
         throw new Error(
-          "pi-durable does not support --provider, --url, or --agent.",
+          "pi-durable does not support --provider, --url, --agent, or --session-id.",
         );
       const backend =
         v.backend === "opencode"
@@ -316,6 +325,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
                 ? { model: { providerID: v.provider, id: v.model } }
                 : {}),
               ...(v.agent ? { agent: v.agent } : {}),
+              ...(v["session-id"] ? { sessionID: v["session-id"] } : {}),
             }
           : {
               type: v.backend,

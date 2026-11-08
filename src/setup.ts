@@ -327,7 +327,16 @@ export async function setupWizard(configPath: string) {
       const model = providerID
         ? { providerID, id: await ask("Model ID: ") }
         : undefined;
-      backend = { type, directory, url, ...(model ? { model } : {}) };
+      const sessionID = await ask(
+        "Existing durable session ID (blank for separate thread sessions): ",
+      );
+      backend = {
+        type,
+        directory,
+        url,
+        ...(model ? { model } : {}),
+        ...(sessionID ? { sessionID } : {}),
+      };
       console.log(
         "OpenCode tool permissions default to deny; edit backend.permissions explicitly if needed.",
       );

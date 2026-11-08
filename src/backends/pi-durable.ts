@@ -378,7 +378,8 @@ export class PiDurableBackend implements AgentBackend {
     text: string,
     signal: AbortSignal,
     onText?: TextSink,
-    result: "visible" | "final" = "visible",
+    // Crew callers select a result mode; gateway callers can record admission.
+    result: "visible" | "final" | ((id: string) => void) = "visible",
     requestId: string = crypto.randomUUID(),
   ) {
     signal.throwIfAborted();
@@ -468,6 +469,7 @@ export class PiDurableBackend implements AgentBackend {
         latestView ??= observation.value;
       }
       signal.throwIfAborted();
+      if (typeof result === "function") result(requestId);
       attempted = true;
       submission = await conversation.submit(
         { type: "input", requestId, content: text, whenBusy: "followUp" },

@@ -29,9 +29,10 @@ export const envelopeSchema = z.object({
 export type Identity = { team: string; user: string };
 
 export function backendFingerprint(config: BotConfig) {
-  return createHash("sha256")
-    .update(JSON.stringify(config.backend))
-    .digest("hex");
+  // A pin selects execution identity, not a new Slack/outbox namespace.
+  const backend = { ...config.backend };
+  if (backend.type === "opencode") delete backend.sessionID;
+  return createHash("sha256").update(JSON.stringify(backend)).digest("hex");
 }
 
 export function botKey(config: BotConfig, identity: Identity) {

@@ -31,7 +31,13 @@ import {
   routeEvent,
   transcriptChunks,
 } from "./routing";
-import { type Job, type Store, TranscriptConflict } from "./store";
+import {
+  type CaptainCursor,
+  type CaptainTranscript,
+  type Job,
+  type Store,
+  TranscriptConflict,
+} from "./store";
 import { LiveReply } from "./streaming";
 import {
   type ThreadContext,
@@ -52,6 +58,8 @@ const finalReadDelaysMs = [100, 200, 400];
 
 const gapNote =
   "_Pogo could not find its last delivered message in session history; earlier replies may be missing. This reply starts at your request._";
+
+type FinalTranscript = Transcript & { gap?: true; anchored?: true };
 
 /** Settled public text without reaction controls; never applies a reaction. */
 export function transcriptReply(entries: readonly TranscriptEntry[]) {
@@ -221,12 +229,36 @@ export class Gateway {
 
   /** Stop surviving backend work before a fresh turn can resume it. */
   private async recover(signal: AbortSignal) {
-    for (const session of this.store.interruptedSessions(this.key)) {
+    const interrupted = this.backend.sessionID
+      ? []
+      : this.store.interruptedSessions(this.key);
+    if (this.backend.sessionID) {
+      const input = this.store.interruptedInput(this.key);
+      if (input && this.backend.interruptInput) {
+        try {
+          await this.backend.interruptInput(
+            this.backend.sessionID,
+            input,
+            AbortSignal.timeout(5000),
+          );
+        } catch {
+          this.log.warn(
+            "Interrupted captain ownership unavailable; not stopping native work",
+          );
+        }
+      }
+    }
+    for (const session of interrupted) {
       await this.backend.interrupt?.(session, AbortSignal.timeout(5000));
     }
     this.store.recover(this.key);
     // Restart catch-up for every mapping; unbaselined ones seed at current history.
     if (this.backend.transcript) this.settle();
+    if (this.backend.sessionID) {
+      const job = this.store.latestBotActivity(this.key);
+      if (job) await this.activity.resume(job, this.backend.sessionID, signal);
+      return;
+    }
     for (const conversation of this.store.transcripts(this.key)) {
       const job = this.store.latestActivity(this.key, conversation);
       const session = this.store.session(conversation);
@@ -243,13 +275,18 @@ export class Gateway {
         gateway.key,
         Date.now(),
         gateway.config.concurrency + used,
+        gateway.backend.sessionID !== undefined,
       );
       for (const job of jobs) {
         if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
-        if (yield* FiberMap.has(slots, job.conversation)) continue;
+        const slot =
+          gateway.backend.sessionID && job.status === "queued"
+            ? gateway.key
+            : job.conversation;
+        if (yield* FiberMap.has(slots, slot)) continue;
         yield* FiberMap.run(
           slots,
-          job.conversation,
+          slot,
           abortable((signal) => gateway.process(job, signal)).pipe(
             Effect.catchCause(() =>
               Effect.sync(() =>
@@ -269,6 +306,14 @@ export class Gateway {
 
   /** Queue catch-up for a settled session, or every mapped thread on connect. */
   settle(session?: string) {
+    if (this.backend.sessionID) {
+      if (
+        (!session || session === this.backend.sessionID) &&
+        !this.unavailable.has(this.key)
+      )
+        this.queueTranscript(this.key);
+      return;
+    }
     for (const conversation of this.store.transcripts(this.key, session))
       if (!this.unavailable.has(conversation))
         this.queueTranscript(conversation);
@@ -307,7 +352,9 @@ export class Gateway {
         if (
           retry.at > now ||
           (yield* FiberMap.has(slots, conversation)) ||
-          gateway.store.unfinished(conversation)
+          (gateway.backend.sessionID
+            ? gateway.store.captainBusy(gateway.key)
+            : gateway.store.unfinished(conversation))
         )
           continue;
         gateway.settled.delete(conversation);
@@ -334,7 +381,16 @@ export class Gateway {
         this.queueTranscript(conversation);
     } catch (error) {
       if (signal.aborted) return;
-      if (error instanceof TranscriptUnavailable) {
+      const awaitingInput =
+        error instanceof TranscriptUnavailable &&
+        error.reason === "cursor" &&
+        this.backend.sessionID &&
+        this.store.jobByInput(
+          this.key,
+          this.store.captainCursor(this.key, this.backend.sessionID).cursor ??
+            "",
+        ) !== null;
+      if (error instanceof TranscriptUnavailable && !awaitingInput) {
         // Keep the mapping and cursor; the next request re-anchors.
         if (!this.unavailable.has(conversation))
           this.log.warn("Transcript unavailable; background catch-up stopped");
@@ -353,6 +409,8 @@ export class Gateway {
 
   /** False means another writer changed the thread; read it again. */
   private async transcriptCatchUp(conversation: string, shutdown: AbortSignal) {
+    if (this.backend.sessionID)
+      return this.captainCatchUp(this.backend.sessionID, shutdown);
     const target = this.store.transcriptTarget(this.key, conversation);
     if (
       !target ||
@@ -397,6 +455,76 @@ export class Gateway {
             : [],
       }) !== undefined
     );
+  }
+
+  /** Resolve native input boundaries, never the latest queued Slack source. */
+  private captainTranscript(
+    sessionID: string,
+    from: CaptainCursor,
+    read: FinalTranscript,
+    current?: number,
+  ): { commit: CaptainTranscript; text: string } {
+    let owner = read.anchored && current !== undefined ? current : from.owner;
+    const groups: { job: number; entries: TranscriptEntry[] }[] = [];
+    const ownerFor = (input: string) =>
+      this.store.jobByInput(this.key, input)?.id ?? null;
+    for (const entry of read.entries) {
+      if (entry.input !== undefined) owner = ownerFor(entry.input);
+      if (owner === null) continue;
+      const group = groups.at(-1);
+      if (group?.job === owner) group.entries.push(entry);
+      else groups.push({ job: owner, entries: [entry] });
+    }
+    // A native input with no public reply must still clear/set ownership.
+    if (read.input !== undefined) owner = ownerFor(read.input);
+    return {
+      text: transcriptReply(
+        groups
+          .filter((group) => group.job === current)
+          .flatMap((group) => group.entries),
+      ),
+      commit: {
+        botKey: this.key,
+        sessionID,
+        from,
+        cursor: read.cursor,
+        owner,
+        replies: groups.flatMap((group) => {
+          const text = transcriptReply(group.entries);
+          const last = group.entries.at(-1);
+          return group.job !== current && text && last
+            ? [
+                {
+                  job: group.job,
+                  eventId: `transcript:${last.id}`,
+                  chunks: transcriptChunks(text),
+                },
+              ]
+            : [];
+        }),
+      },
+    };
+  }
+
+  private async captainCatchUp(sessionID: string, shutdown: AbortSignal) {
+    if (!this.backend.transcript) return true;
+    const from = this.store.captainCursor(this.key, sessionID);
+    const signal = AbortSignal.any([
+      shutdown,
+      AbortSignal.timeout(catchUpReadMs),
+    ]);
+    const validated = await this.backend.createSession({
+      key: this.key,
+      title: botDisplayName(this.config),
+      signal,
+    });
+    if (validated !== sessionID)
+      throw new Error("Pinned session identity changed");
+    const activity = this.store.latestBotActivity(this.key);
+    if (activity) await this.activity.resume(activity, sessionID, shutdown);
+    const read = await this.backend.transcript(sessionID, from.cursor, signal);
+    const { commit } = this.captainTranscript(sessionID, from, read);
+    return this.store.appendCaptainTranscript(commit) && !read.pending;
   }
 
   /** Cursor before this turn; undefined keeps the prompt-only contract. */
@@ -453,7 +581,7 @@ export class Gateway {
     session: string,
     from: string | undefined,
     signal: AbortSignal,
-  ): Promise<(Transcript & { gap?: true }) | undefined> {
+  ): Promise<FinalTranscript | undefined> {
     if (from !== undefined) {
       const read = await this.settledRead(session, from, signal);
       if (read && !(read instanceof TranscriptUnavailable)) return read;
@@ -466,7 +594,11 @@ export class Gateway {
     }
     const anchored = await this.settledRead(session, latestInput, signal);
     if (!anchored || anchored instanceof TranscriptUnavailable) return;
-    return from === undefined ? anchored : { ...anchored, gap: true };
+    return {
+      ...anchored,
+      anchored: true,
+      ...(from === undefined ? {} : { gap: true }),
+    };
   }
 
   private transcriptText(read: Transcript & { gap?: true }) {
@@ -516,7 +648,9 @@ export class Gateway {
       let maintenance: Awaited<ReturnType<typeof startMaintenanceDelivery>>;
       let session: string | undefined;
       let from: string | undefined;
-      let transcript: Transcript | undefined;
+      let transcript: FinalTranscript | undefined;
+      let captain: CaptainCursor | undefined;
+      let captainCommit: CaptainTranscript | undefined;
       let keep = 0;
       const reply = (text: string, complete: boolean) => {
         if (!this.slack.react) return text;
@@ -539,9 +673,14 @@ export class Gateway {
       try {
         try {
           signal.throwIfAborted();
-          session = this.store.session(job.conversation);
+          const pinned = this.backend.sessionID;
+          session = pinned ? undefined : this.store.session(job.conversation);
           let text = job.text;
-          if (!session) {
+          if (
+            pinned
+              ? !this.store.sourceStarted(job.conversation, job.id)
+              : !session
+          ) {
             const before = job.eventId.slice(job.channel.length + 1);
             // Roots (including scheduled runs) have no earlier thread messages.
             if (this.config.threadContext && before !== job.thread) {
@@ -562,21 +701,52 @@ export class Gateway {
               );
               signal.throwIfAborted();
             }
+          }
+          if (!session) {
             session = await this.backend.createSession({
               key: job.conversation,
               title: `${botDisplayName(this.config)} (slack ${job.channel})`,
               signal,
             });
-            // A new session's transcript starts with this turn.
-            this.store.saveSession(
-              job.conversation,
-              session,
-              this.backend.transcript ? "" : undefined,
-            );
+            if (pinned) {
+              if (session !== pinned)
+                throw new Error("Pinned session identity changed");
+            } else {
+              // A new unpinned session's transcript starts with this turn.
+              this.store.saveSession(
+                job.conversation,
+                session,
+                this.backend.transcript ? "" : undefined,
+              );
+            }
           }
           signal.throwIfAborted();
-          this.unavailable.delete(job.conversation);
-          from = await this.transcriptFrom(job.conversation, session, signal);
+          this.unavailable.delete(pinned ? this.key : job.conversation);
+          if (pinned) {
+            captain = this.store.captainCursor(this.key, pinned);
+            from = captain.cursor;
+            if (from === undefined && this.backend.transcript) {
+              try {
+                const baseline = await this.backend.transcript(
+                  session,
+                  undefined,
+                  signal,
+                );
+                captain = this.store.baselineCaptain(
+                  this.key,
+                  pinned,
+                  baseline.cursor,
+                );
+                from = captain.cursor;
+              } catch (error) {
+                if (signal.aborted) throw error;
+                this.log.warn(
+                  "Captain baseline unavailable; using input boundary",
+                );
+              }
+            }
+          } else
+            from = await this.transcriptFrom(job.conversation, session, signal);
           signal.throwIfAborted();
           maintenance = await startMaintenanceDelivery({
             backend: this.backend,
@@ -602,11 +772,21 @@ export class Gateway {
             ? `${reactionInstructions}\n\nUser message:\n${text}`
             : text;
           activity = await this.activity.start(job, session, signal, shutdown);
+          this.store.started(job.id);
           const streamed = await this.backend.prompt(
             session,
             prompt,
             signal,
             (text) => live.push(reply(text, false)),
+            pinned
+              ? (input) => {
+                  this.store.saveInput(this.key, job.id, input, pinned);
+                  if (captain?.cursor === undefined) {
+                    captain = this.store.captainCursor(this.key, pinned);
+                    from = captain.cursor;
+                  }
+                }
+              : undefined,
           );
           signal.throwIfAborted();
           // The prompt reply is this request's own text: only it can react.
@@ -616,13 +796,23 @@ export class Gateway {
           signal.throwIfAborted();
           // Settled history covers every public reply since the last delivery.
           // The streamed copy is used only for a mapping without any cursor.
-          const answer = transcript ? this.transcriptText(transcript) : own;
+          const owned =
+            transcript && captain
+              ? this.captainTranscript(session, captain, transcript, job.id)
+              : undefined;
+          captainCommit = owned?.commit;
+          const answer = owned
+            ? owned.text
+            : transcript
+              ? this.transcriptText(transcript)
+              : own;
           // Unread or unsettled text is never posted without its cursor.
           const deferred = transcript
             ? transcript.pending && !answer.trim()
-            : from !== undefined;
+            : from !== undefined ||
+              (pinned !== undefined && this.backend.transcript !== undefined);
           if (deferred || transcript?.pending)
-            this.queueTranscript(job.conversation);
+            this.queueTranscript(pinned ? this.key : job.conversation);
           activity?.finish();
           if (deferred) {
             failure = "history";
@@ -658,8 +848,19 @@ export class Gateway {
               AbortSignal.any([shutdown, AbortSignal.timeout(10_000)]),
             );
             if (transcript ? transcript.pending : from !== undefined)
-              this.queueTranscript(job.conversation);
-            const text = transcript ? this.transcriptText(transcript) : "";
+              this.queueTranscript(
+                this.backend.sessionID ? this.key : job.conversation,
+              );
+            const owned =
+              transcript && captain
+                ? this.captainTranscript(session, captain, transcript, job.id)
+                : undefined;
+            captainCommit = owned?.commit;
+            const text = owned
+              ? owned.text
+              : transcript
+                ? this.transcriptText(transcript)
+                : "";
             if (text) output = [...transcriptChunks(text), ...output];
             keep = output.length - 1;
           }
@@ -676,7 +877,8 @@ export class Gateway {
         try {
           output = this.store.respond(job.id, output, failure, {
             keep,
-            ...(transcript
+            ...(captainCommit ? { captain: captainCommit } : {}),
+            ...(transcript && !this.backend.sessionID
               ? { transcript: { from, cursor: transcript.cursor } }
               : {}),
           });
@@ -685,7 +887,9 @@ export class Gateway {
           // Another writer moved the cursor: catch-up delivers from there.
           failure = "history";
           output = this.store.respond(job.id, [failureText(failure)], failure);
-          this.queueTranscript(job.conversation);
+          this.queueTranscript(
+            this.backend.sessionID ? this.key : job.conversation,
+          );
         }
         failure = this.store.failure(job.id);
       } finally {

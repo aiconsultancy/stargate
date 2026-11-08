@@ -94,6 +94,11 @@ export const backendSchema = z.discriminatedUnion("type", [
       .refine((value) => ["http:", "https:"].includes(new URL(value).protocol)),
     directory: absolutePath,
     headersEnv: z.record(z.string(), envName).default({}),
+    sessionID: z
+      .string()
+      .max(256)
+      .regex(/^ses_[A-Za-z0-9]+$/)
+      .optional(),
     agent: z.string().min(1).optional(),
     model: z
       .strictObject({ providerID: z.string().min(1), id: z.string().min(1) })
@@ -148,6 +153,18 @@ export const configSchema = z
     bots: z.array(botSchema).min(1),
   })
   .superRefine(({ bots }, context) => {
+    const pinnedSessions = bots.flatMap((bot) =>
+      bot.backend.type === "opencode" && bot.backend.sessionID !== undefined
+        ? [bot.backend.sessionID]
+        : [],
+    );
+    if (new Set(pinnedSessions).size !== pinnedSessions.length) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Duplicate pinned OpenCode sessionID; each root needs one bot owner",
+      });
+    }
     for (const field of [
       "id",
       "appId",

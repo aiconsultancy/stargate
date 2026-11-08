@@ -118,8 +118,10 @@ export class CrewState {
   private constructor(
     readonly path: string,
     private readonly db: Database,
+    /** Configured root of a pinned team; not part of the crew identity. */
+    readonly captainSessionID?: string,
   ) {
-    this.reporting = new ReportingStore(db);
+    this.reporting = new ReportingStore(db, (id) => this.captainRoute(id));
     this.activity = new MemberActivityStore(db);
     this.mailRoutes = new MailRoutes(db);
   }
@@ -130,6 +132,7 @@ export class CrewState {
     fingerprint: string,
     legacyFingerprint?: string,
     allowCrewExpansion = false,
+    captainSessionID?: string,
   ) {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await chmod(directory, 0o700);
@@ -292,7 +295,7 @@ export class CrewState {
           db.query("INSERT INTO identity VALUES (?)").run(fingerprint);
       }).immediate();
       db.exec("PRAGMA foreign_keys=ON");
-      return new CrewState(path, db);
+      return new CrewState(path, db, captainSessionID);
     } catch (error) {
       db.close();
       if (error instanceof CrewError) throw error;
@@ -312,6 +315,31 @@ export class CrewState {
     return this.db
       .query<Peer, [string]>("SELECT * FROM peers WHERE sessionID=?")
       .get(sessionID);
+  }
+
+  /**
+   * Pinned teams only: the configured root, or an earlier root that this
+   * team's stored evidence records as a captain. Never a worker, an empty
+   * context, or an unknown session.
+   */
+  captainLineage(id: string): boolean {
+    const pin = this.captainSessionID;
+    if (!pin || !id || this.peerBySession(id)) return false;
+    return (
+      id === pin ||
+      this.db
+        .query(`SELECT 1 FROM tasks WHERE originCaptainID=?1
+          UNION ALL SELECT 1 FROM pending_tasks WHERE originCaptainID=?1
+          UNION ALL SELECT 1 FROM crew_status_requests WHERE captainID=?1
+          UNION ALL SELECT 1 FROM mail_routes WHERE captainID=?1 AND sender=?1
+          LIMIT 1`)
+        .get(id) !== null
+    );
+  }
+
+  /** Mail, wakes and journal context for stored lineage use the pinned root. */
+  captainRoute(id: string): string {
+    return this.captainLineage(id) ? (this.captainSessionID ?? id) : id;
   }
 
   reservePeer(crewID: CrewID): Peer {
@@ -773,14 +801,19 @@ export class CrewState {
       .get(id);
   }
 
+  /** Caller must be an authenticated captain; the pin inherits lineage. */
   requestedStatus(taskID: string, captainID: string): boolean {
-    return Boolean(
-      this.db
-        .query(
-          "SELECT 1 FROM crew_status_requests WHERE taskID=? AND captainID=?",
-        )
-        .get(taskID, captainID),
-    );
+    return this.db
+      .query<{ captainID: string }, [string]>(
+        "SELECT captainID FROM crew_status_requests WHERE taskID=?",
+      )
+      .all(taskID)
+      .some(
+        (request) =>
+          request.captainID === captainID ||
+          (captainID === this.captainSessionID &&
+            this.captainLineage(request.captainID)),
+      );
   }
 
   reserveStatusRequest(id: string, task: CrewTask, captainID: string) {
@@ -1004,8 +1037,14 @@ export class CrewState {
 
   /** Cancel proved the own input never ran: release the slot with a
    * confirmed-stop audit instead of leaving an uncertain blocker.
+   * `captainID` is the stored origin; `actor` is the cancelling captain.
    */
-  withdrawCancelled(expected: CrewTask, captainID: string, detail: string) {
+  withdrawCancelled(
+    expected: CrewTask,
+    captainID: string,
+    detail: string,
+    actor = captainID,
+  ) {
     this.db
       .transaction(() => {
         const task = this.activeTask(expected.crewID);
@@ -1033,7 +1072,7 @@ export class CrewState {
             task.workerSessionID,
             task.originCaptainID,
             task.inputID,
-            captainID,
+            actor,
             task.result,
             "Wait cancelled before native execution.",
             withdrawKey,

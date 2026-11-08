@@ -159,8 +159,14 @@ test("scripted add stores references, validates without secrets, rejects token a
       "opencode",
       "--directory",
       "/project",
+      "--session-id",
+      "ses_durableCaptain",
     ]),
   ).toEqual({ command: "exit" });
+  expect((await readConfiguration(config)).bots[0]?.backend).toMatchObject({
+    type: "opencode",
+    sessionID: "ses_durableCaptain",
+  });
   expect((await readConfiguration(config)).bots[0]?.access).toEqual({
     users: ["*"],
     channels: ["*"],

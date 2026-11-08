@@ -27,7 +27,7 @@ export interface PiWorkerBackend extends AgentBackend {
     text: string,
     signal: AbortSignal,
     onText?: TextSink,
-    result?: "final",
+    result?: "final" | ((id: string) => void),
     requestId?: string,
   ): Promise<string>;
   /** Same crew slot, but enforced tools-off and input-only model context.

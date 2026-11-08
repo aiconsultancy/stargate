@@ -32,6 +32,11 @@ const optionsSchema = z.strictObject({
     .string()
     .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)
     .optional(),
+  captainSessionID: z
+    .string()
+    .regex(/^ses_[A-Za-z0-9]+$/)
+    .max(256)
+    .optional(),
   team: teamSchema.default(defaultTeam),
   base: z
     .string()
@@ -138,6 +143,9 @@ export async function renderProfile(input: Options, role: string) {
         package: packageDirectory,
         options: {
           namespace: options.namespace,
+          ...(options.captainSessionID
+            ? { captainSessionID: options.captainSessionID }
+            : {}),
           team: options.team,
           captainDirectory: options.directory,
           stateDirectory: join(options.directory, ".local", "pogo-crew"),
@@ -455,6 +463,9 @@ export async function initializeProfile(input: Options) {
     stateDirectory: state,
     namespace: options.namespace,
     agent: options.team.captain.agent ?? options.team.captain.id,
+    ...(options.captainSessionID
+      ? { sessionID: options.captainSessionID }
+      : {}),
     permissions: crewPermissions("captain", options.team.toolAccess),
   };
 }

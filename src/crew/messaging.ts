@@ -182,12 +182,18 @@ export class MailRoutes {
         .changes === 1
     );
   }
-  cursor(sessionID: string, captainID: string, after?: number) {
+  /** `holes` "" bounds ACKs by every unrepaired route to this recipient. */
+  cursor(
+    sessionID: string,
+    captainID: string,
+    after?: number,
+    holes = captainID,
+  ) {
     const hole = this.db
       .query<{ sequence: number | null }, [string, string, string]>(
         "SELECT MIN(sequence) AS sequence FROM mail_route_holes WHERE recipient=? AND (?='' OR captainID=?)",
       )
-      .get(sessionID, captainID, captainID)?.sequence;
+      .get(sessionID, holes, holes)?.sequence;
     const ceiling = hole == null ? Number.MAX_SAFE_INTEGER : hole - 1;
     if (after !== undefined)
       this.db
@@ -262,13 +268,20 @@ export class CrewMessaging {
       );
     const source = statusReply
       ? this.engine.state.task(statusReply.taskID)
-      : contextTask?.originCaptainID === captainID
+      : contextTask &&
+          this.engine.sameCaptain(contextTask.originCaptainID, captainID)
         ? contextTask
         : null;
     const actor = this.engine.mailActor(caller.sessionID);
     if (input.op === "inbox") {
       await this.mailer.register(actor, caller.sessionID, caller.signal);
-      const after = routes.cursor(caller.sessionID, captainID, input.after);
+      const after = routes.cursor(
+        caller.sessionID,
+        captainID,
+        input.after,
+        // One pinned captain: holes from any of its lineage bound this ACK.
+        this.engine.state.captainLineage(captainID) ? "" : captainID,
+      );
       const events = await this.mailer.inbox(
         { sessionID: caller.sessionID, after, limit: input.limit },
         caller.signal,
@@ -283,7 +296,9 @@ export class CrewMessaging {
         if (
           !route ||
           route.recipient !== caller.sessionID ||
-          (captainID && route.captainID !== captainID && !statusRequest) ||
+          (captainID &&
+            !this.engine.sameCaptain(route.captainID, captainID) &&
+            !statusRequest) ||
           event.sessionID !== route.sender ||
           event.actor !== this.engine.mailActor(route.sender) ||
           (input.taskID && route.targetTaskID !== input.taskID)
@@ -380,11 +395,14 @@ export class CrewMessaging {
       }
       const peer =
         member === captain ? null : this.engine.state.reservePeer(member);
+      // Earlier captain roots are evidence; pinned teams wake only the pin.
       const recipient =
         peer?.sessionID ??
-        (reply && reply.sender === reply.captainID
-          ? reply.captainID
-          : captainID);
+        this.engine.state.captainRoute(
+          reply && reply.sender === reply.captainID
+            ? reply.captainID
+            : captainID,
+        );
       const candidate = peer ? this.engine.state.activeTask(member) : source;
       const target = statusReply
         ? source
@@ -453,7 +471,7 @@ export class CrewMessaging {
           this.engine.state.reporting.journal.append(
             {
               member: caller.agent,
-              captainID,
+              captainID: this.engine.state.captainRoute(captainID),
               taskID: source?.id ?? null,
               kind: "message",
               text: `${this.engine.roster().find(({ id }) => id === caller.agent)?.name ?? caller.agent} → ${this.engine.roster().find(({ id }) => id === member)?.name ?? member}: ${input.text}`,

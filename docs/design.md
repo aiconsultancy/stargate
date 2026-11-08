@@ -53,6 +53,7 @@ interface AgentBackend {
     text: string,
     signal: AbortSignal,
     onText?: (text: string) => void,
+    onInput?: (id: string) => void,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
   transcript?(
@@ -79,6 +80,10 @@ must return only the current turn's assistant text, not reasoning or prior
 replies. Prompt must honour cancellation and stop underlying work, not only
 the wait. Close releases owned resources, never an attached external service.
 Implement interrupt if work can survive the gateway process.
+Pinned-session recovery uses the separate `interruptInput` capability: withdraw
+the retained input and stop only when latest raw-input history proves ownership.
+A settled transcript that ends before a newer input is not ownership proof.
+Without that capability, recovery leaves native work untouched.
 
 `onText` receives cumulative visible text for the current turn. It is optional;
 existing module adapters can continue returning only their final answer.
@@ -153,6 +158,9 @@ owners and invariants across the gateway, backends, crew, and scheduled work.
 Bot identity includes config ID, Slack App ID, authenticated workspace/user,
 and a hash of normalized backend settings. A conversation adds channel and
 thread timestamp. Environment **names**, not token values, enter settings.
+An explicit OpenCode `sessionID` pin is excluded from this hash. It binds the
+existing captain without changing thread admission or cron scope. Other
+backend settings still select separate namespaces.
 Changing credentials for the same installation does not discard sessions.
 Changing backend settings selects a new session namespace and Pi database.
 
@@ -223,6 +231,30 @@ delay. It reuses the first preview message. Visible text stops rotations, and
 completion or cancellation stops all feedback timers. See [waiting settings](waiting.md).
 
 ## Session transcript
+
+### Pinned captains
+
+OpenCode `backend.sessionID` selects one existing captain root across sources.
+The adapter validates that binding without creating a replacement. Captain
+execution and history catch-up share one slot; Slack destinations remain on
+the individual jobs. Existing per-thread session mappings remain as history,
+but do not receive captain catch-up broadcasts.
+
+`captain_cursors` stores one cursor and delivery owner for that bot and session.
+The native input ID commits on the job before admission. History attributes
+each public entry to its preceding user or standalone shell input. A known
+Pogo input selects its originating job; an unknown native input clears the
+Slack owner. Synthetic crew messages retain the previous owner. A queued job
+never selects a destination before its input appears in history.
+
+Replies for the current input, continuation outbox rows for earlier owners,
+and cursor advancement commit together. Native UI output with no Pogo owner
+stays in native history instead of being copied to a Slack chat. Catch-up waits
+for queued and running captain requests and never broadcasts to old mappings.
+Targeted per-thread transcript repair does not support pinned captains and
+fails without writing state.
+
+### Ordinary thread-scoped bots
 
 A mapped OpenCode session can continue after its Slack turn ends. Background
 shell completions and crew notifications resume it after a successful wait, a

@@ -137,6 +137,21 @@ test("direct trusted team tools do not require individual connector grants", asy
   );
 });
 
+test("profile binds every crew location to the same existing captain session", async () => {
+  const { options } = await fixture();
+  const captainSessionID = "ses_durableCaptain";
+  const bound = { ...options, captainSessionID };
+  const initialized = await initializeProfile(bound);
+  expect(initialized.sessionID).toBe(captainSessionID);
+  for (const role of ["bowser", "mario", "luigi", "daisy", "toad"]) {
+    const profile = await renderProfile(bound, role);
+    expect(profile.plugins[0]?.options.captainSessionID).toBe(captainSessionID);
+  }
+  await expect(
+    renderProfile({ ...bound, captainSessionID: "not-a-session" }, "bowser"),
+  ).rejects.toThrow("Invalid profile");
+});
+
 test("profile init creates named feature worktrees, preserves source and reuses paths", async () => {
   const { git, options } = await fixture();
   const result = await initializeProfile(options);

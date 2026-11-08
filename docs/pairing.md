@@ -22,8 +22,9 @@ invalidates all URL aliases. Pogo never opens, fetches, or redeems these URLs.
 After pairing, use OpenCode's session list to find the conversation. New
 sessions use `<bot name> (slack <conversation ID>)`, for example
 `Galactica Captain (slack D123)`. The name comes from `displayName`, then the
-OpenCode agent name, then the bot ID. Separate Slack threads keep separate
-sessions even when their titles match. Existing titles stay unchanged and may
+OpenCode agent name, then the bot ID. Ordinary bots keep separate thread
+sessions even when their titles match. A captain uses its pinned durable
+session across chat sources. Existing titles stay unchanged and may
 have been changed in OpenCode. A pairing request does not create a session.
 
 ## Configure deliberately

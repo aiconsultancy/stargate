@@ -16,8 +16,9 @@ requests that need history fail before an agent turn starts.
 
 If the first agent turn starts from a reply in an existing Slack thread, Pogo
 reads prior messages in that same channel and thread. It does so only when no
-backend session exists for that conversation. Later turns use the existing
-backend session and do not read Slack history again. New thread roots and
+backend session exists for that conversation. A pinned captain instead uses
+the first accepted job in that source thread, even though its durable session
+already exists. Later turns do not read Slack history again. New thread roots and
 scheduled runs have no prior messages to import and do not make a history call.
 With `threadContext: false`, Pogo makes no thread-history calls.
 

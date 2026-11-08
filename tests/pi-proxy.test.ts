@@ -138,7 +138,22 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
       title: "one",
       signal: signal(),
     });
-    expect(await backend.prompt(first, "hello", signal())).toBe("Proxy answer");
+    const requestID = crypto.randomUUID();
+    let recordedInput: string | undefined;
+    expect(
+      await backend.prompt(
+        first,
+        "hello",
+        signal(),
+        undefined,
+        (id) => {
+          recordedInput = id;
+          expect(requests).toHaveLength(0);
+        },
+        requestID,
+      ),
+    ).toBe("Proxy answer");
+    expect(recordedInput).toBe(requestID);
     expect(await backend.prompt(first, "again", signal())).toBe("Proxy answer");
     const second = await backend.createSession({
       key: "two",
