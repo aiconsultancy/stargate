@@ -27,6 +27,7 @@ import { MesijClient } from "./mesij";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
 import { CrewReporter } from "./reporting";
+import { type ResultAPI, readTaskResult } from "./result";
 import {
   CrewError,
   type CrewID,
@@ -151,8 +152,12 @@ export type CrewCaller = {
 };
 export type CrewSession = Pick<
   SessionInfo,
-  "id" | "parentID" | "agent" | "location" | "metadata"
+  "id" | "parentID" | "agent" | "location" | "metadata" | "outcome"
 >;
+export type ResultConnector = (
+  session: CrewSession,
+  signal: AbortSignal,
+) => Promise<ResultAPI>;
 type RequestOptions = NonNullable<
   Parameters<OpenCodeClient["session"]["get"]>[1]
 >;
@@ -191,6 +196,7 @@ export interface CrewAgents {
 }
 export type CrewResult = {
   status: string;
+  diagnostic?: string;
   peers?: Peer[];
   task?: CrewTask;
   notices?: CrewNotice[];
@@ -237,6 +243,7 @@ export class CrewEngine {
     private readonly mailer: Pick<MesijClient, "register" | "send" | "inbox">,
     private readonly agents?: CrewAgents,
     piFactory?: PiWorkerFactory,
+    private readonly connectResults?: ResultConnector,
   ) {
     this.pi = new PiCrewWorkers(state, options.stateDirectory, piFactory);
     state.reporting.configureNames([
@@ -252,6 +259,7 @@ export class CrewEngine {
     mailer?: Pick<MesijClient, "register" | "send" | "inbox">,
     agents?: CrewAgents,
     piFactory?: PiWorkerFactory,
+    connectResults?: ResultConnector,
   ) {
     const parsed = crewOptionsSchema.safeParse(input);
     if (!parsed.success)
@@ -340,6 +348,7 @@ export class CrewEngine {
         }),
       agents,
       piFactory,
+      connectResults,
     );
   }
 
@@ -558,12 +567,14 @@ export class CrewEngine {
       let task = this.ownedCaptainTask(input.taskID, caller);
       if (this.member(task.crewID).backend) task = this.pi.reconcile(task);
       if (task.status === "queued") task = await this.promote(task, caller);
-      if (input.op === "status")
+      if (input.op === "status") {
+        const recovered = await this.reconcileResult(task, caller);
         return {
-          status: task.status,
-          task,
+          status: recovered.task.status,
+          ...recovered,
           notices: this.state.notices(task.id, 0),
         };
+      }
       return await this.wait(task, input.afterNoticeID, caller);
     } catch (error) {
       if (
@@ -775,10 +786,21 @@ export class CrewEngine {
     caller: CrewCaller,
   ): Promise<CrewResult> {
     const peer = await this.ensure(input.crew, caller.signal);
-    const active = this.state.activeTask(input.crew);
+    let active = this.state.activeTask(input.crew);
+    const recovered = active
+      ? await this.reconcileResult(active, caller)
+      : undefined;
+    if (recovered) active = recovered.task;
     const busy: CrewResult = {
       status: "busy",
-      ...(active?.originCaptainID === caller.sessionID ? { task: active } : {}),
+      ...(active?.originCaptainID === caller.sessionID
+        ? {
+            task: active,
+            ...(recovered?.diagnostic
+              ? { diagnostic: recovered.diagnostic }
+              : {}),
+          }
+        : {}),
     };
     if (active) {
       if (
@@ -839,7 +861,8 @@ export class CrewEngine {
   private async promote(task: CrewTask, caller: CrewCaller): Promise<CrewTask> {
     caller.signal.throwIfAborted();
     const peer = await this.ensure(task.crewID, caller.signal);
-    const active = this.state.activeTask(task.crewID);
+    let active = this.state.activeTask(task.crewID);
+    if (active) active = (await this.reconcileResult(active, caller)).task;
     if (active && (active.status !== "completed" || active.notifying))
       return task;
     if (!(await this.idle(peer, caller.signal))) return task;
@@ -887,7 +910,7 @@ export class CrewEngine {
           id: task.inputID,
           text:
             `Pogo task envelope: ${envelope}\n\n${text}\n\n` +
-            `Complete only this assignment with pogo_crew ` +
+            `Return a final answer for only this assignment. You may also use pogo_crew ` +
             `op=complete, taskID=${task.id}, result=<your result>. ` +
             "Do not create peer/root sessions or send prompts to captains. " +
             "Use pogo_crew urgent for task-scoped urgent communication.",
@@ -1029,6 +1052,20 @@ export class CrewEngine {
         let current = this.ownedCaptainTask(task.id, caller);
         const piWorker = Boolean(this.member(current.crewID).backend);
         if (piWorker) current = this.pi.reconcile(current);
+        if (
+          this.connectResults &&
+          !piWorker &&
+          (current.status === "uncertain" || idle)
+        ) {
+          const recovered = await this.reconcileResult(current, caller, idle);
+          current = recovered.task;
+          if (current.status === "completed" || current.status === "uncertain")
+            return {
+              status: current.status,
+              ...recovered,
+              notices: this.state.notices(task.id, after),
+            };
+        }
         const notices = this.state.notices(task.id, after);
         if (caller.signal.aborted) {
           await this.cancel(current, caller);
@@ -1062,6 +1099,13 @@ export class CrewEngine {
             );
         if (idle || failed) {
           this.state.uncertain(task.id);
+          if (this.connectResults)
+            return {
+              status: "uncertain",
+              task: this.state.task(task.id) ?? current,
+              notices,
+              diagnostic: `Task ${task.id}, worker ${task.workerSessionID}: Native execution observation failed. Retry status to recover the retained answer when the existing OpenCode server is available; do not resubmit the assignment.`,
+            };
           throw new CrewError(
             "Worker ended or became unavailable without a confirmed result; task outcome uncertain.",
           );
@@ -1079,6 +1123,64 @@ export class CrewEngine {
     } finally {
       controller.abort();
       await observed;
+    }
+  }
+
+  private async reconcileResult(
+    task: CrewTask,
+    caller: CrewCaller,
+    knownIdle = false,
+  ): Promise<{ task: CrewTask; diagnostic?: string }> {
+    const connect = this.connectResults;
+    if (
+      !connect ||
+      this.member(task.crewID).backend ||
+      (task.status !== "running" && task.status !== "uncertain") ||
+      task.released
+    )
+      return { task };
+    const signal = AbortSignal.any([
+      caller.signal,
+      AbortSignal.timeout(10_000),
+    ]);
+    try {
+      const peer = this.state.peer(task.crewID);
+      if (!peer || peer.sessionID !== task.workerSessionID)
+        throw new CrewError(
+          "Worker reservation differs from this task. Restore its original session mapping before retrying status.",
+        );
+      if (!knownIdle && !(await this.idle(peer, signal))) {
+        caller.signal.throwIfAborted();
+        return { task };
+      }
+      signal.throwIfAborted();
+      const session = await this.sessions.get(
+        { sessionID: peer.sessionID },
+        { signal },
+      );
+      this.validPeer(session, peer);
+      if (session.outcome !== "succeeded")
+        throw new CrewError(
+          `Worker is idle with outcome ${session.outcome ?? "unknown"}. Resume the existing task session and retry status after a successful final answer; do not resubmit the assignment.`,
+        );
+      const connection: Promise<ResultAPI> = connect(session, signal);
+      const api = await connection;
+      const result = await readTaskResult(api, task, signal);
+      signal.throwIfAborted();
+      return { task: this.state.recoverResult(task, result) };
+    } catch (error) {
+      caller.signal.throwIfAborted();
+      const current = this.state.task(task.id) ?? task;
+      if (current.status === task.status && !current.released)
+        this.state.uncertain(task.id);
+      const detail =
+        error instanceof CrewError
+          ? error.message
+          : "Authenticated result API unavailable or timed out. Retry status; if it persists, configure team.historyAPI for the existing OpenCode server.";
+      return {
+        task: this.state.task(task.id) ?? current,
+        diagnostic: `Task ${task.id}, worker ${task.workerSessionID}: ${detail}`,
+      };
     }
   }
 

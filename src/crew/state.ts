@@ -471,6 +471,31 @@ export class CrewState {
       .immediate();
   }
 
+  recoverResult(expected: CrewTask, result: string): CrewTask {
+    if (this.reporting.isReport(expected.id))
+      result = redactActivity(result, 3000);
+    return this.db
+      .transaction(() => {
+        const changed = this.db
+          .query(`UPDATE tasks SET status='completed',result=?
+        WHERE id=? AND crewID=? AND workerSessionID=? AND originCaptainID=?
+        AND inputID=? AND status=? AND status IN ('running','uncertain') AND released=0`)
+          .run(
+            result,
+            expected.id,
+            expected.crewID,
+            expected.workerSessionID,
+            expected.originCaptainID,
+            expected.inputID,
+            expected.status,
+          );
+        const task = this.task(expected.id) ?? expected;
+        if (changed.changes) this.reporting.record(task, "result", result);
+        return task;
+      })
+      .immediate();
+  }
+
   release(id: string): boolean {
     return (
       this.db

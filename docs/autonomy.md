@@ -66,5 +66,9 @@ the same grants again would not fix those causes.
 The review also found idle workers stranded by missed completion calls and
 captain polling requirements for queued work. These are task-execution issues,
 not evidence that every tool needs another permission or approval layer.
-The crew should recover completed results from their exact submitted input
-rather than require the operator to supply message IDs and hashes.
+The crew recovers completed results from their exact submitted input rather
+than require the operator to supply message IDs and hashes. A successful final
+answer is enough; an explicit worker completion call remains optional. Captain
+`status`, `wait` and the next `dispatch` check recover missed completion and
+reuse the existing worker session. See [automatic crew result recovery](crew-recovery.md)
+for result selection, retries and diagnostics.

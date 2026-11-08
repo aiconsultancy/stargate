@@ -23,6 +23,9 @@ export default Plugin.define({
         ctx.session,
         undefined,
         ctx.agent,
+        undefined,
+        (session, signal) =>
+          connectHistoryAPI(engine.options.team, session, signal),
       );
     } catch (error) {
       throw new Error(
@@ -119,7 +122,7 @@ export default Plugin.define({
         });
         editor.add({
           name: "pogo_crew",
-          description: `Manage ${engine.options.team.captain.id}'s configured persistent crew: ${engine.options.team.crew.map(({ id }) => id).join(", ")}. Captain may ensure, dispatch, wait, status and compact. Pi workers auto-complete with their final answer; compaction, mail, model controls and urgency are OpenCode-only. Assigned OpenCode workers complete tasks or send task-scoped urgency. Busy dispatch queues only with queue=true. Never auto-wake captains.`,
+          description: `Manage ${engine.options.team.captain.id}'s configured persistent crew: ${engine.options.team.crew.map(({ id }) => id).join(", ")}. Captain may ensure, dispatch, wait, status and compact. Successful final answers auto-complete OpenCode tasks when status, wait or dispatch checks the slot; explicit worker complete is also supported. Recovery returns diagnostics for interrupted work and never replays assignments. Pi workers auto-complete with their final answer; compaction, mail, model controls and urgency are OpenCode-only. Busy dispatch queues only with queue=true. Never auto-wake captains.`,
           input: crewInputSchema,
           options: { codemode: false, permission: "pogo_crew" },
           async execute(input, context) {
