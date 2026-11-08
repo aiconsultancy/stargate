@@ -1,0 +1,35 @@
+import { Rpc } from "@opencode/plugin/rpc";
+import { z } from "zod";
+import type { CrewEngine } from "./engine";
+import { inspectInputSchema, reconcileInputSchema } from "./reconciliation";
+
+export const recoveryRequestSchema = z.strictObject({
+  sessionID: z.string().min(1).max(256),
+  request: z.discriminatedUnion("op", [
+    inspectInputSchema,
+    reconcileInputSchema,
+  ]),
+});
+export const CrewRecovery = Rpc.define({
+  id: "pogo.crew.recovery",
+  events: {},
+  methods: {
+    run: { input: recoveryRequestSchema, output: z.string() },
+  },
+});
+
+/** Authenticated operator transport; engine validates the native root identity. */
+export async function runRecoveryOperator(
+  engine: CrewEngine,
+  raw: unknown,
+  signal: AbortSignal,
+): Promise<string> {
+  const input = recoveryRequestSchema.parse(raw);
+  return JSON.stringify(
+    await engine.run(input.request, {
+      sessionID: input.sessionID,
+      agent: engine.options.team.captain.id,
+      signal,
+    }),
+  );
+}

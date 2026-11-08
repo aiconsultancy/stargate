@@ -165,6 +165,8 @@ export const configSchema = z
 
 export type BackendConfig = z.infer<typeof backendSchema>;
 export type BotConfig = z.infer<typeof botSchema>;
+/** Loaded configuration; `dataDirectory` is absolute. */
+export type Config = z.infer<typeof configSchema>;
 
 export function secret(
   name: string,

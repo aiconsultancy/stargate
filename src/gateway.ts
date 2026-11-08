@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { Effect, FiberMap, Schedule } from "effect";
 import type { Logger } from "pino";
 import type { ActivityView } from "./activity";
 import { ActivityDelivery, type ActivityHandle } from "./activity-delivery";
@@ -11,6 +12,9 @@ import {
 } from "./backend";
 import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "./config";
+import { abortable, runAbortable } from "./effect";
+import { maintenanceText, TurnBudget } from "./maintenance";
+import { startMaintenanceDelivery } from "./maintenance-delivery";
 import {
   parseReactionReply,
   type ReactionName,
@@ -92,7 +96,6 @@ export interface SlackDelivery {
 
 export class Gateway {
   private readonly activity: ActivityDelivery;
-  private readonly active = new Map<string, Promise<void>>();
   private readonly cancellations = new Map<number, AbortController>();
   /** Conversations needing catch-up, with read-retry backoff state. */
   private readonly settled = new Map<
@@ -171,9 +174,54 @@ export class Gateway {
     return this.store.jobStatus(this.key, jobId);
   }
 
+  /**
+   * Supervise this bot until the signal aborts. One scope owns the per-
+   * conversation slots, the transcript watch and activity reporting. A failed
+   * poll closes that scope, stops the watch and rejects, so the runtime can
+   * restart Pogo instead of leaving a silent, half-stopped worker.
+   */
   async work(signal: AbortSignal) {
+    await runAbortable(this.supervise(), signal).catch((error: unknown) => {
+      if (!signal.aborted) throw error;
+    });
+  }
+
+  private supervise() {
+    const gateway = this;
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* abortable((signal) => gateway.recover(signal));
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => gateway.activity.close()),
+        );
+        const watch = gateway.backend.transcript && gateway.backend.watch;
+        if (watch)
+          yield* Effect.forkScoped(
+            abortable((signal) =>
+              watch.call(
+                gateway.backend,
+                (session) => gateway.settle(session),
+                signal,
+              ),
+            ).pipe(
+              Effect.catchCause(() =>
+                Effect.sync(() => gateway.log.warn("Transcript watch stopped")),
+              ),
+            ),
+          );
+        // Closes first: every turn and catch-up observes shutdown and settles.
+        const slots = yield* FiberMap.make<string>();
+        yield* Effect.repeat(
+          gateway.poll(slots),
+          Schedule.spaced("200 millis"),
+        );
+      }),
+    );
+  }
+
+  /** Stop surviving backend work before a fresh turn can resume it. */
+  private async recover(signal: AbortSignal) {
     for (const session of this.store.interruptedSessions(this.key)) {
-      // Stop surviving backend work before a fresh turn can resume it.
       await this.backend.interrupt?.(session, AbortSignal.timeout(5000));
     }
     this.store.recover(this.key);
@@ -184,42 +232,39 @@ export class Gateway {
       const session = this.store.session(conversation);
       if (job && session) await this.activity.resume(job, session, signal);
     }
-    const watching = this.backend.transcript
-      ? this.backend.watch?.((session) => this.settle(session), signal)
-      : undefined;
-    try {
-      while (!signal.aborted) {
-        const jobs = this.store.ready(
-          this.key,
-          Date.now(),
-          this.config.concurrency + this.active.size,
+  }
+
+  /** One pass: queued requests first, then catch-ups, in shared slots. */
+  private poll(slots: FiberMap.FiberMap<string>) {
+    const gateway = this;
+    return Effect.gen(function* () {
+      const used = yield* FiberMap.size(slots);
+      const jobs = gateway.store.ready(
+        gateway.key,
+        Date.now(),
+        gateway.config.concurrency + used,
+      );
+      for (const job of jobs) {
+        if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
+        if (yield* FiberMap.has(slots, job.conversation)) continue;
+        yield* FiberMap.run(
+          slots,
+          job.conversation,
+          abortable((signal) => gateway.process(job, signal)).pipe(
+            Effect.catchCause(() =>
+              Effect.sync(() =>
+                gateway.log.error(
+                  { job: job.id },
+                  "Worker failed; request will need recovery",
+                ),
+              ),
+            ),
+          ),
+          { startImmediately: true },
         );
-        for (const job of jobs) {
-          if (this.active.size >= this.config.concurrency) break;
-          if (this.active.has(job.conversation)) continue;
-          const task = this.process(job, signal)
-            .catch(() => {
-              this.log.error(
-                { job: job.id },
-                "Worker failed; request will need recovery",
-              );
-            })
-            .finally(() => {
-              this.active.delete(job.conversation);
-            });
-          this.active.set(job.conversation, task);
-        }
-        // Started tasks are tracked in `active` and awaited during shutdown.
-        void this.catchUp(signal);
-        await delay(200, undefined, { signal });
       }
-    } catch (error) {
-      if (!signal.aborted) throw error;
-    } finally {
-      await Promise.all(this.active.values());
-      await watching?.catch(() => this.log.warn("Transcript watch stopped"));
-      await this.activity.close();
-    }
+      yield* gateway.startCatchUps(slots);
+    });
   }
 
   /** Queue catch-up for a settled session, or every mapped thread on connect. */
@@ -237,49 +282,73 @@ export class Gateway {
 
   /** Start eligible catch-ups; resolves when they end. Public for tests. */
   async catchUp(signal: AbortSignal) {
-    const tasks: Promise<void>[] = [];
-    const now = Date.now();
-    for (const [conversation, retry] of this.settled) {
-      if (this.active.size >= this.config.concurrency) break;
-      // A pending turn reads the same history; later replies wait for delivery.
-      if (
-        retry.at > now ||
-        this.active.has(conversation) ||
-        this.store.unfinished(conversation)
-      )
-        continue;
-      this.settled.delete(conversation);
-      const task = this.transcriptCatchUp(conversation, signal)
-        .then((complete) => {
-          if (!complete) this.queueTranscript(conversation);
-        })
-        .catch((error: unknown) => {
-          if (signal.aborted) return;
-          if (error instanceof TranscriptUnavailable) {
-            // Keep the mapping and cursor; the next request re-anchors.
-            if (!this.unavailable.has(conversation))
-              this.log.warn(
-                "Transcript unavailable; background catch-up stopped",
-              );
-            this.unavailable.add(conversation);
-            return;
-          }
-          if (!retry.attempts)
-            this.log.warn("Transcript catch-up failed; retrying with backoff");
-          // The cursor stays put, so a later read resumes without a gap.
-          this.settled.set(conversation, {
-            attempts: retry.attempts + 1,
-            at:
-              Date.now() + Math.min(retryCeilingMs, 1000 * 2 ** retry.attempts),
-          });
-        })
-        .finally(() => {
-          this.active.delete(conversation);
-        });
-      this.active.set(conversation, task);
-      tasks.push(task);
+    const gateway = this;
+    await runAbortable(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const slots = yield* FiberMap.make<string>();
+          yield* gateway.startCatchUps(slots);
+          yield* FiberMap.awaitEmpty(slots);
+        }),
+      ),
+      signal,
+    ).catch((error: unknown) => {
+      if (!signal.aborted) throw error;
+    });
+  }
+
+  private startCatchUps(slots: FiberMap.FiberMap<string>) {
+    const gateway = this;
+    return Effect.gen(function* () {
+      const now = Date.now();
+      for (const [conversation, retry] of gateway.settled) {
+        if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
+        // A pending turn reads the same history; later replies wait for delivery.
+        if (
+          retry.at > now ||
+          (yield* FiberMap.has(slots, conversation)) ||
+          gateway.store.unfinished(conversation)
+        )
+          continue;
+        gateway.settled.delete(conversation);
+        yield* FiberMap.run(
+          slots,
+          conversation,
+          abortable((signal) =>
+            gateway.catchUpThread(conversation, retry, signal),
+          ),
+          { startImmediately: true },
+        );
+      }
+    });
+  }
+
+  /** Read failures keep the cursor and back off; they never prompt the agent. */
+  private async catchUpThread(
+    conversation: string,
+    retry: { attempts: number },
+    signal: AbortSignal,
+  ) {
+    try {
+      if (!(await this.transcriptCatchUp(conversation, signal)))
+        this.queueTranscript(conversation);
+    } catch (error) {
+      if (signal.aborted) return;
+      if (error instanceof TranscriptUnavailable) {
+        // Keep the mapping and cursor; the next request re-anchors.
+        if (!this.unavailable.has(conversation))
+          this.log.warn("Transcript unavailable; background catch-up stopped");
+        this.unavailable.add(conversation);
+        return;
+      }
+      if (!retry.attempts)
+        this.log.warn("Transcript catch-up failed; retrying with backoff");
+      // The cursor stays put, so a later read resumes without a gap.
+      this.settled.set(conversation, {
+        attempts: retry.attempts + 1,
+        at: Date.now() + Math.min(retryCeilingMs, 1000 * 2 ** retry.attempts),
+      });
     }
-    await Promise.all(tasks);
   }
 
   /** False means another writer changed the thread; read it again. */
@@ -421,9 +490,13 @@ export class Gateway {
     if (job.status === "queued") {
       if (!this.store.running(job.id)) return;
       const cancellation = new AbortController();
-      const timeout = AbortSignal.timeout(this.config.turnTimeoutMs);
+      const budget = new TurnBudget(this.config.turnTimeoutMs);
       this.cancellations.set(job.id, cancellation);
-      const signal = AbortSignal.any([shutdown, cancellation.signal, timeout]);
+      const signal = AbortSignal.any([
+        shutdown,
+        cancellation.signal,
+        budget.controller.signal,
+      ]);
       const waiting = await resolveWaiting(this.config);
       const live = new LiveReply(
         job,
@@ -440,6 +513,7 @@ export class Gateway {
       let reactionDelivered = false;
       let reactionTask: Promise<void> | undefined;
       let activity: ActivityHandle | undefined;
+      let maintenance: Awaited<ReturnType<typeof startMaintenanceDelivery>>;
       let session: string | undefined;
       let from: string | undefined;
       let transcript: Transcript | undefined;
@@ -504,6 +578,26 @@ export class Gateway {
           this.unavailable.delete(job.conversation);
           from = await this.transcriptFrom(job.conversation, session, signal);
           signal.throwIfAborted();
+          maintenance = await startMaintenanceDelivery({
+            backend: this.backend,
+            sessionID: session,
+            requestID: `slack-job-${job.id}`,
+            signal,
+            publish: async (notice) => {
+              if (
+                !isAllowedUser(this.config, job.user) ||
+                !isAllowedChannel(this.config, job.channel)
+              )
+                throw new Error("Maintenance notice access denied");
+              await live.announce(maintenanceText(notice));
+              budget.pause();
+            },
+            resume: () => {
+              budget.resume();
+              live.resume();
+            },
+            cancel: () => cancellation.abort(),
+          });
           const prompt = this.slack.react
             ? `${reactionInstructions}\n\nUser message:\n${text}`
             : text;
@@ -549,7 +643,7 @@ export class Gateway {
             ? "cancelled"
             : shutdown.aborted
               ? "interrupted"
-              : timeout.aborted
+              : budget.controller.signal.aborted
                 ? "timeout"
                 : error instanceof ThreadContextUnavailable
                   ? "context"
@@ -595,6 +689,8 @@ export class Gateway {
         }
         failure = this.store.failure(job.id);
       } finally {
+        await maintenance?.close();
+        budget.close();
         this.cancellations.delete(job.id);
         await live.close();
         await reactionTask;

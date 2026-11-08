@@ -78,3 +78,16 @@ test("dependency provenance checks every page, signature, count, and current hea
   expect(status([[trusted]], 1, "new-head")).toBe(1);
   expect(status([[]], 0)).toBe(1);
 });
+
+test("Effect stays pinned to the OpenCode SDK release", async () => {
+  const manifest = z.object({
+    dependencies: z.record(z.string(), z.string()),
+  });
+  const read = async (path: string) =>
+    manifest.parse(await Bun.file(new URL(path, import.meta.url)).json());
+  const pogo = await read("../package.json");
+  const plugin = await read("../node_modules/@opencode/plugin/package.json");
+  // One runtime copy: Pogo programs and the SDK share fiber/runtime types.
+  expect(pogo.dependencies["effect"]).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(pogo.dependencies["effect"]).toBe(plugin.dependencies["effect"]);
+});

@@ -24,7 +24,7 @@ import type {
 } from "@opencode/client";
 import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
-import { MesijClient } from "./mesij";
+import { MesijClient, type MesijMessage } from "./mesij";
 import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
 
 export { mailInputSchema } from "./messaging";
@@ -32,6 +32,18 @@ export { mailInputSchema } from "./messaging";
 import { journalInputSchema } from "./journal";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
+import {
+  type ExecutionInspection,
+  type InspectInput,
+  type InspectionConnector,
+  inspectInputSchema,
+  observeExecution,
+  type ReconcileInput,
+  reconcileInputSchema,
+  requireQuiescent,
+  sha256,
+  verifyResult,
+} from "./reconciliation";
 import { CrewReporter, redactActivity } from "./reporting";
 import { type ResultAPI, readTaskResult } from "./result";
 import {
@@ -41,6 +53,7 @@ import {
   CrewState,
   type CrewTask,
   type Peer,
+  type TaskReconciliation,
 } from "./state";
 import {
   agentIDSchema,
@@ -101,6 +114,8 @@ const taskID = z.string().startsWith("task_").max(100);
 const text = z.string().min(1).max(64000);
 export const crewInputSchema = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("roster") }),
+  inspectInputSchema,
+  reconcileInputSchema,
   z.strictObject({ op: z.literal("ensure"), crew: agentIDSchema.optional() }),
   z.strictObject({
     op: z.literal("dispatch"),
@@ -140,6 +155,10 @@ const mailEnvelopeSchema = z.strictObject({
   sender: z.string(),
   recipient: z.string(),
   text,
+  statusRequestID: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
 });
 export type CrewCaller = {
   sessionID: string;
@@ -151,7 +170,9 @@ export type CrewCaller = {
 export type CrewSession = Pick<
   SessionInfo,
   "id" | "parentID" | "agent" | "location" | "metadata" | "outcome"
->;
+> & {
+  time?: Pick<SessionInfo["time"], "updated" | "busy" | "idle">;
+};
 export type ResultConnector = (
   session: CrewSession,
   signal: AbortSignal,
@@ -199,7 +220,22 @@ export type CrewResult = {
   task?: CrewTask;
   notices?: CrewNotice[];
   members?: ReturnType<CrewEngine["roster"]>;
+  active?: TaskInspection | null;
+  inspectedTask?: TaskInspection | null;
+  queued?: TaskInspection[];
+  controlled?: boolean;
+  execution?:
+    | ExecutionInspection
+    | { state: "idle" | "running"; backend: "pi" };
+  reconciliation?: TaskReconciliation | null;
+  statusRequest?: { id: string; sequence: number };
 };
+type TaskInspection = Omit<CrewTask, "result"> & { hasResult: boolean };
+
+function inspectTask(task: CrewTask): TaskInspection {
+  const { result, ...metadata } = task;
+  return { ...metadata, hasResult: result !== null };
+}
 
 function notFound(error: unknown): boolean {
   return (
@@ -243,6 +279,7 @@ export class CrewEngine {
     private readonly mailer: Pick<MesijClient, "register" | "send" | "inbox">,
     private readonly agents?: CrewAgents,
     piFactory?: PiWorkerFactory,
+    private readonly inspectionConnector?: InspectionConnector,
     private readonly connectResults?: ResultConnector,
   ) {
     this.pi = new PiCrewWorkers(
@@ -323,6 +360,7 @@ export class CrewEngine {
     mailer?: Pick<MesijClient, "register" | "send" | "inbox">,
     agents?: CrewAgents,
     piFactory?: PiWorkerFactory,
+    inspectionConnector?: InspectionConnector,
     connectResults?: ResultConnector,
   ) {
     const parsed = crewOptionsSchema.safeParse(input);
@@ -412,6 +450,7 @@ export class CrewEngine {
         }),
       agents,
       piFactory,
+      inspectionConnector,
       connectResults,
     );
   }
@@ -437,7 +476,9 @@ export class CrewEngine {
   ): CrewTask | null {
     const task = id
       ? caller.agent === this.options.team.captain.id
-        ? this.ownedCaptainTask(id, caller)
+        ? historical && this.state.requestedStatus(id, caller.sessionID)
+          ? this.state.task(id)
+          : this.ownedCaptainTask(id, caller)
         : this.ownedWorkerTask(id, caller)
       : this.state.activeTask(caller.agent);
     if (task && ["dispatching", "running", "cancelling"].includes(task.status))
@@ -447,6 +488,75 @@ export class CrewEngine {
       throw new CrewError(
         "Mail send requires a current task or a validated reply; this task is no longer current.",
       );
+    return null;
+  }
+
+  /** Installed inspect receipts authorize only exact status replies, not work. */
+  statusRequestRoute(id: string): MailRoute | null {
+    const request = this.state.statusRequest(id);
+    const task = request && this.state.task(request.taskID);
+    if (
+      !request ||
+      request.receiptID !== id ||
+      !task ||
+      task.workerSessionID !== request.workerSessionID
+    )
+      return null;
+    return {
+      id,
+      sender: request.captainID,
+      recipient: request.workerSessionID,
+      captainID: request.captainID,
+      sourceTaskID: task.id,
+      targetTaskID: task.id,
+    };
+  }
+
+  /** Read installed status envelopes without a second mail store or new aliases. */
+  legacyStatusRoute(event: MesijMessage): MailRoute | null {
+    let value: unknown;
+    try {
+      value = JSON.parse(event.text);
+    } catch {
+      return null;
+    }
+    const envelope = mailEnvelopeSchema.safeParse(value);
+    if (!envelope.success || !envelope.data.statusRequestID) return null;
+    const mail = envelope.data;
+    const request = this.state.statusRequest(envelope.data.statusRequestID);
+    const route = request?.receiptID
+      ? this.statusRequestRoute(request.receiptID)
+      : null;
+    const task = request && this.state.task(request.taskID);
+    if (
+      !route ||
+      !task ||
+      mail.namespace !== this.options.namespace ||
+      mail.sourceTaskID !== task.id ||
+      mail.targetTaskID !== task.id ||
+      mail.originCaptainID !== task.originCaptainID ||
+      mail.sender !== event.sessionID ||
+      mail.recipient !== event.to ||
+      event.actor !== this.actor(mail.sender)
+    )
+      return null;
+    if (
+      event.id === route.id &&
+      mail.sender === route.sender &&
+      mail.recipient === route.recipient
+    )
+      return route;
+    if (
+      event.replyTo === route.id &&
+      mail.sender === route.recipient &&
+      mail.recipient === route.sender
+    )
+      return {
+        ...route,
+        id: event.id,
+        sender: mail.sender,
+        recipient: mail.recipient,
+      };
     return null;
   }
 
@@ -665,8 +775,15 @@ export class CrewEngine {
       let source: CrewTask;
       if (caller.agent === this.options.team.captain.id) {
         await this.captain(caller);
-        source = this.ownedCaptainTask(input.taskID, caller);
+        const requested = this.state.task(input.taskID);
+        source =
+          input.op === "inbox" &&
+          requested &&
+          this.state.requestedStatus(requested.id, caller.sessionID)
+            ? requested
+            : this.ownedCaptainTask(input.taskID, caller);
       } else source = this.ownedWorkerTask(input.taskID, caller);
+      this.member(source.crewID);
       if (source.status === "queued" || source.status === "cancelled")
         throw new CrewError(
           "Queued or cancelled work has no active mail lineage.",
@@ -701,6 +818,16 @@ export class CrewEngine {
         if (!envelope.success) continue;
         const mail = envelope.data;
         const origin = this.state.task(mail.sourceTaskID);
+        const statusRequest = mail.statusRequestID
+          ? this.state.statusRequest(mail.statusRequestID)
+          : null;
+        const statusLineage =
+          statusRequest?.taskID === source.id &&
+          statusRequest.workerSessionID === source.workerSessionID &&
+          ((mail.sender === statusRequest.captainID &&
+            mail.recipient === statusRequest.workerSessionID) ||
+            (mail.sender === statusRequest.workerSessionID &&
+              mail.recipient === statusRequest.captainID));
         if (
           !origin ||
           mail.namespace !== this.options.namespace ||
@@ -710,8 +837,12 @@ export class CrewEngine {
           mail.recipient !== caller.sessionID ||
           mail.sender !== event.sessionID ||
           event.actor !== this.actor(mail.sender) ||
+          (source.originCaptainID !== caller.sessionID &&
+            caller.agent === this.options.team.captain.id &&
+            !statusLineage) ||
           (mail.sender !== origin.originCaptainID &&
-            mail.sender !== origin.workerSessionID)
+            mail.sender !== origin.workerSessionID &&
+            !statusLineage)
         )
           continue;
         messages.push({
@@ -781,6 +912,8 @@ export class CrewEngine {
         };
       }
       await this.captain(caller);
+      if (input.op === "inspect") return await this.inspect(input, caller);
+      if (input.op === "reconcile") return await this.reconcile(input, caller);
       if (input.op === "ensure") {
         const peers: Peer[] = [];
         for (const id of input.crew
@@ -1027,6 +1160,203 @@ export class CrewEngine {
         "Only the assigned worker may use this task operation.",
       );
     return task;
+  }
+
+  private async inspectionAPI(caller: CrewCaller) {
+    if (!this.inspectionConnector)
+      throw new CrewError(
+        "Authenticated inspection API unavailable; configure this team's same-server history API. No state changed.",
+      );
+    const native = await this.sessions.get(
+      { sessionID: caller.sessionID },
+      { signal: caller.signal },
+    );
+    return this.inspectionConnector(native, caller.signal);
+  }
+
+  private async inspect(
+    input: InspectInput,
+    caller: CrewCaller,
+  ): Promise<CrewResult> {
+    const member = this.member(input.crew);
+    const peer = this.state.peer(input.crew);
+    const active = this.state.activeTask(input.crew);
+    const selected = input.taskID ? this.state.task(input.taskID) : active;
+    if (input.taskID && (!selected || selected.crewID !== input.crew))
+      throw new CrewError(
+        "Requested task is not assigned to this team's member.",
+      );
+    const result: CrewResult = {
+      status: peer ? "inspected" : "not-ensured",
+      peers: peer ? [peer] : [],
+      active: active ? inspectTask(active) : null,
+      inspectedTask: selected ? inspectTask(selected) : null,
+      queued: this.state.queuedTasks(input.crew).map(inspectTask),
+      controlled: this.state.controlled(input.crew),
+      reconciliation: selected ? this.state.reconciliation(selected.id) : null,
+    };
+    if (!peer) {
+      if (input.requestStatus)
+        throw new CrewError(
+          "Worker has no registered session/task to interrogate.",
+        );
+      return result;
+    }
+    if (member.backend) {
+      if (input.requestStatus)
+        throw new CrewError("Pi workers do not support Mesij status requests.");
+      result.execution = {
+        state: (await this.idle(peer, caller.signal)) ? "idle" : "running",
+        backend: "pi",
+      };
+      return result;
+    }
+    const api = await this.inspectionAPI(caller);
+    const live = await observeExecution(api, peer.sessionID, caller.signal);
+    this.validPeer(live.session, peer);
+    result.execution = live.execution;
+    if (input.requestStatus) {
+      if (!active || selected?.id !== active.id)
+        throw new CrewError("Status requests require the current active task.");
+      result.statusRequest = await this.requestStatus(
+        active,
+        input.requestStatus.key,
+        caller,
+      );
+    }
+    return result;
+  }
+
+  private async requestStatus(task: CrewTask, key: string, caller: CrewCaller) {
+    const id = sha256(
+      JSON.stringify([
+        this.options.namespace,
+        "status-request",
+        task.id,
+        caller.sessionID,
+        key,
+      ]),
+    );
+    this.state.reserveStatusRequest(id, task, caller.sessionID);
+    try {
+      await this.mailer.register(
+        this.actor(caller.sessionID),
+        caller.sessionID,
+        caller.signal,
+      );
+      await this.mailer.register(
+        this.actor(task.workerSessionID),
+        task.workerSessionID,
+        caller.signal,
+      );
+      const receipt = await this.mailer.send(
+        {
+          actor: this.actor(caller.sessionID),
+          sessionID: caller.sessionID,
+          to: task.workerSessionID,
+          key: id,
+          text: JSON.stringify({
+            namespace: this.options.namespace,
+            sourceTaskID: task.id,
+            targetTaskID: task.id,
+            originCaptainID: task.originCaptainID,
+            sender: caller.sessionID,
+            recipient: task.workerSessionID,
+            statusRequestID: id,
+            text: `Status request for task ${task.id}. Reply using pogo_mail send to=captain with this message's id as replyTo. Report status/evidence only; do not resume or replay work.`,
+          }),
+        },
+        caller.signal,
+      );
+      this.state.statusRequestReceipt(id, receipt.id);
+      const route = this.statusRequestRoute(receipt.id);
+      if (route) this.state.mailRoutes.save(route);
+      return receipt;
+    } catch {
+      throw new CrewError(
+        "Mesij status request unconfirmed; retry inspect with the same requestStatus key. Worker was not prompted.",
+      );
+    }
+  }
+
+  private async reconcile(
+    input: ReconcileInput,
+    caller: CrewCaller,
+  ): Promise<CrewResult> {
+    const task = this.state.task(input.taskID);
+    if (!task) throw new CrewError("Task is not in this team's state.");
+    if (this.member(task.crewID).backend)
+      throw new CrewError(
+        "Reconciliation supports native OpenCode workers only.",
+      );
+    if (
+      task.workerSessionID !== input.expected.workerSessionID ||
+      task.originCaptainID !== input.expected.originCaptainID ||
+      task.inputID !== input.expected.inputID
+    )
+      throw new CrewError(
+        "Expected ownership is stale; inspect this task again.",
+      );
+    const previous = this.state.reconciliation(task.id);
+    if (previous) {
+      if (
+        task.status !== "completed" ||
+        task.result === null ||
+        previous.workerSessionID !== task.workerSessionID ||
+        previous.originCaptainID !== task.originCaptainID ||
+        previous.inputID !== task.inputID ||
+        previous.resultMessageID !== input.resultMessageID ||
+        previous.resultSha256 !== input.resultSha256 ||
+        sha256(task.result) !== input.resultSha256
+      )
+        throw new CrewError(
+          "Reconciliation conflicts with retained audit/result.",
+        );
+      return { status: "reconciled", reconciliation: previous };
+    }
+    const token = this.state.reserveReconciliation(task);
+    try {
+      const api = await this.inspectionAPI(caller);
+      const peer = {
+        crewID: task.crewID,
+        sessionID: task.workerSessionID,
+        status: "ready" as const,
+      };
+      const before = await observeExecution(api, peer.sessionID, caller.signal);
+      this.validPeer(before.session, peer);
+      requireQuiescent(before.execution);
+      const proof = await verifyResult(
+        api,
+        task,
+        input,
+        before.execution,
+        caller.signal,
+        this.member(task.crewID).agent ?? task.crewID,
+      );
+      const after = await observeExecution(api, peer.sessionID, caller.signal);
+      this.validPeer(after.session, peer);
+      requireQuiescent(after.execution);
+      if (JSON.stringify(before.execution) !== JSON.stringify(after.execution))
+        throw new CrewError(
+          "Worker execution changed during evidence verification; inspect again.",
+        );
+      caller.signal.throwIfAborted();
+      const reconciliation = this.state.finishReconciliation(
+        task,
+        token,
+        proof.result,
+        {
+          reconciledBy: caller.sessionID,
+          resultMessageID: input.resultMessageID,
+          inputSha256: proof.inputSha256,
+          resultSha256: input.resultSha256,
+          reason: input.reason,
+        },
+      );
+      return { status: "reconciled", reconciliation };
+    } finally {
+      this.state.releaseControl(task.crewID, token);
+    }
   }
 
   private async dispatch(

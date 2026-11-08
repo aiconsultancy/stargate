@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { Gateway, type SlackDelivery } from "../src/gateway";
+import type { MaintenanceNotice } from "../src/maintenance";
 import { handleSlackRequest } from "../src/slack";
 import { Store } from "../src/store";
 import { bot, event, identity } from "./fixtures";
@@ -127,6 +128,46 @@ test("requester Stop aborts running work in channels and DMs, then replaces prev
     expect(f.writes.at(-1)?.stopJob).toBeUndefined();
     expect(f.gateway.cancel(f.payload())).toBe(false);
   }
+});
+
+test("maintenance notice uses the persisted requester-only Stop target", async () => {
+  const f = fixture();
+  const ready = Promise.withResolvers<MaintenanceNotice>();
+  const delivered = Promise.withResolvers<void>();
+  let closed = false;
+  f.backend.startMaintenance = async () => ({
+    read: async () => ready.promise,
+    async delivered() {
+      delivered.resolve();
+    },
+    async close() {
+      closed = true;
+    },
+  });
+  f.backend.prompt = async (_session, _text, signal) => {
+    ready.resolve({
+      id: "notice",
+      plan: "Restart Pogo",
+      impact: "Brief disconnect",
+      rollback: "Restore release",
+    });
+    return new Promise<string>((_resolve, reject) => {
+      const abort = () => reject(new Error("Stopped"));
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+    });
+  };
+  const work = f.gateway.process(f.job, new AbortController().signal);
+  await delivered.promise;
+  expect(f.store.previews(f.job.id)).toEqual([{ part: 0, ts: "2.000" }]);
+  expect(f.writes[0]?.text).toContain("wait five minutes");
+  expect(f.writes[0]?.stopJob).toBe(f.job.id);
+  const other = { ...f.payload(), user: { id: "UOTHER" } };
+  expect(f.gateway.cancel(other)).toBe(false);
+  expect(f.gateway.cancel(f.payload())).toBe(true);
+  await work;
+  expect(closed).toBe(true);
+  expect(f.writes.at(-1)?.text).toContain("stop request");
 });
 
 test("requester Stop uses one durable cancelled box instead of a generic timeout warning", async () => {

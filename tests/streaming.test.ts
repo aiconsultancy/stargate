@@ -154,6 +154,25 @@ test("quick text cancels waiting feedback before it appears", async () => {
   }
 });
 
+test("maintenance notice is persisted, held against streaming and released explicitly", async () => {
+  const f = liveFixture(null);
+  try {
+    await f.live.announce("Plan, impact, rollback; Stop within five minutes.");
+    expect(f.store.previews(1)).toEqual([{ part: 0, ts: "1" }]);
+    f.live.push("Overlapping provider text");
+    expect(f.writes).toEqual([
+      "Plan, impact, rollback; Stop within five minutes.",
+    ]);
+    f.live.resume();
+    f.live.push("Maintenance finished");
+    await f.written[1]?.promise;
+    expect(f.writes.at(-1)).toBe("Maintenance finished");
+  } finally {
+    await f.live.close();
+    f.store.close();
+  }
+});
+
 test("off disables waiting feedback; zero starts it immediately", async () => {
   const off = liveFixture(null);
   const zero = liveFixture(0);

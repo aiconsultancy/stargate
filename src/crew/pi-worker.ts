@@ -53,6 +53,8 @@ const executions = new Map<string, Execution>();
 const notifications = new Set<string>();
 type Pooled = { backend: Promise<PiWorkerBackend>; owners: Set<PiCrewWorkers> };
 const pool = new Map<string, Pooled>();
+// A replacement harness waits until the previous one for this database closes.
+const closing = new Map<string, Promise<void>>();
 
 const maintenanceInstructions = `You are a captain-managed maintenance worker.
 Perform only the assigned task in your worktree. Read AGENTS.md first.
@@ -106,6 +108,13 @@ export class PiCrewWorkers {
           "pi",
           hash,
         );
+        // No await between the final closing check and the pool lookup.
+        for (
+          let previous = closing.get(dataDirectory);
+          previous;
+          previous = closing.get(dataDirectory)
+        )
+          await previous.catch(() => {});
         const pooled = pool.get(dataDirectory);
         if (pooled) {
           pooled.owners.add(this);
@@ -193,8 +202,18 @@ export class PiCrewWorkers {
         })();
         pool.set(dataDirectory, { backend: opening, owners });
         this.leases.add(dataDirectory);
+        // A failed open is not cached; the next caller opens again.
+        opening.catch(() => {
+          if (pool.get(dataDirectory)?.backend === opening)
+            pool.delete(dataDirectory);
+        });
         return opening;
       })();
+      const opened = backend;
+      opened.catch(() => {
+        if (this.backends.get(member.id) === opened)
+          this.backends.delete(member.id);
+      });
       this.backends.set(member.id, backend);
     }
     return backend;
@@ -434,9 +453,16 @@ export class PiCrewWorkers {
         const entry = pool.get(key);
         if (!entry) return;
         entry.owners.delete(this);
+        // Other plugin instances still own this harness.
         if (entry.owners.size) return;
         pool.delete(key);
-        await (await entry.backend).close();
+        const closed = (async () => {
+          await (await entry.backend).close();
+        })().finally(() => {
+          if (closing.get(key) === closed) closing.delete(key);
+        });
+        closing.set(key, closed);
+        await closed;
       }),
     );
   }

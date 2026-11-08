@@ -110,6 +110,9 @@ async function fixture() {
   let binding: PiCrewBinding | undefined;
   const notifications: { id: string; delivery: string; text: string }[] = [];
   let failCreate = false;
+  let failOpens = 0;
+  const lifecycle: string[] = [];
+  let closeGate: Promise<void> | undefined;
   const started = () => {
     const pending = Promise.withResolvers<void>();
     nextTurn = pending.resolve;
@@ -117,8 +120,13 @@ async function fixture() {
   };
   let nextTurn = () => {};
   const factory: PiWorkerFactory = async (config, context) => {
+    if (failOpens > 0) {
+      failOpens--;
+      throw new Error("private open error");
+    }
     definitions.push(config.systemPrompt ?? "");
     opens++;
+    lifecycle.push("open");
     binding = context.crew;
     expect(config.directory).toBe(options.worktrees["twiki"] ?? "");
     expect(config.systemPrompt).toContain("explicit operator approval");
@@ -155,7 +163,10 @@ async function fixture() {
         notifications.push({ id, text, delivery });
       },
       async close() {
+        lifecycle.push("close started");
+        await closeGate;
         closes++;
+        lifecycle.push("close finished");
       },
     };
     return backend;
@@ -234,6 +245,13 @@ async function fixture() {
     failCreate() {
       failCreate = true;
     },
+    failOpens(count: number) {
+      failOpens = count;
+    },
+    lifecycle,
+    holdClose(gate: Promise<void>) {
+      closeGate = gate;
+    },
     async close() {
       await engine.close();
       await rm(directory, { recursive: true, force: true });
@@ -278,6 +296,58 @@ test("oversized Pi mail is refused before storage and does not jam later inbox p
       messages: [{ text: "Readable follow-up" }],
       nextAfter: 1,
     });
+  } finally {
+    await f.close();
+  }
+});
+
+test("installed Pi inspection observes native idle and running state without prompting", async () => {
+  const f = await fixture();
+  try {
+    await f.engine.run({ op: "ensure", crew: "twiki" }, f.caller());
+    expect(
+      (
+        await f.engine.run(
+          { op: "inspect", crew: "twiki" },
+          f.caller("captain-b"),
+        )
+      ).execution,
+    ).toEqual({ state: "idle", backend: "pi" });
+    const started = f.started();
+    const task = (
+      await f.engine.run(
+        {
+          op: "dispatch",
+          crew: "twiki",
+          text: "Inspect without changing work",
+        },
+        f.caller(),
+      )
+    ).task;
+    await started;
+    expect(
+      (
+        await f.engine.run(
+          { op: "inspect", crew: "twiki" },
+          f.caller("captain-b"),
+        )
+      ).execution,
+    ).toEqual({ state: "running", backend: "pi" });
+    expect(f.turns).toHaveLength(1);
+    await expect(
+      f.engine.run(
+        { op: "inspect", crew: "twiki", requestStatus: { key: "status" } },
+        f.caller("captain-b"),
+      ),
+    ).rejects.toThrow("do not support Mesij status requests");
+    f.turns[0]?.resolve("Done");
+    if (!task) throw new Error("Missing task");
+    await f.engine.run({ op: "wait", taskID: task.id }, f.caller());
+    expect(
+      (await f.engine.run({ op: "inspect", crew: "twiki" }, f.caller()))
+        .execution,
+    ).toEqual({ state: "idle", backend: "pi" });
+    expect(f.notifications).toEqual([]);
   } finally {
     await f.close();
   }
@@ -582,6 +652,61 @@ test("member status retains safe failed Pi outcome without retry or SDK error de
     expect(JSON.stringify(status)).not.toContain("private-provider-error");
     expect(f.turns).toHaveLength(1);
   } finally {
+    await f.close();
+  }
+});
+
+test("a failed Pi harness open is retried, not cached for the process", async () => {
+  const f = await fixture();
+  try {
+    f.failOpens(1);
+    await expect(
+      f.engine.run({ op: "ensure", crew: "twiki" }, f.caller()),
+    ).rejects.toThrow();
+    // No conversation was reserved, so a later ensure may open and create it.
+    await f.engine.run({ op: "ensure", crew: "twiki" }, f.caller());
+    expect(f.opens).toBe(1);
+    expect(f.creations).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a new owner reopens a Pi store only after the last owner closed it", async () => {
+  const f = await fixture();
+  const gate = Promise.withResolvers<void>();
+  let reopened: CrewEngine | undefined;
+  try {
+    await f.engine.run({ op: "ensure", crew: "twiki" }, f.caller());
+    f.holdClose(gate.promise);
+    const closing = f.engine.close();
+    while (!f.lifecycle.includes("close started")) await Bun.sleep(1);
+    reopened = await CrewEngine.open(
+      f.options,
+      f.sessions,
+      f.mailer,
+      undefined,
+      f.factory,
+    );
+    const owner = reopened;
+    const dispatch = owner.run(
+      { op: "dispatch", crew: "twiki", text: "Inspect" },
+      f.caller(),
+    );
+    await Bun.sleep(20);
+    expect(f.lifecycle).toEqual(["open", "close started"]);
+    gate.resolve();
+    await closing;
+    await dispatch;
+    expect(f.lifecycle).toEqual([
+      "open",
+      "close started",
+      "close finished",
+      "open",
+    ]);
+  } finally {
+    gate.resolve();
+    await reopened?.close();
     await f.close();
   }
 });

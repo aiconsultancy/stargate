@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { runCli } from "./cli";
-import { start } from "./runtime";
+import { RuntimeStopped, start } from "./runtime";
 
 const result = await runCli(process.argv.slice(2)).catch((error: unknown) => {
   // CLI helpers sanitize errors; never expose raw SDK or credential failures.
@@ -11,10 +11,12 @@ const result = await runCli(process.argv.slice(2)).catch((error: unknown) => {
 if (result?.command === "start") {
   try {
     await start(result.configPath);
-  } catch {
+  } catch (error) {
     // SDK failures can include tokens or prompts. Never echo their errors.
     console.error(
-      "Pogo could not start. Run pogo config check, then check backend credentials and service connectivity. Another process may own the data directory.",
+      error instanceof RuntimeStopped
+        ? "Pogo stopped after a runtime failure. Check the service log; the service manager may restart it."
+        : "Pogo could not start. Run pogo config check, then check backend credentials and service connectivity. Another process may own the data directory.",
     );
     process.exitCode = 1;
   }

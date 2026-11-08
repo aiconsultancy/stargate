@@ -17,6 +17,11 @@ import {
 import { type BackendConfig, secret } from "../config";
 import { CrewReporting } from "../crew/report-rpc";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
+import {
+  MaintenanceRPC,
+  type MaintenanceWatch,
+  maintenanceNoticeSchema,
+} from "../maintenance";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
 const pairingCode = z.object({
@@ -233,7 +238,41 @@ export class OpenCodeBackend implements AgentBackend {
   }
 
   async interrupt(sessionId: string, signal: AbortSignal) {
-    await this.client.session.interrupt({ sessionID: sessionId }, { signal });
+    try {
+      await this.client.session.interrupt({ sessionID: sessionId }, { signal });
+    } catch (error) {
+      // A deleted session has no work left to stop; startup recovery proceeds.
+      // Typed SDK error only; never parse raw messages.
+      if (!isSessionNotFoundError(error)) throw error;
+    }
+  }
+
+  async startMaintenance(
+    sessionID: string,
+    requestID: string,
+    signal: AbortSignal,
+  ): Promise<MaintenanceWatch> {
+    const rpc = this.client.rpc(MaintenanceRPC);
+    const owner = { sessionID, id: requestID };
+    const options = (signal: AbortSignal) => ({
+      location: { directory: this.config.directory },
+      signal,
+    });
+    if (!(await rpc.open(owner, options(signal))))
+      throw new Error("Maintenance gateway registration failed");
+    return {
+      read: async (signal) =>
+        maintenanceNoticeSchema
+          .nullable()
+          .parse(await rpc.read(owner, options(signal))),
+      delivered: async (noticeID, signal) => {
+        if (!(await rpc.delivered({ ...owner, noticeID }, options(signal))))
+          throw new Error("Maintenance delivery unconfirmed");
+      },
+      close: async (signal) => {
+        await rpc.close(owner, options(signal));
+      },
+    };
   }
 
   async transcript(

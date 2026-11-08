@@ -36,13 +36,19 @@ export interface SlackInteractions {
   interactive(body: unknown, ack: SocketRequest["ack"]): Promise<void>;
 }
 
-/** Socket Mode's generic event includes commands too; acknowledge each only once. */
+/**
+ * Socket Mode's generic event includes commands too; acknowledge each only
+ * once. While intake is closed, nothing is acknowledged: Slack redelivers the
+ * request to the next connection instead of losing an unpersisted event.
+ */
 export async function handleSlackRequest(
   request: SocketRequest,
   accept: (body: unknown) => boolean,
   log: Logger,
   interactions?: SlackInteractions,
+  open: () => boolean = () => true,
 ) {
+  if (!open()) return;
   try {
     if (request.type === "slash_commands" && interactions) {
       await interactions.command(request.body, request.ack);
@@ -61,6 +67,7 @@ export class SlackConnection implements SlackDelivery {
   private readonly socket;
   private readonly web;
   private readonly historyWeb: (signal: AbortSignal) => WebClient;
+  private closing: Promise<void> | undefined;
   constructor(
     appToken: string,
     botToken: string,
@@ -128,10 +135,11 @@ export class SlackConnection implements SlackDelivery {
     accept: (body: unknown) => boolean,
     log: Logger,
     interactions?: SlackInteractions,
+    open?: () => boolean,
   ) {
     this.socket.on("slack_event", async (request: SocketRequest) => {
       // handleSlackRequest catches errors without exposing SDK payloads.
-      await handleSlackRequest(request, accept, log, interactions);
+      await handleSlackRequest(request, accept, log, interactions, open);
     });
     this.socket.on("error", () => log.error("Slack socket error"));
     await this.socket.start();
@@ -294,7 +302,9 @@ export class SlackConnection implements SlackDelivery {
     }
   }
 
-  async close() {
-    await this.socket.disconnect();
+  /** Idempotent: a repeated SDK disconnect can wait for an event that never comes. */
+  close() {
+    this.closing ??= this.socket.disconnect();
+    return this.closing;
   }
 }

@@ -6,18 +6,18 @@ machine framework. The existing owners must keep each transition valid.
 
 ## Gateway and process
 
-| Owner                          | States and transitions                                                   | Required invariant                                                                                             |
-| ------------------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `routing.ts`, `Gateway.accept` | Unknown thread → accepted mention or DM → followed thread                | Validate app, workspace, user, and channel before admission. Reject bot messages.                              |
-| `store.ts`, `Gateway.process`  | Queued → running → responding → done or failed                           | Persist before ACK. Run only the first unfinished job per conversation.                                        |
-| `Gateway.work`                 | Available slot → active conversation → released slot                     | One active turn per conversation; enforce the bot concurrency limit.                                           |
-| Session mapping                | Missing → created → persisted → reused                                   | Reuse only within the full bot/backend/channel/thread namespace.                                               |
-| Delivery cursor                | Unsent → confirmed chunk → next chunk; failure → delayed retry or failed | Delivery retries do not call the backend again. Advance only after Slack confirms a write.                     |
-| Restart recovery               | Running → interrupt attempt → responding with uncertainty notice         | Do not replay a turn whose tool outcomes are unknown.                                                          |
-| Transcript cursor              | NULL → baseline → advance; read failure → retry; lost → next request     | Advance with the reply rows in one transaction. Never backfill a baseline or skip unread history silently.     |
-| `LiveReply`                    | Waiting → visible text → closed; write failure → disabled                | Serialize preview writes. Stop timers before final delivery. Preserve preview timestamps for restart recovery. |
-| Reaction reply                 | No reaction → requested → delivered or failed                            | Target the triggering message. A failed reaction-only reply must not disappear.                                |
-| `runtime.ts`                   | Locked → starting → serving → stopping → closed                          | Hold one data-directory lock. Drain workers before closing resources and releasing the lock.                   |
+| Owner                          | States and transitions                                                   | Required invariant                                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `routing.ts`, `Gateway.accept` | Unknown thread → accepted mention or DM → followed thread                | Validate app, workspace, user, and channel before admission. Reject bot messages.                                                         |
+| `store.ts`, `Gateway.process`  | Queued → running → responding → done or failed                           | Persist before ACK. Run only the first unfinished job per conversation.                                                                   |
+| `Gateway.work`                 | Available slot → active conversation → released slot                     | One fiber per conversation in a scoped `FiberMap`; turns and catch-ups share the bot concurrency limit.                                   |
+| Session mapping                | Missing → created → persisted → reused                                   | Reuse only within the full bot/backend/channel/thread namespace.                                                                          |
+| Delivery cursor                | Unsent → confirmed chunk → next chunk; failure → delayed retry or failed | Delivery retries do not call the backend again. Advance only after Slack confirms a write.                                                |
+| Restart recovery               | Running → interrupt attempt → responding with uncertainty notice         | Do not replay a turn whose tool outcomes are unknown.                                                                                     |
+| Transcript cursor              | NULL → baseline → advance; read failure → retry; lost → next request     | Advance with the reply rows in one transaction. Never backfill a baseline or skip unread history silently.                                |
+| `LiveReply`                    | Waiting → visible text → closed; write failure → disabled                | Serialize preview writes. Stop timers before final delivery. Preserve preview timestamps for restart recovery.                            |
+| Reaction reply                 | No reaction → requested → delivered or failed                            | Target the triggering message. A failed reaction-only reply must not disappear.                                                           |
+| `runtime.ts`                   | Locked → connected → serving → intake closed → drained → closed          | Hold one data-directory lock. Start workers after all bots connect. Close all intake, drain all workers, then resources. Failure exits 1. |
 
 An accepted Slack post can precede its SQLite confirmation. That crash window
 can produce a duplicate. These transitions do not provide exactly-once external
@@ -30,7 +30,7 @@ effects or delivery.
 | OpenCode adapter   | Observe events → submit turn → settle → read final history → detach          | Stream only current-turn visible text. Event-stream failure must not replay the prompt. Cancellation must interrupt server work. |
 | OpenCode watch     | Subscribe → connected → settle notices → disconnect → delayed reconnect      | Notices only trigger cursor reads. Each connection triggers catch-up; no history polling between events.                         |
 | Pi Durable adapter | Attach observer → establish history baseline → submit turn → settle → detach | Ignore history observed before the turn baseline. Return only the current answer. Cancellation must stop the agent.              |
-| `SlackConnection`  | Connect → dispatch → persist → ACK → disconnect                              | ACK accepted events only after durable admission. Sanitize SDK failures.                                                         |
+| `SlackConnection`  | Connect → dispatch → persist → ACK → intake closed → disconnect              | ACK accepted events only after durable admission. No ACK after intake closes. Sanitize SDK failures.                             |
 | Reaction parser    | Incomplete prefix → valid directive or literal text                          | Hide only recognized reaction controls; do not expose a partial control as response text.                                        |
 | Waiting override   | Validate → write private temporary file → rename                             | Check cancellation before replacement. Invalid cosmetic settings must not fail a turn.                                           |
 | Markdown chunker   | Outside fence → open fence → split and reopen → closed fence                 | Keep ordinary fences balanced within the Slack message budget.                                                                   |

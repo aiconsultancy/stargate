@@ -23,8 +23,20 @@ the queue, delivery cursor, and session mappings. `runtime.ts` owns startup,
 the exclusive process lock, cancellation, and resource cleanup.
 
 No shared agent implementation depends on Slack. No Slack implementation
-depends on a particular agent protocol. The first release uses Promise-based
-TypeScript and Bun's standard APIs; Effect is not required.
+depends on a particular agent protocol. Effect 4 owns lifetimes and
+concurrency: the process scope in `runtime.ts`, the per-conversation worker
+slots in `Gateway.work`, and the crew plugin's resource scope. Pure logic,
+SQLite stores and the adapter contract stay Promise-based TypeScript with
+`AbortSignal`; `effect.ts` bridges them. See the
+[architecture review](architecture-review.md).
+
+Workers start only after every bot has connected; a connection failure at
+startup leaves queued requests queued. Shutdown closes Slack intake for every
+bot first. Requests that arrive after that point get no ACK, so Slack
+redelivers them. All workers then stop together: each turn sees its signal
+abort and records an `interrupted` outcome. Backends, stores and the instance
+lock close last. A failure after startup stops every bot and exits with code
+1, so the service manager restarts Pogo.
 
 ## Adapter contract
 

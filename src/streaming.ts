@@ -21,6 +21,7 @@ export class LiveReply {
   private nextWrite = 0;
   private readonly shown = new Map<number, string>();
   private hasText = false;
+  private held = false;
   private readonly waitingStop = new AbortController();
   private readonly waitingTask: Promise<void>;
   private readonly wait: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -48,8 +49,48 @@ export class LiveReply {
     if (!text.trim()) return;
     this.hasText = true;
     this.waitingStop.abort();
+    if (this.held) return;
     this.enqueue(text);
   };
+
+  /** Confirm a cancellable notice before its opt-out timer can start. */
+  async announce(text: string) {
+    this.held = true;
+    this.hasText = true;
+    this.waitingStop.abort();
+    await this.task;
+    this.signal.throwIfAborted();
+    if (!this.slack.update || !this.slack.remove || this.disabled)
+      throw new Error("Cancellable maintenance notices unavailable");
+    const preview = this.store
+      .previews(this.job.id)
+      .find(({ part }) => part === 0);
+    if (
+      !preview ||
+      (await this.slack.update(
+        this.job.channel,
+        preview.ts,
+        text,
+        this.job.id,
+      )) === false
+    ) {
+      if (preview) this.store.removePreview(this.job.id, 0);
+      const ts = await this.slack.post(
+        this.job.channel,
+        this.job.thread,
+        text,
+        this.job.id,
+      );
+      if (!ts) throw new Error("Maintenance notice delivery unconfirmed");
+      this.store.savePreview(this.job.id, 0, ts);
+    }
+    this.signal.throwIfAborted();
+    this.shown.set(0, text);
+  }
+
+  resume() {
+    this.held = false;
+  }
 
   private enqueue(text: string) {
     if (

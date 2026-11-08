@@ -199,6 +199,8 @@ test("OpenCode watch reports settled sessions and reconnects", async () => {
     await watch;
     await server.stop(true);
   }
+  // Stopping a read-only watch never interrupts the sessions it observed.
+  expect(paths.filter((path) => path !== "/api/event")).toEqual([]);
 });
 
 test("repairThread resolves the exact bot namespace from config and state", async () => {
@@ -443,6 +445,41 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
     await expect(
       backend.transcript("session-1", "m7", signal),
     ).rejects.toMatchObject({ reason: "session" });
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("OpenCode interrupt treats a deleted session as stopped, other failures as errors", async () => {
+  let status = 404;
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch() {
+      return status === 404
+        ? Response.json(
+            {
+              _tag: "SessionNotFoundError",
+              sessionID: "session-1",
+              message: "gone",
+            },
+            { status },
+          )
+        : Response.json({ message: "unavailable" }, { status });
+    },
+  });
+  try {
+    const config = backendSchema.parse({
+      type: "opencode",
+      url: server.url.href,
+      directory: "/workspace",
+    });
+    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    const backend = new OpenCodeBackend(config);
+    const signal = new AbortController().signal;
+    await backend.interrupt("session-1", signal);
+    status = 503;
+    await expect(backend.interrupt("session-1", signal)).rejects.toThrow();
   } finally {
     await server.stop(true);
   }

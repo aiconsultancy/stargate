@@ -1,10 +1,13 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type {
-  SessionCreateInput,
-  SessionSyntheticInput,
+import {
+  OpenCode,
+  type SessionCreateInput,
+  type SessionPromptInput,
+  type SessionSyntheticInput,
 } from "@opencode/client";
 import {
   type CrewAgents,
@@ -13,8 +16,15 @@ import {
   type CrewSession,
   type CrewSessions,
 } from "../src/crew/engine";
+import { CrewMaintenance } from "../src/crew/maintenance";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import plugin from "../src/crew/plugin";
+import type {
+  CrewInspectionAPI,
+  EvidenceMessage,
+} from "../src/crew/reconciliation";
+import { CrewRecovery, runRecoveryOperator } from "../src/crew/recovery-rpc";
+import type { CrewTask } from "../src/crew/state";
 import {
   defaultTeam,
   profileTeam,
@@ -470,6 +480,11 @@ async function fixture(team?: Team) {
   }
   const calls: { method: string; sessionID: string; text?: string }[] = [];
   const creations: SessionCreateInput[] = [];
+  const inputs: SessionPromptInput[] = [];
+  const history = new Map<string, EvidenceMessage[]>();
+  const pendingInputs = new Set<string>();
+  const pendingForms = new Set<string>();
+  const pendingPermissions = new Set<string>();
   const messages: MesijMessage[] = [];
   const sentKeys = new Map<
     string,
@@ -496,6 +511,8 @@ async function fixture(team?: Team) {
         id: input.id,
         agent: input.agent,
         location: input.location,
+        time: { updated: 100, busy: 50, idle: 100 },
+        outcome: "succeeded" as const,
         ...(input.metadata ? { metadata: input.metadata } : {}),
       };
       sessions.set(input.id, session);
@@ -503,6 +520,7 @@ async function fixture(team?: Team) {
       return session;
     },
     async prompt(input) {
+      inputs.push(input);
       calls.push({
         method: "prompt",
         sessionID: input.sessionID,
@@ -580,7 +598,46 @@ async function fixture(team?: Team) {
       };
     },
   };
-  const engine = await CrewEngine.open(options, client, mailer, agents);
+  const inspectionAPI: CrewInspectionAPI = {
+    session: {
+      get: (input, request) => client.get(input, request),
+      async active() {
+        return Object.fromEntries(
+          [...busy].map((sessionID) => [sessionID, { type: "running" }]),
+        );
+      },
+      inbox: {
+        async list({ sessionID }) {
+          return pendingInputs.has(sessionID) ? [{ id: "pending-input" }] : [];
+        },
+      },
+      form: {
+        async list({ sessionID }) {
+          return pendingForms.has(sessionID) ? [{ id: "pending-form" }] : [];
+        },
+      },
+    },
+    permission: {
+      async list({ sessionID }) {
+        return pendingPermissions.has(sessionID)
+          ? [{ id: "pending-permission" }]
+          : [];
+      },
+    },
+    message: {
+      async list({ sessionID }) {
+        return { data: history.get(sessionID) ?? [], cursor: {} };
+      },
+    },
+  };
+  const engine = await CrewEngine.open(
+    options,
+    client,
+    mailer,
+    agents,
+    undefined,
+    async () => inspectionAPI,
+  );
   let toolCall = 0;
   const captain = (
     id = "ses_captain_a",
@@ -605,6 +662,12 @@ async function fixture(team?: Team) {
     calls,
     creations,
     synthetics,
+    inputs,
+    history,
+    inspectionAPI,
+    pendingInputs,
+    pendingForms,
+    pendingPermissions,
     messages,
     mailer,
     agents,
@@ -627,6 +690,61 @@ async function fixture(team?: Team) {
       await engine.close();
       await rm(directory, { recursive: true, force: true });
     },
+  };
+}
+
+async function assignedTask(f: Awaited<ReturnType<typeof fixture>>) {
+  const task = (
+    await f.engine.run(
+      { op: "dispatch", crew: "builder", text: "Original task" },
+      f.captain(),
+    )
+  ).task;
+  if (!task) throw new Error("Missing assigned fixture task");
+  return task;
+}
+
+function uncertainResult(
+  f: Awaited<ReturnType<typeof fixture>>,
+  task: CrewTask,
+  result = "Verified original result",
+) {
+  const admitted = f.inputs.find((input) => input.id === task.inputID);
+  if (!admitted) throw new Error("Missing admitted input");
+  f.history.set(task.workerSessionID, [
+    {
+      id: "msg_retained_final",
+      type: "assistant",
+      time: { created: 70, completed: 80 },
+      agent: task.crewID,
+      finish: "stop",
+      content: [
+        { type: "reasoning", text: "private fixture reasoning" },
+        { type: "text", text: result },
+      ],
+    },
+    {
+      id: task.inputID,
+      type: "user",
+      time: { created: 60 },
+      text: admitted.text,
+      ...(admitted.metadata ? { metadata: admitted.metadata } : {}),
+    },
+  ]);
+  f.busy.delete(task.workerSessionID);
+  f.engine.state.uncertain(task.id);
+  return {
+    op: "reconcile" as const,
+    taskID: task.id,
+    expected: {
+      status: "uncertain" as const,
+      workerSessionID: task.workerSessionID,
+      originCaptainID: task.originCaptainID,
+      inputID: task.inputID,
+    },
+    resultMessageID: "msg_retained_final",
+    resultSha256: createHash("sha256").update(result).digest("hex"),
+    reason: "Operator reviewed the retained task result and external outcome.",
   };
 }
 
@@ -1300,6 +1418,994 @@ test("admitted worker exit without completion stays uncertain and is not replaye
     ).toMatchObject({ status: "busy" });
     expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(1);
   } finally {
+    await f.close();
+  }
+});
+
+test("captain inspection reads cross-origin ownership without promoting queued work", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const active = (
+      await f.engine.run(
+        { op: "dispatch", crew: "builder", text: "Original task" },
+        f.captain(),
+      )
+    ).task;
+    const queued = (
+      await f.engine.run(
+        { op: "dispatch", crew: "builder", text: "Next", queue: true },
+        f.captain("ses_captain_b"),
+      )
+    ).task;
+    const result = await f.engine.run(
+      { op: "inspect", crew: "builder" },
+      f.captain("ses_captain_b"),
+    );
+    expect(result).toMatchObject({
+      status: "inspected",
+      active: { id: active?.id, originCaptainID: "ses_captain_a" },
+      queued: [{ id: queued?.id, originCaptainID: "ses_captain_b" }],
+    });
+    expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("cross-origin captain reconciles exact evidence, retains audit and advances only FIFO head", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const original = await assignedTask(f);
+    const queued: CrewTask[] = [];
+    for (const text of ["Next", "Later"]) {
+      const task = (
+        await f.engine.run(
+          { op: "dispatch", crew: "builder", text, queue: true },
+          f.captain("ses_captain_b"),
+        )
+      ).task;
+      if (!task) throw new Error("Missing queue fixture");
+      queued.push(task);
+    }
+    f.engine.state.notice(original.id, "Saved notice");
+    f.engine.state.mailCursor(original.originCaptainID, original.id, 42);
+    const input = uncertainResult(f, original);
+    const reconciled = await f.engine.run(input, f.captain("ses_captain_b"));
+    expect(reconciled).toMatchObject({
+      status: "reconciled",
+      reconciliation: {
+        taskID: original.id,
+        workerSessionID: original.workerSessionID,
+        originCaptainID: original.originCaptainID,
+        inputID: original.inputID,
+        reconciledBy: "ses_captain_b",
+        previousStatus: "uncertain",
+        previousResult: null,
+        resultMessageID: input.resultMessageID,
+        resultSha256: input.resultSha256,
+        reason: input.reason,
+      },
+    });
+    expect(reconciled.reconciliation?.inputSha256).toBe(
+      createHash("sha256")
+        .update(f.inputs[0]?.text ?? "")
+        .digest("hex"),
+    );
+    expect(f.engine.state.task(original.id)).toEqual({
+      ...original,
+      status: "completed",
+      result: "Verified original result",
+    });
+    expect(
+      f.engine.state.mailCursor(original.originCaptainID, original.id),
+    ).toBe(42);
+    expect(f.engine.state.notices(original.id, 0)[0]?.text).toBe(
+      "Saved notice",
+    );
+    expect(f.engine.state.controlled("builder")).toBe(false);
+    expect(f.engine.state.queuedTasks("builder")).toEqual(queued);
+    expect(f.engine.state.peer("builder")?.sessionID).toBe(
+      original.workerSessionID,
+    );
+    const reopened = await CrewEngine.open(
+      f.options,
+      f.client,
+      f.mailer,
+      f.agents,
+    );
+    try {
+      expect(reopened.state.reconciliation(original.id)).toEqual(
+        reconciled.reconciliation ?? null,
+      );
+      const later = queued[1];
+      const next = queued[0];
+      if (!next || !later) throw new Error("Missing queue head");
+      expect(
+        (
+          await reopened.run(
+            { op: "status", taskID: later.id },
+            f.captain("ses_captain_b"),
+          )
+        ).status,
+      ).toBe("queued");
+      expect(
+        (
+          await reopened.run(
+            { op: "status", taskID: next.id },
+            f.captain("ses_captain_b"),
+          )
+        ).status,
+      ).toBe("running");
+      expect(await f.engine.run(input, f.captain("ses_captain_b"))).toEqual(
+        reconciled,
+      );
+      expect(f.engine.state.activeTask("builder")?.id).toBe(next.id);
+      expect(f.engine.state.task(original.id)?.originCaptainID).toBe(
+        original.originCaptainID,
+      );
+      await expect(
+        f.engine.run(
+          { op: "status", taskID: original.id },
+          f.captain("ses_captain_b"),
+        ),
+      ).rejects.toThrow("does not own");
+      const inspection = await f.engine.run(
+        { op: "inspect", crew: "builder", taskID: original.id },
+        f.captain("ses_captain_b"),
+      );
+      expect(inspection.reconciliation).toEqual(reconciled.reconciliation);
+      expect(inspection.inspectedTask?.id).toBe(original.id);
+    } finally {
+      await reopened.close();
+    }
+    expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(2);
+    expect(f.calls.some((call) => call.method === "interrupt")).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Mesij cross-origin status requests and replies preserve original task lineage and never wake workers", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    uncertainResult(f, task);
+    const request = await f.engine.run(
+      { op: "inspect", crew: "builder", requestStatus: { key: "status-one" } },
+      f.captain("ses_captain_b"),
+    );
+    expect(request.statusRequest?.id).toBeDefined();
+    const retried = await f.engine.run(
+      { op: "inspect", crew: "builder", requestStatus: { key: "status-one" } },
+      f.captain("ses_captain_b"),
+    );
+    expect(retried.statusRequest).toEqual(request.statusRequest);
+    expect(f.messages).toHaveLength(1);
+    const inbox = await f.engine.mail(
+      { op: "inbox" },
+      f.worker(task.workerSessionID),
+    );
+    expect(inbox.messages?.[0]?.text).toContain("Status request");
+    const receiptID = inbox.messages?.[0]?.id;
+    await f.engine.mail(
+      {
+        op: "send",
+        taskID: task.id,
+        to: "captain",
+        key: "status-reply",
+        replyTo: receiptID,
+        text: "Finished; retained final message available.",
+      },
+      f.worker(task.workerSessionID),
+    );
+    const replies = await f.engine.mail(
+      { op: "inbox", taskID: task.id },
+      f.captain("ses_captain_b"),
+    );
+    expect(replies.messages?.map((message) => message.text)).toEqual([
+      "Finished; retained final message available.",
+    ]);
+    expect(
+      (
+        await f.engine.mail({ op: "inbox" }, f.captain("ses_captain_b"))
+      ).messages?.map(({ text }) => text),
+    ).toEqual(["Finished; retained final message available."]);
+    const envelope = JSON.parse(f.messages[1]?.text ?? "{}");
+    expect(envelope.originCaptainID).toBe(task.originCaptainID);
+    expect(envelope.targetTaskID).toBe(task.id);
+    expect(f.engine.state.task(task.id)?.originCaptainID).toBe(
+      task.originCaptainID,
+    );
+    await expect(
+      f.engine.mail(
+        {
+          op: "send",
+          taskID: task.id,
+          to: "captain",
+          text: "Not my task",
+          key: "forbidden",
+        },
+        f.captain("ses_captain_b"),
+      ),
+    ).rejects.toThrow("does not own");
+    expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(1);
+    expect(
+      f.calls.some(
+        (call) => call.method === "synthetic" || call.method === "interrupt",
+      ),
+    ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const state of ["running", "uncertain", "completed"] as const) {
+  test(`installed status requests remain visible and reply-scoped for ${state} workers`, async () => {
+    const f = await fixture(profileTeam(customTeam, "ship"));
+    try {
+      const task = await assignedTask(f);
+      if (state === "uncertain") uncertainResult(f, task);
+      const requested = await f.engine.run(
+        { op: "inspect", crew: "builder", requestStatus: { key: "interop" } },
+        f.captain("ses_captain_b"),
+      );
+      const receiptID = requested.statusRequest?.id;
+      if (!receiptID) throw new Error("Missing status request receipt");
+      // Simulate an installed request predating mail_routes, then a restart.
+      const db = new Database(f.engine.state.path);
+      try {
+        db.query("DELETE FROM mail_routes WHERE id=?").run(receiptID);
+      } finally {
+        db.close();
+      }
+      if (state === "completed") {
+        await f.engine.run(
+          { op: "complete", taskID: task.id, result: "Done" },
+          f.worker(task.workerSessionID),
+        );
+        f.busy.delete(task.workerSessionID);
+      }
+      const reopened = await CrewEngine.open(
+        f.options,
+        f.client,
+        f.mailer,
+        f.agents,
+        undefined,
+        async () => f.inspectionAPI,
+      );
+      try {
+        const worker = f.worker(task.workerSessionID);
+        expect(
+          (await reopened.mail({ op: "inbox" }, worker)).messages?.map(
+            ({ id }) => id,
+          ),
+        ).toEqual([receiptID]);
+        for (const to of ["captain", "all", "builder"]) {
+          await expect(
+            reopened.mail(
+              {
+                op: "send",
+                to,
+                taskID: task.id,
+                replyTo: receiptID,
+                text: "wrong task",
+                key: `wrong-${to}`,
+              },
+              f.captain(),
+            ),
+          ).rejects.toThrow("validated message");
+        }
+        await expect(
+          reopened.mail(
+            {
+              op: "send",
+              to: "captain",
+              taskID: "task_foreign",
+              replyTo: receiptID,
+              text: "wrong task",
+              key: "wrong-task",
+            },
+            worker,
+          ),
+        ).rejects.toThrow();
+        if (state !== "running")
+          await expect(
+            reopened.mail(
+              {
+                op: "send",
+                to: "captain",
+                taskID: task.id,
+                text: "stale task",
+                key: "stale",
+              },
+              worker,
+            ),
+          ).rejects.toThrow("current task");
+        expect(
+          await reopened.mail(
+            {
+              op: "send",
+              to: "captain",
+              taskID: task.id,
+              replyTo: receiptID,
+              text: "Status only",
+              key: "valid",
+            },
+            worker,
+          ),
+        ).toMatchObject({ stored: true, notification: "not_requested" });
+        const reply = f.messages.at(-1);
+        if (!reply) throw new Error("Missing status reply");
+        const oldReply = new Database(reopened.state.path);
+        try {
+          oldReply.query("DELETE FROM mail_routes WHERE id=?").run(reply.id);
+        } finally {
+          oldReply.close();
+        }
+        expect(
+          (
+            await reopened.mail({ op: "inbox" }, f.captain("ses_captain_b"))
+          ).messages?.map(({ text }) => text),
+        ).toEqual(["Status only"]);
+        expect(
+          (
+            await reopened.mail(
+              { op: "inbox", taskID: task.id },
+              f.captain("ses_captain_b"),
+            )
+          ).messages?.map(({ text }) => text),
+        ).toEqual(["Status only"]);
+        f.sessions.set("ses_captain_c", {
+          id: "ses_captain_c",
+          agent: "ship-captain-lead",
+          location: { directory: f.options.captainDirectory },
+        });
+        expect(
+          (await reopened.mail({ op: "inbox" }, f.captain("ses_captain_c")))
+            .messages,
+        ).toEqual([]);
+        await expect(
+          reopened.mail(
+            { op: "inbox", taskID: task.id },
+            f.captain("ses_captain_c"),
+          ),
+        ).rejects.toThrow("does not own");
+        expect(reopened.state.task(task.id)).toMatchObject({
+          status: state,
+          originCaptainID: "ses_captain_a",
+        });
+        expect(
+          f.calls.filter(({ method }) => method === "prompt"),
+        ).toHaveLength(1);
+        expect(f.synthetics).toEqual([]);
+      } finally {
+        await reopened.close();
+      }
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+for (const native of ["builder", "ship-crew-builder", "foreign"]) {
+  test(`installed reconciliation validates mapped or historical native result: ${native}`, async () => {
+    const f = await fixture(profileTeam(customTeam, "ship"));
+    try {
+      const task = await assignedTask(f);
+      const input = uncertainResult(f, task);
+      const final = f.history.get(task.workerSessionID)?.[0];
+      if (!final) throw new Error("Missing final answer");
+      final.agent = native;
+      if (native === "foreign") {
+        await expect(
+          f.engine.run(input, f.captain("ses_captain_b")),
+        ).rejects.toThrow("Final result evidence");
+        expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+      } else {
+        const result = JSON.parse(
+          await runRecoveryOperator(
+            f.engine,
+            { sessionID: "ses_captain_b", request: input },
+            f.captain().signal,
+          ),
+        );
+        expect(result.status).toBe("reconciled");
+        expect(f.engine.state.task(task.id)).toMatchObject({
+          status: "completed",
+          originCaptainID: "ses_captain_a",
+        });
+      }
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test("installed maintenance uses mapped captain authorization and rejects foreign roots", async () => {
+  const f = await fixture(profileTeam(customTeam, "ship"));
+  const gate = new CrewMaintenance(f.engine);
+  try {
+    await gate.open(
+      { sessionID: "ses_captain_a", id: "mapped" },
+      f.captain().signal,
+    );
+    gate.close({ sessionID: "ses_captain_a", id: "mapped" });
+    const root = f.sessions.get("ses_captain_b");
+    if (!root) throw new Error("Missing root");
+    root.agent = "lead";
+    await gate.open(
+      { sessionID: root.id, id: "historical" },
+      f.captain().signal,
+    );
+    gate.close({ sessionID: root.id, id: "historical" });
+    root.agent = "foreign";
+    await expect(
+      gate.open({ sessionID: root.id, id: "foreign" }, f.captain().signal),
+    ).rejects.toThrow("root configured captain");
+  } finally {
+    gate.dispose();
+    await f.close();
+  }
+});
+
+test("installed status inbox rejects forged legacy request/reply lineage", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const request = await f.engine.run(
+      { op: "inspect", crew: "builder", requestStatus: { key: "status" } },
+      f.captain("ses_captain_b"),
+    );
+    if (!request.statusRequest) throw new Error("Missing request");
+    const original = f.messages[0];
+    if (!original) throw new Error("Missing event");
+    const envelope = JSON.parse(original.text);
+    const reply = {
+      ...original,
+      id: "f".repeat(32),
+      sequence: 2,
+      sessionID: task.workerSessionID,
+      actor: f.engine.mailActor(task.workerSessionID),
+      to: "ses_captain_b",
+      replyTo: original.id,
+      text: JSON.stringify({
+        ...envelope,
+        sender: task.workerSessionID,
+        recipient: "ses_captain_b",
+        text: "Retained status",
+      }),
+    };
+    f.messages.push(reply);
+    expect(
+      (
+        await f.engine.mail({ op: "inbox" }, f.captain("ses_captain_b"))
+      ).messages?.map(({ text }) => text),
+    ).toEqual(["Retained status"]);
+    const retainedReply = JSON.parse(reply.text);
+    for (const changes of [
+      { namespace: "foreign" },
+      { sourceTaskID: "task_foreign" },
+      { originCaptainID: "ses_captain_b" },
+      { statusRequestID: "0".repeat(64) },
+      { sender: "ses_captain_a" },
+    ]) {
+      reply.text = JSON.stringify({ ...retainedReply, ...changes });
+      expect(
+        (await f.engine.mail({ op: "inbox" }, f.captain("ses_captain_b")))
+          .messages,
+      ).toEqual([]);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("inspection/reconciliation reject workers, child/foreign roots and tasks from another team", async () => {
+  const f = await fixture(customTeam);
+  const other = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    for (const operation of [{ op: "inspect", crew: "builder" }, input]) {
+      await expect(
+        f.engine.run(operation, f.worker(task.workerSessionID)),
+      ).rejects.toThrow("captain sessions");
+      await expect(
+        f.engine.run(operation, f.captain(task.workerSessionID)),
+      ).rejects.toThrow("captain sessions");
+      f.sessions.set("ses_child", {
+        id: "ses_child",
+        agent: "lead",
+        parentID: "ses_captain_a",
+        location: { directory: f.options.captainDirectory },
+      });
+      f.sessions.set("ses_foreign", {
+        id: "ses_foreign",
+        agent: "lead",
+        location: { directory: other.options.captainDirectory },
+      });
+      for (const id of ["ses_child", "ses_foreign"])
+        await expect(f.engine.run(operation, f.captain(id))).rejects.toThrow(
+          "root configured captain",
+        );
+    }
+    const foreign = await assignedTask(other);
+    await expect(
+      f.engine.run({ ...input, taskID: foreign.id }, f.captain()),
+    ).rejects.toThrow("not in this team's state");
+    await expect(
+      f.engine.run(
+        { op: "inspect", crew: "builder", taskID: foreign.id },
+        f.captain(),
+      ),
+    ).rejects.toThrow("not assigned");
+    expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+    expect(f.engine.state.reconciliation(task.id)).toBeNull();
+  } finally {
+    await other.close();
+    await f.close();
+  }
+});
+
+test.each(["workerSessionID", "originCaptainID", "inputID"] as const)(
+  "reconciliation rejects stale expected %s",
+  async (field) => {
+    const f = await fixture(customTeam);
+    try {
+      const task = await assignedTask(f);
+      const input = uncertainResult(f, task);
+      input.expected[field] = "stale_identity";
+      await expect(
+        f.engine.run(input, f.captain("ses_captain_b")),
+      ).rejects.toThrow("ownership is stale");
+      expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+      expect(f.engine.state.controlled("builder")).toBe(false);
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test.each(["dispatching", "running", "completed", "cancelling"])(
+  "reconciliation rejects non-uncertain status %s",
+  async (status) => {
+    const f = await fixture(customTeam);
+    try {
+      const task = await assignedTask(f);
+      const input = uncertainResult(f, task);
+      const db = new Database(f.engine.state.path);
+      try {
+        db.query("UPDATE tasks SET status=? WHERE id=?").run(status, task.id);
+      } finally {
+        db.close();
+      }
+      await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+        "ownership or state changed",
+      );
+      expect(f.engine.state.task(task.id)?.status).toBe(status);
+      expect(f.engine.state.reconciliation(task.id)).toBeNull();
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test.each([
+  "busy",
+  "pendingInputs",
+  "pendingForms",
+  "pendingPermissions",
+] as const)(
+  "reconciliation rejects live or blocked execution: %s",
+  async (field) => {
+    const f = await fixture(customTeam);
+    try {
+      const task = await assignedTask(f);
+      const input = uncertainResult(f, task);
+      f[field].add(task.workerSessionID);
+      await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+        "reconciliation refused",
+      );
+      expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+      expect(f.engine.state.reconciliation(task.id)).toBeNull();
+      expect(f.engine.state.controlled("builder")).toBe(false);
+      expect(f.calls.some((call) => call.method === "interrupt")).toBe(false);
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test.each([
+  "originCaptainID",
+  "inputID",
+  "workerSessionID",
+  "status",
+  "released",
+  "notifying",
+  "peer",
+])(
+  "reconciliation CAS rejects %s changed during verification",
+  async (field) => {
+    const f = await fixture(customTeam);
+    try {
+      const task = await assignedTask(f);
+      const input = uncertainResult(f, task);
+      const list = f.inspectionAPI.message.list;
+      f.inspectionAPI.message.list = async (...args) => {
+        const db = new Database(f.engine.state.path);
+        try {
+          if (field === "peer")
+            db.query(
+              "UPDATE peers SET sessionID='ses_changed' WHERE crewID='builder'",
+            ).run();
+          else if (field === "released" || field === "notifying")
+            db.query(`UPDATE tasks SET ${field}=1 WHERE id=?`).run(task.id);
+          else
+            db.query(`UPDATE tasks SET ${field}=? WHERE id=?`).run(
+              field === "status" ? "running" : "changed_identity",
+              task.id,
+            );
+        } finally {
+          db.close();
+        }
+        return list(...args);
+      };
+      await expect(
+        f.engine.run(input, f.captain("ses_captain_b")),
+      ).rejects.toThrow("changed during verification");
+      expect(f.engine.state.reconciliation(task.id)).toBeNull();
+      expect(f.engine.state.task(task.id)?.result).toBeNull();
+      expect(f.engine.state.controlled("builder")).toBe(false);
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test("reconciliation rechecks live state after proof and refuses new activity", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    const list = f.inspectionAPI.message.list;
+    f.inspectionAPI.message.list = async (...args) => {
+      f.pendingInputs.add(task.workerSessionID);
+      return list(...args);
+    };
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      "reconciliation refused",
+    );
+    expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+    expect(f.engine.state.controlled("builder")).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  "hash",
+  "message",
+  "input",
+  "envelope",
+  "interleaved",
+  "finish",
+  "agent",
+  "missing",
+])("reconciliation refuses invalid retained evidence: %s", async (failure) => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    const messages = f.history.get(task.workerSessionID);
+    const final = messages?.[0];
+    const admitted = messages?.[1];
+    if (!messages || !final || !admitted)
+      throw new Error("Missing evidence fixture");
+    if (failure === "hash") input.resultSha256 = "0".repeat(64);
+    if (failure === "message") input.resultMessageID = "msg_other_result";
+    if (failure === "input") admitted.metadata = {};
+    if (failure === "envelope") admitted.text = "Pogo task envelope: {}";
+    if (failure === "interleaved")
+      messages.splice(1, 0, {
+        id: "msg_other_input",
+        type: "user",
+        time: { created: 65 },
+        text: "Unrelated private prompt",
+      });
+    if (failure === "finish") final.finish = "tool-calls";
+    if (failure === "agent") final.agent = "reader";
+    if (failure === "missing") messages.pop();
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      /evidence|input|envelope/,
+    );
+    expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+    expect(f.engine.state.reconciliation(task.id)).toBeNull();
+    expect(f.engine.state.controlled("builder")).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test("reconciliation evidence paginates and rejects conflicting idempotent retries", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    const messages = f.history.get(task.workerSessionID);
+    if (!messages?.[0] || !messages[1]) throw new Error("Missing evidence");
+    const [final, admitted] = messages;
+    f.inspectionAPI.message.list = async ({ cursor, sessionID }) => {
+      expect(sessionID).toBe(task.workerSessionID);
+      return cursor
+        ? { data: [admitted], cursor: {} }
+        : { data: [final], cursor: { next: "second-page" } };
+    };
+    await f.engine.run(input, f.captain());
+    await expect(
+      f.engine.run({ ...input, resultSha256: "0".repeat(64) }, f.captain()),
+    ).rejects.toThrow("conflicts");
+    expect(f.engine.state.task(task.id)?.result).toBe(
+      "Verified original result",
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("operator RPC uses the same engine checks and accepts no other crew operations", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    const signal = new AbortController().signal;
+    await expect(
+      runRecoveryOperator(
+        f.engine,
+        { sessionID: task.workerSessionID, request: input },
+        signal,
+      ),
+    ).rejects.toThrow("captain sessions");
+    await expect(
+      runRecoveryOperator(
+        f.engine,
+        { sessionID: "ses_captain_b", agent: "lead", request: input },
+        signal,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      runRecoveryOperator(
+        f.engine,
+        {
+          sessionID: "ses_captain_b",
+          request: { op: "dispatch", crew: "builder", text: "No" },
+        },
+        signal,
+      ),
+    ).rejects.toThrow();
+    const inspected = JSON.parse(
+      await runRecoveryOperator(
+        f.engine,
+        {
+          sessionID: "ses_captain_b",
+          request: { op: "inspect", crew: "builder" },
+        },
+        signal,
+      ),
+    );
+    expect(inspected.active.id).toBe(task.id);
+    const reconciled = JSON.parse(
+      await runRecoveryOperator(
+        f.engine,
+        { sessionID: "ses_captain_b", request: input },
+        signal,
+      ),
+    );
+    expect(reconciled.status).toBe("reconciled");
+    expect(f.engine.state.task(task.id)?.originCaptainID).toBe("ses_captain_a");
+  } finally {
+    await f.close();
+  }
+});
+
+test("reconciliation rejects queued/cancelled work and conflicting retained results", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    const queued = (
+      await f.engine.run(
+        { op: "dispatch", crew: "builder", text: "Pending", queue: true },
+        f.captain(),
+      )
+    ).task;
+    if (!queued) throw new Error("Missing queue fixture");
+    const queuedInput = {
+      ...input,
+      taskID: queued.id,
+      expected: { ...input.expected, inputID: queued.inputID },
+    };
+    await expect(f.engine.run(queuedInput, f.captain())).rejects.toThrow(
+      "ownership or state changed",
+    );
+    f.engine.state.cancelQueued(queued.id, queued.originCaptainID);
+    await expect(f.engine.run(queuedInput, f.captain())).rejects.toThrow(
+      "ownership or state changed",
+    );
+    const db = new Database(f.engine.state.path);
+    try {
+      db.query("UPDATE tasks SET result='Existing evidence' WHERE id=?").run(
+        task.id,
+      );
+    } finally {
+      db.close();
+    }
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      "result conflicts",
+    );
+    expect(f.engine.state.task(task.id)?.result).toBe("Existing evidence");
+    expect(f.engine.state.reconciliation(task.id)).toBeNull();
+    expect(f.engine.state.controlled("builder")).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test("reconciliation failures/cancellation release only their own control and never interrupt", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    f.inspectionAPI.message.list = async () => {
+      throw new Error("private raw API failure");
+    };
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      "raw SDK details withheld",
+    );
+    expect(f.engine.state.controlled("builder")).toBe(false);
+    const controller = new AbortController();
+    f.inspectionAPI.message.list = async () => {
+      controller.abort();
+      return { data: [], cursor: {} };
+    };
+    await expect(
+      f.engine.run(input, f.captain("ses_captain_b", controller.signal)),
+    ).rejects.toThrow("raw SDK details withheld");
+    expect(f.engine.state.controlled("builder")).toBe(false);
+    expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+    expect(f.calls.some((call) => call.method === "interrupt")).toBe(false);
+    const token = f.engine.state.reserveReconciliation(
+      f.engine.state.task(task.id) ?? task,
+    );
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      "control is reserved",
+    );
+    expect(f.engine.state.controlled("builder")).toBe(true);
+    f.engine.state.releaseControl("builder", token);
+  } finally {
+    await f.close();
+  }
+});
+
+test("reconciliation never clears a control token changed during verification", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    const list = f.inspectionAPI.message.list;
+    f.inspectionAPI.message.list = async (...args) => {
+      const db = new Database(f.engine.state.path);
+      try {
+        db.query(
+          "UPDATE worker_controls SET token='replacement-control' WHERE crewID='builder'",
+        ).run();
+      } finally {
+        db.close();
+      }
+      return list(...args);
+    };
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      "changed during verification",
+    );
+    expect(f.engine.state.controlled("builder")).toBe(true);
+    expect(f.engine.state.reconciliation(task.id)).toBeNull();
+    f.engine.state.releaseControl("builder", "replacement-control");
+  } finally {
+    await f.close();
+  }
+});
+
+test("inspection/reconciliation fail closed on foreign peer metadata and changed idle boundary", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    const session = f.sessions.get(task.workerSessionID);
+    if (!session) throw new Error("Missing peer fixture");
+    const metadata = session.metadata;
+    session.metadata = {
+      pogoCrew: { namespace: "foreign-team", crewID: "builder" },
+    };
+    await expect(
+      f.engine.run({ op: "inspect", crew: "builder" }, f.captain()),
+    ).rejects.toThrow("identity changed");
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      "identity changed",
+    );
+    if (metadata) session.metadata = metadata;
+    const list = f.inspectionAPI.message.list;
+    f.inspectionAPI.message.list = async (...args) => {
+      session.time = { updated: 200, busy: 150, idle: 200 };
+      return list(...args);
+    };
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      "execution changed",
+    );
+    expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+    expect(f.engine.state.controlled("builder")).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test("authenticated operator SDK RPC invokes inspection/reconciliation without a prompt", async () => {
+  const f = await fixture(customTeam);
+  const task = await assignedTask(f);
+  const input = uncertainResult(f, task);
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      if (request.headers.get("authorization") !== "Bearer fixture-only")
+        return Response.json({ _tag: "UnauthorizedError" }, { status: 401 });
+      const url = new URL(request.url);
+      expect(url.pathname).toBe("/api/rpc/pogo.crew.recovery/run");
+      expect(url.searchParams.get("location[directory]")).toBe(
+        f.options.captainDirectory,
+      );
+      const body = await request.json();
+      return Response.json({
+        output: await runRecoveryOperator(f.engine, body.input, request.signal),
+      });
+    },
+  });
+  try {
+    const client = OpenCode.make({
+      baseUrl: server.url.href,
+      headers: { authorization: "Bearer fixture-only" },
+    });
+    const rpc = client.rpc(CrewRecovery);
+    const options = { location: { directory: f.options.captainDirectory } };
+    const inspected = JSON.parse(
+      await rpc.run(
+        {
+          sessionID: "ses_captain_b",
+          request: { op: "inspect", crew: "builder" },
+        },
+        options,
+      ),
+    );
+    expect(inspected.active.id).toBe(task.id);
+    expect(inspected.execution.state).toBe("idle");
+    const recovered = JSON.parse(
+      await rpc.run({ sessionID: "ses_captain_b", request: input }, options),
+    );
+    expect(recovered.status).toBe("reconciled");
+    await expect(
+      OpenCode.make({ baseUrl: server.url.href })
+        .rpc(CrewRecovery)
+        .run(
+          {
+            sessionID: "ses_captain_b",
+            request: { op: "inspect", crew: "builder" },
+          },
+          options,
+        ),
+    ).rejects.toBeDefined();
+    expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(1);
+    expect(f.calls.some((call) => call.method === "interrupt")).toBe(false);
+  } finally {
+    await server.stop(true);
     await f.close();
   }
 });

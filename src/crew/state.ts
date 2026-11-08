@@ -31,6 +31,27 @@ export type CrewTask = {
   notifying: number;
 };
 export type CrewNotice = { id: number; taskID: string; text: string };
+export type TaskReconciliation = {
+  taskID: string;
+  workerSessionID: string;
+  originCaptainID: string;
+  inputID: string;
+  reconciledBy: string;
+  previousStatus: "uncertain";
+  previousResult: string | null;
+  resultMessageID: string;
+  inputSha256: string;
+  resultSha256: string;
+  reason: string;
+  createdAt: number;
+};
+export type StatusRequest = {
+  id: string;
+  taskID: string;
+  captainID: string;
+  workerSessionID: string;
+  receiptID: string | null;
+};
 
 export class CrewError extends Error {}
 
@@ -114,6 +135,20 @@ export class CrewState {
         CREATE INDEX IF NOT EXISTS pending_worker ON pending_tasks(crewID,status,sequence);
         CREATE TABLE IF NOT EXISTS worker_controls (
           crewID TEXT PRIMARY KEY REFERENCES peers(crewID), token TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS task_reconciliations (
+          taskID TEXT PRIMARY KEY REFERENCES tasks(id),
+          workerSessionID TEXT NOT NULL, originCaptainID TEXT NOT NULL,
+          inputID TEXT NOT NULL, reconciledBy TEXT NOT NULL,
+          previousStatus TEXT NOT NULL CHECK(previousStatus='uncertain'),
+          previousResult TEXT, resultMessageID TEXT NOT NULL,
+          inputSha256 TEXT NOT NULL, resultSha256 TEXT NOT NULL,
+          reason TEXT NOT NULL, createdAt INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS crew_status_requests (
+          id TEXT PRIMARY KEY, taskID TEXT NOT NULL REFERENCES tasks(id),
+          captainID TEXT NOT NULL, workerSessionID TEXT NOT NULL,
+          receiptID TEXT UNIQUE
         );
         CREATE TABLE IF NOT EXISTS pi_peers (
           sessionID TEXT PRIMARY KEY REFERENCES peers(sessionID),
@@ -297,6 +332,167 @@ export class CrewState {
     return Boolean(
       this.db.query("SELECT 1 FROM worker_controls WHERE crewID=?").get(crewID),
     );
+  }
+
+  queuedTasks(crewID: string): CrewTask[] {
+    return this.db
+      .query<CrewTask, [string]>(
+        `SELECT id,crewID,workerSessionID,originCaptainID,inputID,status,result,released,notifying
+         FROM pending_tasks WHERE crewID=? AND status='queued' ORDER BY sequence`,
+      )
+      .all(crewID);
+  }
+
+  reconciliation(taskID: string): TaskReconciliation | null {
+    return this.db
+      .query<TaskReconciliation, [string]>(
+        "SELECT * FROM task_reconciliations WHERE taskID=?",
+      )
+      .get(taskID);
+  }
+
+  private unchangedTask(expected: CrewTask): boolean {
+    const task = this.activeTask(expected.crewID);
+    return (
+      !!task &&
+      task.id === expected.id &&
+      task.workerSessionID === expected.workerSessionID &&
+      task.originCaptainID === expected.originCaptainID &&
+      task.inputID === expected.inputID &&
+      task.status === expected.status &&
+      task.result === expected.result &&
+      task.released === expected.released &&
+      task.notifying === expected.notifying &&
+      this.peer(expected.crewID)?.sessionID === expected.workerSessionID
+    );
+  }
+
+  reserveReconciliation(expected: CrewTask): string {
+    return this.db
+      .transaction(() => {
+        if (
+          expected.status !== "uncertain" ||
+          expected.released !== 0 ||
+          expected.notifying !== 0 ||
+          !this.unchangedTask(expected)
+        )
+          throw new CrewError(
+            "Task ownership or state changed; inspect again before reconciliation.",
+          );
+        if (this.controlled(expected.crewID))
+          throw new CrewError(
+            "Worker control is reserved; do not steal it. Inspect before retrying.",
+          );
+        const token = randomUUID();
+        this.db
+          .query("INSERT INTO worker_controls VALUES (?,?)")
+          .run(expected.crewID, token);
+        return token;
+      })
+      .immediate();
+  }
+
+  finishReconciliation(
+    expected: CrewTask,
+    token: string,
+    result: string,
+    evidence: Pick<
+      TaskReconciliation,
+      | "reconciledBy"
+      | "resultMessageID"
+      | "inputSha256"
+      | "resultSha256"
+      | "reason"
+    >,
+  ): TaskReconciliation {
+    return this.db
+      .transaction(() => {
+        const control = this.db
+          .query<{ token: string }, [string]>(
+            "SELECT token FROM worker_controls WHERE crewID=?",
+          )
+          .get(expected.crewID);
+        if (
+          expected.status !== "uncertain" ||
+          expected.released !== 0 ||
+          expected.notifying !== 0 ||
+          control?.token !== token ||
+          !this.unchangedTask(expected)
+        )
+          throw new CrewError(
+            "Task ownership or state changed during verification; inspect again.",
+          );
+        if (expected.result !== null && expected.result !== result)
+          throw new CrewError(
+            "Retained task result conflicts; no state changed.",
+          );
+        this.db
+          .query(`INSERT INTO task_reconciliations
+            (taskID,workerSessionID,originCaptainID,inputID,reconciledBy,
+             previousStatus,previousResult,resultMessageID,inputSha256,
+             resultSha256,reason,createdAt)
+            VALUES (?,?,?,?,?,'uncertain',?,?,?,?,?,?)`)
+          .run(
+            expected.id,
+            expected.workerSessionID,
+            expected.originCaptainID,
+            expected.inputID,
+            evidence.reconciledBy,
+            expected.result,
+            evidence.resultMessageID,
+            evidence.inputSha256,
+            evidence.resultSha256,
+            evidence.reason,
+            Date.now(),
+          );
+        this.db
+          .query("UPDATE tasks SET status='completed',result=? WHERE id=?")
+          .run(result, expected.id);
+        this.reporting.record(expected, "result", result);
+        const audit = this.reconciliation(expected.id);
+        if (!audit) throw new CrewError("Reconciliation audit missing.");
+        return audit;
+      })
+      .immediate();
+  }
+
+  statusRequest(id: string): StatusRequest | null {
+    return this.db
+      .query<StatusRequest, [string]>(
+        "SELECT * FROM crew_status_requests WHERE id=?1 OR receiptID=?1",
+      )
+      .get(id);
+  }
+
+  requestedStatus(taskID: string, captainID: string): boolean {
+    return Boolean(
+      this.db
+        .query(
+          "SELECT 1 FROM crew_status_requests WHERE taskID=? AND captainID=?",
+        )
+        .get(taskID, captainID),
+    );
+  }
+
+  reserveStatusRequest(id: string, task: CrewTask, captainID: string) {
+    this.db
+      .transaction(() => {
+        if (!this.unchangedTask(task))
+          throw new CrewError(
+            "Task ownership changed before the status request; inspect again.",
+          );
+        this.db
+          .query(`INSERT OR IGNORE INTO crew_status_requests
+            (id,taskID,captainID,workerSessionID) VALUES (?,?,?,?)`)
+          .run(id, task.id, captainID, task.workerSessionID);
+      })
+      .immediate();
+  }
+
+  statusRequestReceipt(id: string, receiptID: string) {
+    this.db
+      .query("UPDATE crew_status_requests SET receiptID=? WHERE id=?")
+      .run(receiptID, id);
   }
 
   private nextQueued(crewID: string): QueuedTask | null {

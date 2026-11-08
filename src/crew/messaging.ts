@@ -103,7 +103,10 @@ export class CrewMessaging {
     await this.engine.authorize(caller);
     const routes = this.engine.state.mailRoutes;
     const reply =
-      input.op === "send" && input.replyTo ? routes.get(input.replyTo) : null;
+      input.op === "send" && input.replyTo
+        ? (routes.get(input.replyTo) ??
+          this.engine.statusRequestRoute(input.replyTo))
+        : null;
     if (
       input.op === "send" &&
       input.replyTo &&
@@ -112,10 +115,22 @@ export class CrewMessaging {
       throw new CrewError(
         "Reply reference must name a validated message addressed to this caller.",
       );
+    const statusReply =
+      input.op === "send" && input.replyTo
+        ? this.engine.state.statusRequest(input.replyTo)
+        : null;
+    if (
+      input.op === "send" &&
+      statusReply &&
+      (statusReply.receiptID !== input.replyTo ||
+        statusReply.workerSessionID !== caller.sessionID ||
+        (input.taskID && statusReply.taskID !== input.taskID))
+    )
+      throw new CrewError("Status reply does not belong to this worker/task.");
     const contextTask = this.engine.mailTask(
       caller,
       input.taskID,
-      input.op === "inbox",
+      input.op === "inbox" || !!statusReply,
     );
     const captainID =
       caller.agent === this.engine.options.team.captain.id
@@ -127,8 +142,11 @@ export class CrewMessaging {
       throw new CrewError(
         "Mail requires an originating captain context or a validated reply.",
       );
-    const source =
-      contextTask?.originCaptainID === captainID ? contextTask : null;
+    const source = statusReply
+      ? this.engine.state.task(statusReply.taskID)
+      : contextTask?.originCaptainID === captainID
+        ? contextTask
+        : null;
     const actor = this.engine.mailActor(caller.sessionID);
     if (input.op === "inbox") {
       await this.mailer.register(actor, caller.sessionID, caller.signal);
@@ -138,11 +156,13 @@ export class CrewMessaging {
         caller.signal,
       );
       const messages = events.flatMap((event) => {
-        const route = routes.get(event.id);
+        const route =
+          routes.get(event.id) ?? this.engine.legacyStatusRoute(event);
+        const statusRequest = this.engine.statusRequestRoute(event.id);
         if (
           !route ||
           route.recipient !== caller.sessionID ||
-          (captainID && route.captainID !== captainID) ||
+          (captainID && route.captainID !== captainID && !statusRequest) ||
           event.to !== caller.sessionID ||
           event.sessionID !== route.sender ||
           event.actor !== this.engine.mailActor(route.sender) ||
@@ -246,9 +266,10 @@ export class CrewMessaging {
           ? reply.captainID
           : captainID);
       const candidate = peer ? this.engine.state.activeTask(member) : source;
-      const target =
-        candidate &&
-        ["dispatching", "running", "cancelling"].includes(candidate.status)
+      const target = statusReply
+        ? source
+        : candidate &&
+            ["dispatching", "running", "cancelling"].includes(candidate.status)
           ? candidate
           : null;
       try {
@@ -270,10 +291,12 @@ export class CrewMessaging {
               namespace: this.engine.options.namespace,
               sender: caller.sessionID,
               recipient,
-              originCaptainID: captainID,
+              originCaptainID:
+                statusReply && source ? source.originCaptainID : captainID,
               sourceTaskID: source?.id,
               targetTaskID: target?.id,
               text: input.text,
+              ...(statusReply ? { statusRequestID: statusReply.id } : {}),
             }),
             key: createHash("sha256")
               .update(

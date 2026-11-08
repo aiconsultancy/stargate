@@ -148,6 +148,7 @@ async function fixture() {
     },
     undefined,
     undefined,
+    undefined,
     connect,
   );
   const dispatch = async () => {
@@ -230,6 +231,7 @@ test("mapped native profiles recover old-named uncertain answers and retain old 
         },
       },
       f.native,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -379,6 +381,7 @@ test("recovery survives reopening and traverses message pages and skill records"
   const reopened = await CrewEngine.open(
     f.options,
     f.native,
+    undefined,
     undefined,
     undefined,
     undefined,

@@ -5,6 +5,7 @@ import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
+import type { MaintenanceWatch } from "./maintenance";
 
 /** Latest complete visible text for this turn, not reasoning or tool output. */
 export type TextSink = (text: string) => void;
@@ -55,6 +56,11 @@ export interface AgentBackend {
     onText?: TextSink,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
+  startMaintenance?(
+    sessionId: string,
+    requestID: string,
+    signal: AbortSignal,
+  ): Promise<MaintenanceWatch>;
   /**
    * Public assistant text after `after`. Undefined `after` returns only the
    * current baseline; "" reads from the start of the session.

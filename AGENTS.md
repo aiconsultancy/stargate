@@ -50,6 +50,10 @@ Pass non-secret CLI options through `ARGS`, or `mise run TASK -- OPTIONS`.
 - `src/store.ts`: SQLite queue, session mappings, delivery progress.
 - `src/backend.ts`, `src/backends/`: backend contract and implementations.
 - `src/runtime.ts`: process ownership, startup, cancellation, cleanup.
+- `src/effect.ts`: Effect/Promise interop. Effect owns lifetimes and
+  concurrency in runtime, gateway workers and plugin setup; keep pure logic,
+  stores and the adapter contract Promise-based. Keep `effect` pinned to the
+  OpenCode SDK's version. See `docs/architecture-review.md`.
 
 Keep backend adapters independent of Slack. Preserve isolation by bot, app,
 workspace, backend settings, channel, and thread. Changing backend settings

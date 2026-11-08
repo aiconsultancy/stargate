@@ -530,3 +530,50 @@ test("scheduled status lookups do not cross bot namespaces", () => {
   f.gateway.accept(event());
   expect(f.store.jobStatus("another-bot", f.next().id)).toBeUndefined();
 });
+
+test("a failed poll stops the transcript watch and rejects the worker", async () => {
+  const f = fixture();
+  const watched = Promise.withResolvers<AbortSignal>();
+  f.backend.transcript = async () => ({ cursor: "", entries: [] });
+  f.backend.watch = async (_onSettled, signal) => {
+    watched.resolve(signal);
+    await new Promise<void>((resolve) =>
+      signal.addEventListener("abort", () => resolve(), { once: true }),
+    );
+  };
+  const ready = f.store.ready.bind(f.store);
+  let polls = 0;
+  f.store.ready = (...args) => {
+    if (++polls === 2) throw new Error("database is locked");
+    return ready(...args);
+  };
+  // Previously the worker waited forever for a watch that nothing aborted.
+  await expect(f.gateway.work(new AbortController().signal)).rejects.toThrow(
+    "database is locked",
+  );
+  expect((await watched.promise).aborted).toBe(true);
+});
+
+test("shutdown lets a running turn record its interruption before resolving", async () => {
+  const f = fixture();
+  const started = Promise.withResolvers<void>();
+  f.backend.prompt = (_session, _text, signal) =>
+    new Promise((_resolve, reject) => {
+      started.resolve();
+      signal.addEventListener(
+        "abort",
+        () => setTimeout(() => reject(new Error("stopped")), 20),
+        { once: true },
+      );
+    });
+  f.gateway.accept(event());
+  const controller = new AbortController();
+  const work = f.gateway.work(controller.signal);
+  await started.promise;
+  controller.abort();
+  await work;
+  // The turn settled inside the worker scope: its notice is durable.
+  const job = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+  expect(job?.status).toBe("responding");
+  expect(job?.failure).toBe("interrupted");
+});
