@@ -11,7 +11,9 @@ import { CrewError } from "./state";
 
 const MAX_RESULTS = 20;
 const MAX_TEXT = 2000;
-const MAX_PAGES = 8;
+const MAX_PAGES = 32;
+const SESSION_BATCH = 20;
+const MESSAGE_BATCH = 100;
 const identifier = z.string().min(1).max(256);
 const query = z
   .string()
@@ -31,6 +33,7 @@ export const historyInputSchema = z.discriminatedUnion("op", [
   z.strictObject({
     op: z.literal("messages"),
     sessionID: identifier,
+    order: z.enum(["asc", "desc"]).default("asc"),
     query: query.optional(),
     cursor: apiCursor.optional(),
     limit,
@@ -38,7 +41,7 @@ export const historyInputSchema = z.discriminatedUnion("op", [
   z.strictObject({
     op: z.literal("search"),
     query,
-    cursor: z.string().min(1).max(16384).optional(),
+    cursor: z.string().min(1).max(32768).optional(),
     limit,
   }),
 ]);
@@ -114,23 +117,42 @@ export type HistoryResult = Continuation &
     | { op: "search"; matches: HistoryText[]; scannedPages: number }
   );
 
+const sessionPosition = z.strictObject({
+  phase: z.literal("sessions"),
+  cursor: apiCursor.optional(),
+});
+const messagePosition = z.strictObject({
+  phase: z.literal("messages"),
+  sessionID: identifier,
+  cursor: apiCursor.optional(),
+  nextSessionCursor: apiCursor.nullable(),
+  pendingSessionIDs: z.array(identifier).max(SESSION_BATCH - 1),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .max(MESSAGE_BATCH - 1)
+    .default(0),
+});
 const searchPosition = z.discriminatedUnion("phase", [
+  sessionPosition,
+  messagePosition,
+]);
+const searchCursor = z.discriminatedUnion("version", [
   z.strictObject({
-    phase: z.literal("sessions"),
-    cursor: apiCursor.optional(),
+    version: z.literal(1),
+    query,
+    position: z.discriminatedUnion("phase", [
+      sessionPosition,
+      messagePosition.omit({ pendingSessionIDs: true, offset: true }),
+    ]),
   }),
   z.strictObject({
-    phase: z.literal("messages"),
-    sessionID: identifier,
-    cursor: apiCursor.optional(),
-    nextSessionCursor: apiCursor.nullable(),
+    version: z.literal(2),
+    query,
+    position: searchPosition,
   }),
 ]);
-const searchCursor = z.strictObject({
-  version: z.literal(1),
-  query,
-  position: searchPosition,
-});
 type SearchPosition = z.infer<typeof searchPosition>;
 
 export class HistoryError extends CrewError {}
@@ -195,7 +217,10 @@ function decodeCursor(cursor: string, query: string): SearchPosition {
       JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")),
     );
     if (decoded.query !== query) throw new Error();
-    return decoded.position;
+    const position = decoded.position;
+    return position.phase === "messages" && !("pendingSessionIDs" in position)
+      ? { ...position, pendingSessionIDs: [], offset: 0 }
+      : position;
   } catch {
     throw new HistoryError("Invalid history cursor.");
   }
@@ -226,7 +251,10 @@ export class CrewHistory {
             limit: request.limit,
             ...(request.cursor
               ? { cursor: request.cursor }
-              : { order: "desc" as const }),
+              : {
+                  order: "desc" as const,
+                  ...(request.query !== undefined && { search: request.query }),
+                }),
           },
           { signal },
         );
@@ -260,7 +288,7 @@ export class CrewHistory {
           limit: request.limit,
           ...(request.cursor
             ? { cursor: request.cursor }
-            : { order: "asc" as const }),
+            : { order: request.order }),
         },
         { signal },
       );
@@ -299,6 +327,7 @@ export class CrewHistory {
       : { phase: "sessions" };
     const matches: HistoryText[] = [];
     let scannedPages = 0;
+    let verifiedSessionID: string | undefined;
     const needle = input.query.toLowerCase();
     while (
       position &&
@@ -307,10 +336,10 @@ export class CrewHistory {
     ) {
       signal.throwIfAborted();
       if (position.phase === "sessions") {
-        // One session per page avoids carrying unscanned session IDs in tokens.
+        // Carry only pending IDs, never transcripts, between bounded scans.
         const page = await this.options.sessions.list(
           {
-            limit: 1,
+            limit: SESSION_BATCH,
             ...(position.cursor
               ? { cursor: position.cursor }
               : { order: "desc" as const }),
@@ -319,40 +348,58 @@ export class CrewHistory {
         );
         signal.throwIfAborted();
         scannedPages++;
-        if (page.data.length > 1)
+        if (page.data.length > SESSION_BATCH)
           throw new HistoryError("Invalid history API response.");
         const next = nextCursor(page);
-        const session = page.data[0];
+        const [sessionID, ...pendingSessionIDs] = page.data
+          .filter(this.options.visible)
+          .map((session) => checkedID(session.id));
         position = next ? { phase: "sessions", cursor: next } : undefined;
-        if (session && this.options.visible(session)) {
+        if (sessionID) {
           position = {
             phase: "messages",
-            sessionID: checkedID(session.id),
+            sessionID,
+            pendingSessionIDs,
+            offset: 0,
             nextSessionCursor: next ?? null,
           };
         }
         continue;
       }
       // Continuation tokens are navigation, not proof of session visibility.
-      const session = await this.options.sessions.get(
-        { sessionID: position.sessionID },
-        { signal },
-      );
-      signal.throwIfAborted();
-      const nextSession: SearchPosition | undefined = position.nextSessionCursor
-        ? { phase: "sessions", cursor: position.nextSessionCursor }
-        : undefined;
-      if (session.id !== position.sessionID || !this.options.visible(session)) {
-        position = nextSession;
-        continue;
+      const [nextID, ...pendingSessionIDs] = position.pendingSessionIDs;
+      const nextSession: SearchPosition | undefined = nextID
+        ? {
+            phase: "messages",
+            sessionID: nextID,
+            pendingSessionIDs,
+            offset: 0,
+            nextSessionCursor: position.nextSessionCursor,
+          }
+        : position.nextSessionCursor
+          ? { phase: "sessions", cursor: position.nextSessionCursor }
+          : undefined;
+      if (verifiedSessionID !== position.sessionID) {
+        const session = await this.options.sessions.get(
+          { sessionID: position.sessionID },
+          { signal },
+        );
+        signal.throwIfAborted();
+        if (
+          session.id !== position.sessionID ||
+          !this.options.visible(session)
+        ) {
+          position = nextSession;
+          continue;
+        }
+        verifiedSessionID = position.sessionID;
       }
-      // Request at most the remaining result count. Every fetched message is
-      // consumed, even if all match; no mid-page results can be skipped.
-      const remaining = input.limit - matches.length;
+      // Scan independently of the result limit. An offset replays only a
+      // partially consumed page, without putting message text in the cursor.
       const page = await this.options.messages.list(
         {
           sessionID: position.sessionID,
-          limit: remaining,
+          limit: MESSAGE_BATCH,
           ...(position.cursor
             ? { cursor: position.cursor }
             : { order: "asc" as const }),
@@ -361,18 +408,28 @@ export class CrewHistory {
       );
       signal.throwIfAborted();
       scannedPages++;
-      if (page.data.length > remaining)
+      if (page.data.length > MESSAGE_BATCH)
         throw new HistoryError("Invalid history API response.");
-      for (const message of page.data) {
+      if (position.offset > page.data.length)
+        throw new HistoryError("Invalid history cursor.");
+      let consumed = position.offset;
+      for (const message of page.data.slice(position.offset)) {
+        consumed++;
         const result = plainText(position.sessionID, message, needle);
         if (result) matches.push(result);
+        if (matches.length === input.limit) break;
       }
       const next = nextCursor(page);
-      position = next ? { ...position, cursor: next } : nextSession;
+      position =
+        consumed < page.data.length
+          ? { ...position, offset: consumed }
+          : next
+            ? { ...position, cursor: next, offset: 0 }
+            : nextSession;
     }
     const cursor = position
       ? Buffer.from(
-          JSON.stringify({ version: 1, query: input.query, position }),
+          JSON.stringify({ version: 2, query: input.query, position }),
         ).toString("base64url")
       : undefined;
     return {

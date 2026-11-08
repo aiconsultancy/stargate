@@ -12,7 +12,7 @@ import {
 import { join } from "node:path";
 import { runCli } from "../src/cli";
 import { crewPermissions } from "../src/crew/policy";
-import { type Team, teamSchema } from "../src/crew/team";
+import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 import { initializeProfile, renderProfile } from "../src/profile";
 
 const directories: string[] = [];
@@ -110,6 +110,24 @@ test("specialisms retain broad host tools and session history", () => {
       effect: "deny",
     });
   }
+});
+
+test("direct trusted team tools do not require individual connector grants", async () => {
+  const { options } = await fixture();
+  for (const role of ["captain", "coding", "research"] as const) {
+    const rules = crewPermissions(role, "direct");
+    expect(rules[0]).toEqual({ action: "*", resource: "*", effect: "allow" });
+    expect(rules.at(-1)).toEqual({
+      action: "read",
+      resource: "*.pem",
+      effect: "deny",
+    });
+  }
+  const team = { ...defaultTeam, toolAccess: "direct" as const };
+  const profile = await renderProfile({ ...options, team }, team.captain.id);
+  expect(profile.agents[team.captain.id]?.permissions).toEqual(
+    crewPermissions("captain", "direct"),
+  );
 });
 
 test("profile init creates named feature worktrees, preserves source and reuses paths", async () => {

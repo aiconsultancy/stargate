@@ -17,6 +17,7 @@ export function historyVisible(
   peer: Peer | null,
   session: HistorySession,
 ): boolean {
+  if (options.team.historyScope === "server") return true;
   const identity = session.metadata?.["pogoCrew"];
   const metadata =
     typeof identity === "object" &&

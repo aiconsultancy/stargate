@@ -525,6 +525,17 @@ export class CrewEngine {
         return { status: "completed" };
       }
       if (input.op === "urgent") return await this.urgent(input, caller);
+      if (
+        input.op === "status" &&
+        caller.agent !== this.options.team.captain.id
+      ) {
+        const task = this.ownedWorkerTask(input.taskID, caller);
+        return {
+          status: task.status,
+          task,
+          notices: this.state.notices(task.id, 0),
+        };
+      }
       await this.captain(caller);
       if (input.op === "ensure") {
         const peers: Peer[] = [];
@@ -719,7 +730,10 @@ export class CrewEngine {
             metadata: {
               pogoCrew: { namespace: this.options.namespace, crewID },
             },
-            permissions: crewPermissions(member.permissionProfile),
+            permissions: crewPermissions(
+              member.permissionProfile,
+              this.options.team.toolAccess,
+            ),
             ...(agent?.data.model ? { model: agent.data.model } : {}),
           },
           { signal },

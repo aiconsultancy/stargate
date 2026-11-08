@@ -14,7 +14,7 @@ const target = agentIDSchema.default("captain");
 export const modelInputSchema = z.discriminatedUnion("op", [
   z.strictObject({
     op: z.literal("get"),
-    target: z.literal("captain").default("captain"),
+    target: z.enum(["captain", "self"]).default("self"),
   }),
   z.strictObject({ op: z.literal("list"), target }),
   z.strictObject({
@@ -54,6 +54,7 @@ export interface ModelAuthority {
     worktrees: Record<string, string>;
   };
   captain(caller: CrewCaller): Promise<void>;
+  authorize(caller: CrewCaller): Promise<void>;
   withWorkerControl<T>(
     crewID: string,
     caller: CrewCaller,
@@ -78,8 +79,9 @@ export class CrewModels {
     const input = parsed.data;
     try {
       caller.signal.throwIfAborted();
-      await this.authority.captain(caller);
       if (input.op === "get") {
+        if (input.target === "captain") await this.authority.captain(caller);
+        else await this.authority.authorize(caller);
         const { model } = await this.sessions.get(
           { sessionID: caller.sessionID },
           { signal: caller.signal },
@@ -97,6 +99,7 @@ export class CrewModels {
           },
         };
       }
+      await this.authority.captain(caller);
       const { team } = this.authority.options;
       if (team.crew.find(({ id }) => id === input.target)?.backend)
         throw new CrewError(

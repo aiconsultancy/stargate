@@ -47,7 +47,8 @@ const historyAPISchema = z.strictObject({
 export const teamSchema = z
   .strictObject({
     captain: agentSchema,
-    historyScope: z.enum(["team", "project"]).optional(),
+    historyScope: z.enum(["team", "project", "server"]).optional(),
+    toolAccess: z.enum(["curated", "direct"]).optional(),
     historyAPI: historyAPISchema.optional(),
     modelProviders: z.array(z.string().min(1).max(100)).min(1).optional(),
     crew: z

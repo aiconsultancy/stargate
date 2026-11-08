@@ -181,6 +181,38 @@ async function fixture(team?: Team) {
   };
 }
 
+test("worker reads its own task status without captain mediation or execution", async () => {
+  const f = await fixture({ ...defaultTeam, toolAccess: "direct" });
+  try {
+    const task = await f.engine.run(
+      { op: "dispatch", crew: "mario", text: "Read status independently" },
+      f.captain(),
+    );
+    const peer = f.engine.state.peer("mario");
+    if (!peer || !task.task) throw new Error("Missing task fixture");
+    const before = f.calls.length;
+    const status = await f.engine.run(
+      { op: "status", taskID: task.task.id },
+      f.worker(peer.sessionID),
+    );
+    expect(status.status).toBe("running");
+    expect(f.calls.length).toBe(before);
+    expect(f.creations[0]?.permissions?.[0]).toEqual({
+      action: "*",
+      resource: "*",
+      effect: "allow",
+    });
+    await expect(
+      f.engine.run(
+        { op: "status", taskID: task.task.id },
+        f.worker(peer.sessionID, "luigi"),
+      ),
+    ).rejects.toThrow();
+  } finally {
+    await f.engine.close();
+  }
+});
+
 test("waiting changes reject children, foreign roots and worker impersonation", async () => {
   const f = await fixture();
   try {

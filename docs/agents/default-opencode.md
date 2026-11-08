@@ -61,8 +61,15 @@ Agent IDs must match their assigned names, normalized to lowercase with word
 separators as hyphens. Hidden legacy aliases are rejected: Chief is `chief`,
 not `mario`; Adama is `adama`, not `bowser`. Existing mismatched installations
 need an explicit backed-up identity migration; never delete session history.
-Optional `historyScope` is `team` (default) or explicit `project`. Captain and
-crew use `pogo_history` to search OpenCode history through the API. Project
+Optional `historyScope` is `team` (default), `project`, or `server`. Captain and
+crew use `pogo_history` to search OpenCode history through the API. Server scope
+includes all sessions on that OpenCode server, including other namespaces.
+Optional `toolAccess: "direct"` lets this trusted team use all registered tools
+and connectors without maintaining a per-tool list. Omit it for the existing
+curated grants. Both modes retain secret-file read exclusions. Specialisms
+guide task assignment; they do not forbid direct implementation or diagnosis.
+See [autonomy](../autonomy.md) and [session history](../session-history.md).
+Project
 scope may include other conversations in the target project; approve that
 privacy expansion deliberately. Do not copy unrelated transcripts to Slack.
 

@@ -122,7 +122,7 @@ export async function renderProfile(input: Options, role: string) {
     agents: {
       [agent.id]: {
         ...(agent.model ? { model: agent.model } : {}),
-        permissions: crewPermissions(profile),
+        permissions: crewPermissions(profile, options.team.toolAccess),
       },
     },
     plugins: [
@@ -390,6 +390,6 @@ export async function initializeProfile(input: Options) {
     stateDirectory: state,
     namespace: options.namespace,
     agent: options.team.captain.id,
-    permissions: crewPermissions("captain"),
+    permissions: crewPermissions("captain", options.team.toolAccess),
   };
 }

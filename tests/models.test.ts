@@ -19,6 +19,12 @@ function fixture() {
     async captain(caller) {
       if (caller.agent !== "bowser") throw new Error("not captain");
     },
+    async authorize(caller) {
+      if (caller.agent === "bowser" && caller.sessionID === "ses_captain")
+        return;
+      if (caller.agent === "mario" && caller.sessionID === "ses_mario") return;
+      throw new Error("not configured caller");
+    },
     async withWorkerControl(crew, caller, operation) {
       await this.captain(caller);
       if (crew !== "mario") throw new Error("not configured");
@@ -130,6 +136,34 @@ test("get reports absent variant as default/unspecified, not a guessed level", a
       variant: "default/unspecified",
     },
   });
+  expect(f.calls).toEqual([]);
+});
+
+test("worker reads its own selected model without control locks or catalog calls", async () => {
+  const f = fixture();
+  f.models.list = async () => {
+    throw new Error("No catalog read required");
+  };
+  const worker = { ...f.caller, sessionID: "ses_mario", agent: "mario" };
+  f.sessions.get = async ({ sessionID }) => {
+    expect(sessionID).toBe(worker.sessionID);
+    return {
+      model: {
+        providerID: "openai-proxy",
+        id: "worker-model",
+        variant: "high",
+      },
+    };
+  };
+  expect(await f.tool.run({ op: "get", target: "self" }, worker)).toMatchObject(
+    {
+      sessionID: "ses_mario",
+      model: { id: "worker-model", variant: "high" },
+    },
+  );
+  await expect(
+    f.tool.run({ op: "get", target: "captain" }, worker),
+  ).rejects.toThrow();
   expect(f.calls).toEqual([]);
 });
 

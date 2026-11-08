@@ -58,6 +58,61 @@ test("history scope excludes other teams and requires explicit project access", 
   );
 });
 
+test("server history scope includes other namespaces, workers and projects", () => {
+  const base = {
+    namespace: "one",
+    captainDirectory: "/captain",
+    projectDirectory: "/project",
+    worktrees: { mario: "/crew/mario" },
+  };
+  const peer = {
+    crewID: "mario",
+    sessionID: "worker",
+    status: "ready" as const,
+  };
+  const candidates = [
+    {
+      id: "other-team",
+      agent: "other-captain",
+      location: { directory: "/project" },
+      metadata: { pogoCrew: { namespace: "other" } },
+    },
+    {
+      id: "worker-child",
+      parentID: "other-root",
+      agent: "other-worker",
+      location: { directory: "/crew/other-worker" },
+      metadata: { pogoCrew: { namespace: "other", crewID: "other-worker" } },
+    },
+    {
+      id: "other-project",
+      agent: "build",
+      location: { directory: "/unrelated-project" },
+    },
+  ];
+  for (const candidate of candidates) {
+    for (const caller of [null, peer]) {
+      expect(
+        historyVisible({ ...base, team: defaultTeam }, caller, candidate),
+      ).toBe(false);
+      expect(
+        historyVisible(
+          { ...base, team: { ...defaultTeam, historyScope: "project" } },
+          caller,
+          candidate,
+        ),
+      ).toBe(false);
+      expect(
+        historyVisible(
+          { ...base, team: { ...defaultTeam, historyScope: "server" } },
+          caller,
+          candidate,
+        ),
+      ).toBe(true);
+    }
+  }
+});
+
 test("history uses authenticated API and rejects a server with a different caller identity", async () => {
   const session = {
     id: "ses_captain",
