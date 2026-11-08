@@ -8,7 +8,8 @@ export type RequestFailure =
   | "backend"
   | "context"
   | "interrupted"
-  | "reaction";
+  | "reaction"
+  | "history";
 
 const failures = {
   timeout: {
@@ -27,6 +28,10 @@ const failures = {
   interrupted: {
     title: "Gateway interrupted",
     text: "Pogo stopped during this request. Work may have run; it was not repeated. Check agent state before sending another request.",
+  },
+  history: {
+    title: "Reply delayed",
+    text: "The agent finished, but its reply was not yet readable in session history. Pogo will post it in this thread when it is. The request was not repeated. Check agent state if no reply appears.",
   },
   reaction: {
     title: "Reaction unavailable",

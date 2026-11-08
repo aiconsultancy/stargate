@@ -22,6 +22,7 @@ test("failures use one accessible collapsed box with a safe cause and next actio
     "backend",
     "context",
     "interrupted",
+    "history",
   ] as const) {
     const content = failureContent(cause);
     expect(content.blocks).toHaveLength(1);

@@ -8,6 +8,38 @@ import type { CrewStatus, CrewStatusInput } from "./crew-status";
 /** Latest complete visible text for this turn, not reasoning or tool output. */
 export type TextSink = (text: string) => void;
 
+/** Public text of one settled assistant message; never reasoning or tools. */
+export type TranscriptEntry = { id: string; text: string; created: number };
+
+/**
+ * Settled entries after a native message cursor, oldest first. `cursor` is the
+ * newest settled message ID ("" before the first message). `pending` means
+ * unsettled messages follow `cursor`. A cursor missing from readable history
+ * is an error, never a silent skip.
+ */
+export type Transcript = {
+  cursor: string;
+  entries: TranscriptEntry[];
+  pending?: true;
+};
+
+/**
+ * Permanent transcript failures: the mapped session or the stored cursor no
+ * longer exists. Transient read errors stay ordinary errors.
+ */
+export class TranscriptUnavailable extends Error {
+  constructor(readonly reason: "session" | "cursor") {
+    super(
+      reason === "session"
+        ? "Mapped session no longer exists"
+        : "Transcript cursor is not in session history",
+    );
+  }
+}
+
+/** `after` value for messages after this adapter's latest prompt input. */
+export const latestInput = "\u0000latest-input";
+
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
   createSession(input: {
@@ -22,6 +54,23 @@ export interface AgentBackend {
     onText?: TextSink,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
+  /**
+   * Public assistant text after `after`. Undefined `after` returns only the
+   * current baseline; "" reads from the start of the session.
+   */
+  transcript?(
+    sessionId: string,
+    after: string | undefined,
+    signal: AbortSignal,
+  ): Promise<Transcript>;
+  /**
+   * Report sessions that settle outside prompt calls; no session ID means
+   * (re)connected. Resolves after the signal aborts.
+   */
+  watch?(
+    onSettled: (sessionId?: string) => void,
+    signal: AbortSignal,
+  ): Promise<void>;
   startActivity?(
     sessionId: string,
     requestID: string,

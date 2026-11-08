@@ -15,10 +15,13 @@ aborts the request's signal. The built-in OpenCode adapter explicitly
 interrupts server-side execution; Pi Durable aborts its conversation. Custom
 adapters must honour the existing cancellation contract.
 
-The reply becomes a stop notice after the backend call settles. Delivery
-failures retry the notice, not the agent work. If the process stops first,
-startup recovery attempts to interrupt surviving work and delivers the saved
-stop notice. Pogo does not delete the session or replay the request.
+The reply becomes a stop notice after the backend call settles. With a
+transcript-capable backend (OpenCode), public text that settled before the
+stop stays above the notice, and later public replies from the same session
+still reach the thread. Pogo reports them; it never submits the request again.
+Delivery failures retry the notice, not the agent work. If the process stops
+first, startup recovery attempts to interrupt surviving work and delivers the
+saved stop notice. Pogo does not delete the session or replay the request.
 
 **Stopping does not undo tool actions. Existing effects may remain.**
 An external service or tool can finish before cancellation reaches it.

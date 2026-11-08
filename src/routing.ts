@@ -125,3 +125,9 @@ export function chunks(text: string): string[] {
   if (truncated) bounded.push(...Array.from("\n[Response truncated by Pogo.]"));
   return markdownChunks(bounded);
 }
+
+/** Every chunk of settled transcript text; history replies are never clipped. */
+export function transcriptChunks(text: string): string[] {
+  const trimmed = text.trim();
+  return trimmed ? markdownChunks(Array.from(trimmed)) : [];
+}

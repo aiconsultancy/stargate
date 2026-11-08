@@ -1,8 +1,19 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { OpenCode } from "@opencode/client";
+import {
+  isSessionNotFoundError,
+  OpenCode,
+  type SessionMessageInfo,
+} from "@opencode/client";
 import { z } from "zod";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
-import type { AgentBackend, TextSink } from "../backend";
+import {
+  type AgentBackend,
+  latestInput,
+  type TextSink,
+  type Transcript,
+  type TranscriptEntry,
+  TranscriptUnavailable,
+} from "../backend";
 import { type BackendConfig, secret } from "../config";
 import { CrewReporting } from "../crew/report-rpc";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
@@ -12,10 +23,29 @@ const pairingCode = z.object({
   code: z.string().regex(/^[A-Za-z0-9_-]{1,512}$/),
   expires_in: z.number().int().positive().max(86_400),
 });
+const settledEvents = [
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+] as const;
+
+function publicEntry(message: SessionMessageInfo): TranscriptEntry | undefined {
+  if (message.type !== "assistant") return;
+  const text = message.content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n")
+    .trim();
+  return text
+    ? { id: message.id, text, created: message.time.created }
+    : undefined;
+}
 
 export class OpenCodeBackend implements AgentBackend {
   private readonly client;
   private readonly pairingClient;
+  /** Each session's latest submitted input; re-anchors a lost cursor. */
+  private readonly inputs = new Map<string, string>();
   constructor(private readonly config: Config) {
     const options = {
       baseUrl: config.url,
@@ -93,6 +123,7 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
     onText?: TextSink,
   ) {
+    this.inputs.delete(sessionId);
     const stop = new AbortController();
     const timer = new AbortController();
     const connected = Promise.withResolvers<void>();
@@ -151,6 +182,7 @@ export class OpenCodeBackend implements AgentBackend {
         { sessionID: sessionId, text, delivery: "queue" },
         { signal },
       );
+      this.inputs.set(sessionId, input.id);
       await this.client.experimental.session.wait(
         { sessionID: sessionId },
         { signal },
@@ -159,8 +191,11 @@ export class OpenCodeBackend implements AgentBackend {
       const replies: string[] = [];
       let cursor: string | undefined;
       do {
+        // A continuation cursor carries the first page's order.
         const page = await this.client.message.list(
-          { sessionID: sessionId, order: "desc", limit: 100, cursor },
+          cursor
+            ? { sessionID: sessionId, limit: 100, cursor }
+            : { sessionID: sessionId, order: "desc", limit: 100 },
           { signal },
         );
         for (const message of page.data) {
@@ -199,6 +234,131 @@ export class OpenCodeBackend implements AgentBackend {
 
   async interrupt(sessionId: string, signal: AbortSignal) {
     await this.client.session.interrupt({ sessionID: sessionId }, { signal });
+  }
+
+  async transcript(
+    sessionID: string,
+    cursor: string | undefined,
+    signal: AbortSignal,
+  ): Promise<Transcript> {
+    const after = cursor === latestInput ? this.inputs.get(sessionID) : cursor;
+    if (cursor === latestInput && after === undefined)
+      throw new TranscriptUnavailable("cursor");
+    try {
+      return await this.readTranscript(sessionID, after, signal);
+    } catch (error) {
+      // Typed SDK error only; never parse raw messages.
+      if (isSessionNotFoundError(error))
+        throw new TranscriptUnavailable("session");
+      throw error;
+    }
+  }
+
+  private async readTranscript(
+    sessionID: string,
+    after: string | undefined,
+    signal: AbortSignal,
+  ): Promise<Transcript> {
+    // Quiet threads: one small page proves nothing follows the cursor.
+    if (after) {
+      const newest = await this.client.message.list(
+        { sessionID, order: "desc", limit: 1 },
+        { signal },
+      );
+      if (newest.data[0]?.id === after) return { cursor: after, entries: [] };
+    }
+    // Read idle state first: later text cannot belong to an earlier execution.
+    const { time } = await this.client.session.get({ sessionID }, { signal });
+    const idle =
+      time.idle !== undefined && time.idle >= (time.busy ?? 0)
+        ? time.idle
+        : undefined;
+    // An idle session has finished every earlier message, even without a mark.
+    const settled = (message: SessionMessageInfo) =>
+      message.type !== "assistant" ||
+      message.time.completed !== undefined ||
+      message.error !== undefined ||
+      (idle !== undefined && message.time.created <= idle);
+    // Keep compact records; long gaps must not retain tool payloads.
+    const newer: { id: string; settled: boolean; entry?: TranscriptEntry }[] =
+      [];
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    let reached = false;
+    // Every page up to the cursor; the caller's signal bounds the work.
+    for (;;) {
+      signal.throwIfAborted();
+      const result = await this.client.message.list(
+        cursor
+          ? { sessionID, limit: 100, cursor }
+          : { sessionID, order: "desc", limit: 20 },
+        { signal },
+      );
+      for (const message of result.data) {
+        if (message.id === after) {
+          reached = true;
+          break;
+        }
+        const entry = publicEntry(message);
+        newer.push({
+          id: message.id,
+          settled: settled(message),
+          ...(entry ? { entry } : {}),
+        });
+      }
+      cursor = result.cursor.next ?? undefined;
+      if (reached || !cursor || after === undefined) break;
+      if (cursors.has(cursor))
+        throw new Error("OpenCode history cursor repeated");
+      cursors.add(cursor);
+    }
+    // Keep the stored cursor; skipping unread history would lose replies.
+    if (after && !reached) throw new TranscriptUnavailable("cursor");
+    const chronological = newer.reverse();
+    const open = chronological.findIndex((message) => !message.settled);
+    const done = open < 0 ? chronological : chronological.slice(0, open);
+    const head = done.at(-1)?.id;
+    if (after !== undefined)
+      return {
+        cursor: head ?? after,
+        entries: done.flatMap((message) =>
+          message.entry ? [message.entry] : [],
+        ),
+        ...(open < 0 ? {} : { pending: true as const }),
+      };
+    // A baseline never delivers earlier history.
+    if (head === undefined && cursor)
+      throw new Error("OpenCode transcript baseline unavailable");
+    return { cursor: head ?? "", entries: [] };
+  }
+
+  async watch(
+    onSettled: (sessionId?: string) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
+    let wait = 1000;
+    while (!signal.aborted) {
+      try {
+        for await (const event of this.client.event.subscribe({
+          types: settledEvents,
+          signal,
+        })) {
+          if (event.type === "server.connected") {
+            wait = 1000;
+            onSettled();
+          } else if (
+            event.type === "session.execution.succeeded" ||
+            event.type === "session.execution.failed" ||
+            event.type === "session.execution.interrupted"
+          )
+            onSettled(event.data.sessionID);
+        }
+      } catch {
+        // Reconnect below; SDK errors can contain request details.
+      }
+      await delay(wait, undefined, { signal }).catch(() => {});
+      wait = Math.min(30_000, wait * 2);
+    }
   }
 
   async startActivity(

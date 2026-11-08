@@ -2,7 +2,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import type { ActivityView } from "./activity";
 import { ActivityDelivery, type ActivityHandle } from "./activity-delivery";
-import type { AgentBackend } from "./backend";
+import {
+  type AgentBackend,
+  latestInput,
+  type Transcript,
+  type TranscriptEntry,
+  TranscriptUnavailable,
+} from "./backend";
 import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "./config";
 import {
@@ -19,8 +25,9 @@ import {
   isAllowedChannel,
   isAllowedUser,
   routeEvent,
+  transcriptChunks,
 } from "./routing";
-import type { Job, Store } from "./store";
+import { type Job, type Store, TranscriptConflict } from "./store";
 import { LiveReply } from "./streaming";
 import {
   type ThreadContext,
@@ -29,6 +36,26 @@ import {
   withThreadContext,
 } from "./thread-context";
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
+
+// Catch-up retries read history only; they never prompt the agent.
+const retryCeilingMs = 5 * 60 * 1000;
+// greybeard: one catch-up may read every page after its cursor within this
+// limit. A longer read fails, keeps the cursor and retries; a server-side
+// "messages after ID" query is the upgrade path for very long sessions.
+const catchUpReadMs = 5 * 60 * 1000;
+// Short retries let a just-settled turn receive its final completion mark.
+const finalReadDelaysMs = [100, 200, 400];
+
+const gapNote =
+  "_Pogo could not find its last delivered message in session history; earlier replies may be missing. This reply starts at your request._";
+
+/** Settled public text without reaction controls; never applies a reaction. */
+export function transcriptReply(entries: readonly TranscriptEntry[]) {
+  return entries
+    .map((entry) => parseReactionReply(entry.text).text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
 
 export interface SlackDelivery {
   /** Replace a preview when ts is set; false means it was removed. */
@@ -67,6 +94,13 @@ export class Gateway {
   private readonly activity: ActivityDelivery;
   private readonly active = new Map<string, Promise<void>>();
   private readonly cancellations = new Map<number, AbortController>();
+  /** Conversations needing catch-up, with read-retry backoff state. */
+  private readonly settled = new Map<
+    string,
+    { attempts: number; at: number }
+  >();
+  /** Deleted sessions or lost cursors: no background probes until a request. */
+  private readonly unavailable = new Set<string>();
   readonly key: string;
   constructor(
     private readonly config: BotConfig,
@@ -142,6 +176,11 @@ export class Gateway {
       await this.backend.interrupt?.(session, AbortSignal.timeout(5000));
     }
     this.store.recover(this.key);
+    // Restart catch-up for every mapping; unbaselined ones seed at current history.
+    if (this.backend.transcript) this.settle();
+    const watching = this.backend.transcript
+      ? this.backend.watch?.((session) => this.settle(session), signal)
+      : undefined;
     try {
       while (!signal.aborted) {
         const jobs = this.store.ready(
@@ -164,14 +203,198 @@ export class Gateway {
             });
           this.active.set(job.conversation, task);
         }
+        // Started tasks are tracked in `active` and awaited during shutdown.
+        void this.catchUp(signal);
         await delay(200, undefined, { signal });
       }
     } catch (error) {
       if (!signal.aborted) throw error;
     } finally {
       await Promise.all(this.active.values());
+      await watching?.catch(() => this.log.warn("Transcript watch stopped"));
       await this.activity.close();
     }
+  }
+
+  /** Queue catch-up for a settled session, or every mapped thread on connect. */
+  settle(session?: string) {
+    for (const conversation of this.store.transcripts(this.key, session))
+      if (!this.unavailable.has(conversation))
+        this.queueTranscript(conversation);
+  }
+
+  /** New work is eligible now; failed reads keep their backoff count. */
+  private queueTranscript(conversation: string) {
+    const attempts = this.settled.get(conversation)?.attempts ?? 0;
+    this.settled.set(conversation, { attempts, at: 0 });
+  }
+
+  /** Start eligible catch-ups; resolves when they end. Public for tests. */
+  async catchUp(signal: AbortSignal) {
+    const tasks: Promise<void>[] = [];
+    const now = Date.now();
+    for (const [conversation, retry] of this.settled) {
+      if (this.active.size >= this.config.concurrency) break;
+      // A pending turn reads the same history; later replies wait for delivery.
+      if (
+        retry.at > now ||
+        this.active.has(conversation) ||
+        this.store.unfinished(conversation)
+      )
+        continue;
+      this.settled.delete(conversation);
+      const task = this.transcriptCatchUp(conversation, signal)
+        .then((complete) => {
+          if (!complete) this.queueTranscript(conversation);
+        })
+        .catch((error: unknown) => {
+          if (signal.aborted) return;
+          if (error instanceof TranscriptUnavailable) {
+            // Keep the mapping and cursor; the next request re-anchors.
+            if (!this.unavailable.has(conversation))
+              this.log.warn(
+                "Transcript unavailable; background catch-up stopped",
+              );
+            this.unavailable.add(conversation);
+            return;
+          }
+          if (!retry.attempts)
+            this.log.warn("Transcript catch-up failed; retrying with backoff");
+          // The cursor stays put, so a later read resumes without a gap.
+          this.settled.set(conversation, {
+            attempts: retry.attempts + 1,
+            at:
+              Date.now() + Math.min(retryCeilingMs, 1000 * 2 ** retry.attempts),
+          });
+        })
+        .finally(() => {
+          this.active.delete(conversation);
+        });
+      this.active.set(conversation, task);
+      tasks.push(task);
+    }
+    await Promise.all(tasks);
+  }
+
+  /** False means another writer changed the thread; read it again. */
+  private async transcriptCatchUp(conversation: string, shutdown: AbortSignal) {
+    const target = this.store.transcriptTarget(this.key, conversation);
+    if (
+      !target ||
+      !this.backend.transcript ||
+      !isAllowedUser(this.config, target.user) ||
+      !isAllowedChannel(this.config, target.channel)
+    )
+      return true;
+    const signal = AbortSignal.any([
+      shutdown,
+      AbortSignal.timeout(catchUpReadMs),
+    ]);
+    const read = await this.backend.transcript(
+      target.session,
+      target.cursor,
+      signal,
+    );
+    if (target.cursor === undefined) {
+      this.store.baselineTranscript(conversation, read.cursor);
+      return true;
+    }
+    if (read.cursor === target.cursor) return true;
+    const text = transcriptReply(read.entries);
+    const last = read.entries.at(-1);
+    return (
+      this.store.appendTranscript({
+        botKey: this.key,
+        conversation,
+        from: target.cursor,
+        cursor: read.cursor,
+        replies:
+          text && last
+            ? [
+                {
+                  eventId: `transcript:${last.id}`,
+                  chunks: transcriptChunks(text),
+                },
+              ]
+            : [],
+      }) !== undefined
+    );
+  }
+
+  /** Cursor before this turn; undefined keeps the prompt-only contract. */
+  private async transcriptFrom(
+    conversation: string,
+    session: string,
+    signal: AbortSignal,
+  ) {
+    if (!this.backend.transcript) return;
+    const from = this.store.transcriptCursor(conversation);
+    if (from !== undefined) return from;
+    try {
+      const { cursor } = await this.backend.transcript(
+        session,
+        undefined,
+        signal,
+      );
+      return this.store.baselineTranscript(conversation, cursor);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      // No cursor exists yet, so the prompt reply cannot be delivered twice.
+      this.log.warn("Transcript baseline unavailable; using prompt reply");
+      return;
+    }
+  }
+
+  /** Retries briefly for final completion marks; typed loss is not retried. */
+  private async settledRead(
+    session: string,
+    after: string,
+    signal: AbortSignal,
+  ): Promise<Transcript | TranscriptUnavailable | undefined> {
+    let read: Transcript | undefined;
+    for (const wait of [0, ...finalReadDelaysMs]) {
+      try {
+        if (wait) await delay(wait, undefined, { signal });
+        read =
+          (await this.backend.transcript?.(session, after, signal)) ?? read;
+        if (read && !read.pending) return read;
+      } catch (error) {
+        if (error instanceof TranscriptUnavailable && !read) return error;
+        if (signal.aborted) break;
+      }
+    }
+    return read;
+  }
+
+  /**
+   * Settled history for a finished request. A typed lost cursor, or a legacy
+   * mapping without a baseline, re-reads strictly after this request's own
+   * native input. Undefined means unreadable: delivery waits for catch-up.
+   */
+  private async finalTranscript(
+    session: string,
+    from: string | undefined,
+    signal: AbortSignal,
+  ): Promise<(Transcript & { gap?: true }) | undefined> {
+    if (from !== undefined) {
+      const read = await this.settledRead(session, from, signal);
+      if (read && !(read instanceof TranscriptUnavailable)) return read;
+      if (
+        !(read instanceof TranscriptUnavailable && read.reason === "cursor")
+      ) {
+        this.log.warn("Transcript read failed; reply deferred");
+        return;
+      }
+    }
+    const anchored = await this.settledRead(session, latestInput, signal);
+    if (!anchored || anchored instanceof TranscriptUnavailable) return;
+    return from === undefined ? anchored : { ...anchored, gap: true };
+  }
+
+  private transcriptText(read: Transcript & { gap?: true }) {
+    return [read.gap ? gapNote : "", transcriptReply(read.entries)]
+      .filter(Boolean)
+      .join("\n\n");
   }
 
   /** Public for deterministic integration tests and single-step workers. */
@@ -208,6 +431,10 @@ export class Gateway {
       let reactionDelivered = false;
       let reactionTask: Promise<void> | undefined;
       let activity: ActivityHandle | undefined;
+      let session: string | undefined;
+      let from: string | undefined;
+      let transcript: Transcript | undefined;
+      let keep = 0;
       const reply = (text: string, complete: boolean) => {
         if (!this.slack.react) return text;
         const parsed = parseReactionReply(text, complete);
@@ -229,7 +456,7 @@ export class Gateway {
       try {
         try {
           signal.throwIfAborted();
-          let session = this.store.session(job.conversation);
+          session = this.store.session(job.conversation);
           let text = job.text;
           if (!session) {
             const before = job.eventId.slice(job.channel.length + 1);
@@ -257,22 +484,54 @@ export class Gateway {
               title: `${botDisplayName(this.config)} (slack ${job.channel})`,
               signal,
             });
-            this.store.saveSession(job.conversation, session);
+            // A new session's transcript starts with this turn.
+            this.store.saveSession(
+              job.conversation,
+              session,
+              this.backend.transcript ? "" : undefined,
+            );
           }
+          signal.throwIfAborted();
+          this.unavailable.delete(job.conversation);
+          from = await this.transcriptFrom(job.conversation, session, signal);
           signal.throwIfAborted();
           const prompt = this.slack.react
             ? `${reactionInstructions}\n\nUser message:\n${text}`
             : text;
           activity = await this.activity.start(job, session, signal, shutdown);
-          const answer = reply(
-            await this.backend.prompt(session, prompt, signal, (text) =>
-              live.push(reply(text, false)),
-            ),
-            true,
+          const streamed = await this.backend.prompt(
+            session,
+            prompt,
+            signal,
+            (text) => live.push(reply(text, false)),
           );
           signal.throwIfAborted();
+          // The prompt reply is this request's own text: only it can react.
+          const own = reply(streamed, true);
+          if (this.backend.transcript)
+            transcript = await this.finalTranscript(session, from, signal);
+          signal.throwIfAborted();
+          // Settled history covers every public reply since the last delivery.
+          // The streamed copy is used only for a mapping without any cursor.
+          const answer = transcript ? this.transcriptText(transcript) : own;
+          // Unread or unsettled text is never posted without its cursor.
+          const deferred = transcript
+            ? transcript.pending && !answer.trim()
+            : from !== undefined;
+          if (deferred || transcript?.pending)
+            this.queueTranscript(job.conversation);
           activity?.finish();
-          output = reacted && !answer.trim() ? [] : chunks(answer);
+          if (deferred) {
+            failure = "history";
+            output = [failureText(failure)];
+          } else
+            output =
+              reacted && !answer.trim()
+                ? []
+                : transcript && answer.trim()
+                  ? transcriptChunks(answer)
+                  : chunks(answer);
+          if (transcript) keep = deferred ? 0 : output.length;
         } catch (error) {
           activity?.cancel();
           this.log.warn({ job: job.id }, "Agent request failed or timed out");
@@ -286,6 +545,20 @@ export class Gateway {
                   ? "context"
                   : "backend";
           output = [failureText(failure)];
+          transcript = undefined;
+          // Keep public text that settled before the failure; shutdown recovers later.
+          if (this.backend.transcript && session && failure !== "interrupted") {
+            transcript = await this.finalTranscript(
+              session,
+              from,
+              AbortSignal.any([shutdown, AbortSignal.timeout(10_000)]),
+            );
+            if (transcript ? transcript.pending : from !== undefined)
+              this.queueTranscript(job.conversation);
+            const text = transcript ? this.transcriptText(transcript) : "";
+            if (text) output = [...transcriptChunks(text), ...output];
+            keep = output.length - 1;
+          }
         }
         // A reaction-only reply has no answer to preserve until delivery settles.
         if (output.length === 0) {
@@ -296,7 +569,20 @@ export class Gateway {
           }
         }
         // Completion commits before awaiting preview cleanup. A late Stop cannot erase it.
-        output = this.store.respond(job.id, output, failure);
+        try {
+          output = this.store.respond(job.id, output, failure, {
+            keep,
+            ...(transcript
+              ? { transcript: { from, cursor: transcript.cursor } }
+              : {}),
+          });
+        } catch (error) {
+          if (!(error instanceof TranscriptConflict)) throw error;
+          // Another writer moved the cursor: catch-up delivers from there.
+          failure = "history";
+          output = this.store.respond(job.id, [failureText(failure)], failure);
+          this.queueTranscript(job.conversation);
+        }
         failure = this.store.failure(job.id);
       } finally {
         this.cancellations.delete(job.id);
@@ -324,7 +610,8 @@ export class Gateway {
         const text = output[i];
         if (text === undefined) continue;
         const ts = previews.get(i);
-        if (failure && this.slack.failure) {
+        // Only the final chunk is the status; earlier chunks are public text.
+        if (failure && this.slack.failure && i === output.length - 1) {
           if (
             (await this.slack.failure(job.channel, job.thread, failure, ts)) ===
             false

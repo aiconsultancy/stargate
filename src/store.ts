@@ -21,6 +21,13 @@ export type Job = Incoming & {
   failure?: RequestFailure | null;
 };
 
+/** Another writer moved the transcript cursor or its outbox rows. */
+export class TranscriptConflict extends Error {
+  constructor() {
+    super("Transcript cursor or delivery rows changed");
+  }
+}
+
 export class Store {
   private readonly db: Database;
   constructor(path: string) {
@@ -49,22 +56,23 @@ export class Store {
         ts TEXT NOT NULL, PRIMARY KEY(job, part)
       );
     `);
-    if (
-      !this.db
-        .query<{ name: string }, []>("PRAGMA table_info(jobs)")
-        .all()
-        .some((column) => column.name === "cancel_requested")
-    )
-      this.db.exec(
-        "ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
-      );
-    if (
-      !this.db
-        .query<{ name: string }, []>("PRAGMA table_info(jobs)")
-        .all()
-        .some((column) => column.name === "failure")
-    )
-      this.db.exec("ALTER TABLE jobs ADD COLUMN failure TEXT");
+    const column = (table: string, name: string, type: string) => {
+      if (
+        !this.db
+          .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+          .all()
+          .some((column) => column.name === name)
+      )
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    };
+    column("jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0");
+    column("jobs", "failure", "TEXT");
+    // Newest native message accounted for in Slack; NULL needs a baseline.
+    column("sessions", "cursor", "TEXT");
+    // Server-wide settle events look up mappings by native session ID.
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS sessions_session ON sessions(session_id)",
+    );
   }
 
   enqueue(input: Incoming): boolean {
@@ -101,10 +109,166 @@ export class Store {
       .get(conversation)?.session_id;
   }
 
-  saveSession(conversation: string, id: string) {
+  saveSession(conversation: string, id: string, cursor?: string) {
     this.db
-      .query("INSERT INTO sessions (conversation,session_id) VALUES (?,?)")
-      .run(conversation, id);
+      .query(
+        "INSERT INTO sessions (conversation,session_id,cursor) VALUES (?,?,?)",
+      )
+      .run(conversation, id, cursor ?? null);
+  }
+
+  transcriptCursor(conversation: string): string | undefined {
+    return (
+      this.db
+        .query<{ cursor: string | null }, [string]>(
+          "SELECT cursor FROM sessions WHERE conversation=?",
+        )
+        .get(conversation)?.cursor ?? undefined
+    );
+  }
+
+  /** Seed a missing cursor without moving an existing one. */
+  baselineTranscript(conversation: string, cursor: string) {
+    this.db
+      .query(
+        "UPDATE sessions SET cursor=? WHERE conversation=? AND cursor IS NULL",
+      )
+      .run(cursor, conversation);
+    return this.transcriptCursor(conversation);
+  }
+
+  /** Every mapped conversation of this bot namespace, or one session's. */
+  transcripts(botKey: string, session?: string): string[] {
+    // Separate statements keep the session_id index usable for settle events.
+    return this.db
+      .query<{ conversation: string }, string[]>(
+        `SELECT s.conversation FROM sessions s
+      WHERE ${session === undefined ? "" : "s.session_id=? AND"} EXISTS
+      (SELECT 1 FROM jobs j WHERE j.conversation=s.conversation AND j.botKey=?)`,
+      )
+      .all(...(session === undefined ? [] : [session]), botKey)
+      .map((row) => row.conversation);
+  }
+
+  /** The mapped session plus the latest request's Slack destination. */
+  transcriptTarget(botKey: string, conversation: string) {
+    const row = this.db
+      .query<
+        {
+          session: string;
+          cursor: string | null;
+          channel: string;
+          thread: string;
+          user: string;
+        },
+        [string, string]
+      >(`SELECT s.session_id AS session, s.cursor, j.channel, j.thread, j.user
+      FROM sessions s JOIN jobs j ON j.conversation=s.conversation
+      WHERE j.botKey=? AND s.conversation=? ORDER BY j.id DESC LIMIT 1`)
+      .get(botKey, conversation);
+    return row && { ...row, cursor: row.cursor ?? undefined };
+  }
+
+  unfinished(conversation: string) {
+    return (
+      this.db
+        .query(`SELECT 1 FROM jobs WHERE conversation=?
+        AND status IN ('queued','running','responding') LIMIT 1`)
+        .get(conversation) !== null
+    );
+  }
+
+  /** Bot keys with requests in one Slack thread, for targeted repair. */
+  threadBots(channel: string, thread: string): string[] {
+    return this.db
+      .query<{ botKey: string }, [string, string]>(
+        "SELECT DISTINCT botKey FROM jobs WHERE channel=? AND thread=?",
+      )
+      .all(channel, thread)
+      .map((row) => row.botKey);
+  }
+
+  /** Persisted reply chunks, including replies that are still delivering. */
+  replies(botKey: string, conversation: string): string[][] {
+    return this.db
+      .query<{ response: string }, [string, string]>(`SELECT response FROM jobs
+      WHERE botKey=? AND conversation=? AND response IS NOT NULL
+      AND status IN ('responding','done') ORDER BY id`)
+      .all(botKey, conversation)
+      .map((row) => JSON.parse(row.response) as string[]);
+  }
+
+  /** This thread's `transcript:*` outbox rows, for targeted repair. */
+  transcriptRows(botKey: string, conversation: string) {
+    return this.db
+      .query<
+        { eventId: string; status: Job["status"]; response: string | null },
+        [string, string]
+      >(`SELECT eventId, status, response FROM jobs WHERE botKey=?
+      AND conversation=? AND eventId LIKE 'transcript:%' ORDER BY id`)
+      .all(botKey, conversation)
+      .map((row) => ({
+        ...row,
+        response: JSON.parse(row.response ?? "[]") as string[],
+      }));
+  }
+
+  /**
+   * Advance the cursor and queue its replies in one transaction. Refuses when
+   * the cursor moved or a turn is pending; that turn reads the same history.
+   * `requeue` retries failed rows of this thread with their stored text. Any
+   * row that cannot be inserted or requeued rolls the whole change back.
+   */
+  appendTranscript(input: {
+    botKey: string;
+    conversation: string;
+    from: string | undefined;
+    cursor: string;
+    replies: { eventId: string; chunks: string[] }[];
+    requeue?: string[];
+  }): number | undefined {
+    return this.db.transaction(() => {
+      const target = this.transcriptTarget(input.botKey, input.conversation);
+      if (
+        !target ||
+        this.db
+          .query(`SELECT 1 FROM jobs WHERE conversation=?
+          AND status IN ('queued','running') LIMIT 1`)
+          .get(input.conversation) !== null ||
+        this.db
+          .query(
+            "UPDATE sessions SET cursor=? WHERE conversation=? AND cursor IS ?",
+          )
+          .run(input.cursor, input.conversation, input.from ?? null).changes ===
+          0
+      )
+        return;
+      let queued = 0;
+      for (const eventId of input.requeue ?? [])
+        queued += this.db
+          .query(`UPDATE jobs SET status='responding',attempts=0,retry_at=0
+          WHERE botKey=? AND conversation=? AND eventId=? AND status='failed'`)
+          .run(input.botKey, input.conversation, eventId).changes;
+      for (const reply of input.replies) {
+        queued += this.db
+          .query(`INSERT OR IGNORE INTO jobs
+          (eventId,botKey,conversation,channel,thread,user,text,status,response)
+          VALUES (?,?,?,?,?,?,'','responding',?)`)
+          .run(
+            reply.eventId,
+            input.botKey,
+            input.conversation,
+            target.channel,
+            target.thread,
+            target.user,
+            JSON.stringify(reply.chunks),
+          ).changes;
+      }
+      // An existing row would be skipped silently; never advance past it.
+      if (queued !== input.replies.length + (input.requeue?.length ?? 0))
+        throw new TranscriptConflict();
+      return queued;
+    })();
   }
 
   ready(botKey: string, now: number, limit: number): Job[] {
@@ -176,23 +340,57 @@ export class Store {
       .get(botKey, id)?.status;
   }
 
-  respond(id: number, chunks: string[], failure?: RequestFailure) {
-    const row = this.db
-      .query<
-        { response: string },
-        [string, string, string | null, number]
-      >(`UPDATE jobs SET status='responding',
-        response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,
-        failure=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE ? END,sent=0
-        WHERE id=? RETURNING response`)
-      .get(
-        JSON.stringify([cancellationNotice]),
-        JSON.stringify(chunks),
-        failure ?? null,
-        id,
-      );
-    if (!row) throw new Error("Response job not found");
-    return JSON.parse(row.response) as string[];
+  /**
+   * An accepted Stop replaces the reply with its notice, except for the first
+   * `keep` chunks: settled public text that already happened. The optional
+   * transcript cursor advances in the same transaction; if it moved, this
+   * throws `TranscriptConflict` and nothing is written.
+   */
+  respond(
+    id: number,
+    chunks: string[],
+    failure?: RequestFailure,
+    options: {
+      keep?: number;
+      transcript?: { from: string | undefined; cursor: string };
+    } = {},
+  ) {
+    return this.db.transaction(() => {
+      const job = this.db
+        .query<{ cancel_requested: number; conversation: string }, [number]>(
+          "SELECT cancel_requested, conversation FROM jobs WHERE id=?",
+        )
+        .get(id);
+      if (!job) throw new Error("Response job not found");
+      const cancelled = job.cancel_requested === 1;
+      const response = cancelled
+        ? [...chunks.slice(0, options.keep ?? 0), cancellationNotice]
+        : chunks;
+      this.db
+        .query(
+          "UPDATE jobs SET status='responding',response=?,failure=?,sent=0 WHERE id=?",
+        )
+        .run(
+          JSON.stringify(response),
+          cancelled ? "cancelled" : (failure ?? null),
+          id,
+        );
+      // A moved cursor means another writer queued some of this text.
+      if (
+        options.transcript &&
+        this.db
+          .query(
+            "UPDATE sessions SET cursor=? WHERE conversation=? AND cursor IS ?",
+          )
+          .run(
+            options.transcript.cursor,
+            job.conversation,
+            options.transcript.from ?? null,
+          ).changes === 0
+      )
+        throw new TranscriptConflict();
+      return response;
+    })();
   }
 
   failure(id: number): RequestFailure | undefined {

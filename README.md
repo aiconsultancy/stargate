@@ -66,9 +66,14 @@ Existing module backends can still return a final answer without streaming.
 
 Requests have a 30-minute time limit by default. Set `turnTimeoutMs` on the bot
 to change it, up to one hour. Ordinary long replies stream in the same thread;
-large builds can need a longer limit or smaller requests. Failures replace the
+large builds can need a longer limit or smaller requests. Failures end the
 live reply with one collapsible **Request status** box. It states the safe cause
 and next action for a timeout, Stop, backend failure or missing thread context.
+With OpenCode, public text that settled before the failure stays above the box.
+If the finished reply is not yet readable in session history, a **Reply
+delayed** box appears and Pogo posts the reply when history is readable.
+Later public replies from the same session, such as work resumed by background
+shell completions, reach the same thread. See [session transcript](docs/design.md#session-transcript).
 Delivery retries do not repeat agent work. Check agent state before retrying
 work whose outcome is uncertain.
 
@@ -359,12 +364,20 @@ SQLite file lock that the OS releases on exit.
   Pi Durable's task storage does not provide automatic gateway-turn recovery.
 - Exactly-once external side effects are **not** guaranteed. A crash after
   Slack accepts a reply but before SQLite records it can duplicate that reply.
+- OpenCode thread replies follow a durable per-thread message cursor. After a
+  restart or reconnect, Pogo catches up every mapped thread. Failed history
+  reads keep the cursor and retry with backoff. A deleted session or lost
+  cursor stops catch-up for that thread. After a lost cursor, the next reply
+  starts with a note that earlier replies may be missing. Existing threads
+  start at current history, without backfill. Continuations are not
+  guaranteed exactly once.
 - Events Slack does not deliver during an outage are not recovered from history.
 - Backend-setting changes create a new session namespace. Pending jobs for an
   old backend identity remain on disk; they are not executed with new settings.
 - Responses render Markdown, with no tool output or reasoning, at most 60,000
-  Unicode characters. Streaming, `/cron`, and its interactive controls are
-  supported. File transport and backend approval buttons are not implemented.
+  Unicode characters; OpenCode transcript replies are not clipped. Streaming,
+  `/cron`, and its interactive controls are supported. File transport and
+  backend approval buttons are not implemented.
   See the [Slack feature comparison](docs/slack-parity.md) for remaining gaps.
 - Database files contain prompts and replies. There is no automatic retention
   policy. Keep the data directory private and back it up only while stopped.

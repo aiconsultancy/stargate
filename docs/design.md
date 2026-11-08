@@ -43,6 +43,15 @@ interface AgentBackend {
     onText?: (text: string) => void,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
+  transcript?(
+    sessionId: string,
+    after: string | undefined,
+    signal: AbortSignal,
+  ): Promise<Transcript>;
+  watch?(
+    onSettled: (sessionId?: string) => void,
+    signal: AbortSignal,
+  ): Promise<void>;
   startActivity?(
     sessionId: string,
     requestID: string,
@@ -65,6 +74,20 @@ Callbacks must not include reasoning, tool arguments, or tool results. The
 gateway buffers snapshots and performs Slack writes separately. OpenCode uses
 live text events and reads final history as the source of truth. If the event
 connection fails, final delivery continues without replaying agent work.
+
+`transcript` and `watch` are optional. `transcript` returns the public text of
+settled assistant messages after a native message cursor, oldest first, with
+the newest settled message ID as the next cursor. An undefined cursor returns
+only the current baseline; `""` reads from the session start. `pending` marks
+unsettled messages after the cursor. A missing session or a cursor that is
+not in readable history throws `TranscriptUnavailable`, never a skip; other
+read errors are transient. The `latestInput` cursor reads strictly after the
+adapter's latest submitted prompt input for that session. `watch` reports
+sessions that settle outside a prompt and reports each (re)connection. Both
+exclude reasoning, tool data, user and synthetic messages, and system text.
+OpenCode implements them with message pages, session idle state, and the
+client's shared event stream. Pi Durable and existing modules omit them and
+keep the prompt-only contract. See [session transcript](#session-transcript).
 
 `startActivity` is an optional, request-scoped reporting capability. Its
 `ActivityWatch` reads bounded visible task activity and can finish or cancel
@@ -173,6 +196,114 @@ codepoints are not structurally reconstructed across messages.
 Waiting feedback starts only if no visible text arrives before the configured
 delay. It reuses the first preview message. Visible text stops rotations, and
 completion or cancellation stops all feedback timers. See [waiting settings](waiting.md).
+
+## Session transcript
+
+A mapped OpenCode session can continue after its Slack turn ends. Background
+shell completions and crew notifications resume it after a successful wait, a
+timeout, or Stop. Pogo delivers that public assistant text to the same thread.
+It never runs the request again for this delivery.
+
+The `sessions` row stores a transcript cursor: the newest native message that
+Pogo accounted for in Slack. NULL means the mapping predates the cursor.
+
+- A turn records its starting cursor. After the prompt settles, the reply is
+  all settled public text after that cursor, not only the last answer. The
+  reply and the new cursor commit in one SQLite transaction. If another writer
+  moved the cursor, the transaction rolls back; the turn posts **Reply
+  delayed** and catch-up delivers from the moved cursor.
+- Reactions come only from the prompt's own reply to the current input.
+  Directives in earlier continuations are removed and never applied.
+- The final read retries briefly (100, 200, 400 ms) for completion marks. If
+  history stays unreadable, or no public text has settled, the turn posts one
+  **Reply delayed** status box and catch-up delivers the reply from history.
+  Pogo never posts the streamed copy without its cursor. Settled text before
+  an unsettled message is delivered; the rest follows through catch-up.
+- On timeout, backend failure, or Stop, settled public text stays above the
+  one **Request status** box. Shutdown keeps the cursor; restart catch-up
+  delivers that text after the recovery notice.
+- Startup, `watch` notifications, and each event-stream (re)connection queue
+  catch-up. Startup and reconnects queue every mapped thread of the bot
+  namespace, with no age limit. A quiet thread costs one single-message
+  history read.
+- A failed catch-up read keeps the cursor and retries without a new event,
+  after 1, 2, 4 seconds and so on, at most every five minutes. Retries read
+  history only; they never prompt the agent.
+- `TranscriptUnavailable` stops background catch-up for that thread with one
+  warning. The mapping and cursor stay. The next request in the thread
+  resumes it. Catch-ups share the bot's concurrency slots with requests;
+  queued requests start first in each tick and quiet threads cost one read.
+- Catch-up waits while the thread has a queued, running, or delivering job.
+  A queued turn reads the same history, so earlier continuations stay first.
+- Catch-up advances the cursor and inserts one `responding` job row in one
+  transaction. The row's event ID is `transcript:<newest message ID>`. Normal
+  delivery then applies access rechecks, chunking, retries, and the sent
+  cursor. Retries do not read history or call the backend again.
+- Transcript replies are not clipped at the 60,000-codepoint reply ceiling.
+  All public text is stored and posted in 2800-codepoint messages.
+- Text-free continuations, such as tool-only steps, advance the cursor without
+  a Slack reply. Model reaction directives are removed from continuations.
+
+Delivery targets the latest request row of the exact bot/app/workspace/
+backend/channel/thread conversation. Session IDs that map only in another bot
+namespace, worker sessions, and child sessions are ignored.
+
+At startup, mappings without a cursor get a baseline at current history. Pogo
+does not backfill earlier history. If that baseline read fails when a request
+starts, the reply is read strictly after the request's own native input, and
+the cursor is seeded there. Later replies are not skipped. If that read also
+fails, Pogo posts the streamed reply and leaves the cursor unset.
+
+A catch-up reads every history page back to its cursor. If the cursor message
+is missing, for example after a session revert, catch-up stops and keeps the
+cursor. The next request reads strictly after its own native input and starts
+the reply with a note that earlier replies may be missing. The reply and the
+re-anchored cursor commit together. Replies between the lost cursor and that
+request are not delivered; use targeted repair with a known `since` message
+if they matter. Transient read errors never re-anchor.
+
+Event coverage: the installed OpenCode 2.2.6 server publishes
+`session.execution.started`, then `succeeded`, `failed`, or `interrupted`, from
+one session runner. Prompts, synthetic inbox items, resume, skills, and
+compaction wake that runner. The call site that turns a background shell
+completion into a synthetic item was not located in the minified build. Tests
+use fake events. Reconnect catch-up covers a missed event.
+
+`greybeard:` Settledness uses the message completion time, its error, or the
+session idle time. One catch-up read may take five minutes; a longer read
+fails, keeps the cursor and retries. A server query for messages after an ID
+is the upgrade path for very long sessions. This is not exactly-once
+delivery: the Slack/SQLite crash window and ambiguous network writes can
+still duplicate a reply.
+
+### Targeted repair
+
+`repairThread` in `src/transcript.ts` is an operator helper, not a CLI
+command. It resolves one bot's current namespace for one thread and compares
+settled public replies after a native message ID with stored Slack replies.
+A dry run reports the missing IDs, `requeued` failed outbox rows in scope,
+and `conflicts`. `apply: true` retries those failed rows with their stored
+text, queues the missing replies as delayed updates labelled with their
+original UTC time, and moves the cursor to the repaired head, in one
+transaction. Conflicts, or any row that cannot be inserted or requeued,
+refuse the whole apply. Repeated runs find no missing replies. More than
+`limit` (default 20) missing replies is an error.
+
+The cursor moves to the repaired head even when it was earlier. Replies that
+`only` excludes, and replies between an older stored cursor and a later
+`since`, are not delivered later. Run it only against a reviewed thread:
+
+```sh
+bun -e 'import { repairThread } from "./src/transcript";
+console.log(JSON.stringify(await repairThread({
+  config: "pogo.json", bot: "captain", channel: "D123", thread: "1.000",
+  since: "msg_INPUT_ID", apply: false,
+}), null, 2));'
+```
+
+Pogo's running worker delivers applied rows; the helper does not post to
+Slack. Only `apply: true` refuses a thread with a queued or running request;
+a dry run never writes.
 
 ## Scheduled prompts
 
