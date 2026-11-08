@@ -101,8 +101,9 @@ export class ActivityDelivery {
       cancelled: false,
     };
     const signal = AbortSignal.any([shutdown, entry.controller.signal]);
+    let settled = false;
     const finish = () => {
-      if (entry.finished && entry.grace) return;
+      if (settled || (entry.finished && entry.grace)) return;
       entry.finished = true;
       if ([...this.pending].filter((pending) => pending.finished).length > 32) {
         entry.controller.abort();
@@ -251,6 +252,7 @@ export class ActivityDelivery {
             "Crew activity unavailable; answer delivery continues",
           );
       } finally {
+        settled = true;
         if (entry.grace) clearTimeout(entry.grace);
         ready.resolve(false);
         if (!this.allowed(job) || this.settings().detail === "off")
@@ -314,6 +316,7 @@ export class ActivityDelivery {
     return {
       finish,
       cancel: () => {
+        if (settled) return;
         entry.cancelled = true;
         entry.controller.abort();
       },

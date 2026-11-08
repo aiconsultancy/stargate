@@ -13,7 +13,11 @@ import { canExpandCrew } from "../src/crew/identity";
 import { piDefinitionPath } from "../src/crew/instructions";
 import type { MesijInbox, MesijMessage, MesijSend } from "../src/crew/mesij";
 import type { PiCrewBinding } from "../src/crew/pi-extension";
-import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
+import {
+  PiCrewWorkers,
+  type PiWorkerBackend,
+  type PiWorkerFactory,
+} from "../src/crew/pi-worker";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 
 function twikiTeam(): Team {
@@ -707,6 +711,63 @@ test("a new owner reopens a Pi store only after the last owner closed it", async
   } finally {
     gate.resolve();
     await reopened?.close();
+    await f.close();
+  }
+});
+
+test("a closed Pi owner cannot acquire a harness after a pending open", async () => {
+  const f = await fixture();
+  const gate = Promise.withResolvers<void>();
+  const closeStarted = Promise.withResolvers<void>();
+  const factory: PiWorkerFactory = async (config, context) => {
+    const backend = await f.factory(config, context);
+    const close = backend.close.bind(backend);
+    backend.close = async () => {
+      closeStarted.resolve();
+      await close();
+    };
+    return backend;
+  };
+  const owner = () =>
+    new PiCrewWorkers(
+      f.engine.state,
+      f.options.stateDirectory,
+      factory,
+      undefined,
+      undefined,
+      f.options.captainDirectory,
+    );
+  const previous = owner();
+  const closed = owner();
+  const live = owner();
+  try {
+    const member = f.options.team?.crew.find(({ id }) => id === "twiki");
+    const directory = f.options.worktrees["twiki"];
+    if (!member || !directory) throw new Error("Missing Pi worker");
+    await previous.canReport(member, directory);
+    f.holdClose(gate.promise);
+    const closing = previous.close();
+    await closeStarted.promise;
+
+    // Acquisition yields at realpath while the previous harness is closing.
+    const acquisition = closed.canReport(member, directory);
+    await closed.close();
+    expect(f.opens).toBe(1);
+    gate.resolve();
+    await closing;
+    await expect(acquisition).rejects.toThrow("closing");
+    expect(f.opens).toBe(1);
+
+    await live.canReport(member, directory);
+    expect(f.opens).toBe(2);
+    await live.close();
+    // No lease from the closed owner can keep the replacement harness alive.
+    expect(f.closes).toBe(2);
+  } finally {
+    gate.resolve();
+    await previous.close();
+    await closed.close();
+    await live.close();
     await f.close();
   }
 });

@@ -3,6 +3,15 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": { "includes": ["**", "!bun.lock"] },
   "formatter": { "indentStyle": "space", "lineWidth": 80 },
+  "overrides": [
+    {
+      "includes": [
+        ".agents/skills/effect-ts/SKILL.md",
+        ".agents/skills/effect-v3-to-v4/SKILL.md"
+      ],
+      "formatter": { "enabled": false }
+    }
+  ],
   "linter": {
     "domains": { "types": "recommended", "project": "recommended" },
     "rules": {

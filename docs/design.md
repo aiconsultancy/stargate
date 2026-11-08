@@ -86,6 +86,10 @@ Callbacks must not include reasoning, tool arguments, or tool results. The
 gateway buffers snapshots and performs Slack writes separately. OpenCode uses
 live text events and reads final history as the source of truth. If the event
 connection fails, final delivery continues without replaying agent work.
+An observer can attach while earlier native work is busy. OpenCode publishes a
+preview only after history proves it follows the submitted input. Pi uses the
+submission's entry/answer bounds and live run input IDs. Uncertain previews are
+suppressed; attachment time alone does not establish ownership.
 
 `transcript` and `watch` are optional. `transcript` returns the public text of
 settled assistant messages after a native message cursor, oldest first, with

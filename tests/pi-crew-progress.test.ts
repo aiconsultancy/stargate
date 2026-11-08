@@ -7,6 +7,10 @@ import type {
   EntryId,
   EntryRecord,
   Observer,
+  SettledSubmissionRecord,
+  Submission,
+  SubmissionId,
+  SubmissionRecord,
 } from "@earendil-works/pi-durable";
 import { PiDurableBackend } from "../src/backends/pi-durable";
 import { PiCrewWorkers } from "../src/crew/pi-worker";
@@ -37,10 +41,14 @@ class Clock {
   }
 }
 
-function assistant(id: number, text: string): EntryRecord {
+function assistant(
+  id: number,
+  text: string,
+  conversationId = 1 as ConversationId,
+): EntryRecord {
   return {
     id: id as EntryId,
-    conversationId: 1 as ConversationId,
+    conversationId,
     kind: "pi.assistant",
     model: [
       {
@@ -87,21 +95,29 @@ async function fixture(report = false) {
   let observer: Observer<ConversationView> | undefined;
   let detached = 0;
   const started = Promise.withResolvers<void>();
-  const answer = Promise.withResolvers<{
-    status: "done";
-    type: "input";
-    answer: EntryId;
-  }>();
+  const answer = Promise.withResolvers<SettledSubmissionRecord>();
+  const submissionId = 1 as SubmissionId;
+  const inputEntry = 1 as EntryId;
+  let activeConversationId = 1 as ConversationId;
+  let record: SubmissionRecord = {
+    id: submissionId,
+    conversationId: activeConversationId,
+    type: "input",
+    status: "placed",
+    entry: inputEntry,
+  };
+  const publications: ReturnType<typeof Promise.withResolvers<void>>[] = [];
   let final = assistant(3, "CANONICAL FINAL");
   let reportsCreated = 0;
   const view = (
     entries: readonly EntryRecord[] = [],
     text = "",
   ): ConversationView => ({
-    conversation: { id: 1 as ConversationId },
+    conversation: { id: activeConversationId },
     entries,
     docs: {
       "pi.live": {
+        run: { inputs: [submissionId] },
         generation: {
           message: {
             content: [
@@ -115,10 +131,13 @@ async function fixture(report = false) {
   });
   const advance = (entries: readonly EntryRecord[] = [], text = "") => {
     if (!observer) throw new Error("Observer not attached");
+    const published = Promise.withResolvers<void>();
+    publications.push(published);
     observer.advance(
       { kind: "value", value: view(entries, text), ops: [], retired: false },
       BACKGROUND_CONTEXT,
     );
+    return published.promise;
   };
   const harness = {
     async observeConversation(
@@ -133,16 +152,42 @@ async function fixture(report = false) {
         },
       };
     },
-    async conversation() {
+    async conversation(id: ConversationId) {
+      activeConversationId = id;
       return {
         async submit() {
+          record = {
+            id: submissionId,
+            conversationId: id,
+            type: "input",
+            status: "placed",
+            entry: inputEntry,
+          };
+          const submission: Submission = {
+            id: submissionId,
+            async status() {
+              return record;
+            },
+            wait: () => answer.promise,
+            async abort() {
+              return record.status === "placed" ? "already_placed" : "settled";
+            },
+          };
           started.resolve();
-          return { wait: () => answer.promise };
+          return submission;
         },
         async commit() {
           return final;
         },
         async abort() {
+          record = {
+            id: submissionId,
+            conversationId: id,
+            type: "input",
+            status: "unanswered",
+            entry: inputEntry,
+            reason: "aborted",
+          };
           answer.reject(new Error("Aborted"));
         },
       };
@@ -197,6 +242,13 @@ async function fixture(report = false) {
       () => answer.reject(new Error("Aborted")),
       { once: true },
     );
+    const onText = args[3];
+    if (onText) {
+      args[3] = (text) => {
+        onText(text);
+        publications.shift()?.resolve();
+      };
+    }
     return prompt(...args);
   };
   return {
@@ -214,17 +266,36 @@ async function fixture(report = false) {
       return reportsCreated;
     },
     emit: (text: string) => advance([], text),
-    intermediate: (text: string) => advance([assistant(2, text)]),
+    intermediate: (text: string) =>
+      advance([assistant(2, text, activeConversationId)]),
+    started: started.promise,
     async start() {
       workers.start(member, directory, peer, task, "Assignment");
       await started.promise;
     },
     succeed(text = "CANONICAL FINAL") {
-      final = assistant(3, text);
-      answer.resolve({ status: "done", type: "input", answer: final.id });
+      final = assistant(3, text, activeConversationId);
+      record = {
+        id: submissionId,
+        conversationId: activeConversationId,
+        type: "input",
+        status: "done",
+        entry: inputEntry,
+        answer: final.id,
+      };
+      answer.resolve(record);
     },
     fail() {
-      answer.reject(new Error("Bearer private-provider-error"));
+      record = {
+        id: submissionId,
+        conversationId: activeConversationId,
+        type: "input",
+        status: "unanswered",
+        entry: inputEntry,
+        reason: "model_error",
+        detail: "Bearer private-provider-error",
+      };
+      answer.resolve(record);
     },
     settled: settled.promise,
     progress: () => state.activity.task(state.task(task.id) ?? task).progress,
@@ -241,7 +312,7 @@ for (const report of [false, true]) {
     const f = await fixture(report);
     try {
       await f.start();
-      f.intermediate("INTERMEDIATE ".repeat(6000));
+      await f.intermediate("INTERMEDIATE ".repeat(6000));
       expect(f.progress().length).toBeGreaterThan(0);
       f.succeed();
       await f.settled;
@@ -268,10 +339,8 @@ test("ordinary Pi Slack prompt retains cumulative visible return and live callba
       new AbortController().signal,
       (text) => snapshots.push(text),
     );
-    // Attach the observer and submit before publishing live entries.
-    await Promise.resolve();
-    await Promise.resolve();
-    f.intermediate("VISIBLE INTERMEDIATE");
+    await f.started;
+    await f.intermediate("VISIBLE INTERMEDIATE");
     f.succeed("FINAL SLACK ANSWER");
     expect(await result).toBe("VISIBLE INTERMEDIATE\n\nFINAL SLACK ANSWER");
     expect(snapshots).toEqual(["VISIBLE INTERMEDIATE"]);
@@ -285,11 +354,11 @@ test("Pi progress flushes latest burst tail while still busy and redacts before 
   const f = await fixture();
   try {
     await f.start();
-    f.emit("First update");
+    await f.emit("First update");
     f.clock.advance(100);
-    f.emit("Second update");
+    await f.emit("Second update");
     f.clock.advance(100);
-    f.emit("Latest update token=private-secret");
+    await f.emit("Latest update token=private-secret");
     expect(f.progress()).toBe("First update");
     f.clock.advance(800);
     expect(f.progress()).toBe("Latest update token=[REDACTED]");
@@ -309,8 +378,8 @@ for (const outcome of ["success", "failure", "cancel", "close"] as const) {
     const f = await fixture();
     try {
       await f.start();
-      f.emit("First update");
-      f.emit("Latest pending update");
+      await f.emit("First update");
+      await f.emit("Latest pending update");
       const callbacks = [...f.clock.timers.values()].map(
         ({ callback }) => callback,
       );
@@ -348,11 +417,9 @@ test("Pi progress storage failures do not stop work or escape timer callbacks", 
       if (failing) throw new Error("Private SQLite error");
       progress(...args);
     };
-    expect(() => {
-      f.emit("First");
-      f.emit("Latest update");
-      f.clock.advance(1000);
-    }).not.toThrow();
+    await expect(f.emit("First")).resolves.toBeUndefined();
+    await expect(f.emit("Latest update")).resolves.toBeUndefined();
+    expect(() => f.clock.advance(1000)).not.toThrow();
     expect(f.state.task(f.task.id)?.status).toBe("running");
     failing = false;
     f.clock.advance(1000);

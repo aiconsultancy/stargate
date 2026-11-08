@@ -132,8 +132,28 @@ export class OpenCodeBackend implements AgentBackend {
     const stop = new AbortController();
     const timer = new AbortController();
     const connected = Promise.withResolvers<void>();
-    let armed = false;
+    type Phase =
+      | { type: "attaching" }
+      | { type: "submitted"; input: string }
+      | { type: "settled" };
+    let phase: Phase = { type: "attaching" };
+    const currentPhase = (): Phase => phase;
     const messages = new Map<string, Map<number, string>>();
+    const ownership = new Map<string, "checking" | "owned" | "foreign">();
+    const checks: Promise<void>[] = [];
+    const publish = () => {
+      if (phase.type !== "submitted" || !onText) return;
+      const text = [...messages]
+        .filter(([id]) => ownership.get(id) === "owned")
+        .map(([, parts]) =>
+          [...parts]
+            .sort(([a], [b]) => a - b)
+            .map(([, text]) => text)
+            .join("\n"),
+        )
+        .join("\n\n");
+      if (text) onText(text);
+    };
     // Consume promptly: slow Slack writes must not block the shared event source.
     const events = onText
       ? (async () => {
@@ -145,8 +165,14 @@ export class OpenCodeBackend implements AgentBackend {
               connected.resolve();
               continue;
             }
-            if (!armed || event.data.sessionID !== sessionId) continue;
+            const current = currentPhase();
+            if (
+              current.type !== "submitted" ||
+              event.data.sessionID !== sessionId
+            )
+              continue;
             const { assistantMessageID, ordinal } = event.data;
+            if (ownership.get(assistantMessageID) === "foreign") continue;
             let parts = messages.get(assistantMessageID);
             if (!parts) {
               parts = new Map();
@@ -158,16 +184,31 @@ export class OpenCodeBackend implements AgentBackend {
                 ? (parts.get(ordinal) ?? "") + event.data.delta
                 : event.data.text,
             );
-            onText(
-              [...messages.values()]
-                .map((parts) =>
-                  [...parts]
-                    .sort(([a], [b]) => a - b)
-                    .map(([, text]) => text)
-                    .join("\n"),
+            if (ownership.get(assistantMessageID) === "owned") publish();
+            else if (!ownership.has(assistantMessageID)) {
+              ownership.set(assistantMessageID, "checking");
+              // Events identify the session and assistant, not its input.
+              // Only transcript placement proves this is not a queued prior turn.
+              checks.push(
+                this.followsInput(
+                  sessionId,
+                  current.input,
+                  AbortSignal.any([signal, stop.signal]),
+                  assistantMessageID,
                 )
-                .join("\n\n"),
-            );
+                  .then((owned) => {
+                    ownership.set(
+                      assistantMessageID,
+                      owned ? "owned" : "foreign",
+                    );
+                    if (owned) publish();
+                    else messages.delete(assistantMessageID);
+                  })
+                  .catch(() => {
+                    // Uncertain previews stay private; final history still wins.
+                  }),
+              );
+            }
           }
         })().catch(() => {
           // Live-only events are best effort; history remains authoritative.
@@ -182,16 +223,17 @@ export class OpenCodeBackend implements AgentBackend {
         ]);
         timer.abort();
       }
-      armed = true;
       const input = await this.client.session.prompt(
         { sessionID: sessionId, text, delivery: "queue" },
         { signal },
       );
+      phase = { type: "submitted", input: input.id };
       this.inputs.set(sessionId, input.id);
       await this.client.experimental.session.wait(
         { sessionID: sessionId },
         { signal },
       );
+      phase = { type: "settled" };
       // Read backwards to the submitted input; do not resend earlier replies.
       const replies: string[] = [];
       let cursor: string | undefined;
@@ -218,19 +260,66 @@ export class OpenCodeBackend implements AgentBackend {
       } while (cursor);
       throw new Error("OpenCode input was not found in session history");
     } catch (error) {
-      // Aborting HTTP does not stop server-side tools. Interrupt explicitly.
-      await this.client.session
-        .interrupt(
-          { sessionID: sessionId },
-          { signal: AbortSignal.timeout(5000) },
-        )
-        .catch(() => {});
+      // A lost admission response has no known input to withdraw. Interrupting
+      // the whole session could stop unrelated native work; do not guess.
+      if (phase.type === "submitted") {
+        const input = phase.input;
+        const cleanup = AbortSignal.timeout(5000);
+        // First withdraw our inbox item. It may race placement; history, not
+        // connection readiness, determines whether session interruption is ours.
+        await this.client.session.inbox
+          .cancel({ sessionID: sessionId, inboxID: input }, { signal: cleanup })
+          .catch(() => {});
+        await this.followsInput(sessionId, input, cleanup)
+          .then(async (placed) => {
+            if (placed)
+              await this.client.session.interrupt(
+                { sessionID: sessionId },
+                { signal: cleanup },
+              );
+          })
+          .catch(() => {});
+      }
       throw error;
     } finally {
+      phase = { type: "settled" };
       timer.abort();
       stop.abort();
       await events;
+      await Promise.all(checks);
     }
+  }
+
+  /** Descending history places an assistant strictly after our delivered input.
+   * Missing/unreadable placement suppresses previews; never infer from event time.
+   */
+  private async followsInput(
+    sessionID: string,
+    input: string,
+    signal: AbortSignal,
+    assistant?: string,
+  ) {
+    let found = assistant === undefined;
+    let cursor: string | undefined;
+    const cursors = new Set<string>();
+    do {
+      const page = await this.client.message.list(
+        cursor
+          ? { sessionID, limit: 100, cursor }
+          : { sessionID, order: "desc", limit: 100 },
+        { signal },
+      );
+      for (const message of page.data) {
+        if (message.id === input) return found;
+        if (message.id === assistant && message.type === "assistant")
+          found = true;
+      }
+      cursor = page.cursor.next ?? undefined;
+      if (cursor && cursors.has(cursor))
+        throw new Error("OpenCode history cursor repeated");
+      if (cursor) cursors.add(cursor);
+    } while (cursor);
+    return false;
   }
 
   async close() {

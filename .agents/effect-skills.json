@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/Effect-TS/skills",
+  "revision": "155c50c911f9c99c294ef8a4461981c5bbe6453e",
+  "files": {
+    ".agents/skills/effect-ts/SKILL.md": "30acc24da779cb4e530732bc74cca172adb372f24f42f2d1af18370c27938bff",
+    ".agents/skills/effect-v3-to-v4/SKILL.md": "fa788dc91d5fd64320e62e71a21d10c0538228b5662ff9ed0fcddc97d0b2890d",
+    ".agents/vendor/effect-skills/LICENSE": "774c3bc5924ad8ae6c5a75f1c53db13feb238ade15989625c513d07b60dedf30"
+  }
+}

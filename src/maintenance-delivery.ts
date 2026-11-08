@@ -39,7 +39,10 @@ export async function startMaintenanceDelivery(input: Input) {
         if (notice && notice.id !== shown) {
           await input.publish(notice);
           signal.throwIfAborted();
-          await watch.delivered(notice.id, request);
+          await watch.delivered(
+            notice.id,
+            AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+          );
           shown = notice.id;
         } else if (!notice && shown) {
           input.resume();

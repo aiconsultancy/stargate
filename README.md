@@ -427,6 +427,14 @@ because it conflicts with `noPropertyAccessFromIndexSignature`; record keys use
 bracket access. Do not replace it with casts, suppression comments, or weaker
 type-safety rules.
 
+Effect **4.0.6** stays pinned to the OpenCode SDK's version. The official
+`effect-ts` and `effect-v3-to-v4` skills are installed in `.agents/skills`;
+[provenance and file hashes](.agents/effect-skills.json) record their upstream
+revision. Read `node_modules/effect/AGENTS.md` before changing Effect code.
+The migration skill is available for future upgrades; this project already uses
+Effect 4. Skill examples that install `latest` do not override the SDK pin.
+Biome leaves these two upstream skill files unformatted to preserve their hashes.
+
 ### Dependency updates
 
 Dependabot checks Bun dependencies and pinned GitHub Actions each Monday.

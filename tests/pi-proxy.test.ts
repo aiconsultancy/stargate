@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { ConversationId, Harness } from "@earendil-works/pi-durable";
 import { PiDurableBackend } from "../src/backends/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
 
@@ -253,3 +255,153 @@ test("Pi cancellation closes the underlying proxy stream", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+for (const cancelQueued of [false, true]) {
+  test(
+    cancelQueued
+      ? "Pi queued cancellation preserves the prior native run"
+      : "Pi queued follow-up streams and returns only its own answer",
+    async () => {
+      const directory = await mkdtemp("/tmp/opencode/pogo-pi-follow-up-");
+      const previous = process.env[apiKeyEnv];
+      process.env[apiKeyEnv] = "local-proxy-test-only";
+      const priorStarted = Promise.withResolvers<void>();
+      const ownStarted = Promise.withResolvers<void>();
+      const queued = Promise.withResolvers<void>();
+      const ownPartial = Promise.withResolvers<void>();
+      const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+      let priorCancelled = false;
+      let requests = 0;
+      const encoder = new TextEncoder();
+      const chunk = (content: string, finish_reason: string | null = null) =>
+        encoder.encode(
+          `data: ${JSON.stringify({
+            id: "fixture",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "opencode-go/deepseek-v4.1-flash",
+            choices: [
+              {
+                index: 0,
+                delta: { role: "assistant", content },
+                finish_reason,
+              },
+            ],
+          })}\n\n`,
+        );
+      const finish = (index: number, text: string) => {
+        const stream = streams[index];
+        if (!stream) throw new Error("Fixture provider is not connected");
+        stream.enqueue(chunk(text, "stop"));
+        stream.enqueue(encoder.encode("data: [DONE]\n\n"));
+        stream.close();
+      };
+      const server = Bun.serve({
+        port: 0,
+        hostname: "127.0.0.1",
+        async fetch(request) {
+          await request.text();
+          const index = requests++;
+          request.signal.addEventListener(
+            "abort",
+            () => {
+              if (index === 0) priorCancelled = true;
+            },
+            { once: true },
+          );
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streams[index] = controller;
+                controller.enqueue(
+                  chunk(index === 0 ? "PRIOR LIVE " : "OWN PARTIAL "),
+                );
+                (index === 0 ? priorStarted : ownStarted).resolve();
+              },
+              cancel() {
+                if (index === 0) priorCancelled = true;
+              },
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          );
+        },
+      });
+      let backend: PiDurableBackend | undefined;
+      let pending: Promise<string> | undefined;
+      const controller = new AbortController();
+      try {
+        backend = await PiDurableBackend.open(
+          config(new URL("/v1", server.url).href, directory),
+          { dataDirectory: directory },
+        );
+        const session = await backend.createSession({
+          key: "native",
+          title: "native",
+          signal: signal(),
+        });
+        // Reuse this backend's real harness, not a competing storage owner.
+        const harness: Harness = Reflect.get(backend, "harness");
+        const conversation = await harness.conversation(
+          Number(session) as ConversationId,
+          BACKGROUND_CONTEXT,
+        );
+        if (!conversation) throw new Error("Fixture conversation is missing");
+        const native = await conversation.submit(
+          { type: "input", content: "Prior native request" },
+          BACKGROUND_CONTEXT,
+        );
+        await priorStarted.promise;
+        const observation = harness.observeCommits({
+          advance(publication) {
+            for (const change of publication.changes) {
+              if (
+                change.type === "submission" &&
+                change.value.status === "queued"
+              )
+                queued.resolve();
+            }
+          },
+          end() {},
+        });
+        const snapshots: string[] = [];
+        pending = backend.prompt(
+          session,
+          "Own follow-up",
+          controller.signal,
+          (text) => {
+            snapshots.push(text);
+            if (text.includes("OWN PARTIAL")) ownPartial.resolve();
+          },
+        );
+        await queued.promise;
+        observation.detach();
+        if (cancelQueued) {
+          controller.abort();
+          await expect(pending).rejects.toThrow();
+          expect(priorCancelled).toBe(false);
+        }
+        finish(0, "PRIOR COMMITTED");
+        expect((await native.wait(BACKGROUND_CONTEXT)).status).toBe("done");
+        if (cancelQueued) {
+          await conversation.waitForIdle(BACKGROUND_CONTEXT);
+          expect(requests).toBe(1);
+        } else {
+          await ownStarted.promise;
+          await ownPartial.promise;
+          finish(1, "OWN FINAL");
+          expect(await pending).toBe("OWN PARTIAL OWN FINAL");
+          expect(snapshots.length).toBeGreaterThan(0);
+        }
+        expect(snapshots.join("\n")).not.toContain("PRIOR");
+      } finally {
+        controller.abort();
+        await pending?.catch(() => {});
+        await backend?.close();
+        await server.stop(true);
+        if (previous === undefined) delete process.env[apiKeyEnv];
+        else process.env[apiKeyEnv] = previous;
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+}

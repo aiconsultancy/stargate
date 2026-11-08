@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import pino from "pino";
 import type {
   ActivitySnapshot,
@@ -652,6 +652,124 @@ test("finalization grace bounds a stuck report and marks the existing box unavai
     });
     expect(cancelled).toBe(0);
   } finally {
+    await f.close();
+  }
+});
+
+for (const outcome of ["complete", "failure"] as const) {
+  test(`retained activity handle cannot restart timers after ${outcome}`, async () => {
+    const calls: string[] = [];
+    const f = fixture({
+      async read() {
+        calls.push("read");
+        if (outcome === "failure") throw new Error("Read failed");
+        return snapshot(2, "complete");
+      },
+      async finish() {
+        calls.push("finish");
+        return snapshot(2, "complete");
+      },
+      async cancel() {
+        calls.push("cancel");
+      },
+    });
+    try {
+      const handle = await f.delivery.start(
+        f.job,
+        "captain",
+        signal(),
+        signal(),
+      );
+      expect(handle).toBeDefined();
+      // Drain terminal/failure cleanup before exercising the retained handle.
+      await f.delivery.close();
+      const before = [...calls];
+      const unexpectedTimer = Object.assign(
+        () => {
+          throw new Error("Settled activity must not create timers");
+        },
+        { __promisify__: setTimeout.__promisify__ },
+      );
+      const timer = spyOn(globalThis, "setTimeout").mockImplementation(
+        unexpectedTimer,
+      );
+      try {
+        expect(() => {
+          handle?.finish();
+          handle?.finish();
+          handle?.cancel();
+          handle?.cancel();
+        }).not.toThrow();
+        await f.delivery.close();
+        expect(timer).not.toHaveBeenCalled();
+        expect(calls).toEqual(before);
+      } finally {
+        timer.mockRestore();
+      }
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test("retained handle stays inert while failed activity cleanup is still draining", async () => {
+  const read = Promise.withResolvers<ActivitySnapshot>();
+  const cleaning = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<ActivitySnapshot>();
+  let readSignal: AbortSignal | undefined;
+  let reads = 0;
+  let finishes = 0;
+  let cancels = 0;
+  const f = fixture({
+    async read(signal) {
+      readSignal = signal;
+      if (!reads++) return snapshot();
+      return read.promise;
+    },
+    async finish() {
+      finishes++;
+      cleaning.resolve();
+      return release.promise;
+    },
+    async cancel() {
+      cancels++;
+    },
+  });
+  try {
+    const handle = await f.delivery.start(f.job, "captain", signal(), signal());
+    expect(handle).toBeDefined();
+    await f.waiting;
+    f.tick();
+    read.reject(new Error("Read failed"));
+    await cleaning.promise;
+    const unexpectedTimer = Object.assign(
+      () => {
+        throw new Error("Activity cleanup must not create grace timers");
+      },
+      { __promisify__: setTimeout.__promisify__ },
+    );
+    const timer = spyOn(globalThis, "setTimeout").mockImplementation(
+      unexpectedTimer,
+    );
+    try {
+      expect(() => {
+        handle?.finish();
+        handle?.finish();
+        handle?.cancel();
+        handle?.cancel();
+      }).not.toThrow();
+      expect(timer).not.toHaveBeenCalled();
+      expect(readSignal?.aborted).toBe(false);
+      expect(finishes).toBe(1);
+      expect(cancels).toBe(0);
+    } finally {
+      timer.mockRestore();
+    }
+    release.resolve(snapshot(2, "complete"));
+    await f.written[1]?.promise;
+    expect(f.views[1]?.view.status).toBe("unavailable");
+  } finally {
+    release.resolve(snapshot(2, "complete"));
     await f.close();
   }
 });

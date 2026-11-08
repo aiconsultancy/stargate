@@ -96,12 +96,20 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
   }
 });
 
-test("OpenCode failure explicitly interrupts server-side execution", async () => {
+test("OpenCode placed-input failure explicitly interrupts server-side execution", async () => {
   let interrupted = false;
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     fetch(request) {
+      const path = new URL(request.url).pathname;
+      if (path.endsWith("/prompt"))
+        return Response.json({ data: { id: "input-current" } });
+      if (path.endsWith("/message"))
+        return Response.json({
+          data: [{ id: "input-current", type: "user" }],
+          cursor: {},
+        });
       if (new URL(request.url).pathname.endsWith("/interrupt")) {
         interrupted = true;
         return Response.json({ success: true });
@@ -129,11 +137,45 @@ test("OpenCode failure explicitly interrupts server-side execution", async () =>
   }
 });
 
-function openCodeStreamFixture() {
+test("OpenCode uncertain admission does not interrupt unrelated native work", async () => {
+  let interrupts = 0;
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch(request) {
+      if (new URL(request.url).pathname.endsWith("/interrupt")) interrupts++;
+      return Response.json({ message: "unavailable" }, { status: 503 });
+    },
+  });
+  try {
+    const config = backendSchema.parse({
+      type: "opencode",
+      url: server.url.href,
+      directory: "/workspace",
+    });
+    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    await expect(
+      new OpenCodeBackend(config).prompt(
+        "session",
+        "hello",
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow();
+    expect(interrupts).toBe(0);
+  } finally {
+    await server.stop(true);
+  }
+});
+
+function openCodeStreamFixture(queued = false) {
   const waiting = Promise.withResolvers<void>();
   const finish = Promise.withResolvers<void>();
   const disconnected = Promise.withResolvers<void>();
   const interrupted = Promise.withResolvers<void>();
+  const checked = Promise.withResolvers<void>();
+  let placed = !queued;
+  let interrupts = 0;
+  let cancelled = false;
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
   let sequence = 0;
   let historyReads = 0;
@@ -183,18 +225,23 @@ function openCodeStreamFixture() {
       }
       if (path.endsWith("/message")) {
         historyReads++;
+        checked.resolve();
         return Response.json({
           data: [
-            {
-              id: "answer-current",
-              type: "assistant",
-              content: [
-                { type: "reasoning", text: "HISTORY REASONING SECRET" },
-                { type: "tool", text: "HISTORY TOOL SECRET" },
-                { type: "text", text: "Canonical final answer." },
-              ],
-            },
-            { id: "input-current", type: "user" },
+            ...(placed
+              ? [
+                  {
+                    id: "answer-current",
+                    type: "assistant",
+                    content: [
+                      { type: "reasoning", text: "HISTORY REASONING SECRET" },
+                      { type: "tool", text: "HISTORY TOOL SECRET" },
+                      { type: "text", text: "Canonical final answer." },
+                    ],
+                  },
+                  { id: "input-current", type: "user" },
+                ]
+              : []),
             {
               id: "old-answer",
               type: "assistant",
@@ -205,8 +252,16 @@ function openCodeStreamFixture() {
         });
       }
       if (path.endsWith("/interrupt")) {
+        interrupts++;
         interrupted.resolve();
         return Response.json({ success: true });
+      }
+      if (
+        path.endsWith("/inbox/input-current") &&
+        request.method === "DELETE"
+      ) {
+        cancelled = true;
+        return new Response(null, { status: 204 });
       }
       return new Response(null, { status: 404 });
     },
@@ -224,6 +279,12 @@ function openCodeStreamFixture() {
     interrupted: interrupted.promise,
     finish: () => finish.resolve(),
     historyReads: () => historyReads,
+    checked: checked.promise,
+    place: () => {
+      placed = true;
+    },
+    interrupts: () => interrupts,
+    cancelled: () => cancelled,
     emit,
     disconnect() {
       stream?.close();
@@ -293,16 +354,13 @@ test("OpenCode streams only current-session visible text before canonical histor
       text: "Corrected second block.",
     });
     await received.promise;
-    expect(snapshots).toEqual([
-      "Second ",
-      "Second block.",
-      "First block.\nSecond block.",
-      "First block.\nCorrected second block.",
-    ]);
-    expect(fixture.historyReads()).toBe(0);
+    // Ownership reads can coalesce deltas received during the history request.
+    expect(snapshots.at(-1)).toBe("First block.\nCorrected second block.");
+    expect(snapshots.join("\n")).not.toContain("SECRET");
+    expect(fixture.historyReads()).toBe(1);
     fixture.finish();
     expect(await result).toBe("Canonical final answer.");
-    expect(fixture.historyReads()).toBe(1);
+    expect(fixture.historyReads()).toBe(2);
     await fixture.disconnected;
   } finally {
     controller.abort();
@@ -345,6 +403,56 @@ test("OpenCode event disconnect retains authoritative final history", async () =
   }
 });
 
+test("OpenCode excludes prior same-session output while its input is queued", async () => {
+  const fixture = openCodeStreamFixture(true);
+  const received = Promise.withResolvers<void>();
+  const snapshots: string[] = [];
+  const controller = new AbortController();
+  const pending = fixture.backend.prompt(
+    "session-current",
+    "Queued follow-up",
+    controller.signal,
+    (text) => {
+      snapshots.push(text);
+      if (text.includes("OWN ANSWER")) received.resolve();
+    },
+  );
+  try {
+    await fixture.waiting;
+    fixture.emit("session.text.delta", {
+      sessionID: "session-current",
+      assistantMessageID: "old-answer",
+      ordinal: 0,
+      delta: "PRIOR TURN",
+    });
+    fixture.emit("session.text.ended", {
+      sessionID: "session-current",
+      assistantMessageID: "old-answer",
+      ordinal: 0,
+      text: "PRIOR TURN COMPLETED",
+    });
+    fixture.emit("session.execution.succeeded", {
+      sessionID: "session-current",
+    });
+    await fixture.checked;
+    fixture.place();
+    fixture.emit("session.text.delta", {
+      sessionID: "session-current",
+      assistantMessageID: "answer-current",
+      ordinal: 0,
+      delta: "OWN ANSWER",
+    });
+    await received.promise;
+    expect(snapshots).toEqual(["OWN ANSWER"]);
+    fixture.finish();
+    expect(await pending).toBe("Canonical final answer.");
+  } finally {
+    controller.abort();
+    await pending.catch(() => {});
+    await fixture.close();
+  }
+});
+
 test("OpenCode cancellation closes the event subscription and interrupts execution", async () => {
   const fixture = openCodeStreamFixture();
   const controller = new AbortController();
@@ -360,10 +468,32 @@ test("OpenCode cancellation closes the event subscription and interrupts executi
     await expect(result).rejects.toThrow();
     await fixture.interrupted;
     await fixture.disconnected;
-    expect(fixture.historyReads()).toBe(0);
+    expect(fixture.historyReads()).toBe(1);
   } finally {
     controller.abort();
     await result.catch(() => {});
+    await fixture.close();
+  }
+});
+
+test("OpenCode queued cancellation withdraws only its own input", async () => {
+  const fixture = openCodeStreamFixture(true);
+  const controller = new AbortController();
+  const pending = fixture.backend.prompt(
+    "session-current",
+    "follow-up",
+    controller.signal,
+    () => {},
+  );
+  try {
+    await fixture.waiting;
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(fixture.cancelled()).toBe(true);
+    expect(fixture.interrupts()).toBe(0);
+  } finally {
+    controller.abort();
+    await pending.catch(() => {});
     await fixture.close();
   }
 });
@@ -468,8 +598,17 @@ test("Pi ignores historical observer advances before attachment resolves", async
         async submit() {
           advance(view([historical, beforeResolution, current]));
           return {
+            id: 1,
+            async status() {
+              return { status: "placed", type: "input", entry: 12 };
+            },
             async wait() {
-              return { status: "done", type: "input", answer: current.id };
+              return {
+                status: "done",
+                type: "input",
+                entry: 12,
+                answer: current.id,
+              };
             },
           };
         },
@@ -492,6 +631,142 @@ test("Pi ignores historical observer advances before attachment resolves", async
   ).toBe("NEW ANSWER");
   expect(snapshots).toEqual(["NEW ANSWER"]);
   expect(detached).toBe(true);
+});
+
+test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
+  const id = 1 as ConversationId;
+  const assistant = (number: number, text: string): EntryRecord => ({
+    id: number as EntryId,
+    conversationId: id,
+    kind: "pi.assistant",
+    model: [
+      {
+        role: "assistant",
+        content: [{ type: "text", text }],
+        api: "openai-responses",
+        provider: "openai",
+        model: "fixture",
+        stopReason: "stop",
+        timestamp: 0,
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            total: 0,
+          },
+        },
+      },
+    ],
+  });
+  const old = assistant(10, "BEFORE ATTACHMENT");
+  const prior = assistant(11, "PRIOR TURN COMMITTED");
+  const own = assistant(13, "OWN ANSWER");
+  const next = assistant(15, "LATER NATIVE TURN");
+  const terminal = {
+    id: 1,
+    conversationId: id,
+    type: "input",
+    entry: 12,
+    ...(outcome === "done"
+      ? { status: "done", answer: own.id }
+      : { status: "unanswered", reason: "model_error" }),
+  };
+  const partial = Promise.withResolvers<void>();
+  let completed = false;
+  let observer: Observer<ConversationView> | undefined;
+  const view = (
+    entries: readonly EntryRecord[],
+    input: number,
+    text: string,
+  ): ConversationView => ({
+    conversation: { id },
+    entries,
+    docs: {
+      "pi.live": {
+        run: { inputs: [input] },
+        generation: { message: { content: [{ type: "text", text }] } },
+      },
+    },
+  });
+  const advance = (value: ConversationView) =>
+    observer?.advance(
+      { kind: "value", value, ops: [], retired: false },
+      BACKGROUND_CONTEXT,
+    );
+  const harness = {
+    async observeConversation(
+      _id: ConversationId,
+      attached: Observer<ConversationView>,
+    ) {
+      observer = attached;
+      return { value: view([old], 99, "PRIOR LIVE"), detach() {} };
+    },
+    async conversation() {
+      return {
+        async submit() {
+          advance(view([old], 99, "PRIOR TURN LIVE"));
+          advance(view([old, prior], 99, "PRIOR TURN COMPLETING"));
+          return {
+            id: 1,
+            async status() {
+              return completed
+                ? terminal
+                : { id: 1, type: "input", status: "placed", entry: 12 };
+            },
+            async abort() {
+              return "settled";
+            },
+            async wait() {
+              advance(view([old, prior], 99, "PRIOR TURN LAST DELTA"));
+              advance(view([old, prior], 1, "OWN PARTIAL"));
+              await partial.promise;
+              completed = true;
+              advance(
+                view(
+                  outcome === "done"
+                    ? [old, prior, own, next]
+                    : [old, prior, next],
+                  2,
+                  "NEXT LIVE",
+                ),
+              );
+              return terminal;
+            },
+          };
+        },
+        async commit() {
+          return own;
+        },
+      };
+    },
+  };
+  const backend: PiDurableBackend = Reflect.construct(PiDurableBackend, [
+    harness,
+    {},
+  ]);
+  const snapshots: string[] = [];
+  const pending = backend.prompt(
+    "1",
+    "follow-up",
+    new AbortController().signal,
+    (text) => {
+      snapshots.push(text);
+      if (text === "OWN PARTIAL") partial.resolve();
+    },
+  );
+  if (outcome === "done") expect(await pending).toBe("OWN ANSWER");
+  else {
+    await expect(pending).rejects.toThrow("Pi input did not complete");
+    expect(snapshots).toEqual(["OWN PARTIAL"]);
+  }
+  expect(snapshots.join("\n")).not.toMatch(/PRIOR|BEFORE|LATER|NEXT/);
 });
 
 test("real Pi Durable harness persists sessions under Bun SQLite", async () => {

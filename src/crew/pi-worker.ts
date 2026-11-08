@@ -108,13 +108,14 @@ export class PiCrewWorkers {
           "pi",
           hash,
         );
-        // No await between the final closing check and the pool lookup.
         for (
           let previous = closing.get(dataDirectory);
           previous;
           previous = closing.get(dataDirectory)
         )
           await previous.catch(() => {});
+        // No await between this check and registering pool ownership.
+        if (this.closed) throw new CrewError("Pi crew runtime is closing.");
         const pooled = pool.get(dataDirectory);
         if (pooled) {
           pooled.owners.add(this);

@@ -23,6 +23,8 @@ import {
   GenerationTask,
   Harness,
   hook,
+  type Submission,
+  type SubmissionRecord,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
@@ -112,6 +114,7 @@ function proxyProvider(config: Config) {
 }
 
 const liveText = z.object({
+  run: z.object({ inputs: z.array(z.number()) }).optional(),
   generation: z
     .object({
       message: z
@@ -335,8 +338,65 @@ export class PiDurableBackend implements AgentBackend {
       | Awaited<ReturnType<Harness["observeConversation"]>>
       | undefined;
     const visible = new Map<number, string>();
-    let baseline: number | undefined;
-    let earlyEntryId = 0;
+    let submission: Submission | undefined;
+    let latestView: ConversationView | undefined;
+    let updates = Promise.resolve();
+    let settled = false;
+    let lastText = "";
+    const collect = (view: ConversationView, record: SubmissionRecord) => {
+      // Attachment and admission do not own the previous run. Placement does.
+      if (
+        record.type !== "input" ||
+        record.status === "unanswered" ||
+        record.entry === undefined
+      )
+        return;
+      for (const entry of view.entries) {
+        if (
+          entry.id <= record.entry ||
+          (record.answer !== undefined && entry.id > record.answer) ||
+          !AssistantEntry.is(entry)
+        )
+          continue;
+        visible.set(
+          entry.id,
+          (entry.model ?? [])
+            .flatMap((message) =>
+              message.role === "assistant"
+                ? message.content.flatMap((block) =>
+                    block.type === "text" ? [block.text] : [],
+                  )
+                : [],
+            )
+            .join(""),
+        );
+      }
+      const live = liveText.safeParse(view.docs["pi.live"]);
+      // A delayed view/status read may straddle placement or completion.
+      const partial =
+        record.status === "placed" &&
+        live.success &&
+        live.data.run?.inputs.includes(record.id)
+          ? piPartialText(view)
+          : "";
+      const text = [...visible.values(), partial].filter(Boolean).join("\n\n");
+      if (text && text !== lastText) {
+        lastText = text;
+        onText?.(text);
+      }
+    };
+    const update = (view: ConversationView) => {
+      latestView = view;
+      updates = updates
+        .then(async () => {
+          if (!submission || settled) return;
+          const record = await submission.status(context);
+          if (!settled) collect(view, record);
+        })
+        .catch(() => {
+          // Observation is best effort; the submission's answer is authoritative.
+        });
+    };
     try {
       if (onText) {
         observation = await this.harness.observeConversation(
@@ -344,53 +404,30 @@ export class PiDurableBackend implements AgentBackend {
           {
             advance(call) {
               if (call.kind !== "value") return;
-              // Advances can precede resolution and exceed the initial view.
-              if (baseline === undefined) {
-                earlyEntryId = Math.max(
-                  earlyEntryId,
-                  ...call.value.entries.map((entry) => entry.id),
-                );
-                return;
-              }
-              for (const entry of call.value.entries) {
-                if (entry.id <= baseline || !AssistantEntry.is(entry)) continue;
-                visible.set(
-                  entry.id,
-                  (entry.model ?? [])
-                    .flatMap((message) =>
-                      message.role === "assistant"
-                        ? message.content.flatMap((block) =>
-                            block.type === "text" ? [block.text] : [],
-                          )
-                        : [],
-                    )
-                    .join(""),
-                );
-              }
-              onText(
-                [...visible.values(), piPartialText(call.value)]
-                  .filter(Boolean)
-                  .join("\n\n"),
-              );
+              update(call.value);
             },
             end() {},
           },
           context,
         );
-        baseline = Math.max(
-          earlyEntryId,
-          ...observation.value.entries.map((entry) => entry.id),
-        );
+        latestView ??= observation.value;
       }
-      const submission = await conversation.submit(
+      submission = await conversation.submit(
         { type: "input", content: text, whenBusy: "followUp" },
         context,
       );
-      const settled = await submission.wait(context);
-      if (settled.status !== "done" || settled.type !== "input")
+      if (latestView) update(latestView);
+      const completed = await submission.wait(context);
+      await updates;
+      settled = true;
+      if (completed.status !== "done" || completed.type !== "input")
         throw new Error("Pi input did not complete");
+      // Status can move ahead of observation; bound retained text at the answer.
+      for (const id of visible.keys()) {
+        if (id <= completed.entry || id > completed.answer) visible.delete(id);
+      }
       const entry = await conversation.commit(
-        (tx) => tx.entry(AssistantEntry, settled.answer),
+        (tx) => tx.entry(AssistantEntry, completed.answer),
         context,
       );
       if (!entry) throw new Error("Pi answer not found");
@@ -409,12 +446,26 @@ export class PiDurableBackend implements AgentBackend {
       visible.set(entry.id, answer);
       return [...visible.values()].filter(Boolean).join("\n\n");
     } catch (error) {
-      await this.interrupt(sessionId, AbortSignal.timeout(5000)).catch(
-        () => {},
-      );
+      // Withdrawal is atomic with placement. Never abort a prior native run
+      // merely because our follow-up is still queued or already settled.
+      // A failed admission without a returned handle has an uncertain outcome.
+      if (submission) {
+        const cleanup = withAbortSignal(
+          AbortSignal.timeout(5000),
+          BACKGROUND_CONTEXT,
+        );
+        await submission
+          .abort(cleanup)
+          .then(async (outcome) => {
+            if (outcome === "already_placed") await conversation.abort(cleanup);
+          })
+          .catch(() => {});
+      }
       throw error;
     } finally {
+      settled = true;
       observation?.detach();
+      await updates;
     }
   }
 

@@ -16,6 +16,8 @@ machine framework. The existing owners must keep each transition valid.
 | Restart recovery               | Running → interrupt attempt → responding with uncertainty notice         | Do not replay a turn whose tool outcomes are unknown.                                                                                     |
 | Transcript cursor              | NULL → baseline → advance; read failure → retry; lost → next request     | Advance with the reply rows in one transaction. Never backfill a baseline or skip unread history silently.                                |
 | `LiveReply`                    | Waiting → visible text → closed; write failure → disabled                | Serialize preview writes. Stop timers before final delivery. Preserve preview timestamps for restart recovery.                            |
+| `ActivityDelivery`             | Capturing → finishing → settled; read or delivery failure → settled      | Settled state is absorbing. Retained handles cannot restart timers or backend work, including while cleanup drains.                       |
+| Maintenance notice             | Read → publish → acknowledge → consent wait                              | Give read and acknowledgement separate deadlines. Owner cancellation stops both; publication alone does not start the consent window.     |
 | Reaction reply                 | No reaction → requested → delivered or failed                            | Target the triggering message. A failed reaction-only reply must not disappear.                                                           |
 | `runtime.ts`                   | Locked → connected → serving → intake closed → drained → closed          | Hold one data-directory lock. Start workers after all bots connect. Close all intake, drain all workers, then resources. Failure exits 1. |
 
@@ -25,15 +27,15 @@ effects or delivery.
 
 ## Backends and Slack
 
-| Owner              | States and transitions                                                       | Required invariant                                                                                                               |
-| ------------------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| OpenCode adapter   | Observe events → submit turn → settle → read final history → detach          | Stream only current-turn visible text. Event-stream failure must not replay the prompt. Cancellation must interrupt server work. |
-| OpenCode watch     | Subscribe → connected → settle notices → disconnect → delayed reconnect      | Notices only trigger cursor reads. Each connection triggers catch-up; no history polling between events.                         |
-| Pi Durable adapter | Attach observer → establish history baseline → submit turn → settle → detach | Ignore history observed before the turn baseline. Return only the current answer. Cancellation must stop the agent.              |
-| `SlackConnection`  | Connect → dispatch → persist → ACK → intake closed → disconnect              | ACK accepted events only after durable admission. No ACK after intake closes. Sanitize SDK failures.                             |
-| Reaction parser    | Incomplete prefix → valid directive or literal text                          | Hide only recognized reaction controls; do not expose a partial control as response text.                                        |
-| Waiting override   | Validate → write private temporary file → rename                             | Check cancellation before replacement. Invalid cosmetic settings must not fail a turn.                                           |
-| Markdown chunker   | Outside fence → open fence → split and reopen → closed fence                 | Keep ordinary fences balanced within the Slack message budget.                                                                   |
+| Owner              | States and transitions                                                       | Required invariant                                                                                                             |
+| ------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| OpenCode adapter   | Observe → submit → prove input placement → collect → settle → detach         | Prove preview ownership from history. Withdraw queued input before considering session interruption. Never replay the prompt.  |
+| OpenCode watch     | Subscribe → connected → settle notices → disconnect → delayed reconnect      | Notices only trigger cursor reads. Each connection triggers catch-up; no history polling between events.                       |
+| Pi Durable adapter | Observe → queue → place input → collect through its answer → settle → detach | Use submission entry/answer bounds and live run inputs. Withdraw queued input atomically; do not abort the earlier native run. |
+| `SlackConnection`  | Connect → dispatch → persist → ACK → intake closed → disconnect              | ACK accepted events only after durable admission. No ACK after intake closes. Sanitize SDK failures.                           |
+| Reaction parser    | Incomplete prefix → valid directive or literal text                          | Hide only recognized reaction controls; do not expose a partial control as response text.                                      |
+| Waiting override   | Validate → write private temporary file → rename                             | Check cancellation before replacement. Invalid cosmetic settings must not fail a turn.                                         |
+| Markdown chunker   | Outside fence → open fence → split and reopen → closed fence                 | Keep ordinary fences balanced within the Slack message budget.                                                                 |
 
 ## Crew
 
@@ -42,7 +44,8 @@ effects or delivery.
 | Peer identity               | Absent → pending → ready                                                                        | Recover a pending peer with its reserved session ID. Do not silently replace a ready peer whose session is missing or mismatched.    |
 | Assignment                  | Queued → dispatching → running → completed; queued → cancelled; active → cancelling → uncertain | Dispatching is not proof of SDK admission. Do not automatically replay uncertain work. Only the assigned worker can complete a task. |
 | Worker control              | Free → token reserved → operation → free                                                        | A reservation excludes dispatch and promotion. A crash-held reservation needs reconciliation.                                        |
-| Urgent delivery             | Active → notification reserved → steer → notification released                                  | Pending notifications block slot release. Failed delivery makes the task uncertain.                                                  |
+| Pi harness ownership        | Resolve path → wait for prior close → acquire → release                                         | Recheck owner state after awaits. A closed owner cannot register a lease or keep a replacement harness open.                         |
+| Urgent delivery             | Active → notification reserved → steer → notification released                                  | Pending notifications block slot release. Failed delivery reports notification uncertainty without changing assignment state.        |
 | Mail                        | Authorize lineage → register → send or read inbox → acknowledge cursor                          | Keep send keys stable on retry. Advance the durable read cursor only by explicit acknowledgement.                                    |
 | Compaction and model switch | Idle → control reserved → stream connected → admitted → started → ended → model switch          | Switch only after confirmed compaction. On failure, interrupt work, keep the model, and release control.                             |
 | History traversal           | Session page → authorized session → message pages → next session                                | Bound the cursor and recheck visibility. Reject foreign sessions and query-mismatched cursors.                                       |
@@ -75,7 +78,7 @@ Owners are `cron.ts`, `cron-store.ts`, `cron-ui.ts`, `provision.ts`,
 
 ## Transition regressions
 
-The transition audit identified three concrete failures:
+An earlier transition audit identified three concrete failures:
 
 - Pi observer callbacks could include old assistant text before the history
   baseline was established. Establish the baseline from both the attachment
@@ -85,6 +88,26 @@ The transition audit identified three concrete failures:
   observation must distinguish dispatching from admitted running work.
 - Cron removal was acknowledged before it was durable. A failed ACK or a crash
   in that window could leave the schedule enabled.
+
+Follow-up regressions cover these lifecycle boundaries:
+
+- A Pi owner can close while acquisition waits for path resolution or the
+  previous harness close. Check ownership again before registering a lease.
+- A retained activity handle could start a grace timer after terminal cleanup.
+  Mark it settled before asynchronous cleanup; later `finish()` and `cancel()`
+  calls do nothing.
+- Maintenance publication can outlast the read deadline. Give the delivered
+  acknowledgement a fresh deadline linked to the same owner signal. A cancelled
+  owner must not acknowledge publication or restore active consent.
+- Both adapters can attach while earlier native work is busy. Attachment time
+  does not prove input ownership. OpenCode checks transcript placement before
+  publishing a preview; Pi uses submission entry/answer bounds and live run
+  input IDs. Cancelling a queued follow-up must not stop the earlier native run.
+
+Placed-input interruption is still session-wide. A later native turn can start
+before interruption reaches it. A lost admission response also leaves ownership
+uncertain; do not guess an input ID, interrupt unrelated work, or replay it.
+See [cancellation limits](../cancellation.md#limits).
 
 The tests for these boundaries use local fixtures. They do not require Slack
 credentials or paid model calls. The other transitions keep their existing

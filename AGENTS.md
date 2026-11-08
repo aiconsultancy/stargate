@@ -72,6 +72,20 @@ selects a new session namespace; never reuse another backend's session ID.
 - Do not introduce `any`, type suppression, or disabled lint rules to hide errors.
 - Keep documentation and CLI help aligned with supported options and limits.
 
+## Learning more about Effect
+
+This repository uses Effect 4, pinned to the OpenCode SDK's version.
+The official `effect-ts` and `effect-v3-to-v4` skills are installed in
+`.agents/skills`; provenance and hashes are in `.agents/effect-skills.json`.
+
+Before writing Effect code, read `node_modules/effect/AGENTS.md` completely.
+Follow its links when required. For APIs not covered there, search the installed
+source in `node_modules/effect/src`. Keep the existing SDK-aligned version;
+installing or loading a skill is not permission to upgrade Effect.
+
+Repository choices take precedence over greenfield examples: keep Zod, Bun
+SQLite, `bun:test`, and the existing Promise adapter contract.
+
 ## Safety and credentials
 
 - Never commit `pogo.json`, its `.env` companion, provider credentials, runtime

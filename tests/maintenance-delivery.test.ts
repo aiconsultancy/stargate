@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import type { AgentBackend } from "../src/backend";
 import type { MaintenanceWatch } from "../src/maintenance";
 import { startMaintenanceDelivery } from "../src/maintenance-delivery";
@@ -115,4 +115,86 @@ test("missing plugin is compatible with ordinary bots but creates no maintenance
   };
   expect(await startMaintenanceDelivery(f.input)).toBeUndefined();
   expect(f.stop.signal.aborted).toBe(false);
+});
+
+test("delivery acknowledgement gets a fresh deadline after slow publication", async () => {
+  const deadlines: { ms: number; controller: AbortController }[] = [];
+  const timeout = spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    deadlines.push({ ms, controller });
+    return controller.signal;
+  });
+  const publishing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const acknowledged = Promise.withResolvers<AbortSignal>();
+  let readSignal: AbortSignal | undefined;
+  const f = fixture({
+    async read(signal) {
+      readSignal = signal;
+      return notice;
+    },
+    async delivered(_id, signal) {
+      acknowledged.resolve(signal);
+    },
+    async close() {},
+  });
+  f.input.publish = async () => {
+    publishing.resolve();
+    await release.promise;
+  };
+  let handle: Awaited<ReturnType<typeof startMaintenanceDelivery>>;
+  try {
+    handle = await startMaintenanceDelivery(f.input);
+    await publishing.promise;
+    const readDeadline = deadlines.find(({ ms }) => ms === 5000);
+    expect(readDeadline).toBeDefined();
+    readDeadline?.controller.abort();
+    expect(readSignal?.aborted).toBe(true);
+    release.resolve();
+    const deliveredSignal = await acknowledged.promise;
+    expect(deliveredSignal).not.toBe(readSignal);
+    expect(deliveredSignal.aborted).toBe(false);
+    expect(deadlines.filter(({ ms }) => ms === 5000)).toHaveLength(2);
+    expect(f.stop.signal.aborted).toBe(false);
+  } finally {
+    release.resolve();
+    await handle?.close();
+    timeout.mockRestore();
+  }
+});
+
+test("owner cancellation during publication never acknowledges or restores authority", async () => {
+  const publishing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const order: string[] = [];
+  const f = fixture({
+    async read() {
+      return notice;
+    },
+    async delivered() {
+      order.push("delivered");
+    },
+    async close() {},
+  });
+  f.input.publish = async () => {
+    publishing.resolve();
+    await release.promise;
+    order.push("published");
+  };
+  f.input.resume = () => {
+    expect(f.stop.signal.aborted).toBe(true);
+    order.push("resume-cancelled");
+  };
+  const handle = await startMaintenanceDelivery(f.input);
+  try {
+    await publishing.promise;
+    f.stop.abort();
+    release.resolve();
+    await handle?.close();
+    expect(order).toEqual(["published", "resume-cancelled"]);
+    expect(f.stop.signal.aborted).toBe(true);
+  } finally {
+    release.resolve();
+    await handle?.close();
+  }
 });
