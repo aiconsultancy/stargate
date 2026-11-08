@@ -30,6 +30,9 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { z } from "zod";
 import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import { type BackendConfig, secret } from "../config";
+import { workingAgreementNotice } from "../crew/instructions";
+import { piCrewExtension } from "../crew/pi-extension";
+import { redactActivity } from "../crew/reporting";
 
 type Config = Extract<BackendConfig, { type: "pi-durable" }>;
 const conversationId = z
@@ -158,7 +161,84 @@ export class PiDurableBackend implements AgentBackend {
       models.setProvider(openaiProvider());
     }
     const registry = createRegistry();
+    if (context.workingAgreement) {
+      const agreement = context.workingAgreement;
+      const notice = workingAgreementNotice(agreement.path);
+      registry.install(
+        defineExtension({
+          name: "pogo.working-agreement",
+          hooks: [
+            hook(GenerationTask, {
+              async beforeRequest(request, api) {
+                const id = String(api.conversationId);
+                if (!agreement.owns(id)) return undefined;
+                const changed = await notice(id);
+                return changed
+                  ? {
+                      messages: [
+                        ...request.messages,
+                        {
+                          role: "system",
+                          content: changed,
+                          timestamp: Date.now(),
+                        },
+                      ],
+                    }
+                  : undefined;
+              },
+            }),
+          ],
+        }),
+      );
+    }
+    let openedHarness: Harness | undefined;
     if (config.tools === "coding") registry.install(CodingTools);
+    if (config.tools === "coding" && context.crew)
+      registry.install(
+        piCrewExtension(context.crew, async (id, input, signal) => {
+          const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+          const conversation = await openedHarness?.conversation(
+            conversationId.parse(id) as ConversationId,
+            context,
+          );
+          if (!conversation) throw new Error("Pi conversation unavailable");
+          const page = await conversation.entries(
+            {},
+            input.limit,
+            input.cursor,
+            context,
+          );
+          return {
+            next: page.next ?? null,
+            items: page.items.flatMap((entry) =>
+              (entry.model ?? []).flatMap((message) => {
+                if (message.role !== "user" && message.role !== "assistant")
+                  return [];
+                const visible =
+                  typeof message.content === "string"
+                    ? message.content
+                    : message.content
+                        .flatMap((block) =>
+                          block.type === "text" ? [block.text] : [],
+                        )
+                        .join("\n");
+                const text = redactActivity(visible);
+                return text
+                  ? [
+                      {
+                        id: entry.id,
+                        conversationId: entry.conversationId,
+                        role: message.role,
+                        text,
+                        truncated: visible.length > 1500,
+                      },
+                    ]
+                  : [];
+              }),
+            ),
+          };
+        }),
+      );
     const activeReports = new Set<ConversationId>();
     const reportGuard = defineExtension({
       name: "pogo.capture-only-report",
@@ -208,6 +288,7 @@ export class PiDurableBackend implements AgentBackend {
         },
         BACKGROUND_CONTEXT,
       );
+      openedHarness = harness;
       return new PiDurableBackend(harness, config, activeReports, reportGuard);
     } catch (error) {
       await storage.close(BACKGROUND_CONTEXT);
@@ -394,6 +475,40 @@ export class PiDurableBackend implements AgentBackend {
       context,
     );
     if (conversation) await conversation.abort(context);
+  }
+
+  async waitForIdle(sessionId: string, signal: AbortSignal) {
+    const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+    const conversation = await this.harness.conversation(
+      conversationId.parse(sessionId) as ConversationId,
+      context,
+    );
+    if (!conversation) throw new Error("Pi conversation not found");
+    await conversation.waitForIdle(context);
+  }
+
+  async notify(
+    sessionId: string,
+    id: string,
+    text: string,
+    delivery: "steer" | "queue",
+    signal: AbortSignal,
+  ) {
+    const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+    const conversation = await this.harness.conversation(
+      conversationId.parse(sessionId) as ConversationId,
+      context,
+    );
+    if (!conversation) throw new Error("Pi conversation not found");
+    await conversation.submit(
+      {
+        type: "input",
+        requestId: id,
+        content: text,
+        whenBusy: delivery === "steer" ? "steer" : "followUp",
+      },
+      context,
+    );
   }
 
   async close() {

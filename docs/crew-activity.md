@@ -48,22 +48,21 @@ older retained outcomes have no timing or progress details.
 
 ## Opt in
 
-First configure [Twiki as a Pi Durable crew member](agents/default-opencode.md#pi-durable-crew).
-The reporter must belong to the captain's team. It uses CLIProxyAPI and the
-same persistent worker slot as maintenance; it does not need another Slack app
-or OpenCode root session.
+No reporter is required. Pogo renders journal facts directly. To add one final
+summary, configure a Pi Durable colleague with tools-off reporting support and
+set its exact configured ID as `reporter`. It shares its normal worker slot;
+reporting does not reserve a second owner or wait behind busy maintenance.
 
 Add this field to the Slack bot's Pogo configuration:
 
 ```json
 "crewActivity": {
-  "detail": "summary",
-  "reporter": "twiki"
+  "detail": "summary"
 }
 ```
 
 - `off`: default. No reporting capture or summary request is started.
-- `summary`: show report status and Twiki's concise, attributed summary.
+- `summary`: show a current final summary or the latest five attributed facts.
 - `detailed`: also show bounded assignments, explicit task messages and results,
   labelled with configured crew display names.
 
@@ -77,14 +76,19 @@ The gateway opens a capture for one accepted captain request, using that
 session and request ID. Setup has a one-second deadline; reporting failure
 does not prevent the captain from answering.
 
-Pogo collects linked task activity, not arbitrary transcripts or tool output.
+Pogo collects scoped journal facts, not arbitrary transcripts or tool output.
 The activity box appears only after actual crew entries are captured. An empty
 capture does not start or queue a summary request. The reporter's own maintenance
 and reporting tasks do not count as crew activity.
-After the captain's turn, Twiki prepares one report through its normal crew
-queue. Maintenance can delay the report, but reporting never waits in the
-answer-delivery path. Pogo updates the same activity message in the original
-thread. It does not prompt the captain again or let workers post to Slack.
+Journal entries have monotonic IDs, host timestamps, member identity and an
+optional task reference. They remain in the private crew database when captures
+expire. Agents record milestones, checks, blockers and outcomes, not tool calls.
+Task transitions add reliable lifecycle facts.
+After the captain's turn, a configured, supported and free reporter may prepare
+one final summary. Busy, queued, uncertain or unavailable reporters are skipped
+with an explanation; facts remain visible. Refreshes do not call a model.
+Pogo edits the same activity message in the original thread. It does not prompt
+the captain again or let workers post to Slack.
 
 Each summary uses a fresh, tools-free Pi context containing only sanitized
 capture records. Twiki's maintenance conversation and earlier reports are not
@@ -104,27 +108,38 @@ input and Slack output. Do not put secrets in assignments or task messages;
 pattern matching cannot identify every possible secret. Historical context
 already available to a worker is not a public activity transcript.
 
-Summary mode does not include raw activity entries. Detailed mode shows at
+Summary mode shows the latest five fact lines when no current model summary is
+available. Detailed mode shows at
 most eight bounded entries; omitted activity is marked as shortened. All
 crew/model text renders as literal text, without Slack mentions or rich-markup
 instructions. Only safe visible text is eligible; never show internal reasoning,
 raw SDK errors, credential files or unrelated history.
 
-Reporting is best effort and bounded. Gateway shutdown, cancellation, access
-revocation or opting out stops further updates. Slack failures do not rerun
-the captain, maintenance tools or a completed summary. Activity messages have
-no separate delivery-retry queue; a crash or disconnect can leave the last
-status visible. The gateway follows at most eight active reports. Collection
-follows the request lifetime, not a separate five-minute timer. Completion
-starts a bounded 30-second finalization period. Request cancellation stops
-collection; cleanup uses a separate bounded signal so a visible box can show
-its terminal status. Read or finalization failures change an existing box to
-**Report unavailable**; they do not create an empty activity box.
+Reporting is best effort and bounded. Stop, access revocation and opt-out cancel
+collection. Timeout and backend failure finish it. Shutdown detaches the loop
+and preserves the durable capture. Slack failures never rerun tools or a model.
+The gateway persists `{ts, capture, revision, done}` with the accepted job.
+Restart and transcript settlement refresh the newest saved box through read,
+not a new capture. Terminal boxes can show later facts without another summary.
+Eight live captures and 32 post-response loops have separate limits. After the
+reply, polling runs about every 15 seconds with a ten-minute collection ceiling
+and one extra poll interval for the terminal read. Saved completed/stopped
+captures use passive reads that cannot admit a reporter. Missing
+or expired captures stop retries. There is no second delivery queue.
 No exactly-once delivery is claimed.
 
 Active reads renew a 90-second capture lease. Abandoned captures expire lazily;
-the reporting protocol allows up to 60 seconds for linked tasks after finish,
-but the gateway's 30-second finalization limit can end the report sooner.
+the reporting protocol allows ten minutes for linked tasks after finish.
 Capture cleanup runs on reporting operations after a one-day receipt window.
 Sanitized report conversations remain in private Pi storage for deliberate
 operator cleanup; they are not a public transcript archive.
+
+Each capture owns a journal sequence range. A newer request closes the earlier
+range. `greybeard:` late facts then belong to the newest box in that exact
+captain thread, with the actual member and task attribution. Earlier journal
+history remains available. Report tasks do not enter their own source journal.
+Ship the gateway and plugin together: `note` is now a valid entry kind and
+task-free entries omit `taskID`. `summaryCurrent` identifies a current model
+summary; status/error explanations never suppress the factual view.
+Existing legacy activity tables are preserved;
+ordinary one-day capture cleanup still removes their old capture data.

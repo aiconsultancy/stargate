@@ -364,7 +364,7 @@ export class OpenCodeBackend implements AgentBackend {
   async startActivity(
     sessionID: string,
     requestID: string,
-    reporter: string,
+    reporter: string | undefined,
     signal: AbortSignal,
   ): Promise<ActivityWatch> {
     const rpc = this.client.rpc(CrewReporting);
@@ -373,17 +373,36 @@ export class OpenCodeBackend implements AgentBackend {
       signal,
     });
     const capture = activitySnapshotSchema.parse(
-      await rpc.start({ sessionID, requestID, reporter }, options(signal)),
+      await rpc.start(
+        { sessionID, requestID, ...(reporter ? { reporter } : {}) },
+        options(signal),
+      ),
     );
-    const owner = { sessionID, id: capture.id };
+    return this.resumeActivity(sessionID, capture.id);
+  }
+
+  resumeActivity(sessionID: string, capture: string): ActivityWatch {
+    const rpc = this.client.rpc(CrewReporting);
+    const options = (signal: AbortSignal) => ({
+      location: { directory: this.config.directory },
+      signal,
+    });
+    const owner = { sessionID, id: capture };
     const snapshot = async (request: Promise<unknown>) => {
       const value = activitySnapshotSchema.parse(await request);
-      if (value.id !== capture.id)
+      if (value.id !== capture)
         throw new Error("Crew activity capture changed");
       return value;
     };
     return {
-      read: (signal) => snapshot(rpc.read(owner, options(signal))),
+      id: capture,
+      read: (signal, passive) =>
+        snapshot(
+          rpc.read(
+            { ...owner, ...(passive ? { passive } : {}) },
+            options(signal),
+          ),
+        ),
       finish: (signal) => snapshot(rpc.finish(owner, options(signal))),
       cancel: async (signal) => {
         await rpc.cancel(owner, options(signal));

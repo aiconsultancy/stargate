@@ -55,7 +55,7 @@ interface AgentBackend {
   startActivity?(
     sessionId: string,
     requestID: string,
-    reporter: string,
+    reporter: string | undefined,
     signal: AbortSignal,
   ): Promise<ActivityWatch>;
   close(): Promise<void>;
@@ -90,11 +90,15 @@ client's shared event stream. Pi Durable and existing modules omit them and
 keep the prompt-only contract. See [session transcript](#session-transcript).
 
 `startActivity` is an optional, request-scoped reporting capability. Its
-`ActivityWatch` reads bounded visible task activity and can finish or cancel
+`ActivityWatch` reads bounded visible journal facts and can finish or cancel
 the capture. OpenCode implements it through the location-scoped Pogo reporting
 RPC. Other adapters remain compatible without it. The gateway manages report
 delivery separately from answer delivery, with its own deadline and access
 rechecks. See [crew activity](crew-activity.md) and [`activity.ts`](../src/activity.ts).
+`resumeActivity` reopens a saved capture through read/finish/cancel, not start.
+The gateway persists its Slack timestamp, capture ID, revision and done flag
+in `jobs.activity`. Post-response loops have a separate bound and survive
+restart without rerunning tools or final model summaries.
 
 `crewStatus` is an optional read-only adapter capability for `/pogo crew`.
 OpenCode implements it through the authenticated captain-location reporting

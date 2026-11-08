@@ -119,6 +119,7 @@ export class Gateway {
         isAllowedUser(config, job.user) &&
         isAllowedChannel(config, job.channel),
       log,
+      { store },
     );
   }
 
@@ -178,6 +179,11 @@ export class Gateway {
     this.store.recover(this.key);
     // Restart catch-up for every mapping; unbaselined ones seed at current history.
     if (this.backend.transcript) this.settle();
+    for (const conversation of this.store.transcripts(this.key)) {
+      const job = this.store.latestActivity(this.key, conversation);
+      const session = this.store.session(conversation);
+      if (job && session) await this.activity.resume(job, session, signal);
+    }
     const watching = this.backend.transcript
       ? this.backend.watch?.((session) => this.settle(session), signal)
       : undefined;
@@ -290,6 +296,9 @@ export class Gateway {
       shutdown,
       AbortSignal.timeout(catchUpReadMs),
     ]);
+    const activityJob = this.store.latestActivity(this.key, conversation);
+    if (activityJob)
+      await this.activity.resume(activityJob, target.session, shutdown);
     const read = await this.backend.transcript(
       target.session,
       target.cursor,
@@ -533,7 +542,8 @@ export class Gateway {
                   : chunks(answer);
           if (transcript) keep = deferred ? 0 : output.length;
         } catch (error) {
-          activity?.cancel();
+          if (cancellation.signal.aborted) activity?.cancel();
+          else if (!shutdown.aborted) activity?.finish();
           this.log.warn({ job: job.id }, "Agent request failed or timed out");
           failure = cancellation.signal.aborted
             ? "cancelled"

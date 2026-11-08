@@ -25,7 +25,19 @@ function plain(text: string, max = 3000) {
 /** Crew/model text is always literal, never Slack markup or notification syntax. */
 export function activityContent(view: ActivityView) {
   const status = statuses[view.status];
-  const summary = bounded(view.summary.trim() || `${status}.`, 3000);
+  const facts = view.entries
+    .slice(-5)
+    .map(
+      (entry) =>
+        `${entry.member}${entry.taskID ? ` (${entry.taskID})` : ""}: ${bounded(entry.text.replace(/\s+/g, " "), 350)}`,
+    )
+    .join("\n");
+  const summary = bounded(
+    view.summaryCurrent && view.summary
+      ? view.summary
+      : [facts, view.summary || `${status}.`].filter(Boolean).join("\n\n"),
+    3000,
+  );
   const details =
     view.detail === "detailed"
       ? view.entries

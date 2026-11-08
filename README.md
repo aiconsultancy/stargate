@@ -18,6 +18,11 @@ For trusted project work, use the [OpenCode captain/crew profile](docs/agents/de
 Without `--team`, Bowser coordinates the four-member starter crew through
 CLIProxyAPI and Mesij. `pogo crew init --team team.example.json` selects a
 configured captain and variable roster; the portable example uses Galactica.
+Native definition IDs and filenames use `<ship>-<role>-<name>`; `--id`
+selects the ship namespace. Pogo member addresses stay short within that ship.
+Captain and crew reference one captain-maintained
+`WAYS_OF_WORKING.md` by path, not repeated content injection. See
+[crew coordination](docs/crew-coordination.md) for journal, mail and DM tools.
 Its optional Bosun worker handles [ship maintenance](docs/ship-maintenance.md),
 with captain/crew journals, shared lessons and explicit nightly scheduling.
 Each team needs separate namespace, state, captain and crew directories, but
@@ -78,10 +83,13 @@ Delivery retries do not repeat agent work. Check agent state before retrying
 work whose outcome is uncertain.
 
 Opt into a separate collapsible crew activity message with
-`crewActivity: { "detail": "summary", "reporter": "twiki" }` on the bot.
+`crewActivity: { "detail": "summary" }` on the bot.
 `detailed` also shows attributed assignments, messages and results; `off` is
-the default. Twiki shares its maintenance queue and prepares the report without
-blocking the captain's answer. Empty captures and the reporter's own maintenance
+the default. Both modes show journal facts without a model call per refresh.
+An optional configured Pi reporter prepares one final tools-off summary only
+when its slot is free. Busy reporters are skipped, not queued. Set its
+short Pogo member ID in `reporter`; there is no built-in Twiki default.
+Empty captures and the reporter's own maintenance
 do not create an activity message or summary request. See [crew activity](docs/crew-activity.md) for
 setup, privacy, and delivery limits.
 

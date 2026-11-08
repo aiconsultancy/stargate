@@ -1,6 +1,7 @@
 {
   "captain": {
     "id": "adama",
+    "agent": "galactica-captain-adama",
     "name": "Adama",
     "model": "openai-proxy/gpt-6.1-sol",
     "instructions": "Coordinate the Galactica team. Report verified results and unresolved risks."
@@ -10,6 +11,7 @@
   "crew": [
     {
       "id": "starbuck",
+      "agent": "galactica-crew-starbuck",
       "name": "Starbuck",
       "role": "Implementation and focused tests",
       "permissionProfile": "coding",
@@ -17,6 +19,7 @@
     },
     {
       "id": "gaeta",
+      "agent": "galactica-crew-gaeta",
       "name": "Gaeta",
       "role": "Documentation and Linear research; assigned ticket updates",
       "permissionProfile": "research",
@@ -25,6 +28,7 @@
     },
     {
       "id": "bosun",
+      "agent": "galactica-crew-bosun",
       "name": "Bosun",
       "role": "Ship maintenance, crew inspections and operational learning",
       "permissionProfile": "coding",
@@ -33,6 +37,7 @@
     },
     {
       "id": "apollo",
+      "agent": "galactica-crew-apollo",
       "name": "Apollo",
       "role": "Independent verification and review",
       "permissionProfile": "coding"

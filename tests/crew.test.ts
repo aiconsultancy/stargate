@@ -2,7 +2,10 @@ import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, stat, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { SessionCreateInput } from "@opencode/client";
+import type {
+  SessionCreateInput,
+  SessionSyntheticInput,
+} from "@opencode/client";
 import {
   type CrewAgents,
   CrewEngine,
@@ -12,9 +15,436 @@ import {
 } from "../src/crew/engine";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import plugin from "../src/crew/plugin";
-import { defaultTeam, type Team } from "../src/crew/team";
+import {
+  defaultTeam,
+  profileTeam,
+  type Team,
+  teamSchema,
+} from "../src/crew/team";
 import { CrewWaiting } from "../src/crew/waiting";
 import { waitingSettingsPath } from "../src/waiting";
+
+test("host-bound journal notes work without a task and isolate captain roots", async () => {
+  const f = await fixture();
+  try {
+    const caller = { ...f.captain(), id: "journal-call" };
+    const first = await f.engine.journal(
+      { op: "append", text: "Checks passed" },
+      caller,
+    );
+    expect(
+      await f.engine.journal({ op: "append", text: "Checks passed" }, caller),
+    ).toEqual(first);
+    const page = await f.engine.journal({ op: "read" }, f.captain());
+    expect(page.entries).toHaveLength(1);
+    expect(
+      (await f.engine.journal({ op: "read" }, f.captain("ses_captain_b")))
+        .entries,
+    ).toEqual([]);
+    expect(first.entry).toMatchObject({
+      member: "bowser",
+      taskID: null,
+      kind: "note",
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test("idle mail, aliases, correlated captain reply and broadcast share one inbox", async () => {
+  const f = await fixture();
+  try {
+    const peer = (
+      await f.engine.run({ op: "ensure", crew: "mario" }, f.captain())
+    ).peers?.[0];
+    if (!peer) throw new Error("Missing peer");
+    const sent = await f.engine.mail(
+      { op: "send", to: "mario", text: "Question" },
+      f.captain(),
+    );
+    expect(sent).toMatchObject({ stored: true, notification: "not_requested" });
+    expect(f.synthetics).toEqual([]);
+    expect(
+      (await f.engine.mail({ op: "inbox" }, f.worker(peer.sessionID)))
+        .messages?.[0]?.text,
+    ).toBe("Question");
+    const replyTo = "id" in sent ? sent.id : undefined;
+    const reply = await f.engine.dm(
+      { op: "send", to: "bowser", text: "Answer", replyTo },
+      f.worker(peer.sessionID),
+    );
+    expect(reply).toMatchObject({ stored: true, notification: "accepted" });
+    expect(f.synthetics.at(-1)).toMatchObject({
+      sessionID: "ses_captain_a",
+      resume: true,
+    });
+    expect(
+      (await f.engine.mail({ op: "inbox" }, f.captain())).messages?.[0]?.text,
+    ).toBe("Answer");
+    expect(
+      (await f.engine.mail({ op: "inbox" }, f.captain("ses_captain_b")))
+        .messages,
+    ).toEqual([]);
+    await expect(
+      f.engine.dm(
+        { op: "send", to: "captain", text: "Spoof", replyTo },
+        f.captain("ses_captain_b"),
+      ),
+    ).rejects.toThrow("addressed");
+    const broadcast = await f.engine.mail(
+      { op: "send", to: "all", text: "FYI" },
+      f.captain(),
+    );
+    expect(broadcast).toMatchObject({
+      receipts: defaultTeam.crew.map(({ id }) => ({ to: id, stored: true })),
+    });
+    expect(f.creations).toHaveLength(1);
+    expect(
+      (await f.engine.run({ op: "roster" }, f.captain())).members?.[0],
+    ).toMatchObject({ id: "bowser", aliases: ["captain"], mail: true });
+  } finally {
+    await f.close();
+  }
+});
+
+test("DM stored first, busy steer never resumes, native failure preserves task state", async () => {
+  const f = await fixture();
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Work" },
+        f.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    const caller = f.captain();
+    const receipt = await f.engine.dm(
+      { op: "send", to: "mario", text: "Check interface" },
+      caller,
+    );
+    expect(receipt).toMatchObject({ notification: "accepted", stored: true });
+    expect(f.synthetics[0]).toMatchObject({
+      resume: false,
+      delivery: "steer",
+      metadata: { pogoCrew: { taskID: task.id } },
+    });
+    expect(f.synthetics[0]?.id).toBe(
+      `msg_${"id" in receipt ? receipt.id : ""}`,
+    );
+    expect(f.synthetics[0]?.text).toContain(
+      `final answer remains task ${task.id}'s result`,
+    );
+    await f.engine.dm(
+      { op: "send", to: "mario", text: "Check interface" },
+      caller,
+    );
+    expect(f.synthetics[1]?.id).toBe(f.synthetics[0]?.id);
+    expect(f.messages).toHaveLength(1);
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "mario", text: "Later", delivery: "queue" },
+        f.captain(),
+      ),
+    ).toMatchObject({ notification: "unsupported", stored: true });
+    f.client.synthetic = async () => {
+      throw new Error("raw secret");
+    };
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "mario", text: "Another" },
+        f.captain(),
+      ),
+    ).toMatchObject({ notification: "uncertain", stored: true });
+    expect(f.engine.state.task(task.id)).toMatchObject({
+      status: "running",
+      notifying: 0,
+    });
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "mario", text: "Other captain" },
+        f.captain("ses_captain_b"),
+      ),
+    ).toMatchObject({ notification: "deferred", stored: true });
+    await f.engine.run(
+      { op: "complete", taskID: task.id, result: "Done" },
+      f.worker(task.workerSessionID),
+    );
+    f.busy.delete(task.workerSessionID);
+    f.client.synthetic = async (input) => {
+      f.synthetics.push(input);
+    };
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "mario", text: "Free wake", delivery: "queue" },
+        f.captain(),
+      ),
+    ).toMatchObject({ notification: "accepted" });
+    expect(f.synthetics.at(-1)).toMatchObject({
+      resume: true,
+      delivery: "queue",
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test("namespaced native definitions keep short crew, mail, journal and task identities", async () => {
+  const f = await fixture(profileTeam(defaultTeam, "galactica"));
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Work" },
+        f.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    expect(f.creations[0]?.agent).toBe("galactica-crew-mario");
+    expect(task.crewID).toBe("mario");
+    const worker = f.worker(task.workerSessionID);
+    expect(worker.agent).toBe("galactica-crew-mario");
+    expect(
+      (await f.engine.journal({ op: "append", text: "Verified" }, worker)).entry
+        ?.member,
+    ).toBe("mario");
+    const dm = await f.engine.dm(
+      { op: "send", to: "captain", text: "Question" },
+      worker,
+    );
+    expect(dm).toMatchObject({ to: "bowser", notification: "accepted" });
+    await f.engine.dm({ op: "send", to: "bowser", text: "Question" }, worker);
+    expect(f.engine.state.notices(task.id, 0)).toHaveLength(1);
+    expect(
+      (await f.engine.run({ op: "roster" }, worker)).members?.map(
+        ({ id }) => id,
+      ),
+    ).toEqual(["bowser", "mario", "luigi", "daisy", "toad"]);
+    await expect(
+      f.engine.run(
+        { op: "status", taskID: task.id },
+        { ...worker, agent: "galactica-crew-luigi" },
+      ),
+    ).rejects.toThrow("assigned worker");
+    await f.engine.run(
+      { op: "complete", taskID: task.id, result: "Done" },
+      worker,
+    );
+    expect(
+      (await f.engine.run({ op: "status", taskID: task.id }, f.captain())).task
+        ?.result,
+    ).toBe("Done");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a correlated reply routes exactly but cannot steer another captain's work", async () => {
+  const f = await fixture();
+  try {
+    const mario = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "A work" },
+        f.captain(),
+      )
+    ).task;
+    const luigi = (
+      await f.engine.run(
+        { op: "dispatch", crew: "luigi", text: "A peer" },
+        f.captain(),
+      )
+    ).task;
+    if (!mario || !luigi) throw new Error("Missing tasks");
+    const incoming = await f.engine.mail(
+      { op: "send", to: "mario", text: "Question" },
+      f.worker(luigi.workerSessionID, "luigi"),
+    );
+    const replyTo = "id" in incoming ? incoming.id : undefined;
+    await f.engine.run(
+      { op: "complete", taskID: mario.id, result: "A done" },
+      f.worker(mario.workerSessionID),
+    );
+    f.busy.delete(mario.workerSessionID);
+    await f.engine.run(
+      { op: "dispatch", crew: "mario", text: "B work" },
+      f.captain("ses_captain_b"),
+    );
+    const reply = await f.engine.dm(
+      { op: "send", to: "luigi", text: "Late answer", replyTo },
+      f.worker(mario.workerSessionID),
+    );
+    expect(reply).toMatchObject({ stored: true, notification: "deferred" });
+    expect(f.synthetics).toEqual([]);
+    const inbox = await f.engine.mail(
+      { op: "inbox" },
+      f.worker(luigi.workerSessionID, "luigi"),
+    );
+    expect(inbox.messages?.[0]).toMatchObject({ text: "Late answer" });
+    expect(inbox.messages?.[0]).not.toHaveProperty("sourceTaskID");
+    await expect(
+      f.engine.mail(
+        { op: "send", to: "all", text: "Not a reply broadcast", replyTo },
+        f.worker(mario.workerSessionID),
+      ),
+    ).rejects.toThrow("message sender");
+  } finally {
+    await f.close();
+  }
+});
+
+test("finished worker has no stale captain context for inbox, new mail or journal", async () => {
+  const f = await fixture();
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "A work" },
+        f.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    await f.engine.run(
+      { op: "complete", taskID: task.id, result: "Done" },
+      f.worker(task.workerSessionID),
+    );
+    f.busy.delete(task.workerSessionID);
+    const incoming = await f.engine.dm(
+      { op: "send", to: "mario", text: "B question" },
+      f.captain("ses_captain_b"),
+    );
+    const worker = f.worker(task.workerSessionID);
+    await expect(
+      f.engine.dm({ op: "send", to: "captain", text: "Ambiguous" }, worker),
+    ).rejects.toThrow("captain context");
+    await expect(
+      f.engine.mail(
+        { op: "send", taskID: task.id, to: "captain", text: "Stale" },
+        worker,
+      ),
+    ).rejects.toThrow("current task");
+    expect(
+      (await f.engine.mail({ op: "inbox" }, worker)).messages?.map(
+        ({ text }) => text,
+      ),
+    ).toContain("B question");
+    const replyTo = "id" in incoming ? incoming.id : undefined;
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "captain", text: "B answer", replyTo },
+        worker,
+      ),
+    ).toMatchObject({ notification: "accepted" });
+    expect(f.synthetics.at(-1)?.sessionID).toBe("ses_captain_b");
+    expect(
+      (await f.engine.journal({ op: "append", text: "Own idle note" }, worker))
+        .entry,
+    ).toMatchObject({ captainID: "", taskID: null });
+    expect(
+      JSON.stringify(
+        f.engine.state.reporting.journal.read("ses_captain_a", 0, 100),
+      ),
+    ).not.toContain("Own idle note");
+    expect(
+      (await f.engine.journal({ op: "read" }, worker)).entries.map(
+        ({ text }) => text,
+      ),
+    ).toEqual(["Own idle note"]);
+    expect(
+      (await f.engine.mail({ op: "inbox", taskID: task.id }, f.captain()))
+        .messages,
+    ).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("notification bookkeeping failure keeps the successful durable mail receipt", async () => {
+  const f = await fixture();
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "A work" },
+        f.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    f.engine.state.beginNotify = () => {
+      throw new Error("private database details");
+    };
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "mario", text: "Stored first" },
+        f.captain(),
+      ),
+    ).toMatchObject({ stored: true, notification: "uncertain" });
+    f.engine.state.noticeOnce = () => {
+      throw new Error("private database details");
+    };
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "captain", text: "Stored peer reply" },
+        f.worker(task.workerSessionID),
+      ),
+    ).toMatchObject({ stored: true, notification: "uncertain" });
+    expect(f.messages).toHaveLength(2);
+    expect(f.synthetics).toEqual([]);
+    expect(f.engine.state.task(task.id)?.status).toBe("running");
+  } finally {
+    await f.close();
+  }
+});
+
+test("broadcast returns partial receipts and Pi tools-none stores no unreadable mail", async () => {
+  const f = await fixture(
+    teamSchema.parse({
+      ...defaultTeam,
+      crew: [
+        ...defaultTeam.crew,
+        {
+          id: "silent",
+          name: "Silent",
+          role: "No tools",
+          permissionProfile: "coding",
+          backend: { type: "pi-durable", model: "openai/test", tools: "none" },
+        },
+      ],
+    }),
+  );
+  try {
+    const register = f.mailer.register;
+    f.mailer.register = async () => {
+      throw new Error("Unsupported mail must not touch Mesij");
+    };
+    expect(
+      await f.engine.mail(
+        { op: "send", to: "silent", text: "Unreadable" },
+        f.captain(),
+      ),
+    ).toMatchObject({ stored: false, notification: "unsupported" });
+    f.mailer.register = register;
+    const send = f.mailer.send;
+    f.mailer.send = async (input, signal) => {
+      if (input.to === f.engine.state.peer("luigi")?.sessionID)
+        throw new Error("private transport failure");
+      return send(input, signal);
+    };
+    const result = await f.engine.mail(
+      { op: "send", to: "all", text: "Notice" },
+      f.captain(),
+    );
+    expect(result).toMatchObject({
+      receipts: [
+        { to: "mario", stored: true },
+        { to: "luigi", stored: "uncertain" },
+        { to: "daisy", stored: true },
+        { to: "toad", stored: true },
+        { to: "silent", stored: false, notification: "unsupported" },
+      ],
+    });
+    expect(f.engine.state.peer("silent")).toBeNull();
+    expect(f.messages).toHaveLength(3);
+    expect(JSON.stringify(result)).not.toContain("private transport failure");
+  } finally {
+    await f.close();
+  }
+});
 
 async function fixture(team?: Team) {
   const definition = team ?? defaultTeam;
@@ -34,13 +464,18 @@ async function fixture(team?: Team) {
   for (const id of ["ses_captain_a", "ses_captain_b"]) {
     sessions.set(id, {
       id,
-      agent: definition.captain.id,
+      agent: definition.captain.agent ?? definition.captain.id,
       location: { directory: options.captainDirectory },
     });
   }
   const calls: { method: string; sessionID: string; text?: string }[] = [];
   const creations: SessionCreateInput[] = [];
   const messages: MesijMessage[] = [];
+  const sentKeys = new Map<
+    string,
+    { text: string; id: string; sequence: number }
+  >();
+  const synthetics: SessionSyntheticInput[] = [];
   let promptHook = () => {};
   let createFailure = false;
   let promptFailure = false;
@@ -98,7 +533,9 @@ async function fixture(team?: Team) {
     async compact({ sessionID }) {
       calls.push({ method: "compact", sessionID });
     },
-    async synthetic({ sessionID, text }) {
+    async synthetic(input) {
+      const { sessionID, text } = input;
+      synthetics.push(input);
       calls.push({ method: "synthetic", sessionID, text });
     },
   };
@@ -107,6 +544,12 @@ async function fixture(team?: Team) {
       return { id: "0".repeat(32), sequence: 0 };
     },
     async send(input) {
+      const previous = sentKeys.get(input.key);
+      if (previous) {
+        if (previous.text !== input.text)
+          throw new Error("Conflicting Mesij replay key");
+        return { id: previous.id, sequence: previous.sequence };
+      }
       const event = {
         id: String(messages.length + 1).padStart(32, "0"),
         sequence: messages.length + 1,
@@ -115,8 +558,10 @@ async function fixture(team?: Team) {
         to: input.to,
         type: "message.posted",
         text: input.text,
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       };
       messages.push(event);
+      sentKeys.set(input.key, event);
       return { id: event.id, sequence: event.sequence };
     },
     async inbox(input) {
@@ -136,18 +581,21 @@ async function fixture(team?: Team) {
     },
   };
   const engine = await CrewEngine.open(options, client, mailer, agents);
+  let toolCall = 0;
   const captain = (
     id = "ses_captain_a",
     signal = new AbortController().signal,
   ) => ({
     sessionID: id,
-    agent: definition.captain.id,
+    agent: definition.captain.agent ?? definition.captain.id,
     signal,
+    id: `captain-tool-call-${++toolCall}`,
   });
   const worker = (sessionID: string, agent = definition.crew[0]?.id ?? "") => ({
     sessionID,
-    agent,
+    agent: definition.crew.find(({ id }) => id === agent)?.agent ?? agent,
     signal: new AbortController().signal,
+    id: `worker-tool-call-${++toolCall}`,
   });
   return {
     options,
@@ -156,6 +604,7 @@ async function fixture(team?: Team) {
     sessions,
     calls,
     creations,
+    synthetics,
     messages,
     mailer,
     agents,
@@ -522,7 +971,7 @@ test("two teams sharing one server isolate roots, results, mail and urgency", as
     ).toEqual(["B private mail"]);
     await other.run(
       { op: "urgent", taskID: second?.id, to: "builder", text: "B only" },
-      a.worker(second?.workerSessionID ?? ""),
+      otherCaller,
     );
     expect(
       a.calls
@@ -905,14 +1354,14 @@ test("worker urgency cannot create an idle colleague's root session", async () =
       )
     ).task;
     if (!task) throw new Error("Missing task");
-    await expect(
-      f.engine.run(
+    expect(
+      await f.engine.run(
         { op: "urgent", taskID: task.id, to: "luigi", text: "Question" },
         f.worker(task.workerSessionID),
       ),
-    ).rejects.toThrow("same captain lineage");
+    ).toMatchObject({ status: "unavailable" });
     expect(f.creations).toHaveLength(1);
-    expect(f.engine.state.peer("luigi")).toBeNull();
+    expect(f.engine.state.peer("luigi")?.status).toBe("pending");
   } finally {
     await f.close();
   }
@@ -1025,13 +1474,14 @@ test("same-captain colleague urgency includes the recipient's exact task ID", as
       },
       f.worker(mario?.workerSessionID ?? ""),
     );
-    expect(f.calls.filter((call) => call.method === "synthetic")).toEqual([
-      {
-        method: "synthetic",
-        sessionID: luigi?.workerSessionID ?? "",
-        text: `Pogo urgent notice for task ${luigi?.id}; source task ${mario?.id}.\nInterface changed`,
-      },
-    ]);
+    expect(f.synthetics).toHaveLength(1);
+    expect(f.synthetics[0]).toMatchObject({
+      sessionID: luigi?.workerSessionID,
+      delivery: "steer",
+      resume: false,
+      metadata: { pogoCrew: { taskID: luigi?.id, sourceTaskID: mario?.id } },
+    });
+    expect(f.synthetics[0]?.text).toContain("Interface changed");
     await expect(
       f.engine.run(
         { op: "compact", crew: "mario" },
@@ -1310,10 +1760,13 @@ test("urgent captain mail stays durable and cross-captain colleague input is rej
       { op: "wait", taskID: mario?.id },
       f.captain(),
     );
-    expect(notice.notices?.[0]?.text).toBe("Approval needed");
-    expect(f.calls.some((call) => call.method === "synthetic")).toBe(false);
-    await expect(
-      f.engine.run(
+    expect(notice.notices?.[0]?.text).toContain("Approval needed");
+    expect(f.synthetics[0]).toMatchObject({
+      sessionID: "ses_captain_a",
+      resume: true,
+    });
+    expect(
+      await f.engine.run(
         {
           op: "urgent",
           taskID: mario?.id,
@@ -1322,7 +1775,7 @@ test("urgent captain mail stays durable and cross-captain colleague input is rej
         },
         f.worker(mario?.workerSessionID ?? ""),
       ),
-    ).rejects.toThrow("lineage");
+    ).toMatchObject({ status: "deferred" });
   } finally {
     await f.close();
   }

@@ -42,15 +42,20 @@ configuration or customized prompts. Initialization never copies runtime
 prompts, transcripts or credentials into these records. Include the ship
 directory in the team's private backup; it is not another task database.
 
-OpenCode profiles include each member's actual journal path, the shared log
-path and the project skill library. Pi workers do not load OpenCode profiles:
-the captain must include relevant paths and journal instructions in their
-bounded assignment, or configure them in the existing Pi `systemPrompt`.
+These Markdown journals are retained as history, not the new note-writing path.
+Write concise milestones, checks, blockers and outcomes with `pogo_journal`.
+Pogo supplies IDs, time, identity and task context in the existing crew SQLite
+database. Notes remain when temporary Slack activity captures expire. Skip
+routine turns, empty updates and tool transcripts. Native-workaround feedback
+is an ordinary note, not a separate tracker or automatic implementation loop.
+Coding-enabled Pi crew use the same tools; explicit tools-none stays disabled.
 
-At useful task boundaries, append one concise entry. Skip routine turns and
-empty updates. Each member owns its journal; the shared log holds reusable
-lessons and useful inspection findings. Append a whole entry in one write and
-preserve previous entries. Use this format, omitting empty headings:
+All agent definitions and Pi member instructions reference the single shared
+`<captainDirectory>/WAYS_OF_WORKING.md`. Captain maintains it; crew propose edits.
+Read it initially and reread it when updated. Do not repeatedly send its contents
+in assignments or model requests. Initialization preserves existing edits.
+The shared ship log still holds reusable lessons and useful inspection findings.
+Preserve legacy journal entries, which may use this historical format:
 
 ```markdown
 ## <timestamp with timezone> — <agent ID> — <task ID or work reference>
@@ -108,14 +113,14 @@ Example values, to adjust explicitly:
 
 ```text
 Run the configured team's nightly inspection. Dispatch one bounded task to
-bosun with the actual ship log and journal paths from your profile. Inspect
+bosun with the actual ship log path from your profile. Inspect
 configured crew status, recent relevant task results and journals, unresolved
 blockers and useful project checks. Do not interrupt busy workers or repeat
 completed external actions. Diagnose and repair recoverable issues within this
 maintenance scope; verify repairs and preserve unrelated changes. Coordinate
 Twiki's existing Pi maintenance/reporting through the captain when useful;
-include its journal path in any assignment. Record useful findings and lessons
-in the ship log and each participating member's journal; improve a project skill
+use its existing coding-enabled coordination tools. Record useful findings
+through pogo_journal and reusable lessons in the ship log; improve a project skill
 with skill-creator only when justified. Collect the assigned task result and
 report findings, checks, actions, lessons and unresolved blockers here. State
 what was not inspected. If bosun is absent, report the configuration gap rather

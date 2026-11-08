@@ -1,17 +1,19 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import { Error as ToolError } from "@opencode/plugin/promise/tool";
 import { connectHistoryAPI, historyVisible } from "./api";
 import { compactOnServer } from "./compaction";
 import { CrewEngine, crewInputSchema, mailInputSchema } from "./engine";
 import { CrewHistory, historyInputSchema } from "./history";
+import { workingAgreementContext } from "./instructions";
+import { journalInputSchema } from "./journal";
+import { dmInputSchema } from "./messaging";
 import { CrewModels, modelInputSchema } from "./models";
 import { CrewReporting } from "./report-rpc";
 import { CrewError } from "./state";
 import { CrewWaiting, waitingInputSchema } from "./waiting";
 
-// greybeard: configured shared workers, one active task each; no captain wakeups.
-// Autonomous continuations require correlated Slack delivery first.
+// greybeard: configured shared workers; only explicit DM wakes a captain.
 // Host tools and the general HTTP API are not an OS sandbox.
 export default Plugin.define({
   id: "pogo.crew",
@@ -68,6 +70,13 @@ export default Plugin.define({
       }
     };
     try {
+      await ctx.session.hook(
+        "context",
+        workingAgreementContext(
+          join(engine.options.captainDirectory, "WAYS_OF_WORKING.md"),
+          (caller) => engine.authorize(caller),
+        ),
+      );
       reportingRegistration = await ctx.rpc.register(CrewReporting, {
         status: (input, context) =>
           report(context.signal, async () => engine.status(input)),
@@ -89,6 +98,60 @@ export default Plugin.define({
           ),
       });
       await ctx.tool.transform((editor) => {
+        for (const binding of [
+          {
+            name: "pogo_journal",
+            input: journalInputSchema,
+            action: "pogo_crew",
+            description:
+              "Append concise milestones, checks, blockers, outcomes or native-workaround notes; no tool transcripts or secrets. Read scoped journal pages by ID with nextAfter. Identity, time and task come from the host.",
+            run: (
+              input: unknown,
+              caller: Parameters<CrewEngine["journal"]>[1],
+            ) => engine.journal(input, caller),
+          },
+          {
+            name: "pogo_dm",
+            input: dmInputSchema,
+            action: "pogo_mail",
+            description:
+              "Store peer mail, then request native steer or queue delivery. Captain alias resolves the originating captain, all broadcasts exclude self. Reply with replyTo; final answers are task results, not peer replies. Receipts do not prove reading or execution.",
+            run: (input: unknown, caller: Parameters<CrewEngine["dm"]>[1]) =>
+              engine.dm(input, caller),
+          },
+        ])
+          editor.add({
+            name: binding.name,
+            description: binding.description,
+            input: binding.input,
+            options: { codemode: false, permission: binding.action },
+            async execute(input, context) {
+              await ctx.permission.assert({
+                sessionID: context.sessionID,
+                agent: context.agent,
+                source: {
+                  type: "tool",
+                  messageID: context.messageID,
+                  id: context.id,
+                },
+                action: binding.action,
+                resources: [input.op],
+                save: [input.op],
+              });
+              try {
+                return {
+                  content: JSON.stringify(await binding.run(input, context)),
+                };
+              } catch (error) {
+                throw new ToolError({
+                  message:
+                    error instanceof CrewError
+                      ? error.message
+                      : "Coordination operation unconfirmed; raw details withheld.",
+                });
+              }
+            },
+          });
         editor.add({
           name: "pogo_waiting",
           description:
@@ -124,7 +187,7 @@ export default Plugin.define({
         });
         editor.add({
           name: "pogo_crew",
-          description: `Manage ${engine.options.team.captain.id}'s configured persistent crew: ${engine.options.team.crew.map(({ id }) => id).join(", ")}. Captain may ensure, dispatch, wait, status and compact. Successful final answers auto-complete OpenCode tasks when status, wait or dispatch checks the slot; explicit worker complete is also supported. Recovery returns diagnostics for interrupted work and never replays assignments. Pi workers auto-complete with their final answer; compaction, mail, model controls and urgency are OpenCode-only. Busy dispatch queues only with queue=true. Never auto-wake captains.`,
+          description: `Read roster or manage ${engine.options.team.captain.id}'s configured crew. Captain may ensure, dispatch, wait, status and compact. Successful final answers auto-complete OpenCode tasks when status, wait or dispatch checks the slot; explicit worker complete is supported. Recovery never replays assignments. Pi workers auto-complete; compaction and model controls remain OpenCode-only. Busy dispatch queues only with queue=true. Only explicit pogo_dm wakes captains.`,
           input: crewInputSchema,
           options: { codemode: false, permission: "pogo_crew" },
           async execute(input, context) {
@@ -244,7 +307,7 @@ export default Plugin.define({
         editor.add({
           name: "pogo_mail",
           description:
-            "Send or read Mesij mail for an owned task. Recipients are fixed crew slots or that task's captain. Never wakes agents. Inbox filters sent messages and unrelated task mail; pass nextAfter as after to acknowledge a page.",
+            "Store/read asynchronous Mesij mail. Optional taskID/key preserve legacy callers; host tool-call ID supplies the default retry key. captain is the configured captain alias, all excludes self. Mail never wakes recipients; use pogo_dm for explicit notification. Pass replyTo for exact replies and nextAfter as after to acknowledge inbox pages.",
           input: mailInputSchema,
           options: { codemode: false, permission: "pogo_mail" },
           async execute(input, context) {

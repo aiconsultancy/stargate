@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { connectHistoryAPI, historyVisible } from "../src/crew/api";
-import { defaultTeam } from "../src/crew/team";
+import { defaultTeam, profileTeam } from "../src/crew/team";
 
 test("history scope excludes other teams and requires explicit project access", () => {
   const options = {
@@ -53,6 +53,24 @@ test("history scope excludes other teams and requires explicit project access", 
     metadata: { pogoCrew: { namespace: "one", crewID: "mario" } },
   };
   expect(historyVisible(options, peer, worker)).toBe(true);
+  const mapped = { ...options, team: profileTeam(defaultTeam, "ship") };
+  expect(historyVisible(mapped, null, session)).toBe(true);
+  expect(
+    historyVisible(mapped, null, { ...session, agent: "ship-captain-bowser" }),
+  ).toBe(true);
+  expect(historyVisible(mapped, peer, worker)).toBe(true);
+  expect(
+    historyVisible(mapped, peer, { ...worker, agent: "ship-crew-mario" }),
+  ).toBe(true);
+  expect(historyVisible(mapped, peer, { ...worker, id: "foreign" })).toBe(
+    false,
+  );
+  expect(
+    historyVisible(mapped, peer, {
+      ...worker,
+      metadata: { pogoCrew: { namespace: "other", crewID: "mario" } },
+    }),
+  ).toBe(false);
   expect(historyVisible(options, peer, { ...worker, agent: "bowser" })).toBe(
     false,
   );

@@ -25,6 +25,11 @@ import type {
 import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { MesijClient } from "./mesij";
+import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
+
+export { mailInputSchema } from "./messaging";
+
+import { journalInputSchema } from "./journal";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
 import { CrewReporter, redactActivity } from "./reporting";
@@ -95,6 +100,7 @@ export type CrewOptions = z.infer<typeof crewOptionsSchema>;
 const taskID = z.string().startsWith("task_").max(100);
 const text = z.string().min(1).max(64000);
 export const crewInputSchema = z.discriminatedUnion("op", [
+  z.strictObject({ op: z.literal("roster") }),
   z.strictObject({ op: z.literal("ensure"), crew: agentIDSchema.optional() }),
   z.strictObject({
     op: z.literal("dispatch"),
@@ -118,18 +124,7 @@ export const crewInputSchema = z.discriminatedUnion("op", [
   }),
 ]);
 export type CrewInput = z.infer<typeof crewInputSchema>;
-export const mailInputSchema = z.discriminatedUnion("op", [
-  z.strictObject({
-    op: z.literal("send"),
-    taskID,
-    to: agentIDSchema,
-    text,
-    key: z.string().min(1).max(100),
-    replyTo: z
-      .string()
-      .regex(/^[a-f0-9]{32}$/)
-      .optional(),
-  }),
+const legacyMailInputSchema = z.discriminatedUnion("op", [
   z.strictObject({
     op: z.literal("inbox"),
     taskID,
@@ -150,6 +145,8 @@ export type CrewCaller = {
   sessionID: string;
   agent: string;
   signal: AbortSignal;
+  id?: string;
+  [piIdentity]?: true;
 };
 export type CrewSession = Pick<
   SessionInfo,
@@ -201,6 +198,7 @@ export type CrewResult = {
   peers?: Peer[];
   task?: CrewTask;
   notices?: CrewNotice[];
+  members?: ReturnType<CrewEngine["roster"]>;
 };
 
 function notFound(error: unknown): boolean {
@@ -232,6 +230,7 @@ async function physicalDirectory(path: string): Promise<string> {
 // Locations share the same worker slots. Join an in-flight report admission
 // rather than racing Pi's durable conversation-creation reservation.
 const reportAdmissions = new Map<string, Promise<void>>();
+const piIdentity = Symbol("host-bound Pi caller");
 
 export class CrewEngine {
   private readonly pi: PiCrewWorkers;
@@ -246,7 +245,44 @@ export class CrewEngine {
     piFactory?: PiWorkerFactory,
     private readonly connectResults?: ResultConnector,
   ) {
-    this.pi = new PiCrewWorkers(state, options.stateDirectory, piFactory);
+    this.pi = new PiCrewWorkers(
+      state,
+      options.stateDirectory,
+      piFactory,
+      undefined,
+      (member) => {
+        const authorize = (conversationID: string) => {
+          const peer = state.peer(member.id);
+          if (
+            !peer ||
+            member.backend?.tools !== "coding" ||
+            state.piPeer(peer.sessionID)?.conversationID !== conversationID
+          )
+            throw new CrewError(
+              "Pi tools require this member's saved conversation.",
+            );
+          return peer;
+        };
+        return {
+          authorize,
+          run: async (name, input, conversationID, id, signal) => {
+            const peer = authorize(conversationID);
+            const caller: CrewCaller = {
+              sessionID: peer.sessionID,
+              agent: member.id,
+              id,
+              signal,
+              [piIdentity]: true,
+            };
+            if (name === "pogo_journal") return this.journal(input, caller);
+            if (name === "pogo_mail") return this.mail(input, caller);
+            if (name === "pogo_dm") return this.dm(input, caller);
+            return this.run(input, caller);
+          },
+        };
+      },
+      options.captainDirectory,
+    );
     state.reporting.configureNames([
       options.team.captain,
       ...options.team.crew,
@@ -390,8 +426,235 @@ export class CrewEngine {
     return `pogo:${namespace}:${role}`;
   }
 
+  mailActor(sessionID: string) {
+    return this.actor(sessionID);
+  }
+
+  mailTask(
+    caller: CrewCaller,
+    id?: string,
+    historical = false,
+  ): CrewTask | null {
+    const task = id
+      ? caller.agent === this.options.team.captain.id
+        ? this.ownedCaptainTask(id, caller)
+        : this.ownedWorkerTask(id, caller)
+      : this.state.activeTask(caller.agent);
+    if (task && ["dispatching", "running", "cancelling"].includes(task.status))
+      return task;
+    if (id && historical) return task;
+    if (id)
+      throw new CrewError(
+        "Mail send requires a current task or a validated reply; this task is no longer current.",
+      );
+    return null;
+  }
+
   async mail(raw: unknown, caller: CrewCaller) {
-    const parsed = mailInputSchema.safeParse(raw);
+    caller = this.logicalCaller(caller);
+    const input = mailInputSchema.safeParse(raw);
+    if (!input.success) throw new CrewError("Invalid pogo_mail input.");
+    const result = await this.message(raw, caller, false);
+    if (input.data.op !== "inbox" || !input.data.taskID) return result;
+    // Keep pre-upgrade task envelopes readable without rewriting Mesij history.
+    const legacy = await this.legacyMail(input.data, caller);
+    if (!("messages" in result) || !("messages" in legacy)) return result;
+    const messages = [
+      ...(result.messages ?? []),
+      ...legacy.messages.filter(
+        (message) =>
+          !(result.messages ?? []).some((current) => current.id === message.id),
+      ),
+    ].sort((a, b) => a.sequence - b.sequence);
+    return {
+      ...result,
+      messages,
+      nextAfter: Math.max(
+        "nextAfter" in result ? (result.nextAfter ?? 0) : 0,
+        legacy.nextAfter ?? 0,
+      ),
+    };
+  }
+
+  async dm(raw: unknown, caller: CrewCaller) {
+    return this.message(raw, this.logicalCaller(caller), true);
+  }
+
+  private async message(raw: unknown, caller: CrewCaller, direct: boolean) {
+    try {
+      return await new CrewMessaging(this, this.mailer).run(
+        raw,
+        caller,
+        direct,
+      );
+    } catch (error) {
+      if (error instanceof CrewError) throw error;
+      throw new CrewError(
+        "Mail admission unconfirmed. Retry only the same key; raw details withheld.",
+      );
+    }
+  }
+
+  async notifyMail(
+    route: MailRoute,
+    caller: CrewCaller,
+    text: string,
+    delivery: "steer" | "queue",
+  ): Promise<string> {
+    const peer = this.state.peerBySession(route.recipient);
+    const task = peer ? this.state.activeTask(peer.crewID) : null;
+    if (peer?.status !== "ready" && peer) return "unavailable";
+    if (
+      peer &&
+      (this.state.controlled(peer.crewID) ||
+        this.state.hasQueued(peer.crewID) ||
+        (task &&
+          ((task.status !== "completed" &&
+            task.originCaptainID !== route.captainID) ||
+            !["running", "dispatching", "completed"].includes(task.status) ||
+            task.notifying)))
+    )
+      return "deferred";
+    const busy =
+      task && ["running", "dispatching"].includes(task.status) ? task : null;
+    const senderCaptainID =
+      caller.agent === this.options.team.captain.id
+        ? caller.sessionID
+        : this.mailTask(caller)?.originCaptainID;
+    if (busy && senderCaptainID !== route.captainID) return "deferred";
+    if (busy && delivery === "queue" && !this.member(busy.crewID).backend)
+      return "unsupported";
+    const framing = `Pogo DM ${route.id} from ${caller.agent}.\n${text}\n\nReply through pogo_mail or pogo_dm with replyTo=${route.id}; a final answer is not a peer reply.${busy ? ` Your final answer remains task ${busy.id}'s result; restate it if you had already finished.` : ""}`;
+    if (!peer && route.sourceTaskID) {
+      const source = this.state.task(route.sourceTaskID);
+      if (source?.originCaptainID === route.recipient)
+        this.state.noticeOnce(route.id, source.id, framing);
+    }
+    if (busy && !this.state.beginNotify(busy.id)) return "deferred";
+    let control: string | undefined;
+    try {
+      if (peer && !busy) {
+        control = this.state.reserveControl(peer.crewID);
+        if (!(await this.idle(peer, caller.signal))) return "deferred";
+      }
+      if (peer && this.member(peer.crewID).backend) {
+        return await this.pi.notify(
+          this.member(peer.crewID),
+          this.options.worktrees[peer.crewID] ?? "",
+          peer,
+          route.id,
+          framing,
+          delivery,
+          caller.signal,
+        );
+      }
+      if (peer)
+        this.validPeer(
+          await this.sessions.get(
+            { sessionID: peer.sessionID },
+            { signal: caller.signal },
+          ),
+          peer,
+        );
+      await this.sessions.synthetic(
+        {
+          sessionID: route.recipient,
+          id: `msg_${route.id}`,
+          text: framing,
+          description: "Crew direct message",
+          metadata: {
+            pogoCrew: {
+              ...(busy ? { taskID: busy.id } : {}),
+              ...(route.sourceTaskID
+                ? { sourceTaskID: route.sourceTaskID }
+                : {}),
+              originCaptainID: route.captainID,
+              messageID: route.id,
+            },
+          },
+          delivery,
+          resume: !busy,
+        },
+        { signal: caller.signal },
+      );
+      return "accepted";
+    } catch {
+      return "uncertain";
+    } finally {
+      if (busy) this.state.endNotify(busy.id);
+      if (peer && control) this.state.releaseControl(peer.crewID, control);
+    }
+  }
+
+  roster() {
+    return [this.options.team.captain, ...this.options.team.crew].map(
+      (member) => {
+        const worker = this.options.team.crew.find(
+          ({ id }) => id === member.id,
+        );
+        const supported = !worker?.backend || worker.backend.tools === "coding";
+        return {
+          id: member.id,
+          name: member.name ?? member.id,
+          role: worker?.role ?? "Captain and coordinator",
+          aliases: worker ? [] : ["captain"],
+          backend: worker?.backend ? "pi-durable" : "opencode",
+          mail: supported,
+          dm: supported ? ["steer", "queue"] : [],
+          busyQueue: !!worker?.backend && supported,
+        };
+      },
+    );
+  }
+
+  logicalCaller(caller: CrewCaller): CrewCaller {
+    const captain = this.options.team.captain;
+    if (caller.agent === (captain.agent ?? captain.id))
+      return { ...caller, agent: captain.id };
+    const member = this.options.team.crew.find(
+      (member) => caller.agent === (member.agent ?? member.id),
+    );
+    return member ? { ...caller, agent: member.id } : caller;
+  }
+
+  async journal(raw: unknown, caller: CrewCaller) {
+    caller = this.logicalCaller(caller);
+    const input = journalInputSchema.safeParse(raw);
+    if (!input.success) throw new CrewError("Invalid pogo_journal input.");
+    await this.authorize(caller);
+    const task = this.mailTask(caller);
+    const captainID =
+      caller.agent === this.options.team.captain.id
+        ? caller.sessionID
+        : (task?.originCaptainID ?? "");
+    const store = this.state.reporting.journal;
+    if (input.data.op === "read")
+      return {
+        ...store.read(
+          captainID,
+          input.data.after,
+          input.data.limit,
+          captainID ? input.data.member : caller.agent,
+        ),
+        entry: undefined,
+      };
+    if (!caller.id)
+      throw new CrewError("Journal append requires a host tool-call identity.");
+    const entry = store.append(
+      {
+        member: caller.agent,
+        captainID,
+        taskID: task?.id ?? null,
+        kind: "note",
+        text: input.data.text,
+      },
+      `${caller.sessionID}:${caller.id}`,
+    );
+    return { entry, entries: [entry], nextAfter: entry.id, truncated: false };
+  }
+
+  private async legacyMail(raw: unknown, caller: CrewCaller) {
+    const parsed = legacyMailInputSchema.safeParse(raw);
     if (!parsed.success)
       throw new CrewError(
         "Invalid pogo_mail input. Supply a task ID and the operation's declared fields.",
@@ -399,12 +662,6 @@ export class CrewEngine {
     const input = parsed.data;
     try {
       await this.authorize(caller);
-      if (input.op === "send" && input.to !== "captain") {
-        if (this.member(input.to).backend)
-          throw new CrewError(
-            "Pi workers receive dispatch assignments, not Mesij mail.",
-          );
-      }
       let source: CrewTask;
       if (caller.agent === this.options.team.captain.id) {
         await this.captain(caller);
@@ -416,63 +673,6 @@ export class CrewEngine {
         );
       const actor = this.actor(caller.sessionID);
       await this.mailer.register(actor, caller.sessionID, caller.signal);
-      if (input.op === "send") {
-        const target =
-          input.to === "captain" ? source : this.state.activeTask(input.to);
-        if (!target || target.originCaptainID !== source.originCaptainID)
-          throw new CrewError(
-            "Mail recipient must have an active task in the same captain lineage.",
-          );
-        if (input.to !== "captain") await this.ensure(input.to, caller.signal);
-        const recipient =
-          input.to === "captain"
-            ? source.originCaptainID
-            : target.workerSessionID;
-        await this.mailer.register(
-          this.actor(recipient),
-          recipient,
-          caller.signal,
-        );
-        const receipt = await this.mailer.send(
-          {
-            actor,
-            sessionID: caller.sessionID,
-            to: recipient,
-            text: JSON.stringify({
-              namespace: this.options.namespace,
-              sourceTaskID: source.id,
-              targetTaskID: target.id,
-              originCaptainID: source.originCaptainID,
-              sender: caller.sessionID,
-              recipient,
-              text: input.text,
-            }),
-            key: createHash("sha256")
-              .update(
-                JSON.stringify([
-                  this.options.namespace,
-                  source.id,
-                  target.id,
-                  caller.sessionID,
-                  recipient,
-                  input.key,
-                ]),
-              )
-              .digest("hex"),
-            ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-          },
-          caller.signal,
-        );
-        this.state.reporting.message(
-          source,
-          caller.agent,
-          input.to === "captain" ? this.options.team.captain.id : input.to,
-          input.text,
-          target.id,
-          caller.sessionID,
-        );
-        return { status: "sent", ...receipt };
-      }
       const after = this.state.mailCursor(
         caller.sessionID,
         source.id,
@@ -539,6 +739,7 @@ export class CrewEngine {
   }
 
   async run(raw: unknown, caller: CrewCaller): Promise<CrewResult> {
+    caller = this.logicalCaller(caller);
     const parsed = crewInputSchema.safeParse(raw);
     if (!parsed.success)
       throw new CrewError(
@@ -553,8 +754,14 @@ export class CrewEngine {
           : caller,
       );
       authorized = true;
+      if (input.op === "roster")
+        return { status: "roster", members: this.roster() };
       if ("crew" in input && input.crew) this.member(input.crew);
-      if (input.op === "urgent" && input.to !== "captain")
+      if (
+        input.op === "urgent" &&
+        input.to !== "captain" &&
+        input.to !== this.options.team.captain.id
+      )
         this.member(input.to);
       if (input.op === "complete") {
         const task = this.ownedWorkerTask(input.taskID, caller);
@@ -627,6 +834,7 @@ export class CrewEngine {
   }
 
   async captain(caller: CrewCaller): Promise<void> {
+    caller = this.logicalCaller(caller);
     if (
       caller.agent !== this.options.team.captain.id ||
       this.state.peerBySession(caller.sessionID)
@@ -641,7 +849,10 @@ export class CrewEngine {
     if (
       session.parentID ||
       session.id !== caller.sessionID ||
-      session.agent !== this.options.team.captain.id ||
+      ![
+        this.options.team.captain.agent ?? this.options.team.captain.id,
+        this.options.team.captain.id,
+      ].includes(session.agent ?? "") ||
       resolve(session.location.directory) !==
         resolve(this.options.captainDirectory)
     )
@@ -651,6 +862,7 @@ export class CrewEngine {
   }
 
   async authorize(caller: CrewCaller): Promise<void> {
+    caller = this.logicalCaller(caller);
     if (caller.agent === this.options.team.captain.id)
       return this.captain(caller);
     const peer = this.state.peerBySession(caller.sessionID);
@@ -659,10 +871,16 @@ export class CrewEngine {
         "Only the configured captain or assigned worker may use crew operations.",
       );
     this.member(peer.crewID);
-    if (this.member(peer.crewID).backend)
+    if (this.member(peer.crewID).backend) {
+      if (
+        caller[piIdentity] &&
+        this.state.piPeer(peer.sessionID)?.conversationID
+      )
+        return;
       throw new CrewError(
         "Pi workers cannot impersonate OpenCode tool callers.",
       );
+    }
     const session = await this.sessions.get(
       { sessionID: caller.sessionID },
       { signal: caller.signal },
@@ -711,7 +929,9 @@ export class CrewEngine {
     if (
       session.id !== peer.sessionID ||
       session.parentID ||
-      session.agent !== peer.crewID ||
+      ![this.member(peer.crewID).agent ?? peer.crewID, peer.crewID].includes(
+        session.agent ?? "",
+      ) ||
       resolve(session.location.directory) !==
         resolve(this.options.worktrees[peer.crewID] ?? "") ||
       typeof metadata !== "object" ||
@@ -750,7 +970,7 @@ export class CrewEngine {
       try {
         const agent = await this.agents?.get(
           {
-            agentID: crewID,
+            agentID: member.agent ?? crewID,
             location: { directory: worktree },
           },
           { signal },
@@ -763,7 +983,7 @@ export class CrewEngine {
         session = await this.sessions.create(
           {
             id: peer.sessionID,
-            agent: crewID,
+            agent: member.agent ?? crewID,
             title: `Pogo ${crewID}`,
             location: { directory: worktree },
             metadata: {
@@ -874,7 +1094,13 @@ export class CrewEngine {
   }
 
   private async idle(peer: Peer, signal: AbortSignal): Promise<boolean> {
-    if (this.member(peer.crewID).backend) return this.pi.idle(peer);
+    if (this.member(peer.crewID).backend)
+      return this.pi.idle(
+        peer,
+        this.member(peer.crewID),
+        this.options.worktrees[peer.crewID] ?? "",
+        signal,
+      );
     try {
       await this.sessions.wait(
         { sessionID: peer.sessionID },
@@ -987,6 +1213,23 @@ export class CrewEngine {
   }
 
   /** Report tasks use the same slot/FIFO, but never join activity collection. */
+  async reporterFree(id: string, signal: AbortSignal): Promise<boolean> {
+    const member = this.options.team.crew.find((member) => member.id === id);
+    const directory = this.options.worktrees[id];
+    if (
+      !member?.backend ||
+      !directory ||
+      this.state.controlled(id) ||
+      this.state.hasQueued(id)
+    )
+      return false;
+    const task = this.state.activeTask(id);
+    if (task && (task.status !== "completed" || task.notifying)) return false;
+    if (!(await this.pi.canReport(member, directory))) return false;
+    const peer = this.state.peer(id);
+    return !peer || (await this.idle(peer, signal));
+  }
+
   queueReport(
     sessionID: string,
     reporter: string,
@@ -1193,7 +1436,12 @@ export class CrewEngine {
         );
       const connection: Promise<ResultAPI> = connect(session, signal);
       const api = await connection;
-      const result = await readTaskResult(api, task, signal);
+      const result = await readTaskResult(
+        api,
+        task,
+        signal,
+        this.member(task.crewID).agent ?? task.crewID,
+      );
       signal.throwIfAborted();
       return { task: this.state.recoverResult(task, result) };
     } catch (error) {
@@ -1216,74 +1464,26 @@ export class CrewEngine {
     input: Extract<CrewInput, { op: "urgent" }>,
     caller: CrewCaller,
   ): Promise<CrewResult> {
-    let source: CrewTask;
-    if (caller.agent === this.options.team.captain.id) {
-      await this.captain(caller);
-      source = this.ownedCaptainTask(input.taskID, caller);
-    } else source = this.ownedWorkerTask(input.taskID, caller);
-    if (source.status !== "running" && source.status !== "dispatching")
-      throw new CrewError("Urgency requires an active task lineage.");
-    if (input.to === "captain") {
-      this.state.notice(source.id, input.text);
-      this.state.reporting.message(
-        source,
-        caller.agent,
-        this.options.team.captain.id,
-        `Urgent: ${input.text}`,
-        source.id,
-        caller.sessionID,
-      );
-      return { status: "mailed" };
-    }
-    if (this.member(input.to).backend)
-      throw new CrewError(
-        "Pi workers do not support live steering; use a subsequent assignment.",
-      );
-    const target = this.state.activeTask(input.to);
-    if (
-      !target ||
-      target.originCaptainID !== source.originCaptainID ||
-      !this.state.beginNotify(target.id)
-    )
-      throw new CrewError(
-        "Colleague urgency requires an active task in the same captain lineage.",
-      );
-    try {
-      await this.ensure(input.to, caller.signal);
-      await this.sessions.synthetic(
-        {
-          sessionID: target.workerSessionID,
-          text: `Pogo urgent notice for task ${target.id}; source task ${source.id}.\n${input.text}`,
-          description: "Task-scoped crew urgency",
-          metadata: {
-            pogoCrew: {
-              taskID: target.id,
-              sourceTaskID: source.id,
-              originCaptainID: source.originCaptainID,
-            },
-          },
-          delivery: "steer",
-          resume: true,
-        },
-        { signal: caller.signal },
-      );
-      this.state.reporting.message(
-        source,
-        caller.agent,
-        input.to,
-        `Urgent: ${input.text}`,
-        target.id,
-        caller.sessionID,
-      );
-      return { status: "steered" };
-    } catch {
-      this.state.uncertain(target.id);
-      throw new CrewError(
-        "Urgent delivery uncertain. Inspect worker session; notice was not automatically replayed.",
-      );
-    } finally {
-      this.state.endNotify(target.id);
-    }
+    const receipt = await this.dm(
+      {
+        op: "send",
+        taskID: input.taskID,
+        to: input.to,
+        text: input.text,
+        delivery: "steer",
+      },
+      caller,
+    );
+    const status =
+      "notification" in receipt ? (receipt.notification ?? "stored") : "stored";
+    return {
+      status:
+        status === "accepted"
+          ? input.to === "captain" || input.to === this.options.team.captain.id
+            ? "mailed"
+            : "steered"
+          : status,
+    };
   }
 
   close() {

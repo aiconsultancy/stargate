@@ -37,7 +37,11 @@ const envelope = z.strictObject({
 });
 const urgency = z.object({
   taskID: z.string(),
-  sourceTaskID: z.string().startsWith("task_"),
+  sourceTaskID: z.string().startsWith("task_").optional(),
+  messageID: z
+    .string()
+    .regex(/^[a-f0-9]{32}$/)
+    .optional(),
   originCaptainID: z.string(),
 });
 
@@ -45,6 +49,7 @@ function matchesUrgency(message: ResultMessage, task: CrewTask): boolean {
   const notice = urgency.safeParse(message.metadata?.["pogoCrew"]);
   return (
     notice.success &&
+    !!(notice.data.sourceTaskID || notice.data.messageID) &&
     notice.data.taskID === task.id &&
     notice.data.originCaptainID === task.originCaptainID
   );
@@ -79,6 +84,7 @@ export async function readTaskResult(
   api: ResultAPI,
   task: CrewTask,
   signal: AbortSignal,
+  workerAgent = task.crewID,
 ): Promise<string> {
   let cursor: string | undefined;
   let final: ResultMessage | undefined;
@@ -107,7 +113,7 @@ export async function readTaskResult(
           .trim();
         if (
           !final ||
-          final.agent !== task.crewID ||
+          ![workerAgent, task.crewID].includes(final.agent ?? "") ||
           final.finish !== "stop" ||
           final.error !== undefined ||
           final.time.completed === undefined ||

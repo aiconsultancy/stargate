@@ -3,6 +3,7 @@ import type { ActivityWatch } from "./activity";
 import { OpenCodeBackend } from "./backends/opencode";
 import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
+import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
 
 /** Latest complete visible text for this turn, not reasoning or tool output. */
@@ -74,9 +75,10 @@ export interface AgentBackend {
   startActivity?(
     sessionId: string,
     requestID: string,
-    reporter: string,
+    reporter: string | undefined,
     signal: AbortSignal,
   ): Promise<ActivityWatch>;
+  resumeActivity?(sessionId: string, capture: string): ActivityWatch;
   /** Sensitive, single-use pairing code. Never pass through model or storage. */
   pair?(signal: AbortSignal): Promise<{ code: string; expiresIn: number }>;
   /** Read-only configured crew status; does not require/create a conversation. */
@@ -84,7 +86,11 @@ export interface AgentBackend {
   close(): Promise<void>;
 }
 
-export type BackendContext = { dataDirectory: string };
+export type BackendContext = {
+  dataDirectory: string;
+  crew?: PiCrewBinding;
+  workingAgreement?: { path: string; owns(conversationID: string): boolean };
+};
 
 export async function createBackend(
   config: BackendConfig,

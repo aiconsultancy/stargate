@@ -5,15 +5,15 @@ export const crewActivitySchema = z.strictObject({
   reporter: z
     .string()
     .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)
-    .default("twiki"),
+    .optional(),
 });
 export type CrewActivitySettings = z.infer<typeof crewActivitySchema>;
 
 export const activityEntrySchema = z.strictObject({
   id: z.number().int().nonnegative(),
-  taskID: z.string().min(1).max(100),
+  taskID: z.string().min(1).max(100).optional(),
   member: z.string().min(1).max(100),
-  kind: z.enum(["assignment", "update", "message", "result"]),
+  kind: z.enum(["assignment", "update", "message", "result", "note"]),
   text: z.string().max(1500),
 });
 export const activitySnapshotSchema = z.strictObject({
@@ -28,6 +28,7 @@ export const activitySnapshotSchema = z.strictObject({
   ]),
   reporter: z.string().min(1).max(100),
   summary: z.string().max(3000),
+  summaryCurrent: z.boolean().optional(),
   entries: z.array(activityEntrySchema).max(8),
   truncated: z.boolean(),
 });
@@ -38,7 +39,8 @@ export type ActivityView = ActivitySnapshot & {
 
 /** Optional backend capability; scoped to one accepted captain request. */
 export interface ActivityWatch {
-  read(signal: AbortSignal): Promise<ActivitySnapshot>;
+  id?: string;
+  read(signal: AbortSignal, passive?: boolean): Promise<ActivitySnapshot>;
   finish(signal: AbortSignal): Promise<ActivitySnapshot>;
   cancel(signal: AbortSignal): Promise<void>;
 }

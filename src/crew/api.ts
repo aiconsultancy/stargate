@@ -29,7 +29,10 @@ export function historyVisible(
   const directory = resolve(session.location.directory);
   if (
     !session.parentID &&
-    session.agent === options.team.captain.id &&
+    [
+      options.team.captain.agent ?? options.team.captain.id,
+      options.team.captain.id,
+    ].includes(session.agent ?? "") &&
     directory === resolve(options.captainDirectory)
   )
     return true;
@@ -38,7 +41,11 @@ export function historyVisible(
     return (
       !session.parentID &&
       session.id === peer.sessionID &&
-      session.agent === peer.crewID &&
+      [
+        options.team.crew.find(({ id }) => id === peer.crewID)?.agent ??
+          peer.crewID,
+        peer.crewID,
+      ].includes(session.agent ?? "") &&
       !!worktree &&
       directory === resolve(worktree) &&
       metadata?.["namespace"] === options.namespace &&

@@ -4,6 +4,7 @@ import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { canExpandCrew } from "./identity";
 import { MemberActivityStore } from "./member-activity";
+import { MailRoutes } from "./messaging";
 import { ReportingStore, redactActivity } from "./reporting";
 export type CrewID = string;
 export type Peer = {
@@ -40,12 +41,14 @@ type QueuedTask = CrewTask & { text: string };
 export class CrewState {
   readonly reporting: ReportingStore;
   readonly activity: MemberActivityStore;
+  readonly mailRoutes: MailRoutes;
   private constructor(
     readonly path: string,
     private readonly db: Database,
   ) {
     this.reporting = new ReportingStore(db);
     this.activity = new MemberActivityStore(db);
+    this.mailRoutes = new MailRoutes(db);
   }
 
   static async open(
@@ -290,7 +293,7 @@ export class CrewState {
       .immediate();
   }
 
-  private controlled(crewID: string): boolean {
+  controlled(crewID: string): boolean {
     return Boolean(
       this.db.query("SELECT 1 FROM worker_controls WHERE crewID=?").get(crewID),
     );
@@ -302,6 +305,10 @@ export class CrewState {
         "SELECT * FROM pending_tasks WHERE crewID=? AND status='queued' ORDER BY sequence LIMIT 1",
       )
       .get(crewID);
+  }
+
+  hasQueued(crewID: string): boolean {
+    return !!this.nextQueued(crewID);
   }
 
   enqueue(
@@ -327,6 +334,15 @@ export class CrewState {
           )
             throw new CrewError(
               "Reporting capture is not eligible for admission.",
+            );
+          const active = this.activeTask(peer.crewID);
+          if (
+            this.controlled(peer.crewID) ||
+            this.nextQueued(peer.crewID) ||
+            (active && (active.status !== "completed" || active.notifying))
+          )
+            throw new CrewError(
+              "Summary skipped: reporter is busy or uncertain.",
             );
         }
         const count =
@@ -540,6 +556,14 @@ export class CrewState {
     this.db
       .query("INSERT INTO notices(taskID,text) VALUES (?,?)")
       .run(taskID, text);
+  }
+
+  noticeOnce(messageID: string, taskID: string, text: string) {
+    this.db
+      .transaction(() => {
+        if (this.mailRoutes.notice(messageID)) this.notice(taskID, text);
+      })
+      .immediate();
   }
 
   notices(taskID: string, after: number): CrewNotice[] {

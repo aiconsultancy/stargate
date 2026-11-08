@@ -97,6 +97,7 @@ function fixture(
     pino({ enabled: false }),
     {
       ...options,
+      store,
       wait: async (_ms, stop) => {
         waiting.resolve();
         if (stop.aborted) throw new Error("aborted");
@@ -113,6 +114,7 @@ function fixture(
   );
   return {
     backend,
+    slack,
     store,
     views,
     written,
@@ -153,6 +155,164 @@ test("activity is opt-in and disabled mode starts no capture or inference", asyn
     ).toBeUndefined();
     expect(f.starts).toBe(0);
     expect(f.views).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("restart and terminal late refresh reuse persisted capture and Slack timestamp", async () => {
+  let current = snapshot();
+  let cancels = 0;
+  let finishes = 0;
+  const watch: ActivityWatch = {
+    id: "report-1",
+    async read() {
+      return current;
+    },
+    async finish() {
+      finishes++;
+      return current;
+    },
+    async cancel() {
+      cancels++;
+    },
+  };
+  const f = fixture(watch);
+  const create = () =>
+    new ActivityDelivery(
+      f.backend,
+      f.slack,
+      () => ({ detail: "summary" }),
+      () => true,
+      pino({ enabled: false }),
+      { store: f.store },
+    );
+  try {
+    await f.delivery.start(f.job, "captain", signal(), signal());
+    await f.waiting;
+    await f.delivery.close();
+    expect(cancels).toBe(0);
+    expect(f.store.activity(f.job.id)).toMatchObject({
+      capture: "report-1",
+      ts: "report-message",
+      done: false,
+    });
+    f.backend.resumeActivity = (session, capture) => {
+      expect(session).toBe("captain");
+      expect(capture).toBe("report-1");
+      return watch;
+    };
+    current = snapshot(2, "complete");
+    const resumed = create();
+    await resumed.resume(f.job, "captain", signal());
+    await f.written[1]?.promise;
+    await resumed.close();
+    expect(f.views[1]?.ts).toBe("report-message");
+    expect(f.store.activity(f.job.id)?.done).toBe(true);
+    expect(f.starts).toBe(1);
+    expect(finishes).toBe(1);
+    current = {
+      ...snapshot(3, "complete"),
+      entries: [
+        { id: 3, member: "Chief", kind: "note", text: "Late verified fact" },
+      ],
+    };
+    const published = Promise.withResolvers<void>();
+    const publish = f.slack.activity;
+    if (!publish) throw new Error("Missing activity writer");
+    f.slack.activity = async (...args) => {
+      const ts = await publish(...args);
+      published.resolve();
+      return ts;
+    };
+    const late = create();
+    await late.resume(f.job, "captain", signal());
+    await published.promise;
+    await late.close();
+    expect(f.views.at(-1)?.ts).toBe("report-message");
+    expect(f.views.at(-1)?.view.entries[0]?.text).toBe("Late verified fact");
+    expect(finishes).toBe(1);
+    expect(f.starts).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("missing saved capture stops retries without opening a new capture", async () => {
+  const watch: ActivityWatch = {
+    id: "missing",
+    async read() {
+      throw new Error("This captain does not own the activity capture.");
+    },
+    async finish() {
+      throw new Error("This captain does not own the activity capture.");
+    },
+    async cancel() {},
+  };
+  const f = fixture(watch);
+  try {
+    f.store.saveActivity(f.job.id, {
+      capture: "missing",
+      revision: -1,
+      done: false,
+    });
+    const saved = Promise.withResolvers<void>();
+    const save = f.store.saveActivity.bind(f.store);
+    f.store.saveActivity = (id, progress) => {
+      save(id, progress);
+      if (progress.done) saved.resolve();
+    };
+    f.backend.resumeActivity = () => watch;
+    await f.delivery.resume(f.job, "captain", signal());
+    await saved.promise;
+    await f.delivery.close();
+    expect(f.store.activity(f.job.id)?.done).toBe(true);
+    expect(f.starts).toBe(0);
+    expect(f.views).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a saved Stop never starts a summary if native cancellation was unconfirmed", async () => {
+  let finishes = 0;
+  const f = fixture({
+    id: "report-1",
+    async read() {
+      return snapshot(2);
+    },
+    async finish() {
+      finishes++;
+      throw new Error("Must not finalize a stopped capture");
+    },
+    async cancel() {},
+  });
+  try {
+    f.store.saveActivity(f.job.id, {
+      capture: "report-1",
+      ts: "report-message",
+      revision: 1,
+      done: true,
+    });
+    f.backend.resumeActivity = () => ({
+      async read() {
+        return snapshot(2);
+      },
+      async finish() {
+        finishes++;
+        return snapshot(3, "complete");
+      },
+      async cancel() {},
+    });
+    await f.delivery.resume(f.job, "captain", signal());
+    await f.written[0]?.promise;
+    await f.delivery.close();
+    expect(finishes).toBe(0);
+    expect(f.views[0]).toMatchObject({
+      ts: "report-message",
+      view: { status: "cancelled" },
+    });
+    expect(f.starts).toBe(0);
   } finally {
     await f.close();
   }
@@ -320,7 +480,7 @@ test("captain answer delivery does not wait for reporting or replay on retry", a
     expect(captures).toBe(1);
     expect(turns).toBe(1);
     await gateway.close();
-    expect(cancel).toBe(1);
+    expect(cancel).toBe(0);
   } finally {
     await gateway.close();
     store.close();
@@ -401,7 +561,7 @@ test("empty captures and summary-only status never create an activity box", asyn
   }
 });
 
-test("request abort cancels capture and terminalizes an existing activity box", async () => {
+test("explicit Stop cancels capture and terminalizes an existing activity box", async () => {
   const cancelled = Promise.withResolvers<void>();
   const request = new AbortController();
   const f = fixture({
@@ -416,10 +576,15 @@ test("request abort cancels capture and terminalizes an existing activity box", 
     },
   });
   try {
-    await f.delivery.start(f.job, "captain", request.signal, signal());
+    const handle = await f.delivery.start(
+      f.job,
+      "captain",
+      request.signal,
+      signal(),
+    );
     await f.waiting;
     expect(f.views[0]?.view.status).toBe("collecting");
-    request.abort();
+    handle?.cancel();
     await cancelled.promise;
     await f.written[1]?.promise;
     expect(f.views[1]).toMatchObject({
@@ -485,7 +650,7 @@ test("finalization grace bounds a stuck report and marks the existing box unavai
       ts: "report-message",
       view: { status: "unavailable" },
     });
-    expect(cancelled).toBe(1);
+    expect(cancelled).toBe(0);
   } finally {
     await f.close();
   }

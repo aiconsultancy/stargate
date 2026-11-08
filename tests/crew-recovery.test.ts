@@ -31,6 +31,7 @@ async function fixture() {
     sessionID: "ses_captain",
     agent: "captain",
     signal: new AbortController().signal,
+    id: "recovery-call",
   };
   const sessions = new Map<string, CrewSession>([
     [
@@ -134,7 +135,17 @@ async function fixture() {
   const engine = await CrewEngine.open(
     options,
     native,
-    undefined,
+    {
+      async register() {
+        return { id: "0".repeat(32), sequence: 0 };
+      },
+      async send() {
+        return { id: "1".repeat(32), sequence: 1 };
+      },
+      async inbox() {
+        return [];
+      },
+    },
     undefined,
     undefined,
     connect,
@@ -194,6 +205,64 @@ async function fixture() {
 test("recovery reader accepts installed SDK message objects", () => {
   const compatible = (client: OpenCodeClient): ResultAPI => client;
   expect(compatible).toBeFunction();
+});
+
+test("mapped native profiles recover old-named uncertain answers and retain old session authority", async () => {
+  const f = await fixture();
+  let mapped: CrewEngine | undefined;
+  try {
+    const task = await f.dispatch();
+    f.engine.state.uncertain(task.id);
+    f.finish(task);
+    mapped = await CrewEngine.open(
+      {
+        ...f.options,
+        team: {
+          captain: { id: "captain", agent: "ship-captain-captain" },
+          crew: [
+            {
+              id: "worker",
+              agent: "ship-crew-worker",
+              role: "Implementation",
+              permissionProfile: "coding",
+            },
+          ],
+        },
+      },
+      f.native,
+      undefined,
+      undefined,
+      undefined,
+      async () => ({
+        message: {
+          async list() {
+            return { data: f.messages.toReversed(), cursor: {} };
+          },
+        },
+      }),
+    );
+    await mapped.captain(f.captain);
+    await mapped.authorize({
+      sessionID: task.workerSessionID,
+      agent: "worker",
+      signal: f.captain.signal,
+    });
+    const session = f.sessions.get(task.workerSessionID);
+    if (!session) throw new Error("Missing native peer");
+    session.agent = "ship-crew-worker";
+    const result = await mapped.run(
+      { op: "status", taskID: task.id },
+      f.captain,
+    );
+    expect(result.task).toMatchObject({
+      status: "completed",
+      result: "Implemented and tested.",
+    });
+    expect(f.counts().prompts).toBe(1);
+  } finally {
+    await mapped?.close();
+    await f.close();
+  }
 });
 
 for (const op of ["status", "wait"] as const) {
@@ -260,6 +329,7 @@ for (const notice of [
       if (!message) throw new Error("Missing urgency message");
       expect(message.metadata).toEqual({
         pogoCrew: {
+          messageID: "1".repeat(32),
           taskID: task.id,
           sourceTaskID: task.id,
           originCaptainID: f.captain.sessionID,
@@ -338,6 +408,31 @@ test("busy workers remain running and do not read result history", async () => {
       await f.engine.run({ op: "status", taskID: task.id }, f.captain),
     ).toMatchObject({ status: "running" });
     expect(f.counts().reads).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test("task-marked DM without a source task preserves result recovery", async () => {
+  const f = await fixture();
+  try {
+    const task = await f.dispatch();
+    const receipt = await f.engine.dm(
+      { op: "send", to: "worker", text: "Restate final result" },
+      { ...f.captain, id: "task-free-dm" },
+    );
+    expect(receipt).toMatchObject({ notification: "accepted" });
+    expect(f.messages.at(-1)?.metadata).toMatchObject({
+      pogoCrew: { taskID: task.id, messageID: "1".repeat(32) },
+    });
+    expect(f.messages.at(-1)?.metadata?.["pogoCrew"]).not.toHaveProperty(
+      "sourceTaskID",
+    );
+    f.finish(task);
+    expect(
+      (await f.engine.run({ op: "status", taskID: task.id }, f.captain)).task
+        ?.status,
+    ).toBe("completed");
   } finally {
     await f.close();
   }

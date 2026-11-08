@@ -2,11 +2,12 @@ import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import type { ActivitySnapshot } from "../activity";
 import type { CrewCaller, CrewEngine } from "./engine";
+import { JournalStore } from "./journal";
 import { CrewError, type CrewTask } from "./state";
 
 // Active requests renew this lease on each read; only abandoned captures expire.
 const captureLease = 90_000;
-const settleWindow = 60_000;
+const settleWindow = 600_000;
 const recordLimit = 64;
 type Entry = ActivitySnapshot["entries"][number];
 type Capture = {
@@ -23,6 +24,9 @@ type Capture = {
   deadline: number;
   expires: number;
   reportTaskID: string | null;
+  startSeq: number;
+  endSeq: number | null;
+  summarySeq: number;
 };
 
 /** Sanitize before persistence, truncation, inference, and publication. */
@@ -51,8 +55,10 @@ export function redactActivity(text: string, limit = 1500): string {
 /** Private tables share crew identity, transaction, and file permissions. */
 export class ReportingStore {
   private names = new Map<string, string>();
+  readonly journal: JournalStore;
 
   constructor(private readonly db: Database) {
+    this.journal = new JournalStore(db);
     db.exec(`
       CREATE TABLE IF NOT EXISTS activity_captures (
         id TEXT PRIMARY KEY, sessionID TEXT NOT NULL, requestID TEXT NOT NULL,
@@ -78,6 +84,17 @@ export class ReportingStore {
       );
       CREATE INDEX IF NOT EXISTS activity_window ON activity_entries(captureID,id);
     `);
+    const columns = db
+      .query<{ name: string }, []>("PRAGMA table_info(activity_captures)")
+      .all();
+    for (const [name, type] of [
+      ["startSeq", "INTEGER NOT NULL DEFAULT 0"],
+      ["endSeq", "INTEGER"],
+      ["summarySeq", "INTEGER NOT NULL DEFAULT 0"],
+    ]) {
+      if (!columns.some((column) => column.name === name))
+        db.exec(`ALTER TABLE activity_captures ADD COLUMN ${name} ${type}`);
+    }
   }
 
   configureNames(members: { id: string; name?: string | undefined }[]) {
@@ -126,16 +143,12 @@ export class ReportingStore {
             throw new CrewError("Capture reporter cannot change.");
           return previous;
         }
-        if (
-          this.db
-            .query(
-              "SELECT 1 FROM activity_captures WHERE sessionID=? AND status='collecting'",
-            )
-            .get(sessionID)
-        )
-          throw new CrewError(
-            "A different captain turn already owns the active capture.",
-          );
+        // greybeard: newest box owns late facts in this exact captain thread.
+        this.db
+          .query(`UPDATE activity_captures SET endSeq=?,
+          status=CASE WHEN status='collecting' THEN 'summarizing' ELSE status END,
+          finished=1, revision=revision+1 WHERE sessionID=? AND endSeq IS NULL`)
+          .run(this.journal.head(), sessionID);
         if (
           (this.db
             .query<{ count: number }, []>(
@@ -150,18 +163,19 @@ export class ReportingStore {
         const expires = Date.now() + captureLease;
         this.db
           .query(`INSERT INTO activity_captures
-        (id,sessionID,requestID,reporterID,reporter,status,summary,deadline,expires)
-        VALUES (?,?,?,?,?,?,?,?,?)`)
+        (id,sessionID,requestID,reporterID,reporter,status,summary,deadline,expires,startSeq)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`)
           .run(
             id,
             sessionID,
             requestID,
             reporterID,
-            this.names.get(reporterID) ?? reporterID,
-            unavailable ? "unavailable" : "collecting",
+            this.names.get(reporterID) ?? (reporterID || "Journal"),
+            "collecting",
             unavailable ?? "",
             expires,
             expires,
+            this.journal.head(),
           );
         return this.owned(sessionID, id);
       })
@@ -190,7 +204,7 @@ export class ReportingStore {
   renew(capture: Capture) {
     this.db
       .query(
-        "UPDATE activity_captures SET expires=? WHERE id=? AND status='collecting'",
+        "UPDATE activity_captures SET expires=? WHERE id=? AND status IN ('collecting','summarizing')",
       )
       .run(Date.now() + captureLease, capture.id);
   }
@@ -220,9 +234,9 @@ export class ReportingStore {
       .run(taskID, captureID);
     this.db
       .query(
-        "UPDATE activity_captures SET reportTaskID=?,revision=revision+1 WHERE id=?",
+        "UPDATE activity_captures SET reportTaskID=?,summarySeq=?,revision=revision+1 WHERE id=?",
       )
-      .run(taskID, captureID);
+      .run(taskID, this.journal.head(), captureID);
   }
 
   reportTaskID(captureID: string): string | undefined {
@@ -236,6 +250,16 @@ export class ReportingStore {
   assignment(task: CrewTask, text: string) {
     this.expire();
     if (this.isReport(task.id)) return;
+    this.journal.append(
+      {
+        member: task.crewID,
+        captainID: task.originCaptainID,
+        taskID: task.id,
+        kind: "assignment",
+        text: `${task.status === "queued" ? "Queued: " : ""}${text}`,
+      },
+      `${task.id}:assignment`,
+    );
     const capture = this.db
       .query<Capture, [string]>(
         "SELECT * FROM activity_captures WHERE sessionID=? AND status='collecting'",
@@ -261,44 +285,6 @@ export class ReportingStore {
         .run(task.id, capture.id).changes
     )
       return;
-    this.record(
-      task,
-      "assignment",
-      `${task.status === "queued" ? "Queued: " : ""}${text}`,
-    );
-  }
-
-  private linked(taskID: string): string | undefined {
-    return this.db
-      .query<{ captureID: string }, [string]>(
-        "SELECT captureID FROM activity_tasks WHERE taskID=?",
-      )
-      .get(taskID)?.captureID;
-  }
-
-  message(
-    task: CrewTask,
-    member: string,
-    recipient: string,
-    text: string,
-    targetTaskID = task.id,
-    senderSessionID?: string,
-  ) {
-    if (task.status !== "running" && task.status !== "dispatching") return;
-    if (this.linked(task.id) !== this.linked(targetTaskID)) return;
-    if (senderSessionID === task.originCaptainID) {
-      const captureID = this.linked(task.id);
-      if (
-        !captureID ||
-        this.owned(task.originCaptainID, captureID).status !== "collecting"
-      )
-        return;
-    }
-    this.record(
-      task,
-      "message",
-      `${this.names.get(member) ?? member} → ${this.names.get(recipient) ?? recipient}: ${text}`,
-    );
   }
 
   record(task: CrewTask, kind: Entry["kind"], text: string) {
@@ -319,39 +305,16 @@ export class ReportingStore {
         );
       return;
     }
-    const captureID = this.linked(task.id);
-    if (!captureID) return;
-    const capture = this.owned(task.originCaptainID, captureID);
-    if (capture.status !== "collecting" && capture.status !== "summarizing")
-      return;
-    // Freeze source records before report admission. Later updates cannot enter
-    // another turn, and cannot change the evidence of an in-flight summary.
-    if (capture.reportTaskID) return;
-    const sanitized = redactActivity(text);
-    this.db
-      .query(`INSERT INTO activity_entries(captureID,taskID,member,kind,text)
-      VALUES (?,?,?,?,?)`)
-      .run(
-        captureID,
-        task.id,
-        this.names.get(task.crewID) ?? task.crewID,
+    this.journal.append(
+      {
+        member: task.crewID,
+        captainID: task.originCaptainID,
+        taskID: task.id,
         kind,
-        sanitized,
-      );
-    const count =
-      this.db
-        .query<{ count: number }, [string]>(
-          "SELECT COUNT(*) AS count FROM activity_entries WHERE captureID=?",
-        )
-        .get(captureID)?.count ?? 0;
-    this.db
-      .query(`UPDATE activity_captures SET revision=revision+1,
-      truncated=MAX(truncated,?) WHERE id=?`)
-      .run(Number(count > 8 || text.length > 1500), captureID);
-    this.db
-      .query(`DELETE FROM activity_entries WHERE captureID=? AND id NOT IN
-      (SELECT id FROM activity_entries WHERE captureID=? ORDER BY id DESC LIMIT ?)`)
-      .run(captureID, captureID, recordLimit);
+        text,
+      },
+      `${task.id}:${kind}:${kind === "message" ? randomUUID() : text}`,
+    );
   }
 
   taskIDs(captureID: string): string[] {
@@ -364,24 +327,43 @@ export class ReportingStore {
   }
 
   entries(captureID: string, limit = 8): Entry[] {
-    return this.db
-      .query<Entry, [string, number]>(
-        `SELECT id,taskID,member,kind,text FROM activity_entries
-       WHERE captureID=? ORDER BY id DESC LIMIT ?`,
+    const capture = this.db
+      .query<Capture, [string]>("SELECT * FROM activity_captures WHERE id=?")
+      .get(captureID);
+    if (!capture) return [];
+    return this.journal
+      .window(
+        capture.sessionID,
+        capture.startSeq,
+        capture.endSeq,
+        capture.reporterID,
+        limit,
       )
-      .all(captureID, limit)
-      .reverse();
+      .map(({ id, taskID, member, kind, text }) => ({
+        id,
+        ...(taskID ? { taskID } : {}),
+        member: this.names.get(member) ?? member,
+        kind,
+        text,
+      }));
   }
 
   snapshot(capture: Capture): ActivitySnapshot {
+    const entries = this.entries(capture.id, 9);
+    const head = entries.at(-1)?.id ?? capture.startSeq;
+    const stale = !!capture.reportTaskID && head > capture.summarySeq;
     return {
       id: capture.id,
-      revision: capture.revision,
+      revision: capture.revision + head,
       status: capture.status,
       reporter: capture.reporter,
-      summary: capture.summary,
-      entries: this.entries(capture.id),
-      truncated: Boolean(capture.truncated),
+      summary: stale
+        ? "Summary predates later journal facts."
+        : capture.summary,
+      summaryCurrent:
+        !!capture.reportTaskID && capture.status === "complete" && !stale,
+      entries: entries.slice(-8),
+      truncated: Boolean(capture.truncated) || entries.length > 8,
     };
   }
 }
@@ -420,7 +402,11 @@ export class CrewReporter {
   }
 
   async start(
-    input: { sessionID: string; requestID: string; reporter: string },
+    input: {
+      sessionID: string;
+      requestID: string;
+      reporter?: string | undefined;
+    },
     signal: AbortSignal,
   ) {
     await this.verify(input.sessionID, signal);
@@ -431,20 +417,27 @@ export class CrewReporter {
       this.store.start(
         input.sessionID,
         input.requestID,
-        input.reporter,
+        input.reporter ?? "",
         member?.backend?.type === "pi-durable"
           ? undefined
-          : "Activity reporter unavailable: configure the requested Pi Durable crew member; no native fallback.",
+          : input.reporter
+            ? "Summary skipped: configured reporter does not support tools-off reporting."
+            : "Summary skipped: no reporter configured.",
       ),
     );
   }
 
-  async read(input: { sessionID: string; id: string }, signal: AbortSignal) {
+  async read(
+    input: { sessionID: string; id: string; passive?: boolean | undefined },
+    signal: AbortSignal,
+  ) {
     const caller = await this.verify(input.sessionID, signal);
     this.store.expire();
     const capture = this.store.owned(input.sessionID, input.id);
-    this.store.renew(capture);
-    this.advance(capture, caller);
+    if (!input.passive) {
+      this.store.renew(capture);
+      this.advance(capture, caller);
+    }
     return this.store.snapshot(this.store.owned(input.sessionID, input.id));
   }
 
@@ -473,6 +466,14 @@ export class CrewReporter {
 
   private advance(capture: Capture, caller: CrewCaller) {
     if (capture.status !== "summarizing" || this.jobs.has(capture.id)) return;
+    if (Date.now() >= capture.deadline) {
+      this.store.terminal(
+        capture,
+        capture.reportTaskID ? "unavailable" : "complete",
+        "Summary skipped: collection deadline reached; later facts remain in the journal.",
+      );
+      return;
+    }
     const tasks = this.store
       .taskIDs(capture.id)
       .map((id) => this.engine.reportingTask(id));
@@ -502,13 +503,26 @@ export class CrewReporter {
     const job = (async () => {
       let reportTaskID = capture.reportTaskID;
       if (!reportTaskID) {
-        const records = this.store.entries(capture.id, recordLimit);
+        if (
+          !(await this.engine.reporterFree(capture.reporterID, caller.signal))
+        ) {
+          this.store.terminal(
+            capture,
+            "complete",
+            capture.summary ||
+              "Summary skipped: reporter is busy, uncertain, or unavailable.",
+          );
+          return;
+        }
+        const records = this.store.entries(capture.id, recordLimit + 1);
         const taskStatuses = tasks.map((task) =>
           task
             ? { taskID: task.id, status: task.status }
             : { status: "unavailable" },
         );
-        let truncated = Boolean(capture.truncated);
+        let truncated =
+          Boolean(capture.truncated) || records.length > recordLimit;
+        if (records.length > recordLimit) records.shift();
         const reference = () =>
           JSON.stringify({ records, tasks: taskStatuses, truncated });
         while (reference().length > 60_000 && records.length) {

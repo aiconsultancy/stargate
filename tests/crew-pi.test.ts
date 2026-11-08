@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentBackend, TextSink } from "../src/backend";
+import type { TextSink } from "../src/backend";
 import {
   CrewEngine,
   type CrewOptions,
@@ -10,7 +10,10 @@ import {
   type CrewSessions,
 } from "../src/crew/engine";
 import { canExpandCrew } from "../src/crew/identity";
-import type { PiWorkerFactory } from "../src/crew/pi-worker";
+import { piDefinitionPath } from "../src/crew/instructions";
+import type { MesijInbox, MesijMessage, MesijSend } from "../src/crew/mesij";
+import type { PiCrewBinding } from "../src/crew/pi-extension";
+import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 
 function twikiTeam(): Team {
@@ -101,6 +104,11 @@ async function fixture() {
     onText: TextSink | undefined;
   }[] = [];
   let creations = 0;
+  let opens = 0;
+  const definitions: string[] = [];
+  let closes = 0;
+  let binding: PiCrewBinding | undefined;
+  const notifications: { id: string; delivery: string; text: string }[] = [];
   let failCreate = false;
   const started = () => {
     const pending = Promise.withResolvers<void>();
@@ -108,10 +116,16 @@ async function fixture() {
     return pending.promise;
   };
   let nextTurn = () => {};
-  const factory: PiWorkerFactory = async (config) => {
+  const factory: PiWorkerFactory = async (config, context) => {
+    definitions.push(config.systemPrompt ?? "");
+    opens++;
+    binding = context.crew;
     expect(config.directory).toBe(options.worktrees["twiki"] ?? "");
     expect(config.systemPrompt).toContain("explicit operator approval");
-    const backend: AgentBackend = {
+    expect(config.systemPrompt).toContain(
+      join(options.captainDirectory, "WAYS_OF_WORKING.md"),
+    );
+    const backend: PiWorkerBackend = {
       async createSession() {
         creations++;
         if (failCreate) throw new Error("private provider error");
@@ -136,14 +150,50 @@ async function fixture() {
         return response.promise;
       },
       async interrupt() {},
-      async close() {},
+      async waitForIdle() {},
+      async notify(_sessionID, id, text, delivery) {
+        notifications.push({ id, text, delivery });
+      },
+      async close() {
+        closes++;
+      },
     };
     return backend;
+  };
+  let mailSequence = 0;
+  const mailMessages: MesijMessage[] = [];
+  const mailer = {
+    async register() {
+      return { id: "0".repeat(32), sequence: 0 };
+    },
+    async send(input: MesijSend) {
+      const sequence = ++mailSequence;
+      const receipt = { id: String(sequence).padStart(32, "0"), sequence };
+      mailMessages.push({
+        ...receipt,
+        actor: input.actor,
+        sessionID: input.sessionID,
+        to: input.to,
+        text: input.text,
+        type: "message",
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+      });
+      return receipt;
+    },
+    async inbox(input: MesijInbox) {
+      return mailMessages
+        .filter(
+          (message) =>
+            message.to === input.sessionID &&
+            message.sequence > (input.after ?? 0),
+        )
+        .slice(0, input.limit ?? 20);
+    },
   };
   const engine = await CrewEngine.open(
     options,
     sessions,
-    undefined,
+    mailer,
     undefined,
     factory,
   );
@@ -154,9 +204,22 @@ async function fixture() {
     sessionID,
     agent: "bowser",
     signal,
+    id: "captain-call",
   });
   return {
     directory,
+    definitions,
+    get binding() {
+      return binding;
+    },
+    get opens() {
+      return opens;
+    },
+    get closes() {
+      return closes;
+    },
+    notifications,
+    mailer,
     options,
     sessions,
     engine,
@@ -177,6 +240,48 @@ async function fixture() {
     },
   };
 }
+
+test("oversized Pi mail is refused before storage and does not jam later inbox pages", async () => {
+  const f = await fixture();
+  try {
+    await f.engine.run({ op: "ensure", crew: "twiki" }, f.caller());
+    for (const text of [
+      "x".repeat(64000),
+      "🌌".repeat(15000),
+      '"'.repeat(30000),
+    ]) {
+      expect(
+        await f.engine.mail({ op: "send", to: "twiki", text }, f.caller()),
+      ).toMatchObject({
+        stored: false,
+        notification: "unsupported",
+        diagnostic:
+          "Message is too large for the Pi inbox; mail was not stored.",
+      });
+    }
+    expect(
+      await f.engine.mail(
+        { op: "send", to: "twiki", text: "Readable follow-up" },
+        f.caller(),
+      ),
+    ).toMatchObject({ stored: true, sequence: 1 });
+    if (!f.binding) throw new Error("Missing Pi binding");
+    expect(
+      await f.binding.run(
+        "pogo_mail",
+        { op: "inbox", limit: 1 },
+        "17",
+        "read-mail",
+        new AbortController().signal,
+      ),
+    ).toMatchObject({
+      messages: [{ text: "Readable follow-up" }],
+      nextAfter: 1,
+    });
+  } finally {
+    await f.close();
+  }
+});
 
 test("captain dispatches persistent Pi work and collects only its own result", async () => {
   const f = await fixture();
@@ -245,6 +350,99 @@ test("captain dispatches persistent Pi work and collects only its own result", a
         call.includes(first.task?.workerSessionID ?? "missing"),
       ),
     ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Pi coordination is host-bound and location plugins share one native storage owner", async () => {
+  const f = await fixture();
+  const second = await CrewEngine.open(
+    f.options,
+    f.sessions,
+    f.mailer,
+    undefined,
+    f.factory,
+  );
+  try {
+    const started = f.started();
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "twiki", text: "Bound work" },
+        f.caller(),
+      )
+    ).task;
+    await started;
+    if (!task || !f.binding) throw new Error("Missing Pi binding");
+    expect(() => f.binding?.authorize("18")).toThrow("saved conversation");
+    const note = await f.binding.run(
+      "pogo_journal",
+      { op: "append", text: "Pi milestone" },
+      "17",
+      "pi-call-1",
+      f.caller().signal,
+    );
+    expect(note).toMatchObject({
+      entry: { member: "twiki", taskID: task.id, kind: "note" },
+    });
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "twiki", text: "Follow up", delivery: "queue" },
+        f.caller(),
+      ),
+    ).toMatchObject({ stored: true, notification: "accepted" });
+    expect(
+      await second.dm(
+        { op: "send", to: "twiki", text: "Clarify", delivery: "steer" },
+        { ...f.caller(), id: "second-call" },
+      ),
+    ).toMatchObject({ notification: "accepted" });
+    expect(f.notifications.map(({ delivery }) => delivery)).toEqual([
+      "queue",
+      "steer",
+    ]);
+    expect(f.notifications[0]?.id).toHaveLength(32);
+    expect(f.opens).toBe(1);
+    f.turns[0]?.resolve("Complete");
+    await f.engine.run({ op: "wait", taskID: task.id }, f.caller());
+    await f.engine.close();
+    expect(f.closes).toBe(0);
+    expect(
+      await f.binding.run(
+        "pogo_crew",
+        { op: "roster" },
+        "17",
+        "pi-call-2",
+        f.caller().signal,
+      ),
+    ).toMatchObject({ status: "roster" });
+    await second.close();
+    expect(f.closes).toBe(1);
+  } finally {
+    await second.close();
+    await f.close();
+  }
+});
+
+test("Pi consumes the trusted member definition without creating an OpenCode profile", async () => {
+  const f = await fixture();
+  try {
+    const member = f.engine.options.team.crew.find(({ id }) => id === "twiki");
+    if (!member) throw new Error("Missing Pi member");
+    const path = piDefinitionPath(f.options.captainDirectory, member);
+    await mkdir(
+      join(f.options.captainDirectory, ".local", "ship", "definitions"),
+      { recursive: true },
+    );
+    await writeFile(
+      path,
+      `Captain-maintained Pi definition.\nShared working agreement: ${join(f.options.captainDirectory, "WAYS_OF_WORKING.md")}\n`,
+    );
+    await f.engine.run({ op: "ensure", crew: "twiki" }, f.caller());
+    expect(f.definitions[0]).toContain("Captain-maintained Pi definition.");
+    expect(f.nativeCalls.some((call) => call.startsWith("create:"))).toBe(
+      false,
+    );
   } finally {
     await f.close();
   }
@@ -468,18 +666,17 @@ test("Pi FIFO remains captain-polled and native-only controls fail clearly", asy
     await expect(
       f.engine.run({ op: "compact", crew: "twiki" }, f.caller()),
     ).rejects.toThrow("not supported");
-    await expect(
-      f.engine.mail(
+    expect(
+      await f.engine.mail(
         {
           op: "send",
           to: "twiki",
-          taskID: first?.id,
           key: "message",
           text: "hello",
         },
         f.caller(),
       ),
-    ).rejects.toThrow("not Mesij");
+    ).toMatchObject({ stored: true, notification: "not_requested" });
   } finally {
     await f.close();
   }

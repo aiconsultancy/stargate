@@ -11,6 +11,7 @@ function view(overrides: Partial<ActivityView> = {}): ActivityView {
     status: "collecting",
     reporter: "Twiki",
     summary: "Apollo is checking the implementation.",
+    summaryCurrent: true,
     entries: [
       {
         id: 1,
@@ -39,6 +40,32 @@ test("activity summary is collapsed, accessible, and excludes raw entries and ID
   expect(content.text).toContain("Apollo is checking the implementation.");
   expect(JSON.stringify(content)).not.toContain("Check implementation");
   expect(JSON.stringify(content)).not.toContain("private-");
+});
+
+test("summary mode shows the latest five journal facts without a model summary", () => {
+  for (const summary of [
+    "",
+    "Summary skipped: no reporter configured.",
+    "Summary predates later journal facts.",
+    "Reporter execution unavailable or unconfirmed; no work was replayed.",
+  ]) {
+    const content = activityContent(
+      view({
+        summary,
+        summaryCurrent: false,
+        entries: Array.from({ length: 8 }, (_, id) => ({
+          id,
+          member: "Chief",
+          kind: "note" as const,
+          text: `Milestone ${id} ${"x".repeat(1400)}`,
+        })),
+      }),
+    );
+    expect(content.text).not.toContain("Milestone 2");
+    expect(content.text).toContain("Milestone 3");
+    expect(content.text).toContain("Milestone 7");
+    expect(content.blocks[0]?.child_blocks[0]?.type).toBe("section");
+  }
 });
 
 test("detailed activity attributes each kind and remains literal", () => {

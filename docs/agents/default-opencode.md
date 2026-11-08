@@ -47,7 +47,7 @@ with captain `adama` and four workers, including researcher `gaeta` and ship
 maintenance worker `bosun`:
 
 ```sh
-pogo crew init --team team.example.json \
+pogo crew init --team team.example.json --id galactica \
   --directory /srv/pogo/galactica/captain --project /srv/project \
   --worktrees /srv/pogo/galactica/crew --base origin/main
 ```
@@ -56,11 +56,16 @@ See [ship maintenance](../ship-maintenance.md) for durable captain/crew journals
 the shared ship log, project-owned skill learning and an optional nightly
 inspection through the existing `/cron` form. No schedule is enabled by default.
 
-Team JSON contains `captain: { id, name?, model?, instructions? }` and a
+Team JSON contains `captain: { id, agent?, name?, model?, instructions? }` and a
 nonempty `crew` array. Each worker has the same identity fields plus `role`
 and `permissionProfile` (`coding` or `research`). IDs use lowercase letters,
 digits, `_` and `-`, at most 64 characters. IDs must be unique and distinct
-from the captain. `captain` is reserved as a worker-message recipient.
+from the captain. `captain` and `all` are reserved crew-message aliases.
+Pogo IDs remain short addresses such as `adama` and `apollo`. Optional `agent`
+maps an address to its native OpenCode definition. Generated profiles set native
+IDs and filenames to `<namespace>-captain-<name>.md` or
+`<namespace>-crew-<name>.md`, for example `galactica-crew-apollo.md` and
+`pegasus-crew-apollo.md`. Communications do not need these full native IDs.
 Names/instructions are non-secret text, not credentials. Unknown fields fail.
 Agent IDs must match their assigned names, normalized to lowercase with word
 separators as hyphens. Hidden legacy aliases are rejected: Chief is `chief`,
@@ -97,7 +102,7 @@ environment, not just Pogo's shell. Never put header values in team JSON.
 Without a verified endpoint, history is unavailable; there is no DB fallback.
 
 Permissions follow the explicit profile, never a name. Models use
-`provider/model#variant` (variant optional) and become `agents[id].model`.
+`provider/model#variant` (variant optional) and become `agents[nativeID].model`.
 Omitted models use the existing template default. The engine selects configured
 worker models when creating sessions; existing sessions keep stored models.
 Optional `modelProviders` bounds model-tool discovery/switches. It defaults to
@@ -172,8 +177,12 @@ supplies it. The proxy must publish `opencode-go/deepseek-v4.1-flash`.
 The key variable must exist in the **OpenCode plugin host's** environment,
 not only the Slack gateway's environment. No paid/native route is substituted.
 
-Profile initialization creates Twiki's feature worktree, but not an OpenCode
-agent overlay. `pogo_crew ensure` creates one private Pi conversation, reused
+Profile initialization creates Twiki's feature worktree and a private definition
+at `<captainDirectory>/.local/ship/definitions/<native ID>.md`, not an OpenCode
+agent overlay. The Pi backend consumes that trusted definition when it opens;
+initialization preserves captain edits. Native request hooks advise a reread of
+the shared working agreement only after its content changes, without injecting
+the file contents. `pogo_crew ensure` creates one private Pi conversation, reused
 across assignments and host restarts. Pi storage lives under the team's private
 state directory, separate from OpenCode sessions. Its peer ID is a Pogo handle,
 not an OpenCode session that can be opened with `opencode mini`.
@@ -181,9 +190,11 @@ not an OpenCode session that can be opened with `opencode mini`.
 The captain uses the existing `dispatch`, `wait`, `status`, and `queue: true`
 operations. Final Pi text completes the assigned task automatically; Twiki does
 not call `pogo_crew complete`. Only the originating captain can collect it.
-There is no extra Slack registration or unsolicited captain wakeup. Pi members
-do not support Mesij mail, live urgency, OpenCode history, compaction or model
-switching. Work stops after five minutes or the adapter's 50-turn ceiling.
+There is no extra Slack registration. Coding-enabled Pi members support Mesij
+mail, explicit DM and milestone journals through host-bound native tools. Only
+explicit DM can wake a captain. Self-only `pi_history` reads the current native
+conversation; unified OpenCode history, compaction and model switching remain
+unsupported. Assigned work stops after five minutes or 50 turns.
 
 An interrupted or failed Pi task becomes `uncertain`; it blocks the worker
 instead of resubmitting maintenance automatically. Unconfirmed conversation
@@ -202,7 +213,9 @@ boundary; the profile initializer still refuses conflicting overlays.
 host OS account; a worktree is **not a sandbox**, and there is no Slack tool
 approval UI. Approval instructions are cooperative, not enforced isolation.
 Do not grant coding tools to untrusted tasks. A Pi worker's explicit `tools`
-setting, not its specialism, controls host-tool access.
+setting, not its specialism, controls host-tool access. Tools-none recipients
+return unsupported without storing unreadable mail. Report contexts keep their
+selected tools-off extension list and restart guard.
 
 ## Linear connection
 
@@ -274,9 +287,10 @@ OpenCode reloads local configuration after a save.
 6. Use [batch Slack provisioning](../setup.md) to create or reuse bot apps.
    Register only the captain, not workers, with Pogo. Use the setup output's
    `directory` and `agent` for `backend.directory` and `backend.agent`
-   (`bowser` for the starter, `adama` for Galactica).
+   (`bowser-captain-bowser` for the starter,
+   `galactica-captain-adama` for the example).
 7. For this trusted profile, copy the output's `permissions` array to
-   `backend.permissions` (also in `agents[<captain ID>].permissions`).
+   `backend.permissions` (also in `agents[<native captain ID>].permissions`).
    A session-level deny-all overrides agent allows; leaving that gateway
    default in place intentionally blocks tools.
    Keep the ordinary deny-all default for bots not using this profile.
@@ -349,6 +363,28 @@ reasoning, system prompts and raw tool output, and return historical text as
 untrusted data. Compaction does not remove the stored transcript.
 
 ## Coordination and limits
+
+Use the [crew coordination guide](../crew-coordination.md) for the read-only
+roster, append-only SQLite journal, asynchronous mail and explicit native DM.
+Coding-enabled Pi crew share these handlers; tools-none crew remain tools-off.
+Mail and journal notes never wake agents. Explicit DM can wake the originating
+captain and free colleagues; another captain's busy work receives stored mail
+without steering. No final answer substitutes for a correlated peer reply.
+New tools reuse existing permission actions (`pogo_journal`: `pogo_crew`,
+`pogo_dm`: `pogo_mail`), without replacing stored session permissions.
+
+Captain maintains `<captainDirectory>/WAYS_OF_WORKING.md`. Initialization only
+creates it if absent. All definitions and Pi member instructions reference this
+same path and advise an initial read and a reread when updated. Contents are not
+repeatedly injected. Existing Markdown journals remain history; new milestones,
+checks, blockers, outcomes and useful native-workaround feedback go through
+`pogo_journal`. Working agreements never grant extra authority.
+
+Install namespaced native definitions and explicit `agent` mappings together.
+An operator can switch existing native sessions to those definitions without
+resetting Pogo member IDs or deleting history. Backend agent settings select
+the captain's native ID. Existing physical worktree paths can remain. This
+feature does not perform automatic live session migration or service changes.
 
 Mesij stores ordinary crew messages. Stable bot-scoped identities, inbox
 cursors, worker session IDs, and task ownership belong to the crew integration.

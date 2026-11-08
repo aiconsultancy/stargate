@@ -7,7 +7,7 @@ import type {
 } from "./activity";
 import type { AgentBackend } from "./backend";
 import type { SlackDelivery } from "./gateway";
-import type { Job } from "./store";
+import type { Job, Store } from "./store";
 
 export type ActivityHandle = { finish(): void; cancel(): void };
 type Pending = {
@@ -15,12 +15,16 @@ type Pending = {
   wake: AbortController;
   done: Promise<void>;
   finished: boolean;
+  job: number;
+  cancelled: boolean;
   grace?: ReturnType<typeof setTimeout>;
 };
 type Options = {
   intervalMs?: number;
   startupTimeoutMs?: number;
   finalizeTimeoutMs?: number;
+  settleIntervalMs?: number;
+  store?: Store;
   wait?: (ms: number, signal: AbortSignal) => Promise<void>;
 };
 
@@ -63,8 +67,10 @@ export class ActivityDelivery {
     sessionID: string,
     requestSignal: AbortSignal,
     shutdown: AbortSignal,
+    resume = false,
   ): Promise<ActivityHandle | undefined> {
     const settings = this.settings();
+    const saved = this.options.store?.activity(job.id);
     const start =
       typeof this.backend.startActivity === "function"
         ? this.backend.startActivity.bind(this.backend)
@@ -76,10 +82,13 @@ export class ActivityDelivery {
     if (
       this.closed ||
       settings.detail === "off" ||
-      !start ||
+      (!start && !this.backend.resumeActivity) ||
       !publish ||
       !this.allowed(job) ||
-      this.pending.size >= 8
+      [...this.pending].some((entry) => entry.job === job.id) ||
+      (resume
+        ? [...this.pending].filter((entry) => entry.finished).length >= 32
+        : [...this.pending].filter((entry) => !entry.finished).length >= 8)
     )
       return;
     const ready = Promise.withResolvers<boolean>();
@@ -87,17 +96,31 @@ export class ActivityDelivery {
       controller: new AbortController(),
       wake: new AbortController(),
       done: Promise.resolve(),
-      finished: false,
+      finished: resume,
+      job: job.id,
+      cancelled: false,
     };
     const signal = AbortSignal.any([shutdown, entry.controller.signal]);
-    const cancelled = () => entry.controller.abort();
-    requestSignal.addEventListener("abort", cancelled, { once: true });
-    if (requestSignal.aborted) cancelled();
+    const finish = () => {
+      if (entry.finished && entry.grace) return;
+      entry.finished = true;
+      if ([...this.pending].filter((pending) => pending.finished).length > 32) {
+        entry.controller.abort();
+        return;
+      }
+      entry.grace = setTimeout(
+        () => entry.controller.abort(),
+        this.options.finalizeTimeoutMs ?? 615_000,
+      );
+      const wake = entry.wake;
+      entry.wake = new AbortController();
+      wake.abort();
+    };
     this.pending.add(entry);
     entry.done = (async () => {
       let watch: ActivityWatch | undefined;
       let terminal = false;
-      let ts: string | undefined;
+      let ts = saved?.ts;
       let latest: ActivitySnapshot | undefined;
       try {
         const setupSignal = AbortSignal.any([
@@ -105,34 +128,63 @@ export class ActivityDelivery {
           requestSignal,
           AbortSignal.timeout(this.options.startupTimeoutMs ?? 1000),
         ]);
-        const opened = await abortable(
-          start(
-            sessionID,
-            `slack-job-${job.id}`,
-            settings.reporter,
-            setupSignal,
-          ),
-          setupSignal,
-        );
+        const opened =
+          resume && saved && this.backend.resumeActivity
+            ? this.backend.resumeActivity(sessionID, saved.capture)
+            : await abortable(
+                start?.(
+                  sessionID,
+                  `slack-job-${job.id}`,
+                  settings.reporter,
+                  setupSignal,
+                ) ?? Promise.reject(new Error("Activity start unavailable")),
+                setupSignal,
+              );
         watch = opened;
+        const capture = opened.id ?? saved?.capture;
+        if (capture && !saved)
+          this.options.store?.saveActivity(job.id, {
+            capture,
+            revision: -1,
+            done: false,
+          });
         ready.resolve(true);
-        let revision = -1;
+        if (resume) finish();
+        let revision = saved?.revision ?? -1;
         let finished = false;
         while (!signal.aborted) {
-          if (!this.allowed(job) || this.settings().detail === "off") break;
+          if (!this.allowed(job) || this.settings().detail === "off") {
+            entry.cancelled = true;
+            break;
+          }
           const finishNow = entry.finished && !finished;
           const wake = entry.wake;
           const readSignal = AbortSignal.any([signal, wake.signal]);
           let snapshot: ActivitySnapshot;
           try {
             snapshot = await abortable(
-              finishNow ? opened.finish(readSignal) : opened.read(readSignal),
+              finishNow && !saved?.done
+                ? opened.finish(readSignal)
+                : opened.read(readSignal, saved?.done),
               readSignal,
             );
           } catch (error) {
             if (wake.signal.aborted && !signal.aborted) continue;
             throw error;
           }
+          // A durable Stop is not permission to finish an unconfirmed capture
+          // after restart. Refresh its facts once, without another report.
+          if (
+            saved?.done &&
+            ["collecting", "summarizing"].includes(snapshot.status)
+          )
+            snapshot = {
+              ...snapshot,
+              status: "cancelled",
+              summaryCurrent: false,
+              summary:
+                "Activity collection stopped; later facts remain in the journal.",
+            };
           latest = snapshot;
           if (finishNow) finished = true;
           const isTerminal = ["complete", "unavailable", "cancelled"].includes(
@@ -157,16 +209,42 @@ export class ActivityDelivery {
               signal,
             );
             revision = snapshot.revision;
+            if (capture)
+              this.options.store?.saveActivity(job.id, {
+                capture,
+                ...(ts ? { ts } : {}),
+                revision,
+                done: isTerminal,
+              });
           }
           terminal = isTerminal;
+          if (terminal && capture)
+            this.options.store?.saveActivity(job.id, {
+              capture,
+              ...(ts ? { ts } : {}),
+              revision,
+              done: true,
+            });
           if (terminal) break;
           try {
-            await this.wait(this.options.intervalMs ?? 5000, readSignal);
+            await this.wait(
+              entry.finished
+                ? (this.options.settleIntervalMs ?? 15_000)
+                : (this.options.intervalMs ?? 5000),
+              readSignal,
+            );
           } catch (error) {
             if (!wake.signal.aborted || signal.aborted) throw error;
           }
         }
-      } catch {
+      } catch (error) {
+        const progress = this.options.store?.activity(job.id);
+        if (
+          progress &&
+          error instanceof Error &&
+          /does not own|expired|capture.*missing/i.test(error.message)
+        )
+          this.options.store?.saveActivity(job.id, { ...progress, done: true });
         if (!signal.aborted)
           this.log.warn(
             { job: job.id },
@@ -174,29 +252,48 @@ export class ActivityDelivery {
           );
       } finally {
         if (entry.grace) clearTimeout(entry.grace);
-        requestSignal.removeEventListener("abort", cancelled);
         ready.resolve(false);
-        if (watch && !terminal) {
+        if (!this.allowed(job) || this.settings().detail === "off")
+          entry.cancelled = true;
+        if (entry.cancelled) {
+          const progress = this.options.store?.activity(job.id);
+          if (progress)
+            this.options.store?.saveActivity(job.id, {
+              ...progress,
+              done: true,
+            });
+        }
+        if (
+          watch &&
+          !terminal &&
+          !saved?.done &&
+          !shutdown.aborted &&
+          !this.closed
+        ) {
           const cleanup = AbortSignal.timeout(2000);
-          await abortable(watch.cancel(cleanup), cleanup).catch(() => {});
+          if (entry.cancelled)
+            await abortable(watch.cancel(cleanup), cleanup).catch(() => {});
+          else await abortable(watch.finish(cleanup), cleanup).catch(() => {});
         }
         const detail = this.settings().detail;
         if (
           !terminal &&
+          !shutdown.aborted &&
+          !this.closed &&
           ts &&
           latest &&
           this.allowed(job) &&
           detail !== "off"
         ) {
           const cleanup = AbortSignal.timeout(2000);
-          const aborted =
-            requestSignal.aborted || shutdown.aborted || this.closed;
+          const aborted = entry.cancelled;
           await abortable(
             publish(
               job.channel,
               job.thread,
               {
                 ...latest,
+                summaryCurrent: false,
                 revision: latest.revision + 1,
                 status: aborted ? "cancelled" : "unavailable",
                 summary: aborted
@@ -215,21 +312,24 @@ export class ActivityDelivery {
     })();
     if (!(await ready.promise)) return;
     return {
-      finish: () => {
-        if (entry.finished || !this.pending.has(entry) || signal.aborted)
-          return;
-        entry.finished = true;
-        // Finalization can outlive the request, but cannot block forever.
-        entry.grace = setTimeout(
-          () => entry.controller.abort(),
-          this.options.finalizeTimeoutMs ?? 30_000,
-        );
-        const wake = entry.wake;
-        entry.wake = new AbortController();
-        wake.abort();
+      finish,
+      cancel: () => {
+        entry.cancelled = true;
+        entry.controller.abort();
       },
-      cancel: () => entry.controller.abort(),
     };
+  }
+
+  async resume(job: Job, sessionID: string, shutdown: AbortSignal) {
+    if (!this.options.store?.activity(job.id) || !this.backend.resumeActivity)
+      return;
+    await this.start(
+      job,
+      sessionID,
+      new AbortController().signal,
+      shutdown,
+      true,
+    );
   }
 
   async close() {

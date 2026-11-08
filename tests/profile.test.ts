@@ -14,7 +14,12 @@ import {
 import { join } from "node:path";
 import { runCli } from "../src/cli";
 import { crewPermissions } from "../src/crew/policy";
-import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
+import {
+  defaultTeam,
+  profileTeam,
+  type Team,
+  teamSchema,
+} from "../src/crew/team";
 import { initializeProfile, renderProfile } from "../src/profile";
 
 const directories: string[] = [];
@@ -60,7 +65,7 @@ test("default profile uses proxy, durable crew, and 20% compaction buffer", asyn
   const { options } = await fixture();
   const config = await renderProfile(options, "daisy");
   expect(config.model).toBe("openai-proxy/gpt-6.1-sol");
-  expect(config.default_agent).toBe("daisy");
+  expect(config.default_agent).toBe("bowser-crew-daisy");
   expect(config.compaction).toMatchObject({ auto: true, buffer: "20%" });
   expect(config.experimental).toMatchObject({ background_compaction: true });
   expect(Object.hasOwn(config, "mcp")).toBe(false);
@@ -127,7 +132,7 @@ test("direct trusted team tools do not require individual connector grants", asy
   }
   const team = { ...defaultTeam, toolAccess: "direct" as const };
   const profile = await renderProfile({ ...options, team }, team.captain.id);
-  expect(profile.agents[team.captain.id]?.permissions).toEqual(
+  expect(profile.agents["bowser-captain-bowser"]?.permissions).toEqual(
     crewPermissions("captain", "direct"),
   );
 });
@@ -151,7 +156,7 @@ test("profile init creates named feature worktrees, preserves source and reuses 
     ).trim();
     expect(branch).toBe(`crew/bowser-${name}`);
     const prompt = await readFile(
-      join(directory, ".opencode", "agents", `${name}.md`),
+      join(directory, ".opencode", "agents", `bowser-crew-${name}.md`),
       "utf8",
     );
     expect(prompt).not.toContain("{{");
@@ -182,7 +187,12 @@ test("profile init creates named feature worktrees, preserves source and reuses 
 test("profile init refuses conflicting files rather than overwriting work", async () => {
   const { options } = await fixture();
   await initializeProfile(options);
-  const path = join(options.directory, ".opencode", "agents", "bowser.md");
+  const path = join(
+    options.directory,
+    ".opencode",
+    "agents",
+    "bowser-captain-bowser.md",
+  );
   await writeFile(path, "User's custom instructions\n");
   await expect(initializeProfile(options)).rejects.toThrow("existing");
   expect(await readFile(path, "utf8")).toBe("User's custom instructions\n");
@@ -209,7 +219,12 @@ test("ship records cover the configured roster and preserve operator notes", asy
     ...Object.entries(result.worktrees),
   ]) {
     const prompt = await readFile(
-      join(directory ?? "", ".opencode", "agents", `${id}.md`),
+      join(
+        directory ?? "",
+        ".opencode",
+        "agents",
+        `bowser-${id === team.captain.id ? "captain" : "crew"}-${id}.md`,
+      ),
       "utf8",
     );
     expect(prompt).toContain(log);
@@ -228,6 +243,43 @@ test("ship records cover the configured roster and preserve operator notes", asy
   );
 });
 
+test("shared working agreement is preserved and referenced, never injected into definitions", async () => {
+  const { options } = await fixture();
+  const path = join(options.directory, "WAYS_OF_WORKING.md");
+  await mkdir(options.directory, { recursive: true });
+  await writeFile(path, "CAPTAIN EDIT ONE\n");
+  const input = { ...options, namespace: "galactica", team };
+  const result = await initializeProfile(input);
+  expect(await readFile(path, "utf8")).toBe("CAPTAIN EDIT ONE\n");
+  for (const [id, directory] of [
+    ["adama", options.directory],
+    ...Object.entries(result.worktrees),
+  ]) {
+    const native = `galactica-${id === "adama" ? "captain" : "crew"}-${id}`;
+    const prompt = await readFile(
+      join(directory ?? "", ".opencode", "agents", `${native}.md`),
+      "utf8",
+    );
+    expect(prompt).toContain(path);
+    expect(prompt).toContain("reread it when updated");
+    expect(prompt).not.toContain("CAPTAIN EDIT ONE");
+    const config = await Bun.file(
+      join(directory ?? "", ".opencode", "opencode.json"),
+    ).json();
+    expect(config.instructions).toBeUndefined();
+  }
+  await writeFile(path, "CAPTAIN EDIT TWO\n");
+  await initializeProfile(input);
+  expect(await readFile(path, "utf8")).toBe("CAPTAIN EDIT TWO\n");
+  const other = await renderProfile(
+    { ...input, namespace: "pegasus" },
+    "starbuck",
+  );
+  expect(other.default_agent).toBe("pegasus-crew-starbuck");
+  expect(other.plugins[0]?.options.team.crew[0]?.id).toBe("starbuck");
+  expect(() => profileTeam(team, "x".repeat(64))).toThrow();
+});
+
 test("portable Bosun is an ordinary configured worker, not a runtime default", async () => {
   const { options } = await fixture();
   const example = teamSchema.parse(
@@ -242,12 +294,12 @@ test("portable Bosun is an ordinary configured worker, not a runtime default", a
   const directory = result.worktrees["bosun"];
   expect(directory).toBeDefined();
   const config = await renderProfile({ ...options, team: example }, "bosun");
-  expect(config.agents["bosun"]?.model).toBe(bosun?.model);
+  expect(config.agents["galactica-crew-bosun"]?.model).toBe(bosun?.model);
   expect(config.skills).toContain(
     join(options.projectDirectory, ".agents", "opco", "skills"),
   );
   const prompt = await readFile(
-    join(directory ?? "", ".opencode", "agents", "bosun.md"),
+    join(directory ?? "", ".opencode", "agents", "galactica-crew-bosun.md"),
     "utf8",
   );
   expect(prompt).toContain(bosun?.instructions ?? "missing Bosun instructions");
@@ -293,8 +345,26 @@ test("Pi crew receives a worktree but no OpenCode agent or session profile", asy
   expect(
     await Bun.file(join(worktree, ".opencode", "opencode.json")).exists(),
   ).toBe(false);
+  const definitionPath = join(
+    options.directory,
+    ".local",
+    "ship",
+    "definitions",
+    "bowser-crew-twiki.md",
+  );
+  const definition = await readFile(definitionPath, "utf8");
+  expect(definition).toContain("Pogo address: twiki");
+  expect(definition).toContain(join(options.directory, "WAYS_OF_WORKING.md"));
+  expect(definition).toContain("reread it when updated");
+  expect(definition).not.toContain("# Ways of working");
+  expect((await stat(definitionPath)).mode & 0o777).toBe(0o600);
+  await writeFile(definitionPath, `${definition}\nCaptain amendment.\n`);
+  await initializeProfile({ ...options, team: mixed });
+  expect(await readFile(definitionPath, "utf8")).toBe(
+    `${definition}\nCaptain amendment.\n`,
+  );
   const prompt = await readFile(
-    join(options.directory, ".opencode", "agents", "adama.md"),
+    join(options.directory, ".opencode", "agents", "bowser-captain-adama.md"),
     "utf8",
   );
   expect(prompt).toContain("twiki (Twiki)");
@@ -373,21 +443,21 @@ test("custom profiles select captain, agent models, and permissions independent 
     options: { namespace: _, ...options },
   } = await fixture();
   const captain = await renderProfile({ ...options, team }, "adama");
-  expect(captain.default_agent).toBe("adama");
-  expect(captain.agents["adama"]?.model).toBe(team.captain.model);
-  expect(captain.agents["adama"]?.permissions).toEqual(
+  expect(captain.default_agent).toBe("adama-captain-adama");
+  expect(captain.agents["adama-captain-adama"]?.model).toBe(team.captain.model);
+  expect(captain.agents["adama-captain-adama"]?.permissions).toEqual(
     crewPermissions("captain"),
   );
   expect(captain.plugins[0]?.options.namespace).toBe("adama");
-  expect(captain.plugins[0]?.options.team).toEqual(team);
+  expect(captain.plugins[0]?.options.team).toEqual(profileTeam(team, "adama"));
   expect(Object.keys(captain.plugins[0]?.options.worktrees ?? {})).toEqual([
     "starbuck",
     "gaeta",
   ]);
   const coding = await renderProfile({ ...options, team }, "starbuck");
-  expect(coding.agents["starbuck"]?.model).toBe(team.crew[0]?.model);
+  expect(coding.agents["adama-crew-starbuck"]?.model).toBe(team.crew[0]?.model);
   const research = await renderProfile({ ...options, team }, "gaeta");
-  expect(research.agents["gaeta"]?.permissions).toEqual(
+  expect(research.agents["adama-crew-gaeta"]?.permissions).toEqual(
     crewPermissions("research"),
   );
   await expect(renderProfile({ ...options, team }, "bowser")).rejects.toThrow(
@@ -407,14 +477,14 @@ test("custom init creates only configured worktrees, generic prompts, and genera
   const before = git("status", "--porcelain");
   const result = await initializeProfile({ ...options, team });
   expect(Object.keys(result.worktrees)).toEqual(["starbuck", "gaeta"]);
-  expect(result.agent).toBe("adama");
+  expect(result.agent).toBe("adama-captain-adama");
   expect(result.permissions).toEqual(crewPermissions("captain"));
   expect(git("status", "--porcelain")).toBe(before);
   expect(
     await readFile(join(options.projectDirectory, "AGENTS.md"), "utf8"),
   ).toBe("Uncommitted project rules\n");
   const prompt = await readFile(
-    join(options.directory, ".opencode", "agents", "adama.md"),
+    join(options.directory, ".opencode", "agents", "adama-captain-adama.md"),
     "utf8",
   );
   expect(prompt).toContain("Protect the fleet.");
@@ -437,7 +507,7 @@ test("custom init creates only configured worktrees, generic prompts, and genera
       }),
     ).toBe("");
     const worker = await readFile(
-      join(directory, ".opencode", "agents", `${id}.md`),
+      join(directory, ".opencode", "agents", `adama-crew-${id}.md`),
       "utf8",
     );
     expect(worker).not.toContain("{{");
@@ -454,7 +524,9 @@ test("custom init creates only configured worktrees, generic prompts, and genera
     "utf8",
   );
   for (const id of ["adama", "starbuck", "gaeta"])
-    expect(excludes).toContain(`/.agents/opco/agents/${id}.md`);
+    expect(excludes).toContain(
+      `/.agents/opco/agents/adama-${id === "adama" ? "captain" : "crew"}-${id}.md`,
+    );
   expect(await initializeProfile({ ...options, team })).toEqual(result);
 });
 
@@ -473,7 +545,7 @@ test("independent team namespaces and captains share a source without sharing di
   });
   expect(first.namespace).toBe("adama");
   expect(second.namespace).toBe("pegasus");
-  expect(second.agent).toBe("cain");
+  expect(second.agent).toBe("pegasus-captain-cain");
   expect(first.stateDirectory).not.toBe(second.stateDirectory);
   expect(first.worktrees["starbuck"]).not.toBe(second.worktrees["starbuck"]);
   expect(git("branch", "--list", "crew/*")).toContain("crew/adama-starbuck");
@@ -483,8 +555,8 @@ test("independent team namespaces and captains share a source without sharing di
     join(options.projectDirectory, ".git", "info", "exclude"),
     "utf8",
   );
-  expect(excludes).toContain("/.opencode/agents/adama.md");
-  expect(excludes).toContain("/.opencode/agents/cain.md");
+  expect(excludes).toContain("/.opencode/agents/adama-captain-adama.md");
+  expect(excludes).toContain("/.opencode/agents/pegasus-captain-cain.md");
 });
 
 test("custom init preserves canonical config and refuses tracked config", async () => {
@@ -597,7 +669,7 @@ test("crew CLI loads non-secret --team JSON and rejects invalid input without ec
   const config = await Bun.file(
     join(options.directory, ".opencode", "opencode.json"),
   ).json();
-  expect(config.default_agent).toBe("adama");
+  expect(config.default_agent).toBe("adama-captain-adama");
   expect(config.plugins[0].options.namespace).toBe("adama");
-  expect(config.plugins[0].options.team).toEqual(team);
+  expect(config.plugins[0].options.team).toEqual(profileTeam(team, "adama"));
 });

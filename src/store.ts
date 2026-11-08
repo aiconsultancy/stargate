@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { z } from "zod";
 import { cancellationNotice } from "./cancellation";
 import { failureText, type RequestFailure } from "./request-failure";
 
@@ -20,6 +21,14 @@ export type Job = Incoming & {
   attempts: number;
   failure?: RequestFailure | null;
 };
+
+const activityProgress = z.strictObject({
+  ts: z.string().optional(),
+  capture: z.string(),
+  revision: z.number().int(),
+  done: z.boolean(),
+});
+export type ActivityProgress = z.infer<typeof activityProgress>;
 
 /** Another writer moved the transcript cursor or its outbox rows. */
 export class TranscriptConflict extends Error {
@@ -67,6 +76,7 @@ export class Store {
     };
     column("jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "failure", "TEXT");
+    column("jobs", "activity", "TEXT");
     // Newest native message accounted for in Slack; NULL needs a baseline.
     column("sessions", "cursor", "TEXT");
     // Server-wide settle events look up mappings by native session ID.
@@ -91,6 +101,29 @@ export class Store {
           $text: input.text,
         }).changes > 0
     );
+  }
+
+  activity(id: number): ActivityProgress | undefined {
+    const raw = this.db
+      .query<{ activity: string | null }, [number]>(
+        "SELECT activity FROM jobs WHERE id=?",
+      )
+      .get(id)?.activity;
+    return raw ? activityProgress.parse(JSON.parse(raw)) : undefined;
+  }
+
+  saveActivity(id: number, progress: ActivityProgress) {
+    this.db
+      .query("UPDATE jobs SET activity=? WHERE id=?")
+      .run(JSON.stringify(activityProgress.parse(progress)), id);
+  }
+
+  latestActivity(botKey: string, conversation: string): Job | null {
+    return this.db
+      .query<Job, [string, string]>(
+        "SELECT * FROM jobs WHERE botKey=? AND conversation=? AND activity IS NOT NULL ORDER BY id DESC LIMIT 1",
+      )
+      .get(botKey, conversation);
   }
 
   follows(conversation: string): boolean {

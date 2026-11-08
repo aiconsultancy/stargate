@@ -1,21 +1,29 @@
 ## Ship log, journals and learned skills
 
 Shared ship log: {{shipLog}}
-Your journal: {{journalPath}}
-Team journals: {{journalDirectory}}/<agent ID>.md
+Historical Markdown journal: {{journalPath}}
+Historical team journals: {{journalDirectory}}/<agent ID>.md
+Shared working agreement: {{waysOfWorking}}
+Native definition ID: {{nativeAgent}}. Pogo communication address: {{agentID}}.
 Project skill library: {{skillsDirectory}}/<name>/SKILL.md
 
-Read relevant log entries and your journal before related work. Write concise
-entries at task boundaries, not every turn. Skip entries with no useful change.
-Record timestamp, agent ID, task ID or work reference, then Findings, Checks,
-Actions and Lessons; omit empty headings. Distinguish verified facts from
-assumptions. Keep task-specific details in your own journal. Append reusable
+Read the shared working agreement initially and reread it when updated.
+Captain maintains it; crew propose edits through ordinary messages or journal
+notes. This file does not override operator instructions or runtime permissions.
+Read relevant log entries and historical journals before related work. Write
+concise milestones at task boundaries, not every turn. Write checks, blockers
+and outcomes through pogo_journal, not every
+tool call. Host supplies ID, timestamp, member and task. Distinguish verified
+facts from assumptions. Record Pogo limitations and useful authenticated native
+workarounds as ordinary journal notes. Do not create a feedback tracker or loop.
+Prefer Pogo tools when adequate; native self-service stays within existing
+scope and authentication, without another storage owner or uncertain replay.
+Append reusable
 lessons and useful inspection findings to the shared ship log, with evidence
 paths and next actions. Preserve other entries; append each complete entry in
 one write. Do not copy prompts, transcripts, raw tool output or secrets.
-Captain assignments to Pi workers must include the shared log, that worker's
-journal path from the directory above, and these task-boundary recording rules;
-Pi workers do not load this OpenCode profile.
+Pi workers receive the same shared working-agreement path in their definition;
+do not repeatedly send its contents. Reports remain tools-off.
 
 You may create or improve useful project-owned skills from verified lessons.
 Load skill-creator before editing a skill. Use the project's canonical

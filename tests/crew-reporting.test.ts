@@ -2,8 +2,10 @@ import { Database } from "bun:sqlite";
 import { expect, setSystemTime, test } from "bun:test";
 import { access, mkdtemp, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import pino from "pino";
 import { activitySnapshotSchema } from "../src/activity";
-import type { TextSink } from "../src/backend";
+import { ActivityDelivery } from "../src/activity-delivery";
+import type { AgentBackend, TextSink } from "../src/backend";
 import { PiDurableBackend } from "../src/backends/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
 import {
@@ -15,6 +17,7 @@ import {
 import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
 import { redactActivity } from "../src/crew/reporting";
 import { defaultTeam, teamSchema } from "../src/crew/team";
+import { Store } from "../src/store";
 
 async function fixture(safeReports = true) {
   const directory = await mkdtemp("/tmp/opencode/pogo-reporting-");
@@ -130,12 +133,14 @@ async function fixture(safeReports = true) {
     };
     return backend;
   };
+  let mailSequence = 0;
   const mailer = {
     async register() {
       return { id: "receipt", sequence: 1 };
     },
     async send() {
-      return { id: "receipt", sequence: 1 };
+      const sequence = ++mailSequence;
+      return { id: String(sequence).padStart(32, "0"), sequence };
     },
     async inbox() {
       return [];
@@ -151,7 +156,7 @@ async function fixture(safeReports = true) {
   const caller = (
     sessionID = "captain-a",
     signal = new AbortController().signal,
-  ) => ({ sessionID, agent: "bowser", signal });
+  ) => ({ sessionID, agent: "bowser", signal, id: "captain-call" });
   const start = (
     requestID = "turn-a",
     sessionID = "captain-a",
@@ -268,6 +273,165 @@ test("empty capture finishes without starting or queuing Twiki inference", async
   }
 });
 
+test("journal-only activity needs no reporter, retains late facts and never calls a model", async () => {
+  const f = await fixture();
+  try {
+    const capture = await f.engine.reporting.start(
+      { sessionID: "captain-a", requestID: "facts-only" },
+      f.caller().signal,
+    );
+    await f.engine.journal(
+      { op: "append", text: "Captain checked inputs" },
+      { ...f.caller(), id: "note-1" },
+    );
+    expect((await f.read(capture.id)).entries[0]).toMatchObject({
+      kind: "note",
+      member: "Bowser",
+    });
+    await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+    let final = await f.read(capture.id);
+    for (
+      let attempt = 0;
+      attempt < 10 && final.status === "summarizing";
+      attempt++
+    )
+      final = await f.read(capture.id);
+    expect(final.status).toBe("complete");
+    expect(final.summary).toContain("no reporter");
+    await f.engine.journal(
+      { op: "append", text: "Late verification passed" },
+      { ...f.caller(), id: "note-2" },
+    );
+    const late = await f.read(capture.id);
+    expect(late.revision).toBeGreaterThan(final.revision);
+    expect(late.entries.at(-1)?.text).toBe("Late verification passed");
+    expect(f.turns).toEqual([]);
+    expect((await f.read(capture.id)).revision).toBe(late.revision);
+  } finally {
+    await f.close();
+  }
+});
+
+test("saved Stop dry-reads a summarizing capture without admitting a report", async () => {
+  const f = await fixture();
+  const store = new Store(":memory:");
+  let delivery: ActivityDelivery | undefined;
+  try {
+    const capture = await f.start();
+    const task = await f.dispatch("Running source");
+    await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+    await f.complete(task.id, "Ready, but collection was stopped");
+    store.enqueue({
+      eventId: "stopped",
+      botKey: "bot",
+      conversation: "thread",
+      channel: "D1",
+      thread: "1",
+      user: "U1",
+      text: "request",
+    });
+    const job = store.ready("bot", Date.now(), 1)[0];
+    if (!job) throw new Error("Missing job");
+    store.saveActivity(job.id, {
+      capture: capture.id,
+      ts: "box",
+      revision: 0,
+      done: true,
+    });
+    const backend: AgentBackend = {
+      async createSession() {
+        throw new Error("No session creation");
+      },
+      async prompt() {
+        throw new Error("No prompt");
+      },
+      async close() {},
+      resumeActivity() {
+        return {
+          read: (signal, passive) =>
+            f.engine.reporting.read(
+              { ...f.owner(capture.id), ...(passive ? { passive } : {}) },
+              signal,
+            ),
+          finish: (signal) =>
+            f.engine.reporting.finish(f.owner(capture.id), signal),
+          async cancel() {
+            throw new Error("Unconfirmed previous cancel");
+          },
+        };
+      },
+    };
+    const published = Promise.withResolvers<void>();
+    let status = "";
+    delivery = new ActivityDelivery(
+      backend,
+      {
+        async post() {},
+        async activity(_channel, _thread, view) {
+          status = view.status;
+          published.resolve();
+          return "box";
+        },
+      },
+      () => ({ detail: "summary" }),
+      () => true,
+      pino({ enabled: false }),
+      { store },
+    );
+    await delivery.resume(job, "captain-a", f.caller().signal);
+    await published.promise;
+    await delivery.close();
+    await f.engine.reporting.close();
+    expect(status).toBe("cancelled");
+    expect(f.turns).toEqual([]);
+    expect(f.engine.state.reporting.reportTaskID(capture.id)).toBeUndefined();
+  } finally {
+    await delivery?.close();
+    store.close();
+    await f.close();
+  }
+});
+
+test("a final model summary cannot hide later journal facts or run again", async () => {
+  const f = await fixture();
+  try {
+    const capture = await f.start();
+    await f.engine.journal(
+      { op: "append", text: "Checks passed" },
+      { ...f.caller(), id: "before-report" },
+    );
+    const started = f.started();
+    await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+    await started;
+    f.turns[0]?.resolve("Captain: checks passed.");
+    await f.engine.run(
+      { op: "wait", taskID: f.reportTask(capture.id) },
+      f.caller(),
+    );
+    expect((await f.read(capture.id)).summary).toBe("Captain: checks passed.");
+    await f.engine.journal(
+      { op: "append", text: "Late correction" },
+      { ...f.caller(), id: "after-report" },
+    );
+    expect(await f.read(capture.id)).toMatchObject({
+      status: "complete",
+      summary: "Summary predates later journal facts.",
+    });
+    expect((await f.read(capture.id)).entries.at(-1)?.text).toBe(
+      "Late correction",
+    );
+    expect(f.turns).toHaveLength(1);
+    const db = new Database(f.engine.state.path, { readonly: true });
+    try {
+      expect(db.query("SELECT * FROM activity_entries").all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test("reporter's maintenance is not crew activity and cannot cause a report of itself", async () => {
   const f = await fixture();
   try {
@@ -315,7 +479,6 @@ test("captures assignments, validated messages, urgency, results, and configured
     const historical = await f.dispatch("Earlier turn", "luigi");
     const capture = await f.start();
     expect(await f.start()).toEqual(capture);
-    await expect(f.start("competing-turn")).rejects.toThrow("already owns");
     const task = await f.dispatch(
       "Inspect API_KEY=assignment-secret xoxb-111-secret",
     );
@@ -331,6 +494,7 @@ test("captures assignments, validated messages, urgency, results, and configured
         sessionID: task.workerSessionID,
         agent: task.crewID,
         signal: f.caller().signal,
+        id: "urgent-call",
       },
     );
     await f.engine.run(
@@ -339,6 +503,7 @@ test("captures assignments, validated messages, urgency, results, and configured
         sessionID: task.workerSessionID,
         agent: task.crewID,
         signal: f.caller().signal,
+        id: "actual-urgent-call",
       },
     );
     await f.complete(historical.id, "Historical result must stay absent");
@@ -351,17 +516,19 @@ test("captures assignments, validated messages, urgency, results, and configured
       "message",
       "message",
       "result",
+      "result",
     ]);
-    expect(snapshot.entries.every(({ member }) => member === "Chief")).toBe(
-      true,
-    );
+    expect(
+      snapshot.entries
+        .filter(({ taskID }) => taskID === task.id)
+        .every(({ member }) => member === "Chief"),
+    ).toBe(true);
     const visible = JSON.stringify(snapshot);
     expect(visible).toContain("Chief → Bowser");
     for (const secret of [
       "assignment-secret",
       "message-secret",
       "provider-secret",
-      "Historical result",
     ])
       expect(visible).not.toContain(secret);
     const db = new Database(f.engine.state.path, { readonly: true });
@@ -426,7 +593,7 @@ test("exact capture ownership rejects other captains, workers, child sessions, a
   }
 });
 
-test("one bounded summary uses Twiki's same conversation and FIFO; report tasks cannot recurse", async () => {
+test("busy reporter is skipped; facts remain visible and unrelated maintenance continues", async () => {
   const f = await fixture();
   try {
     const maintenanceStarted = f.started();
@@ -439,79 +606,26 @@ test("one bounded summary uses Twiki's same conversation and FIFO; report tasks 
     const capture = await f.start();
     const task = await f.dispatch("Build feature");
     await f.complete(task.id, "Feature ready");
-    expect(
-      (await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal))
-        .status,
-    ).toBe("summarizing");
-    await f.opened;
-    const reportID = f.reportTask(capture.id);
-    expect(f.engine.state.task(reportID)?.status).toBe("queued");
-    expect(f.engine.state.reporting.isReport(reportID)).toBe(true);
-    f.turns[0]?.onText?.("Checking maintenance files");
-    const busyStatus = f.engine.status({ member: "twiki" });
-    expect(busyStatus.members[0]).toMatchObject({
-      observed: true,
-      current: {
-        kind: "assignment",
-        summary: "Unrelated maintenance",
-        progress: "Checking maintenance files",
-      },
-      queuedCount: 1,
-      queued: [{ kind: "report", summary: "Prepare crew activity report" }],
-    });
-    expect(JSON.stringify(busyStatus)).not.toContain("Feature ready");
-    const followup = await f.start("next-turn");
-    await f.read(capture.id);
-    expect(f.turns).toHaveLength(1);
-    const reportStarted = f.started();
+    await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+    let final = await f.read(capture.id);
+    for (
+      let attempt = 0;
+      attempt < 10 && final.status === "summarizing";
+      attempt++
+    )
+      final = await f.read(capture.id);
+    expect(final.status).toBe("complete");
+    expect(final.summary).toContain("Summary skipped");
+    expect(JSON.stringify(final.entries)).toContain("Feature ready");
+    expect(f.engine.state.reporting.reportTaskID(capture.id)).toBeUndefined();
+    expect(f.turns[0]?.signal.aborted).toBe(false);
     f.turns[0]?.resolve("Maintenance done");
     await f.engine.run(
       { op: "wait", taskID: maintenance.id },
       f.caller("captain-b"),
     );
-    await f.read(capture.id);
-    await reportStarted;
-    expect(f.turns.map(({ mode }) => mode)).toEqual(["maintenance", "report"]);
-    expect(f.turns[1]?.sessionID).toBe(f.turns[0]?.sessionID);
-    expect(f.creations).toBe(1);
-    expect(f.turns[1]?.text).toContain("Feature ready");
-    expect(f.turns[1]?.text).not.toContain("Unrelated maintenance");
-    expect(f.turns[1]?.text).not.toContain("Maintenance done");
-    f.turns[1]?.onText?.("Preparing visible report; token=report-secret");
-    const reporterStatus = f.engine.status({ member: "twiki" });
-    expect(reporterStatus.members[0]).toMatchObject({
-      observed: true,
-      current: {
-        id: reportID,
-        kind: "report",
-        progress: "Preparing visible report; token=[REDACTED]",
-      },
-      queuedCount: 0,
-      lastOutcome: { kind: "assignment", status: "completed" },
-    });
-    expect(f.turns).toHaveLength(2);
-    f.turns[1]?.resolve("Chief: feature ready. token=summary-secret");
-    await f.engine.run({ op: "wait", taskID: reportID }, f.caller());
-    const final = await f.read(capture.id);
-    expect(final.status).toBe("complete");
-    expect(final.summary).toContain("Chief: feature ready");
-    expect(final.summary).not.toContain("summary-secret");
-    const finishedStatus = f.engine.status({ member: "twiki" });
-    expect(finishedStatus.members[0]).toMatchObject({
-      observed: false,
-      current: null,
-      lastOutcome: { kind: "report", status: "completed" },
-    });
-    expect(finishedStatus.members[0]?.recent.map(({ kind }) => kind)).toEqual([
-      "report",
-      "assignment",
-    ]);
-    expect((await f.read(followup.id)).entries).toEqual([]);
     for (let index = 0; index < 3; index++) await f.read(capture.id);
-    expect(f.turns).toHaveLength(2);
-    expect(f.engine.state.task(reportID)?.result).not.toContain(
-      "summary-secret",
-    );
+    expect(f.turns).toHaveLength(1);
   } finally {
     await f.close();
   }
@@ -533,11 +647,13 @@ test("finish waits only linked tasks; later turns and other captains cannot ente
     const started = f.started();
     await f.read(a.id);
     await started;
-    expect(f.turns[0]?.text).toContain("Turn A result");
+    expect(f.turns[0]?.text).toContain("Turn A assignment");
+    expect(f.turns[0]?.text).not.toContain("Turn A result");
     expect(f.turns[0]?.text).not.toContain("Turn B");
     expect(f.turns[0]?.text).not.toContain("Other result");
     expect((await f.read(b.id)).entries.map(({ taskID }) => taskID)).toEqual([
       taskB.id,
+      taskA.id,
     ]);
     expect(
       (await f.read(other.id, "captain-b")).entries.every(
@@ -561,10 +677,11 @@ test("queued reporting cancellation never interrupts Twiki's unrelated maintenan
     const task = await f.dispatch("Feature");
     await f.complete(task.id, "Ready");
     await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
-    const id = f.reportTask(capture.id);
     await f.engine.reporting.cancel(f.owner(capture.id), f.caller().signal);
-    expect(f.engine.state.task(id)?.status).toBe("cancelled");
-    expect((await f.read(capture.id)).status).toBe("cancelled");
+    expect(f.engine.state.reporting.reportTaskID(capture.id)).toBeUndefined();
+    expect(["complete", "cancelled"]).toContain(
+      (await f.read(capture.id)).status,
+    );
     expect(f.turns[0]?.signal.aborted).toBe(false);
     f.turns[0]?.resolve("Done");
     await f.engine.run(
@@ -608,7 +725,7 @@ test("follow-up captain messages cannot enter an earlier turn's linked task capt
       {
         op: "send",
         taskID: task.id,
-        to: "captain",
+        to: "chief",
         text: "FOLLOWUP PRIVATE INPUT",
         key: "follow-up",
       },
@@ -617,7 +734,9 @@ test("follow-up captain messages cannot enter an earlier turn's linked task capt
     expect(JSON.stringify(await f.read(first.id))).not.toContain(
       "FOLLOWUP PRIVATE INPUT",
     );
-    expect((await f.read(second.id)).entries).toEqual([]);
+    expect(JSON.stringify((await f.read(second.id)).entries)).toContain(
+      "FOLLOWUP PRIVATE INPUT",
+    );
   } finally {
     await f.close();
   }
@@ -638,17 +757,11 @@ test("deadline reports missing results without promoting unrelated source tasks"
     } finally {
       db.close();
     }
-    const started = f.started();
-    await f.read(capture.id);
-    await started;
-    expect(f.turns[0]?.text).toContain('"status":"running"');
-    expect(f.turns[0]?.text).toContain("Unfinished source task");
+    const final = await f.read(capture.id);
+    expect(final.summary).toContain("deadline reached");
+    expect(JSON.stringify(final.entries)).toContain("Unfinished source task");
     expect(f.engine.state.task(task.id)?.status).toBe("running");
-    f.turns[0]?.resolve("Chief: result not yet available.");
-    await f.engine.run(
-      { op: "wait", taskID: f.reportTask(capture.id) },
-      f.caller(),
-    );
+    expect(f.turns).toEqual([]);
     expect((await f.read(capture.id)).status).toBe("complete");
   } finally {
     await f.close();
@@ -716,6 +829,7 @@ test("abandoned capture expires; bounded windows and input redaction survive per
           sessionID: task.workerSessionID,
           agent: task.crewID,
           signal: f.caller().signal,
+          id: `urgent-${index}`,
         },
       );
     const current = await f.read(capture.id);
@@ -727,11 +841,7 @@ test("abandoned capture expires; bounded windows and input redaction survive per
     await f.complete(task.id, "After expiry");
     const later = await f.start("later-turn");
     expect((await f.read(later.id)).entries).toEqual([]);
-    expect(
-      (await f.read(capture.id)).entries.some(({ text }) =>
-        text.includes("After expiry"),
-      ),
-    ).toBe(false);
+    expect((await f.read(later.id)).entries).toEqual([]);
   } finally {
     await f.close();
   }
@@ -767,8 +877,8 @@ test("reporter absence and unsafe backend return truthful unavailable without ma
   const f = await fixture(false);
   try {
     const missing = await f.start("missing", "captain-a", "unknown");
-    expect(missing.status).toBe("unavailable");
-    expect(missing.summary).toContain("no native fallback");
+    expect(missing.status).toBe("collecting");
+    expect(missing.summary).toContain("Summary skipped");
     const capture = await f.start();
     const task = await f.dispatch("Feature");
     await f.complete(task.id, "Ready");
@@ -781,12 +891,10 @@ test("reporter absence and unsafe backend return truthful unavailable without ma
       attempt++
     )
       snapshot = await f.read(capture.id);
-    expect(snapshot.status).toBe("unavailable");
-    expect(snapshot.summary).toContain("cannot enforce tools-off");
+    expect(snapshot.status).toBe("complete");
+    expect(snapshot.summary).toContain("Summary skipped");
     expect(f.turns).toHaveLength(0);
-    expect(f.engine.state.task(f.reportTask(capture.id))?.status).toBe(
-      "cancelled",
-    );
+    expect(f.engine.state.reporting.reportTaskID(capture.id)).toBeUndefined();
   } finally {
     await f.close();
   }

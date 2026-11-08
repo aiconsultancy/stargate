@@ -10,8 +10,14 @@ import {
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { piDefinitionPath, piMemberDefinition } from "./crew/instructions";
 import { crewPermissions } from "./crew/policy";
-import { defaultModelProviders, defaultTeam, teamSchema } from "./crew/team";
+import {
+  defaultModelProviders,
+  defaultTeam,
+  profileTeam,
+  teamSchema,
+} from "./crew/team";
 
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const absolute = z
@@ -60,6 +66,7 @@ function parseOptions(input: Options) {
     ...parsed.data,
     namespace: parsed.data.namespace ?? parsed.data.team.captain.id,
   };
+  options.team = profileTeam(options.team, options.namespace);
   const proxy = new URL(options.proxyURL);
   if (
     !["http:", "https:"].includes(proxy.protocol) ||
@@ -119,9 +126,9 @@ export async function renderProfile(input: Options, role: string) {
     ...parsed,
     providers,
     skills: [join(options.projectDirectory, ".agents", "opco", "skills")],
-    default_agent: role,
+    default_agent: agent.agent ?? role,
     agents: {
-      [agent.id]: {
+      [agent.agent ?? agent.id]: {
         ...(agent.model ? { model: agent.model } : {}),
         permissions: crewPermissions(profile, options.team.toolAccess),
       },
@@ -280,6 +287,20 @@ export async function initializeProfile(input: Options) {
   if (((await lstat(state)).mode & 0o077) !== 0)
     throw new Error("Crew state directory must be private (0700).");
   const agents = [options.team.captain, ...options.team.crew];
+  const roster = [
+    `- ${options.team.captain.id}: Captain and coordinator`,
+    ...options.team.crew.map((member) => `- ${member.id}: ${member.role}`),
+  ].join("\n");
+  await writeProfileFile(
+    join(options.directory, "WAYS_OF_WORKING.md"),
+    (
+      await readFile(
+        join(packageDirectory, "templates", "ways-of-working.md"),
+        "utf8",
+      )
+    ).replace("{{roster}}", roster),
+    true,
+  );
   const ship = join(options.directory, ".local", "ship");
   await writeProfileFile(
     join(ship, "log.md"),
@@ -292,9 +313,8 @@ export async function initializeProfile(input: Options) {
   );
   await excludeGenerated(
     options.projectDirectory,
-    agents.map(({ id }) => id),
+    agents.map(({ id, agent }) => agent ?? id),
   );
-  const legacy = JSON.stringify(options.team) === JSON.stringify(defaultTeam);
   for (const agent of agents) {
     const role = agent.id;
     const journalPath = join(ship, "journals", `${role}.md`);
@@ -342,7 +362,14 @@ export async function initializeProfile(input: Options) {
         );
       }
     }
-    if (member?.backend) continue;
+    if (member?.backend) {
+      await writeProfileFile(
+        piDefinitionPath(options.directory, member),
+        piMemberDefinition(member, directory, options.directory),
+        true,
+      );
+      continue;
+    }
     const configPath = await configDirectory(directory);
     if (!captain && configPath === join(directory, ".agents", "opco")) {
       await excludeGenerated(options.projectDirectory, [], true);
@@ -356,7 +383,7 @@ export async function initializeProfile(input: Options) {
           "ls-files",
           "--",
           `${relative}/opencode.json`,
-          `${relative}/agents/${role}.md`,
+          `${relative}/agents/${agent.agent ?? role}.md`,
         )
       ) {
         throw new Error(
@@ -369,7 +396,7 @@ export async function initializeProfile(input: Options) {
         packageDirectory,
         "templates",
         "agents",
-        `${legacy ? role : captain ? "captain" : "crew"}.md`,
+        `${captain ? "captain" : "crew"}.md`,
       ),
       "utf8",
     );
@@ -382,6 +409,7 @@ export async function initializeProfile(input: Options) {
         options.team.modelProviders ?? defaultModelProviders
       ).join(", "),
       agentID: role,
+      nativeAgent: agent.agent ?? role,
       agentName: agent.name ?? role,
       captainID: options.team.captain.id,
       captainName: options.team.captain.name ?? options.team.captain.id,
@@ -389,6 +417,7 @@ export async function initializeProfile(input: Options) {
       shipLog: join(ship, "log.md"),
       journalPath,
       journalDirectory: join(ship, "journals"),
+      waysOfWorking: join(options.directory, "WAYS_OF_WORKING.md"),
       skillsDirectory: join(
         options.projectDirectory,
         ".agents",
@@ -400,7 +429,7 @@ export async function initializeProfile(input: Options) {
       roster: options.team.crew
         .map(
           (member) =>
-            `- ${member.id} (${member.name ?? member.id}): ${member.role}; permissions: ${member.permissionProfile}${member.backend ? "; backend: Pi Durable (dispatch/wait/status only)" : ""}`,
+            `- ${member.id} (${member.name ?? member.id}): ${member.role}; permissions: ${member.permissionProfile}${member.backend ? `; backend: Pi Durable (coordination ${member.backend.tools === "coding" ? "enabled" : "disabled"})` : ""}`,
         )
         .join("\n"),
       instructions:
@@ -411,7 +440,10 @@ export async function initializeProfile(input: Options) {
       /\{\{(\w+)\}\}/g,
       (match, key: string) => substitutions[key] ?? match,
     );
-    await writeProfileFile(join(configPath, "agents", `${role}.md`), prompt);
+    await writeProfileFile(
+      join(configPath, "agents", `${agent.agent ?? role}.md`),
+      prompt,
+    );
     await writeProfileFile(
       join(configPath, "opencode.json"),
       `${JSON.stringify(await renderProfile(options, role), null, 2)}\n`,
@@ -422,7 +454,7 @@ export async function initializeProfile(input: Options) {
     worktrees,
     stateDirectory: state,
     namespace: options.namespace,
-    agent: options.team.captain.id,
+    agent: options.team.captain.agent ?? options.team.captain.id,
     permissions: crewPermissions("captain", options.team.toolAccess),
   };
 }
