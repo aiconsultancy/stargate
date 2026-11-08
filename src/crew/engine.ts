@@ -679,11 +679,14 @@ export class CrewEngine {
   ): Promise<string> {
     const peer = this.state.peerBySession(route.recipient);
     const task = peer ? this.state.activeTask(peer.crewID) : null;
+    const busy =
+      task && ["running", "dispatching"].includes(task.status) ? task : null;
     if (peer?.status !== "ready" && peer) return "unavailable";
     if (
       peer &&
       (this.state.controlled(peer.crewID) ||
-        this.state.hasQueued(peer.crewID) ||
+        // Pending assignments must not suppress steer for the current task.
+        (this.state.hasQueued(peer.crewID) && !busy) ||
         (task &&
           ((task.status !== "completed" &&
             !this.sameCaptain(task.originCaptainID, route.captainID)) ||
@@ -691,8 +694,6 @@ export class CrewEngine {
             task.notifying)))
     )
       return "deferred";
-    const busy =
-      task && ["running", "dispatching"].includes(task.status) ? task : null;
     const senderCaptainID =
       caller.agent === this.options.team.captain.id
         ? caller.sessionID

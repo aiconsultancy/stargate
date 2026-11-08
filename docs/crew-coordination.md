@@ -100,6 +100,7 @@ Ask captain to coordinate broadcasts when useful; this is not a permission barri
 
 Explicit DM can wake the originating captain or a free provisioned colleague.
 Same-captain running OpenCode work gets task-marked steer with `resume:false`;
+later queued assignments do not block that current-task message or get promoted.
 OpenCode queue while busy is stored-only/unsupported. Pi uses native steer or
 follow-up. Other-captain work, uncertain work and worker controls defer delivery.
 Unprovisioned workers get only a reserved mailbox, not a new agent session.
@@ -118,6 +119,40 @@ a control still held by an operation in this process cannot be cleared. Pogo
 never clears another controller automatically or adds a lock lease. See
 [captain recovery](crew-recovery.md#captain-controlled-recovery); do not edit
 the database to clear a slot.
+
+## Task communication protocol
+
+The shared working agreement owns ship policy. Definitions reference that file;
+assignments carry task-specific scope, not another copy of the policy. Before
+project work, captain and crew read the target checkout's `AGENTS.md`, applicable
+nested instructions, guides and required skills. Project instructions own
+implementation and delivery rules. Generated Pi definitions name the worker's
+project `AGENTS.md` explicitly because their runtime is separate from OpenCode.
+
+Workers acknowledge assignments with task ID, scope and next checkpoint. They
+answer captain DMs with `replyTo` at the next safe point: after the current tool
+returns with a known outcome, before another mutation, or between independent
+work units. One substantive reply can acknowledge and answer; no separate read
+receipt or unconditional heartbeat is required. Milestones use mail; urgent
+replies use explicit DM. Final task results include revision, checks and limits.
+
+Use these distinct states: stored mail, admitted native delivery, evidenced
+reading, correlated answer and persisted or verified task completion. Native
+`accepted` means admitted, not read or answered. No acknowledgement proves task
+completion, and no final task answer replaces a correlated peer reply.
+
+During active work, captain checks a missed checkpoint or, by default, two
+minutes without acknowledgement. Inspect once and send at most one supported
+status request, then report the blocker and next action. This working default
+does not create a timer service or promise a two-minute response. Deferred,
+unsupported or uncertain delivery never justifies replaying an assignment.
+An idle worker with pending FIFO assignments still defers DM wakeups: inspect
+the head and advance it only within its assigned scope. Do not cancel or promote
+unrelated work to obtain a reply. Instructions cannot interrupt a hung provider
+or a long synchronous tool.
+
+Improve this agreement from recorded task outcomes through the existing
+[ship maintenance workflow](ship-maintenance.md#task-boundary-improvement).
 
 ## Native clients
 

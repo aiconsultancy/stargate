@@ -267,6 +267,13 @@ test("ship records cover the configured roster and preserve operator notes", asy
   const log = join(ship, "log.md");
   expect(await readFile(log, "utf8")).toContain("# Ship log");
   expect((await stat(log)).mode & 0o777).toBe(0o600);
+  const agreement = await readFile(
+    join(options.directory, "WAYS_OF_WORKING.md"),
+    "utf8",
+  );
+  expect(agreement).toContain("applicable nested");
+  expect(agreement).toContain("## Requests and replies");
+  expect(agreement).toContain("## Task-boundary improvement");
   await writeFile(log, "Verified lesson: preserve the original task ID.\n");
   for (const [id, directory] of [
     [team.captain.id, options.directory],
@@ -410,6 +417,7 @@ test("Pi crew receives a worktree but no OpenCode agent or session profile", asy
   expect(definition).toContain("Pogo address: twiki");
   expect(worktree).toBe(join(options.worktreeDirectory, "twiki"));
   expect(definition).toContain("Do not switch worktrees");
+  expect(definition).toContain(join(worktree, "AGENTS.md"));
   expect(definition).toContain(join(options.directory, "WAYS_OF_WORKING.md"));
   expect(definition).toContain("reread it when updated");
   expect(definition).not.toContain("# Ways of working");

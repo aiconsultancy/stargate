@@ -198,6 +198,70 @@ test("DM stored first, busy steer never resumes, native failure preserves task s
   }
 });
 
+test("busy crew receives correlated captain steer with queued work without promoting FIFO", async () => {
+  const f = await fixture();
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Current work" },
+        f.captain(),
+      )
+    ).task;
+    const queued = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Next work", queue: true },
+        f.captain(),
+      )
+    ).task;
+    if (!task || !queued) throw new Error("Missing tasks");
+    const beforeCurrent = f.engine.state.task(task.id);
+    const beforeQueued = f.engine.state.task(queued.id);
+    const receipt = await f.engine.dm(
+      { op: "send", to: "mario", text: "Status at your next safe point?" },
+      f.captain(),
+    );
+    expect(receipt).toMatchObject({ stored: true, notification: "accepted" });
+    expect(f.synthetics.at(-1)).toMatchObject({
+      sessionID: task.workerSessionID,
+      resume: false,
+      delivery: "steer",
+      metadata: { pogoCrew: { taskID: task.id } },
+    });
+    const replyTo = "id" in receipt ? receipt.id : undefined;
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "captain", replyTo, text: "Running; tests next." },
+        f.worker(task.workerSessionID),
+      ),
+    ).toMatchObject({ stored: true, notification: "accepted" });
+    expect(f.engine.state.task(task.id)).toEqual(beforeCurrent);
+    expect(f.engine.state.task(queued.id)).toEqual(beforeQueued);
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "mario", text: "Foreign request" },
+        f.captain("ses_captain_b"),
+      ),
+    ).toMatchObject({ stored: true, notification: "deferred" });
+    await f.engine.run(
+      { op: "complete", taskID: task.id, result: "Verified result" },
+      f.worker(task.workerSessionID),
+    );
+    f.busy.delete(task.workerSessionID);
+    const deliveries = f.synthetics.length;
+    expect(
+      await f.engine.dm(
+        { op: "send", to: "mario", text: "Do not bypass idle FIFO" },
+        f.captain(),
+      ),
+    ).toMatchObject({ stored: true, notification: "deferred" });
+    expect(f.synthetics).toHaveLength(deliveries);
+    expect(f.engine.state.task(task.id)?.result).toBe("Verified result");
+    expect(f.engine.state.task(queued.id)).toEqual(beforeQueued);
+  } finally {
+    await f.close();
+  }
+});
+
 test("namespaced native definitions keep short crew, mail, journal and task identities", async () => {
   const f = await fixture(profileTeam(defaultTeam, "galactica"));
   try {

@@ -10,12 +10,15 @@ Project skill library: {{skillsDirectory}}/<name>/SKILL.md
 Read the shared working agreement initially and reread it when updated.
 Captain maintains it; crew propose edits through ordinary messages or journal
 notes. This file does not override operator instructions or runtime permissions.
+Follow its project-instruction, request/reply, liveness and task-boundary
+improvement procedures. Keep ship policy there, not in each assignment.
 Read relevant log entries and historical journals before related work. Write
 concise milestones at task boundaries, not every turn. Write checks, blockers
 and outcomes through pogo_journal, not every
 tool call. Host supplies ID, timestamp, member and task. Distinguish verified
 facts from assumptions. Record Pogo limitations and useful authenticated native
-workarounds as ordinary journal notes. Do not create a feedback tracker or loop.
+workarounds as ordinary journal notes. Use the shared task-boundary improvement
+procedure; do not create a feedback tracker or automatic background loop.
 Prefer Pogo tools when adequate; native self-service stays within existing
 scope and authentication, without another storage owner or uncertain replay.
 Append reusable
