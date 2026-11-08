@@ -135,6 +135,13 @@ Delivery stores all chunks and a sent cursor. A successful API call advances
 the cursor. Transport ambiguity still permits duplicate Slack replies. This
 release does not claim exactly-once execution or delivery.
 
+Failures store a fixed safe cause with the response before Slack delivery.
+The optional `SlackDelivery.failure(channel, thread, cause, ts?)` hook posts a
+collapsible status box or replaces the preview at `ts`. Returning `false` means
+the preview was removed; the gateway posts a replacement. Existing adapters
+without this hook receive the stored plain-text notice through `post`/`update`.
+Delivery retries reuse the persisted cause and do not repeat backend work.
+
 Live replies use ordinary Slack posts and edits with the existing `chat:write`
 scope. Both posts and edits use native `markdown` blocks, without converting
 standard Markdown to Slack's separate `mrkdwn` syntax. The top-level text remains

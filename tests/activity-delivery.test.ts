@@ -38,6 +38,7 @@ function snapshot(
 function fixture(
   watch: ActivityWatch,
   settings: CrewActivitySettings = { detail: "summary", reporter: "twiki" },
+  options: { finalizeTimeoutMs?: number } = {},
 ) {
   const config = bot();
   const store = new Store(":memory:");
@@ -95,6 +96,7 @@ function fixture(
     () => allowed,
     pino({ enabled: false }),
     {
+      ...options,
       wait: async (_ms, stop) => {
         waiting.resolve();
         if (stop.aborted) throw new Error("aborted");
@@ -156,7 +158,7 @@ test("activity is opt-in and disabled mode starts no capture or inference", asyn
   }
 });
 
-test("finish during an outstanding read still finalizes and updates the original thread", async () => {
+test("finish wakes the poll interval and updates the original thread", async () => {
   const first = Promise.withResolvers<ActivitySnapshot>();
   const final = Promise.withResolvers<void>();
   let finished = 0;
@@ -182,15 +184,14 @@ test("finish during an outstanding read still finalizes and updates the original
   );
   try {
     const handle = await f.delivery.start(f.job, "captain", signal(), signal());
-    handle?.finish();
     first.resolve(snapshot());
     await f.waiting;
+    handle?.finish();
     expect(f.views[0]).toMatchObject({
       channel: "C123",
       thread: "1.000",
       view: { detail: "detailed" },
     });
-    f.tick();
     await final.promise;
     await f.written[1]?.promise;
     await f.delivery.close();
@@ -202,6 +203,34 @@ test("finish during an outstanding read still finalizes and updates the original
       ts: "report-message",
       view: { summary: "Chief verified formatting.", status: "complete" },
     });
+  } finally {
+    await f.close();
+  }
+});
+
+test("finish interrupts an outstanding read and uses a separate finalization signal", async () => {
+  const blocked = Promise.withResolvers<ActivitySnapshot>();
+  const final = Promise.withResolvers<void>();
+  let reading: AbortSignal | undefined;
+  const f = fixture({
+    async read(stop) {
+      reading = stop;
+      return blocked.promise;
+    },
+    async finish(stop) {
+      expect(stop.aborted).toBe(false);
+      final.resolve();
+      return snapshot(2, "complete");
+    },
+    async cancel() {},
+  });
+  try {
+    const handle = await f.delivery.start(f.job, "captain", signal(), signal());
+    handle?.finish();
+    await final.promise;
+    expect(reading?.aborted).toBe(true);
+    await f.written[0]?.promise;
+    expect(f.views[0]?.view.status).toBe("complete");
   } finally {
     await f.close();
   }
@@ -339,5 +368,125 @@ test("reporting transport failure cannot turn a successful answer into an error"
   } finally {
     await gateway.close();
     store.close();
+  }
+});
+
+test("empty captures and summary-only status never create an activity box", async () => {
+  const read = Promise.withResolvers<void>();
+  const f = fixture({
+    async read() {
+      read.resolve();
+      return { ...snapshot(), entries: [], summary: "Collecting activity" };
+    },
+    async finish() {
+      return {
+        ...snapshot(2, "complete"),
+        entries: [],
+        summary: "No assignments",
+      };
+    },
+    async cancel() {},
+  });
+  try {
+    const handle = await f.delivery.start(f.job, "captain", signal(), signal());
+    await read.promise;
+    await f.waiting;
+    expect(f.views).toEqual([]);
+    handle?.finish();
+    f.tick();
+    await f.delivery.close();
+    expect(f.views).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("request abort cancels capture and terminalizes an existing activity box", async () => {
+  const cancelled = Promise.withResolvers<void>();
+  const request = new AbortController();
+  const f = fixture({
+    async read() {
+      return snapshot();
+    },
+    async finish() {
+      throw new Error("must not summarize aborted work");
+    },
+    async cancel() {
+      cancelled.resolve();
+    },
+  });
+  try {
+    await f.delivery.start(f.job, "captain", request.signal, signal());
+    await f.waiting;
+    expect(f.views[0]?.view.status).toBe("collecting");
+    request.abort();
+    await cancelled.promise;
+    await f.written[1]?.promise;
+    expect(f.views[1]).toMatchObject({
+      ts: "report-message",
+      view: { status: "cancelled" },
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test("a report read failure terminalizes the visible activity box", async () => {
+  let reads = 0;
+  const f = fixture({
+    async read() {
+      if (reads++) throw new Error("PRIVATE transport error");
+      return snapshot();
+    },
+    async finish() {
+      return snapshot(2, "complete");
+    },
+    async cancel() {},
+  });
+  try {
+    await f.delivery.start(f.job, "captain", signal(), signal());
+    await f.waiting;
+    f.tick();
+    await f.written[1]?.promise;
+    expect(f.views[1]).toMatchObject({
+      ts: "report-message",
+      view: { status: "unavailable" },
+    });
+    expect(JSON.stringify(f.views)).not.toContain("PRIVATE");
+  } finally {
+    await f.close();
+  }
+});
+
+test("finalization grace bounds a stuck report and marks the existing box unavailable", async () => {
+  const blocked = Promise.withResolvers<ActivitySnapshot>();
+  let cancelled = 0;
+  const f = fixture(
+    {
+      async read() {
+        return snapshot();
+      },
+      async finish() {
+        return blocked.promise;
+      },
+      async cancel() {
+        cancelled++;
+      },
+    },
+    { detail: "summary", reporter: "twiki" },
+    { finalizeTimeoutMs: 10 },
+  );
+  try {
+    const handle = await f.delivery.start(f.job, "captain", signal(), signal());
+    await f.waiting;
+    handle?.finish();
+    await f.written[1]?.promise;
+    expect(f.views[1]).toMatchObject({
+      ts: "report-message",
+      view: { status: "unavailable" },
+    });
+    expect(cancelled).toBe(1);
+  } finally {
+    await f.close();
   }
 });

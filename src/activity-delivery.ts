@@ -12,12 +12,15 @@ import type { Job } from "./store";
 export type ActivityHandle = { finish(): void; cancel(): void };
 type Pending = {
   controller: AbortController;
+  wake: AbortController;
   done: Promise<void>;
   finished: boolean;
+  grace?: ReturnType<typeof setTimeout>;
 };
 type Options = {
   intervalMs?: number;
   startupTimeoutMs?: number;
+  finalizeTimeoutMs?: number;
   wait?: (ms: number, signal: AbortSignal) => Promise<void>;
 };
 
@@ -82,18 +85,20 @@ export class ActivityDelivery {
     const ready = Promise.withResolvers<boolean>();
     const entry: Pending = {
       controller: new AbortController(),
+      wake: new AbortController(),
       done: Promise.resolve(),
       finished: false,
     };
-    const signal = AbortSignal.any([
-      shutdown,
-      entry.controller.signal,
-      AbortSignal.timeout(300_000),
-    ]);
+    const signal = AbortSignal.any([shutdown, entry.controller.signal]);
+    const cancelled = () => entry.controller.abort();
+    requestSignal.addEventListener("abort", cancelled, { once: true });
+    if (requestSignal.aborted) cancelled();
     this.pending.add(entry);
     entry.done = (async () => {
       let watch: ActivityWatch | undefined;
       let terminal = false;
+      let ts: string | undefined;
+      let latest: ActivitySnapshot | undefined;
       try {
         const setupSignal = AbortSignal.any([
           signal,
@@ -111,18 +116,26 @@ export class ActivityDelivery {
         );
         watch = opened;
         ready.resolve(true);
-        let ts: string | undefined;
         let revision = -1;
         let finished = false;
         while (!signal.aborted) {
           if (!this.allowed(job) || this.settings().detail === "off") break;
           const finishNow = entry.finished && !finished;
-          const snapshot: ActivitySnapshot = await abortable(
-            finishNow ? opened.finish(signal) : opened.read(signal),
-            signal,
-          );
+          const wake = entry.wake;
+          const readSignal = AbortSignal.any([signal, wake.signal]);
+          let snapshot: ActivitySnapshot;
+          try {
+            snapshot = await abortable(
+              finishNow ? opened.finish(readSignal) : opened.read(readSignal),
+              readSignal,
+            );
+          } catch (error) {
+            if (wake.signal.aborted && !signal.aborted) continue;
+            throw error;
+          }
+          latest = snapshot;
           if (finishNow) finished = true;
-          terminal = ["complete", "unavailable", "cancelled"].includes(
+          const isTerminal = ["complete", "unavailable", "cancelled"].includes(
             snapshot.status,
           );
           signal.throwIfAborted();
@@ -131,19 +144,27 @@ export class ActivityDelivery {
           if (
             detail !== "off" &&
             snapshot.revision !== revision &&
-            (snapshot.entries.length || snapshot.summary || ts)
+            (snapshot.entries.length || ts)
           ) {
-            ts = await publish(
-              job.channel,
-              job.thread,
-              { ...snapshot, detail },
-              ts,
+            ts = await abortable(
+              publish(
+                job.channel,
+                job.thread,
+                { ...snapshot, detail },
+                ts,
+                signal,
+              ),
               signal,
             );
             revision = snapshot.revision;
           }
+          terminal = isTerminal;
           if (terminal) break;
-          await this.wait(this.options.intervalMs ?? 5000, signal);
+          try {
+            await this.wait(this.options.intervalMs ?? 5000, readSignal);
+          } catch (error) {
+            if (!wake.signal.aborted || signal.aborted) throw error;
+          }
         }
       } catch {
         if (!signal.aborted)
@@ -152,9 +173,42 @@ export class ActivityDelivery {
             "Crew activity unavailable; answer delivery continues",
           );
       } finally {
+        if (entry.grace) clearTimeout(entry.grace);
+        requestSignal.removeEventListener("abort", cancelled);
         ready.resolve(false);
         if (watch && !terminal) {
-          await watch.cancel(AbortSignal.timeout(2000)).catch(() => {});
+          const cleanup = AbortSignal.timeout(2000);
+          await abortable(watch.cancel(cleanup), cleanup).catch(() => {});
+        }
+        const detail = this.settings().detail;
+        if (
+          !terminal &&
+          ts &&
+          latest &&
+          this.allowed(job) &&
+          detail !== "off"
+        ) {
+          const cleanup = AbortSignal.timeout(2000);
+          const aborted =
+            requestSignal.aborted || shutdown.aborted || this.closed;
+          await abortable(
+            publish(
+              job.channel,
+              job.thread,
+              {
+                ...latest,
+                revision: latest.revision + 1,
+                status: aborted ? "cancelled" : "unavailable",
+                summary: aborted
+                  ? "Activity capture cancelled because the request stopped."
+                  : "Activity report unavailable; answer delivery continues. No work was replayed.",
+                detail,
+              },
+              ts,
+              cleanup,
+            ),
+            cleanup,
+          ).catch(() => {});
         }
         this.pending.delete(entry);
       }
@@ -162,7 +216,17 @@ export class ActivityDelivery {
     if (!(await ready.promise)) return;
     return {
       finish: () => {
+        if (entry.finished || !this.pending.has(entry) || signal.aborted)
+          return;
         entry.finished = true;
+        // Finalization can outlive the request, but cannot block forever.
+        entry.grace = setTimeout(
+          () => entry.controller.abort(),
+          this.options.finalizeTimeoutMs ?? 30_000,
+        );
+        const wake = entry.wake;
+        entry.wake = new AbortController();
+        wake.abort();
       },
       cancel: () => entry.controller.abort(),
     };

@@ -383,7 +383,7 @@ test("a failed reaction-only answer reports failure instead of disappearing", as
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect([...f.messages.values()]).toEqual([
-      "Pogo could not add that reaction.",
+      "Pogo could not add that reaction. The agent request was not repeated. Check Slack reaction permissions before trying again.",
     ]);
   } finally {
     f.store.close();

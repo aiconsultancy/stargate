@@ -10,6 +10,7 @@ import {
   type ReactionName,
   reactionInstructions,
 } from "./reactions";
+import { failureText, type RequestFailure } from "./request-failure";
 import {
   botKey,
   chunks,
@@ -30,6 +31,13 @@ import {
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
 
 export interface SlackDelivery {
+  /** Replace a preview when ts is set; false means it was removed. */
+  failure?(
+    channel: string,
+    thread: string,
+    cause: RequestFailure,
+    ts?: string,
+  ): Promise<string | false> | Promise<void>;
   activity?(
     channel: string,
     thread: string,
@@ -177,15 +185,13 @@ export class Gateway {
       return;
     }
     let output: string[];
+    let failure = job.failure ?? undefined;
     if (job.status === "queued") {
       if (!this.store.running(job.id)) return;
       const cancellation = new AbortController();
+      const timeout = AbortSignal.timeout(this.config.turnTimeoutMs);
       this.cancellations.set(job.id, cancellation);
-      const signal = AbortSignal.any([
-        shutdown,
-        cancellation.signal,
-        AbortSignal.timeout(this.config.turnTimeoutMs),
-      ]);
+      const signal = AbortSignal.any([shutdown, cancellation.signal, timeout]);
       const waiting = await resolveWaiting(this.config);
       const live = new LiveReply(
         job,
@@ -264,25 +270,34 @@ export class Gateway {
             ),
             true,
           );
+          signal.throwIfAborted();
           activity?.finish();
           output = reacted && !answer.trim() ? [] : chunks(answer);
         } catch (error) {
           activity?.cancel();
           this.log.warn({ job: job.id }, "Agent request failed or timed out");
-          output = [
-            error instanceof ThreadContextUnavailable
-              ? "Pogo could not load initial thread context. No agent turn was started. Check Slack history access and try again."
-              : "Pogo could not finish this request. Work may have run; it was not repeated. Check the agent before trying again.",
-          ];
+          failure = cancellation.signal.aborted
+            ? "cancelled"
+            : shutdown.aborted
+              ? "interrupted"
+              : timeout.aborted
+                ? "timeout"
+                : error instanceof ThreadContextUnavailable
+                  ? "context"
+                  : "backend";
+          output = [failureText(failure)];
         }
         // A reaction-only reply has no answer to preserve until delivery settles.
         if (output.length === 0) {
           await reactionTask;
-          if (!reactionDelivered)
-            output = ["Pogo could not add that reaction."];
+          if (!reactionDelivered) {
+            failure = "reaction";
+            output = [failureText(failure)];
+          }
         }
         // Completion commits before awaiting preview cleanup. A late Stop cannot erase it.
-        output = this.store.respond(job.id, output);
+        output = this.store.respond(job.id, output, failure);
+        failure = this.store.failure(job.id);
       } finally {
         this.cancellations.delete(job.id);
         await live.close();
@@ -309,7 +324,15 @@ export class Gateway {
         const text = output[i];
         if (text === undefined) continue;
         const ts = previews.get(i);
-        if (ts) {
+        if (failure && this.slack.failure) {
+          if (
+            (await this.slack.failure(job.channel, job.thread, failure, ts)) ===
+            false
+          ) {
+            this.store.removePreview(job.id, i);
+            await this.slack.failure(job.channel, job.thread, failure);
+          }
+        } else if (ts) {
           if (!this.slack.update)
             throw new Error("Slack preview update unavailable");
           if ((await this.slack.update(job.channel, ts, text)) === false) {

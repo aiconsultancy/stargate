@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
+import { expect, setSystemTime, test } from "bun:test";
 import { access, mkdtemp, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { activitySnapshotSchema } from "../src/activity";
@@ -232,6 +232,65 @@ test("reporting is opt-in; state stays private and inactive dispatch collects no
     expect((await stat(f.engine.state.path)).mode & 0o777).toBe(0o600);
     expect(f.turns).toHaveLength(0);
   } finally {
+    await f.close();
+  }
+});
+
+test("empty capture finishes without starting or queuing Twiki inference", async () => {
+  const f = await fixture();
+  try {
+    const capture = await f.start();
+    const finished = await f.engine.reporting.finish(
+      f.owner(capture.id),
+      f.caller().signal,
+    );
+    expect(finished).toMatchObject({ status: "complete", entries: [] });
+    expect(
+      f.engine.state.reporting.owned("captain-a", capture.id).reportTaskID,
+    ).toBeNull();
+    expect(f.turns).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("reporter's maintenance is not crew activity and cannot cause a report of itself", async () => {
+  const f = await fixture();
+  try {
+    const capture = await f.start();
+    const started = f.started();
+    const maintenance = await f.dispatch("Twiki maintenance", "twiki");
+    await started;
+    f.turns[0]?.resolve("Maintenance done");
+    await f.engine.run({ op: "wait", taskID: maintenance.id }, f.caller());
+    const finished = await f.engine.reporting.finish(
+      f.owner(capture.id),
+      f.caller().signal,
+    );
+    expect(finished).toMatchObject({ status: "complete", entries: [] });
+    expect(f.turns.map(({ mode }) => mode)).toEqual(["maintenance"]);
+    expect(
+      f.engine.state.reporting.owned("captain-a", capture.id).reportTaskID,
+    ).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test("active capture read renews its lease beyond five minutes", async () => {
+  const f = await fixture();
+  try {
+    const capture = await f.start();
+    const started = Date.now();
+    for (let minute = 1; minute <= 6; minute++) {
+      setSystemTime(started + minute * 60_000);
+      expect((await f.read(capture.id)).status).toBe("collecting");
+      expect(
+        f.engine.state.reporting.owned("captain-a", capture.id).expires,
+      ).toBeGreaterThan(Date.now() + 30_000);
+    }
+  } finally {
+    setSystemTime();
     await f.close();
   }
 });

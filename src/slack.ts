@@ -7,6 +7,7 @@ import { stopBlock } from "./cancellation";
 import type { CronUIApi } from "./cron-ui";
 import type { SlackDelivery } from "./gateway";
 import type { ReactionName } from "./reactions";
+import { failureContent, type RequestFailure } from "./request-failure";
 import type { Identity } from "./routing";
 import { slackContent } from "./slack-format";
 import { loadThreadContext, type ThreadContextRequest } from "./thread-context";
@@ -167,6 +168,39 @@ export class SlackConnection implements SlackDelivery {
   async announce(channel: string, text: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
     return this.send(channel, "", text, "plain");
+  }
+
+  async failure(
+    channel: string,
+    thread: string,
+    cause: RequestFailure,
+    ts?: string,
+  ) {
+    const content = {
+      channel,
+      ...failureContent(cause),
+      parse: "none" as const,
+      mrkdwn: false,
+      unfurl_links: false,
+      unfurl_media: false,
+    };
+    try {
+      if (ts !== undefined) {
+        await this.web.chat.update({ ...content, ts });
+        return ts;
+      }
+      const result = await this.web.chat.postMessage({
+        ...content,
+        thread_ts: thread,
+      });
+      if (!result.ts)
+        throw new Error("Slack did not return a message timestamp");
+      return result.ts;
+    } catch (error) {
+      if (ts !== undefined && slackError(error, "message_not_found"))
+        return false;
+      throw error;
+    }
   }
 
   async activity(

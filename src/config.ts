@@ -140,7 +140,7 @@ export const botSchema = z.strictObject({
     reporter: "twiki",
   }),
   concurrency: z.number().int().min(1).max(32).default(4),
-  turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(300_000),
+  turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
 });
 
 export const configSchema = z

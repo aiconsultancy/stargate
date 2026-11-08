@@ -36,6 +36,9 @@ session and request ID. Setup has a one-second deadline; reporting failure
 does not prevent the captain from answering.
 
 Pogo collects linked task activity, not arbitrary transcripts or tool output.
+The activity box appears only after actual crew entries are captured. An empty
+capture does not start or queue a summary request. The reporter's own maintenance
+and reporting tasks do not count as crew activity.
 After the captain's turn, Twiki prepares one report through its normal crew
 queue. Maintenance can delay the report, but reporting never waits in the
 answer-delivery path. Pogo updates the same activity message in the original
@@ -69,10 +72,17 @@ Reporting is best effort and bounded. Gateway shutdown, cancellation, access
 revocation or opting out stops further updates. Slack failures do not rerun
 the captain, maintenance tools or a completed summary. Activity messages have
 no separate delivery-retry queue; a crash or disconnect can leave the last
-status visible. The gateway follows at most eight active reports for up to
-five minutes each. No exactly-once delivery is claimed.
+status visible. The gateway follows at most eight active reports. Collection
+follows the request lifetime, not a separate five-minute timer. Completion
+starts a bounded 30-second finalization period. Request cancellation stops
+collection; cleanup uses a separate bounded signal so a visible box can show
+its terminal status. Read or finalization failures change an existing box to
+**Report unavailable**; they do not create an empty activity box.
+No exactly-once delivery is claimed.
 
-Captures expire lazily; finishing allows up to 60 seconds for linked tasks.
+Active reads renew a 90-second capture lease. Abandoned captures expire lazily;
+the reporting protocol allows up to 60 seconds for linked tasks after finish,
+but the gateway's 30-second finalization limit can end the report sooner.
 Capture cleanup runs on reporting operations after a one-day receipt window.
 Sanitized report conversations remain in private Pi storage for deliberate
 operator cleanup; they are not a public transcript archive.

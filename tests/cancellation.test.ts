@@ -129,6 +129,23 @@ test("requester Stop aborts running work in channels and DMs, then replaces prev
   }
 });
 
+test("requester Stop uses one durable cancelled box instead of a generic timeout warning", async () => {
+  const f = fixture();
+  const failures: string[] = [];
+  f.slack.failure = async (_channel, _thread, cause, ts) => {
+    failures.push(cause);
+    expect(ts).toBe("2.000");
+    return "2.000";
+  };
+  const work = f.gateway.process(f.job, new AbortController().signal);
+  await f.started;
+  expect(f.gateway.cancel(f.payload())).toBe(true);
+  await work;
+  expect(failures).toEqual(["cancelled"]);
+  expect(f.writes).toHaveLength(1);
+  expect(f.store.failure(f.job.id)).toBe("cancelled");
+});
+
 test("Stop rejects other humans, bots, installations, channels, threads, and previews", async () => {
   const f = fixture();
   f.config.access.users = ["*"];

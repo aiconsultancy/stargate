@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { cancellationNotice } from "./cancellation";
+import { failureText, type RequestFailure } from "./request-failure";
 
 export type Incoming = {
   eventId: string;
@@ -17,6 +18,7 @@ export type Job = Incoming & {
   response: string | null;
   sent: number;
   attempts: number;
+  failure?: RequestFailure | null;
 };
 
 export class Store {
@@ -56,6 +58,13 @@ export class Store {
       this.db.exec(
         "ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
       );
+    if (
+      !this.db
+        .query<{ name: string }, []>("PRAGMA table_info(jobs)")
+        .all()
+        .some((column) => column.name === "failure")
+    )
+      this.db.exec("ALTER TABLE jobs ADD COLUMN failure TEXT");
   }
 
   enqueue(input: Incoming): boolean {
@@ -134,6 +143,7 @@ export class Store {
       this.db
         .query(`UPDATE jobs SET cancel_requested=1,
       response=CASE WHEN status='queued' THEN ? ELSE response END,
+      failure=CASE WHEN status='queued' THEN 'cancelled' ELSE failure END,
       status=CASE WHEN status='queued' THEN 'responding' ELSE status END
       WHERE botKey=? AND id=? AND user=? AND channel=? AND thread=?
       AND status IN ('queued','running') AND EXISTS (
@@ -166,17 +176,33 @@ export class Store {
       .get(botKey, id)?.status;
   }
 
-  respond(id: number, chunks: string[]) {
+  respond(id: number, chunks: string[], failure?: RequestFailure) {
     const row = this.db
       .query<
         { response: string },
-        [string, string, number]
+        [string, string, string | null, number]
       >(`UPDATE jobs SET status='responding',
-        response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,sent=0
+        response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,
+        failure=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE ? END,sent=0
         WHERE id=? RETURNING response`)
-      .get(JSON.stringify([cancellationNotice]), JSON.stringify(chunks), id);
+      .get(
+        JSON.stringify([cancellationNotice]),
+        JSON.stringify(chunks),
+        failure ?? null,
+        id,
+      );
     if (!row) throw new Error("Response job not found");
     return JSON.parse(row.response) as string[];
+  }
+
+  failure(id: number): RequestFailure | undefined {
+    return (
+      this.db
+        .query<{ failure: RequestFailure | null }, [number]>(
+          "SELECT failure FROM jobs WHERE id=?",
+        )
+        .get(id)?.failure ?? undefined
+    );
   }
 
   sent(id: number, count: number) {
@@ -215,13 +241,12 @@ export class Store {
     // greybeard: unknown tool outcomes are never retried automatically.
     // Reconciliation requires a backend-specific execution identifier.
     this.db
-      .query(`UPDATE jobs SET status='responding',response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,sent=0
+      .query(`UPDATE jobs SET status='responding',response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,sent=0,
+      failure=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE 'interrupted' END
       WHERE botKey=? AND status='running'`)
       .run(
         JSON.stringify([cancellationNotice]),
-        JSON.stringify([
-          "Pogo stopped during this request. Work may have run; it was not repeated. Check agent state before sending another request.",
-        ]),
+        JSON.stringify([failureText("interrupted")]),
         botKey,
       );
   }

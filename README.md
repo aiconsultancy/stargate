@@ -64,11 +64,20 @@ same message becomes the answer when text arrives. See [waiting settings](docs/w
 for configurable delays, disabling feedback, and captain-managed changes.
 Existing module backends can still return a final answer without streaming.
 
+Requests have a 30-minute time limit by default. Set `turnTimeoutMs` on the bot
+to change it, up to one hour. Ordinary long replies stream in the same thread;
+large builds can need a longer limit or smaller requests. Failures replace the
+live reply with one collapsible **Request status** box. It states the safe cause
+and next action for a timeout, Stop, backend failure or missing thread context.
+Delivery retries do not repeat agent work. Check agent state before retrying
+work whose outcome is uncertain.
+
 Opt into a separate collapsible crew activity message with
 `crewActivity: { "detail": "summary", "reporter": "twiki" }` on the bot.
 `detailed` also shows attributed assignments, messages and results; `off` is
 the default. Twiki shares its maintenance queue and prepares the report without
-blocking the captain's answer. See [crew activity](docs/crew-activity.md) for
+blocking the captain's answer. Empty captures and the reporter's own maintenance
+do not create an activity message or summary request. See [crew activity](docs/crew-activity.md) for
 setup, privacy, and delivery limits.
 
 Select **Stop** on a live reply or waiting message to request cancellation.
@@ -335,7 +344,7 @@ SQLite file lock that the OS releases on exit.
 - Messages queue in SQLite before Slack acknowledgement. Duplicate deliveries
   and overlapping `message`/`app_mention` events do not run the agent twice.
 - Turns run in order per thread; different threads run concurrently. Each bot
-  defaults to four concurrent turns and a five-minute turn timeout.
+  defaults to four concurrent turns and a 30-minute turn timeout (maximum one hour).
 - Replies persist separately from execution; Slack retries do not rerun tools.
   Up to eight delivery attempts use bounded exponential delays.
 - A stopped process can leave tool outcomes unknown. On restart, Pogo attempts

@@ -4,7 +4,8 @@ import type { ActivitySnapshot } from "../activity";
 import type { CrewCaller, CrewEngine } from "./engine";
 import { CrewError, type CrewTask } from "./state";
 
-const captureLifetime = 300_000;
+// Active requests renew this lease on each read; only abandoned captures expire.
+const captureLease = 90_000;
 const settleWindow = 60_000;
 const recordLimit = 64;
 type Entry = ActivitySnapshot["entries"][number];
@@ -146,7 +147,7 @@ export class ReportingStore {
             "Activity capture capacity reached; retry after retention cleanup.",
           );
         const id = `capture_${randomUUID()}`;
-        const expires = Date.now() + captureLifetime;
+        const expires = Date.now() + captureLease;
         this.db
           .query(`INSERT INTO activity_captures
         (id,sessionID,requestID,reporterID,reporter,status,summary,deadline,expires)
@@ -183,7 +184,15 @@ export class ReportingStore {
     this.db
       .query(`UPDATE activity_captures SET status='summarizing', finished=1,
       deadline=?, expires=?, revision=revision+1 WHERE id=? AND status='collecting'`)
-      .run(now + settleWindow, now + captureLifetime, capture.id);
+      .run(now + settleWindow, now + settleWindow + captureLease, capture.id);
+  }
+
+  renew(capture: Capture) {
+    this.db
+      .query(
+        "UPDATE activity_captures SET expires=? WHERE id=? AND status='collecting'",
+      )
+      .run(Date.now() + captureLease, capture.id);
   }
 
   terminal(
@@ -232,7 +241,8 @@ export class ReportingStore {
         "SELECT * FROM activity_captures WHERE sessionID=? AND status='collecting'",
       )
       .get(task.originCaptainID);
-    if (!capture) return;
+    // The reporter's own maintenance must not create reports of itself.
+    if (!capture || task.crewID === capture.reporterID) return;
     const count =
       this.db
         .query<{ count: number }, [string]>(
@@ -433,6 +443,7 @@ export class CrewReporter {
     const caller = await this.verify(input.sessionID, signal);
     this.store.expire();
     const capture = this.store.owned(input.sessionID, input.id);
+    this.store.renew(capture);
     this.advance(capture, caller);
     return this.store.snapshot(this.store.owned(input.sessionID, input.id));
   }
@@ -477,7 +488,10 @@ export class CrewReporter {
       Date.now() < capture.deadline
     )
       return;
-    if (!capture.reportTaskID && tasks.length === 0) {
+    if (
+      !capture.reportTaskID &&
+      this.store.entries(capture.id, 1).length === 0
+    ) {
       this.store.terminal(
         capture,
         "complete",
