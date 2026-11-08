@@ -23,10 +23,11 @@ import type {
   SessionSyntheticInput,
 } from "@opencode/client";
 import { z } from "zod";
+import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { MesijClient } from "./mesij";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
-import { CrewReporter } from "./reporting";
+import { CrewReporter, redactActivity } from "./reporting";
 import { type ResultAPI, readTaskResult } from "./result";
 import {
   CrewError,
@@ -251,6 +252,33 @@ export class CrewEngine {
       ...options.team.crew,
     ]);
     this.reporting = new CrewReporter(this);
+  }
+
+  /** Location-authorized read surface. Unlike tool status, never reconciles,
+   * promotes queued work, provisions peers, reads transcripts or invokes models.
+   */
+  status(input: CrewStatusInput = {}): CrewStatus {
+    const members = this.options.team.crew.filter(
+      ({ id }) => !input.member || input.member === id,
+    );
+    return {
+      members: members.slice(0, 20).map((member) => {
+        const peer = this.state.peer(member.id);
+        const task = this.state.activeTask(member.id);
+        const current = task && task.status !== "completed" ? task : null;
+        return {
+          id: member.id,
+          name: redactActivity(member.name ?? member.id, 100),
+          backend: member.backend ? "pi-durable" : "opencode",
+          provisioned: peer?.status ?? "unprovisioned",
+          observed: !!current && !!member.backend && this.pi.observed(current),
+          current: current ? this.state.activity.task(current) : null,
+          ...this.state.activity.read(member.id),
+        };
+      }),
+      total: members.length,
+      truncated: members.length > 20,
+    };
   }
 
   static async open(

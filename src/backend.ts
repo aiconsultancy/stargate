@@ -3,6 +3,7 @@ import type { ActivityWatch } from "./activity";
 import { OpenCodeBackend } from "./backends/opencode";
 import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
+import type { CrewStatus, CrewStatusInput } from "./crew-status";
 
 /** Latest complete visible text for this turn, not reasoning or tool output. */
 export type TextSink = (text: string) => void;
@@ -29,6 +30,8 @@ export interface AgentBackend {
   ): Promise<ActivityWatch>;
   /** Sensitive, single-use pairing code. Never pass through model or storage. */
   pair?(signal: AbortSignal): Promise<{ code: string; expiresIn: number }>;
+  /** Read-only configured crew status; does not require/create a conversation. */
+  crewStatus?(input: CrewStatusInput, signal: AbortSignal): Promise<CrewStatus>;
   close(): Promise<void>;
 }
 

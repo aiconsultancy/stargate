@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend, TextSink } from "../src/backend";
 import {
   CrewEngine,
   type CrewOptions,
@@ -97,6 +97,8 @@ async function fixture() {
     sessionID: string;
     signal: AbortSignal;
     resolve: (text: string) => void;
+    reject: (error: Error) => void;
+    onText: TextSink | undefined;
   }[] = [];
   let creations = 0;
   let failCreate = false;
@@ -115,9 +117,16 @@ async function fixture() {
         if (failCreate) throw new Error("private provider error");
         return "17";
       },
-      async prompt(sessionID, text, signal) {
+      async prompt(sessionID, text, signal, onText) {
         const response = Promise.withResolvers<string>();
-        turns.push({ sessionID, text, signal, resolve: response.resolve });
+        turns.push({
+          sessionID,
+          text,
+          signal,
+          resolve: response.resolve,
+          reject: response.reject,
+          onText,
+        });
         signal.addEventListener(
           "abort",
           () => response.reject(new Error("aborted")),
@@ -277,6 +286,103 @@ test("Pi cancellation stops execution and never replays uncertain work", async (
     ).toBe("busy");
     expect(f.turns).toHaveLength(1);
     expect(f.nativeCalls).not.toContain("interrupt");
+  } finally {
+    await f.close();
+  }
+});
+
+test("member status observes live Pi progress across locations without another model call or queue promotion", async () => {
+  const f = await fixture();
+  let other: CrewEngine | undefined;
+  try {
+    const started = f.started();
+    const first = (
+      await f.engine.run(
+        { op: "dispatch", crew: "twiki", text: "Inspect formatting" },
+        f.caller(),
+      )
+    ).task;
+    await started;
+    f.turns[0]?.onText?.(
+      "Checked files; formatting in progress. api_key=private-key",
+    );
+    await f.engine.run(
+      {
+        op: "dispatch",
+        crew: "twiki",
+        text: "Inspect documentation",
+        queue: true,
+      },
+      f.caller(),
+    );
+    other = await CrewEngine.open(
+      f.options,
+      f.sessions,
+      undefined,
+      undefined,
+      f.factory,
+    );
+    const before = f.nativeCalls.length;
+    for (const engine of [f.engine, other]) {
+      const status = engine.status({ member: "twiki" });
+      expect(status.members[0]).toMatchObject({
+        observed: true,
+        current: {
+          status: "running",
+          summary: "Inspect formatting",
+          progress: "Checked files; formatting in progress. api_key=[REDACTED]",
+        },
+        queuedCount: 1,
+      });
+      expect(status.members[0]?.current?.startedAt).toBeNumber();
+      expect(status.members[0]?.current?.updatedAt).toBeNumber();
+    }
+    expect(f.nativeCalls).toHaveLength(before);
+    expect(f.turns).toHaveLength(1);
+    f.turns[0]?.resolve("PRIVATE RAW FINAL RESULT");
+    await f.engine.run({ op: "wait", taskID: first?.id }, f.caller());
+    const finished = f.engine.status({ member: "twiki" });
+    expect(finished.members[0]).toMatchObject({
+      observed: false,
+      current: null,
+      queuedCount: 1,
+      lastOutcome: { status: "completed", summary: "Inspect formatting" },
+    });
+    expect(JSON.stringify(finished)).not.toContain("PRIVATE RAW FINAL RESULT");
+    expect(f.turns).toHaveLength(1);
+    expect(f.creations).toBe(1);
+  } finally {
+    await other?.close();
+    await f.close();
+  }
+});
+
+test("member status retains safe failed Pi outcome without retry or SDK error details", async () => {
+  const f = await fixture();
+  try {
+    const started = f.started();
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "twiki", text: "Inspect failure" },
+        f.caller(),
+      )
+    ).task;
+    await started;
+    f.turns[0]?.reject(new Error("Bearer private-provider-error"));
+    expect(
+      (await f.engine.run({ op: "wait", taskID: task?.id }, f.caller())).status,
+    ).toBe("uncertain");
+    const status = f.engine.status({ member: "twiki" });
+    expect(status.members[0]).toMatchObject({
+      observed: false,
+      current: {
+        status: "uncertain",
+        phase: "Execution failed; outcome uncertain",
+      },
+      lastOutcome: { status: "uncertain" },
+    });
+    expect(JSON.stringify(status)).not.toContain("private-provider-error");
+    expect(f.turns).toHaveLength(1);
   } finally {
     await f.close();
   }

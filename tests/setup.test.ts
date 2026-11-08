@@ -64,8 +64,8 @@ test("manifest prefill round-trips and grants only intended scopes/events", () =
   expect(manifest.features.slash_commands).toEqual([
     {
       command: "/pogo",
-      description: "Manage Pogo operator controls",
-      usage_hint: "pair",
+      description: "View crew activity or manage operator controls",
+      usage_hint: "crew [member] | pair",
       should_escape: true,
     },
     {

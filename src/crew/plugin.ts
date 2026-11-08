@@ -69,6 +69,8 @@ export default Plugin.define({
     };
     try {
       reportingRegistration = await ctx.rpc.register(CrewReporting, {
+        status: (input, context) =>
+          report(context.signal, async () => engine.status(input)),
         start: (input, context) =>
           report(context.signal, () =>
             engine.reporting.start(input, context.signal),

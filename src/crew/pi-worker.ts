@@ -1,13 +1,24 @@
 import { createHash } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentBackend, BackendContext } from "../backend";
+import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import type { BackendConfig } from "../config";
+import { redactActivity } from "./reporting";
 import { CrewError, type CrewState, type CrewTask, type Peer } from "./state";
 import type { CrewMember } from "./team";
 
 type PiConfig = Extract<BackendConfig, { type: "pi-durable" }>;
 export interface PiWorkerBackend extends AgentBackend {
+  /** Internal Pi result selection: visible progress is separate from the final
+   * answer persisted as this task's canonical result. Slack keeps its default.
+   */
+  prompt(
+    sessionID: string,
+    text: string,
+    signal: AbortSignal,
+    onText?: TextSink,
+    result?: "final",
+  ): Promise<string>;
   /** Same crew slot, but enforced tools-off and input-only model context.
    * Absence fails closed; normal maintenance prompt is never a fallback.
    */
@@ -15,13 +26,18 @@ export interface PiWorkerBackend extends AgentBackend {
     sessionID: string,
     text: string,
     signal: AbortSignal,
+    onText?: TextSink,
   ): Promise<string>;
 }
 export type PiWorkerFactory = (
   config: PiConfig,
   context: BackendContext,
 ) => Promise<PiWorkerBackend>;
-type Execution = { controller: AbortController; done: Promise<void> };
+type Execution = {
+  taskID: string;
+  controller: AbortController;
+  done: Promise<void>;
+};
 // All location plugins in this process observe the same in-flight execution.
 const executions = new Map<string, Execution>();
 
@@ -45,6 +61,12 @@ export class PiCrewWorkers {
     private readonly factory: PiWorkerFactory = async (config, context) => {
       const { PiDurableBackend } = await import("../backends/pi-durable");
       return PiDurableBackend.open(config, context);
+    },
+    private readonly scheduleProgress: (callback: () => void) => () => void = (
+      callback,
+    ) => {
+      const timer = setTimeout(callback, 1000);
+      return () => clearTimeout(timer);
     },
   ) {}
 
@@ -134,6 +156,14 @@ export class PiCrewWorkers {
     return !executions.has(this.key(peer));
   }
 
+  /** Observation only: never initialize a backend or reconcile durable state. */
+  observed(task: CrewTask): boolean {
+    return (
+      executions.get(`${this.state.path}:${task.workerSessionID}`)?.taskID ===
+      task.id
+    );
+  }
+
   async canReport(member: CrewMember, directory: string): Promise<boolean> {
     return (
       typeof (await this.backend(member, directory)).promptReport === "function"
@@ -153,6 +183,7 @@ export class PiCrewWorkers {
     if (!conversationID)
       throw new CrewError("Pi worker has no confirmed conversation.");
     const execution: Execution = {
+      taskID: task.id,
       controller: new AbortController(),
       done: Promise.resolve(),
     };
@@ -164,6 +195,50 @@ export class PiCrewWorkers {
         execution.controller.signal,
         AbortSignal.timeout(300_000),
       ]);
+      let pendingProgress: string | undefined;
+      let cancelProgress: (() => void) | undefined;
+      let observing = true;
+      const flushProgress = () => {
+        if (pendingProgress === undefined) return;
+        try {
+          this.state.activity.progress(task.id, pendingProgress);
+          pendingProgress = undefined;
+        } catch {
+          // Status is best effort. Never fail execution or expose raw SQLite
+          // errors; the next active timer may retry the bounded latest snapshot.
+        }
+      };
+      const stopProgress = () => {
+        observing = false;
+        cancelProgress?.();
+        cancelProgress = undefined;
+        signal.removeEventListener("abort", stopProgress);
+        flushProgress();
+        pendingProgress = undefined;
+      };
+      const scheduleProgress = () => {
+        cancelProgress = this.scheduleProgress(() => {
+          cancelProgress = undefined;
+          if (
+            !observing ||
+            signal.aborted ||
+            this.closed ||
+            pendingProgress === undefined
+          )
+            return;
+          flushProgress();
+          scheduleProgress();
+        });
+      };
+      const onText: TextSink = (text) => {
+        if (!observing || signal.aborted || this.closed) return;
+        // Bound and redact before buffering, not just at the SQLite boundary.
+        pendingProgress = redactActivity(text, 64000).slice(-400);
+        if (cancelProgress) return;
+        flushProgress();
+        scheduleProgress();
+      };
+      signal.addEventListener("abort", stopProgress, { once: true });
       try {
         const backend = await this.backend(member, directory);
         signal.throwIfAborted();
@@ -172,13 +247,16 @@ export class PiCrewWorkers {
           throw new CrewError("Pi backend cannot enforce read-only reporting.");
         const answer =
           isReport && backend.promptReport
-            ? await backend.promptReport(conversationID, text, signal)
+            ? await backend.promptReport(conversationID, text, signal, onText)
             : await backend.prompt(
                 conversationID,
                 `Captain assignment ${task.id}:\n\n${text}`,
                 signal,
+                onText,
+                "final",
               );
         signal.throwIfAborted();
+        stopProgress();
         this.state.complete(
           task.id,
           peer.sessionID,
@@ -186,8 +264,13 @@ export class PiCrewWorkers {
             "Worker finished without a text result.",
         );
       } catch {
-        this.state.uncertain(task.id);
+        stopProgress();
+        this.state.uncertain(
+          task.id,
+          signal.aborted ? "uncertain" : "Execution failed; outcome uncertain",
+        );
       } finally {
+        stopProgress();
         executions.delete(this.key(peer));
         this.owned.delete(execution);
       }

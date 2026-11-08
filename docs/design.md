@@ -73,6 +73,15 @@ RPC. Other adapters remain compatible without it. The gateway manages report
 delivery separately from answer delivery, with its own deadline and access
 rechecks. See [crew activity](crew-activity.md) and [`activity.ts`](../src/activity.ts).
 
+`crewStatus` is an optional read-only adapter capability for `/pogo crew`.
+OpenCode implements it through the authenticated captain-location reporting
+RPC, without a captain session ID. It reads crew state and in-process Pi
+execution observations, never the mutating crew-tool status/recovery path.
+Bounded per-task metadata includes reporter work independently of turn captures.
+The Slack modal ACKs and opens before the read, and applies the bot's normal
+app, workspace, user and channel access rules. Stored task state is not a
+liveness guarantee. Backends without this capability remain compatible.
+
 Custom modules export:
 
 ```ts

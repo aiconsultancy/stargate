@@ -242,6 +242,7 @@ export class PiDurableBackend implements AgentBackend {
     text: string,
     signal: AbortSignal,
     onText?: TextSink,
+    result: "visible" | "final" = "visible",
   ) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
     const conversation = await this.harness.conversation(
@@ -321,7 +322,9 @@ export class PiDurableBackend implements AgentBackend {
             : [],
         )
         .join("");
-      if (!onText) return answer;
+      // Crew progress observation must not change its canonical task result.
+      // Normal Slack streaming still returns all visible text for this turn.
+      if (!onText || result === "final") return answer;
       visible.set(entry.id, answer);
       return [...visible.values()].filter(Boolean).join("\n\n");
     } catch (error) {
@@ -338,7 +341,12 @@ export class PiDurableBackend implements AgentBackend {
    * A fresh Pi conversation has no prior maintenance/report context. The same
    * worker slot/FIFO controls admission; the maintenance conversation is untouched.
    */
-  async promptReport(sessionId: string, text: string, signal: AbortSignal) {
+  async promptReport(
+    sessionId: string,
+    text: string,
+    signal: AbortSignal,
+    onText?: TextSink,
+  ) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
     if (
       !(await this.harness.conversation(
@@ -367,7 +375,13 @@ export class PiDurableBackend implements AgentBackend {
     );
     this.activeReports.add(report.id);
     try {
-      return await this.prompt(String(report.id), text, signal);
+      return await this.prompt(
+        String(report.id),
+        text,
+        signal,
+        onText,
+        "final",
+      );
     } finally {
       this.activeReports.delete(report.id);
     }

@@ -19,12 +19,15 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
       if (stop) calls.push("stop");
       return stop;
     },
+    interaction("crew"),
   );
   const ack = async () => {
     calls.push("ack");
   };
   await controls.command({ command: "/pogo", text: "pair" }, ack);
   await controls.command({ command: "/cron", text: "list" }, ack);
+  await controls.command({ command: "/pogo", text: "crew" }, ack);
+  await controls.command({ command: "/pogo", text: "crew twiki" }, ack);
   await controls.interactive(
     { actions: [{ action_id: "pogo_pair_generate" }] },
     ack,
@@ -35,6 +38,8 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
   expect(calls).toEqual([
     "pair-command",
     "cron-command",
+    "crew-command",
+    "crew-command",
     "pair-interactive",
     "pair-interactive",
     "stop",
@@ -50,5 +55,10 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
   expect(acks).toHaveLength(4);
   for (const payload of acks)
     expect(payload).toMatchObject({ response_type: "ephemeral" });
-  expect(calls).toHaveLength(7);
+  for (const text of ["pair extra", "pairing", "crew-other", "", undefined]) {
+    await controls.command({ command: "/pogo", text }, async (payload) => {
+      expect(payload).toMatchObject({ response_type: "ephemeral" });
+    });
+  }
+  expect(calls).toHaveLength(9);
 });

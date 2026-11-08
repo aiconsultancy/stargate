@@ -80,6 +80,12 @@ blocking the captain's answer. Empty captures and the reporter's own maintenance
 do not create an activity message or summary request. See [crew activity](docs/crew-activity.md) for
 setup, privacy, and delivery limits.
 
+Use `/pogo crew` for the configured crew roster or `/pogo crew twiki` for one
+member's task, queue, last outcome and recent visible progress. This private
+status view calls no model and starts no work. It includes Twiki's maintenance
+and reporter tasks even when automatic crew reports are off. Stored running or
+ready state does not prove execution is live. See [crew activity](docs/crew-activity.md#query-a-member).
+
 Select **Stop** on a live reply or waiting message to request cancellation.
 Only the original requester can stop that request. Existing tool effects are
 not rolled back. See [cancellation](docs/cancellation.md) for setup and limits.
@@ -186,7 +192,7 @@ Each bot needs its own Slack app with Socket Mode enabled:
 | `im:history`        | Receive direct messages                |
 | `chat:write`        | Send replies                           |
 | `reactions:write`   | Add context-selected emoji reactions   |
-| `commands`          | Open the `/cron` job manager           |
+| `commands`          | Open `/pogo` controls and `/cron`      |
 
 Create an app-level `xapp-…` token with **`connections:write`** under
 **Basic Information → App-Level Tokens**. Install the app to your workspace

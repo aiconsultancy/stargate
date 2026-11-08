@@ -5,6 +5,7 @@ import { type ActivityWatch, activitySnapshotSchema } from "../activity";
 import type { AgentBackend, TextSink } from "../backend";
 import { type BackendConfig, secret } from "../config";
 import { CrewReporting } from "../crew/report-rpc";
+import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
 const pairingCode = z.object({
@@ -48,6 +49,24 @@ export class OpenCodeBackend implements AgentBackend {
     } catch {
       // SDK failures and validation errors can contain credentials or codes.
       throw new Error("OpenCode pairing failed; outcome may be unknown");
+    }
+  }
+
+  async crewStatus(input: CrewStatusInput, signal: AbortSignal) {
+    try {
+      signal.throwIfAborted();
+      const result = crewStatusSchema.parse(
+        await this.client.rpc(CrewReporting).status(input, {
+          location: { directory: this.config.directory },
+          signal,
+        }),
+      );
+      signal.throwIfAborted();
+      return result;
+    } catch {
+      throw new Error(
+        "Crew status unavailable; check the captain location and crew plugin.",
+      );
     }
   }
 

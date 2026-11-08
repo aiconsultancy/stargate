@@ -6,6 +6,7 @@ import { parseEnv } from "node:util";
 import pino from "pino";
 import { createBackend } from "./backend";
 import { loadConfig, secret } from "./config";
+import { CrewUI } from "./crew-ui";
 import { CronScheduler } from "./cron";
 import { CronStore } from "./cron-store";
 import { CronUI } from "./cron-ui";
@@ -85,6 +86,14 @@ export async function start(configPath: string) {
         botLog,
         controller.signal,
       );
+      const crewUI = new CrewUI(
+        bot,
+        identity,
+        backend,
+        slack.crewUI,
+        botLog,
+        controller.signal,
+      );
       const cron = new CronScheduler(
         bot,
         identity,
@@ -96,7 +105,12 @@ export async function start(configPath: string) {
       await slack.start(
         (body) => !controller.signal.aborted && gateway.accept(body),
         botLog,
-        controlInteractions(cronUI, pairingUI, (body) => gateway.cancel(body)),
+        controlInteractions(
+          cronUI,
+          pairingUI,
+          (body) => gateway.cancel(body),
+          crewUI,
+        ),
       );
       const worker = gateway.work(controller.signal).catch(() => {
         botLog.error("Worker stopped unexpectedly");

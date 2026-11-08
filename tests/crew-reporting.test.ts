@@ -3,6 +3,7 @@ import { expect, setSystemTime, test } from "bun:test";
 import { access, mkdtemp, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { activitySnapshotSchema } from "../src/activity";
+import type { TextSink } from "../src/backend";
 import { PiDurableBackend } from "../src/backends/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
 import {
@@ -86,20 +87,33 @@ async function fixture(safeReports = true) {
     sessionID: string;
     signal: AbortSignal;
     resolve: (text: string) => void;
+    onText: TextSink | undefined;
   }[] = [];
   let next = () => {};
   let creations = 0;
   const opened = Promise.withResolvers<void>();
   const prompt =
     (mode: "maintenance" | "report") =>
-    async (sessionID: string, text: string, signal: AbortSignal) => {
+    async (
+      sessionID: string,
+      text: string,
+      signal: AbortSignal,
+      onText?: TextSink,
+    ) => {
       const answer = Promise.withResolvers<string>();
       signal.addEventListener(
         "abort",
         () => answer.reject(new Error("aborted")),
         { once: true },
       );
-      turns.push({ mode, text, sessionID, signal, resolve: answer.resolve });
+      turns.push({
+        mode,
+        text,
+        sessionID,
+        signal,
+        resolve: answer.resolve,
+        onText,
+      });
       next();
       return answer.promise;
     };
@@ -433,6 +447,19 @@ test("one bounded summary uses Twiki's same conversation and FIFO; report tasks 
     const reportID = f.reportTask(capture.id);
     expect(f.engine.state.task(reportID)?.status).toBe("queued");
     expect(f.engine.state.reporting.isReport(reportID)).toBe(true);
+    f.turns[0]?.onText?.("Checking maintenance files");
+    const busyStatus = f.engine.status({ member: "twiki" });
+    expect(busyStatus.members[0]).toMatchObject({
+      observed: true,
+      current: {
+        kind: "assignment",
+        summary: "Unrelated maintenance",
+        progress: "Checking maintenance files",
+      },
+      queuedCount: 1,
+      queued: [{ kind: "report", summary: "Prepare crew activity report" }],
+    });
+    expect(JSON.stringify(busyStatus)).not.toContain("Feature ready");
     const followup = await f.start("next-turn");
     await f.read(capture.id);
     expect(f.turns).toHaveLength(1);
@@ -450,12 +477,35 @@ test("one bounded summary uses Twiki's same conversation and FIFO; report tasks 
     expect(f.turns[1]?.text).toContain("Feature ready");
     expect(f.turns[1]?.text).not.toContain("Unrelated maintenance");
     expect(f.turns[1]?.text).not.toContain("Maintenance done");
+    f.turns[1]?.onText?.("Preparing visible report; token=report-secret");
+    const reporterStatus = f.engine.status({ member: "twiki" });
+    expect(reporterStatus.members[0]).toMatchObject({
+      observed: true,
+      current: {
+        id: reportID,
+        kind: "report",
+        progress: "Preparing visible report; token=[REDACTED]",
+      },
+      queuedCount: 0,
+      lastOutcome: { kind: "assignment", status: "completed" },
+    });
+    expect(f.turns).toHaveLength(2);
     f.turns[1]?.resolve("Chief: feature ready. token=summary-secret");
     await f.engine.run({ op: "wait", taskID: reportID }, f.caller());
     const final = await f.read(capture.id);
     expect(final.status).toBe("complete");
     expect(final.summary).toContain("Chief: feature ready");
     expect(final.summary).not.toContain("summary-secret");
+    const finishedStatus = f.engine.status({ member: "twiki" });
+    expect(finishedStatus.members[0]).toMatchObject({
+      observed: false,
+      current: null,
+      lastOutcome: { kind: "report", status: "completed" },
+    });
+    expect(finishedStatus.members[0]?.recent.map(({ kind }) => kind)).toEqual([
+      "report",
+      "assignment",
+    ]);
     expect((await f.read(followup.id)).entries).toEqual([]);
     for (let index = 0; index < 3; index++) await f.read(capture.id);
     expect(f.turns).toHaveLength(2);

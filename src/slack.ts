@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import type { ActivityView } from "./activity";
 import { activityContent } from "./activity-slack";
 import { stopBlock } from "./cancellation";
+import type { CrewUIApi } from "./crew-ui";
 import type { CronUIApi } from "./cron-ui";
 import type { SlackDelivery } from "./gateway";
 import type { ReactionName } from "./reactions";
@@ -232,6 +233,17 @@ export class SlackConnection implements SlackDelivery {
     if (!result.ts) throw new Error("Slack did not return a message timestamp");
     return result.ts;
   }
+
+  readonly crewUI: CrewUIApi = {
+    open: async (triggerId, view) => {
+      const result = await this.web.views.open({ trigger_id: triggerId, view });
+      if (!result.view?.id) throw new Error("Slack did not return a view ID");
+      return result.view.id;
+    },
+    update: async (viewId, view) => {
+      await this.web.views.update({ view_id: viewId, view });
+    },
+  };
 
   readonly cronUI: CronUIApi = {
     open: async (triggerId, view) => {

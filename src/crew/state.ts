@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { canExpandCrew } from "./identity";
+import { MemberActivityStore } from "./member-activity";
 import { ReportingStore, redactActivity } from "./reporting";
 export type CrewID = string;
 export type Peer = {
@@ -38,11 +39,13 @@ type QueuedTask = CrewTask & { text: string };
 
 export class CrewState {
   readonly reporting: ReportingStore;
+  readonly activity: MemberActivityStore;
   private constructor(
     readonly path: string,
     private readonly db: Database,
   ) {
     this.reporting = new ReportingStore(db);
+    this.activity = new MemberActivityStore(db);
   }
 
   static async open(
@@ -278,7 +281,10 @@ export class CrewState {
             `msg_${randomUUID()}`,
           );
         const task = this.task(id);
-        if (task) this.reporting.assignment(task, text);
+        if (task) {
+          this.reporting.assignment(task, text);
+          this.activity.assignment(task, text);
+        }
         return task;
       })
       .immediate();
@@ -350,6 +356,7 @@ export class CrewState {
         if (!task) throw new CrewError("Queue reservation failed.");
         if (reportCaptureID) this.reporting.markReport(id, reportCaptureID);
         else this.reporting.assignment(task, text);
+        this.activity.assignment(task, text, !!reportCaptureID);
         return task;
       })
       .immediate();
@@ -383,6 +390,7 @@ export class CrewState {
         this.db.query("DELETE FROM pending_tasks WHERE id=?").run(id);
         const task = this.task(id);
         if (!task) throw new CrewError("Queue promotion failed.");
+        this.activity.phase(task, "dispatching");
         return { task, text: head.text };
       })
       .immediate();
@@ -396,7 +404,10 @@ export class CrewState {
         )
         .run(id, captainID).changes === 1;
     const task = this.task(id);
-    if (cancelled && task) this.reporting.record(task, "update", "Cancelled");
+    if (cancelled && task) {
+      this.reporting.record(task, "update", "Cancelled");
+      this.activity.phase(task, "cancelled");
+    }
     return cancelled;
   }
 
@@ -434,19 +445,23 @@ export class CrewState {
       )
       .run(id);
     const task = this.task(id);
-    if (changed.changes && task)
+    if (changed.changes && task) {
       this.reporting.record(task, "update", "Running");
+      this.activity.phase(task, "running");
+    }
   }
 
-  uncertain(id: string) {
+  uncertain(id: string, phase = "uncertain") {
     const changed = this.db
       .query(
         "UPDATE tasks SET status='uncertain' WHERE id=? AND status NOT IN ('completed','uncertain')",
       )
       .run(id);
     const task = this.task(id);
-    if (changed.changes && task)
+    if (changed.changes && task) {
       this.reporting.record(task, "update", "Outcome uncertain");
+      this.activity.phase(task, phase);
+    }
   }
 
   complete(id: string, workerSessionID: string, result: string) {
@@ -467,6 +482,7 @@ export class CrewState {
           .query("UPDATE tasks SET status='completed',result=? WHERE id=?")
           .run(result, id);
         this.reporting.record(task, "result", result);
+        this.activity.phase({ ...task, status: "completed" }, "completed");
       })
       .immediate();
   }
@@ -490,7 +506,10 @@ export class CrewState {
             expected.status,
           );
         const task = this.task(expected.id) ?? expected;
-        if (changed.changes) this.reporting.record(task, "result", result);
+        if (changed.changes) {
+          this.reporting.record(task, "result", result);
+          this.activity.phase(task, "completed");
+        }
         return task;
       })
       .immediate();
@@ -506,13 +525,15 @@ export class CrewState {
   }
 
   beginCancel(id: string, captainID: string): boolean {
-    return (
+    const changed =
       this.db
         .query(`UPDATE tasks SET status='cancelling'
       WHERE id=? AND originCaptainID=? AND released=0
       AND status IN ('dispatching','running')`)
-        .run(id, captainID).changes === 1
-    );
+        .run(id, captainID).changes === 1;
+    const task = this.task(id);
+    if (changed && task) this.activity.phase(task, "cancelling");
+    return changed;
   }
 
   notice(taskID: string, text: string) {

@@ -1,7 +1,48 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
 import { stopBlock } from "../src/cancellation";
+import { crewStatusView } from "../src/crew-ui";
 import { handleSlackRequest, SlackConnection } from "../src/slack";
+
+test("crew UI consumes trigger for loading modal and updates that private view without posting messages", async () => {
+  const calls: { path: string; fields: URLSearchParams }[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      calls.push({
+        path: new URL(request.url).pathname,
+        fields: new URLSearchParams(await request.text()),
+      });
+      return Response.json({ ok: true, view: { id: "V_CREW" } });
+    },
+  });
+  const slack = new SlackConnection(
+    "fixture-app",
+    "fixture-bot",
+    pino({ enabled: false }),
+    { slackApiUrl: server.url.href },
+  );
+  try {
+    const view = crewStatusView(
+      { members: [], total: 0, truncated: false },
+      false,
+    );
+    const viewID = await slack.crewUI.open("fixture-trigger", view);
+    expect(viewID).toBe("V_CREW");
+    await slack.crewUI.update(viewID, view);
+    expect(calls.map(({ path }) => path)).toEqual([
+      "/views.open",
+      "/views.update",
+    ]);
+    expect(calls[0]?.fields.get("trigger_id")).toBe("fixture-trigger");
+    expect(calls[1]?.fields.get("view_id")).toBe("V_CREW");
+    for (const call of calls)
+      expect(JSON.parse(call.fields.get("view") ?? "null")).toEqual(view);
+  } finally {
+    await server.stop(true);
+  }
+});
 
 test("Slack previews and edits keep plain text; reactions use the fixed target", async () => {
   const calls: { path: string; fields: URLSearchParams }[] = [];

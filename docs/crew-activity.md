@@ -4,6 +4,48 @@ Pogo can show a separate **Crew activity** message in the requesting Slack
 thread. It uses a native collapsible Slack container, initially collapsed.
 The captain's streamed answer and final answer stay separate.
 
+## Query a member
+
+Use the existing `/pogo` command in an allowed channel:
+
+- `/pogo crew`: show the configured crew roster and task summaries.
+- `/pogo crew twiki`: show Twiki's current stored task, queue, last stored
+  outcome and recent task status. Replace `twiki` with another crew ID.
+
+The private modal opens before the backend read. This query calls no model,
+creates no captain or worker conversation, and does not start, promote, retry,
+recover or reconcile work. Normal bot user and channel access rules apply;
+pairing-operator access is not required. It uses the same authenticated,
+location-scoped captain plugin RPC as crew reports. No additional Slack app or
+permission is needed. An older plugin or a backend without crew status support
+shows an unavailable notice. A standalone Pi bot is not a crew captain.
+
+The view reads durable crew task state. For Pi workers, it also shows whether
+this OpenCode process observes an in-flight task. That observation is not a
+health check. A stored `running` or `ready` value does not prove execution is
+live. `uncertain` means there is no confirmed outcome; the query does not repair
+or replay that task. Legacy task times and summaries remain unknown.
+OpenCode execution is labelled unobserved; the query does not fetch native
+session transcripts. Close and run the command again to refresh the snapshot.
+
+This view is independent of automatic turn reports and works when
+`crewActivity` is off. It includes the reporter's own maintenance and reporting
+tasks, which automatic turn captures deliberately exclude. Assignment summaries
+are limited to 180 characters. Pi's visible-text callback supplies a coalesced,
+400-character progress snapshot; reasoning, tool output and raw final results
+are not copied into status. Report task summaries use a fixed label, not their
+input records. Recognized credentials are redacted before persistence and
+display. Do not put secrets in assignments or visible answers: redaction cannot
+identify all secrets.
+
+The roster shows at most 20 members; a direct member query can select an omitted
+member. Each detail view shows the first five queued tasks and eight recent
+outcomes, with total counts and explicit truncation notices. Private status
+metadata retains active and queued tasks plus 12 recent tasks per member.
+Existing task results, mail, notices and Pi histories are not removed. Status
+metadata has no transcript browser or complete event archive. Some legacy and
+older retained outcomes have no timing or progress details.
+
 ## Opt in
 
 First configure [Twiki as a Pi Durable crew member](agents/default-opencode.md#pi-durable-crew).
