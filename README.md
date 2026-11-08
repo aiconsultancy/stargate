@@ -18,6 +18,8 @@ For trusted project work, use the [OpenCode captain/crew profile](docs/agents/de
 Without `--team`, Bowser coordinates the four-member starter crew through
 CLIProxyAPI and Mesij. `pogo crew init --team team.example.json` selects a
 configured captain and variable roster; the portable example uses Galactica.
+Its optional Bosun worker handles [ship maintenance](docs/ship-maintenance.md),
+with captain/crew journals, shared lessons and explicit nightly scheduling.
 Each team needs separate namespace, state, captain and crew directories, but
 can share an OpenCode V2 server. Existing Bowser/global settings are unchanged.
 Use the [repeatable instance procedure](docs/instances.md) for a second team,

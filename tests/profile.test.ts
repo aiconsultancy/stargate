@@ -3,10 +3,12 @@ import { execFileSync } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   realpath,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -154,6 +156,12 @@ test("profile init creates named feature worktrees, preserves source and reuses 
     );
     expect(prompt).not.toContain("{{");
     expect(prompt).toContain("mode: primary");
+    expect(prompt).toContain(
+      join(options.directory, ".local", "ship", "log.md"),
+    );
+    expect(prompt).toContain(
+      join(options.directory, ".local", "ship", "journals", `${name}.md`),
+    );
     expect(
       execFileSync("git", ["-C", directory, "status", "--porcelain"], {
         encoding: "utf8",
@@ -164,6 +172,11 @@ test("profile init creates named feature worktrees, preserves source and reuses 
     (await stat(join(options.directory, ".local", "pogo-crew"))).mode & 0o777,
   ).toBe(0o700);
   expect(await initializeProfile(options)).toEqual(result);
+  expect(
+    await Bun.file(
+      join(options.directory, ".local", "ship", "journals", "bowser.md"),
+    ).exists(),
+  ).toBe(true);
 });
 
 test("profile init refuses conflicting files rather than overwriting work", async () => {
@@ -173,6 +186,87 @@ test("profile init refuses conflicting files rather than overwriting work", asyn
   await writeFile(path, "User's custom instructions\n");
   await expect(initializeProfile(options)).rejects.toThrow("existing");
   expect(await readFile(path, "utf8")).toBe("User's custom instructions\n");
+});
+
+test("ship records cover the configured roster and preserve operator notes", async () => {
+  const { options } = await fixture();
+  const ship = join(options.directory, ".local", "ship");
+  const journal = join(ship, "journals", "gaeta.md");
+  await mkdir(join(ship, "journals"), { recursive: true });
+  await writeFile(journal, "Operator's research notes\n");
+  const result = await initializeProfile({ ...options, team });
+  expect((await readdir(join(ship, "journals"))).sort()).toEqual([
+    "adama.md",
+    "gaeta.md",
+    "starbuck.md",
+  ]);
+  const log = join(ship, "log.md");
+  expect(await readFile(log, "utf8")).toContain("# Ship log");
+  expect((await stat(log)).mode & 0o777).toBe(0o600);
+  await writeFile(log, "Verified lesson: preserve the original task ID.\n");
+  for (const [id, directory] of [
+    [team.captain.id, options.directory],
+    ...Object.entries(result.worktrees),
+  ]) {
+    const prompt = await readFile(
+      join(directory ?? "", ".opencode", "agents", `${id}.md`),
+      "utf8",
+    );
+    expect(prompt).toContain(log);
+    expect(prompt).toContain(join(ship, "journals", `${id}.md`));
+    expect(prompt).toContain(
+      join(options.projectDirectory, ".agents", "opco", "skills"),
+    );
+    expect(prompt).toContain("skill-creator");
+    expect(prompt).toContain("task boundaries, not every turn");
+    expect(prompt).not.toContain("{{");
+  }
+  await initializeProfile({ ...options, team });
+  expect(await readFile(journal, "utf8")).toBe("Operator's research notes\n");
+  expect(await readFile(log, "utf8")).toBe(
+    "Verified lesson: preserve the original task ID.\n",
+  );
+});
+
+test("portable Bosun is an ordinary configured worker, not a runtime default", async () => {
+  const { options } = await fixture();
+  const example = teamSchema.parse(
+    await Bun.file(join(import.meta.dir, "..", "team.example.json")).json(),
+  );
+  const bosun = example.crew.find(({ id }) => id === "bosun");
+  expect(bosun?.permissionProfile).toBe("coding");
+  expect(bosun?.backend).toBeUndefined();
+  expect(bosun?.instructions).toContain("nightly");
+  expect(defaultTeam.crew.some(({ id }) => id === "bosun")).toBe(false);
+  const result = await initializeProfile({ ...options, team: example });
+  const directory = result.worktrees["bosun"];
+  expect(directory).toBeDefined();
+  const config = await renderProfile({ ...options, team: example }, "bosun");
+  expect(config.agents["bosun"]?.model).toBe(bosun?.model);
+  expect(config.skills).toContain(
+    join(options.projectDirectory, ".agents", "opco", "skills"),
+  );
+  const prompt = await readFile(
+    join(directory ?? "", ".opencode", "agents", "bosun.md"),
+    "utf8",
+  );
+  expect(prompt).toContain(bosun?.instructions ?? "missing Bosun instructions");
+  expect(prompt).toContain(
+    join(options.directory, ".local", "ship", "journals", "bosun.md"),
+  );
+});
+
+test("ship initialization rejects a linked record without changing its target", async () => {
+  const { options } = await fixture();
+  const ship = join(options.directory, ".local", "ship");
+  await mkdir(ship, { recursive: true });
+  const target = join(options.directory, "operator-notes.md");
+  await writeFile(target, "Keep these notes\n");
+  await symlink(target, join(ship, "log.md"));
+  await expect(initializeProfile({ ...options, team })).rejects.toThrow(
+    "existing profile file",
+  );
+  expect(await readFile(target, "utf8")).toBe("Keep these notes\n");
 });
 
 test("Pi crew receives a worktree but no OpenCode agent or session profile", async () => {
@@ -205,6 +299,11 @@ test("Pi crew receives a worktree but no OpenCode agent or session profile", asy
   );
   expect(prompt).toContain("twiki (Twiki)");
   expect(prompt).toContain("backend: Pi Durable");
+  expect(
+    await Bun.file(
+      join(options.directory, ".local", "ship", "journals", "twiki.md"),
+    ).exists(),
+  ).toBe(true);
   await expect(
     renderProfile({ ...options, team: mixed }, "twiki"),
   ).rejects.toThrow("do not use OpenCode");

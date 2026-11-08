@@ -441,7 +441,76 @@ test("explicit Pi roster expansion preserves all native peers and results", asyn
   }
 });
 
-test("roster expansion rejects rebinding, removal and non-Pi additions", () => {
+test("explicit OpenCode roster expansion preserves native and Pi peers and tasks", async () => {
+  const f = await fixture();
+  try {
+    const peers = (await f.engine.run({ op: "ensure" }, f.caller())).peers;
+    const peer = peers?.find(({ crewID }) => crewID === "mario");
+    if (!peer) throw new Error("Missing original peer");
+    const task = f.engine.state.reserveTask(peer, "captain-a");
+    if (!task) throw new Error("Missing original task");
+    f.engine.state.complete(task.id, peer.sessionID, "Retained native result");
+    const savedTask = f.engine.state.task(task.id);
+    const statePath = f.engine.state.path;
+    await f.engine.close();
+    const existingTeam = teamSchema.parse(f.options.team);
+    const expanded = {
+      ...f.options,
+      team: teamSchema.parse({
+        ...existingTeam,
+        crew: [
+          ...existingTeam.crew,
+          {
+            id: "bosun",
+            role: "Ship maintenance",
+            permissionProfile: "coding",
+          },
+        ],
+      }),
+      worktrees: { ...f.options.worktrees, bosun: join(f.directory, "bosun") },
+    };
+    await expect(CrewEngine.open(expanded, f.sessions)).rejects.toThrow(
+      "configuration changed",
+    );
+    const upgraded = await CrewEngine.open(
+      { ...expanded, allowCrewExpansion: true },
+      f.sessions,
+      undefined,
+      undefined,
+      f.factory,
+    );
+    let bosunSessionID: string | undefined;
+    try {
+      expect(upgraded.state.path).toBe(statePath);
+      for (const previous of peers ?? [])
+        expect(upgraded.state.peer(previous.crewID)).toEqual(previous);
+      expect(upgraded.state.task(task.id)).toEqual(savedTask);
+      const ensured = await upgraded.run(
+        { op: "ensure", crew: "bosun" },
+        f.caller(),
+      );
+      expect(ensured.status).toBe("ready");
+      bosunSessionID = upgraded.state.peer("bosun")?.sessionID;
+      expect(bosunSessionID).toBeDefined();
+      expect(f.nativeCalls).toContain("create:bosun");
+    } finally {
+      await upgraded.close();
+    }
+    const reopened = await CrewEngine.open(expanded, f.sessions);
+    try {
+      expect(reopened.state.peer("bosun")?.sessionID).toBe(bosunSessionID);
+      for (const previous of peers ?? [])
+        expect(reopened.state.peer(previous.crewID)).toEqual(previous);
+      expect(reopened.state.task(task.id)).toEqual(savedTask);
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("roster expansion accepts OpenCode additions but rejects rebinding and removal", () => {
   const old = {
     version: 2,
     namespace: "crew",
@@ -479,10 +548,22 @@ test("roster expansion rejects rebinding, removal and non-Pi additions", () => {
   expect(
     canExpandCrew(before, JSON.stringify({ ...next, crew: [added] })),
   ).toBe(false);
+  for (const changed of [
+    { ...next, namespace: "another" },
+    { ...next, projectDirectory: "/other" },
+    { ...next, captain: { ...old.captain, directory: "/other" } },
+  ])
+    expect(canExpandCrew(before, JSON.stringify(changed))).toBe(false);
   expect(
     canExpandCrew(
       before,
-      JSON.stringify({ ...next, crew: [...old.crew, { id: "other" }] }),
+      JSON.stringify({
+        ...next,
+        crew: [
+          ...old.crew,
+          { id: "bosun", directory: "/bosun", permissionProfile: "coding" },
+        ],
+      }),
     ),
-  ).toBe(false);
+  ).toBe(true);
 });

@@ -118,6 +118,7 @@ export async function renderProfile(input: Options, role: string) {
   return {
     ...parsed,
     providers,
+    skills: [join(options.projectDirectory, ".agents", "opco", "skills")],
     default_agent: role,
     agents: {
       [agent.id]: {
@@ -166,10 +167,17 @@ async function present(path: string) {
   }
 }
 
-async function writeNewOrSame(path: string, text: string) {
+async function writeProfileFile(
+  path: string,
+  text: string,
+  preserveExisting = false,
+) {
   const info = await present(path);
   if (info) {
-    if (!info.isFile() || (await readFile(path, "utf8")) !== text) {
+    if (
+      !info.isFile() ||
+      (!preserveExisting && (await readFile(path, "utf8")) !== text)
+    ) {
       throw new Error(`Refusing to overwrite existing profile file: ${path}`);
     }
     return;
@@ -272,6 +280,16 @@ export async function initializeProfile(input: Options) {
   if (((await lstat(state)).mode & 0o077) !== 0)
     throw new Error("Crew state directory must be private (0700).");
   const agents = [options.team.captain, ...options.team.crew];
+  const ship = join(options.directory, ".local", "ship");
+  await writeProfileFile(
+    join(ship, "log.md"),
+    "# Ship log\n\nRecord verified team lessons and useful inspection findings.\n",
+    true,
+  );
+  const shipInstructions = await readFile(
+    join(packageDirectory, "templates", "ship-instructions.md"),
+    "utf8",
+  );
   await excludeGenerated(
     options.projectDirectory,
     agents.map(({ id }) => id),
@@ -279,6 +297,12 @@ export async function initializeProfile(input: Options) {
   const legacy = JSON.stringify(options.team) === JSON.stringify(defaultTeam);
   for (const agent of agents) {
     const role = agent.id;
+    const journalPath = join(ship, "journals", `${role}.md`);
+    await writeProfileFile(
+      journalPath,
+      `# ${role} journal\n\nRecord useful findings, checks, actions and lessons at task boundaries.\n`,
+      true,
+    );
     const captain = role === options.team.captain.id;
     const member = options.team.crew.find((member) => member.id === role);
     const directory = captain ? options.directory : worktrees[role];
@@ -362,6 +386,15 @@ export async function initializeProfile(input: Options) {
       captainID: options.team.captain.id,
       captainName: options.team.captain.name ?? options.team.captain.id,
       directory,
+      shipLog: join(ship, "log.md"),
+      journalPath,
+      journalDirectory: join(ship, "journals"),
+      skillsDirectory: join(
+        options.projectDirectory,
+        ".agents",
+        "opco",
+        "skills",
+      ),
       role: member?.role ?? "Captain and Slack coordinator",
       permissionProfile: member?.permissionProfile ?? "captain",
       roster: options.team.crew
@@ -374,12 +407,12 @@ export async function initializeProfile(input: Options) {
         agent.instructions ??
         "Follow the assigned task and project instructions.",
     };
-    const prompt = template.replace(
+    const prompt = `${template.trimEnd()}\n\n${shipInstructions}`.replace(
       /\{\{(\w+)\}\}/g,
       (match, key: string) => substitutions[key] ?? match,
     );
-    await writeNewOrSame(join(configPath, "agents", `${role}.md`), prompt);
-    await writeNewOrSame(
+    await writeProfileFile(join(configPath, "agents", `${role}.md`), prompt);
+    await writeProfileFile(
       join(configPath, "opencode.json"),
       `${JSON.stringify(await renderProfile(options, role), null, 2)}\n`,
     );

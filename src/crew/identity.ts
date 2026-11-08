@@ -35,6 +35,7 @@ export function canExpandCrew(previous: string, next: string): boolean {
       added.length > 0 &&
       added.every((member) => {
         const backend = member["backend"];
+        if (backend === undefined) return true;
         return (
           typeof backend === "object" &&
           backend !== null &&

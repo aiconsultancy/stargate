@@ -43,13 +43,18 @@ the caller's real captain session. See [waiting responses](../waiting.md) for
 defaults, off versus zero, workspace persistence and plugin activation.
 
 Copy [`team.example.json`](../../team.example.json), a portable Galactica team
-with captain `adama` and three workers, including researcher `gaeta`:
+with captain `adama` and four workers, including researcher `gaeta` and ship
+maintenance worker `bosun`:
 
 ```sh
 pogo crew init --team team.example.json \
   --directory /srv/pogo/galactica/captain --project /srv/project \
   --worktrees /srv/pogo/galactica/crew --base origin/main
 ```
+
+See [ship maintenance](../ship-maintenance.md) for durable captain/crew journals,
+the shared ship log, project-owned skill learning and an optional nightly
+inspection through the existing `/cron` form. No schedule is enabled by default.
 
 Team JSON contains `captain: { id, name?, model?, instructions? }` and a
 nonempty `crew` array. Each worker has the same identity fields plus `role`
@@ -126,9 +131,10 @@ generated directory, captain agent and permission rules, and distinct Slack
 app registrations. State stays under each captain's `.local/pogo-crew`.
 
 Do not silently rebind persisted identities to another roster, path or captain.
-Initial roster IDs/directories remain fixed once persisted, including legacy
-starter states. Keep existing state and sessions. Use fresh directories and a
-new namespace for a changed roster, or plan an explicit migration. Model
+Existing roster IDs/directories remain fixed once persisted, including legacy
+starter states. Keep existing state and sessions. New members can use the
+explicit append-only `allowCrewExpansion` rollout described below without a
+new namespace. Other roster changes require an explicit migration. Model
 changes use the explicit session-switch operation below. Setup refuses
 conflicting overlays; it does not overwrite a live Bowser installation.
 Existing sessions also keep their stored permission rules. New agent defaults
@@ -186,8 +192,8 @@ delete it to clear a reservation. Plugin shutdown cancels and closes Pi work.
 
 For an existing roster, an approved append-only rollout may set
 `allowCrewExpansion: true` in **each generated Pogo plugin's options**. Supply
-the same updated team and add Twiki's path to `worktrees`. This accepts only
-new Pi members, preserving every existing worker's ID, permission profile,
+the same updated team and add each new member's path to `worktrees`. This accepts
+new OpenCode or Pi members, preserving every existing worker's ID, permission profile,
 directory, session, tasks and results. It rejects removal or rebinding. Clear
 the flag after rollout. Back up private state first and update at an idle
 boundary; the profile initializer still refuses conflicting overlays.
@@ -373,13 +379,17 @@ tracks Slack requests and reply delivery; these are not interchangeable stores.
 2. `dispatch` reserves one active task per worker in a SQLite transaction,
    then submits a uniquely identified input to that worker's existing session.
    An explicit queued assignment remains unsubmitted until promoted.
-3. The assigned worker calls `complete` with the task ID and result. A final
-   assistant message alone does not mark the task complete. Only its originating
-   captain session can collect that task's result through the crew tool.
+3. A successful final worker answer completes the task when the captain checks
+   `status`, `wait`, or the next `dispatch`. Pogo verifies the existing session,
+   task boundary and native outcome before recovering its visible answer. The
+   worker may also call `complete` explicitly. Only the originating captain
+   session can collect that task's result through the crew tool. See
+   [automatic result recovery](../crew-recovery.md).
 4. A completed slot is reused only after OpenCode confirms the worker is idle.
    Results remain stored after reuse. Queued jobs keep FIFO order per member.
-5. Ambiguous admission, interrupted execution or missing completion can leave
-   a task `uncertain`. It blocks slot reuse and is never automatically replayed.
+5. Ambiguous admission, interrupted execution or unavailable result evidence
+   can leave a task `uncertain`. It blocks slot reuse and is never automatically
+   replayed. A later verified final answer can recover the same task.
    Cancelling a queued wait cancels that pending job, not another active job.
 
 Model/compaction controls reserve the worker against concurrent dispatch.
