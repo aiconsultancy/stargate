@@ -21,6 +21,7 @@ import {
   teamSchema,
 } from "../src/crew/team";
 import { initializeProfile, renderProfile } from "../src/profile";
+import { reactionInstructions } from "../src/reactions";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -150,6 +151,31 @@ test("profile binds every crew location to the same existing captain session", a
   await expect(
     renderProfile({ ...bound, captainSessionID: "not-a-session" }, "bowser"),
   ).rejects.toThrow("Invalid profile");
+});
+
+test("reaction protocol belongs once in the captain definition, not crew definitions", async () => {
+  const { options } = await fixture();
+  await initializeProfile(options);
+  await initializeProfile(options);
+  const captain = await readFile(
+    join(options.directory, ".opencode", "agents", "bowser-captain-bowser.md"),
+    "utf8",
+  );
+  expect(captain).toContain(reactionInstructions);
+  expect(captain.split("Slack reaction protocol (optional):")).toHaveLength(2);
+  for (const member of ["mario", "luigi", "daisy", "toad"]) {
+    const crew = await readFile(
+      join(
+        options.worktreeDirectory,
+        member,
+        ".opencode",
+        "agents",
+        `bowser-crew-${member}.md`,
+      ),
+      "utf8",
+    );
+    expect(crew).not.toContain("Slack reaction protocol");
+  }
 });
 
 test("profile init creates named feature worktrees, preserves source and reuses paths", async () => {

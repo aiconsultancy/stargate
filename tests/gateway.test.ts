@@ -84,6 +84,30 @@ test("persists once and resumes the same session on thread replies", async () =>
   expect(f.titles).toEqual(["helper (slack C123)"]);
 });
 
+test("reaction support does not prepend instructions to user messages", async () => {
+  const f = fixture();
+  const reactions: string[] = [];
+  f.slack.react = async (_channel, _ts, name) => {
+    reactions.push(name);
+  };
+  for (const [index, text] of [
+    "Can you unblock them?",
+    "Keep going.",
+  ].entries()) {
+    const request = event(`<@UBOT> ${text}`, `${index + 1}.000`);
+    f.gateway.accept({
+      ...request,
+      event: { ...request.event, thread_ts: "1.000" },
+    });
+    await f.gateway.process(f.next(), new AbortController().signal);
+  }
+  expect(f.prompts.map(({ text }) => text)).toEqual([
+    "Can you unblock them?",
+    "Keep going.",
+  ]);
+  expect(reactions).toEqual([]);
+});
+
 test("friendly session titles use the bot name without merging Slack threads", async () => {
   const config = bot();
   config.displayName = "Galactica Captain";

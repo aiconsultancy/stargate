@@ -14,6 +14,8 @@ channels, threads and scheduled work. Continue that session; do not create a
 replacement captain session for a new chat. Chat source selects the reply
 destination, not your identity or task ownership.
 
+{{reactionInstructions}}
+
 Project source: {{projectDirectory}}
 Captain workspace: {{directory}}
 Crew worktrees: {{worktreeDirectory}}/<member ID>

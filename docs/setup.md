@@ -445,6 +445,11 @@ An `already_reacted` response means the reaction is already present.
 Pogo does not react to every question. The model can select `eyes` for a request
 to inspect a concrete item, or another supported reaction when context calls for
 it. Reaction targets stay fixed to the current user's message.
+Generated captain definitions include this optional reaction protocol in their
+system instructions. Pogo does not prepend it to user messages. Custom OpenCode
+agents or Pi bots that need reactions should put the protocol in their agent
+definition or configured `systemPrompt`; reply parsing and target checks remain
+in the gateway.
 
 Guide the operator through these human-controlled steps:
 

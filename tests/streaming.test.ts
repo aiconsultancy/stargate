@@ -333,7 +333,7 @@ test("only explicit model reactions target the current user message", async () =
     reactions.push({ channel, ts, name });
   };
   f.backend.prompt = async (_session, text, _signal, onText) => {
-    expect(text).toContain("Do not use eyes to acknowledge a general question");
+    expect(text).toBe("hello");
     onText?.("[[pogo:react:ey");
     expect(f.messages.size).toBe(0);
     onText?.("[[pogo:react:eyes]]\nLooking at the PR.");

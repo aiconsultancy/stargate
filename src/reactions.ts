@@ -17,6 +17,7 @@ const directives = reactionNames.map((name) => ({
   line: `[[pogo:react:${name}]]`,
 }));
 
+/** Persistent agent/system instructions, never a per-message user prefix. */
 export const reactionInstructions = `Slack reaction protocol (optional):
 You may start your response with one standalone line [[pogo:react:NAME]].
 Allowed NAME values: ${reactionNames.join(", ")}.

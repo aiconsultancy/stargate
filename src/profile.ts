@@ -18,6 +18,7 @@ import {
   profileTeam,
   teamSchema,
 } from "./crew/team";
+import { reactionInstructions } from "./reactions";
 
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const absolute = z
@@ -440,6 +441,7 @@ export async function initializeProfile(input: Options) {
             `- ${member.id} (${member.name ?? member.id}): ${member.role}; permissions: ${member.permissionProfile}${member.backend ? `; backend: Pi Durable (coordination ${member.backend.tools === "coding" ? "enabled" : "disabled"})` : ""}`,
         )
         .join("\n"),
+      reactionInstructions,
       instructions:
         agent.instructions ??
         "Follow the assigned task and project instructions.",

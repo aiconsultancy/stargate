@@ -15,11 +15,7 @@ import type { BotConfig } from "./config";
 import { abortable, runAbortable } from "./effect";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
-import {
-  parseReactionReply,
-  type ReactionName,
-  reactionInstructions,
-} from "./reactions";
+import { parseReactionReply, type ReactionName } from "./reactions";
 import { failureText, type RequestFailure } from "./request-failure";
 import {
   botKey,
@@ -768,14 +764,11 @@ export class Gateway {
             },
             cancel: () => cancellation.abort(),
           });
-          const prompt = this.slack.react
-            ? `${reactionInstructions}\n\nUser message:\n${text}`
-            : text;
           activity = await this.activity.start(job, session, signal, shutdown);
           this.store.started(job.id);
           const streamed = await this.backend.prompt(
             session,
-            prompt,
+            text,
             signal,
             (text) => live.push(reply(text, false)),
             pinned
