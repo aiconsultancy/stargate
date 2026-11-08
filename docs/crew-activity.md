@@ -90,6 +90,11 @@ with an explanation; facts remain visible. Refreshes do not call a model.
 Pogo edits the same activity message in the original thread. It does not prompt
 the captain again or let workers post to Slack.
 
+Accepted summary jobs belong to the reporter, not the short reporting RPC.
+Ending that RPC does not cancel an accepted job. Explicit capture cancellation
+and plugin shutdown abort and drain pending admission; running Pi work remains
+subject to the existing report cancellation and backend shutdown paths.
+
 Each summary uses a fresh, tools-free Pi context containing only sanitized
 capture records. Twiki's maintenance conversation and earlier reports are not
 model context for a new report. The same worker slot and queue still control

@@ -50,11 +50,14 @@ No new slash command, OAuth scope, token, or public HTTP endpoint is needed.
 - Backend interruption after input placement is session-wide. If another native
   turn starts before the interrupt arrives, it can also be stopped. Avoid native
   input in the same session while stopping a placed request.
-- If admission fails without returning an input ID, Pogo cannot prove ownership.
-  It does not interrupt the whole session or replay the request. Check native
-  session state before retrying; the input may have been accepted.
+- Pogo creates an input ID or request key before admission. If the response is
+  lost, cleanup uses that exact correlation to withdraw the input or prove its
+  placement before interrupting. It never resubmits the prompt for recovery.
+  If recovery reads fail, the outcome remains uncertain; check native state
+  before retrying. Correlation covers an in-flight attempt, not crash replay.
 - Backend interruption is best effort. A failed interrupt or an adapter that
   ignores cancellation can leave work running. The stop notice records the
   request to stop; it does not certify that external work stopped or rolled
-  back. Live Slack delivery still has its existing retry and duplication
-  limits.
+  back. Admission can race cleanup: an OpenCode input accepted after its cancel
+  request can still run. Live Slack delivery still has its existing retry and
+  duplication limits.

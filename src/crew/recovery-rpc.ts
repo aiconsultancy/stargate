@@ -1,13 +1,20 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { z } from "zod";
 import type { CrewEngine } from "./engine";
-import { inspectInputSchema, reconcileInputSchema } from "./reconciliation";
+import {
+  abandonInputSchema,
+  inspectInputSchema,
+  reconcileInputSchema,
+} from "./reconciliation";
+import { workspaceInputSchemas } from "./workspace";
 
 export const recoveryRequestSchema = z.strictObject({
   sessionID: z.string().min(1).max(256),
   request: z.discriminatedUnion("op", [
     inspectInputSchema,
     reconcileInputSchema,
+    abandonInputSchema,
+    ...workspaceInputSchemas,
   ]),
 });
 export const CrewRecovery = Rpc.define({

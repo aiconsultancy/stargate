@@ -28,6 +28,7 @@ export interface PiWorkerBackend extends AgentBackend {
     signal: AbortSignal,
     onText?: TextSink,
     result?: "final",
+    requestId?: string,
   ): Promise<string>;
   /** Same crew slot, but enforced tools-off and input-only model context.
    * Absence fails closed; normal maintenance prompt is never a fallback.
@@ -37,12 +38,46 @@ export interface PiWorkerBackend extends AgentBackend {
     text: string,
     signal: AbortSignal,
     onText?: TextSink,
+    receipt?: {
+      requestId: string;
+      onConversation: (conversationID: string) => void;
+    },
   ): Promise<string>;
 }
-export type PiWorkerFactory = (
+export type PiWorkerFactory = ((
   config: PiConfig,
   context: BackendContext,
-) => Promise<PiWorkerBackend>;
+) => Promise<PiWorkerBackend>) & {
+  /** Must inspect committed receipts without scheduling or submitting work. */
+  recover?: (
+    context: BackendContext,
+    conversationID: string,
+    requestID: string,
+    signal: AbortSignal,
+  ) => Promise<string | undefined>;
+};
+const nativeFactory: PiWorkerFactory = Object.assign(
+  async (config: PiConfig, context: BackendContext) => {
+    const { PiDurableBackend } = await import("../backends/pi-durable");
+    return PiDurableBackend.open(config, context);
+  },
+  {
+    async recover(
+      context: BackendContext,
+      conversationID: string,
+      requestID: string,
+      signal: AbortSignal,
+    ) {
+      const { PiDurableBackend } = await import("../backends/pi-durable");
+      return PiDurableBackend.recover(
+        context,
+        conversationID,
+        requestID,
+        signal,
+      );
+    },
+  },
+);
 type Execution = {
   taskID: string;
   controller: AbortController;
@@ -69,15 +104,14 @@ export class PiCrewWorkers {
   private readonly backends = new Map<string, Promise<PiWorkerBackend>>();
   private readonly leases = new Set<string>();
   private readonly owned = new Set<Execution>();
+  private readonly recoveryController = new AbortController();
+  private readonly recoveries = new Set<Promise<CrewTask>>();
   private closed = false;
 
   constructor(
     private readonly state: CrewState,
     private readonly stateDirectory: string,
-    private readonly factory: PiWorkerFactory = async (config, context) => {
-      const { PiDurableBackend } = await import("../backends/pi-durable");
-      return PiDurableBackend.open(config, context);
-    },
+    private readonly factory: PiWorkerFactory = nativeFactory,
     private readonly scheduleProgress: (callback: () => void) => () => void = (
       callback,
     ) => {
@@ -263,6 +297,72 @@ export class PiCrewWorkers {
     return this.state.task(task.id) ?? task;
   }
 
+  /** Recover only this task's committed answer; never initialize a worker. */
+  async recover(
+    task: CrewTask,
+    member: CrewMember,
+    _directory: string,
+    signal: AbortSignal,
+  ): Promise<CrewTask> {
+    if (this.closed) return task;
+    const recovery = this.recoverReceipt(
+      task,
+      member,
+      AbortSignal.any([signal, this.recoveryController.signal]),
+    );
+    this.recoveries.add(recovery);
+    try {
+      return await recovery;
+    } finally {
+      this.recoveries.delete(recovery);
+    }
+  }
+
+  private async recoverReceipt(
+    task: CrewTask,
+    member: CrewMember,
+    signal: AbortSignal,
+  ): Promise<CrewTask> {
+    signal.throwIfAborted();
+    const current = this.state.task(task.id) ?? task;
+    if (
+      this.closed ||
+      current.crewID !== member.id ||
+      current.released !== 0 ||
+      !["dispatching", "running", "uncertain"].includes(current.status) ||
+      this.observed(current)
+    )
+      return current;
+    const expected = this.reconcile(current);
+    const conversationID = this.state.piTaskConversation(expected.id);
+    if (!conversationID || !this.factory.recover) return expected;
+    try {
+      const hash = createHash("sha256").update(member.id).digest("hex");
+      const dataDirectory = join(
+        await realpath(resolve(this.stateDirectory)),
+        "pi",
+        hash,
+      );
+      signal.throwIfAborted();
+      const answer = await this.factory.recover(
+        { dataDirectory },
+        conversationID,
+        expected.inputID,
+        signal,
+      );
+      signal.throwIfAborted();
+      if (answer !== undefined)
+        return this.state.recoverResult(
+          expected,
+          answer.trim().slice(0, 64000) ||
+            "Worker finished without a text result.",
+        );
+    } catch {
+      // Missing/unreadable native receipts remain unresolved, not failed or done.
+    }
+    return this.closed ? expected : (this.state.task(task.id) ?? expected);
+  }
+
   async idle(
     peer: Peer,
     member: CrewMember,
@@ -404,15 +504,22 @@ export class PiCrewWorkers {
         const isReport = this.state.reporting.isReport(task.id);
         if (isReport && !backend.promptReport)
           throw new CrewError("Pi backend cannot enforce read-only reporting.");
+        if (!isReport)
+          this.state.savePiTaskConversation(task.id, conversationID);
         const answer =
           isReport && backend.promptReport
-            ? await backend.promptReport(conversationID, text, signal, onText)
+            ? await backend.promptReport(conversationID, text, signal, onText, {
+                requestId: task.inputID,
+                onConversation: (id) =>
+                  this.state.savePiTaskConversation(task.id, id),
+              })
             : await backend.prompt(
                 conversationID,
                 `Captain assignment ${task.id}:\n\n${text}`,
                 signal,
                 onText,
                 "final",
+                task.inputID,
               );
         signal.throwIfAborted();
         stopProgress();
@@ -446,8 +553,12 @@ export class PiCrewWorkers {
 
   async close() {
     this.closed = true;
+    this.recoveryController.abort();
     const running = [...this.owned];
     for (const execution of running) execution.controller.abort();
+    // Readers own native handles through their complete cleanup, even when an
+    // opener ignores cancellation. Crew state may close only after this drain.
+    await Promise.allSettled([...this.recoveries]);
     await Promise.all(running.map(({ done }) => done));
     await Promise.allSettled(
       [...this.leases].map(async (key) => {

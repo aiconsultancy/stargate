@@ -369,7 +369,10 @@ export class ReportingStore {
 }
 
 export class CrewReporter {
-  private readonly jobs = new Map<string, Promise<void>>();
+  private readonly jobs = new Map<
+    string,
+    { controller: AbortController; done: Promise<void> }
+  >();
   private closed = false;
 
   constructor(private readonly engine: CrewEngine) {}
@@ -392,6 +395,7 @@ export class CrewReporter {
     try {
       await this.engine.captain(caller);
       signal.throwIfAborted();
+      if (this.closed) throw new CrewError("Activity reporter is closing.");
       return caller;
     } catch (error) {
       if (error instanceof CrewError) throw error;
@@ -453,7 +457,11 @@ export class CrewReporter {
     const caller = await this.verify(input.sessionID, signal);
     const capture = this.store.owned(input.sessionID, input.id);
     this.store.terminal(capture, "cancelled", "Activity capture cancelled.");
-    await this.jobs.get(capture.id);
+    const job = this.jobs.get(capture.id);
+    job?.controller.abort();
+    await job?.done;
+    // Cancellation was accepted before close; do not revisit a drained owner.
+    if (this.closed) return true;
     if (capture.reportTaskID)
       await this.engine.cancelReport(capture.reportTaskID, caller);
     else {
@@ -500,12 +508,18 @@ export class CrewReporter {
       );
       return;
     }
+    // RPC cancellation ends the request, not work it already authorized.
+    const controller = new AbortController();
+    const owner = { ...caller, signal: controller.signal };
     const job = (async () => {
       let reportTaskID = capture.reportTaskID;
       if (!reportTaskID) {
-        if (
-          !(await this.engine.reporterFree(capture.reporterID, caller.signal))
-        ) {
+        const free = await this.engine.reporterFree(
+          capture.reporterID,
+          owner.signal,
+        );
+        owner.signal.throwIfAborted();
+        if (!free) {
           this.store.terminal(
             capture,
             "complete",
@@ -543,25 +557,39 @@ export class CrewReporter {
           prompt,
         ).id;
       }
-      await this.engine.progressReport(reportTaskID, caller);
+      await this.engine.progressReport(reportTaskID, owner);
+      owner.signal.throwIfAborted();
     })()
-      .catch((error: unknown) => {
-        this.store.terminal(
-          capture,
-          "unavailable",
+      .catch(async (error: unknown) => {
+        let summary =
           error instanceof CrewError
             ? error.message
-            : "Activity reporter unavailable or unconfirmed; raw details withheld.",
-        );
+            : "Activity reporter unavailable or unconfirmed; raw details withheld.";
+        // Aborting admission does not itself remove a durable queue entry.
+        const reportTaskID = this.store.reportTaskID(capture.id);
+        if (
+          reportTaskID &&
+          this.engine.state.task(reportTaskID)?.status === "queued"
+        ) {
+          try {
+            await this.engine.cancelReport(reportTaskID, owner);
+          } catch {
+            summary =
+              "Activity reporter cleanup unconfirmed; raw details withheld.";
+          }
+        }
+        this.store.terminal(capture, "unavailable", summary);
       })
       .finally(() => {
         this.jobs.delete(capture.id);
       });
-    this.jobs.set(capture.id, job);
+    this.jobs.set(capture.id, { controller, done: job });
   }
 
   async close() {
     this.closed = true;
-    await Promise.all(this.jobs.values());
+    const jobs = [...this.jobs.values()];
+    for (const job of jobs) job.controller.abort();
+    await Promise.all(jobs.map(({ done }) => done));
   }
 }

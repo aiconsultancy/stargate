@@ -19,6 +19,12 @@ Allowed model providers: {{modelProviders}}
 Configured roster (IDs, not display names, select crew tools):
 {{roster}}
 
+Each crew member uses one permanent worktree named after that member's ID.
+Assign task branches inside that worktree, not a new worktree for each task.
+Temporary work in tmp directories is allowed without moving the crew session.
+Keep the same worktree and session across tasks; correct directory drift rather
+than creating replacements. Legacy folder names need an explicit migration.
+
 Choose the shortest effective path. Use tools directly for implementation,
 diagnosis and repairs when delegation adds delay or the crew is busy. Delegate
 independent work when it saves time; substantial work does not require a crew

@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { CrewCaller, CrewEngine } from "./engine";
-import type { MesijClient } from "./mesij";
+import type { MesijClient, MesijMessage } from "./mesij";
 import { CrewError } from "./state";
 
 const send = z.strictObject({
@@ -36,6 +36,7 @@ export type MailRoute = {
   sourceTaskID: string | null;
   targetTaskID: string | null;
 };
+type MailIntent = Omit<MailRoute, "id"> & { fingerprint: string };
 export class MailRoutes {
   constructor(private readonly db: Database) {
     db.exec(`CREATE TABLE IF NOT EXISTS mail_routes (
@@ -46,24 +47,134 @@ export class MailRoutes {
       sessionID TEXT NOT NULL, captainID TEXT NOT NULL, sequence INTEGER NOT NULL,
       PRIMARY KEY(sessionID,captainID)
     );
-    CREATE TABLE IF NOT EXISTS mail_notices (id TEXT PRIMARY KEY);`);
+    CREATE TABLE IF NOT EXISTS mail_notices (id TEXT PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS mail_intents (
+      key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
+      sender TEXT NOT NULL, recipient TEXT NOT NULL, captainID TEXT NOT NULL,
+      sourceTaskID TEXT, targetTaskID TEXT, receiptID TEXT
+    );
+    CREATE TABLE IF NOT EXISTS mail_route_holes (
+      id TEXT PRIMARY KEY, recipient TEXT NOT NULL, captainID TEXT NOT NULL,
+      sequence INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS mail_intents_fingerprint ON mail_intents(fingerprint);`);
   }
   get(id: string) {
     return this.db
       .query<MailRoute, [string]>("SELECT * FROM mail_routes WHERE id=?")
       .get(id);
   }
-  save(route: MailRoute) {
+  save(route: MailRoute, key?: string) {
     this.db
-      .query("INSERT OR IGNORE INTO mail_routes VALUES (?,?,?,?,?,?)")
-      .run(
-        route.id,
-        route.sender,
-        route.recipient,
-        route.captainID,
-        route.sourceTaskID,
-        route.targetTaskID,
-      );
+      .transaction(() => {
+        if (key !== undefined) {
+          const intent = this.db
+            .query<
+              Omit<MailRoute, "id"> & { receiptID: string | null },
+              [string]
+            >(
+              "SELECT sender,recipient,captainID,sourceTaskID,targetTaskID,receiptID FROM mail_intents WHERE key=?",
+            )
+            .get(key);
+          if (
+            !intent ||
+            intent.sender !== route.sender ||
+            intent.recipient !== route.recipient ||
+            intent.captainID !== route.captainID ||
+            intent.sourceTaskID !== route.sourceTaskID ||
+            intent.targetTaskID !== route.targetTaskID ||
+            (intent.receiptID !== null && intent.receiptID !== route.id)
+          )
+            throw new CrewError(
+              "Mail receipt does not match its authorized intent.",
+            );
+          this.db
+            .query(
+              "UPDATE mail_intents SET receiptID=? WHERE key=? AND receiptID IS NULL",
+            )
+            .run(route.id, key);
+        }
+        this.db
+          .query("INSERT OR IGNORE INTO mail_routes VALUES (?,?,?,?,?,?)")
+          .run(
+            route.id,
+            route.sender,
+            route.recipient,
+            route.captainID,
+            route.sourceTaskID,
+            route.targetTaskID,
+          );
+        this.db.query("DELETE FROM mail_route_holes WHERE id=?").run(route.id);
+      })
+      .immediate();
+  }
+  prepare(key: string, intent: MailIntent) {
+    this.db
+      .transaction(() => {
+        this.db
+          .query(
+            "INSERT OR IGNORE INTO mail_intents VALUES (?,?,?,?,?,?,?,NULL)",
+          )
+          .run(
+            key,
+            intent.fingerprint,
+            intent.sender,
+            intent.recipient,
+            intent.captainID,
+            intent.sourceTaskID,
+            intent.targetTaskID,
+          );
+        const saved = this.db
+          .query<MailIntent, [string]>(
+            "SELECT fingerprint,sender,recipient,captainID,sourceTaskID,targetTaskID FROM mail_intents WHERE key=?",
+          )
+          .get(key);
+        if (
+          !saved ||
+          saved.fingerprint !== intent.fingerprint ||
+          saved.sender !== intent.sender ||
+          saved.recipient !== intent.recipient ||
+          saved.captainID !== intent.captainID ||
+          saved.sourceTaskID !== intent.sourceTaskID ||
+          saved.targetTaskID !== intent.targetTaskID
+        )
+          throw new CrewError(
+            "Mail retry key belongs to a different message or context.",
+          );
+      })
+      .immediate();
+  }
+  recover(event: MesijMessage) {
+    // Only a pre-authorized intent can repair a lost receipt. The digest binds
+    // native sender/recipient/type/reply identity and the exact namespaced
+    // task/captain envelope, not merely arbitrary JSON claims in the event.
+    const repaired = this.db
+      .transaction(() => {
+        const intent = this.db
+          .query<Omit<MailRoute, "id"> & { key: string }, [string, string]>(
+            "SELECT key,sender,recipient,captainID,sourceTaskID,targetTaskID FROM mail_intents WHERE fingerprint=? AND (receiptID IS NULL OR receiptID=?) LIMIT 1",
+          )
+          .get(mailFingerprint(event), event.id);
+        if (!intent) return { route: null };
+        const { key, ...context } = intent;
+        const route = { id: event.id, ...context };
+        // Selection and binding share this transaction: an old bound intent
+        // cannot authorize a copied event or create a spurious ACK barrier.
+        this.db
+          .query("INSERT OR IGNORE INTO mail_route_holes VALUES (?,?,?,?)")
+          .run(event.id, intent.recipient, intent.captainID, event.sequence);
+        try {
+          this.save(route, key);
+          return { route };
+        } catch (error) {
+          // save's nested transaction rolls back binding and route together.
+          // Commit only the ACK ceiling so a failed repair remains readable.
+          return { error };
+        }
+      })
+      .immediate();
+    if ("error" in repaired) throw repaired.error;
+    return repaired.route;
   }
   notice(id: string): boolean {
     return (
@@ -72,17 +183,24 @@ export class MailRoutes {
     );
   }
   cursor(sessionID: string, captainID: string, after?: number) {
+    const hole = this.db
+      .query<{ sequence: number | null }, [string, string, string]>(
+        "SELECT MIN(sequence) AS sequence FROM mail_route_holes WHERE recipient=? AND (?='' OR captainID=?)",
+      )
+      .get(sessionID, captainID, captainID)?.sequence;
+    const ceiling = hole == null ? Number.MAX_SAFE_INTEGER : hole - 1;
     if (after !== undefined)
       this.db
         .query(`INSERT INTO mailbox_cursors VALUES (?,?,?)
       ON CONFLICT(sessionID,captainID) DO UPDATE SET sequence=MAX(sequence,excluded.sequence)`)
-        .run(sessionID, captainID, after);
-    return (
+        .run(sessionID, captainID, Math.min(after, ceiling));
+    return Math.min(
+      ceiling,
       this.db
         .query<{ sequence: number }, [string, string]>(
           "SELECT sequence FROM mailbox_cursors WHERE sessionID=? AND captainID=?",
         )
-        .get(sessionID, captainID)?.sequence ?? 0
+        .get(sessionID, captainID)?.sequence ?? 0,
     );
   }
 }
@@ -156,14 +274,16 @@ export class CrewMessaging {
         caller.signal,
       );
       const messages = events.flatMap((event) => {
+        if (event.to !== caller.sessionID) return [];
         const route =
-          routes.get(event.id) ?? this.engine.legacyStatusRoute(event);
+          routes.get(event.id) ??
+          this.engine.legacyStatusRoute(event) ??
+          routes.recover(event);
         const statusRequest = this.engine.statusRequestRoute(event.id);
         if (
           !route ||
           route.recipient !== caller.sessionID ||
           (captainID && route.captainID !== captainID && !statusRequest) ||
-          event.to !== caller.sessionID ||
           event.sessionID !== route.sender ||
           event.actor !== this.engine.mailActor(route.sender) ||
           (input.taskID && route.targetTaskID !== input.taskID)
@@ -272,7 +392,51 @@ export class CrewMessaging {
             ["dispatching", "running", "cancelling"].includes(candidate.status)
           ? candidate
           : null;
+      const route = {
+        sender: caller.sessionID,
+        recipient,
+        captainID,
+        sourceTaskID: source?.id ?? null,
+        targetTaskID: target?.id ?? null,
+      };
+      const intentKey = createHash("sha256")
+        .update(
+          JSON.stringify([
+            this.engine.options.namespace,
+            caller.sessionID,
+            recipient,
+            key,
+          ]),
+        )
+        .digest("hex");
+      const message = {
+        actor,
+        sessionID: caller.sessionID,
+        to: recipient,
+        text: JSON.stringify({
+          namespace: this.engine.options.namespace,
+          // Bind identical human text to this send, not another pending intent.
+          intentKey,
+          sender: caller.sessionID,
+          recipient,
+          originCaptainID:
+            statusReply && source ? source.originCaptainID : captainID,
+          sourceTaskID: source?.id,
+          targetTaskID: target?.id,
+          text: input.text,
+          ...(statusReply ? { statusRequestID: statusReply.id } : {}),
+        }),
+        key: intentKey,
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+      };
       try {
+        routes.prepare(message.key, {
+          ...route,
+          fingerprint: mailFingerprint({
+            ...message,
+            type: message.replyTo ? "message.replied" : "message.posted",
+          }),
+        });
         if (!registered) {
           await this.mailer.register(actor, caller.sessionID, caller.signal);
           registered = true;
@@ -282,45 +446,9 @@ export class CrewMessaging {
           recipient,
           caller.signal,
         );
-        const receipt = await this.mailer.send(
-          {
-            actor,
-            sessionID: caller.sessionID,
-            to: recipient,
-            text: JSON.stringify({
-              namespace: this.engine.options.namespace,
-              sender: caller.sessionID,
-              recipient,
-              originCaptainID:
-                statusReply && source ? source.originCaptainID : captainID,
-              sourceTaskID: source?.id,
-              targetTaskID: target?.id,
-              text: input.text,
-              ...(statusReply ? { statusRequestID: statusReply.id } : {}),
-            }),
-            key: createHash("sha256")
-              .update(
-                JSON.stringify([
-                  this.engine.options.namespace,
-                  caller.sessionID,
-                  recipient,
-                  key,
-                ]),
-              )
-              .digest("hex"),
-            ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-          },
-          caller.signal,
-        );
-        const route: MailRoute = {
-          id: receipt.id,
-          sender: caller.sessionID,
-          recipient,
-          captainID,
-          sourceTaskID: source?.id ?? null,
-          targetTaskID: target?.id ?? null,
-        };
-        routes.save(route);
+        const receipt = await this.mailer.send(message, caller.signal);
+        const storedRoute: MailRoute = { id: receipt.id, ...route };
+        routes.save(storedRoute, message.key);
         if (!source || !this.engine.state.reporting.isReport(source.id))
           this.engine.state.reporting.journal.append(
             {
@@ -340,7 +468,7 @@ export class CrewMessaging {
         )
           try {
             notification = await this.engine.notifyMail(
-              route,
+              storedRoute,
               caller,
               input.text,
               input.delivery,
@@ -363,6 +491,26 @@ export class CrewMessaging {
       ? { status: "sent", ...receipts[0] }
       : { status: "sent", receipts };
   }
+}
+
+function mailFingerprint(
+  event: Pick<
+    MesijMessage,
+    "actor" | "sessionID" | "to" | "type" | "text" | "replyTo"
+  >,
+) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        event.actor,
+        event.sessionID,
+        event.to,
+        event.type,
+        event.text,
+        event.replyTo ?? null,
+      ]),
+    )
+    .digest("hex");
 }
 
 function parseJSON(text: string): unknown {

@@ -44,9 +44,12 @@ export class MemberActivityStore {
 
   phase(task: CrewTask, phase: string) {
     const now = Date.now();
-    const terminal = ["completed", "uncertain", "cancelled"].includes(
-      task.status,
-    );
+    const terminal = [
+      "completed",
+      "uncertain",
+      "cancelled",
+      "abandoned",
+    ].includes(task.status);
     // Legacy tasks keep unknown creation/start times. Never backfill invented times.
     this.db
       .query(`INSERT INTO member_activity
@@ -85,6 +88,15 @@ export class MemberActivityStore {
       progress,createdAt,startedAt,updatedAt,finishedAt
       FROM member_activity WHERE taskID=?`)
       .get(task.id);
+    // Known local decision; the external native stop is reported separately.
+    const stop =
+      task.status === "abandoned"
+        ? this.db
+            .query<{ stop: string }, [string]>(
+              "SELECT stop FROM task_abandonments WHERE taskID=?",
+            )
+            .get(task.id)?.stop
+        : undefined;
     return {
       id: task.id,
       status: task.status,
@@ -104,7 +116,9 @@ export class MemberActivityStore {
         activity?.phase === "Execution failed; outcome uncertain" &&
         task.status === "uncertain"
           ? activity.phase
-          : task.status,
+          : stop && stop !== "confirmed"
+            ? `abandoned; native stop ${stop}`
+            : task.status,
     };
   }
 
@@ -123,7 +137,7 @@ export class MemberActivityStore {
         .get(crewID)?.count ?? 0;
     const terminal = `SELECT t.id,t.status,COALESCE(a.finishedAt,a.updatedAt,0) AS time,
       t.rowid AS sequence FROM tasks t LEFT JOIN member_activity a ON a.taskID=t.id
-      WHERE t.crewID=? AND t.status IN ('completed','uncertain')
+      WHERE t.crewID=? AND t.status IN ('completed','uncertain','abandoned','cancelled')
       UNION ALL SELECT p.id,p.status,COALESCE(a.finishedAt,a.updatedAt,0),p.sequence
       FROM pending_tasks p LEFT JOIN member_activity a ON a.taskID=p.id
       WHERE p.crewID=? AND p.status='cancelled'`;
@@ -156,7 +170,8 @@ export class MemberActivityStore {
       AND taskID NOT IN (SELECT id FROM tasks WHERE crewID=? AND released=0)
       AND taskID NOT IN (SELECT id FROM pending_tasks WHERE crewID=? AND status='queued')
       AND taskID NOT IN (SELECT taskID FROM member_activity WHERE crewID=?
-        AND taskID IN (SELECT id FROM tasks WHERE crewID=? AND status IN ('completed','uncertain')
+        AND taskID IN (SELECT id FROM tasks WHERE crewID=?
+          AND status IN ('completed','uncertain','abandoned','cancelled')
           UNION SELECT id FROM pending_tasks WHERE crewID=? AND status='cancelled')
         ORDER BY updatedAt DESC,rowid DESC LIMIT 12)`)
       .run(crewID, crewID, crewID, crewID, crewID, crewID);

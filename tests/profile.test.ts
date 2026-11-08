@@ -149,6 +149,7 @@ test("profile init creates named feature worktrees, preserves source and reuses 
   expect(git("branch", "--show-current").trim()).toBe("main");
   expect(git("status", "--porcelain")).toBe("");
   for (const [name, directory] of Object.entries(result.worktrees)) {
+    expect(directory).toBe(join(options.worktreeDirectory, name));
     const branch = execFileSync(
       "git",
       ["-C", directory, "branch", "--show-current"],
@@ -161,6 +162,7 @@ test("profile init creates named feature worktrees, preserves source and reuses 
     );
     expect(prompt).not.toContain("{{");
     expect(prompt).toContain("mode: primary");
+    expect(prompt).toContain("Do not switch worktrees");
     expect(prompt).toContain(
       join(options.directory, ".local", "ship", "log.md"),
     );
@@ -177,6 +179,17 @@ test("profile init creates named feature worktrees, preserves source and reuses 
     (await stat(join(options.directory, ".local", "pogo-crew"))).mode & 0o777,
   ).toBe(0o700);
   expect(await initializeProfile(options)).toEqual(result);
+  const worker = result.worktrees["mario"];
+  if (!worker) throw new Error("Missing worker worktree");
+  execFileSync("git", ["-C", worker, "switch", "-c", "feat/task-in-place"], {
+    stdio: "pipe",
+  });
+  expect(await initializeProfile(options)).toEqual(result);
+  expect(
+    execFileSync("git", ["-C", worker, "branch", "--show-current"], {
+      encoding: "utf8",
+    }).trim(),
+  ).toBe("feat/task-in-place");
   expect(
     await Bun.file(
       join(options.directory, ".local", "ship", "journals", "bowser.md"),
@@ -354,6 +367,8 @@ test("Pi crew receives a worktree but no OpenCode agent or session profile", asy
   );
   const definition = await readFile(definitionPath, "utf8");
   expect(definition).toContain("Pogo address: twiki");
+  expect(worktree).toBe(join(options.worktreeDirectory, "twiki"));
+  expect(definition).toContain("Do not switch worktrees");
   expect(definition).toContain(join(options.directory, "WAYS_OF_WORKING.md"));
   expect(definition).toContain("reread it when updated");
   expect(definition).not.toContain("# Ways of working");

@@ -3,6 +3,7 @@ import type {
   MessageListInput,
   OpenCodeClient,
   SessionGetInput,
+  SessionInboxCancelInput,
   SessionMessageInfo,
 } from "@opencode/client";
 import { z } from "zod";
@@ -30,8 +31,28 @@ export const reconcileInputSchema = z.strictObject({
   resultSha256: z.string().regex(/^[a-f0-9]{64}$/),
   reason: z.string().trim().min(1).max(2000),
 });
+/** Captain override for blocked slots. Copy expected fields from inspect. */
+export const abandonInputSchema = z.strictObject({
+  op: z.literal("abandon"),
+  taskID: z.string().startsWith("task_").max(100),
+  expected: z.strictObject({
+    status: z.enum(["dispatching", "running", "cancelling", "uncertain"]),
+    workerSessionID: id,
+    originCaptainID: id,
+    inputID: id,
+    controlID: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable()
+      .default(null),
+  }),
+  reason: z.string().trim().min(1).max(2000),
+  key: z.string().regex(/^[A-Za-z0-9._-]{1,100}$/),
+  acknowledgeUnconfirmedStop: z.literal(true),
+});
 export type InspectInput = z.infer<typeof inspectInputSchema>;
 export type ReconcileInput = z.infer<typeof reconcileInputSchema>;
+export type AbandonInput = z.infer<typeof abandonInputSchema>;
 type RequestOptions = NonNullable<
   Parameters<OpenCodeClient["session"]["get"]>[1]
 >;
@@ -46,7 +67,8 @@ export interface EvidenceMessage {
   error?: unknown;
   content?: ReadonlyArray<{ type: string; text?: string }>;
 }
-// Only authenticated read APIs. No prompts, interrupts, forms or permissions writes.
+// Authenticated read APIs. No prompts, interrupts, forms or permission writes;
+// captain abandon alone may withdraw its own task's still-queued input.
 export interface CrewInspectionAPI {
   session: {
     get(input: SessionGetInput, request?: RequestOptions): Promise<CrewSession>;
@@ -56,6 +78,10 @@ export interface CrewInspectionAPI {
         input: SessionGetInput,
         request?: RequestOptions,
       ): Promise<ReadonlyArray<{ id: string }>>;
+      cancel?(
+        input: SessionInboxCancelInput,
+        request?: RequestOptions,
+      ): Promise<void>;
     };
     form: {
       list(
@@ -134,6 +160,102 @@ export async function observeExecution(
       outcome: session.outcome ?? null,
     },
   };
+}
+
+/** Where the task's own prompt is natively. superseded: placed, but a later
+ * user, shell or foreign synthetic input follows it, so the active turn may be
+ * foreign work.
+ */
+export type Placement =
+  | "queued"
+  | "placed"
+  | "superseded"
+  | "absent"
+  | "unknown";
+type PlacementTask = Pick<
+  CrewTask,
+  "id" | "workerSessionID" | "inputID" | "originCaptainID"
+>;
+
+/** Newest first, one native message class per scan. Throws past the bound. */
+async function* newest(
+  api: CrewInspectionAPI,
+  sessionID: string,
+  type: "user" | "shell" | "synthetic",
+  signal: AbortSignal,
+): AsyncGenerator<EvidenceMessage> {
+  let cursor: string | undefined;
+  const cursors = new Set<string>();
+  for (let page = 0; page < 8; page++) {
+    const result = await api.message.list(
+      {
+        sessionID,
+        limit: 64,
+        ...(cursor ? { cursor } : { order: "desc" as const, type }),
+      },
+      { signal },
+    );
+    yield* result.data;
+    const next = result.cursor.next;
+    if (!next) return;
+    if (cursors.has(next)) throw new CrewError("Repeated history cursor.");
+    cursors.add(next);
+    cursor = next;
+  }
+  throw new CrewError("History bound exceeded.");
+}
+
+/** Same rule as result recovery: steering marked for this task and captain. */
+function taskScoped(message: EvidenceMessage, task: PlacementTask): boolean {
+  const notice = message.metadata?.["pogoCrew"];
+  if (typeof notice !== "object" || notice === null) return false;
+  const value = notice as Record<string, unknown>;
+  return (
+    value["taskID"] === task.id &&
+    value["originCaptainID"] === task.originCaptainID &&
+    (typeof value["sourceTaskID"] === "string" ||
+      typeof value["messageID"] === "string")
+  );
+}
+
+/** Exact inputID only; inbox before history because delivery moves it.
+ * Type-filtered scans keep long tool-heavy turns out of the 8x64 window.
+ */
+export async function observePlacement(
+  api: CrewInspectionAPI,
+  task: PlacementTask,
+  signal: AbortSignal,
+): Promise<Placement> {
+  try {
+    const sessionID = task.workerSessionID;
+    const inbox = await api.session.inbox.list({ sessionID }, { signal });
+    if (inbox.some(({ id }) => id === task.inputID)) return "queued";
+    let own: EvidenceMessage | undefined;
+    let later = false;
+    for await (const message of newest(api, sessionID, "user", signal)) {
+      if (message.type !== "user") continue;
+      if (message.id === task.inputID) {
+        own = message;
+        break;
+      }
+      later = true;
+    }
+    if (!own) return "absent";
+    if (later) return "superseded";
+    // Shell and foreign synthetic inputs also start or steer other work.
+    for (const type of ["shell", "synthetic"] as const)
+      for await (const message of newest(api, sessionID, type, signal)) {
+        if (message.time.created < own.time.created) break;
+        if (
+          message.type === type &&
+          !(type === "synthetic" && taskScoped(message, task))
+        )
+          return "superseded";
+      }
+    return "placed";
+  } catch {
+    return "unknown";
+  }
 }
 
 export function requireQuiescent(execution: ExecutionInspection): void {

@@ -25,7 +25,9 @@ export type CrewTask = {
     | "running"
     | "completed"
     | "cancelling"
-    | "uncertain";
+    | "uncertain"
+    /** Captain released it without a result; external stop is in the audit. */
+    | "abandoned";
   result: string | null;
   released: number;
   notifying: number;
@@ -52,12 +54,62 @@ export type StatusRequest = {
   workerSessionID: string;
   receiptID: string | null;
 };
+export type AbandonableStatus =
+  | "dispatching"
+  | "running"
+  | "cancelling"
+  | "uncertain";
+/** pending: local abandon committed, native stop attempt not yet recorded. */
+export type StopPhase = "pending" | "confirmed" | "unconfirmed";
+export type TaskAbandonment = {
+  taskID: string;
+  crewID: string;
+  workerSessionID: string;
+  originCaptainID: string;
+  inputID: string;
+  abandonedBy: string;
+  previousStatus: AbandonableStatus;
+  previousResult: string | null;
+  reason: string;
+  operationKey: string;
+  clearedControlID: string | null;
+  stop: StopPhase;
+  stopDetail: string | null;
+  createdAt: number;
+  stoppedAt: number | null;
+};
+type AbandonExpected = Pick<
+  CrewTask,
+  "id" | "crewID" | "workerSessionID" | "originCaptainID" | "inputID"
+> & { status: AbandonableStatus; controlID: string | null };
 
 export class CrewError extends Error {}
 
 /** greybeard: bounded FIFO, polled by its captain; no background scheduler. */
 export const pendingTaskLimit = 100;
 type QueuedTask = CrewTask & { text: string };
+const abandonmentColumns = `taskID,crewID,workerSessionID,originCaptainID,inputID,
+  abandonedBy,previousStatus,previousResult,reason,operationKey,clearedControlID,
+  stop,stopDetail,createdAt,stoppedAt`;
+// Controls held by operations in this process. An explicit captain override
+// may clear a crash-held control, never one an operation here still holds.
+const liveControls = new Set<string>();
+const tasksTable = (name: string) => `${name} (
+          id TEXT PRIMARY KEY,
+          crewID TEXT NOT NULL REFERENCES peers(crewID),
+          workerSessionID TEXT NOT NULL,
+          originCaptainID TEXT NOT NULL,
+          inputID TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL CHECK(status IN ('dispatching','running',
+            'completed','cancelling','uncertain','abandoned','cancelled')),
+          result TEXT,
+          released INTEGER NOT NULL DEFAULT 0,
+          notifying INTEGER NOT NULL DEFAULT 0
+        )`;
+/** Not a valid captain abandon key, so audits stay distinguishable. */
+export const withdrawKey = "pogo:cancel";
+const controlID = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
 
 export class CrewState {
   readonly reporting: ReportingStore;
@@ -97,18 +149,7 @@ export class CrewState {
           sessionID TEXT NOT NULL UNIQUE,
           status TEXT NOT NULL CHECK(status IN ('pending','ready'))
         );
-        CREATE TABLE IF NOT EXISTS tasks (
-          id TEXT PRIMARY KEY,
-          crewID TEXT NOT NULL REFERENCES peers(crewID),
-          workerSessionID TEXT NOT NULL,
-          originCaptainID TEXT NOT NULL,
-          inputID TEXT NOT NULL UNIQUE,
-          status TEXT NOT NULL CHECK(status IN
-            ('dispatching','running','completed','cancelling','uncertain')),
-          result TEXT,
-          released INTEGER NOT NULL DEFAULT 0,
-          notifying INTEGER NOT NULL DEFAULT 0
-        );
+        CREATE TABLE ${tasksTable("IF NOT EXISTS tasks")};
         CREATE UNIQUE INDEX IF NOT EXISTS active_worker
           ON tasks(crewID) WHERE released=0;
         CREATE TABLE IF NOT EXISTS notices (
@@ -154,6 +195,23 @@ export class CrewState {
           sessionID TEXT PRIMARY KEY REFERENCES peers(sessionID),
           conversationID TEXT
         );
+        CREATE TABLE IF NOT EXISTS task_abandonments (
+          taskID TEXT PRIMARY KEY REFERENCES tasks(id),
+          crewID TEXT NOT NULL, workerSessionID TEXT NOT NULL,
+          originCaptainID TEXT NOT NULL, inputID TEXT NOT NULL,
+          abandonedBy TEXT NOT NULL,
+          previousStatus TEXT NOT NULL CHECK(previousStatus IN
+            ('dispatching','running','cancelling','uncertain')),
+          previousResult TEXT, reason TEXT NOT NULL,
+          operationKey TEXT NOT NULL, clearedControlID TEXT,
+          controlToken TEXT NOT NULL,
+          stop TEXT NOT NULL CHECK(stop IN ('pending','confirmed','unconfirmed')),
+          stopDetail TEXT, createdAt INTEGER NOT NULL, stoppedAt INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS pi_task_conversations (
+          taskID TEXT PRIMARY KEY REFERENCES tasks(id),
+          conversationID TEXT NOT NULL
+        );
       `);
       const legacyPeers = /CHECK\s*\(\s*crewID\s+IN\s*\(/i.test(
         db
@@ -162,7 +220,16 @@ export class CrewState {
           )
           .get()?.sql ?? "",
       );
-      if (allowCrewExpansion && legacyPeers) db.exec("PRAGMA foreign_keys=OFF");
+      // Older state predates the terminal abandoned/cancelled task statuses.
+      const legacyTasks = !/'abandoned'/.test(
+        db
+          .query<{ sql: string }, []>(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'",
+          )
+          .get()?.sql ?? "",
+      );
+      if ((allowCrewExpansion && legacyPeers) || legacyTasks)
+        db.exec("PRAGMA foreign_keys=OFF");
       db.transaction(() => {
         const identity = db
           .query<{ value: string }, []>("SELECT value FROM identity")
@@ -196,6 +263,24 @@ export class CrewState {
           if (db.query("PRAGMA foreign_key_check").all().length)
             throw new CrewError(
               "Crew expansion failed its reference check; original state retained.",
+            );
+        }
+        if (legacyTasks) {
+          // Widen only the status CHECK. Every row, rowid (recent-order key)
+          // and referencing table stays as is; legacy uncertain stays uncertain.
+          const columns =
+            "rowid,id,crewID,workerSessionID,originCaptainID,inputID,status,result,released,notifying";
+          db.exec(`
+            CREATE TABLE ${tasksTable("tasks_terminal")};
+            INSERT INTO tasks_terminal (${columns}) SELECT ${columns} FROM tasks;
+            DROP TABLE tasks;
+            ALTER TABLE tasks_terminal RENAME TO tasks;
+            CREATE UNIQUE INDEX IF NOT EXISTS active_worker
+              ON tasks(crewID) WHERE released=0;
+          `);
+          if (db.query("PRAGMA foreign_key_check").all().length)
+            throw new CrewError(
+              "Crew task status upgrade failed its reference check; original state retained.",
             );
         }
         if (identity && identity.value !== fingerprint)
@@ -274,6 +359,44 @@ export class CrewState {
       throw new CrewError(
         "Pi conversation reservation changed; inspect crew state.",
       );
+  }
+
+  /** Persist before native admission. Idempotent for the same conversation;
+   * only the current, unreleased dispatching/running task may bind.
+   */
+  savePiTaskConversation(taskID: string, conversationID: string) {
+    this.db
+      .transaction(() => {
+        const task = this.db
+          .query<CrewTask, [string]>("SELECT * FROM tasks WHERE id=?")
+          .get(taskID);
+        const saved = this.piTaskConversation(taskID);
+        if (saved === conversationID) return;
+        if (
+          saved !== undefined ||
+          !task ||
+          task.released !== 0 ||
+          (task.status !== "dispatching" && task.status !== "running") ||
+          this.activeTask(task.crewID)?.id !== task.id
+        )
+          throw new CrewError(
+            "Pi task conversation binding refused: task is not current or is bound elsewhere.",
+          );
+        this.db
+          .query("INSERT INTO pi_task_conversations VALUES (?,?)")
+          .run(taskID, conversationID);
+      })
+      .immediate();
+  }
+
+  piTaskConversation(taskID: string): string | undefined {
+    return (
+      this.db
+        .query<{ conversationID: string }, [string]>(
+          "SELECT conversationID FROM pi_task_conversations WHERE taskID=?",
+        )
+        .get(taskID)?.conversationID ?? undefined
+    );
   }
 
   task(id: string): CrewTask | null {
@@ -383,11 +506,197 @@ export class CrewState {
           throw new CrewError(
             "Worker control is reserved; do not steal it. Inspect before retrying.",
           );
-        const token = randomUUID();
+        return this.insertControl(expected.crewID);
+      })
+      .immediate();
+  }
+
+  private insertControl(crewID: string): string {
+    const token = randomUUID();
+    this.db
+      .query("INSERT INTO worker_controls VALUES (?,?)")
+      .run(crewID, token);
+    liveControls.add(`${this.path}\0${token}`);
+    return token;
+  }
+
+  /** Hash only; the token itself stays private to its holder. */
+  controlID(crewID: string): string | null {
+    const row = this.db
+      .query<{ token: string }, [string]>(
+        "SELECT token FROM worker_controls WHERE crewID=?",
+      )
+      .get(crewID);
+    return row ? controlID(row.token) : null;
+  }
+
+  abandonment(taskID: string): TaskAbandonment | null {
+    return this.db
+      .query<TaskAbandonment, [string]>(
+        `SELECT ${abandonmentColumns} FROM task_abandonments WHERE taskID=?`,
+      )
+      .get(taskID);
+  }
+
+  /** Releases the slot and holds the control for the stop attempt. History,
+   * result, notices and mail stay intact; the outcome remains uncertain.
+   */
+  beginAbandon(
+    expected: AbandonExpected,
+    audit: Pick<TaskAbandonment, "abandonedBy" | "reason" | "operationKey">,
+  ): string {
+    return this.db
+      .transaction(() => {
+        const task = this.activeTask(expected.crewID);
+        if (
+          !task ||
+          task.id !== expected.id ||
+          task.status !== expected.status ||
+          task.workerSessionID !== expected.workerSessionID ||
+          task.originCaptainID !== expected.originCaptainID ||
+          task.inputID !== expected.inputID ||
+          this.peer(expected.crewID)?.sessionID !== expected.workerSessionID
+        )
+          throw new CrewError(
+            "Task ownership or state changed; inspect again. Nothing abandoned.",
+          );
+        const control = this.db
+          .query<{ token: string }, [string]>(
+            "SELECT token FROM worker_controls WHERE crewID=?",
+          )
+          .get(expected.crewID);
+        const held = control ? controlID(control.token) : null;
+        if (held !== expected.controlID)
+          throw new CrewError(
+            held
+              ? "Worker control is reserved. Pass its inspected controlID only if no Pogo operation can still hold it. Nothing abandoned."
+              : "Expected worker control is gone; inspect again. Nothing abandoned.",
+          );
+        if (control && liveControls.has(`${this.path}\0${control.token}`))
+          throw new CrewError(
+            "Worker control is held by an operation in this process; retry after it ends. Nothing abandoned.",
+          );
+        if (control)
+          this.db
+            .query("DELETE FROM worker_controls WHERE crewID=? AND token=?")
+            .run(expected.crewID, control.token);
+        const token = this.insertControl(expected.crewID);
         this.db
-          .query("INSERT INTO worker_controls VALUES (?,?)")
-          .run(expected.crewID, token);
+          .query(
+            "UPDATE tasks SET status='abandoned',released=1 WHERE id=? AND released=0",
+          )
+          .run(task.id);
+        this.db
+          .query(`INSERT INTO task_abandonments
+            (taskID,crewID,workerSessionID,originCaptainID,inputID,abandonedBy,
+             previousStatus,previousResult,reason,operationKey,clearedControlID,
+             controlToken,stop,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)`)
+          .run(
+            task.id,
+            task.crewID,
+            task.workerSessionID,
+            task.originCaptainID,
+            task.inputID,
+            audit.abandonedBy,
+            expected.status,
+            task.result,
+            audit.reason,
+            audit.operationKey,
+            held,
+            token,
+            Date.now(),
+          );
+        const updated = { ...task, status: "abandoned" as const, released: 1 };
+        // Report captures end as unavailable; the work's outcome stays unknown.
+        if (this.reporting.isReport(task.id))
+          this.reporting.record(updated, "update", "Outcome uncertain");
+        this.reporting.record(updated, "update", "Abandoned by captain");
+        this.activity.phase(updated, "abandoned");
         return token;
+      })
+      .immediate();
+  }
+
+  /** Crash recovery: retry only a pending stop whose own control remains. */
+  resumeAbandon(taskID: string): string | null {
+    return this.db
+      .transaction(() => {
+        const row = this.db
+          .query<
+            { crewID: string; controlToken: string; stop: StopPhase },
+            [string]
+          >(
+            "SELECT crewID,controlToken,stop FROM task_abandonments WHERE taskID=?",
+          )
+          .get(taskID);
+        if (row?.stop !== "pending") return null;
+        if (liveControls.has(`${this.path}\0${row.controlToken}`)) return null;
+        const control = this.db
+          .query<{ token: string }, [string]>(
+            "SELECT token FROM worker_controls WHERE crewID=?",
+          )
+          .get(row.crewID);
+        if (control?.token === row.controlToken) {
+          liveControls.add(`${this.path}\0${row.controlToken}`);
+          return row.controlToken;
+        }
+        this.db
+          .query(`UPDATE task_abandonments SET stop='unconfirmed',stoppedAt=?,
+            stopDetail='Stop attempt did not finish and its control is gone; not retried.'
+            WHERE taskID=? AND stop='pending'`)
+          .run(Date.now(), taskID);
+        return null;
+      })
+      .immediate();
+  }
+
+  finishAbandon(
+    taskID: string,
+    token: string,
+    stop: Exclude<StopPhase, "pending">,
+    detail: string,
+  ) {
+    this.db
+      .transaction(() => {
+        const row = this.db
+          .query<{ crewID: string }, [string, string]>(
+            "SELECT crewID FROM task_abandonments WHERE taskID=? AND controlToken=?",
+          )
+          .get(taskID, token);
+        if (!row) throw new CrewError("Abandon audit missing.");
+        this.db
+          .query(`UPDATE task_abandonments SET stop=?,stopDetail=?,stoppedAt=?
+            WHERE taskID=? AND stop='pending'`)
+          .run(stop, detail.slice(0, 500), Date.now(), taskID);
+        this.releaseControl(row.crewID, token);
+      })
+      .immediate();
+  }
+
+  /** Workspace changes share the dispatch slot. Uncertain or completed work
+   * may stay assigned; Pogo-active work must be stopped or abandoned first.
+   */
+  reserveWorkspace(crewID: string, expectedTaskID: string | null): string {
+    return this.db
+      .transaction(() => {
+        if (this.controlled(crewID))
+          throw new CrewError(
+            "Worker control is reserved by another operation; inspect again. No Git change made.",
+          );
+        const active = this.activeTask(crewID);
+        if ((active?.id ?? null) !== expectedTaskID)
+          throw new CrewError(
+            "Worker task slot changed since inspection; inspect again. No Git change made.",
+          );
+        if (
+          active &&
+          ((active.status !== "completed" && active.status !== "uncertain") ||
+            active.notifying)
+        )
+          throw new CrewError(
+            "Worker has Pogo-active work; wait, or abandon it before changing the workspace. No Git change made.",
+          );
+        return this.insertControl(crewID);
       })
       .immediate();
   }
@@ -635,16 +944,13 @@ export class CrewState {
           throw new CrewError(
             "Worker has running or uncertain work; control refused.",
           );
-        const token = randomUUID();
-        this.db
-          .query("INSERT INTO worker_controls VALUES (?,?)")
-          .run(crewID, token);
-        return token;
+        return this.insertControl(crewID);
       })
       .immediate();
   }
 
   releaseControl(crewID: string, token: string) {
+    liveControls.delete(`${this.path}\0${token}`);
     this.db
       .query("DELETE FROM worker_controls WHERE crewID=? AND token=?")
       .run(crewID, token);
@@ -663,10 +969,92 @@ export class CrewState {
     }
   }
 
+  /** Exact native evidence (own input queued or placed, worker active) shows
+   * an uncertain task is still admitted. CAS; never while a control is held.
+   */
+  readmit(expected: CrewTask): CrewTask {
+    return this.db
+      .transaction(() => {
+        const changed = this.db
+          .query(`UPDATE tasks SET status='running'
+            WHERE id=? AND crewID=? AND workerSessionID=? AND originCaptainID=?
+            AND inputID=? AND status='uncertain' AND released=0 AND notifying=0
+            AND NOT EXISTS (SELECT 1 FROM worker_controls WHERE crewID=?)`)
+          .run(
+            expected.id,
+            expected.crewID,
+            expected.workerSessionID,
+            expected.originCaptainID,
+            expected.inputID,
+            expected.crewID,
+          );
+        const task = this.task(expected.id) ?? expected;
+        if (changed.changes) {
+          this.reporting.record(
+            task,
+            "update",
+            "Running: native input matched",
+          );
+          this.activity.phase(task, "running");
+        }
+        return task;
+      })
+      .immediate();
+  }
+
+  /** Cancel proved the own input never ran: release the slot with a
+   * confirmed-stop audit instead of leaving an uncertain blocker.
+   */
+  withdrawCancelled(expected: CrewTask, captainID: string, detail: string) {
+    this.db
+      .transaction(() => {
+        const task = this.activeTask(expected.crewID);
+        if (
+          task?.id !== expected.id ||
+          task.status !== "cancelling" ||
+          task.originCaptainID !== captainID ||
+          task.inputID !== expected.inputID ||
+          this.controlled(expected.crewID)
+        )
+          return;
+        const now = Date.now();
+        this.db
+          .query("UPDATE tasks SET status='cancelled',released=1 WHERE id=?")
+          .run(task.id);
+        this.db
+          .query(`INSERT INTO task_abandonments
+            (taskID,crewID,workerSessionID,originCaptainID,inputID,abandonedBy,
+             previousStatus,previousResult,reason,operationKey,controlToken,
+             stop,stopDetail,createdAt,stoppedAt)
+            VALUES (?,?,?,?,?,?,'cancelling',?,?,?,?,'confirmed',?,?,?)`)
+          .run(
+            task.id,
+            task.crewID,
+            task.workerSessionID,
+            task.originCaptainID,
+            task.inputID,
+            captainID,
+            task.result,
+            "Wait cancelled before native execution.",
+            withdrawKey,
+            randomUUID(),
+            detail.slice(0, 500),
+            now,
+            now,
+          );
+        const updated = { ...task, status: "cancelled" as const, released: 1 };
+        if (this.reporting.isReport(task.id))
+          this.reporting.record(updated, "update", "Outcome uncertain");
+        this.reporting.record(updated, "update", "Cancelled before execution");
+        this.activity.phase(updated, "cancelled");
+      })
+      .immediate();
+  }
+
   uncertain(id: string, phase = "uncertain") {
     const changed = this.db
       .query(
-        "UPDATE tasks SET status='uncertain' WHERE id=? AND status NOT IN ('completed','uncertain')",
+        "UPDATE tasks SET status='uncertain' WHERE id=? AND released=0 AND status NOT IN ('completed','uncertain')",
       )
       .run(id);
     const task = this.task(id);
@@ -686,12 +1074,25 @@ export class CrewState {
             "Only the assigned worker can complete this task.",
           );
         if (task.status === "completed" && task.result === result) return;
-        if (task.status !== "dispatching" && task.status !== "running")
+        // A failed observation does not void the worker's own answer, but an
+        // abandoned, released or replaced task can never be completed.
+        const current =
+          task.released === 0 &&
+          this.activeTask(task.crewID)?.id === task.id &&
+          this.peer(task.crewID)?.sessionID === workerSessionID;
+        if (
+          !current ||
+          (task.status !== "dispatching" &&
+            task.status !== "running" &&
+            task.status !== "uncertain")
+        )
           throw new CrewError(
-            "Task is not running. Inspect uncertain state; do not replay work.",
+            "Task is not current. Inspect its state; do not replay work.",
           );
         this.db
-          .query("UPDATE tasks SET status='completed',result=? WHERE id=?")
+          .query(
+            "UPDATE tasks SET status='completed',result=? WHERE id=? AND released=0",
+          )
           .run(result, id);
         this.reporting.record(task, "result", result);
         this.activity.phase({ ...task, status: "completed" }, "completed");

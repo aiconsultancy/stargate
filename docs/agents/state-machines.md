@@ -43,10 +43,14 @@ effects or delivery.
 | --------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | Peer identity               | Absent → pending → ready                                                                        | Recover a pending peer with its reserved session ID. Do not silently replace a ready peer whose session is missing or mismatched.    |
 | Assignment                  | Queued → dispatching → running → completed; queued → cancelled; active → cancelling → uncertain | Dispatching is not proof of SDK admission. Do not automatically replay uncertain work. Only the assigned worker can complete a task. |
+| Admission evidence          | Saved input ID → queued or placed receipt → owned execution/result                              | Reconcile the same ID after a lost response. Withdraw that input before considering interruption; do not stop unrelated native work. |
+| Captain abandonment         | Inspect exact owner → audited abandon → terminal abandoned                                      | Preserve results and queue; never promote or replay here. Local abandonment is separate from pending, confirmed or unconfirmed stop. |
+| Pi result receipt           | Bind conversation → submit task input ID → native done → crew result                            | Recover only the exact canonical answer through a read-only harness. Missing process-local execution is not proof of failure.        |
 | Worker control              | Free → token reserved → operation → free                                                        | A reservation excludes dispatch and promotion. A crash-held reservation needs reconciliation.                                        |
 | Pi harness ownership        | Resolve path → wait for prior close → acquire → release                                         | Recheck owner state after awaits. A closed owner cannot register a lease or keep a replacement harness open.                         |
 | Urgent delivery             | Active → notification reserved → steer → notification released                                  | Pending notifications block slot release. Failed delivery reports notification uncertainty without changing assignment state.        |
-| Mail                        | Authorize lineage → register → send or read inbox → acknowledge cursor                          | Keep send keys stable on retry. Advance the durable read cursor only by explicit acknowledgement.                                    |
+| Mail                        | Authorize intent → send → bind receipt and route → read → acknowledge cursor                    | Bind one event per intent. Keep send keys stable. Explicit ACK cannot cross a known unresolved route hole.                           |
+| Workspace recovery          | Inspect → validate fingerprint → reserve control → checkpoint → stash or reset                  | Captain only; configured Git root only. Preserve ignored data, refuse path obstructions and stale ownership, and retain checkpoints. |
 | Compaction and model switch | Idle → control reserved → stream connected → admitted → started → ended → model switch          | Switch only after confirmed compaction. On failure, interrupt work, keep the model, and release control.                             |
 | History traversal           | Session page → authorized session → message pages → next session                                | Bound the cursor and recheck visibility. Reject foreign sessions and query-mismatched cursors.                                       |
 | Profile initialization      | Validate → inspect or create worktrees → inspect config → write                                 | Reuse identical files. Refuse conflicts and tracked files. Retain partial setup after failure.                                       |
@@ -103,10 +107,23 @@ Follow-up regressions cover these lifecycle boundaries:
   does not prove input ownership. OpenCode checks transcript placement before
   publishing a preview; Pi uses submission entry/answer bounds and live run
   input IDs. Cancelling a queued follow-up must not stop the earlier native run.
+- Crew admission can lose a receipt even though the saved input was accepted.
+  Reconcile inbox/history by that identity, without another prompt. A temporary
+  observation failure cannot invalidate the assigned worker's later completion.
+- Pi can commit an answer before the process records crew completion. A durable
+  task/conversation binding and exact read-only receipt recover that result.
+- Mesij can store mail before its route receipt returns. Authorized send intents,
+  one-event receipt binding and durable ACK barriers prevent a route gap from
+  silently acknowledging past that message.
+- Explicit captain abandonment is terminal, including in status views. A late
+  completion or recovery cannot revive it; native stop evidence stays separate.
+- Git stash and reset can delete untracked path obstructions while restoring
+  HEAD. Refuse those obstructions before writing, including ignored children.
 
 Placed-input interruption is still session-wide. A later native turn can start
-before interruption reaches it. A lost admission response also leaves ownership
-uncertain; do not guess an input ID, interrupt unrelated work, or replay it.
+before interruption reaches it. Correlation IDs created before admission let
+cleanup recover a lost response without resubmitting. If ownership or placement
+cannot be read, do not guess, interrupt unrelated work, or replay it.
 See [cancellation limits](../cancellation.md#limits).
 
 The tests for these boundaries use local fixtures. They do not require Slack

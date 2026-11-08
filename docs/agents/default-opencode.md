@@ -197,9 +197,12 @@ conversation; unified OpenCode history, compaction and model switching remain
 unsupported. Assigned work stops after five minutes or 50 turns.
 
 An interrupted or failed Pi task becomes `uncertain`; it blocks the worker
-instead of resubmitting maintenance automatically. Unconfirmed conversation
-creation is also not repeated. Inspect private state before recovery; never
-delete it to clear a reservation. Plugin shutdown cancels and closes Pi work.
+instead of resubmitting maintenance automatically. A saved completed Pi receipt
+can recover the exact result after restart without new model work. Otherwise
+the captain can inspect, preserve changes and explicitly abandon the task through
+[crew recovery controls](../crew-recovery.md#captain-controlled-recovery).
+Unconfirmed conversation creation is not repeated. Never delete state to clear
+a reservation. Plugin shutdown cancels and closes Pi work.
 
 For an existing roster, an approved append-only rollout may set
 `allowCrewExpansion: true` in **each generated Pogo plugin's options**. Supply
@@ -426,6 +429,9 @@ tracks Slack requests and reply delivery; these are not interchangeable stores.
 5. Ambiguous admission, interrupted execution or unavailable result evidence
    can leave a task `uncertain`. It blocks slot reuse and is never automatically
    replayed. A later verified final answer can recover the same task.
+   A captain can also explicitly abandon the exact task after inspecting its
+   evidence and workspace. This keeps the audit, history, results and queue;
+   native stop remains separately confirmed or unconfirmed.
    Cancelling a queued wait cancels that pending job, not another active job.
 
 Model/compaction controls reserve the worker against concurrent dispatch.

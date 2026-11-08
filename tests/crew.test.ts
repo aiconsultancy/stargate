@@ -529,6 +529,17 @@ async function fixture(team?: Team) {
       busy.add(input.sessionID);
       promptHook();
       if (promptFailure) throw new Error("secret raw SDK error");
+      // Accepted input is placed in the busy worker's native history.
+      history.set(input.sessionID, [
+        {
+          id: input.id ?? "msg_fixture",
+          type: "user",
+          time: { created: 60 },
+          text: input.text,
+          ...(input.metadata ? { metadata: input.metadata } : {}),
+        },
+        ...(history.get(input.sessionID) ?? []),
+      ]);
       return { id: input.id ?? "msg_fixture", sessionID: input.sessionID };
     },
     async wait({ sessionID }, request) {
@@ -574,7 +585,7 @@ async function fixture(team?: Team) {
         actor: input.actor,
         sessionID: input.sessionID,
         to: input.to,
-        type: "message.posted",
+        type: input.replyTo ? "message.replied" : "message.posted",
         text: input.text,
         ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       };
@@ -2535,26 +2546,40 @@ test("independent plugin instances atomically reserve the same worker", async ()
   }
 });
 
-test("aborted admission interrupts the reserved worker using a fresh signal", async () => {
-  const f = await fixture();
-  try {
-    const controller = new AbortController();
-    f.onPrompt(() => controller.abort());
-    f.failPrompt();
-    await expect(
-      f.engine.run(
-        { op: "dispatch", crew: "mario", text: "Cancelled admission" },
-        f.captain("ses_captain_a", controller.signal),
-      ),
-    ).rejects.toThrow("uncertain");
-    expect(f.calls.filter((call) => call.method === "interrupt")).toHaveLength(
-      1,
-    );
-    expect(f.engine.state.activeTask("mario")?.status).toBe("uncertain");
-  } finally {
-    await f.close();
-  }
-});
+for (const placed of [true, false])
+  test(`aborted admission interrupts only proven own placement: ${placed}`, async () => {
+    const f = await fixture();
+    try {
+      const controller = new AbortController();
+      f.onPrompt(() => {
+        const input = f.inputs.at(-1);
+        if (placed && input)
+          f.history.set(input.sessionID, [
+            {
+              id: input.id ?? "",
+              type: "user",
+              time: { created: 60 },
+              text: input.text,
+            },
+          ]);
+        controller.abort();
+      });
+      f.failPrompt();
+      await expect(
+        f.engine.run(
+          { op: "dispatch", crew: "mario", text: "Cancelled admission" },
+          f.captain("ses_captain_a", controller.signal),
+        ),
+      ).rejects.toThrow("uncertain");
+      // Unproven native activity may be foreign work; it is not interrupted.
+      expect(
+        f.calls.filter((call) => call.method === "interrupt"),
+      ).toHaveLength(placed ? 1 : 0);
+      expect(f.engine.state.activeTask("mario")?.status).toBe("uncertain");
+    } finally {
+      await f.close();
+    }
+  });
 
 test("same-captain colleague urgency includes the recipient's exact task ID", async () => {
   const f = await fixture();

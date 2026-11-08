@@ -33,11 +33,15 @@ import { journalInputSchema } from "./journal";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
 import {
+  type AbandonInput,
+  abandonInputSchema,
   type ExecutionInspection,
   type InspectInput,
   type InspectionConnector,
   inspectInputSchema,
   observeExecution,
+  observePlacement,
+  type Placement,
   type ReconcileInput,
   reconcileInputSchema,
   requireQuiescent,
@@ -47,13 +51,16 @@ import {
 import { CrewReporter, redactActivity } from "./reporting";
 import { type ResultAPI, readTaskResult } from "./result";
 import {
+  type AbandonableStatus,
   CrewError,
   type CrewID,
   type CrewNotice,
   CrewState,
   type CrewTask,
   type Peer,
+  type TaskAbandonment,
   type TaskReconciliation,
+  withdrawKey,
 } from "./state";
 import {
   agentIDSchema,
@@ -61,6 +68,16 @@ import {
   defaultTeam,
   teamSchema,
 } from "./team";
+import {
+  inspectWorkspace,
+  resetWorkspace,
+  stashWorkspace,
+  type WorkspaceCheckpoint,
+  type WorkspaceInput,
+  type WorkspaceInspection,
+  workspaceInputSchemas,
+  workspaceRoot,
+} from "./workspace";
 
 const directory = z
   .string()
@@ -116,6 +133,8 @@ export const crewInputSchema = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("roster") }),
   inspectInputSchema,
   reconcileInputSchema,
+  abandonInputSchema,
+  ...workspaceInputSchemas,
   z.strictObject({ op: z.literal("ensure"), crew: agentIDSchema.optional() }),
   z.strictObject({
     op: z.literal("dispatch"),
@@ -224,11 +243,24 @@ export type CrewResult = {
   inspectedTask?: TaskInspection | null;
   queued?: TaskInspection[];
   controlled?: boolean;
+  /** sha256 of a held control token; pass to abandon only for a crash orphan. */
+  controlID?: string | null;
   execution?:
     | ExecutionInspection
-    | { state: "idle" | "running"; backend: "pi" };
+    | { state: "idle" | "running"; backend: "pi" }
+    | { state: "unknown" };
   reconciliation?: TaskReconciliation | null;
+  abandonment?: TaskAbandonment | null;
   statusRequest?: { id: string; sequence: number };
+  workspace?: WorkspaceInspection;
+  slot?: {
+    taskID: string | null;
+    status: CrewTask["status"] | null;
+    controlled: boolean;
+    queued: number;
+  };
+  checkpoint?: WorkspaceCheckpoint | null;
+  executionConfirmed?: boolean;
 };
 type TaskInspection = Omit<CrewTask, "result"> & { hasResult: boolean };
 
@@ -914,6 +946,13 @@ export class CrewEngine {
       await this.captain(caller);
       if (input.op === "inspect") return await this.inspect(input, caller);
       if (input.op === "reconcile") return await this.reconcile(input, caller);
+      if (input.op === "abandon") return await this.abandon(input, caller);
+      if (
+        input.op === "workspace" ||
+        input.op === "stash" ||
+        input.op === "reset"
+      )
+        return await this.workspace(input, caller);
       if (input.op === "ensure") {
         const peers: Peer[] = [];
         for (const id of input.crew
@@ -933,7 +972,11 @@ export class CrewEngine {
         return { status: "compaction-admitted" };
       }
       let task = this.ownedCaptainTask(input.taskID, caller);
-      if (this.member(task.crewID).backend) task = this.pi.reconcile(task);
+      const abandoned = this.abandoned(
+        task,
+        input.op === "wait" ? input.afterNoticeID : 0,
+      );
+      if (abandoned) return abandoned;
       if (task.status === "queued") task = await this.promote(task, caller);
       if (input.op === "status") {
         const recovered = await this.reconcileResult(task, caller);
@@ -953,11 +996,7 @@ export class CrewEngine {
       ) {
         const task = this.ownedCaptainTask(input.taskID, caller);
         await this.cancel(task, caller);
-        throw new CrewError(
-          this.state.task(task.id)?.status === "cancelled"
-            ? "Wait cancelled; queued task cancelled without interrupting the worker."
-            : "Wait cancelled; task outcome uncertain. Inspect worker before further work.",
-        );
+        throw new CrewError(this.cancelled(task.id));
       }
       if (error instanceof CrewError) throw error;
       throw new CrewError(
@@ -1193,7 +1232,9 @@ export class CrewEngine {
       inspectedTask: selected ? inspectTask(selected) : null,
       queued: this.state.queuedTasks(input.crew).map(inspectTask),
       controlled: this.state.controlled(input.crew),
+      controlID: this.state.controlID(input.crew),
       reconciliation: selected ? this.state.reconciliation(selected.id) : null,
+      abandonment: selected ? this.state.abandonment(selected.id) : null,
     };
     if (!peer) {
       if (input.requestStatus)
@@ -1211,8 +1252,22 @@ export class CrewEngine {
       };
       return result;
     }
-    const api = await this.inspectionAPI(caller);
-    const live = await observeExecution(api, peer.sessionID, caller.signal);
+    let live: Awaited<ReturnType<typeof observeExecution>>;
+    try {
+      live = await observeExecution(
+        await this.inspectionAPI(caller),
+        peer.sessionID,
+        caller.signal,
+      );
+    } catch (error) {
+      caller.signal.throwIfAborted();
+      // Status requests need a validated live identity; plain reads keep the
+      // local ownership the captain needs for reconcile or abandon.
+      if (input.requestStatus) throw error;
+      result.execution = { state: "unknown" };
+      result.diagnostic = `Native execution unknown: ${error instanceof CrewError ? error.message : "inspection API unavailable; raw details withheld."} Local ownership above is current. Retry inspect, or abandon with acknowledgeUnconfirmedStop.`;
+      return result;
+    }
     this.validPeer(live.session, peer);
     result.execution = live.execution;
     if (input.requestStatus) {
@@ -1356,6 +1411,353 @@ export class CrewEngine {
       return { status: "reconciled", reconciliation };
     } finally {
       this.state.releaseControl(task.crewID, token);
+    }
+  }
+
+  private abandoned(task: CrewTask, after: number): CrewResult | null {
+    const abandonment = this.state.abandonment(task.id);
+    return abandonment
+      ? {
+          // Local terminal decision: abandoned, or cancelled before execution.
+          status: task.status === "cancelled" ? "cancelled" : "abandoned",
+          task,
+          abandonment,
+          notices: this.state.notices(task.id, after),
+        }
+      : null;
+  }
+
+  /** Captain override for a blocked slot whose result cannot be proven.
+   * Never completes, replays, prompts or promotes; the FIFO stays queued.
+   */
+  private async abandon(
+    input: AbandonInput,
+    caller: CrewCaller,
+  ): Promise<CrewResult> {
+    const task = this.state.task(input.taskID);
+    if (!task) throw new CrewError("Task is not in this team's state.");
+    this.member(task.crewID);
+    const { expected } = input;
+    const previous = this.state.abandonment(task.id);
+    if (previous) {
+      if (
+        previous.operationKey !== input.key ||
+        previous.reason !== input.reason ||
+        previous.previousStatus !== expected.status ||
+        previous.workerSessionID !== expected.workerSessionID ||
+        previous.originCaptainID !== expected.originCaptainID ||
+        previous.inputID !== expected.inputID
+      )
+        throw new CrewError(
+          "Task was already released by an abandon or proven cancellation with another key, reason or identity; inspect its retained audit.",
+        );
+      const token = this.state.resumeAbandon(task.id);
+      if (token)
+        return this.stopAbandoned(task, previous.previousStatus, token, caller);
+      return {
+        status: "abandoned",
+        task: this.state.task(task.id) ?? task,
+        abandonment: this.state.abandonment(task.id),
+      };
+    }
+    if (task.status === "abandoned" || task.released)
+      throw new CrewError(
+        "Task is no longer assigned; inspect its retained state. Nothing abandoned.",
+      );
+    if (
+      task.workerSessionID !== expected.workerSessionID ||
+      task.originCaptainID !== expected.originCaptainID ||
+      task.inputID !== expected.inputID
+    )
+      throw new CrewError(
+        "Expected ownership is stale; inspect this task again.",
+      );
+    if (task.status === "completed")
+      throw new CrewError(
+        "Completed tasks keep their result; dispatch releases them normally. Nothing abandoned.",
+      );
+    if (task.status === "queued" || task.status === "cancelled")
+      throw new CrewError(
+        "Queued work has no native execution to abandon. Nothing abandoned.",
+      );
+    const token = this.state.beginAbandon(
+      { ...task, status: expected.status, controlID: expected.controlID },
+      {
+        abandonedBy: caller.sessionID,
+        reason: input.reason,
+        operationKey: input.key,
+      },
+    );
+    return this.stopAbandoned(task, expected.status, token, caller);
+  }
+
+  private async stopAbandoned(
+    task: CrewTask,
+    previous: AbandonableStatus,
+    token: string,
+    caller: CrewCaller,
+  ): Promise<CrewResult> {
+    // The local abandon is committed. Always record a stop outcome, even
+    // when the caller aborts; a crash leaves "pending" for an exact retry.
+    let outcome: { stop: "confirmed" | "unconfirmed"; detail: string } = {
+      stop: "unconfirmed",
+      detail: "Stop attempt failed; native state unknown.",
+    };
+    try {
+      outcome = await this.stopOwnInput(task, caller, previous);
+    } finally {
+      this.state.finishAbandon(task.id, token, outcome.stop, outcome.detail);
+    }
+    return {
+      status: "abandoned",
+      task: this.state.task(task.id) ?? task,
+      abandonment: this.state.abandonment(task.id),
+      ...(outcome.stop === "unconfirmed"
+        ? {
+            diagnostic: `Task ${task.id} abandoned; native stop unconfirmed: ${outcome.detail} Dispatch still requires confirmed native idle. Inspect the workspace before reuse.`,
+          }
+        : {}),
+    };
+  }
+
+  /** Best effort, this worker only. Withdraws the task's own queued input;
+   * interrupts only when its own input is the latest placed turn. Unknown or
+   * foreign native work is never interrupted. Confirmed: idle, nothing queued.
+   */
+  private async stopOwnInput(
+    task: CrewTask,
+    caller: CrewCaller,
+    previous: CrewTask["status"],
+  ): Promise<{
+    stop: "confirmed" | "unconfirmed";
+    detail: string;
+    withdrawn: boolean;
+  }> {
+    const member = this.member(task.crewID);
+    const peer = this.state.peer(task.crewID);
+    if (!peer || peer.sessionID !== task.workerSessionID)
+      return {
+        stop: "unconfirmed",
+        detail: "Worker reservation differs.",
+        withdrawn: false,
+      };
+    const signal = AbortSignal.timeout(15_000);
+    if (member.backend) {
+      if (this.pi.observed(task))
+        await Promise.race([
+          this.pi.interrupt(peer),
+          delay(5000, undefined, { ref: false }),
+        ]);
+      return (await this.idle(peer, signal))
+        ? { stop: "confirmed", detail: "Pi worker idle.", withdrawn: false }
+        : {
+            stop: "unconfirmed",
+            detail: "Pi worker idle state unconfirmed.",
+            withdrawn: false,
+          };
+    }
+    const api = this.inspectionConnector
+      ? await this.inspectionAPI({ ...caller, signal }).catch(() => null)
+      : null;
+    let placement: Placement = api
+      ? await observePlacement(api, task, signal)
+      : "unknown";
+    let withdrawn = false;
+    if (placement === "queued" && api?.session.inbox.cancel) {
+      await api.session.inbox
+        .cancel(
+          { sessionID: task.workerSessionID, inboxID: task.inputID },
+          { signal },
+        )
+        .catch(() => {});
+      placement = await observePlacement(api, task, signal);
+      withdrawn = placement === "absent";
+    }
+    const settled = async (ms: number) => {
+      try {
+        await this.sessions.wait(
+          { sessionID: peer.sessionID },
+          { signal: AbortSignal.any([signal, AbortSignal.timeout(ms)]) },
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let idle = await settled(100);
+    let interrupted = false;
+    if (!idle && placement === "placed") {
+      try {
+        await this.sessions.interrupt(
+          { sessionID: peer.sessionID, resume: false },
+          { signal: AbortSignal.timeout(5000) },
+        );
+        interrupted = true;
+      } catch {
+        // An unavailable native API leaves the stop unconfirmed below.
+      }
+      idle = await settled(2000);
+    }
+    const inFlight = previous === "dispatching";
+    const notes = [
+      withdrawn ? "own queued input withdrawn before execution" : "",
+      `own input ${placement}`,
+      idle ? "native idle" : "native idle unconfirmed",
+      interrupted ? "interrupt accepted" : "",
+      !idle && placement !== "placed"
+        ? "unproven native work not interrupted"
+        : "",
+      inFlight ? "admission may still be in flight" : "",
+    ].filter(Boolean);
+    return {
+      stop:
+        idle && placement !== "queued" && placement !== "unknown" && !inFlight
+          ? "confirmed"
+          : "unconfirmed",
+      detail: `${notes.join("; ")}.`,
+      withdrawn: withdrawn && !inFlight,
+    };
+  }
+
+  /** Uncertain native task whose own input is provably queued or the latest
+   * placed turn on an active worker is still admitted: running, no resubmit.
+   */
+  private async readmitUncertain(
+    task: CrewTask,
+    caller: CrewCaller,
+  ): Promise<{ task: CrewTask; diagnostic?: string }> {
+    if (
+      task.status !== "uncertain" ||
+      task.released ||
+      !this.inspectionConnector ||
+      this.member(task.crewID).backend
+    )
+      return { task };
+    const peer = this.state.peer(task.crewID);
+    if (!peer || peer.sessionID !== task.workerSessionID) return { task };
+    const signal = AbortSignal.any([
+      caller.signal,
+      AbortSignal.timeout(10_000),
+    ]);
+    const api = await this.inspectionAPI({ ...caller, signal }).catch(
+      () => null,
+    );
+    const placement = api
+      ? await observePlacement(api, task, signal)
+      : "unknown";
+    caller.signal.throwIfAborted();
+    const admitted = placement === "queued" || placement === "placed";
+    if (admitted && !(await this.idle(peer, signal)))
+      return {
+        task: this.state.readmit(task),
+        diagnostic: `Task ${task.id}: own input ${task.inputID} is ${placement} natively; running without resubmission.`,
+      };
+    return {
+      task,
+      diagnostic: `Task ${task.id}: own input ${task.inputID} is ${placement} natively. ${placement === "unknown" ? "Native evidence unreadable; inspect before recovery." : "Recover a retained answer with status/reconcile, or inspect and abandon."}`,
+    };
+  }
+
+  private slot(crewID: string): NonNullable<CrewResult["slot"]> {
+    const active = this.state.activeTask(crewID);
+    return {
+      taskID: active?.id ?? null,
+      status: active?.status ?? null,
+      controlled: this.state.controlled(crewID),
+      queued: this.state.queuedTasks(crewID).length,
+    };
+  }
+
+  /** Bounded Git in the configured worker worktree. Inspection is read-only;
+   * stash/reset hold the dispatch control slot and require the exact state.
+   */
+  private async workspace(
+    input: WorkspaceInput,
+    caller: CrewCaller,
+  ): Promise<CrewResult> {
+    const root = await workspaceRoot(
+      this.options.worktrees[input.crew] ?? "",
+      this.options.captainDirectory,
+      this.options.projectDirectory,
+      caller.signal,
+    );
+    if (input.op === "workspace")
+      return {
+        status: "workspace",
+        workspace: await inspectWorkspace(
+          root,
+          input.crew,
+          caller.signal,
+          input.patch,
+        ),
+        slot: this.slot(input.crew),
+      };
+    caller.signal.throwIfAborted();
+    const peer = this.state.reservePeer(input.crew);
+    const token = this.state.reserveWorkspace(
+      input.crew,
+      input.expected.taskID,
+    );
+    try {
+      const executionConfirmed = await this.idle(peer, caller.signal);
+      if (!executionConfirmed && !input.acknowledgeUnconfirmedExecution)
+        throw new CrewError(
+          "Worker idle state is unconfirmed; native writes can race with Git. Retry with acknowledgeUnconfirmedExecution=true only if you accept that risk. No Git change made.",
+        );
+      const current = await inspectWorkspace(root, input.crew, caller.signal);
+      if (
+        current.head !== input.expected.head ||
+        current.fingerprint !== input.expected.fingerprint
+      )
+        throw new CrewError(
+          "Workspace HEAD or changes differ from the inspected state; inspect again. No Git change made.",
+        );
+      if (current.nested)
+        throw new CrewError(
+          "Workspace contains a submodule or nested repository; review it natively. No Git change made.",
+        );
+      if (!current.changeCount)
+        return {
+          status: "clean",
+          workspace: current,
+          checkpoint: null,
+          executionConfirmed,
+        };
+      caller.signal.throwIfAborted();
+      const checkpoint =
+        input.op === "stash"
+          ? await stashWorkspace(root, input.crew)
+          : await resetWorkspace(root, input.crew, current.head);
+      if (checkpoint)
+        this.state.reporting.journal.append(
+          {
+            member: input.crew,
+            captainID: caller.sessionID,
+            taskID: this.state.activeTask(input.crew)?.id ?? null,
+            kind: "update",
+            text: `Captain ${input.op === "stash" ? "stashed" : "reset"} workspace at ${current.head}; retained ${checkpoint.oid}.`,
+          },
+          `${input.crew}:workspace:${checkpoint.oid}`,
+        );
+      return {
+        status: checkpoint
+          ? input.op === "stash"
+            ? "stashed"
+            : "reset"
+          : "unchanged",
+        workspace: await inspectWorkspace(root, input.crew, caller.signal),
+        checkpoint,
+        executionConfirmed,
+        ...(input.op === "reset"
+          ? {
+              diagnostic: checkpoint
+                ? "Tracked changes were reset to HEAD; untracked and ignored files were left in place."
+                : "No tracked changes to reset; untracked and ignored files were left in place.",
+            }
+          : {}),
+      };
+    } finally {
+      this.state.releaseControl(input.crew, token);
     }
   }
 
@@ -1512,7 +1914,25 @@ export class CrewEngine {
       this.state.running(task.id);
       return { status: "running", task: this.state.task(task.id) ?? task };
     } catch {
-      if (caller.signal.aborted) await this.cancel(task, caller);
+      if (caller.signal.aborted) {
+        await this.cancel(task, caller);
+        if (this.state.abandonment(task.id))
+          throw new CrewError(this.cancelled(task.id));
+      } else {
+        // A lost receipt is not a lost input: correlate the persisted inputID.
+        const api = await this.inspectionAPI(caller).catch(() => null);
+        const placement = api
+          ? await observePlacement(api, task, caller.signal)
+          : "unknown";
+        if (placement === "queued" || placement === "placed") {
+          this.state.running(task.id);
+          return {
+            status: "running",
+            task: this.state.task(task.id) ?? task,
+            diagnostic: `Prompt receipt lost; own input ${task.inputID} is ${placement} natively. Not resubmitted.`,
+          };
+        }
+      }
       this.state.uncertain(task.id);
       throw new CrewError(
         `Task ${task.id} admission uncertain. Inspect worker ${task.workerSessionID}; work will not be replayed automatically.`,
@@ -1522,6 +1942,7 @@ export class CrewEngine {
 
   private async cancel(task: CrewTask, caller: CrewCaller) {
     if (this.state.cancelQueued(task.id, caller.sessionID)) return;
+    const previous = this.state.task(task.id)?.status ?? task.status;
     if (!this.state.beginCancel(task.id, caller.sessionID)) return;
     try {
       if (this.member(task.crewID).backend) {
@@ -1529,17 +1950,26 @@ export class CrewEngine {
         if (peer) await this.pi.interrupt(peer);
         return;
       }
-      await this.sessions.interrupt(
-        { sessionID: task.workerSessionID, resume: false },
-        {
-          signal: AbortSignal.timeout(5000),
-        },
-      );
+      // Withdraw the own queued input first; interrupt only proven placement.
+      const stop = await this.stopOwnInput(task, caller, previous);
+      if (stop.withdrawn)
+        this.state.withdrawCancelled(task, caller.sessionID, stop.detail);
     } catch {
-      // Interruption can fail independently; keep the reservation uncertain.
+      // Native stop can fail independently; keep the reservation uncertain.
     } finally {
       this.state.uncertain(task.id);
     }
+  }
+
+  private cancelled(taskID: string): string {
+    const abandonment = this.state.abandonment(taskID);
+    if (abandonment?.operationKey === withdrawKey)
+      return "Wait cancelled; own input withdrawn before execution and the task cancelled without a result.";
+    if (this.state.task(taskID)?.status === "cancelled")
+      return "Wait cancelled; queued task cancelled without interrupting the worker.";
+    if (abandonment)
+      return "Wait cancelled; a captain abandoned this task. Inspect its retained audit.";
+    return "Wait cancelled; task outcome uncertain. Inspect worker before further work.";
   }
 
   /** Report tasks use the same slot/FIFO, but never join activity collection. */
@@ -1575,6 +2005,16 @@ export class CrewEngine {
       sessionID,
       text,
       captureID,
+    );
+  }
+
+  /** Pi: adopt only this task's committed native answer; never resubmits. */
+  private piRecover(task: CrewTask, signal: AbortSignal): Promise<CrewTask> {
+    return this.pi.recover(
+      task,
+      this.member(task.crewID),
+      this.options.worktrees[task.crewID] ?? "",
+      signal,
     );
   }
 
@@ -1616,7 +2056,7 @@ export class CrewEngine {
       // durable admission; a cancelled queued report must not start maintenance.
       caller.signal.throwIfAborted();
       await this.promote(this.ownedCaptainTask(task.id, caller), caller);
-    } else this.reportingTask(task.id);
+    } else await this.piRecover(task, caller.signal);
   }
 
   async cancelReport(id: string, caller: CrewCaller) {
@@ -1651,12 +2091,13 @@ export class CrewEngine {
     try {
       for (;;) {
         let current = this.ownedCaptainTask(task.id, caller);
+        const abandoned = this.abandoned(current, after);
+        if (abandoned) return abandoned;
         const piWorker = Boolean(this.member(current.crewID).backend);
-        if (piWorker) current = this.pi.reconcile(current);
+        if (piWorker) current = await this.piRecover(current, caller.signal);
         if (
-          this.connectResults &&
           !piWorker &&
-          (current.status === "uncertain" || idle)
+          (current.status === "uncertain" || (this.connectResults && idle))
         ) {
           const recovered = await this.reconcileResult(current, caller, idle);
           current = recovered.task;
@@ -1670,9 +2111,7 @@ export class CrewEngine {
         const notices = this.state.notices(task.id, after);
         if (caller.signal.aborted) {
           await this.cancel(current, caller);
-          throw new CrewError(
-            "Wait cancelled; task outcome uncertain. Inspect worker before further work.",
-          );
+          throw new CrewError(this.cancelled(task.id));
         }
         if (
           current.status === "completed" ||
@@ -1716,9 +2155,7 @@ export class CrewEngine {
     } catch (error) {
       if (caller.signal.aborted) {
         await this.cancel(task, caller);
-        throw new CrewError(
-          "Wait cancelled; task outcome uncertain. Inspect worker before further work.",
-        );
+        throw new CrewError(this.cancelled(task.id));
       }
       throw error;
     } finally {
@@ -1732,6 +2169,14 @@ export class CrewEngine {
     caller: CrewCaller,
     knownIdle = false,
   ): Promise<{ task: CrewTask; diagnostic?: string }> {
+    if (this.member(task.crewID).backend)
+      return { task: await this.piRecover(task, caller.signal) };
+    let readmission: string | undefined;
+    if (task.status === "uncertain" && !knownIdle) {
+      const readmitted = await this.readmitUncertain(task, caller);
+      if (readmitted.task.status === "running") return readmitted;
+      readmission = readmitted.diagnostic;
+    }
     const connect = this.connectResults;
     if (
       !connect ||
@@ -1739,7 +2184,7 @@ export class CrewEngine {
       (task.status !== "running" && task.status !== "uncertain") ||
       task.released
     )
-      return { task };
+      return { task, ...(readmission ? { diagnostic: readmission } : {}) };
     const signal = AbortSignal.any([
       caller.signal,
       AbortSignal.timeout(10_000),

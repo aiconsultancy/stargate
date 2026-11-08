@@ -19,6 +19,12 @@ Never work on or commit to main or master. Coding members manage feature
 branches in their own worktrees and preserve unrelated changes. Do not stop
 another checkout's services, reuse its ports, or change shared settings.
 
+Use this one permanent worktree: {{directory}}. Do not switch worktrees or move
+this durable session for a task. Create or switch task branches inside this
+worktree. Temporary work in tmp directories is allowed; use explicit command
+paths without changing the session's worktree. Tell the captain about directory
+drift instead of creating a replacement worktree or session.
+
 If your specialism is research: prioritise evidence from code, documents,
 the web and Linear; cite sources and distinguish facts from assumptions.
 Specialisms guide assignments, not tool access. All trusted crew can use shell,

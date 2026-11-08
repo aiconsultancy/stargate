@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { chmod, open } from "node:fs/promises";
 import { join } from "node:path";
 import { type AgentBackend, createBackend } from "./backend";
 import { loadConfig } from "./config";
@@ -163,7 +165,19 @@ export async function repairThread(input: {
   const config = await loadConfig(input.config);
   const bot = config.bots.find((candidate) => candidate.id === input.bot);
   if (!bot) throw new Error("Unknown bot ID");
-  const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
+  // Harden existing state before SQLite creates WAL/SHM. Never create a
+  // replacement database or follow a database symlink during repair.
+  await chmod(config.dataDirectory, 0o700);
+  const path = join(config.dataDirectory, "pogo.sqlite");
+  const file = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
+  try {
+    if (!(await file.stat()).isFile())
+      throw new Error("Invalid gateway database");
+    await file.chmod(0o600);
+  } finally {
+    await file.close();
+  }
+  const store = new Store(path);
   try {
     const keys = store.threadBots(input.channel, input.thread).filter((key) => {
       const parts: unknown = JSON.parse(key);

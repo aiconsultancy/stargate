@@ -37,6 +37,12 @@ edits; it does not create an unused OpenCode agent for a Pi member.
 Working agreements never override operator instructions or permissions.
 Historical Markdown journals remain; new milestone notes use SQLite.
 
+Each crew member has one permanent worktree named after its member ID. Task
+branches change inside that worktree; tasks do not get replacement worktrees or
+crew sessions. Temporary work in tmp directories is allowed without moving the
+session. Existing legacy folder names need an explicit migration that preserves
+their work, branches and session identity.
+
 ## Tools
 
 ```js
@@ -73,6 +79,19 @@ Completed and uncertain tasks do not select a captain for new messages. A
 task-free crew send needs a validated reply. Its inbox can read all mail
 addressed to that member; explicit historical task inbox reads remain supported.
 
+Before sending, Pogo saves the authorized route intent and an envelope hash,
+not another copy of the message text. If Mesij stores the message but its
+response is lost, a later read can restore the route from an exact event/intent
+match. Namespace, sender, recipient and task/captain lineage must still match.
+Each intent binds to one native receipt ID. Copying an old envelope into a new
+event does not authorize another delivery. Unproved older events do not gain
+trusted routes automatically.
+
+If a proved route cannot yet be saved, its acknowledgement barrier persists.
+Neither `nextAfter` nor a later supplied `after` can pass that known hole.
+Saving the route clears the barrier atomically. Recovery does not wake an agent,
+and reading a page still does not acknowledge it.
+
 Mail never wakes recipients. DM first stores mail, then requests native steer
 or queue delivery. Receipts distinguish storage, native acceptance, unsupported,
 deferred, unavailable and uncertain delivery. Acceptance does not prove reading,
@@ -93,9 +112,12 @@ Use mail/DM with `replyTo` for peer answers. A final answer remains the assigned
 task result. Native task-marked notices instruct a worker to restate that result
 if it had already finished. Captain task notices also support an existing wait.
 Free-worker notification reuses the existing durable control reservation. A
-process crash can retain that control and block dispatch. Recovery needs an
-operator-approved state repair after verifying no live controller still owns
-it; Pogo does not automatically clear another controller or add a lock lease.
+process crash can retain that control and block dispatch. A captain can inspect
+the exact reservation and explicitly abandon its blocked task with an audit;
+a control still held by an operation in this process cannot be cleared. Pogo
+never clears another controller automatically or adds a lock lease. See
+[captain recovery](crew-recovery.md#captain-controlled-recovery); do not edit
+the database to clear a slot.
 
 ## Native clients
 

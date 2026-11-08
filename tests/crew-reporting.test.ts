@@ -694,6 +694,269 @@ test("queued reporting cancellation never interrupts Twiki's unrelated maintenan
   }
 });
 
+for (const operation of ["finish", "read"] as const) {
+  test(`${operation} report job survives RPC abort after return`, async () => {
+    const f = await fixture();
+    const entered = Promise.withResolvers<AbortSignal>();
+    const release = Promise.withResolvers<void>();
+    const reporterFree = f.engine.reporterFree.bind(f.engine);
+    f.engine.reporterFree = async (id, signal) => {
+      entered.resolve(signal);
+      await release.promise;
+      signal.throwIfAborted();
+      return reporterFree(id, signal);
+    };
+    try {
+      const capture = await f.start();
+      const task = await f.dispatch("Feature");
+      if (operation === "read")
+        await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+      await f.complete(task.id, "Ready");
+      const rpc = new AbortController();
+      const started = f.started();
+      await f.engine.reporting[operation](f.owner(capture.id), rpc.signal);
+      const ownerSignal = await entered.promise;
+      rpc.abort();
+      expect(ownerSignal.aborted).toBe(false);
+      release.resolve();
+      await started;
+      f.turns[0]?.resolve("Chief: ready");
+      await f.engine.run(
+        { op: "wait", taskID: f.reportTask(capture.id) },
+        f.caller(),
+      );
+      expect((await f.read(capture.id)).status).toBe("complete");
+    } finally {
+      release.resolve();
+      await f.close();
+    }
+  });
+}
+
+for (const phase of ["reporterFree", "progressReport"] as const) {
+  for (const stop of ["cancel", "close"] as const) {
+    test(`${stop} aborts and drains ${phase} before releasing reporting ownership`, async () => {
+      const f = await fixture();
+      const entered = Promise.withResolvers<AbortSignal>();
+      const release = Promise.withResolvers<void>();
+      let ownerSignal: AbortSignal | undefined;
+      let drained = false;
+      const block = async (signal: AbortSignal) => {
+        ownerSignal = signal;
+        entered.resolve(signal);
+        try {
+          await release.promise;
+        } finally {
+          drained = true;
+        }
+      };
+      if (phase === "reporterFree") {
+        const original = f.engine.reporterFree.bind(f.engine);
+        f.engine.reporterFree = async (id, signal) => {
+          await block(signal);
+          return original(id, signal);
+        };
+      } else {
+        const original = f.engine.progressReport.bind(f.engine);
+        f.engine.progressReport = async (id, caller) => {
+          await block(caller.signal);
+          // A busy admission may return without promoting or throwing.
+          if (caller.signal.aborted) return;
+          return original(id, caller);
+        };
+      }
+      try {
+        const capture = await f.start();
+        const task = await f.dispatch("Feature");
+        await f.complete(task.id, "Ready");
+        await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+        await entered.promise;
+        let stopped = false;
+        const stopping = (
+          stop === "cancel"
+            ? f.engine.reporting.cancel(f.owner(capture.id), f.caller().signal)
+            : f.engine.reporting.close()
+        ).then(() => {
+          stopped = true;
+        });
+        // Cancellation verifies the RPC caller before it can abort owned work.
+        if (stop === "cancel")
+          await f.engine.reporting.read(
+            { ...f.owner(capture.id), passive: true },
+            f.caller().signal,
+          );
+        expect(ownerSignal?.aborted).toBe(true);
+        expect(stopped).toBe(false);
+        expect(drained).toBe(false);
+        release.resolve();
+        await stopping;
+        expect(drained).toBe(true);
+        expect(f.turns).toEqual([]);
+        const reportID = f.engine.state.reporting.reportTaskID(capture.id);
+        if (phase === "progressReport") {
+          expect(reportID).toBeDefined();
+          expect(f.engine.state.task(reportID ?? "")).toMatchObject({
+            status: "cancelled",
+            released: 1,
+          });
+        } else expect(reportID).toBeUndefined();
+        expect(
+          f.engine.state.reporting.owned("captain-a", capture.id).status,
+        ).toBe(stop === "cancel" ? "cancelled" : "unavailable");
+      } finally {
+        release.resolve();
+        await f.close();
+      }
+    });
+  }
+}
+
+test("failed queued report cleanup records safe unavailable and drains", async () => {
+  const f = await fixture();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  f.engine.progressReport = async () => {
+    entered.resolve();
+    await release.promise;
+    throw new Error("private admission details");
+  };
+  f.engine.cancelReport = async () => {
+    throw new Error("private cleanup details");
+  };
+  try {
+    const capture = await f.start();
+    const task = await f.dispatch("Feature");
+    await f.complete(task.id, "Ready");
+    await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+    await entered.promise;
+    const closing = f.engine.reporting.close().then(
+      () => "closed",
+      (error: unknown) => error,
+    );
+    release.resolve();
+    expect(await closing).toBe("closed");
+    expect(
+      f.engine.state.reporting.owned("captain-a", capture.id),
+    ).toMatchObject({
+      status: "unavailable",
+      summary: "Activity reporter cleanup unconfirmed; raw details withheld.",
+    });
+    expect(f.turns).toEqual([]);
+  } finally {
+    release.resolve();
+    await f.close();
+  }
+});
+
+test("accepted capture cancellation does not access state after concurrent close", async () => {
+  const f = await fixture();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  f.engine.reporterFree = async () => {
+    entered.resolve();
+    await release.promise;
+    return true;
+  };
+  try {
+    const capture = await f.start();
+    const task = await f.dispatch("Feature");
+    await f.complete(task.id, "Ready");
+    await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+    await entered.promise;
+    const cancelling = f.engine.reporting
+      .cancel(f.owner(capture.id), f.caller().signal)
+      .then(
+        (result) => result,
+        (error: unknown) => error,
+      );
+    expect(
+      await f.engine.reporting.read(
+        { ...f.owner(capture.id), passive: true },
+        f.caller().signal,
+      ),
+    ).toMatchObject({ status: "cancelled" });
+    let lateAccess = 0;
+    f.engine.state.reporting.owned = () => {
+      lateAccess++;
+      throw new Error("State accessed after reporter close");
+    };
+    f.engine.cancelReport = async () => {
+      lateAccess++;
+      throw new Error("Engine accessed after reporter close");
+    };
+    const closing = f.engine.close();
+    release.resolve();
+    await closing;
+    expect(await cancelling).toBe(true);
+    expect(lateAccess).toBe(0);
+    expect(f.turns).toEqual([]);
+  } finally {
+    release.resolve();
+    await f.close();
+  }
+});
+
+test("reporter close rejects verification that resumes after owner drain", async () => {
+  const f = await fixture();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  try {
+    const capture = await f.start();
+    const task = await f.dispatch("Feature");
+    await f.complete(task.id, "Ready");
+    const get = f.sessions.get.bind(f.sessions);
+    f.sessions.get = async (...args) => {
+      const session = await get(...args);
+      entered.resolve();
+      await release.promise;
+      return session;
+    };
+    const finishing = f.engine.reporting.finish(
+      f.owner(capture.id),
+      f.caller().signal,
+    );
+    const outcome = finishing.then(
+      () => new Error("Unexpected reporting success"),
+      (error: unknown) => error,
+    );
+    await entered.promise;
+    await f.engine.close();
+    release.resolve();
+    expect(await outcome).toMatchObject({
+      message: "Activity reporter is closing.",
+    });
+    expect(f.turns).toEqual([]);
+  } finally {
+    release.resolve();
+    await f.close();
+  }
+});
+
+test("pre-aborted reporting RPCs cannot authorize jobs or cancel captures", async () => {
+  const f = await fixture();
+  try {
+    const capture = await f.start();
+    const task = await f.dispatch("Feature");
+    await f.complete(task.id, "Ready");
+    const signal = AbortSignal.abort();
+    for (const operation of ["read", "finish", "cancel"] as const)
+      await expect(
+        f.engine.reporting[operation](f.owner(capture.id), signal),
+      ).rejects.toThrow();
+    await expect(
+      f.engine.reporting.start(
+        { sessionID: "captain-a", requestID: "denied" },
+        signal,
+      ),
+    ).rejects.toThrow();
+    expect((await f.read(capture.id)).status).toBe("collecting");
+    expect(f.engine.state.reporting.reportTaskID(capture.id)).toBeUndefined();
+    expect(f.turns).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
 test("active reporting cancellation aborts only its own task", async () => {
   const f = await fixture();
   try {

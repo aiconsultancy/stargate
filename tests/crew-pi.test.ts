@@ -822,6 +822,115 @@ test("Pi shutdown retains uncertain task and unconfirmed creation is not repeate
   }
 });
 
+test("Pi owner shutdown aborts and drains read-only recovery before state closes", async () => {
+  const f = await fixture();
+  const entered = Promise.withResolvers<AbortSignal>();
+  const release = Promise.withResolvers<void>();
+  const lifecycle: string[] = [];
+  const factory: PiWorkerFactory = Object.assign(
+    async () => {
+      throw new Error("Receipt inspection must not open a runtime");
+    },
+    {
+      async recover(
+        _context: unknown,
+        _conversation: string,
+        _request: string,
+        signal: AbortSignal,
+      ) {
+        signal.addEventListener("abort", () => lifecycle.push("aborted"), {
+          once: true,
+        });
+        entered.resolve(signal);
+        try {
+          // Deliberately ignore abort until the native read releases resources.
+          await release.promise;
+          return "Late native answer";
+        } finally {
+          lifecycle.push("reader cleaned");
+        }
+      },
+    },
+  );
+  const owner = new PiCrewWorkers(f.engine.state, f.directory, factory);
+  let closing: Promise<void> | undefined;
+  try {
+    const member = f.options.team?.crew.find(({ id }) => id === "twiki");
+    if (!member) throw new Error("Missing Pi worker");
+    const state = f.engine.state;
+    const peer = state.reservePeer(member.id);
+    state.readyPeer(member.id);
+    const task = state.reserveTask(peer, "captain-a", "Inspect receipt");
+    if (!task) throw new Error("Missing task");
+    state.savePiTaskConversation(task.id, "17");
+    const result = owner
+      .recover(task, member, f.directory, new AbortController().signal)
+      .then(
+        (task) => ({ task, error: undefined }),
+        (error: unknown) => ({ task: undefined, error }),
+      );
+    const signal = await entered.promise;
+    const control = state.beginAbandon(
+      { ...task, status: "uncertain", controlID: null },
+      {
+        abandonedBy: "captain-a",
+        reason: "Stop recovery",
+        operationKey: "close-recovery",
+      },
+    );
+    state.finishAbandon(task.id, control, "confirmed", "Stopped");
+    const replacement = state.reserveTask(peer, "captain-a", "Replacement");
+    if (!replacement) throw new Error("Missing replacement task");
+    let stateClosed = false;
+    let lateReads = 0;
+    const lookup = state.task.bind(state);
+    state.task = (id) => {
+      if (stateClosed) {
+        lateReads++;
+        throw new Error("State read after shutdown");
+      }
+      return lookup(id);
+    };
+    let ownerClosed = false;
+    closing = owner.close().then(async () => {
+      ownerClosed = true;
+      lifecycle.push("owner closed");
+      expect(state.task(task.id)).toMatchObject({ released: 1, result: null });
+      expect(state.task(replacement.id)).toEqual(replacement);
+      await f.engine.close();
+      stateClosed = true;
+      lifecycle.push("state closed");
+    });
+    expect(signal.aborted).toBe(true);
+    await Promise.resolve();
+    expect(ownerClosed).toBe(false);
+    expect(lifecycle).toEqual(["aborted"]);
+    release.resolve();
+    expect((await result).error).toBeUndefined();
+    await closing;
+    expect(lifecycle).toEqual([
+      "aborted",
+      "reader cleaned",
+      "owner closed",
+      "state closed",
+    ]);
+    expect(
+      await owner.recover(
+        task,
+        member,
+        f.directory,
+        new AbortController().signal,
+      ),
+    ).toEqual(task);
+    expect(lateReads).toBe(0);
+  } finally {
+    release.resolve();
+    await closing;
+    await owner.close();
+    await f.close();
+  }
+});
+
 test("Pi FIFO remains captain-polled and native-only controls fail clearly", async () => {
   const f = await fixture();
   try {

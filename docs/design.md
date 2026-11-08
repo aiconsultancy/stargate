@@ -90,6 +90,11 @@ An observer can attach while earlier native work is busy. OpenCode publishes a
 preview only after history proves it follows the submitted input. Pi uses the
 submission's entry/answer bounds and live run input IDs. Uncertain previews are
 suppressed; attachment time alone does not establish ownership.
+While OpenCode's inbox still contains the input, previews skip history scans.
+Inbox absence does not prove placement; history remains authoritative. Both
+adapters allocate correlation IDs before admission, so a lost response can be
+cleaned up without submitting again. Unreadable recovery remains uncertain;
+these per-attempt IDs do not make replay after a process crash safe.
 
 `transcript` and `watch` are optional. `transcript` returns the public text of
 settled assistant messages after a native message cursor, oldest first, with
@@ -323,7 +328,10 @@ console.log(JSON.stringify(await repairThread({
 
 Pogo's running worker delivers applied rows; the helper does not post to
 Slack. Only `apply: true` refuses a thread with a queued or running request;
-a dry run never writes.
+a dry run never queues replies or moves the cursor. Both modes first restrict
+the existing data directory to `0700` and `pogo.sqlite` to `0600`, before SQLite
+creates WAL/SHM files. Repair refuses a missing database or a database symlink;
+it never creates replacement state.
 
 ## Scheduled prompts
 

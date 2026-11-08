@@ -13,7 +13,7 @@ import type {
   SubmissionRecord,
 } from "@earendil-works/pi-durable";
 import { PiDurableBackend } from "../src/backends/pi-durable";
-import { PiCrewWorkers } from "../src/crew/pi-worker";
+import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
 import { CrewState, type CrewTask } from "../src/crew/state";
 import { teamSchema } from "../src/crew/team";
 
@@ -252,6 +252,7 @@ async function fixture(report = false) {
     return prompt(...args);
   };
   return {
+    directory,
     state,
     backend,
     workers,
@@ -429,6 +430,139 @@ test("Pi progress storage failures do not stop work or escape timer callbacks", 
     expect(f.state.task(f.task.id)?.result).toBe("CANONICAL FINAL");
     expect(f.clock.timers.size).toBe(0);
   } finally {
+    await f.close();
+  }
+});
+
+test("Pi recovery leaves legacy tasks without native conversation binding unresolved", async () => {
+  const f = await fixture();
+  try {
+    expect(f.state.piTaskConversation(f.task.id)).toBeUndefined();
+    expect(
+      await f.workers.recover(
+        f.task,
+        f.member,
+        f.directory,
+        new AbortController().signal,
+      ),
+    ).toMatchObject({ status: "uncertain", result: null, released: 0 });
+    expect(f.state.piTaskConversation(f.task.id)).toBeUndefined();
+  } finally {
+    await f.close();
+  }
+});
+
+test("Pi recovery fails closed for unsupported, missing and unreadable receipts without opening runtime", async () => {
+  const f = await fixture();
+  let opens = 0;
+  let reads = 0;
+  const factory: PiWorkerFactory = async () => {
+    opens++;
+    return f.backend;
+  };
+  const workers = new PiCrewWorkers(f.state, f.directory, factory);
+  try {
+    f.state.savePiTaskConversation(f.task.id, "1");
+    const inspect = () =>
+      workers.recover(
+        f.task,
+        f.member,
+        f.directory,
+        new AbortController().signal,
+      );
+    expect(await inspect()).toMatchObject({
+      status: "uncertain",
+      result: null,
+    });
+    factory.recover = async (_context, conversation, request) => {
+      expect(conversation).toBe("1");
+      expect(request).toBe(f.task.inputID);
+      reads++;
+      if (reads === 2) throw new Error("Private native database error");
+      return undefined;
+    };
+    expect(await inspect()).toMatchObject({
+      status: "uncertain",
+      result: null,
+    });
+    expect(await inspect()).toMatchObject({
+      status: "uncertain",
+      result: null,
+    });
+    expect(opens).toBe(0);
+    expect(reads).toBe(2);
+  } finally {
+    await workers.close();
+    await f.close();
+  }
+});
+
+test("Pi receipt arriving after captain abandonment cannot revive old task or complete its replacement", async () => {
+  const f = await fixture();
+  const reading = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let reads = 0;
+  const factory: PiWorkerFactory = Object.assign(
+    async () => {
+      throw new Error("Recovery must never open a runtime");
+    },
+    {
+      async recover() {
+        reads++;
+        reading.resolve();
+        await release.promise;
+        return "OLD COMMITTED ANSWER";
+      },
+    },
+  );
+  const workers = new PiCrewWorkers(f.state, f.directory, factory);
+  let recovering: Promise<CrewTask> | undefined;
+  try {
+    f.state.savePiTaskConversation(f.task.id, "1");
+    f.state.running(f.task.id);
+    f.state.uncertain(f.task.id);
+    recovering = workers.recover(
+      f.task,
+      f.member,
+      f.directory,
+      new AbortController().signal,
+    );
+    await reading.promise;
+    const control = f.state.beginAbandon(
+      { ...f.task, status: "uncertain", controlID: null },
+      {
+        abandonedBy: "captain",
+        reason: "Do not resume",
+        operationKey: "abandon",
+      },
+    );
+    f.state.finishAbandon(f.task.id, control, "confirmed", "Stopped");
+    const next = f.state.reserveTask(
+      f.peer,
+      "captain",
+      "Replacement assignment",
+    );
+    if (!next) throw new Error("Replacement task is missing");
+    release.resolve();
+    expect(await recovering).toMatchObject({
+      status: "abandoned",
+      released: 1,
+      result: null,
+    });
+    expect(f.state.task(next.id)).toEqual(next);
+    expect(
+      await workers.recover(
+        f.task,
+        f.member,
+        f.directory,
+        new AbortController().signal,
+      ),
+    ).toMatchObject({ released: 1, result: null });
+    expect(reads).toBe(1);
+  } finally {
+    release.resolve();
+    await recovering;
+    await workers.close();
     await f.close();
   }
 });

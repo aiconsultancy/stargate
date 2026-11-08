@@ -1,6 +1,16 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  rename,
+  rm,
+  stat,
+  symlink,
+  unlink,
+} from "node:fs/promises";
 import { join } from "node:path";
+import { z } from "zod";
 import { latestInput, TranscriptUnavailable } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema, loadConfig } from "../src/config";
@@ -203,17 +213,23 @@ test("OpenCode watch reports settled sessions and reconnects", async () => {
   expect(paths.filter((path) => path !== "/api/event")).toEqual([]);
 });
 
-test("repairThread resolves the exact bot namespace from config and state", async () => {
+test("repairThread resolves the namespace and protects existing state", async () => {
   const directory = await mkdtemp("/tmp/opencode/pogo-repair-");
+  const state = join(directory, "state");
+  const database = join(state, "pogo.sqlite");
+  const modes: number[] = [];
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    fetch(request) {
+    async fetch(request) {
       const url = new URL(request.url);
       if (url.pathname === "/api/session/session-1")
         return Response.json({ data: { id: "session-1", time: { idle: 99 } } });
-      if (url.pathname.endsWith("/message"))
+      if (url.pathname.endsWith("/message")) {
+        for (const path of [database, `${database}-wal`, `${database}-shm`])
+          modes.push((await stat(path)).mode & 0o777);
         return Response.json({ data: history, cursor: {} });
+      }
       return new Response(null, { status: 404 });
     },
   });
@@ -266,6 +282,8 @@ test("repairThread resolves the exact bot namespace from config and state", asyn
     }
     store.saveSession(conversation, "session-1", "m8");
     store.close();
+    await chmod(state, 0o755);
+    await chmod(database, 0o644);
     const input = {
       config: path,
       bot: "captain",
@@ -285,6 +303,10 @@ test("repairThread resolves the exact bot namespace from config and state", asyn
       conflicts: [],
       queued: 0,
     });
+    expect((await stat(state)).mode & 0o777).toBe(0o700);
+    expect((await stat(database)).mode & 0o777).toBe(0o600);
+    expect(modes.length).toBeGreaterThan(0);
+    expect(new Set(modes)).toEqual(new Set([0o600]));
     expect(
       await repairThread({ ...input, only: ["m6"], apply: true }),
     ).toMatchObject({ missing: [{ id: "m6" }], queued: 1 });
@@ -294,6 +316,15 @@ test("repairThread resolves the exact bot namespace from config and state", asyn
     await expect(repairThread({ ...input, thread: "7.000" })).rejects.toThrow(
       "one current bot namespace",
     );
+    const target = join(state, "target.sqlite");
+    await rename(database, target);
+    await chmod(target, 0o644);
+    await symlink(target, database);
+    await expect(repairThread(input)).rejects.toThrow();
+    expect((await stat(target)).mode & 0o777).toBe(0o644);
+    await unlink(database);
+    await expect(repairThread(input)).rejects.toThrow("ENOENT");
+    await expect(stat(database)).rejects.toThrow("ENOENT");
   } finally {
     await server.stop(true);
     await rm(directory, { recursive: true, force: true });
@@ -371,10 +402,11 @@ test("OpenCode reads every page of a long gap, keeps missing cursors, and honour
 test("OpenCode prompt pages with cursors only, records its input, and types missing sessions", async () => {
   const lists: URLSearchParams[] = [];
   let deleted = false;
+  let inputID = "m3";
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    fetch(request) {
+    async fetch(request) {
       const url = new URL(request.url);
       if (deleted)
         return Response.json(
@@ -385,8 +417,10 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
           },
           { status: 404 },
         );
-      if (url.pathname.endsWith("/prompt"))
-        return Response.json({ data: { id: "m3" } });
+      if (url.pathname.endsWith("/prompt")) {
+        inputID = z.object({ id: z.string() }).parse(await request.json()).id;
+        return Response.json({ data: { id: inputID } });
+      }
       if (url.pathname.endsWith("/wait"))
         return new Response(null, { status: 204 });
       if (url.pathname === "/api/session/session-1")
@@ -400,7 +434,11 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
       const start = Number(url.searchParams.get("cursor") ?? 0);
       const end = start + 3;
       return Response.json({
-        data: history.slice(start, end),
+        data: history
+          .slice(start, end)
+          .map((message) =>
+            message.id === "m3" ? { ...message, id: inputID } : message,
+          ),
         cursor: end < history.length ? { next: String(end) } : {},
       });
     },

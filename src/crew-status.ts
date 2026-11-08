@@ -17,6 +17,7 @@ const task = z.strictObject({
     "completed",
     "cancelling",
     "uncertain",
+    "abandoned",
   ]),
   kind: z.enum(["assignment", "report", "unknown"]),
   summary: z.string().max(180),

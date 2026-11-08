@@ -1,3 +1,4 @@
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 import {
   BACKGROUND_CONTEXT,
@@ -147,6 +148,57 @@ export class PiDurableBackend implements AgentBackend {
     private readonly activeReports: Set<ConversationId>,
     private readonly reportGuard: ReturnType<typeof defineExtension>,
   ) {}
+
+  /** Receipt inspection never opens a scheduling runtime or resolves credentials. */
+  static async recover(
+    context: BackendContext,
+    sessionId: string,
+    requestId: string,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    signal.throwIfAborted();
+    const path = join(context.dataDirectory, "pi.sqlite");
+    // A missing native store is not permission to create a replacement.
+    await access(path);
+    const storage = await openNodeSqliteStorage(path);
+    const call = withAbortSignal(signal, BACKGROUND_CONTEXT);
+    let harness: Harness | undefined;
+    try {
+      harness = await Harness.open(
+        storage,
+        { models: createModels(), registry: createRegistry(), readOnly: true },
+        call,
+      );
+      const conversation = await harness.conversation(
+        conversationId.parse(sessionId) as ConversationId,
+        call,
+      );
+      if (!conversation) return undefined;
+      return await conversation.commit(async (tx) => {
+        const receipt = await tx.submissionByRequest(
+          conversation.id,
+          requestId,
+        );
+        if (receipt?.type !== "input" || receipt.status !== "done")
+          return undefined;
+        const answer = await tx.entry(AssistantEntry, receipt.answer);
+        if (!answer || answer.conversationId !== conversation.id)
+          return undefined;
+        return (answer.model ?? [])
+          .flatMap((message) =>
+            message.role === "assistant"
+              ? message.content.flatMap((block) =>
+                  block.type === "text" ? [block.text] : [],
+                )
+              : [],
+          )
+          .join("");
+      }, call);
+    } finally {
+      if (harness) await harness.close(BACKGROUND_CONTEXT);
+      else await storage.close(BACKGROUND_CONTEXT);
+    }
+  }
 
   static async open(config: Config, context: BackendContext) {
     const models = createModels();
@@ -327,7 +379,9 @@ export class PiDurableBackend implements AgentBackend {
     signal: AbortSignal,
     onText?: TextSink,
     result: "visible" | "final" = "visible",
+    requestId: string = crypto.randomUUID(),
   ) {
+    signal.throwIfAborted();
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
     const conversation = await this.harness.conversation(
       conversationId.parse(sessionId) as ConversationId,
@@ -338,6 +392,7 @@ export class PiDurableBackend implements AgentBackend {
       | Awaited<ReturnType<Harness["observeConversation"]>>
       | undefined;
     const visible = new Map<number, string>();
+    let attempted = false;
     let submission: Submission | undefined;
     let latestView: ConversationView | undefined;
     let updates = Promise.resolve();
@@ -412,8 +467,10 @@ export class PiDurableBackend implements AgentBackend {
         );
         latestView ??= observation.value;
       }
+      signal.throwIfAborted();
+      attempted = true;
       submission = await conversation.submit(
-        { type: "input", content: text, whenBusy: "followUp" },
+        { type: "input", requestId, content: text, whenBusy: "followUp" },
         context,
       );
       if (latestView) update(latestView);
@@ -448,18 +505,27 @@ export class PiDurableBackend implements AgentBackend {
     } catch (error) {
       // Withdrawal is atomic with placement. Never abort a prior native run
       // merely because our follow-up is still queued or already settled.
-      // A failed admission without a returned handle has an uncertain outcome.
-      if (submission) {
+      if (attempted) {
         const cleanup = withAbortSignal(
           AbortSignal.timeout(5000),
           BACKGROUND_CONTEXT,
         );
-        await submission
-          .abort(cleanup)
-          .then(async (outcome) => {
-            if (outcome === "already_placed") await conversation.abort(cleanup);
-          })
-          .catch(() => {});
+        try {
+          if (!submission) {
+            // Read the committed request index; never replay admission to
+            // recover its handle. Cleanup must survive the caller's abort.
+            const record = await conversation.commit(
+              (tx) => tx.submissionByRequest(conversation.id, requestId),
+              cleanup,
+            );
+            if (record)
+              submission = await this.harness.submission(record.id, cleanup);
+          }
+          const outcome = await submission?.abort(cleanup);
+          if (outcome === "already_placed") await conversation.abort(cleanup);
+        } catch {
+          // Unreadable admission/placement remains uncertain; no broad abort.
+        }
       }
       throw error;
     } finally {
@@ -478,6 +544,10 @@ export class PiDurableBackend implements AgentBackend {
     text: string,
     signal: AbortSignal,
     onText?: TextSink,
+    receipt?: {
+      requestId: string;
+      onConversation: (conversationID: string) => void;
+    },
   ) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
     if (
@@ -505,6 +575,7 @@ export class PiDurableBackend implements AgentBackend {
       },
       context,
     );
+    receipt?.onConversation(String(report.id));
     this.activeReports.add(report.id);
     try {
       return await this.prompt(
@@ -513,6 +584,7 @@ export class PiDurableBackend implements AgentBackend {
         signal,
         onText,
         "final",
+        receipt?.requestId,
       );
     } finally {
       this.activeReports.delete(report.id);

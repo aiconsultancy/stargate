@@ -4,6 +4,7 @@ import {
   OpenCode,
   type SessionMessageInfo,
 } from "@opencode/client";
+import { SessionMessage } from "@opencode/schema";
 import { z } from "zod";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
 import {
@@ -129,11 +130,13 @@ export class OpenCodeBackend implements AgentBackend {
     onText?: TextSink,
   ) {
     this.inputs.delete(sessionId);
+    signal.throwIfAborted();
     const stop = new AbortController();
     const timer = new AbortController();
     const connected = Promise.withResolvers<void>();
     type Phase =
       | { type: "attaching" }
+      | { type: "submitting"; input: string }
       | { type: "submitted"; input: string }
       | { type: "settled" };
     let phase: Phase = { type: "attaching" };
@@ -223,12 +226,16 @@ export class OpenCodeBackend implements AgentBackend {
         ]);
         timer.abort();
       }
+      signal.throwIfAborted();
+      const id = SessionMessage.ID.create();
+      phase = { type: "submitting", input: id };
+      this.inputs.set(sessionId, id);
       const input = await this.client.session.prompt(
-        { sessionID: sessionId, text, delivery: "queue" },
+        { sessionID: sessionId, id, text, delivery: "queue" },
         { signal },
       );
-      phase = { type: "submitted", input: input.id };
-      this.inputs.set(sessionId, input.id);
+      if (input.id !== id) throw new Error("OpenCode input identity changed");
+      phase = { type: "submitted", input: id };
       await this.client.experimental.session.wait(
         { sessionID: sessionId },
         { signal },
@@ -260,9 +267,9 @@ export class OpenCodeBackend implements AgentBackend {
       } while (cursor);
       throw new Error("OpenCode input was not found in session history");
     } catch (error) {
-      // A lost admission response has no known input to withdraw. Interrupting
-      // the whole session could stop unrelated native work; do not guess.
-      if (phase.type === "submitted") {
+      // Correlate a lost admission response without submitting again. A known
+      // ID permits withdrawal, but only readable placement permits interruption.
+      if (phase.type === "submitting" || phase.type === "submitted") {
         const input = phase.input;
         const cleanup = AbortSignal.timeout(5000);
         // First withdraw our inbox item. It may race placement; history, not
@@ -299,6 +306,15 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
     assistant?: string,
   ) {
+    if (assistant !== undefined) {
+      // Inbox list is unpaginated in this SDK. Presence proves we still queue;
+      // absence proves nothing, so delivered candidates still need history.
+      const inbox = await this.client.session.inbox.list(
+        { sessionID },
+        { signal },
+      );
+      if (inbox.some((item) => item.id === input)) return false;
+    }
     let found = assistant === undefined;
     let cursor: string | undefined;
     const cursors = new Set<string>();

@@ -6,6 +6,10 @@ operator instructions, permissions, access controls or task isolation.
 
 - Use `pogo_crew` roster for configured names, roles and delivery support.
   `captain` aliases the configured captain ID. `all` excludes the sender.
+- Each crew member keeps one permanent worktree named after that member's ID.
+  Create or switch task branches inside it; do not switch worktrees or move the
+  durable crew session. Temporary work in tmp directories is allowed without
+  changing the session's worktree. Report directory drift to the captain.
 - Use `pogo_mail` for asynchronous messages; it never wakes recipients.
   Use `pogo_dm` explicitly for native steer or queue notification. Stored,
   accepted, read and answered are different states. Reply with `replyTo`;
