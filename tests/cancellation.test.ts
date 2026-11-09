@@ -187,6 +187,45 @@ test("requester Stop uses one durable cancelled box instead of a generic timeout
   expect(f.store.failure(f.job.id)).toBe("cancelled");
 });
 
+test("maintenance monitoring failure stops work without reporting a requester Stop", async () => {
+  const f = fixture();
+  const read = Promise.withResolvers<MaintenanceNotice | null>();
+  const failures: string[] = [];
+  let acknowledged = false;
+  let closed = false;
+  f.backend.startMaintenance = async () => ({
+    read: async () => read.promise,
+    async delivered() {
+      acknowledged = true;
+    },
+    async close() {
+      closed = true;
+    },
+  });
+  f.slack.failure = async (_channel, _thread, cause) => {
+    failures.push(cause);
+    return "2.000";
+  };
+  const work = f.gateway.process(f.job, new AbortController().signal);
+  const signal = await f.started;
+  read.reject(new Error("Private monitor transport error"));
+  await work;
+  expect(signal.aborted).toBe(true);
+  expect(f.stopped()).toBe(true);
+  expect(f.prompts()).toBe(1);
+  expect(f.store.failure(f.job.id)).toBe("backend");
+  expect(failures).toEqual(["backend"]);
+  expect(f.writes.some(({ text }) => text.includes("stop request"))).toBe(
+    false,
+  );
+  expect(f.writes.some(({ text }) => text.includes("Private monitor"))).toBe(
+    false,
+  );
+  expect(acknowledged).toBe(false);
+  expect(closed).toBe(true);
+  expect(f.store.jobStatus(f.gateway.key, f.job.id)).toBe("done");
+});
+
 test("Stop rejects other humans, bots, installations, channels, threads, and previews", async () => {
   const f = fixture();
   f.config.access.users = ["*"];

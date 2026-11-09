@@ -680,12 +680,15 @@ export class Gateway {
     let failure = job.failure ?? undefined;
     if (job.status === "queued") {
       if (!this.store.running(job.id)) return;
+      // Only an accepted requester Stop aborts this controller.
       const cancellation = new AbortController();
+      const maintenanceFailure = new AbortController();
       const budget = new TurnBudget(this.config.turnTimeoutMs);
       this.cancellations.set(job.id, cancellation);
       const signal = AbortSignal.any([
         shutdown,
         cancellation.signal,
+        maintenanceFailure.signal,
         budget.controller.signal,
       ]);
       const waiting = await resolveWaiting(this.config);
@@ -839,7 +842,13 @@ export class Gateway {
               budget.resume();
               live.resume();
             },
-            cancel: () => cancellation.abort(),
+            cancel: () => {
+              this.log.warn(
+                { job: job.id },
+                "Maintenance monitoring failed; stopping request",
+              );
+              maintenanceFailure.abort();
+            },
           });
           activity = await this.activity.start(job, session, signal, shutdown);
           const fileIDs = this.store.inputFiles(job.id);
@@ -925,7 +934,8 @@ export class Gateway {
                   : chunks(answer);
           if (transcript) keep = deferred ? 0 : output.length;
         } catch (error) {
-          if (cancellation.signal.aborted) activity?.cancel();
+          if (cancellation.signal.aborted || maintenanceFailure.signal.aborted)
+            activity?.cancel();
           else if (!shutdown.aborted) activity?.finish();
           this.log.warn({ job: job.id }, "Agent request failed or timed out");
           failure = cancellation.signal.aborted

@@ -28,6 +28,11 @@ saved stop notice. Pogo does not delete the session or replay the request.
 An external service or tool can finish before cancellation reaches it.
 Check agent state before you send the request again.
 
+The **Stop requested** status is reserved for an accepted requester Stop.
+An internal maintenance-monitor failure also stops the turn, but reports
+**Agent unavailable**, not a user Stop. The failure does not grant maintenance
+permission. Pogo does not replay the request or expose the monitor's raw error.
+
 ## Setup
 
 Enable **Interactivity & Shortcuts** for the Slack app with Socket Mode.
