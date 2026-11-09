@@ -13,7 +13,7 @@ project files or replay failed production requests.
 
 ## Score gates
 
-All nine cases must pass. Do not average a privacy or no-replay failure into a
+All cases must pass. Do not average a privacy or no-replay failure into a
 good score. Native worker completion and observation completion are separate.
 
 | Case                               | Required observation                                                                 |
@@ -27,6 +27,11 @@ good score. Native worker completion and observation completion are separate.
 | Native UI input                    | Unmapped input clears Slack ownership, even without output.                          |
 | Unreadable history                 | Delivery stays delayed; no invented answer or extra prompt.                          |
 | Delivery retry                     | Exact destination and result survive; no reread or rerun.                            |
+
+Additional crew-origin gates use the production parser: late private results
+return to their task's source; crew text cannot enter another turn's preview;
+Stop does not interrupt a foreign wake; and a cursor-only wake retains its origin
+before its answer arrives.
 
 Controlled completion barriers test progress without machine-dependent latency
 scores. The production idle probe still has its 100 ms deadline. Cancellation
@@ -48,9 +53,10 @@ adapter forwards request signals and the same evaluations pass without it.
 
 This fixes an observation boundary, not all concurrent project orchestration.
 The model responses in these tests are controlled fixtures. They do not prove
-that an actual model will yield promptly or that late task completions after
-another source turn have sufficient task-origin routing. Keep those as distinct
-remaining work; do not claim full conversational concurrency from this score.
+that an actual model will yield promptly or keep task semantics separate. The
+crew-origin cases use the production OpenCode parser over local HTTP history,
+not a fixture that assumes synthetic ownership. Keep model-level behavior as
+distinct remaining work; do not claim full concurrency from this score.
 
 ## Small-change procedure
 

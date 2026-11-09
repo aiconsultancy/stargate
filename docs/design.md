@@ -244,8 +244,19 @@ but do not receive captain catch-up broadcasts.
 The native input ID commits on the job before admission. History attributes
 each public entry to its preceding user or standalone shell input. A known
 Pogo input selects its originating job; an unknown native input clears the
-Slack owner. Synthetic crew messages retain the previous owner. A queued job
-never selects a destination before its input appears in history.
+Slack owner. Crew tasks retain the exact originating captain input resolved
+from the dispatch tool's message ancestry, including while queued. Captain-bound
+crew wakes queue rather than steer another source's active turn. Their metadata
+selects that retained input only for the exact originating captain session.
+Missing or foreign origins clear Slack ownership and stay in native history;
+ordinary shell-completion synthetics retain the existing continuation behavior.
+A queued job never selects a destination before its input appears in history.
+
+Old tasks keep a null origin; activation never guesses or backfills their source.
+Their results, notices and history remain available through normal crew status
+and collection, but an unsolicited wake cannot choose a Slack destination.
+This includes tasks already running during activation. Recover the result and
+report it in its proven source; do not replay the assignment to obtain routing.
 
 Replies for the current input, continuation outbox rows for earlier owners,
 and cursor advancement commit together. Native UI output with no Pogo owner

@@ -40,6 +40,253 @@ import { Store } from "../src/store";
 import { waitingSettingsPath } from "../src/waiting";
 import { bot, event, identity } from "./fixtures";
 
+test("dispatch binds the exact open assistant origin before later inputs and preserves queued ancestry", async () => {
+  const f = await fixture();
+  try {
+    f.history.set("ses_captain_a", [
+      { id: "later", type: "user", time: { created: 3 } },
+      { id: "dispatch-tool", type: "assistant", time: { created: 2 } },
+      { id: "original", type: "user", time: { created: 1 } },
+    ]);
+    const caller = { ...f.captain(), messageID: "dispatch-tool" };
+    const first = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "First" },
+        caller,
+      )
+    ).task;
+    const queued = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Second", queue: true },
+        caller,
+      )
+    ).task;
+    if (!first || !queued) throw new Error("Missing tasks");
+    expect(first.originInputID).toBe("original");
+    expect(queued).toMatchObject({
+      status: "queued",
+      originInputID: "original",
+    });
+    await f.engine.run(
+      { op: "complete", taskID: first.id, result: "Done" },
+      f.worker(first.workerSessionID),
+    );
+    f.busy.delete(first.workerSessionID);
+    const promoted = await f.engine.run(
+      { op: "status", taskID: queued.id },
+      { ...f.captain(), messageID: "unrelated-later-tool" },
+    );
+    expect(promoted.task).toMatchObject({
+      id: queued.id,
+      inputID: queued.inputID,
+      status: "running",
+      originInputID: "original",
+    });
+    expect(f.inputs).toHaveLength(2);
+    expect(f.inputs.map(({ id }) => id)).toEqual([
+      first.inputID,
+      queued.inputID,
+    ]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("dispatch leaves origin unknown when ancestry is absent, unreadable or unavailable", async () => {
+  for (const mode of [
+    "missing-context",
+    "missing-anchor",
+    "api-error",
+    "missing-api",
+  ] as const) {
+    const f = await fixture();
+    const engine =
+      mode === "missing-api"
+        ? await CrewEngine.open(f.options, f.client, f.mailer, f.agents)
+        : f.engine;
+    try {
+      f.history.set("ses_captain_a", [
+        { id: "unrelated", type: "user", time: { created: 1 } },
+      ]);
+      if (mode === "api-error")
+        f.inspectionAPI.message.list = async () => {
+          throw new Error("Private API failure");
+        };
+      const caller =
+        mode === "missing-context"
+          ? f.captain()
+          : { ...f.captain(), messageID: "absent" };
+      const result = await engine.run(
+        { op: "dispatch", crew: "mario", text: "Work" },
+        caller,
+      );
+      expect(result.task).toMatchObject({
+        status: "running",
+        originInputID: null,
+      });
+      expect(f.inputs).toHaveLength(1);
+    } finally {
+      if (engine !== f.engine) await engine.close();
+      await f.close();
+    }
+  }
+});
+
+test("dispatch origin deadline cancels a stalled history read without replay or task failure", async () => {
+  const f = await fixture();
+  let observed: AbortSignal | undefined;
+  try {
+    f.inspectionAPI.message.list = async (_input, request) => {
+      const signal = request?.signal;
+      if (!signal) throw new Error("Missing history signal");
+      observed = signal;
+      return new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    };
+    const result = await f.engine.run(
+      { op: "dispatch", crew: "mario", text: "Work" },
+      { ...f.captain(), messageID: "open-tool" },
+    );
+    expect(result.task).toMatchObject({
+      status: "running",
+      originInputID: null,
+    });
+    expect(observed?.aborted).toBe(true);
+    expect(f.inputs).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+}, 10_000);
+
+test("captain wakes queue with exact task origin while worker steer and wait notices remain intact", async () => {
+  const f = await fixture();
+  try {
+    f.history.set("ses_captain_a", [
+      { id: "tool", type: "assistant", time: { created: 2 } },
+      { id: "private-input", type: "user", time: { created: 1 } },
+    ]);
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Private work" },
+        { ...f.captain(), messageID: "tool" },
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    await f.engine.dm(
+      { op: "send", to: "mario", text: "Continue" },
+      f.captain(),
+    );
+    expect(f.synthetics.at(-1)).toMatchObject({
+      sessionID: task.workerSessionID,
+      delivery: "steer",
+      resume: false,
+    });
+    const waiting = f.engine.run({ op: "wait", taskID: task.id }, f.captain());
+    await f.engine.dm(
+      {
+        op: "send",
+        to: "captain",
+        text: "Private progress",
+        delivery: "steer",
+      },
+      f.worker(task.workerSessionID),
+    );
+    expect(f.synthetics.at(-1)).toMatchObject({
+      sessionID: "ses_captain_a",
+      delivery: "queue",
+      resume: true,
+      metadata: {
+        pogoCrew: {
+          sourceTaskID: task.id,
+          originCaptainID: "ses_captain_a",
+          originInputID: "private-input",
+        },
+      },
+    });
+    expect(
+      (await waiting).notices?.map(({ text }) => text).join("\n"),
+    ).toContain("Private progress");
+    expect(f.engine.state.task(task.id)).toMatchObject({
+      status: "running",
+      result: null,
+    });
+    expect(f.inputs).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("task-free and legacy-lineage captain wakes never invent a pinned input origin", async () => {
+  const f = await fixture();
+  const pinned = await CrewEngine.open(
+    { ...f.options, captainSessionID: "ses_pinned" },
+    f.client,
+    f.mailer,
+    f.agents,
+  );
+  try {
+    const peer = (
+      await f.engine.run({ op: "ensure", crew: "mario" }, f.captain())
+    ).peers?.[0];
+    if (!peer) throw new Error("Missing peer");
+    const old = f.engine.state.reserveTask(
+      peer,
+      "ses_captain_a",
+      "Old work",
+      "old-private-input",
+    );
+    if (!old) throw new Error("Missing task");
+    f.engine.state.running(old.id);
+    await pinned.notifyMail(
+      {
+        id: "1".repeat(32),
+        sender: peer.sessionID,
+        recipient: "ses_pinned",
+        captainID: "ses_captain_a",
+        sourceTaskID: old.id,
+        targetTaskID: null,
+      },
+      f.worker(peer.sessionID),
+      "Old progress",
+      "steer",
+    );
+    expect(f.synthetics.at(-1)).toMatchObject({
+      sessionID: "ses_pinned",
+      delivery: "queue",
+    });
+    expect(f.synthetics.at(-1)?.metadata?.["pogoCrew"]).not.toHaveProperty(
+      "originInputID",
+    );
+    await pinned.notifyMail(
+      {
+        id: "2".repeat(32),
+        sender: peer.sessionID,
+        recipient: "ses_pinned",
+        captainID: "ses_pinned",
+        sourceTaskID: null,
+        targetTaskID: null,
+      },
+      f.worker(peer.sessionID),
+      "Task-free reply",
+      "steer",
+    );
+    expect(f.synthetics.at(-1)).toMatchObject({
+      sessionID: "ses_pinned",
+      delivery: "queue",
+    });
+    expect(f.synthetics.at(-1)?.metadata?.["pogoCrew"]).not.toHaveProperty(
+      "originInputID",
+    );
+    expect(f.inputs).toHaveLength(0);
+  } finally {
+    await pinned.close();
+    await f.close();
+  }
+});
+
 test("conversation eval: busy status lets a second source progress without replaying crew work", async () => {
   const f = await fixture();
   const idle = Effect.runSync(Deferred.make<void>());

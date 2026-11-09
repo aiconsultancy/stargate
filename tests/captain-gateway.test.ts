@@ -8,6 +8,8 @@ import {
   type Transcript,
   TranscriptUnavailable,
 } from "../src/backend";
+import { OpenCodeBackend } from "../src/backends/opencode";
+import { backendSchema } from "../src/config";
 import { Gateway, type SlackDelivery } from "../src/gateway";
 import { backendFingerprint, botKey, conversationKey } from "../src/routing";
 import { Store } from "../src/store";
@@ -90,6 +92,276 @@ function source(channel: string, text: string, ts: string, thread?: string) {
     },
   };
 }
+
+function productionTranscriptFixture(store?: Store, ownStore = true) {
+  const f = fixture(store, ownStore);
+  const history: Record<string, unknown>[] = [];
+  let time = 0;
+  let serial = 0;
+  const add = (message: Record<string, unknown>) => {
+    time += 10;
+    history.push({
+      ...message,
+      time: {
+        created: time,
+        ...(message["type"] === "assistant" ? { completed: time + 1 } : {}),
+      },
+    });
+  };
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch(request) {
+      const url = new URL(request.url);
+      if (url.pathname === "/api/session/original-captain")
+        return Response.json({
+          data: { id: "original-captain", time: { busy: 0, idle: time + 100 } },
+        });
+      if (!url.pathname.endsWith("/message"))
+        return new Response(null, { status: 404 });
+      const start = Number(url.searchParams.get("cursor") ?? 0);
+      const end =
+        start + Math.min(3, Number(url.searchParams.get("limit") ?? 20));
+      return Response.json({
+        data: history.toReversed().slice(start, end),
+        cursor: end < history.length ? { next: String(end) } : {},
+      });
+    },
+  });
+  cleanup.push(() => server.stop(true));
+  const config = backendSchema.parse({
+    type: "opencode",
+    url: server.url.href,
+    directory: "/workspace",
+  });
+  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  const native = new OpenCodeBackend(config);
+  f.backend.transcript = (session, cursor, signal) =>
+    native.transcript(session, cursor, signal);
+  let beforeReturn = () => {};
+  let beforeAnswer = () => {};
+  f.backend.prompt = async (session, text, _signal, _onText, onInput) => {
+    f.prompts.push({ session, text });
+    const id = `msg_input_${++serial}`;
+    onInput?.(id);
+    add({ id, type: "user", text });
+    beforeAnswer();
+    const answer = `answer: ${text}`;
+    add({
+      id: `msg_answer_${serial}`,
+      type: "assistant",
+      content: [{ type: "text", text: answer }],
+    });
+    beforeReturn();
+    return answer;
+  };
+  const wake = (
+    id: string,
+    text?: string,
+    origin?: string,
+    captain = "original-captain",
+  ) => {
+    add({
+      id,
+      type: "synthetic",
+      metadata: {
+        pogoCrew: {
+          sourceTaskID: "task_private_a",
+          originCaptainID: captain,
+          messageID: id,
+          ...(origin ? { originInputID: origin } : {}),
+        },
+      },
+    });
+    if (text) answer(id, text);
+  };
+  const answer = (id: string, text: string) =>
+    add({
+      id: `${id}_reply`,
+      type: "assistant",
+      content: [{ type: "text", text }],
+    });
+  return {
+    ...f,
+    add,
+    wake,
+    answer,
+    beforeReturn(fn: () => void) {
+      beforeReturn = fn;
+    },
+    beforeAnswer(fn: () => void) {
+      beforeAnswer = fn;
+    },
+  };
+}
+
+for (const duringTurn of [false, true]) {
+  test(`conversation eval: production parser routes late private crew result to origin, during turn=${duringTurn}`, async () => {
+    const f = productionTranscriptFixture();
+    f.gateway.accept(source("D123", "private task A", "1.000"));
+    await f.drain();
+    if (duringTurn)
+      f.beforeReturn(() => f.wake("wake_a", "PRIVATE_A", "msg_input_1"));
+    f.gateway.accept(source("C456", "<@UBOT> public question B", "2.000"));
+    await f.drain();
+    if (!duringTurn) f.wake("wake_a", "PRIVATE_A", "msg_input_1");
+    f.wake("unknown", "UNROUTED_PRIVATE");
+    f.wake("foreign", "FOREIGN_PRIVATE", "msg_input_2", "other-captain");
+    f.gateway.settle("original-captain");
+    await f.gateway.catchUp(f.signal);
+    await f.drain();
+    expect(f.posts).toEqual([
+      { channel: "D123", thread: "1.000", text: "answer: private task A" },
+      { channel: "C456", thread: "2.000", text: "answer: public question B" },
+      { channel: "D123", thread: "1.000", text: "PRIVATE_A" },
+    ]);
+    expect(f.prompts).toHaveLength(2);
+  });
+}
+
+test("conversation eval: production parser preserves a crew origin across cursor-only wake", async () => {
+  const f = productionTranscriptFixture();
+  f.gateway.accept(source("D123", "private task A", "1.000"));
+  await f.drain();
+  f.gateway.accept(source("C456", "<@UBOT> public question B", "2.000"));
+  await f.drain();
+  f.wake("wake_a", undefined, "msg_input_1");
+  f.gateway.settle("original-captain");
+  await f.gateway.catchUp(f.signal);
+  expect(f.store.captainCursor(f.gateway.key, "original-captain").owner).toBe(
+    1,
+  );
+  f.answer("wake_a", "PRIVATE_A");
+  f.gateway.settle("original-captain");
+  await f.gateway.catchUp(f.signal);
+  await f.drain();
+  expect(f.posts.at(-1)).toEqual({
+    channel: "D123",
+    thread: "1.000",
+    text: "PRIVATE_A",
+  });
+  expect(f.prompts).toHaveLength(2);
+});
+
+test("conversation eval: crew origin survives restart and ordinary shell completion", async () => {
+  const directory = await mkdtemp("/tmp/opencode/pogo-origin-");
+  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, "pogo.sqlite");
+  const initial = new Store(path);
+  const f = productionTranscriptFixture(initial, false);
+  f.gateway.accept(source("D123", "private task A", "1.000"));
+  await f.drain();
+  f.gateway.accept(source("C456", "<@UBOT> public question B", "2.000"));
+  await f.drain();
+  f.wake("wake_a", undefined, "msg_input_1");
+  f.gateway.settle("original-captain");
+  await f.gateway.catchUp(f.signal);
+  await f.gateway.close();
+  initial.close();
+  const reopened = new Store(path);
+  cleanup.push(() => reopened.close());
+  const gateway = new Gateway(
+    f.config,
+    identity,
+    reopened,
+    f.backend,
+    f.slack,
+    pino({ enabled: false }),
+  );
+  cleanup.push(() => gateway.close());
+  f.answer("wake_a", "PRIVATE_A");
+  f.add({
+    id: "shell_done",
+    type: "synthetic",
+    text: "Background shell complete",
+  });
+  f.answer("shell_done", "Same origin shell continuation");
+  gateway.settle("original-captain");
+  await gateway.catchUp(f.signal);
+  for (const job of reopened.ready(gateway.key, Number.MAX_SAFE_INTEGER, 10))
+    await gateway.process(job, f.signal);
+  expect(f.posts.at(-1)).toEqual({
+    channel: "D123",
+    thread: "1.000",
+    text: "PRIVATE_A\n\nSame origin shell continuation",
+  });
+  expect(f.prompts).toHaveLength(2);
+});
+
+for (const origin of ["msg_input_1", undefined]) {
+  test(`conversation eval: pre-upgrade wake cursor cannot inherit latest source, origin=${origin}`, async () => {
+    const f = productionTranscriptFixture();
+    f.gateway.accept(source("D123", "private task A", "1.000"));
+    await f.drain();
+    f.gateway.accept(source("C456", "<@UBOT> public question B", "2.000"));
+    await f.drain();
+    f.wake("old_wake", undefined, origin);
+    const from = f.store.captainCursor(f.gateway.key, "original-captain");
+    expect(
+      f.store.appendCaptainTranscript({
+        botKey: f.gateway.key,
+        sessionID: "original-captain",
+        from,
+        cursor: "old_wake",
+        owner: from.owner,
+        replies: [],
+      }),
+    ).toBe(true);
+    f.answer("old_wake", "PRIVATE_A");
+    f.gateway.settle("original-captain");
+    await f.gateway.catchUp(f.signal);
+    await f.drain();
+    expect(f.posts.slice(2)).toEqual(
+      origin ? [{ channel: "D123", thread: "1.000", text: "PRIVATE_A" }] : [],
+    );
+    expect(f.prompts).toHaveLength(2);
+  });
+}
+
+for (const sameOrigin of [false, true]) {
+  test(`conversation eval: adjacent crew wake batch fails closed unless origins agree, same=${sameOrigin}`, async () => {
+    const f = productionTranscriptFixture();
+    f.gateway.accept(source("D123", "private task A", "1.000"));
+    await f.drain();
+    f.gateway.accept(source("C456", "<@UBOT> public question B", "2.000"));
+    await f.drain();
+    f.wake("wake_a", undefined, "msg_input_1");
+    f.add({ id: "ordinary_between", type: "synthetic" });
+    f.wake("wake_next", undefined, sameOrigin ? "msg_input_1" : "msg_input_2");
+    f.answer("batch", "MERGED PRIVATE RESULT");
+    f.gateway.settle("original-captain");
+    await f.gateway.catchUp(f.signal);
+    await f.drain();
+    expect(f.posts.slice(2)).toEqual(
+      sameOrigin
+        ? [{ channel: "D123", thread: "1.000", text: "MERGED PRIVATE RESULT" }]
+        : [],
+    );
+    expect(f.store.captainCursor(f.gateway.key, "original-captain").owner).toBe(
+      sameOrigin ? 1 : null,
+    );
+    expect(f.prompts).toHaveLength(2);
+  });
+}
+
+test("conversation eval: a steer crew wake batched after another source input stays native", async () => {
+  const f = productionTranscriptFixture();
+  f.gateway.accept(source("D123", "private task A", "1.000"));
+  await f.drain();
+  f.beforeAnswer(() => f.wake("old_steer_a", undefined, "msg_input_1"));
+  f.gateway.accept(source("C456", "<@UBOT> public question B", "2.000"));
+  await f.drain();
+  expect(f.posts.filter((p) => p.channel === "D123")).toEqual([
+    { channel: "D123", thread: "1.000", text: "answer: private task A" },
+  ]);
+  expect(f.posts.map((p) => p.text).join("\n")).not.toContain(
+    "answer: public question B",
+  );
+  expect(
+    f.store.captainCursor(f.gateway.key, "original-captain").owner,
+  ).toBeNull();
+  expect(f.prompts).toHaveLength(2);
+});
 
 test("DM, two channels and cron use the original root without source mappings", async () => {
   const f = fixture();

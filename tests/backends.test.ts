@@ -292,7 +292,15 @@ test("OpenCode cancellation before admission makes no native requests", async ()
   }
 });
 
-function openCodeStreamFixture(queued = false, deliverDuringCheck = false) {
+function openCodeStreamFixture(
+  queued = false,
+  deliverDuringCheck = false,
+  crewWake?: {
+    originInputID?: string;
+    originCaptainID?: string;
+    batched?: boolean;
+  },
+) {
   const waiting = Promise.withResolvers<void>();
   const finish = Promise.withResolvers<void>();
   const disconnected = Promise.withResolvers<void>();
@@ -356,17 +364,44 @@ function openCodeStreamFixture(queued = false, deliverDuringCheck = false) {
         checked.resolve();
         return Response.json({
           data: [
-            ...(placed
+            ...(crewWake
               ? [
                   {
-                    id: "answer-current",
+                    id: "answer-wake",
                     type: "assistant",
-                    content: [
-                      { type: "reasoning", text: "HISTORY REASONING SECRET" },
-                      { type: "tool", text: "HISTORY TOOL SECRET" },
-                      { type: "text", text: "Canonical final answer." },
-                    ],
+                    content: [{ type: "text", text: "PRIVATE TASK A" }],
                   },
+                  {
+                    id: "wake-a",
+                    type: "synthetic",
+                    metadata: {
+                      pogoCrew: {
+                        originCaptainID: "session-current",
+                        messageID: "mail-a",
+                        ...crewWake,
+                      },
+                    },
+                  },
+                ]
+              : []),
+            ...(placed
+              ? [
+                  ...(!crewWake?.batched
+                    ? [
+                        {
+                          id: "answer-current",
+                          type: "assistant",
+                          content: [
+                            {
+                              type: "reasoning",
+                              text: "HISTORY REASONING SECRET",
+                            },
+                            { type: "tool", text: "HISTORY TOOL SECRET" },
+                            { type: "text", text: "Canonical final answer." },
+                          ],
+                        },
+                      ]
+                    : []),
                   { id: inputId, type: "user" },
                 ]
               : []),
@@ -411,6 +446,7 @@ function openCodeStreamFixture(queued = false, deliverDuringCheck = false) {
     interrupted: interrupted.promise,
     finish: () => finish.resolve(),
     historyReads: () => historyReads,
+    input: () => inputId,
     checked: checked.promise,
     place: () => {
       placed = true;
@@ -428,6 +464,87 @@ function openCodeStreamFixture(queued = false, deliverDuringCheck = false) {
     },
   };
 }
+
+for (const origin of [
+  { originInputID: "msg_sourceA" },
+  {},
+  { originCaptainID: "other-captain", originInputID: "msg_sourceA" },
+]) {
+  test(`conversation eval: queued crew wake cannot enter another input's preview or Stop, origin=${JSON.stringify(origin)}`, async () => {
+    const f = openCodeStreamFixture(false, false, origin);
+    const received = Promise.withResolvers<void>();
+    const snapshots: string[] = [];
+    const stop = new AbortController();
+    const result = f.backend.prompt(
+      "session-current",
+      "Public B",
+      stop.signal,
+      (text) => {
+        snapshots.push(text);
+        if (text.includes("OWN B")) received.resolve();
+      },
+    );
+    try {
+      await f.waiting;
+      f.emit("session.text.delta", {
+        sessionID: "session-current",
+        assistantMessageID: "answer-wake",
+        ordinal: 0,
+        delta: "PRIVATE TASK A",
+      });
+      f.emit("session.text.delta", {
+        sessionID: "session-current",
+        assistantMessageID: "answer-current",
+        ordinal: 0,
+        delta: "OWN B",
+      });
+      await received.promise;
+      await f.backend.interruptInput("session-current", f.input(), stop.signal);
+      expect(f.interrupts()).toBe(0);
+      expect(f.cancelled()).toBe(true);
+      f.finish();
+      expect(await result).toBe("Canonical final answer.");
+      expect(snapshots.join("\n")).not.toContain("PRIVATE TASK A");
+    } finally {
+      stop.abort();
+      await result.catch(() => {});
+      await f.close();
+    }
+  });
+}
+
+test("conversation eval: native steer batch has no public preview, final text or Stop ownership", async () => {
+  const f = openCodeStreamFixture(false, false, {
+    originInputID: "msg_sourceA",
+    batched: true,
+  });
+  const stop = new AbortController();
+  const snapshots: string[] = [];
+  const result = f.backend.prompt(
+    "session-current",
+    "Public B",
+    stop.signal,
+    (text) => snapshots.push(text),
+  );
+  try {
+    await f.waiting;
+    f.emit("session.text.delta", {
+      sessionID: "session-current",
+      assistantMessageID: "answer-wake",
+      ordinal: 0,
+      delta: "PRIVATE TASK A",
+    });
+    await f.backend.interruptInput("session-current", f.input(), stop.signal);
+    expect(f.interrupts()).toBe(0);
+    f.finish();
+    expect(await result).toBe("");
+    expect(snapshots).toEqual([]);
+  } finally {
+    stop.abort();
+    await result.catch(() => {});
+    await f.close();
+  }
+});
 
 test("OpenCode streams only current-session visible text before canonical history completes", async () => {
   const fixture = openCodeStreamFixture();

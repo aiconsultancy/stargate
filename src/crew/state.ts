@@ -17,6 +17,7 @@ export type CrewTask = {
   crewID: CrewID;
   workerSessionID: string;
   originCaptainID: string;
+  originInputID: string | null;
   inputID: string;
   status:
     | "queued"
@@ -99,6 +100,7 @@ const tasksTable = (name: string) => `${name} (
           crewID TEXT NOT NULL REFERENCES peers(crewID),
           workerSessionID TEXT NOT NULL,
           originCaptainID TEXT NOT NULL,
+          originInputID TEXT,
           inputID TEXT NOT NULL UNIQUE,
           status TEXT NOT NULL CHECK(status IN ('dispatching','running',
             'completed','cancelling','uncertain','abandoned','cancelled')),
@@ -169,6 +171,7 @@ export class CrewState {
           crewID TEXT NOT NULL REFERENCES peers(crewID),
           workerSessionID TEXT NOT NULL,
           originCaptainID TEXT NOT NULL,
+          originInputID TEXT,
           inputID TEXT NOT NULL UNIQUE,
           text TEXT NOT NULL,
           status TEXT NOT NULL CHECK(status IN ('queued','cancelled')) DEFAULT 'queued',
@@ -285,6 +288,16 @@ export class CrewState {
             throw new CrewError(
               "Crew task status upgrade failed its reference check; original state retained.",
             );
+        }
+        // Add provenance after legacy rebuilds; retained rows stay untagged.
+        for (const table of ["tasks", "pending_tasks"]) {
+          if (
+            !db
+              .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+              .all()
+              .some((column) => column.name === "originInputID")
+          )
+            db.exec(`ALTER TABLE ${table} ADD COLUMN originInputID TEXT`);
         }
         if (identity && identity.value !== fingerprint)
           db.query("UPDATE identity SET value=? WHERE value=?").run(
@@ -434,7 +447,7 @@ export class CrewState {
         .get(id) ??
       this.db
         .query<CrewTask, [string]>(
-          `SELECT id,crewID,workerSessionID,originCaptainID,inputID,status,result,released,notifying FROM pending_tasks WHERE id=?`,
+          `SELECT id,crewID,workerSessionID,originCaptainID,originInputID,inputID,status,result,released,notifying FROM pending_tasks WHERE id=?`,
         )
         .get(id)
     );
@@ -448,7 +461,12 @@ export class CrewState {
       .get(crewID);
   }
 
-  reserveTask(peer: Peer, captainID: string, text = ""): CrewTask | null {
+  reserveTask(
+    peer: Peer,
+    captainID: string,
+    text = "",
+    originInputID: string | null = null,
+  ): CrewTask | null {
     return this.db
       .transaction(() => {
         if (
@@ -460,13 +478,14 @@ export class CrewState {
         const id = `task_${randomUUID()}`;
         this.db
           .query(`INSERT INTO tasks
-        (id,crewID,workerSessionID,originCaptainID,inputID,status)
-        VALUES (?,?,?,?,?,'dispatching')`)
+        (id,crewID,workerSessionID,originCaptainID,originInputID,inputID,status)
+        VALUES (?,?,?,?,?,?,'dispatching')`)
           .run(
             id,
             peer.crewID,
             peer.sessionID,
             captainID,
+            originInputID,
             `msg_${randomUUID()}`,
           );
         const task = this.task(id);
@@ -488,7 +507,7 @@ export class CrewState {
   queuedTasks(crewID: string): CrewTask[] {
     return this.db
       .query<CrewTask, [string]>(
-        `SELECT id,crewID,workerSessionID,originCaptainID,inputID,status,result,released,notifying
+        `SELECT id,crewID,workerSessionID,originCaptainID,originInputID,inputID,status,result,released,notifying
          FROM pending_tasks WHERE crewID=? AND status='queued' ORDER BY sequence`,
       )
       .all(crewID);
@@ -854,6 +873,7 @@ export class CrewState {
     captainID: string,
     text: string,
     reportCaptureID?: string,
+    originInputID: string | null = null,
   ): CrewTask {
     return this.db
       .transaction(() => {
@@ -896,13 +916,14 @@ export class CrewState {
         const id = `task_${randomUUID()}`;
         this.db
           .query(
-            `INSERT INTO pending_tasks (id,crewID,workerSessionID,originCaptainID,inputID,text) VALUES (?,?,?,?,?,?)`,
+            `INSERT INTO pending_tasks (id,crewID,workerSessionID,originCaptainID,originInputID,inputID,text) VALUES (?,?,?,?,?,?,?)`,
           )
           .run(
             id,
             peer.crewID,
             peer.sessionID,
             captainID,
+            originInputID,
             `msg_${randomUUID()}`,
             text,
           );
@@ -932,13 +953,14 @@ export class CrewState {
         if (active && !this.release(active.id)) return null;
         this.db
           .query(
-            `INSERT INTO tasks (id,crewID,workerSessionID,originCaptainID,inputID,status) VALUES (?,?,?,?,?,'dispatching')`,
+            `INSERT INTO tasks (id,crewID,workerSessionID,originCaptainID,originInputID,inputID,status) VALUES (?,?,?,?,?,?,'dispatching')`,
           )
           .run(
             head.id,
             head.crewID,
             head.workerSessionID,
             head.originCaptainID,
+            head.originInputID,
             head.inputID,
           );
         this.db.query("DELETE FROM pending_tasks WHERE id=?").run(id);

@@ -19,6 +19,13 @@ import { type BackendConfig, secret } from "../config";
 import { CrewReporting } from "../crew/report-rpc";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
 import {
+  boundaryRecord,
+  closesBoundaryContext,
+  InputBoundaryFold,
+  type InputBoundaryRecord,
+  resolveBoundaryContext,
+} from "../input-boundary";
+import {
   MaintenanceRPC,
   type MaintenanceWatch,
   maintenanceNoticeSchema,
@@ -283,8 +290,11 @@ export class OpenCodeBackend implements AgentBackend {
       );
       phase = { type: "settled" };
       // Read backwards to the submitted input; do not resend earlier replies.
-      const replies: { text: string; failed: boolean }[] = [];
+      const history: (InputBoundaryRecord & {
+        reply?: { text: string; failed: boolean };
+      })[] = [];
       let cursor: string | undefined;
+      const cursors = new Set<string>();
       do {
         // A continuation cursor carries the first page's order.
         const page = await this.client.message.list(
@@ -294,29 +304,38 @@ export class OpenCodeBackend implements AgentBackend {
           { signal },
         );
         for (const message of page.data) {
+          history.push({
+            ...boundaryRecord(message, sessionId),
+            ...(message.type === "assistant"
+              ? {
+                  reply: {
+                    failed: message.error !== undefined,
+                    text: message.content
+                      .filter((part) => part.type === "text")
+                      .map((part) => part.text)
+                      .join("\n"),
+                  },
+                }
+              : {}),
+          });
           if (message.id === input.id) {
+            const fold = new InputBoundaryFold();
+            let owner: string | undefined;
+            const replies: { text: string; failed: boolean }[] = [];
+            for (const record of history.reverse()) {
+              owner = fold.next(record) ?? owner;
+              if (record.reply && owner === input.id)
+                replies.push(record.reply);
+            }
             if (replies.some((reply) => reply.failed))
               throw new Error("OpenCode generation failed");
-            return replies
-              .reverse()
-              .map((reply) => reply.text)
-              .join("\n\n");
+            return replies.map((reply) => reply.text).join("\n\n");
           }
-          if (message.type === "user" || message.type === "shell") {
-            // Later native UI turns cannot become this prompt's public reply.
-            replies.length = 0;
-            continue;
-          }
-          if (message.type !== "assistant") continue;
-          replies.push({
-            failed: message.error !== undefined,
-            text: message.content
-              .filter((part) => part.type === "text")
-              .map((part) => part.text)
-              .join("\n"),
-          });
         }
         cursor = page.cursor.next ?? undefined;
+        if (cursor && cursors.has(cursor))
+          throw new Error("OpenCode history cursor repeated");
+        if (cursor) cursors.add(cursor);
       } while (cursor);
       throw new Error("OpenCode input was not found in session history");
     } catch (error) {
@@ -358,6 +377,7 @@ export class OpenCodeBackend implements AgentBackend {
     let found = assistant === undefined;
     let cursor: string | undefined;
     const cursors = new Set<string>();
+    const chain: InputBoundaryRecord[] = [];
     do {
       const page = await this.client.message.list(
         cursor
@@ -366,19 +386,28 @@ export class OpenCodeBackend implements AgentBackend {
         { signal },
       );
       for (const message of page.data) {
-        if (message.type === "user" || message.type === "shell") {
-          if (found) return message.id === input;
+        if (!found) {
           if (message.id === input) return false;
+          if (message.id === assistant && message.type === "assistant")
+            found = true;
+          continue;
         }
-        if (message.id === assistant && message.type === "assistant")
-          found = true;
+        const record = boundaryRecord(message, sessionID);
+        if (chain.length && closesBoundaryContext(record)) {
+          chain.push(record);
+          return resolveBoundaryContext(chain) === input;
+        }
+        if (record.input === undefined) continue;
+        if (!chain.length && record.type !== "synthetic")
+          return record.input === input;
+        chain.push(record);
       }
       cursor = page.cursor.next ?? undefined;
       if (cursor && cursors.has(cursor))
         throw new Error("OpenCode history cursor repeated");
       if (cursor) cursors.add(cursor);
     } while (cursor);
-    return false;
+    return resolveBoundaryContext(chain) === input;
   }
 
   async close() {
@@ -483,15 +512,23 @@ export class OpenCodeBackend implements AgentBackend {
       message.error !== undefined ||
       (idle !== undefined && message.time.created <= idle);
     // Keep compact records; long gaps must not retain tool payloads.
-    const newer: {
-      id: string;
+    const newer: (InputBoundaryRecord & {
       settled: boolean;
       entry?: TranscriptEntry;
-      input?: string;
-    }[] = [];
+    })[] = [];
+    const context: InputBoundaryRecord[] = [];
     const cursors = new Set<string>();
     let cursor: string | undefined;
     let reached = false;
+    let selected = false;
+    let needContext = false;
+    const startsWithCrew = () => {
+      const oldest = newer.findLast(
+        (message) =>
+          message.input !== undefined || message.type === "assistant",
+      );
+      return oldest?.type === "synthetic" && oldest.input !== undefined;
+    };
     // Every page up to the cursor; the caller's signal bounds the work.
     for (;;) {
       signal.throwIfAborted();
@@ -502,22 +539,39 @@ export class OpenCodeBackend implements AgentBackend {
         { signal },
       );
       for (const message of result.data) {
+        const record = boundaryRecord(message, sessionID);
+        if (selected) {
+          if (record.input !== undefined || record.type === "assistant")
+            context.push(record);
+          if (closesBoundaryContext(record)) {
+            needContext = false;
+            break;
+          }
+          continue;
+        }
         if (message.id === after) {
           reached = true;
-          break;
+          selected = true;
+          context.push(record);
+          needContext =
+            record.type === "synthetic" ||
+            (!closesBoundaryContext(record) && startsWithCrew());
+          if (!needContext) break;
+          continue;
         }
         const entry = publicEntry(message);
         newer.push({
-          id: message.id,
+          ...record,
           settled: settled(message),
           ...(entry ? { entry } : {}),
-          ...(message.type === "user" || message.type === "shell"
-            ? { input: message.id }
-            : {}),
         });
       }
+      if (after === undefined && !selected) {
+        selected = true;
+        needContext = startsWithCrew();
+      }
       cursor = result.cursor.next ?? undefined;
-      if (reached || !cursor || after === undefined) break;
+      if ((selected && !needContext) || !cursor) break;
       if (cursors.has(cursor))
         throw new Error("OpenCode history cursor repeated");
       cursors.add(cursor);
@@ -528,10 +582,18 @@ export class OpenCodeBackend implements AgentBackend {
     const open = chronological.findIndex((message) => !message.settled);
     const done = open < 0 ? chronological : chronological.slice(0, open);
     const head = done.at(-1)?.id;
+    const fold = new InputBoundaryFold();
     let input: string | undefined;
+    const reanchor =
+      context[0]?.id === after && context[0]?.type === "synthetic";
+    for (const message of context.reverse()) {
+      const boundary = fold.next(message);
+      // Ordinary synthetic cursors can also sit inside an undelivered crew batch.
+      if (reanchor) input = boundary ?? input;
+    }
     const entries: TranscriptEntry[] = [];
     for (const message of done) {
-      if (message.input !== undefined) input = message.input;
+      input = fold.next(message) ?? input;
       if (message.entry)
         entries.push({
           ...message.entry,

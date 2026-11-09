@@ -26,6 +26,7 @@ import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { MesijClient, type MesijMessage } from "./mesij";
 import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
+import { readInputOrigin } from "./origin";
 
 export { mailInputSchema } from "./messaging";
 
@@ -190,6 +191,7 @@ export type CrewCaller = {
   agent: string;
   signal: AbortSignal;
   id?: string;
+  messageID?: string;
   [piIdentity]?: true;
 };
 export type CrewSession = Pick<
@@ -703,10 +705,14 @@ export class CrewEngine {
     if (busy && delivery === "queue" && !this.member(busy.crewID).backend)
       return "unsupported";
     const framing = `Pogo DM ${route.id} from ${caller.agent}.\n${text}\n\nReply through pogo_mail or pogo_dm with replyTo=${route.id}; a final answer is not a peer reply.${busy ? ` Your final answer remains task ${busy.id}'s result; restate it if you had already finished.` : ""}`;
+    let originInputID: string | null = null;
     if (!peer && route.sourceTaskID) {
       const source = this.state.task(route.sourceTaskID);
       if (source && this.sameCaptain(source.originCaptainID, route.recipient))
         this.state.noticeOnce(route.id, source.id, framing);
+      // A pin can inherit old task authority, never its native input namespace.
+      if (source?.originCaptainID === route.recipient)
+        originInputID = source.originInputID;
     }
     if (busy && !this.state.beginNotify(busy.id)) return "deferred";
     let control: string | undefined;
@@ -747,10 +753,11 @@ export class CrewEngine {
                 ? { sourceTaskID: route.sourceTaskID }
                 : {}),
               originCaptainID: route.captainID,
+              ...(originInputID ? { originInputID } : {}),
               messageID: route.id,
             },
           },
-          delivery,
+          delivery: peer ? delivery : "queue",
           resume: !busy,
         },
         { signal: caller.signal },
@@ -1809,7 +1816,17 @@ export class CrewEngine {
     input: Extract<CrewInput, { op: "dispatch" }>,
     caller: CrewCaller,
   ): Promise<CrewResult> {
+    const messageID = caller.messageID;
+    const originInputID = await this.dispatchOrigin(caller, messageID);
     const peer = await this.ensure(input.crew, caller.signal);
+    const enqueue = () =>
+      this.state.enqueue(
+        peer,
+        caller.sessionID,
+        input.text,
+        undefined,
+        originInputID,
+      );
     let active = this.state.activeTask(input.crew);
     const recovered = active
       ? await this.reconcileResult(active, caller)
@@ -1836,7 +1853,7 @@ export class CrewEngine {
         return input.queue
           ? {
               status: "queued",
-              task: this.state.enqueue(peer, caller.sessionID, input.text),
+              task: enqueue(),
             }
           : busy;
       }
@@ -1844,7 +1861,7 @@ export class CrewEngine {
         return input.queue
           ? {
               status: "queued",
-              task: this.state.enqueue(peer, caller.sessionID, input.text),
+              task: enqueue(),
             }
           : busy;
     }
@@ -1853,20 +1870,53 @@ export class CrewEngine {
       return input.queue
         ? {
             status: "queued",
-            task: this.state.enqueue(peer, caller.sessionID, input.text),
+            task: enqueue(),
           }
         : busy;
     }
     caller.signal.throwIfAborted();
-    const task = this.state.reserveTask(peer, caller.sessionID, input.text);
+    const task = this.state.reserveTask(
+      peer,
+      caller.sessionID,
+      input.text,
+      originInputID,
+    );
     if (!task)
       return input.queue
         ? {
             status: "queued",
-            task: this.state.enqueue(peer, caller.sessionID, input.text),
+            task: enqueue(),
           }
         : { status: "busy" };
     return this.admit(task, input.text, caller);
+  }
+
+  private async dispatchOrigin(
+    caller: CrewCaller,
+    messageID: string | undefined,
+  ): Promise<string | null> {
+    if (!messageID || !this.inspectionConnector) return null;
+    const stop = new AbortController();
+    const signal = AbortSignal.any([caller.signal, stop.signal]);
+    try {
+      const origin = async () =>
+        readInputOrigin(
+          await this.inspectionAPI({ ...caller, signal }),
+          caller.sessionID,
+          messageID,
+          signal,
+        );
+      return await Promise.race([
+        origin(),
+        delay(5000, null, { signal, ref: false }),
+      ]);
+    } catch {
+      caller.signal.throwIfAborted();
+      // Missing or unreadable ancestry suppresses Slack routing, not the task.
+      return null;
+    } finally {
+      stop.abort();
+    }
   }
 
   private async idle(peer: Peer, signal: AbortSignal): Promise<boolean> {

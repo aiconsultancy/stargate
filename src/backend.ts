@@ -15,7 +15,7 @@ export type TranscriptEntry = {
   id: string;
   text: string;
   created: number;
-  /** Closest preceding user/shell input in this read window, if present. */
+  /** Proven origin; unknown or mixed adjacent crew batches clear ownership. */
   input?: string;
 };
 
@@ -28,7 +28,7 @@ export type TranscriptEntry = {
 export type Transcript = {
   cursor: string;
   entries: TranscriptEntry[];
-  /** Last user/shell input in the settled window; absent means inherit owner. */
+  /** Last proven/unmapped boundary; absent inherits owner. Crew cursors re-anchor. */
   input?: string;
   pending?: true;
 };
