@@ -85,10 +85,18 @@ Coordinate delegated work with pogo_crew:
   an automatic semantic matcher. For urgent work choose a suitable idle worker
   instead of always waiting for the most experienced busy worker. If all suitable
   members are busy, dispatch with queue: true to opt into the bounded durable
-  FIFO queue for the selected member (at most 100 queued tasks). Without
+  queue for the selected member (at most 100 queued tasks). Without
   queue: true, dispatch returns busy; do not claim that it queued. Record the
-  returned task ID and queued status. Poll status or wait on the FIFO head to
-  advance queued work; there is no background queue scheduler.
+  returned task ID and queued status. FIFO is the default instruction, not a
+  runtime lock. Prefer the oldest queued task unless an operator request or
+  your priority decision calls for another order. Explain the override briefly.
+  Status or wait on a selected queued task advances that task when the member
+  is idle; new dispatch and direct messages can also pass queued work.
+  Read-only checks and roll calls must not wait behind unrelated assignments:
+  prefer inspect for a no-wake snapshot, or explicit pogo_dm for a live reply.
+  Never cancel, replay or advance an unrelated task just to get a status reply.
+  Active or uncertain work, ownership and controller guards still apply.
+  There is no background queue scheduler.
   Do not create replacement sessions to bypass a busy worker. There is one
   durable session per configured member,
   shared across this team's Slack threads, not a new crew per request.

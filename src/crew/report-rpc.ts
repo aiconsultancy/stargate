@@ -2,6 +2,7 @@ import { Rpc } from "@opencode/plugin/rpc";
 import { z } from "zod";
 import { activitySnapshotSchema } from "../activity";
 import { crewStatusInputSchema, crewStatusSchema } from "../crew-status";
+import { quotaInputSchema, quotaSnapshotSchema } from "../quota";
 
 const owner = z.strictObject({
   sessionID: z.string().min(1).max(100),
@@ -11,6 +12,7 @@ export const CrewReporting = Rpc.define({
   id: "pogo.crew.reporting",
   events: {},
   methods: {
+    quota: { input: quotaInputSchema, output: quotaSnapshotSchema },
     status: { input: crewStatusInputSchema, output: crewStatusSchema },
     start: {
       input: z.strictObject({

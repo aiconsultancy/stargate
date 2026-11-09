@@ -6,7 +6,8 @@ require a human to supply message IDs, hashes or a copied result.
 
 The captain's `status`, `wait` and next `dispatch` check recover results from
 idle workers. A check of a queued task can also recover the previous task
-before promoting the FIFO head. This does not add a background queue scheduler
+before promoting the captain-selected task. FIFO is default guidance that the
+captain can override; other queued tasks stay unchanged. This adds no background queue scheduler
 or send an unsolicited Slack reply.
 
 ## Result selection

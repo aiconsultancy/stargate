@@ -118,6 +118,11 @@ status view calls no model and starts no work. It includes Twiki's maintenance
 and reporter tasks even when automatic crew reports are off. Stored running or
 ready state does not prove execution is live. See [crew activity](docs/crew-activity.md#query-a-member).
 
+Use `/pogo usage` for a private Claude/Codex subscription quota snapshot, with
+used/remaining percentages, reset times and freshness. Captain and crew can
+read the same data through `pogo_quota`. This is not a token counter and does
+not change models. Requires opt-in proxy configuration; see [usage](docs/usage.md).
+
 Select **Stop** on a live reply or waiting message to request cancellation.
 Only the original requester can stop that request. Existing tool effects are
 not rolled back. See [cancellation](docs/cancellation.md) for setup and limits.

@@ -453,9 +453,12 @@ The captain uses role and prior task/history evidence for assignment affinity;
 there is no automatic semantic matcher. For urgent work prefer a suitable idle
 member over waiting for an experienced busy member. If all suitable members
 are busy, `dispatch` with `queue: true` explicitly opts into a bounded durable
-FIFO queue per member, up to 100 queued tasks. Without that flag, busy dispatch
-returns `busy` and is not queued. A captain must poll `status` or `wait` on the
-FIFO head to advance queued work after the worker becomes idle. There is no
+queue per member, up to 100 queued tasks. Without that flag, busy dispatch
+returns `busy` and is not queued. FIFO is the default instruction, not a runtime
+lock. The captain can select another queued task with `status` or `wait`, or
+dispatch priority work when the worker is idle. Unselected tasks stay queued.
+Read-only checks and direct-message roll calls can pass queued assignments.
+Active/uncertain work, task ownership and controller guards still apply. There is no
 background scheduler: a queue left without polling stays pending.
 
 ### Persistent sessions and tasks

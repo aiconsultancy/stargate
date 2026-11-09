@@ -24,6 +24,7 @@ import type {
 } from "@opencode/client";
 import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
+import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
 import { MesijClient, type MesijMessage } from "./mesij";
 import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
 import { readInputOrigin } from "./origin";
@@ -91,6 +92,7 @@ export const crewOptionsSchema = z
     projectDirectory: directory,
     worktrees: z.record(agentIDSchema, directory),
     team: teamSchema.optional(),
+    quota: quotaConfigSchema.optional(),
     allowCrewExpansion: z.boolean().optional(),
     mesijCommand: directory,
     /** The one native captain root; earlier roots stay history. */
@@ -318,6 +320,7 @@ export type CrewWaitOptions = {
 };
 
 export class CrewEngine {
+  readonly quotas: QuotaReader;
   private readonly pi: PiCrewWorkers;
   readonly reporting: CrewReporter;
   private closing?: Promise<void>;
@@ -335,6 +338,7 @@ export class CrewEngine {
     private readonly connectResults?: ResultConnector,
     waitOptions: CrewWaitOptions = {},
   ) {
+    this.quotas = new QuotaReader(options.quota);
     this.waitNow = waitOptions.now ?? (() => performance.now());
     this.waitPoll =
       waitOptions.wait ?? ((ms, signal) => delay(ms, undefined, { signal }));
@@ -371,6 +375,7 @@ export class CrewEngine {
             if (name === "pogo_journal") return this.journal(input, caller);
             if (name === "pogo_mail") return this.mail(input, caller);
             if (name === "pogo_dm") return this.dm(input, caller);
+            if (name === "pogo_quota") return this.quota(input, caller);
             return this.run(input, caller);
           },
         };
@@ -409,6 +414,15 @@ export class CrewEngine {
       total: members.length,
       truncated: members.length > 20,
     };
+  }
+
+  async quota(input: unknown, caller: CrewCaller) {
+    await this.authorize(caller);
+    if (!quotaInputSchema.safeParse(input).success)
+      throw new CrewError(
+        "Quota accepts no URL, credentials or other arguments.",
+      );
+    return this.quotas.read(caller.signal);
   }
 
   static async open(
@@ -706,8 +720,6 @@ export class CrewEngine {
     if (
       peer &&
       (this.state.controlled(peer.crewID) ||
-        // Pending assignments must not suppress steer for the current task.
-        (this.state.hasQueued(peer.crewID) && !busy) ||
         (task &&
           ((task.status !== "completed" &&
             !this.sameCaptain(task.originCaptainID, route.captainID)) ||
@@ -2094,16 +2106,11 @@ export class CrewEngine {
     return "Wait cancelled; task outcome uncertain. Inspect worker before further work.";
   }
 
-  /** Report tasks use the same slot/FIFO, but never join activity collection. */
+  /** Tools-off reports may pass queued work, never an occupied/uncertain slot. */
   async reporterFree(id: string, signal: AbortSignal): Promise<boolean> {
     const member = this.options.team.crew.find((member) => member.id === id);
     const directory = this.options.worktrees[id];
-    if (
-      !member?.backend ||
-      !directory ||
-      this.state.controlled(id) ||
-      this.state.hasQueued(id)
-    )
+    if (!member?.backend || !directory || this.state.controlled(id))
       return false;
     const task = this.state.activeTask(id);
     if (task && (task.status !== "completed" || task.notifying)) return false;

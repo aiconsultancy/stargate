@@ -9,6 +9,7 @@ import {
 import { Effect } from "effect";
 import { resourceScope } from "../effect";
 import { MaintenanceRPC, maintenancePlanSchema } from "../maintenance";
+import { quotaInputSchema } from "../quota";
 import { connectHistoryAPI, historyVisible } from "./api";
 import { compactOnServer } from "./compaction";
 import { CrewEngine, crewInputSchema, mailInputSchema } from "./engine";
@@ -145,6 +146,8 @@ const plugin = Plugin.define({
           report(context.signal, async () => maintenance.close(input)),
       });
       await register(CrewReporting, {
+        quota: (_input, context) =>
+          report(context.signal, () => engine.quotas.read(context.signal)),
         status: (input, context) =>
           report(context.signal, async () => engine.status(input)),
         start: (input, context) =>
@@ -166,6 +169,21 @@ const plugin = Plugin.define({
       });
       await ctx.tool.transform((editor) => {
         editor.add({
+          name: "pogo_quota",
+          description:
+            "Read Claude/Codex subscription quota used/remaining percentages, scopes, reset times and observation timestamps. Not token totals. Cached up to 60 seconds; missing or inactive limits and reset-passed observations are not evidence of available quota or exact model entitlement. No model, session or allowance changes. Accepts no arguments; credentials and raw account metadata stay server-side.",
+          input: quotaInputSchema,
+          options: { codemode: false, permission: "pogo_crew" },
+          execute: (input, context) =>
+            guard(
+              context,
+              "pogo_crew",
+              "quota",
+              "Quota unavailable; private details withheld.",
+              () => engine.quota(input, context),
+            ),
+        });
+        editor.add({
           name: "pogo_journal",
           description:
             "Append concise milestones, checks, blockers, outcomes or native-workaround notes; no tool transcripts or secrets. Read scoped journal pages by ID with nextAfter. Identity, time and task come from the host.",
@@ -183,7 +201,7 @@ const plugin = Plugin.define({
         editor.add({
           name: "pogo_dm",
           description:
-            "Store peer mail, then request native steer or queue delivery. Captain alias resolves the originating captain, all broadcasts exclude self. Reply with replyTo; final answers are task results, not peer replies. Receipts do not prove reading or execution.",
+            "Store peer mail, then request native steer or queue delivery. Queued assignments do not block an idle worker's DM or roll-call reply; active/uncertain work, ownership and controller checks remain. FIFO is default scheduling guidance, not a runtime lock. Captain alias resolves the originating captain, all broadcasts exclude self. Reply with replyTo; final answers are task results, not peer replies. Receipts do not prove reading or execution.",
           input: dmInputSchema,
           options: { codemode: false, permission: "pogo_mail" },
           execute: (input, context) =>
@@ -227,7 +245,7 @@ const plugin = Plugin.define({
         });
         editor.add({
           name: "pogo_crew",
-          description: `Read roster or manage ${engine.options.team.captain.id}'s configured crew: ${engine.options.team.crew.map(({ id }) => id).join(", ")}. Captain may ensure, dispatch, wait, status and compact; assigned workers may read their own task status. Wait has one 60-second observation window including queued promotion. If it returns running or queued, give a progress reply and end the turn; collect the same task later. Do not repeat wait in the same turn or resubmit. Window expiry stops observation, not worker execution; Stop and caller cancellation still cancel work. Successful final answers auto-complete tasks when status, wait or dispatch checks the slot; explicit worker complete is supported. Before complete or final answer, workers should send one concise pogo_dm to captain with taskID and verified outcome; a new send after completion cannot select that task's captain route. Recovery never replays assignments. Uncertain is an exception to resolve, not a resting state. Order: (1) inspect: team-wide ownership, FIFO, controlID, live state; execution unknown keeps local fields; optional requestStatus sends Mesij only, never waking workers or changing ownership. (2) reconcile: only with a retained final message/hash and quiescent native evidence. (3) workspace: read-only status/diff and fingerprint; stash keeps staged, unstaged and untracked changes (ignored files untouched) and returns its OID with a restore command; reset needs acknowledgeDiscard, checkpoints tracked changes first and leaves untracked files. Both need the inspected head/fingerprint/taskID and refuse untracked or ignored entries occupying paths HEAD would restore. (4) abandon: marks a blocked task abandoned and frees its slot with exact inspected identity, reason, key and acknowledgeUnconfirmedStop; withdraws the task's own queued input, interrupts only its own placed turn, records a confirmed/unconfirmed stop and keeps result/history; never completes, prompts or promotes queued work. (5) dispatch again; it still waits for native idle. Idle is not success. Workers cannot use captain controls. Pi workers auto-complete and recover committed answers; coordination tools work on both harnesses when enabled; compaction and model controls are OpenCode-only. Busy dispatch queues only with queue=true. Only explicit pogo_dm wakes captains.`,
+          description: `Read roster or manage ${engine.options.team.captain.id}'s configured crew: ${engine.options.team.crew.map(({ id }) => id).join(", ")}. FIFO is default guidance that the captain may override: status/wait on a selected queued task or new dispatch can pass older queued work when idle. Explain priority changes. Read-only checks and roll calls do not wait behind queued assignments: use inspect for a no-wake snapshot or explicit pogo_dm for a live reply. Never advance unrelated work for a status reply. Active/uncertain work, ownership and controller guards remain hard limits. Captain may ensure, dispatch, wait, status and compact; assigned workers may read their own task status. Wait has one 60-second observation window including queued promotion. If it returns running or queued, give a progress reply and end the turn; collect the same task later. Do not repeat wait in the same turn or resubmit. Window expiry stops observation, not worker execution; Stop and caller cancellation still cancel work. Successful final answers auto-complete tasks when status, wait or dispatch checks the slot; explicit worker complete is supported. Before complete or final answer, workers should send one concise pogo_dm to captain with taskID and verified outcome; a new send after completion cannot select that task's captain route. Recovery never replays assignments. Uncertain is an exception to resolve, not a resting state. Order: (1) inspect: team-wide ownership, queue, controlID, live state; execution unknown keeps local fields; optional requestStatus sends Mesij only, never waking workers or changing ownership. (2) reconcile: only with a retained final message/hash and quiescent native evidence. (3) workspace: read-only status/diff and fingerprint; stash keeps staged, unstaged and untracked changes (ignored files untouched) and returns its OID with a restore command; reset needs acknowledgeDiscard, checkpoints tracked changes first and leaves untracked files. Both need the inspected head/fingerprint/taskID and refuse untracked or ignored entries occupying paths HEAD would restore. (4) abandon: marks a blocked task abandoned and frees its slot with exact inspected identity, reason, key and acknowledgeUnconfirmedStop; withdraws the task's own queued input, interrupts only its own placed turn, records a confirmed/unconfirmed stop and keeps result/history; never completes, prompts or promotes queued work. (5) dispatch again; it still waits for native idle. Idle is not success. Workers cannot use captain controls. Pi workers auto-complete and recover committed answers; coordination tools work on both harnesses when enabled; compaction and model controls are OpenCode-only. Busy dispatch queues only with queue=true. Only explicit pogo_dm wakes captains.`,
           input: crewInputSchema,
           options: { codemode: false, permission: "pogo_crew" },
           execute: (input, context) =>

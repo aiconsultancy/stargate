@@ -165,9 +165,17 @@ minutes without acknowledgement. Inspect once and send at most one supported
 status request, then report the blocker and next action. This working default
 does not create a timer service or promise a two-minute response. Deferred,
 unsupported or uncertain delivery never justifies replaying an assignment.
-An idle worker with pending FIFO assignments still defers DM wakeups: inspect
-the head and advance it only within its assigned scope. Do not cancel or promote
-unrelated work to obtain a reply. Instructions cannot interrupt a hung provider
+FIFO is the default scheduling instruction, not a runtime lock. The captain can
+override queued order for priority work. `status` or `wait` selects a queued
+task for admission when the worker is idle; new dispatch can also pass queued
+work. Explain priority decisions and preserve unselected assignments.
+Read-only checks and roll calls do not wait behind queued work: use `inspect`
+for a no-wake snapshot, or `pogo_dm` for an actual member reply. An idle member
+can receive that DM without promoting or cancelling an older assignment.
+Tools-off summaries can also pass queued maintenance when their reporter is idle.
+Active or uncertain execution, ownership, controllers and the queue-size bound
+remain hard guards; an override never preempts a running task. Do not cancel or
+promote unrelated work to obtain a reply. Instructions cannot interrupt a hung provider
 or a long synchronous tool.
 
 Improve this agreement from recorded task outcomes through the existing

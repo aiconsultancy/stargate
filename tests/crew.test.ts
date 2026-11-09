@@ -1323,11 +1323,19 @@ test("busy crew receives correlated captain steer with queued work without promo
     const deliveries = f.synthetics.length;
     expect(
       await f.engine.dm(
-        { op: "send", to: "mario", text: "Do not bypass idle FIFO" },
+        {
+          op: "send",
+          to: "mario",
+          text: "Read-only roll call; leave queued work untouched",
+        },
         f.captain(),
       ),
-    ).toMatchObject({ stored: true, notification: "deferred" });
-    expect(f.synthetics).toHaveLength(deliveries);
+    ).toMatchObject({ stored: true, notification: "accepted" });
+    expect(f.synthetics).toHaveLength(deliveries + 1);
+    expect(f.synthetics.at(-1)).toMatchObject({
+      resume: true,
+      delivery: "steer",
+    });
     expect(f.engine.state.task(task.id)?.result).toBe("Verified result");
     expect(f.engine.state.task(queued.id)).toEqual(beforeQueued);
   } finally {
@@ -2032,7 +2040,7 @@ test("custom roster authorizes real sessions and applies permission profiles", a
   }
 });
 
-test("durable queue is opt-in, FIFO and promotes only after completion plus idle", async () => {
+test("captain selects queued order after completion plus idle, preserving unselected work", async () => {
   const f = await fixture(customTeam);
   const reopened = await CrewEngine.open(
     f.options,
@@ -2073,21 +2081,21 @@ test("durable queue is opt-in, FIFO and promotes only after completion plus idle
     expect(
       (await reopened.run({ op: "status", taskID: third?.id }, f.captain()))
         .status,
-    ).toBe("queued");
+    ).toBe("running");
     expect(
       (await reopened.run({ op: "status", taskID: second?.id }, f.captain()))
         .status,
-    ).toBe("running");
+    ).toBe("queued");
     expect(
       f.calls.filter((call) => call.method === "prompt").at(-1)?.text,
-    ).toContain("Two");
+    ).toContain("Three");
     await f.engine.run(
-      { op: "complete", taskID: second?.id, result: "Done too" },
-      f.worker(second?.workerSessionID ?? ""),
+      { op: "complete", taskID: third?.id, result: "Done too" },
+      f.worker(third?.workerSessionID ?? ""),
     );
-    f.busy.delete(second?.workerSessionID ?? "");
+    f.busy.delete(third?.workerSessionID ?? "");
     expect(
-      (await reopened.run({ op: "status", taskID: third?.id }, f.captain()))
+      (await reopened.run({ op: "status", taskID: second?.id }, f.captain()))
         .status,
     ).toBe("running");
   } finally {
@@ -2602,7 +2610,7 @@ test("captain inspection reads cross-origin ownership without promoting queued w
   }
 });
 
-test("cross-origin captain reconciles exact evidence, retains audit and advances only FIFO head", async () => {
+test("cross-origin captain reconciles exact evidence, retains audit and selects own queued work", async () => {
   const f = await fixture(customTeam);
   try {
     const original = await assignedTask(f);
@@ -2677,7 +2685,7 @@ test("cross-origin captain reconciles exact evidence, retains audit and advances
             f.captain("ses_captain_b"),
           )
         ).status,
-      ).toBe("queued");
+      ).toBe("running");
       expect(
         (
           await reopened.run(
@@ -2685,11 +2693,11 @@ test("cross-origin captain reconciles exact evidence, retains audit and advances
             f.captain("ses_captain_b"),
           )
         ).status,
-      ).toBe("running");
+      ).toBe("queued");
       expect(await f.engine.run(input, f.captain("ses_captain_b"))).toEqual(
         reconciled,
       );
-      expect(f.engine.state.activeTask("builder")?.id).toBe(next.id);
+      expect(f.engine.state.activeTask("builder")?.id).toBe(later.id);
       expect(f.engine.state.task(original.id)?.originCaptainID).toBe(
         original.originCaptainID,
       );

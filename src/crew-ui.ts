@@ -9,6 +9,7 @@ import {
   crewStatusSchema,
 } from "./crew-status";
 import type { CronView, SlackAck } from "./cron-ui";
+import { formatQuota, type QuotaSnapshot, quotaSnapshotSchema } from "./quota";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
 
 export interface CrewUIApi {
@@ -22,7 +23,7 @@ const commandSchema = z.object({
     .string()
     .trim()
     .max(100)
-    .regex(/^crew(?:\s+[a-z0-9][a-z0-9_-]{0,63})?$/),
+    .regex(/^(?:crew(?:\s+[a-z0-9][a-z0-9_-]{0,63})?|usage)$/),
   api_app_id: id,
   team_id: id,
   user_id: z.string().regex(/^[UW][A-Z0-9]+$/),
@@ -41,10 +42,10 @@ const section = (text: string) => ({
   type: "section" as const,
   text: plain(redactActivity(text, 3000)),
 });
-function notice(text: string): CronView {
+function notice(text: string, title = "Crew activity"): CronView {
   return {
     type: "modal",
-    title: plain("Crew activity"),
+    title: plain(title),
     close: plain("Close"),
     clear_on_close: true,
     blocks: [section(text)],
@@ -137,11 +138,35 @@ export function crewStatusView(
   return { ...notice("Crew activity"), blocks };
 }
 
+export function quotaStatusView(
+  snapshot: QuotaSnapshot,
+  now = Date.now(),
+): CronView {
+  // At most 10 accounts x 16 windows. Group each account, not one block per row.
+  const lines = formatQuota(snapshot, now);
+  const blocks = [section(lines.slice(0, 2).join("\n"))];
+  let text = "";
+  for (const line of lines.slice(2)) {
+    if (text.length + line.length + 1 > 2900) {
+      blocks.push(section(text));
+      text = "";
+    }
+    text += `${text ? "\n" : ""}${line}`;
+  }
+  if (text) blocks.push(section(text));
+  blocks.push(
+    section(
+      "Close and run /pogo usage again to refresh. No model is called; no account data is posted to the channel.",
+    ),
+  );
+  return { ...notice("Usage", "Provider usage"), blocks };
+}
+
 export class CrewUI {
   constructor(
     private readonly config: BotConfig,
     private readonly identity: Identity,
-    private readonly backend: Pick<AgentBackend, "crewStatus">,
+    private readonly backend: Pick<AgentBackend, "crewStatus" | "quota">,
     private readonly api: CrewUIApi,
     private readonly log: Logger,
     private readonly signal: AbortSignal,
@@ -163,14 +188,15 @@ export class CrewUI {
 
   async command(body: unknown, ack: SlackAck) {
     const parsed = commandSchema.safeParse(body);
+    const usage = parsed.success && parsed.data.text === "usage";
     if (
       !parsed.success ||
       !this.allowed(parsed.data) ||
-      !this.backend.crewStatus
+      !(usage ? this.backend.quota : this.backend.crewStatus)
     ) {
       await ack({
         response_type: "ephemeral",
-        text: "Crew status unavailable. Use /pogo crew or /pogo crew <member-id> in an allowed channel with a configured captain backend.",
+        text: "Status unavailable. Use /pogo crew [member] or /pogo usage in an allowed channel with a configured captain backend.",
       });
       return;
     }
@@ -181,12 +207,27 @@ export class CrewUI {
     try {
       viewID = await this.api.open(
         data.trigger_id,
-        notice("Reading crew status… No model is called."),
+        notice(
+          usage
+            ? "Reading provider usage… No model is called."
+            : "Reading crew status… No model is called.",
+          usage ? "Provider usage" : "Crew activity",
+        ),
       );
       if (!this.allowed(data)) return;
       const member = data.text.split(/\s+/)[1];
       const signal = AbortSignal.any([this.signal, this.deadline()]);
       signal.throwIfAborted();
+      if (usage && this.backend.quota) {
+        const snapshot = quotaSnapshotSchema.parse(
+          await this.backend.quota(signal),
+        );
+        signal.throwIfAborted();
+        if (this.allowed(data))
+          await this.api.update(viewID, quotaStatusView(snapshot));
+        return;
+      }
+      if (!this.backend.crewStatus) return;
       const status = crewStatusSchema.parse(
         await this.backend.crewStatus(member ? { member } : {}, signal),
       );
@@ -204,13 +245,16 @@ export class CrewUI {
         : status;
       await this.api.update(viewID, crewStatusView(safe, !!member));
     } catch {
-      this.log.error("Could not read or display crew status");
+      this.log.error("Could not read or display Pogo status");
       if (!viewID || !this.allowed(data)) return;
       try {
         await this.api.update(
           viewID,
           notice(
-            "Crew status unavailable or timed out. Check the configured captain location and crew plugin. No model was called or work retried.",
+            usage
+              ? "Quota unavailable or timed out. Check the captain location, crew plugin and private quota configuration. No model was called."
+              : "Crew status unavailable or timed out. Check the configured captain location and crew plugin. No model was called or work retried.",
+            usage ? "Provider usage" : "Crew activity",
           ),
         );
       } catch {

@@ -29,8 +29,8 @@ export function buildManifest(name = "Pogo") {
       slash_commands: [
         {
           command: "/pogo",
-          description: "View crew activity or manage operator controls",
-          usage_hint: "crew [member] | pair",
+          description: "View crew activity, usage or operator controls",
+          usage_hint: "crew [member] | usage | pair",
           should_escape: true,
         },
         {

@@ -68,7 +68,7 @@ test("legacy state upgrades identity without replacing peers, results or cursors
   }
 });
 
-test("queue ceiling, FIFO and durable controls constrain task reservations", async () => {
+test("queue ceiling and durable controls remain hard guards; queued order is captain policy", async () => {
   const directory = await mkdtemp("/tmp/opencode/pogo-crew-state-");
   const state = await CrewState.open(directory, "custom", "identity-v2");
   const second = await CrewState.open(directory, "custom", "identity-v2");
@@ -85,7 +85,12 @@ test("queue ceiling, FIFO and durable controls constrain task reservations", asy
     for (let index = 1; index < pendingTaskLimit; index++)
       state.enqueue(peer, "captain", String(index));
     expect(() => second.enqueue(peer, "captain", "overflow")).toThrow("100");
-    expect(second.reserveTask(peer, "captain")).toBeNull();
+    const immediate = second.reserveTask(peer, "captain", "Priority read");
+    expect(immediate).not.toBeNull();
+    if (!immediate) throw new Error("Missing priority task");
+    expect(state.task(queued.id)?.status).toBe("queued");
+    state.complete(immediate.id, peer.sessionID, "Read complete");
+    state.release(immediate.id);
     const promoted = second.promote(queued.id, null);
     expect(promoted?.text).toBe("first");
     expect(promoted?.task.inputID).toBe(queued.inputID);

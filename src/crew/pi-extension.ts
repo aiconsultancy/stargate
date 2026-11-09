@@ -1,5 +1,6 @@
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { z } from "zod";
+import { quotaInputSchema } from "../quota";
 import { crewInputSchema } from "./engine";
 import { journalInputSchema } from "./journal";
 import { dmInputSchema, mailInputSchema } from "./messaging";
@@ -33,6 +34,12 @@ export function piCrewExtension(
 ) {
   const tools = [
     {
+      name: "pogo_quota",
+      schema: quotaInputSchema,
+      description:
+        "Read Claude/Codex subscription quota percentages, scopes, resets and timestamps, not token totals. Cached up to 60s. Missing/inactive limits and reset-passed observations do not prove model availability. No changes; no arguments or credentials.",
+    },
+    {
       name: "pogo_crew",
       schema: crewInputSchema,
       description:
@@ -54,7 +61,7 @@ export function piCrewExtension(
       name: "pogo_dm",
       schema: dmInputSchema,
       description:
-        "Store peer mail and request steer or queue notification. Native acceptance does not mean read or answered. Final answers remain task results; use replyTo for peer replies.",
+        "Store peer mail and request steer or queue notification. Queued assignments do not block an idle member's roll-call reply. FIFO is default guidance, not a lock; active/uncertain work and ownership/controller guards remain. Native acceptance does not mean read or answered. Final answers remain task results; use replyTo for peer replies.",
     },
     {
       name: "pi_history",

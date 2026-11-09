@@ -32,6 +32,7 @@ import {
   type MaintenanceWatch,
   maintenanceNoticeSchema,
 } from "../maintenance";
+import { quotaSnapshotSchema } from "../quota";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
 const pinnedSessionSchema = z.object({
@@ -119,6 +120,27 @@ export class OpenCodeBackend implements AgentBackend {
     } catch {
       throw new Error(
         "Crew status unavailable; check the captain location and crew plugin.",
+      );
+    }
+  }
+
+  async quota(signal: AbortSignal) {
+    try {
+      signal.throwIfAborted();
+      const result = quotaSnapshotSchema.parse(
+        await this.client.rpc(CrewReporting).quota(
+          {},
+          {
+            location: { directory: this.config.directory },
+            signal,
+          },
+        ),
+      );
+      signal.throwIfAborted();
+      return result;
+    } catch {
+      throw new Error(
+        "Quota unavailable; check the captain location and quota configuration.",
       );
     }
   }

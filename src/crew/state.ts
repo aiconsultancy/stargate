@@ -86,7 +86,7 @@ type AbandonExpected = Pick<
 
 export class CrewError extends Error {}
 
-/** greybeard: bounded FIFO, polled by its captain; no background scheduler. */
+/** greybeard: bounded captain-selected queue; no background scheduler. */
 export const pendingTaskLimit = 100;
 type QueuedTask = CrewTask & { text: string };
 const abandonmentColumns = `taskID,crewID,workerSessionID,originCaptainID,inputID,
@@ -469,11 +469,7 @@ export class CrewState {
   ): CrewTask | null {
     return this.db
       .transaction(() => {
-        if (
-          this.activeTask(peer.crewID) ||
-          this.controlled(peer.crewID) ||
-          this.nextQueued(peer.crewID)
-        )
+        if (this.activeTask(peer.crewID) || this.controlled(peer.crewID))
           return null;
         const id = `task_${randomUUID()}`;
         this.db
@@ -856,18 +852,6 @@ export class CrewState {
       .run(receiptID, id);
   }
 
-  private nextQueued(crewID: string): QueuedTask | null {
-    return this.db
-      .query<QueuedTask, [string]>(
-        "SELECT * FROM pending_tasks WHERE crewID=? AND status='queued' ORDER BY sequence LIMIT 1",
-      )
-      .get(crewID);
-  }
-
-  hasQueued(crewID: string): boolean {
-    return !!this.nextQueued(crewID);
-  }
-
   enqueue(
     peer: Peer,
     captainID: string,
@@ -896,7 +880,6 @@ export class CrewState {
           const active = this.activeTask(peer.crewID);
           if (
             this.controlled(peer.crewID) ||
-            this.nextQueued(peer.crewID) ||
             (active && (active.status !== "completed" || active.notifying))
           )
             throw new CrewError(
@@ -944,30 +927,33 @@ export class CrewState {
   ): { task: CrewTask; text: string } | null {
     return this.db
       .transaction(() => {
-        const queued = this.task(id);
+        const queued = this.db
+          .query<QueuedTask, [string]>(
+            "SELECT * FROM pending_tasks WHERE id=? AND status='queued'",
+          )
+          .get(id);
         if (queued?.status !== "queued" || this.controlled(queued.crewID))
           return null;
-        const head = this.nextQueued(queued.crewID);
         const active = this.activeTask(queued.crewID);
-        if (head?.id !== id || (active?.id ?? null) !== previousID) return null;
+        if ((active?.id ?? null) !== previousID) return null;
         if (active && !this.release(active.id)) return null;
         this.db
           .query(
             `INSERT INTO tasks (id,crewID,workerSessionID,originCaptainID,originInputID,inputID,status) VALUES (?,?,?,?,?,?,'dispatching')`,
           )
           .run(
-            head.id,
-            head.crewID,
-            head.workerSessionID,
-            head.originCaptainID,
-            head.originInputID,
-            head.inputID,
+            queued.id,
+            queued.crewID,
+            queued.workerSessionID,
+            queued.originCaptainID,
+            queued.originInputID,
+            queued.inputID,
           );
         this.db.query("DELETE FROM pending_tasks WHERE id=?").run(id);
         const task = this.task(id);
         if (!task) throw new CrewError("Queue promotion failed.");
         this.activity.phase(task, "dispatching");
-        return { task, text: head.text };
+        return { task, text: queued.text };
       })
       .immediate();
   }

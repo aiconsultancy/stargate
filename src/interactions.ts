@@ -40,7 +40,7 @@ export function controlInteractions(
       else if (
         parsed.success &&
         parsed.data.command === "/pogo" &&
-        /^crew(?:\s|$)/.test(parsed.data.text ?? "") &&
+        /^(?:crew|usage)(?:\s|$)/.test(parsed.data.text ?? "") &&
         crew
       )
         await crew.command(body, ack);
@@ -49,7 +49,7 @@ export function controlInteractions(
       else
         await ack({
           response_type: "ephemeral",
-          text: "Unknown Pogo command. Use /pogo pair, /pogo crew [member], or /cron.",
+          text: "Unknown Pogo command. Use /pogo pair, /pogo crew [member], /pogo usage, or /cron.",
         });
     },
     async interactive(body, ack) {

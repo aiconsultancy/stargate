@@ -135,6 +135,13 @@ The Slack modal ACKs and opens before the read, and applies the bot's normal
 app, workspace, user and channel access rules. Stored task state is not a
 liveness guarantee. Backends without this capability remain compatible.
 
+`quota` is an optional read-only adapter capability for `/pogo usage`. It uses
+the same location-authorized RPC and private modal as crew status. The crew
+plugin's opt-in `QuotaReader` supplies sanitized Claude/Codex subscription
+limits to this RPC and the authorized `pogo_quota` tool on both harnesses.
+Proxy management credentials stay on the host. No model, session or queue
+operation is required; see [provider usage](usage.md).
+
 Custom modules export:
 
 ```ts

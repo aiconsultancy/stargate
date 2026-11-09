@@ -169,6 +169,7 @@ test("a pinned team keeps one captain: earlier roots are history, not authority 
     for (const attempt of [
       () => f.engine.run({ op: "roster" }, f.captain(legacy)),
       () => f.engine.authorize(f.captain(legacy)),
+      () => f.engine.quota({}, f.captain(legacy)),
       () => f.engine.journal({ op: "read" }, f.captain(legacy)),
       () =>
         runRecoveryOperator(
@@ -234,6 +235,36 @@ test("a pinned team keeps one captain: earlier roots are history, not authority 
       task: { originCaptainID: legacy, result: "Legacy result" },
     });
     expect(f.engine.state.task(task.id)?.originCaptainID).toBe(legacy);
+  } finally {
+    await f.close();
+  }
+});
+
+test("quota tool authorizes captain/assigned worker, accepts no controls and starts no work", async () => {
+  const f = await fixture();
+  try {
+    await f.open(canonical);
+    const task = f.engine.state.reserveTask(f.peer, canonical, "Existing work");
+    if (!task) throw new Error("Missing task");
+    f.engine.state.running(task.id);
+    expect(await f.engine.quota({}, f.captain(canonical))).toMatchObject({
+      status: "not-configured",
+      accounts: [],
+    });
+    expect(await f.engine.quota({}, f.worker())).toMatchObject({
+      status: "not-configured",
+      accounts: [],
+    });
+    await expect(
+      f.engine.quota({ url: "https://example.com", reset: true }, f.worker()),
+    ).rejects.toThrow("no URL");
+    await expect(
+      f.engine.quota({}, { ...f.worker(), sessionID: "ses_foreign" }),
+    ).rejects.toThrow("configured captain or assigned worker");
+    expect(f.engine.state.task(task.id)?.status).toBe("running");
+    expect(f.prompts).toEqual([]);
+    expect(f.synthetic).toEqual([]);
+    expect(f.events).toEqual([]);
   } finally {
     await f.close();
   }

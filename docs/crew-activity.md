@@ -85,7 +85,7 @@ optional task reference. They remain in the private crew database when captures
 expire. Agents record milestones, checks, blockers and outcomes, not tool calls.
 Task transitions add reliable lifecycle facts.
 After the captain's turn, a configured, supported and free reporter may prepare
-one final summary. Busy, queued, uncertain or unavailable reporters are skipped
+one final summary. Busy, uncertain or unavailable reporters are skipped
 with an explanation; facts remain visible. Refreshes do not call a model.
 Pogo edits the same activity message in the original thread. It does not prompt
 the captain again or let workers post to Slack.

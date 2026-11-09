@@ -89,6 +89,7 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
     );
     expect(authorized).toBe(1);
     expect(JSON.stringify(requests[0]?.["tools"])).toContain("pogo_journal");
+    expect(JSON.stringify(requests[0]?.["tools"])).toContain("pogo_quota");
     expect(JSON.stringify(requests[1]?.["messages"])).toContain(
       "Read own history",
     );
