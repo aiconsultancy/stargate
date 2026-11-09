@@ -44,10 +44,12 @@ test("conversation eval: busy status lets a second source progress without repla
   const f = await fixture();
   const idle = Effect.runSync(Deferred.make<void>());
   let observers = 0;
+  let probes = 0;
   const wait = nativeWait(
     () =>
       Effect.gen(function* () {
         observers++;
+        probes++;
         yield* Deferred.await(idle);
       }).pipe(
         Effect.ensuring(
@@ -63,6 +65,8 @@ test("conversation eval: busy status lets a second source progress without repla
     { ...f.client, wait },
     f.mailer,
     f.agents,
+    undefined,
+    async () => f.inspectionAPI,
     async () => {
       throw new Error("Busy status must not read a final result");
     },
@@ -129,6 +133,7 @@ test("conversation eval: busy status lets a second source progress without repla
     expect(f.busy.has(task.workerSessionID)).toBe(true);
     expect(Effect.runSync(Deferred.isDone(idle))).toBe(false);
     expect(observers).toBe(0);
+    expect(probes).toBe(2);
   } finally {
     Effect.runSync(Deferred.succeed(idle, undefined));
     await gateway.close();
