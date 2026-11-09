@@ -240,6 +240,14 @@ execution and history catch-up share one slot; Slack destinations remain on
 the individual jobs. Existing per-thread session mappings remain as history,
 but do not receive captain catch-up broadcasts.
 
+Each pinned Slack turn also carries model-visible source identity. When enabled,
+bounded thread context refreshes on every reply, not only the first request.
+The thread root and newest eligible messages anchor
+short references such as "resume this". The persistent captain instructions
+resolve those references against this source rather than the latest unrelated
+task in shared history. This is a context anchor, not a second captain or a
+model-level isolation guarantee. See [thread context](thread-context.md).
+
 `captain_cursors` stores one cursor and delivery owner for that bot and session.
 The native input ID commits on the job before admission. History attributes
 each public entry to its preceding user or standalone shell input. A known

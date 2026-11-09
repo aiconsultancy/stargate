@@ -128,9 +128,11 @@ confirmation button. Scheduled results start a new thread in that channel.
 See [cron jobs](docs/cron.md) for app setup and execution limits.
 
 Set `threadContext: true` on a bot to import bounded prior messages when its
-first request starts inside an existing Slack thread. This is off by default.
-Only the requester's and this bot's text can be included; other participants,
-files, and attachments are excluded. See [thread context](docs/thread-context.md)
+first request starts inside an existing Slack thread. Shared captains refresh
+this context on every reply and carry source IDs each turn.
+History loading is off by default. It includes requester/bot text and, for a
+pinned captain, a root from another allowed human; other participants' replies
+and historical files remain excluded. See [thread context](docs/thread-context.md)
 for limits, privacy, and Slack access requirements.
 
 `/pogo pair` lets configured operators request standard OpenCode device

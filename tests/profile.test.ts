@@ -559,6 +559,8 @@ test("custom init creates only configured worktrees, generic prompts, and genera
   expect(prompt).toContain("queue: true");
   expect(prompt).toContain("60-second observation window");
   expect(prompt).toContain("Do not repeat wait in the same turn");
+  expect(prompt).toContain("Scope each Slack request");
+  expect(prompt).toContain("not the last task mentioned elsewhere");
   expect(prompt).not.toContain("{{");
   expect(prompt).not.toContain("four");
   for (const [id, directory] of Object.entries(result.worktrees)) {

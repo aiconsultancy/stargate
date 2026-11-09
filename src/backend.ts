@@ -7,6 +7,20 @@ import type { BackendConfig } from "./config";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
 import type { MaintenanceWatch } from "./maintenance";
+import type { ThreadContext } from "./thread-context";
+
+/** Source identity is routing data; history remains untrusted Slack text. */
+export type PromptSourceContext = {
+  source: {
+    channel: string;
+    thread: string;
+    message: string;
+    user: string;
+    team: string;
+    app: string;
+  };
+  history?: ThreadContext;
+};
 
 /** Latest complete visible text for this turn, not reasoning or tool output. */
 export type TextSink = (text: string) => void;
@@ -70,6 +84,7 @@ export interface AgentBackend {
     /** Persist the allocated native input ID synchronously before admission. */
     onInput?: (id: string) => void,
     files?: readonly Attachment[],
+    context?: PromptSourceContext,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
   /** Withdraw this input; interrupt only if raw history proves it is current. */

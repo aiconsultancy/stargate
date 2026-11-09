@@ -42,6 +42,13 @@ read-only; it is never blindly repeated. Parser/file tests separately cover
 partial previews, private tool output, code examples, unsafe paths and changed
 files. All media fixtures use local files and controlled HTTP, not live Slack.
 
+The thread-context gate starts a failed migration request, answers another
+thread in the same channel, then resumes the first thread. It requires the
+first thread's root and source IDs, not the other thread's topic. Adapter tests
+check the actual model-visible frame through local HTTP. Cold-start, unknown
+owner, allowed-root and bounded-history tests cover context refresh mechanics.
+These do not prove model-level topic isolation or full-thread summarization.
+
 Crew wait uses one 60-second observation window across queue promotion and
 running work. On expiry it returns progress without stopping the worker. The
 captain must reply and end the turn, then collect the same task later. Tests use

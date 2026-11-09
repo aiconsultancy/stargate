@@ -16,6 +16,7 @@ import {
 import {
   type AgentBackend,
   latestInput,
+  type PromptSourceContext,
   type Transcript,
   type TranscriptEntry,
   TranscriptUnavailable,
@@ -735,29 +736,50 @@ export class Gateway {
           const pinned = this.backend.sessionID;
           session = pinned ? undefined : this.store.session(job.conversation);
           let text = job.text;
-          if (
-            pinned
-              ? !this.store.sourceStarted(job.conversation, job.id)
-              : !session
-          ) {
-            const before = job.eventId.slice(job.channel.length + 1);
+          const before = job.eventId.slice(job.channel.length + 1);
+          const slackMessage =
+            job.eventId.startsWith(`${job.channel}:`) &&
+            /^\d{1,16}\.\d{1,6}$/.test(before);
+          const sourceContext: PromptSourceContext | undefined =
+            pinned && slackMessage
+              ? {
+                  source: {
+                    channel: job.channel,
+                    thread: job.thread,
+                    message: before,
+                    user: job.user,
+                    team: this.identity.team,
+                    app: this.config.slack.appId,
+                  },
+                }
+              : undefined;
+          if (pinned || !session) {
             // Roots (including scheduled runs) have no earlier thread messages.
-            if (this.config.threadContext && before !== job.thread) {
+            if (
+              this.config.threadContext &&
+              slackMessage &&
+              before !== job.thread
+            ) {
               if (!this.slack.threadContext)
                 throw new ThreadContextUnavailable();
-              text = withThreadContext(
-                text,
-                await this.slack.threadContext({
-                  channel: job.channel,
-                  thread: job.thread,
-                  before,
-                  user: job.user,
-                  botUser: this.identity.user,
-                  appId: this.config.slack.appId,
-                  team: this.identity.team,
-                  signal,
-                }),
-              );
+              const history = await this.slack.threadContext({
+                channel: job.channel,
+                thread: job.thread,
+                before,
+                user: job.user,
+                botUser: this.identity.user,
+                appId: this.config.slack.appId,
+                team: this.identity.team,
+                signal,
+                ...(pinned
+                  ? {
+                      allowThreadRoot: (user: string) =>
+                        isAllowedUser(this.config, user),
+                    }
+                  : {}),
+              });
+              if (sourceContext) sourceContext.history = history;
+              else text = withThreadContext(text, history);
               signal.throwIfAborted();
             }
           }
@@ -866,6 +888,7 @@ export class Gateway {
                 }
               : undefined,
             inputFiles,
+            sourceContext,
           );
           signal.throwIfAborted();
           // The prompt reply is this request's own text: only it can react.

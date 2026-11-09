@@ -11,6 +11,7 @@ import { type Attachment, checkAttachments } from "../attachments";
 import {
   type AgentBackend,
   latestInput,
+  type PromptSourceContext,
   type TextSink,
   type Transcript,
   type TranscriptEntry,
@@ -177,6 +178,7 @@ export class OpenCodeBackend implements AgentBackend {
     onText?: TextSink,
     onInput?: (id: string) => void,
     files: readonly Attachment[] = [],
+    context?: PromptSourceContext,
   ) {
     checkAttachments(files);
     this.inputs.delete(sessionId);
@@ -286,7 +288,14 @@ export class OpenCodeBackend implements AgentBackend {
         {
           sessionID: sessionId,
           id,
-          text,
+          text: context
+            ? `${JSON.stringify({
+                slackSource: context.source,
+                ...(context.history
+                  ? { untrustedSlackThreadContext: context.history }
+                  : {}),
+              })}\n\nCurrent user instruction:\n${text}`
+            : text,
           delivery: "queue",
           ...(files.length
             ? {

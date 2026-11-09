@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
 import { botSchema } from "../src/config";
+import { isAllowedUser } from "../src/routing";
 import { SlackConnection } from "../src/slack";
 import {
   loadThreadContext,
@@ -175,6 +176,98 @@ test("message, page and Unicode codepoint limits declare truncation", async () =
     response_metadata: { next_cursor: "next" },
   }));
   expect(cursorOnly.truncated).toBe(true);
+});
+
+test("thread history retains eligible root then newest replies inside its bounded page", async () => {
+  const result = await loadThreadContext(
+    { ...request(), before: "100.000" },
+    async () => ({
+      ok: true,
+      messages: Array.from({ length: 26 }, (_, index) =>
+        message(`${index + 1}.000`, {
+          text: index ? `latest-${index + 1}` : "migration root",
+        }),
+      ),
+    }),
+  );
+  expect(result.messages.map(({ text }) => text)).toEqual([
+    "migration root",
+    ...Array.from({ length: 19 }, (_, index) => `latest-${index + 8}`),
+  ]);
+  expect(result.truncated).toBe(true);
+  const budgeted = await loadThreadContext(request(), async () => ({
+    ok: true,
+    messages: Array.from({ length: 8 }, (_, index) =>
+      message(`${index + 1}.000`, {
+        text: (index ? String(index + 1) : "R").repeat(2000),
+      }),
+    ),
+  }));
+  expect(budgeted.messages.map(({ text }) => text[0])).toEqual([
+    "R",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+  ]);
+  expect(
+    budgeted.messages.reduce(
+      (total, { text }) => total + Array.from(text).length,
+      0,
+    ),
+  ).toBe(12_000);
+  expect(budgeted.truncated).toBe(true);
+});
+
+test("another human's thread root is included only with explicit current access approval", async () => {
+  for (const [users, deniedUsers, allowed] of [
+    [["UROOT"], [], true],
+    [["*"], [], true],
+    [["*"], ["UROOT"], false],
+    [["U123"], [], false],
+  ] as const) {
+    const config = bot();
+    config.access.users = [...users];
+    config.access.deniedUsers = [...deniedUsers];
+    const input = {
+      ...request(),
+      allowThreadRoot: (user: string) => isAllowedUser(config, user),
+    };
+    const result = await loadThreadContext(input, async () => ({
+      ok: true,
+      messages: [
+        message("1.000", {
+          user: "UROOT",
+          thread_ts: undefined,
+          text: "migration root",
+        }),
+        message("2.000", { user: "UROOT", text: "other human reply" }),
+        message("3.000", { text: "requester follow-up" }),
+      ],
+    }));
+    expect(result.messages).toEqual([
+      ...(allowed
+        ? [{ author: "thread_root" as const, text: "migration root" }]
+        : []),
+      { author: "requester", text: "requester follow-up" },
+    ]);
+  }
+  const result = await loadThreadContext(request(), async () => ({
+    ok: true,
+    messages: [message("1.000", { user: "UROOT", text: "private root" })],
+  }));
+  expect(result.messages).toEqual([]);
+  const botRoot = await loadThreadContext(
+    { ...request(), allowThreadRoot: () => true },
+    async () => ({
+      ok: true,
+      messages: [
+        message("1.000", { user: "UROOT", bot_id: "BOTHER", text: "bot root" }),
+      ],
+    }),
+  );
+  expect(botRoot.messages).toEqual([]);
 });
 
 test("injected delimiters remain inside labelled JSON, separate from instruction", async () => {

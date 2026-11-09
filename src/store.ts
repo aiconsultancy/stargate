@@ -212,16 +212,6 @@ export class Store {
       .get(botKey);
   }
 
-  sourceStarted(conversation: string, before: number): boolean {
-    return (
-      this.db
-        .query(
-          "SELECT 1 FROM jobs WHERE conversation=? AND id<? AND started=1 AND failure IS NOT 'context' LIMIT 1",
-        )
-        .get(conversation, before) !== null
-    );
-  }
-
   /** Persist admission correlation before the backend submits any native work. */
   saveInput(botKey: string, id: number, input: string, sessionID?: string) {
     this.db.transaction(() => {

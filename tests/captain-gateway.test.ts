@@ -5,6 +5,7 @@ import pino from "pino";
 import {
   type AgentBackend,
   latestInput,
+  type PromptSourceContext,
   type Transcript,
   TranscriptUnavailable,
 } from "../src/backend";
@@ -13,6 +14,10 @@ import { backendSchema } from "../src/config";
 import { Gateway, type SlackDelivery } from "../src/gateway";
 import { backendFingerprint, botKey, conversationKey } from "../src/routing";
 import { Store } from "../src/store";
+import {
+  loadThreadContext,
+  ThreadContextUnavailable,
+} from "../src/thread-context";
 import { repairTranscript } from "../src/transcript";
 import { bot, event, identity } from "./fixtures";
 
@@ -25,7 +30,11 @@ function fixture(store = new Store(":memory:"), ownStore = true) {
   if (ownStore) cleanup.push(() => store.close());
   const config = bot();
   config.access.channels = ["*"];
-  const prompts: { session: string; text: string }[] = [];
+  const prompts: {
+    session: string;
+    text: string;
+    context?: PromptSourceContext;
+  }[] = [];
   const validated: string[] = [];
   const backend: AgentBackend = {
     sessionID: "original-captain",
@@ -33,8 +42,8 @@ function fixture(store = new Store(":memory:"), ownStore = true) {
       validated.push(key);
       return "original-captain";
     },
-    async prompt(session, text) {
-      prompts.push({ session, text });
+    async prompt(session, text, _signal, _onText, _onInput, _files, context) {
+      prompts.push({ session, text, ...(context ? { context } : {}) });
       return `answer: ${text}`;
     },
     async close() {},
@@ -449,8 +458,41 @@ test("conversation eval: concurrent sources keep one captain execution slot", as
   expect(maximum).toBe(1);
 });
 
-test("thread context is first-source scoped even though the pinned root exists", async () => {
-  const f = fixture();
+test("pinned reply refreshes its own bounded root after an unseen native wake without catch-up", async () => {
+  const f = nativeFixture();
+  f.config.threadContext = true;
+  let reads = 0;
+  f.slack.threadContext = async () => {
+    reads++;
+    return {
+      messages: [{ author: "requester", text: "MIGRATION T1 ROOT" }],
+      truncated: false,
+    };
+  };
+  f.gateway.accept(source("C123", "<@UBOT> Migration T1", "1.000"));
+  await f.drain();
+  for (const ts of ["2.000", "3.000"]) {
+    f.gateway.accept(source("C123", "Continue T1", ts, "1.000"));
+    await f.drain();
+  }
+  f.add("synthetic");
+  f.add("assistant", "T2 wake report");
+  // No settle/catch-up: the durable owner still says T1.
+  f.gateway.accept(source("C123", "Resume T1", "4.000", "1.000"));
+  await f.drain();
+  expect(f.prompts[3]?.context).toMatchObject({
+    source: { channel: "C123", thread: "1.000", message: "4.000" },
+    history: {
+      messages: [{ author: "requester", text: "MIGRATION T1 ROOT" }],
+      truncated: false,
+    },
+  });
+  expect(JSON.stringify(f.prompts[3]?.context)).not.toContain("T2 wake report");
+  expect(reads).toBe(3);
+});
+
+test("thread context is source-scoped and refreshes bounded history on every pinned reply", async () => {
+  const f = nativeFixture();
   f.config.threadContext = true;
   const contexts: string[] = [];
   f.slack.threadContext = async ({ channel }) => {
@@ -466,9 +508,202 @@ test("thread context is first-source scoped even though the pinned root exists",
     f.gateway.accept(source(channel, "continue", "4.000", "1.000"));
     await f.drain();
   }
-  expect(contexts).toEqual(["C123", "C456"]);
-  expect(f.prompts[0]?.text).toContain('"text":"C123"');
-  expect(f.prompts[2]?.text).toContain('"text":"C456"');
+  expect(contexts).toEqual(["C123", "C123", "C456", "C456"]);
+  expect(f.prompts[0]?.context?.history?.messages[0]?.text).toBe("C123");
+  expect(f.prompts[2]?.context?.history?.messages[0]?.text).toBe("C456");
+  expect(f.prompts[0]?.text).toBe("summarize");
+});
+
+test("conversation eval: migration resume refreshes its root after another thread even when its first backend turn failed", async () => {
+  const f = nativeFixture();
+  f.config.threadContext = true;
+  f.config.access.users.push("UROOT");
+  const reads: string[] = [];
+  f.slack.threadContext = async (input) => {
+    reads.push(input.thread);
+    return loadThreadContext(input, async () => ({
+      ok: true,
+      messages: [
+        {
+          type: "message",
+          user: "UROOT",
+          ts: input.thread,
+          text: input.thread === "1.000" ? "MIGRATION ROOT" : "NET1010 ROOT",
+        },
+      ],
+    }));
+  };
+  f.setTurn(async (text) => {
+    if (text === "Migration initial")
+      throw new Error("Synthetic backend failure");
+    f.add("assistant", `answer: ${text}`);
+    return `answer: ${text}`;
+  });
+  f.gateway.accept(source("C123", "<@UBOT> Migration initial", "1.000"));
+  const failed = f.next();
+  await f.drain();
+  expect(f.store.failure(failed.id)).toBe("backend");
+  f.gateway.accept(source("C123", "<@UBOT> NET1010", "2.000"));
+  await f.drain();
+  f.gateway.accept(source("C123", "Can we resume this?", "3.000", "1.000"));
+  await f.drain();
+  expect(f.prompts[2]).toMatchObject({
+    text: "Can we resume this?",
+    context: {
+      source: {
+        channel: "C123",
+        thread: "1.000",
+        message: "3.000",
+        user: "U123",
+        team: "T123",
+        app: "A123",
+      },
+      history: {
+        messages: [{ author: "thread_root", text: "MIGRATION ROOT" }],
+        truncated: false,
+      },
+    },
+  });
+  expect(JSON.stringify(f.prompts[2]?.context)).not.toContain("NET1010");
+  f.gateway.accept(source("C123", "Next migration step", "4.000", "1.000"));
+  await f.drain();
+  expect(reads).toEqual(["1.000", "1.000"]);
+  expect(f.prompts[3]?.context?.source.message).toBe("4.000");
+  expect(f.prompts[3]?.context?.history?.messages[0]?.text).toBe(
+    "MIGRATION ROOT",
+  );
+});
+
+test("cold captain refreshes a legacy same-source owner before its first newly framed reply", async () => {
+  const f = nativeFixture();
+  f.config.threadContext = true;
+  f.gateway.accept(source("C123", "<@UBOT> old migration root", "1.000"));
+  const old = f.next();
+  f.store.running(old.id);
+  f.store.started(old.id);
+  f.store.captainCursor(f.gateway.key, "original-captain");
+  const input = f.add("input", "Legacy prompt without a source frame");
+  f.store.saveInput(f.gateway.key, old.id, input, "original-captain");
+  f.store.respond(old.id, ["Legacy answer"]);
+  f.store.finish(old.id);
+  let reads = 0;
+  f.slack.threadContext = async () => {
+    reads++;
+    return {
+      messages: [{ author: "requester", text: "MIGRATION ROOT" }],
+      truncated: false,
+    };
+  };
+  const fresh = new Gateway(
+    f.config,
+    identity,
+    f.store,
+    f.backend,
+    f.slack,
+    pino({ enabled: false }),
+  );
+  cleanup.push(() => fresh.close());
+  for (const ts of ["2.000", "3.000"]) {
+    fresh.accept(source("C123", "Resume migration", ts, "1.000"));
+    const job = f.store.ready(fresh.key, Number.MAX_SAFE_INTEGER, 1)[0];
+    if (!job) throw new Error("Missing fresh job");
+    await fresh.process(job, f.signal);
+  }
+  expect(reads).toBe(2);
+  expect(f.prompts[0]?.context?.history?.messages[0]?.text).toBe(
+    "MIGRATION ROOT",
+  );
+  expect(f.prompts[1]?.context?.history?.messages[0]?.text).toBe(
+    "MIGRATION ROOT",
+  );
+});
+
+test("failed and successful captain prompts both reread the next reply's bounded history", async () => {
+  const f = nativeFixture();
+  f.config.threadContext = true;
+  let reads = 0;
+  f.slack.threadContext = async () => {
+    reads++;
+    return {
+      messages: [{ author: "requester", text: "Migration root" }],
+      truncated: false,
+    };
+  };
+  let first = true;
+  f.setTurn(async (text) => {
+    if (first) {
+      first = false;
+      throw new Error("Synthetic backend failure");
+    }
+    f.add("assistant", "Migration answer");
+    return text;
+  });
+  for (const ts of ["2.000", "3.000", "4.000"]) {
+    f.gateway.accept(source("C123", "<@UBOT> Resume", ts, "1.000"));
+    await f.drain();
+  }
+  expect(reads).toBe(3);
+  expect(f.prompts[0]?.context?.history).toBeDefined();
+  expect(f.prompts[1]?.context?.history).toBeDefined();
+  expect(f.prompts[2]?.context?.history).toBeDefined();
+});
+
+test("unmapped native ownership refreshes history and unreadable switched context fails before prompting", async () => {
+  const f = nativeFixture();
+  f.config.threadContext = true;
+  let reads = 0;
+  f.slack.threadContext = async () => {
+    reads++;
+    return { messages: [], truncated: false };
+  };
+  f.gateway.accept(source("C123", "<@UBOT> root", "1.000"));
+  await f.drain();
+  f.add("input", "Private native UI turn");
+  await f.settle();
+  f.gateway.accept(source("C123", "Resume", "2.000", "1.000"));
+  await f.drain();
+  expect(reads).toBe(1);
+  f.gateway.accept(source("C123", "<@UBOT> other root", "3.000"));
+  await f.drain();
+  const before = f.prompts.length;
+  f.slack.threadContext = async () => {
+    throw new ThreadContextUnavailable();
+  };
+  f.gateway.accept(source("C123", "Resume original", "4.000", "1.000"));
+  const failed = f.next();
+  await f.drain();
+  expect(f.prompts).toHaveLength(before);
+  expect(f.store.failure(failed.id)).toBe("context");
+});
+
+test("pinned Slack roots always carry source IDs with history disabled, without fabricating scheduled IDs", async () => {
+  const f = fixture();
+  f.slack.threadContext = async () => {
+    throw new Error("History must not be requested");
+  };
+  f.gateway.accept(source("C123", "<@UBOT> root", "1.000"));
+  await f.drain();
+  expect(f.prompts[0]?.context).toEqual({
+    source: {
+      channel: "C123",
+      thread: "1.000",
+      message: "1.000",
+      user: "U123",
+      team: "T123",
+      app: "A123",
+    },
+  });
+  f.gateway.enqueueScheduled({
+    runId: "daily",
+    name: "Daily",
+    channel: "C123",
+    thread: "scheduled:daily",
+    user: "U123",
+    prompt: "Scheduled instruction",
+  });
+  await f.drain();
+  expect(f.prompts[1]?.context).toBeUndefined();
+  expect(f.prompts[1]?.text).toBe("Scheduled instruction");
 });
 
 test("captain repair fails closed instead of using a legacy thread root", async () => {
@@ -512,8 +747,16 @@ function nativeFixture(store?: Store, ownStore = true) {
     add("assistant", answer);
     return answer;
   };
-  f.backend.prompt = async (session, text, signal, _onText, onInput) => {
-    f.prompts.push({ session, text });
+  f.backend.prompt = async (
+    session,
+    text,
+    signal,
+    _onText,
+    onInput,
+    _files,
+    context,
+  ) => {
+    f.prompts.push({ session, text, ...(context ? { context } : {}) });
     input = `native-${serial + 1}`;
     onInput?.(input);
     add("input");
