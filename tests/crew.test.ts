@@ -10,7 +10,10 @@ import {
   type SessionPromptInput,
   type SessionSyntheticInput,
 } from "@opencode/client";
-import { Context, Deferred, Effect } from "effect";
+import type { Plugin as EffectPlugin } from "@opencode/plugin/effect";
+import { Agent, Session, SessionMessage } from "@opencode/schema";
+import { Tool } from "@opencode/schema/tool";
+import { Context, Deferred, Effect, Exit, Schema, Scope } from "effect";
 import pino from "pino";
 import {
   type CrewAgents,
@@ -79,6 +82,208 @@ function waitClock() {
     },
   };
 }
+
+test("conversation eval: exported plugin wires cancellable native wait through its registered crew tool", async () => {
+  const historyRequests: string[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      historyRequests.push(new URL(request.url).pathname);
+      return new Response("Unexpected history request", { status: 500 });
+    },
+  });
+  const scope = Effect.runSync(Scope.make());
+  const release = Effect.runSync(Deferred.make<void>());
+  const started = Promise.withResolvers<void>();
+  const unexpected: string[] = [];
+  let observers = 0;
+  let finalizers = 0;
+  let disposed = 0;
+  let f: Awaited<ReturnType<typeof fixture>> | undefined;
+  type RegisteredTool = {
+    name: string;
+    execute: (
+      input: unknown,
+      context: Tool.Context,
+    ) => Effect.Effect<Tool.Result<undefined>, Tool.Error>;
+  };
+  let crewTool: RegisteredTool | undefined;
+  let work:
+    | Promise<
+        | { type: "success"; value: Tool.Result<undefined> }
+        | { type: "failure"; error: unknown }
+      >
+    | undefined;
+  try {
+    const seed = await fixture(
+      teamSchema.parse({
+        ...defaultTeam,
+        historyAPI: { url: server.url.href },
+      }),
+    );
+    f = seed;
+    const task = (
+      await seed.engine.run(
+        { op: "dispatch", crew: "mario", text: "Retain this result" },
+        seed.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing fixture task");
+    const registration = {
+      dispose: Effect.sync(() => {
+        disposed++;
+      }),
+      events: { emit: () => Effect.void },
+    };
+    const scopedRegistration = Effect.acquireRelease(
+      Effect.succeed(registration),
+      (owned) => owned.dispose,
+    );
+    const methods = new Map<string, unknown>([
+      ["location", { directory: seed.options.captainDirectory }],
+      ["options", seed.options],
+      ["rpc.register", () => Effect.succeed(registration)],
+      ["permission.assert", () => Effect.void],
+      ["session.hook", () => scopedRegistration],
+      [
+        "session.get",
+        ({ sessionID }: { sessionID: string }) =>
+          Effect.promise(() => seed.client.get({ sessionID })).pipe(
+            Effect.flatMap((session) =>
+              Schema.decodeUnknownEffect(Session.Info)({
+                ...session,
+                projectID: "project_fixture",
+                cost: 0,
+                tokens: {
+                  input: 0,
+                  output: 0,
+                  reasoning: 0,
+                  cache: { read: 0, write: 0 },
+                },
+                time: { created: 1, updated: 1 },
+              }),
+            ),
+          ),
+      ],
+      [
+        "session.wait",
+        ({ sessionID }: { sessionID: string }) =>
+          Effect.gen(function* () {
+            expect(sessionID).toBe(task.workerSessionID);
+            observers++;
+            started.resolve();
+            yield* Deferred.await(release);
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                observers--;
+                finalizers++;
+              }),
+            ),
+          ),
+      ],
+      [
+        "tool.transform",
+        (transform: (editor: object) => void) =>
+          Effect.sync(() => {
+            transform(readStub("editor"));
+          }).pipe(Effect.andThen(scopedRegistration)),
+      ],
+      [
+        "editor.add",
+        (tool: RegisteredTool) => {
+          if (tool.name === "pogo_crew") crewTool = tool;
+        },
+      ],
+    ]);
+    // The installed adapter eagerly reads unused API paths. Only approved
+    // invocations exist; every other invocation throws and remains counted.
+    function readStub(path: string): object {
+      return new Proxy(() => {}, {
+        get(_target, key) {
+          const child = path ? `${path}.${String(key)}` : String(key);
+          return methods.get(child) ?? readStub(child);
+        },
+        apply() {
+          unexpected.push(path);
+          throw new Error(`Unexpected plugin host invocation: ${path}`);
+        },
+      });
+    }
+    // One fake-host boundary; production export and SDK adapter remain real.
+    const host = readStub("") as EffectPlugin.Context;
+    await Effect.runPromise(plugin.effect(host).pipe(Scope.provide(scope)));
+    if (!crewTool) throw new Error("Crew tool was not registered");
+    work = Effect.runPromise(
+      crewTool.execute(
+        { op: "wait", taskID: task.id },
+        {
+          sessionID: Session.ID.make("ses_captain_a"),
+          agent: Agent.ID.make("bowser"),
+          messageID: SessionMessage.ID.make("msg_wait"),
+          id: Tool.CallID.make("call_wait"),
+          progress: () => Effect.void,
+        },
+      ),
+    ).then(
+      (value) => ({ type: "success", value }),
+      (error: unknown) => ({ type: "failure", error }),
+    );
+    await boundedOutcome(started.promise);
+    expect(observers).toBe(1);
+    await seed.engine.run(
+      { op: "complete", taskID: task.id, result: "Original retained answer" },
+      seed.worker(task.workerSessionID),
+    );
+    const result = await boundedOutcome(work).catch((cause: unknown) => {
+      throw new Error(
+        `Registered plugin wait remained pending with ${observers} native observer(s)`,
+        { cause },
+      );
+    });
+    if (result.type === "failure") throw result.error;
+    if (typeof result.value.content !== "string")
+      throw new Error("Crew tool did not return JSON text");
+    expect(JSON.parse(result.value.content)).toMatchObject({
+      status: "completed",
+      task: {
+        id: task.id,
+        inputID: task.inputID,
+        result: "Original retained answer",
+      },
+    });
+    expect(observers).toBe(0);
+    expect(finalizers).toBe(1);
+    expect(Effect.runSync(Deferred.isDone(release))).toBe(false);
+    expect(seed.busy.has(task.workerSessionID)).toBe(true);
+    expect(seed.calls.filter(({ method }) => method === "interrupt")).toEqual(
+      [],
+    );
+    expect(seed.inputs.map(({ id }) => id)).toEqual([task.inputID]);
+  } finally {
+    // Also joins the unbridged mutant: releasing only this observation does
+    // not abort a tool, mark a worker idle, or trigger cancellation discovery.
+    Effect.runSync(Deferred.succeed(release, undefined));
+    try {
+      await work;
+    } finally {
+      try {
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+      } finally {
+        try {
+          await f?.close();
+        } finally {
+          await server.stop(true);
+          expect(observers).toBe(0);
+          expect(unexpected).toEqual([]);
+          expect(historyRequests).toEqual([]);
+          expect(disposed).toBe(5);
+        }
+      }
+    }
+  }
+});
 
 test("conversation eval: bounded wait yields without cancelling the worker and later collects its original result", async () => {
   const clock = waitClock();

@@ -20,6 +20,7 @@ good score. Native worker completion and observation completion are separate.
 | ---------------------------------- | ------------------------------------------------------------------------------------ |
 | Busy observation cancellation      | Observer settles and finalizes while worker stays busy.                              |
 | Already cancelled                  | No native observation starts.                                                        |
+| Exported plugin wait binding       | Registered crew tool returns retained completion and joins native observation.       |
 | Two source requests with busy crew | Both receive their own answer through one captain; crew task/input remain unchanged. |
 | Explicit task completion           | Captain wait returns retained result before native worker idle; no interrupt.        |
 | Concurrent source admission        | Native captain turns never overlap.                                                  |
@@ -63,6 +64,20 @@ abort signal to the runner. The rest of the plugin keeps the installed adapter
 and its registration/cleanup behavior. No dependency upgrade or HTTP endpoint
 configuration is required. Remove this narrow bridge when the upstream Promise
 adapter forwards request signals and the same evaluations pass without it.
+
+The exported-plugin gate runs the real default plugin with the installed Promise
+adapter and a controlled Effect host. It invokes the registered `pogo_crew` wait
+tool, completes the original task through a second engine on the same temporary
+SQLite database, and checks that observation ends while the worker stays busy.
+This checks setup injection, not only the wait helper. Removing the exported
+wait override must fail the gate.
+
+The fixture has an explicit loopback history API with no credential references.
+After cleanup it checks zero HTTP requests and zero unexpected host calls. Its
+pending observation can be released during teardown, so the negative case can
+join the tool call and close resources without cancelling real work or using
+local service discovery. The host is controlled; this does not establish native
+server behavior or repair dropped signals on other Promise adapter methods.
 
 This fixes an observation boundary, not all concurrent project orchestration.
 The model responses in these tests are controlled fixtures. They do not prove
