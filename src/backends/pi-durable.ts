@@ -31,11 +31,13 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { z } from "zod";
+import type { Attachment } from "../attachments";
 import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import { type BackendConfig, secret } from "../config";
 import { workingAgreementNotice } from "../crew/instructions";
 import { piCrewExtension } from "../crew/pi-extension";
 import { redactActivity } from "../crew/reporting";
+import { piInputContent } from "./pi-attachments";
 
 type Config = Extract<BackendConfig, { type: "pi-durable" }>;
 const conversationId = z
@@ -142,11 +144,14 @@ export function piPartialText(view: ConversationView): string {
 }
 
 export class PiDurableBackend implements AgentBackend {
+  readonly supportsAttachments = true;
+
   private constructor(
     private readonly harness: Harness,
     private readonly config: Config,
     private readonly activeReports: Set<ConversationId>,
     private readonly reportGuard: ReturnType<typeof defineExtension>,
+    private readonly acceptsImages: boolean,
   ) {}
 
   /** Receipt inspection never opens a scheduling runtime or resolves credentials. */
@@ -344,7 +349,21 @@ export class PiDurableBackend implements AgentBackend {
         BACKGROUND_CONTEXT,
       );
       openedHarness = harness;
-      return new PiDurableBackend(harness, config, activeReports, reportGuard);
+      const separator = config.model.indexOf("/");
+      const acceptsImages =
+        models
+          .getModel(
+            config.model.slice(0, separator),
+            config.model.slice(separator + 1),
+          )
+          ?.input.includes("image") ?? false;
+      return new PiDurableBackend(
+        harness,
+        config,
+        activeReports,
+        reportGuard,
+        acceptsImages,
+      );
     } catch (error) {
       await storage.close(BACKGROUND_CONTEXT);
       throw error;
@@ -380,9 +399,16 @@ export class PiDurableBackend implements AgentBackend {
     onText?: TextSink,
     // Crew callers select a result mode; gateway callers can record admission.
     result: "visible" | "final" | ((id: string) => void) = "visible",
-    requestId: string = crypto.randomUUID(),
+    request: string | readonly Attachment[] = crypto.randomUUID(),
   ) {
     signal.throwIfAborted();
+    const content = piInputContent(
+      text,
+      typeof request === "string" ? [] : request,
+      this.acceptsImages,
+    );
+    const requestId =
+      typeof request === "string" ? request : crypto.randomUUID();
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
     const conversation = await this.harness.conversation(
       conversationId.parse(sessionId) as ConversationId,
@@ -472,7 +498,7 @@ export class PiDurableBackend implements AgentBackend {
       if (typeof result === "function") result(requestId);
       attempted = true;
       submission = await conversation.submit(
-        { type: "input", requestId, content: text, whenBusy: "followUp" },
+        { type: "input", requestId, content, whenBusy: "followUp" },
         context,
       );
       if (latestView) update(latestView);

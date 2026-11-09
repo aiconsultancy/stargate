@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { Attachment } from "../attachments";
 import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import type { BackendConfig } from "../config";
 import { piDefinitionPath, piMemberDefinition } from "./instructions";
@@ -28,7 +29,7 @@ export interface PiWorkerBackend extends AgentBackend {
     signal: AbortSignal,
     onText?: TextSink,
     result?: "final" | ((id: string) => void),
-    requestId?: string,
+    requestId?: string | readonly Attachment[],
   ): Promise<string>;
   /** Same crew slot, but enforced tools-off and input-only model context.
    * Absence fails closed; normal maintenance prompt is never a fallback.

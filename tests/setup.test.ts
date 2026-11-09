@@ -58,6 +58,8 @@ test("manifest prefill round-trips and grants only intended scopes/events", () =
     "groups:history",
     "im:history",
     "chat:write",
+    "files:read",
+    "files:write",
     "reactions:write",
     "commands",
   ]);

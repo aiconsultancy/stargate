@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { z } from "zod";
+import type { PreparedAttachment, PublishedFile } from "./attachments";
 import { cancellationNotice } from "./cancellation";
 import { failureText, type RequestFailure } from "./request-failure";
 
@@ -11,6 +12,7 @@ export type Incoming = {
   thread: string;
   user: string;
   text: string;
+  files?: readonly string[];
 };
 
 export type Job = Incoming & {
@@ -34,7 +36,20 @@ export type CaptainTranscript = {
   from: CaptainCursor;
   cursor: string;
   owner: number | null;
-  replies: { job: number; eventId: string; chunks: string[] }[];
+  replies: {
+    job: number;
+    eventId: string;
+    chunks: string[];
+    files?: PublishedFile[];
+  }[];
+};
+
+export type AttachmentDelivery = PublishedFile & {
+  title?: string;
+  prepared?: PreparedAttachment;
+  phase?: "reserved" | "uploaded" | "completing" | "shared" | "unavailable";
+  fileID?: string;
+  noticeSent?: boolean;
 };
 
 const activityProgress = z.strictObject({
@@ -100,6 +115,8 @@ export class Store {
     column("jobs", "failure", "TEXT");
     column("jobs", "activity", "TEXT");
     column("jobs", "input", "TEXT");
+    column("jobs", "input_files", "TEXT");
+    column("jobs", "output_files", "TEXT");
     // Preserve source-first context and legacy ownership; keep statuses intact.
     if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
       this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
@@ -118,8 +135,8 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,user,text)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text)`)
+      (eventId,botKey,conversation,channel,thread,user,text,input_files)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -128,8 +145,40 @@ export class Store {
           $thread: input.thread,
           $user: input.user,
           $text: input.text,
+          $files: input.files?.length ? JSON.stringify(input.files) : null,
         }).changes > 0
     );
+  }
+
+  inputFiles(id: number): string[] {
+    const row = this.db
+      .query<{ input_files: string | null }, [number]>(
+        "SELECT input_files FROM jobs WHERE id=?",
+      )
+      .get(id);
+    return row?.input_files
+      ? z
+          .array(z.string().regex(/^F[A-Z0-9]+$/))
+          .max(10)
+          .parse(JSON.parse(row.input_files))
+      : [];
+  }
+
+  attachments(id: number): AttachmentDelivery[] {
+    const row = this.db
+      .query<{ output_files: string | null }, [number]>(
+        "SELECT output_files FROM jobs WHERE id=?",
+      )
+      .get(id);
+    return row?.output_files
+      ? (JSON.parse(row.output_files) as AttachmentDelivery[])
+      : [];
+  }
+
+  saveAttachments(id: number, files: readonly AttachmentDelivery[]) {
+    this.db
+      .query("UPDATE jobs SET output_files=? WHERE id=?")
+      .run(JSON.stringify(files), id);
   }
 
   activity(id: number): ActivityProgress | undefined {
@@ -279,12 +328,13 @@ export class Store {
       if (
         this.db
           .query(`INSERT OR IGNORE INTO jobs
-        (eventId,botKey,conversation,channel,thread,user,text,status,response)
-        SELECT ?,botKey,conversation,channel,thread,user,'','responding',?
+        (eventId,botKey,conversation,channel,thread,user,text,status,response,output_files)
+        SELECT ?,botKey,conversation,channel,thread,user,'','responding',?,?
         FROM jobs WHERE botKey=? AND id=?`)
           .run(
             reply.eventId,
             JSON.stringify(reply.chunks),
+            reply.files?.length ? JSON.stringify(reply.files) : null,
             input.botKey,
             reply.job,
           ).changes !== 1
@@ -432,7 +482,7 @@ export class Store {
     conversation: string;
     from: string | undefined;
     cursor: string;
-    replies: { eventId: string; chunks: string[] }[];
+    replies: { eventId: string; chunks: string[]; files?: PublishedFile[] }[];
     requeue?: string[];
   }): number | undefined {
     return this.db.transaction(() => {
@@ -460,8 +510,8 @@ export class Store {
       for (const reply of input.replies) {
         queued += this.db
           .query(`INSERT OR IGNORE INTO jobs
-          (eventId,botKey,conversation,channel,thread,user,text,status,response)
-          VALUES (?,?,?,?,?,?,'','responding',?)`)
+          (eventId,botKey,conversation,channel,thread,user,text,status,response,output_files)
+          VALUES (?,?,?,?,?,?,'','responding',?,?)`)
           .run(
             reply.eventId,
             input.botKey,
@@ -470,6 +520,7 @@ export class Store {
             target.thread,
             target.user,
             JSON.stringify(reply.chunks),
+            reply.files?.length ? JSON.stringify(reply.files) : null,
           ).changes;
       }
       // An existing row would be skipped silently; never advance past it.
@@ -575,6 +626,7 @@ export class Store {
       keep?: number;
       transcript?: { from: string | undefined; cursor: string };
       captain?: CaptainTranscript;
+      files?: PublishedFile[];
     } = {},
   ) {
     return this.db.transaction(() => {
@@ -590,11 +642,14 @@ export class Store {
         : chunks;
       this.db
         .query(
-          "UPDATE jobs SET started=CASE WHEN status='running' THEN 1 ELSE started END,status='responding',response=?,failure=?,sent=0 WHERE id=?",
+          "UPDATE jobs SET started=CASE WHEN status='running' THEN 1 ELSE started END,status='responding',response=?,failure=?,sent=0,output_files=? WHERE id=?",
         )
         .run(
           JSON.stringify(response),
           cancelled ? "cancelled" : (failure ?? null),
+          !cancelled && !failure && options.files?.length
+            ? JSON.stringify(options.files)
+            : null,
           id,
         );
       // A moved cursor means another writer queued some of this text.

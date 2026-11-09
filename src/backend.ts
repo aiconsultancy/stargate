@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import type { ActivityWatch } from "./activity";
+import type { Attachment } from "./attachments";
 import { OpenCodeBackend } from "./backends/opencode";
 import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
@@ -52,6 +53,8 @@ export const latestInput = "\u0000latest-input";
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
+  /** Explicit capability: unsupported adapters must not silently drop files. */
+  readonly supportsAttachments?: boolean;
   /** Explicit durable identity; the gateway scopes routing to this session. */
   readonly sessionID?: string | undefined;
   createSession(input: {
@@ -66,6 +69,7 @@ export interface AgentBackend {
     onText?: TextSink,
     /** Persist the allocated native input ID synchronously before admission. */
     onInput?: (id: string) => void,
+    files?: readonly Attachment[],
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
   /** Withdraw this input; interrupt only if raw history proves it is current. */

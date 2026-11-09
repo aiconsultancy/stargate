@@ -7,6 +7,7 @@ import {
 import { SessionMessage } from "@opencode/schema";
 import { z } from "zod";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
+import { type Attachment, checkAttachments } from "../attachments";
 import {
   type AgentBackend,
   latestInput,
@@ -62,6 +63,7 @@ function publicEntry(message: SessionMessageInfo): TranscriptEntry | undefined {
 }
 
 export class OpenCodeBackend implements AgentBackend {
+  readonly supportsAttachments = true;
   private readonly client;
   private readonly pairingClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
@@ -174,7 +176,9 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
     onText?: TextSink,
     onInput?: (id: string) => void,
+    files: readonly Attachment[] = [],
   ) {
+    checkAttachments(files);
     this.inputs.delete(sessionId);
     signal.throwIfAborted();
     const stop = new AbortController();
@@ -279,7 +283,21 @@ export class OpenCodeBackend implements AgentBackend {
       phase = { type: "submitting", input: id };
       this.inputs.set(sessionId, id);
       const input = await this.client.session.prompt(
-        { sessionID: sessionId, id, text, delivery: "queue" },
+        {
+          sessionID: sessionId,
+          id,
+          text,
+          delivery: "queue",
+          ...(files.length
+            ? {
+                files: files.map((file) => ({
+                  name: file.name,
+                  uri: `data:${file.mime};base64,${Buffer.from(file.data).toString("base64")}`,
+                  source: { type: "inline" as const },
+                })),
+              }
+            : {}),
+        },
         { signal },
       );
       if (input.id !== id) throw new Error("OpenCode input identity changed");

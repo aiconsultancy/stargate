@@ -49,6 +49,8 @@ export function buildManifest(name = "Pogo") {
           "groups:history",
           "im:history",
           "chat:write",
+          "files:read",
+          "files:write",
           "reactions:write",
           "commands",
         ],
@@ -74,10 +76,10 @@ export function manifestUrl(name = "Pogo") {
 }
 
 export const slackInstructions = `Create the app using the prefilled manifest link.
-Scopes: app_mentions:read, channels:history, groups:history, im:history, chat:write, reactions:write, commands.
+Scopes: app_mentions:read, channels:history, groups:history, im:history, chat:write, files:read, files:write, reactions:write, commands.
 In Basic Information, copy the App ID (A...). Create an app-level token
 (xapp-...) with connections:write. Install/reinstall the app to your workspace
-after scope changes; copy the Bot User OAuth Token (xoxb-...). Invite the bot
+after scope changes, including file scopes; copy the Bot User OAuth Token (xoxb-...). Invite the bot
 to each allowed channel with /invite @your-bot.
 Find user IDs: member profile → More → Copy member ID.
 Find channel IDs: channel details → channel ID at the bottom.

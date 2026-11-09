@@ -10,6 +10,7 @@ import type { SlackDelivery } from "./gateway";
 import type { ReactionName } from "./reactions";
 import { failureContent, type RequestFailure } from "./request-failure";
 import type { Identity } from "./routing";
+import { SlackFiles, type SlackFilesFetch } from "./slack-files";
 import { slackContent } from "./slack-format";
 import { loadThreadContext, type ThreadContextRequest } from "./thread-context";
 
@@ -64,6 +65,7 @@ export async function handleSlackRequest(
 }
 
 export class SlackConnection implements SlackDelivery {
+  readonly files: SlackFiles;
   private readonly socket;
   private readonly web;
   private readonly historyWeb: (signal: AbortSignal) => WebClient;
@@ -73,6 +75,7 @@ export class SlackConnection implements SlackDelivery {
     botToken: string,
     log: Logger,
     webOptions: Pick<WebClientOptions, "slackApiUrl" | "fetch"> = {},
+    fileFetch?: SlackFilesFetch,
   ) {
     // Third-party errors can contain request headers/bodies. Do not log them.
     const logger = {
@@ -111,6 +114,7 @@ export class SlackConnection implements SlackDelivery {
               : signal,
           }),
       });
+    this.files = new SlackFiles(this.historyWeb, botToken, fileFetch);
     this.socket = new SocketModeClient({
       appToken,
       logger,

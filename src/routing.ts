@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { maxAttachments } from "./attachments";
 import type { BotConfig } from "./config";
 import { markdownChunks } from "./markdown-chunks";
 
@@ -7,7 +8,11 @@ const eventSchema = z.object({
   type: z.enum(["app_mention", "message"]),
   channel: z.string(),
   user: z.string(),
-  text: z.string().max(40_000),
+  text: z.string().max(40_000).default(""),
+  files: z
+    .array(z.object({ id: z.string().regex(/^F[A-Z0-9]+$/) }))
+    .max(maxAttachments)
+    .optional(),
   ts: z.string().regex(/^\d+\.\d+$/),
   thread_ts: z
     .string()
@@ -83,7 +88,7 @@ export function routeEvent(
   const event = result.data;
   if (
     event.bot_id ||
-    event.subtype ||
+    (event.subtype && event.subtype !== "file_share") ||
     event.hidden ||
     event.user === identity.user
   )
@@ -98,7 +103,7 @@ export function routeEvent(
   const direct = event.channel_type === "im";
   if (config.access.mentionOnly && !mentioned) return;
   const text = event.text.split(mention).join("").trim();
-  if (!text) return;
+  if (!text && !event.files?.length) return;
   const key = botKey(config, identity);
   return {
     // app_mention and message can describe the same Slack message.
@@ -113,6 +118,9 @@ export function routeEvent(
     thread: event.thread_ts ?? event.ts,
     user: event.user,
     text,
+    ...(event.files?.length
+      ? { files: event.files.map((file) => file.id) }
+      : {}),
     startsConversation: mentioned || direct,
   };
 }

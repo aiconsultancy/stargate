@@ -78,6 +78,10 @@ same message becomes the answer when text arrives. See [waiting settings](docs/w
 for configurable delays, disabling feedback, and captain-managed changes.
 Existing module backends can still return a final answer without streaming.
 
+Accepted Slack messages can carry images and files. Agents can publish requested
+local evidence into the proven source thread. See [attachments](docs/attachments.md)
+for scopes, supported backends, limits and explicit file publication syntax.
+
 Requests have a 30-minute time limit by default. Set `turnTimeoutMs` on the bot
 to change it, up to one hour. Ordinary long replies stream in the same thread;
 large builds can need a longer limit or smaller requests. Failures end the

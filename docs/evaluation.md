@@ -34,6 +34,14 @@ return to their task's source; crew text cannot enter another turn's preview;
 Stop does not interrupt a foreign wake; and a cursor-only wake retains its origin
 before its answer arrives.
 
+Attachment gates accept file-only Slack requests, pass actual inline bytes to
+the OpenCode adapter, reject inaccessible input before admission, and route late
+private proof through the production transcript parser. Upload retries preserve
+the original task and persisted upload ID. An ambiguous finalization is checked
+read-only; it is never blindly repeated. Parser/file tests separately cover
+partial previews, private tool output, code examples, unsafe paths and changed
+files. All media fixtures use local files and controlled HTTP, not live Slack.
+
 Crew wait uses one 60-second observation window across queue promotion and
 running work. On expiry it returns progress without stopping the worker. The
 captain must reply and end the turn, then collect the same task later. Tests use

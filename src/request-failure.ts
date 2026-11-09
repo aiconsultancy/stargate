@@ -1,12 +1,15 @@
 import { cancellationNotice } from "./cancellation";
 import { slackContent } from "./slack-format";
 
+export class AttachmentInputUnavailable extends Error {}
+
 /** Only fixed safe causes cross the durable queue and Slack boundary. */
 export type RequestFailure =
   | "timeout"
   | "cancelled"
   | "backend"
   | "context"
+  | "attachments"
   | "interrupted"
   | "reaction"
   | "history";
@@ -24,6 +27,10 @@ const failures = {
   context: {
     title: "Thread context unavailable",
     text: "Pogo could not load initial thread context. No agent turn was started. Check Slack history access and try again.",
+  },
+  attachments: {
+    title: "Attachments unavailable",
+    text: "Pogo could not pass these attachments to the agent. Check files:read access, channel sharing, supported file types and size limits. No agent turn was admitted; the files were not silently dropped.",
   },
   interrupted: {
     title: "Gateway interrupted",

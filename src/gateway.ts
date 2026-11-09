@@ -4,6 +4,16 @@ import type { Logger } from "pino";
 import type { ActivityView } from "./activity";
 import { ActivityDelivery, type ActivityHandle } from "./activity-delivery";
 import {
+  type Attachment,
+  checkAttachments,
+  inspectAttachment,
+  maxAttachments,
+  maxAttachmentTotalBytes,
+  type PublishedFile,
+  parseAttachments,
+  readPreparedAttachment,
+} from "./attachments";
+import {
   type AgentBackend,
   latestInput,
   type Transcript,
@@ -16,7 +26,11 @@ import { abortable, runAbortable } from "./effect";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
 import { parseReactionReply, type ReactionName } from "./reactions";
-import { failureText, type RequestFailure } from "./request-failure";
+import {
+  AttachmentInputUnavailable,
+  failureText,
+  type RequestFailure,
+} from "./request-failure";
 import {
   botKey,
   chunks,
@@ -60,12 +74,52 @@ type FinalTranscript = Transcript & { gap?: true; anchored?: true };
 /** Settled public text without reaction controls; never applies a reaction. */
 export function transcriptReply(entries: readonly TranscriptEntry[]) {
   return entries
-    .map((entry) => parseReactionReply(entry.text).text.trim())
+    .map((entry) =>
+      parseAttachments(parseReactionReply(entry.text).text).text.trim(),
+    )
     .filter(Boolean)
     .join("\n\n");
 }
 
+export function transcriptAttachments(entries: readonly TranscriptEntry[]) {
+  return [
+    ...new Map(
+      entries
+        .flatMap((entry) => parseAttachments(entry.text).files)
+        .map((file) => [file.path, file]),
+    ).values(),
+  ];
+}
+
+export interface AttachmentTransport {
+  download(
+    ids: readonly string[],
+    channel: string,
+    signal: AbortSignal,
+  ): Promise<Attachment[]>;
+  reserveUpload(
+    name: string,
+    length: number,
+    signal: AbortSignal,
+  ): Promise<{ fileID: string; url: string }>;
+  putUpload(url: string, data: Uint8Array, signal: AbortSignal): Promise<void>;
+  completeUpload(
+    channel: string,
+    thread: string,
+    fileID: string,
+    title: string,
+    signal: AbortSignal,
+  ): Promise<void>;
+  sharedIn(
+    fileID: string,
+    channel: string,
+    thread: string,
+    signal: AbortSignal,
+  ): Promise<boolean>;
+}
+
 export interface SlackDelivery {
+  readonly files?: AttachmentTransport;
   /** Replace a preview when ts is set; false means it was removed. */
   failure?(
     channel: string,
@@ -433,6 +487,7 @@ export class Gateway {
     }
     if (read.cursor === target.cursor) return true;
     const text = transcriptReply(read.entries);
+    const files = transcriptAttachments(read.entries);
     const last = read.entries.at(-1);
     return (
       this.store.appendTranscript({
@@ -446,6 +501,7 @@ export class Gateway {
                 {
                   eventId: `transcript:${last.id}`,
                   chunks: transcriptChunks(text),
+                  files,
                 },
               ]
             : [],
@@ -459,7 +515,7 @@ export class Gateway {
     from: CaptainCursor,
     read: FinalTranscript,
     current?: number,
-  ): { commit: CaptainTranscript; text: string } {
+  ): { commit: CaptainTranscript; text: string; files: PublishedFile[] } {
     let owner = read.anchored && current !== undefined ? current : from.owner;
     const groups: { job: number; entries: TranscriptEntry[] }[] = [];
     const ownerFor = (input: string) =>
@@ -479,6 +535,11 @@ export class Gateway {
           .filter((group) => group.job === current)
           .flatMap((group) => group.entries),
       ),
+      files: transcriptAttachments(
+        groups
+          .filter((group) => group.job === current)
+          .flatMap((group) => group.entries),
+      ),
       commit: {
         botKey: this.key,
         sessionID,
@@ -494,6 +555,7 @@ export class Gateway {
                   job: group.job,
                   eventId: `transcript:${last.id}`,
                   chunks: transcriptChunks(text),
+                  files: transcriptAttachments(group.entries),
                 },
               ]
             : [];
@@ -648,8 +710,9 @@ export class Gateway {
       let captain: CaptainCursor | undefined;
       let captainCommit: CaptainTranscript | undefined;
       let keep = 0;
+      let files: PublishedFile[] = [];
       const reply = (text: string, complete: boolean) => {
-        if (!this.slack.react) return text;
+        if (!this.slack.react) return parseAttachments(text, complete).text;
         const parsed = parseReactionReply(text, complete);
         if (parsed.reaction && !reacted && !signal.aborted) {
           reacted = true;
@@ -664,7 +727,7 @@ export class Gateway {
               this.log.warn({ job: job.id }, "Slack reaction unavailable"),
             );
         }
-        return parsed.text;
+        return parseAttachments(parsed.text, complete).text;
       };
       try {
         try {
@@ -765,6 +828,28 @@ export class Gateway {
             cancel: () => cancellation.abort(),
           });
           activity = await this.activity.start(job, session, signal, shutdown);
+          const fileIDs = this.store.inputFiles(job.id);
+          let inputFiles: Attachment[] = [];
+          if (fileIDs.length) {
+            try {
+              if (!this.slack.files || !this.backend.supportsAttachments)
+                throw new Error(
+                  "Attachment input is unavailable for this backend",
+                );
+              inputFiles = await this.slack.files.download(
+                fileIDs,
+                job.channel,
+                signal,
+              );
+              checkAttachments(inputFiles);
+              if (inputFiles.length !== fileIDs.length)
+                throw new Error("Some requested attachments are unavailable");
+            } catch {
+              signal.throwIfAborted();
+              throw new AttachmentInputUnavailable();
+            }
+            signal.throwIfAborted();
+          }
           this.store.started(job.id);
           const streamed = await this.backend.prompt(
             session,
@@ -780,6 +865,7 @@ export class Gateway {
                   }
                 }
               : undefined,
+            inputFiles,
           );
           signal.throwIfAborted();
           // The prompt reply is this request's own text: only it can react.
@@ -794,6 +880,11 @@ export class Gateway {
               ? this.captainTranscript(session, captain, transcript, job.id)
               : undefined;
           captainCommit = owned?.commit;
+          files = owned
+            ? owned.files
+            : transcript
+              ? transcriptAttachments(transcript.entries)
+              : parseAttachments(streamed).files;
           const answer = owned
             ? owned.text
             : transcript
@@ -830,7 +921,9 @@ export class Gateway {
                 ? "timeout"
                 : error instanceof ThreadContextUnavailable
                   ? "context"
-                  : "backend";
+                  : error instanceof AttachmentInputUnavailable
+                    ? "attachments"
+                    : "backend";
           output = [failureText(failure)];
           transcript = undefined;
           // Keep public text that settled before the failure; shutdown recovers later.
@@ -871,6 +964,7 @@ export class Gateway {
           output = this.store.respond(job.id, output, failure, {
             keep,
             ...(captainCommit ? { captain: captainCommit } : {}),
+            files,
             ...(transcript && !this.backend.sessionID
               ? { transcript: { from, cursor: transcript.cursor } }
               : {}),
@@ -934,15 +1028,148 @@ export class Gateway {
         }
         this.store.sent(job.id, i + 1);
       }
+      await this.deliverAttachments(job, shutdown);
       this.store.finish(job.id);
     } catch {
       this.log.warn({ job: job.id }, "Slack delivery failed");
-      if (job.attempts >= 7) this.store.finish(job.id, "failed");
-      else
+      if (job.attempts >= 7) {
+        if (
+          this.store.attachments(job.id).some((file) => file.phase !== "shared")
+        )
+          await this.slack
+            .post(
+              job.channel,
+              job.thread,
+              "Attachment delivery failed or is unconfirmed. The agent work was not rerun.",
+            )
+            .catch(() => {});
+        this.store.finish(job.id, "failed");
+      } else
         this.store.retry(
           job.id,
           Date.now() + Math.min(60_000, 1000 * 2 ** job.attempts),
         );
+    }
+  }
+
+  private async deliverAttachments(job: Job, shutdown: AbortSignal) {
+    const files = this.store.attachments(job.id);
+    if (!files.length) return;
+    const save = () => this.store.saveAttachments(job.id, files);
+    const local =
+      this.config.backend.type !== "opencode" ||
+      ["localhost", "127.0.0.1", "[::1]"].includes(
+        new URL(this.config.backend.url).hostname,
+      );
+    if (!local || files.length > maxAttachments || !this.slack.files) {
+      for (const file of files) file.phase = "unavailable";
+      save();
+    } else {
+      for (const file of files) {
+        if (file.phase || file.prepared) continue;
+        try {
+          file.prepared = await inspectAttachment(file);
+        } catch {
+          file.phase = "unavailable";
+        }
+        save();
+      }
+      if (
+        files.reduce((sum, file) => sum + (file.prepared?.size ?? 0), 0) >
+        maxAttachmentTotalBytes
+      ) {
+        for (const file of files)
+          if (file.phase !== "shared") file.phase = "unavailable";
+        save();
+      }
+    }
+    for (const file of files) {
+      shutdown.throwIfAborted();
+      if (
+        !isAllowedUser(this.config, job.user) ||
+        !isAllowedChannel(this.config, job.channel)
+      )
+        throw new Error("Attachment delivery access denied");
+      if (file.phase === "shared") continue;
+      if (file.prepared && !file.title) {
+        file.title =
+          [...(file.caption || file.prepared.name)]
+            .map((char) =>
+              char === "/" ||
+              char === "\\" ||
+              char.charCodeAt(0) < 32 ||
+              char.charCodeAt(0) === 127
+                ? " "
+                : char,
+            )
+            .join("")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 255)
+            .trim() || file.prepared.name;
+        save();
+      }
+      const transport = this.slack.files;
+      const signal = AbortSignal.any([shutdown, AbortSignal.timeout(30_000)]);
+      if (file.phase === "completing" && file.fileID && transport) {
+        if (
+          await transport.sharedIn(file.fileID, job.channel, job.thread, signal)
+        ) {
+          file.phase = "shared";
+          save();
+          continue;
+        }
+        // Completion is one-shot. Absence of a share is not proof it never ran.
+        file.phase = "unavailable";
+        save();
+      }
+      if (file.phase === "unavailable" || !file.prepared || !transport) {
+        if (!file.noticeSent) {
+          if (!files.some((item) => item.noticeSent))
+            await this.slack.post(
+              job.channel,
+              job.thread,
+              "An attachment is unavailable or its upload is unconfirmed. The agent work was not rerun.",
+            );
+          file.noticeSent = true;
+          save();
+        }
+        continue;
+      }
+      if (file.phase !== "uploaded") {
+        let content: Attachment;
+        try {
+          content = await readPreparedAttachment(file.prepared);
+        } catch {
+          file.phase = "unavailable";
+          save();
+          throw new Error("Published attachment changed or became unavailable");
+        }
+        // A retry may abandon an unshared reservation, never complete both IDs.
+        const reserved = await transport.reserveUpload(
+          content.name,
+          content.data.byteLength,
+          signal,
+        );
+        file.fileID = reserved.fileID;
+        file.phase = "reserved";
+        save();
+        await transport.putUpload(reserved.url, content.data, signal);
+        file.phase = "uploaded";
+        save();
+      }
+      if (!file.fileID) throw new Error("Attachment upload identity missing");
+      file.phase = "completing";
+      save();
+      await transport.completeUpload(
+        job.channel,
+        job.thread,
+        file.fileID,
+        file.title ?? file.prepared.name,
+        signal,
+      );
+      file.phase = "shared";
+      save();
     }
   }
 
