@@ -9,6 +9,8 @@ import {
   type SessionPromptInput,
   type SessionSyntheticInput,
 } from "@opencode/client";
+import { Context, Deferred, Effect } from "effect";
+import pino from "pino";
 import {
   type CrewAgents,
   CrewEngine,
@@ -18,6 +20,7 @@ import {
 } from "../src/crew/engine";
 import { CrewMaintenance } from "../src/crew/maintenance";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
+import { nativeWait } from "../src/crew/native-wait";
 import plugin from "../src/crew/plugin";
 import type {
   CrewInspectionAPI,
@@ -32,7 +35,157 @@ import {
   teamSchema,
 } from "../src/crew/team";
 import { CrewWaiting } from "../src/crew/waiting";
+import { Gateway } from "../src/gateway";
+import { Store } from "../src/store";
 import { waitingSettingsPath } from "../src/waiting";
+import { bot, event, identity } from "./fixtures";
+
+test("conversation eval: busy status lets a second source progress without replaying crew work", async () => {
+  const f = await fixture();
+  const idle = Effect.runSync(Deferred.make<void>());
+  let observers = 0;
+  const wait = nativeWait(
+    () =>
+      Effect.gen(function* () {
+        observers++;
+        yield* Deferred.await(idle);
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            observers--;
+          }),
+        ),
+      ),
+    Context.empty(),
+  );
+  const engine = await CrewEngine.open(
+    f.options,
+    { ...f.client, wait },
+    f.mailer,
+    f.agents,
+    async () => {
+      throw new Error("Busy status must not read a final result");
+    },
+  );
+  const store = new Store(":memory:");
+  const posts: { channel: string; thread: string; text: string }[] = [];
+  const sessions: string[] = [];
+  const task = (
+    await f.engine.run(
+      { op: "dispatch", crew: "mario", text: "Synthetic project task" },
+      f.captain(),
+    )
+  ).task;
+  if (!task) throw new Error("Missing task");
+  const before = f.engine.state.task(task.id);
+  const gateway = new Gateway(
+    bot(),
+    identity,
+    store,
+    {
+      sessionID: "ses_captain_a",
+      async createSession() {
+        return "ses_captain_a";
+      },
+      async prompt(session, text) {
+        sessions.push(session);
+        expect(
+          (await engine.run({ op: "status", taskID: task.id }, f.captain()))
+            .status,
+        ).toBe("running");
+        return text === "Track project A"
+          ? "Project A is running."
+          : "Project B has its independent plan.";
+      },
+      async close() {},
+    },
+    {
+      async post(channel, thread, text) {
+        posts.push({ channel, thread, text });
+      },
+    },
+    pino({ enabled: false }),
+  );
+  try {
+    gateway.accept(event("<@UBOT> Track project A", "1.000"));
+    const other = event("<@UBOT> Plan project B", "2.000");
+    gateway.accept({
+      ...other,
+      event: { ...other.event, channel: "D123", channel_type: "im" },
+    });
+    for (const job of store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 2))
+      await gateway.process(job, new AbortController().signal);
+    expect(posts).toEqual([
+      { channel: "C123", thread: "1.000", text: "Project A is running." },
+      {
+        channel: "D123",
+        thread: "2.000",
+        text: "Project B has its independent plan.",
+      },
+    ]);
+    expect(sessions).toEqual(["ses_captain_a", "ses_captain_a"]);
+    expect(f.inputs).toHaveLength(1);
+    expect(f.engine.state.task(task.id)).toEqual(before);
+    expect(f.busy.has(task.workerSessionID)).toBe(true);
+    expect(Effect.runSync(Deferred.isDone(idle))).toBe(false);
+    expect(observers).toBe(0);
+  } finally {
+    Effect.runSync(Deferred.succeed(idle, undefined));
+    await gateway.close();
+    store.close();
+    await engine.close();
+    await f.close();
+  }
+});
+
+test("conversation eval: explicit completion releases wait before native worker idle", async () => {
+  const f = await fixture();
+  const idle = Effect.runSync(Deferred.make<void>());
+  const started = Promise.withResolvers<void>();
+  let observing = false;
+  const task = (
+    await f.engine.run(
+      { op: "dispatch", crew: "mario", text: "Synthetic completion task" },
+      f.captain(),
+    )
+  ).task;
+  if (!task) throw new Error("Missing task");
+  f.client.wait = nativeWait(
+    () =>
+      Effect.gen(function* () {
+        observing = true;
+        started.resolve();
+        yield* Deferred.await(idle);
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            observing = false;
+          }),
+        ),
+      ),
+    Context.empty(),
+  );
+  const waiting = f.engine.run({ op: "wait", taskID: task.id }, f.captain());
+  try {
+    await started.promise;
+    await f.engine.run(
+      { op: "complete", taskID: task.id, result: "Retained result" },
+      f.worker(task.workerSessionID),
+    );
+    expect(await waiting).toMatchObject({
+      status: "completed",
+      task: { id: task.id, result: "Retained result" },
+    });
+    expect(observing).toBe(false);
+    expect(Effect.runSync(Deferred.isDone(idle))).toBe(false);
+    expect(f.calls.filter((call) => call.method === "interrupt")).toEqual([]);
+    expect(f.inputs).toHaveLength(1);
+  } finally {
+    Effect.runSync(Deferred.succeed(idle, undefined));
+    await waiting.catch(() => {});
+    await f.close();
+  }
+});
 
 test("host-bound journal notes work without a task and isolate captain roots", async () => {
   const f = await fixture();

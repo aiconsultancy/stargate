@@ -66,6 +66,10 @@ run = "bun run check"
 description = "Run tests"
 run = "bun test"
 
+[tasks.eval]
+description = "Evaluate conversation liveness, isolation, routing, and no-replay behavior"
+run = "bun test tests/conversation-eval.test.ts tests/crew.test.ts tests/captain-gateway.test.ts -t 'conversation eval:'"
+
 [tasks.typecheck]
 description = "Check TypeScript types"
 run = "bun run typecheck"

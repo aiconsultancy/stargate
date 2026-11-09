@@ -145,7 +145,7 @@ test("pin leaves the old namespace and per-source follow-up admission intact", a
   );
 });
 
-test("first requests from concurrent sources share one execution slot", async () => {
+test("conversation eval: concurrent sources keep one captain execution slot", async () => {
   const f = fixture();
   const first = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
@@ -298,7 +298,7 @@ function nativeFixture(store?: Store, ownStore = true) {
   };
 }
 
-test("one cursor routes prior continuation and current answer to their own sources", async () => {
+test("conversation eval: prior continuation and current answer keep their own sources", async () => {
   const f = nativeFixture();
   f.gateway.accept(source("D123", "first", "1.000"));
   await f.drain();
@@ -318,7 +318,7 @@ test("one cursor routes prior continuation and current answer to their own sourc
   expect(f.prompts).toHaveLength(2);
 });
 
-test("native UI input clears Slack ownership, including an input with no output", async () => {
+test("conversation eval: native UI input clears Slack ownership even without output", async () => {
   const f = nativeFixture();
   f.gateway.accept(source("D123", "first", "1.000"));
   await f.drain();
@@ -385,7 +385,7 @@ test("legacy mappings never broadcast; matching original cursor retains one owne
   expect(f.store.session(job.conversation)).toBe("original-captain");
 });
 
-test("unreadable final history defers owned delivery and retries without a prompt", async () => {
+test("conversation eval: unreadable history delays delivery instead of inventing an answer", async () => {
   const f = nativeFixture();
   f.setTurn(async () => {
     f.add("assistant", "Owned deferred answer");
@@ -407,7 +407,7 @@ test("unreadable final history defers owned delivery and retries without a promp
   expect(f.prompts).toHaveLength(1);
 });
 
-test("delivery retries keep the exact destination and never read or prompt again", async () => {
+test("conversation eval: delivery retries keep their destination and never rerun work", async () => {
   const f = nativeFixture();
   const post = f.slack.post;
   f.slack.post = async () => {

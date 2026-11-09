@@ -91,6 +91,12 @@ shell completions, reach the same thread. See [session transcript](docs/design.m
 Delivery retries do not repeat agent work. Check agent state before retrying
 work whose outcome is uncertain.
 
+Use `make eval` for local conversation reliability evaluations: busy crew,
+cancelled observations, two sources, reply ownership and delivery recovery.
+These requests use fake native delivery and real SQLite, with no Slack posts or
+provider calls. See [evaluation and improvement](docs/evaluation.md) for the
+score gates, limits and small-change procedure.
+
 Opt into a separate collapsible crew activity message with
 `crewActivity: { "detail": "summary" }` on the bot.
 `detailed` also shows attributed assignments, messages and results; `off` is

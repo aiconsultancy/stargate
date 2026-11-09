@@ -1,9 +1,12 @@
 import { join, resolve } from "node:path";
 import { Plugin } from "@opencode/plugin";
+import { Plugin as EffectPlugin } from "@opencode/plugin/effect";
+import { fromPromise } from "@opencode/plugin/promise/adapter";
 import {
   type ToolContext,
   Error as ToolError,
 } from "@opencode/plugin/promise/tool";
+import { Effect } from "effect";
 import { resourceScope } from "../effect";
 import { MaintenanceRPC, maintenancePlanSchema } from "../maintenance";
 import { connectHistoryAPI, historyVisible } from "./api";
@@ -15,6 +18,7 @@ import { journalInputSchema } from "./journal";
 import { CrewMaintenance } from "./maintenance";
 import { dmInputSchema } from "./messaging";
 import { CrewModels, modelInputSchema } from "./models";
+import { nativeWait } from "./native-wait";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
 import { CrewError } from "./state";
@@ -22,7 +26,7 @@ import { CrewWaiting, waitingInputSchema } from "./waiting";
 
 // greybeard: configured shared workers; only explicit DM wakes a captain.
 // Host tools and the general HTTP API are not an OS sandbox.
-export default Plugin.define({
+const plugin = Plugin.define({
   id: "pogo.crew",
   async setup(ctx) {
     // One scope owns the engine, RPC registrations and maintenance turns.
@@ -311,4 +315,20 @@ export default Plugin.define({
     }
     return resources.close;
   },
+});
+
+export default EffectPlugin.define({
+  id: plugin.id,
+  effect: (host) =>
+    Effect.gen(function* () {
+      const runtime = yield* Effect.context<never>();
+      // greybeard: SDK 2.2.5 Promise methods discard request signals. Bridge
+      // native wait only; remove this override when that adapter forwards them.
+      const wait = nativeWait(host.session.wait, runtime);
+      yield* fromPromise({
+        ...plugin,
+        setup: (ctx) =>
+          plugin.setup({ ...ctx, session: { ...ctx.session, wait } }),
+      }).effect(host);
+    }),
 });
