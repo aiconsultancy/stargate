@@ -307,11 +307,23 @@ async function physicalDirectory(path: string): Promise<string> {
 // rather than racing Pi's durable conversation-creation reservation.
 const reportAdmissions = new Map<string, Promise<void>>();
 const piIdentity = Symbol("host-bound Pi caller");
+// greybeard: cooperative 60s observation, not a turn/fairness guarantee. Native
+// admission/read calls can overrun; add turn-aware yielding only when required.
+const crewWaitWindowMs = 60_000;
+/** Internal timing injection, never operator/team configuration. */
+export type CrewWaitOptions = {
+  now?: () => number;
+  wait?: (ms: number, signal: AbortSignal) => Promise<void>;
+  windowMs?: number;
+};
 
 export class CrewEngine {
   private readonly pi: PiCrewWorkers;
   readonly reporting: CrewReporter;
   private closing?: Promise<void>;
+  private readonly waitNow: () => number;
+  private readonly waitPoll: NonNullable<CrewWaitOptions["wait"]>;
+  private readonly waitWindowMs: number;
   private constructor(
     readonly options: CrewOptions & { team: NonNullable<CrewOptions["team"]> },
     readonly state: CrewState,
@@ -321,7 +333,12 @@ export class CrewEngine {
     piFactory?: PiWorkerFactory,
     private readonly inspectionConnector?: InspectionConnector,
     private readonly connectResults?: ResultConnector,
+    waitOptions: CrewWaitOptions = {},
   ) {
+    this.waitNow = waitOptions.now ?? (() => performance.now());
+    this.waitPoll =
+      waitOptions.wait ?? ((ms, signal) => delay(ms, undefined, { signal }));
+    this.waitWindowMs = waitOptions.windowMs ?? crewWaitWindowMs;
     this.pi = new PiCrewWorkers(
       state,
       options.stateDirectory,
@@ -402,6 +419,7 @@ export class CrewEngine {
     piFactory?: PiWorkerFactory,
     inspectionConnector?: InspectionConnector,
     connectResults?: ResultConnector,
+    waitOptions: CrewWaitOptions = {},
   ) {
     const parsed = crewOptionsSchema.safeParse(input);
     if (!parsed.success)
@@ -493,6 +511,7 @@ export class CrewEngine {
       piFactory,
       inspectionConnector,
       connectResults,
+      waitOptions,
     );
   }
 
@@ -954,6 +973,8 @@ export class CrewEngine {
         "Invalid pogo_crew input. Use the operation's declared fields.",
       );
     const input = parsed.data;
+    const deadline =
+      input.op === "wait" ? this.waitNow() + this.waitWindowMs : 0;
     let authorized = false;
     try {
       await this.authorize(
@@ -1017,13 +1038,14 @@ export class CrewEngine {
         return { status: "compaction-admitted" };
       }
       let task = this.ownedCaptainTask(input.taskID, caller);
+      if (input.op === "wait") caller.signal.throwIfAborted();
       const abandoned = this.abandoned(
         task,
         input.op === "wait" ? input.afterNoticeID : 0,
       );
       if (abandoned) return abandoned;
-      if (task.status === "queued") task = await this.promote(task, caller);
       if (input.op === "status") {
+        if (task.status === "queued") task = await this.promote(task, caller);
         const recovered = await this.reconcileResult(task, caller);
         return {
           status: recovered.task.status,
@@ -1031,7 +1053,7 @@ export class CrewEngine {
           notices: this.state.notices(task.id, 0),
         };
       }
-      return await this.wait(task, input.afterNoticeID, caller);
+      return await this.wait(task, input.afterNoticeID, caller, deadline);
     } catch (error) {
       if (
         input.op === "wait" &&
@@ -2169,15 +2191,28 @@ export class CrewEngine {
     task: CrewTask,
     after: number,
     caller: CrewCaller,
+    deadline: number,
   ): Promise<CrewResult> {
+    const elapsed = (current: CrewTask, notices: CrewNotice[]): CrewResult => ({
+      status: current.status,
+      task: current,
+      notices,
+      diagnostic: `Observation window elapsed; task ${current.id} is still ${current.status}. Work continues independently; nothing was cancelled or resubmitted. Reply with progress. End this turn; collect this task later with status or wait. Do not resubmit the assignment.`,
+    });
     // Queued waits do not observe/interrupt the different task occupying this slot.
     while (task.status === "queued") {
       caller.signal.throwIfAborted();
       task = await this.promote(task, caller);
+      caller.signal.throwIfAborted();
       if (task.status !== "queued") break;
-      await delay(25, undefined, { signal: caller.signal });
+      const notices = this.state.notices(task.id, after);
+      if (notices.length) return { status: task.status, task, notices };
+      const remaining = deadline - this.waitNow();
+      if (remaining <= 0) return elapsed(task, notices);
+      await this.waitPoll(Math.min(25, remaining), caller.signal);
       task = this.ownedCaptainTask(task.id, caller);
     }
+    caller.signal.throwIfAborted();
     if (task.status === "cancelled")
       return {
         status: task.status,
@@ -2190,16 +2225,19 @@ export class CrewEngine {
     let observed: Promise<void> | undefined;
     try {
       for (;;) {
+        caller.signal.throwIfAborted();
         let current = this.ownedCaptainTask(task.id, caller);
         const abandoned = this.abandoned(current, after);
         if (abandoned) return abandoned;
         const piWorker = Boolean(this.member(current.crewID).backend);
         if (piWorker) current = await this.piRecover(current, caller.signal);
+        caller.signal.throwIfAborted();
         if (
           !piWorker &&
           (current.status === "uncertain" || (this.connectResults && idle))
         ) {
           const recovered = await this.reconcileResult(current, caller, idle);
+          caller.signal.throwIfAborted();
           current = recovered.task;
           if (current.status === "completed" || current.status === "uncertain")
             return {
@@ -2250,7 +2288,9 @@ export class CrewEngine {
             "Worker ended or became unavailable without a confirmed result; task outcome uncertain.",
           );
         }
-        await delay(25, undefined, { signal: caller.signal });
+        const remaining = deadline - this.waitNow();
+        if (remaining <= 0) return elapsed(current, notices);
+        await this.waitPoll(Math.min(25, remaining), caller.signal);
       }
     } catch (error) {
       if (caller.signal.aborted) {

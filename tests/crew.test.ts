@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   OpenCode,
   type SessionCreateInput,
@@ -17,6 +18,7 @@ import {
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
+  type CrewWaitOptions,
 } from "../src/crew/engine";
 import { CrewMaintenance } from "../src/crew/maintenance";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
@@ -39,6 +41,467 @@ import { Gateway } from "../src/gateway";
 import { Store } from "../src/store";
 import { waitingSettingsPath } from "../src/waiting";
 import { bot, event, identity } from "./fixtures";
+
+async function boundedOutcome<T>(work: Promise<T>): Promise<T> {
+  const stop = new AbortController();
+  try {
+    return await Promise.race([
+      work,
+      delay(1000, undefined, { signal: stop.signal, ref: false }).then(() => {
+        throw new Error("Crew wait did not yield after its observation window");
+      }),
+    ]);
+  } finally {
+    stop.abort();
+  }
+}
+
+function waitClock() {
+  let now = 0;
+  let poll = async () => {};
+  return {
+    options: {
+      windowMs: 50,
+      now: () => now,
+      wait: async (ms: number, signal: AbortSignal) => {
+        signal.throwIfAborted();
+        now += ms;
+        await poll();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      },
+    },
+    advance(ms: number) {
+      now += ms;
+    },
+    now: () => now,
+    onPoll(next: () => Promise<void>) {
+      poll = next;
+    },
+  };
+}
+
+test("conversation eval: bounded wait yields without cancelling the worker and later collects its original result", async () => {
+  const clock = waitClock();
+  const f = await fixture(undefined, clock.options);
+  const idle = Effect.runSync(Deferred.make<void>());
+  let observers = 0;
+  const stop = new AbortController();
+  let waiting: Promise<unknown> | undefined;
+  try {
+    f.history.set("ses_captain_a", [
+      { id: "tool", type: "assistant", time: { created: 2 } },
+      { id: "private-input", type: "user", time: { created: 1 } },
+    ]);
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Original" },
+        { ...f.captain(), messageID: "tool" },
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    f.engine.state.notice(task.id, "Already read");
+    const after = f.engine.state.notices(task.id, 0).at(-1)?.id ?? 0;
+    const before = f.engine.state.task(task.id);
+    f.client.wait = nativeWait(
+      () =>
+        Effect.gen(function* () {
+          observers++;
+          yield* Deferred.await(idle);
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              observers--;
+            }),
+          ),
+        ),
+      Context.empty(),
+    );
+    const observation = f.engine.run(
+      { op: "wait", taskID: task.id, afterNoticeID: after },
+      f.captain("ses_captain_a", stop.signal),
+    );
+    waiting = observation;
+    expect(await boundedOutcome(observation)).toMatchObject({
+      status: "running",
+      task: before,
+      notices: [],
+      diagnostic: expect.stringContaining("End this turn"),
+    });
+    expect(observers).toBe(0);
+    expect(Effect.runSync(Deferred.isDone(idle))).toBe(false);
+    expect(f.busy.has(task.workerSessionID)).toBe(true);
+    expect(f.engine.state.task(task.id)).toEqual(before);
+    expect(f.calls.filter(({ method }) => method === "interrupt")).toEqual([]);
+    expect(f.inputs).toHaveLength(1);
+    expect(f.engine.state.notices(task.id, 0).map(({ id }) => id)).toEqual([
+      after,
+    ]);
+    await f.engine.dm(
+      { op: "send", to: "captain", taskID: task.id, text: "Ready" },
+      f.worker(task.workerSessionID),
+    );
+    await f.engine.run(
+      { op: "complete", taskID: task.id, result: "Original result" },
+      f.worker(task.workerSessionID),
+    );
+    expect(
+      await f.engine.run(
+        { op: "wait", taskID: task.id, afterNoticeID: after },
+        f.captain(),
+      ),
+    ).toMatchObject({
+      status: "completed",
+      task: {
+        id: task.id,
+        inputID: task.inputID,
+        originInputID: "private-input",
+        result: "Original result",
+      },
+    });
+    expect(f.synthetics.at(-1)).toMatchObject({
+      delivery: "queue",
+      metadata: {
+        pogoCrew: { sourceTaskID: task.id, originInputID: "private-input" },
+      },
+    });
+    expect(f.inputs).toHaveLength(1);
+  } finally {
+    stop.abort();
+    Effect.runSync(Deferred.succeed(idle, undefined));
+    await waiting?.catch(() => {});
+    await f.close();
+  }
+});
+
+test("bounded queued wait preserves FIFO and origins without admitting or replaying work", async () => {
+  const clock = waitClock();
+  const f = await fixture(undefined, clock.options);
+  try {
+    const first = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "First" },
+        f.captain(),
+      )
+    ).task;
+    if (!first) throw new Error("Missing task");
+    f.history.set("ses_captain_a", [
+      { id: "queue-tool", type: "assistant", time: { created: 2 } },
+      { id: "queue-origin", type: "user", time: { created: 1 } },
+    ]);
+    const caller = { ...f.captain(), messageID: "queue-tool" };
+    const queued = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Second", queue: true },
+        caller,
+      )
+    ).task;
+    await f.engine.run(
+      { op: "dispatch", crew: "mario", text: "Third", queue: true },
+      caller,
+    );
+    if (!queued) throw new Error("Missing queued task");
+    const fifo = f.engine.state.queuedTasks("mario");
+    const before = f.engine.state.task(first.id);
+    expect(
+      await boundedOutcome(
+        f.engine.run({ op: "wait", taskID: queued.id }, f.captain()),
+      ),
+    ).toMatchObject({
+      status: "queued",
+      task: queued,
+      notices: [],
+      diagnostic: expect.stringContaining("End this turn"),
+    });
+    expect(clock.now()).toBe(50);
+    expect(f.engine.state.queuedTasks("mario")).toEqual(fifo);
+    expect(f.engine.state.task(first.id)).toEqual(before);
+    expect(f.engine.state.task(queued.id)?.originInputID).toBe("queue-origin");
+    expect(f.inputs).toHaveLength(1);
+    expect(f.calls.filter(({ method }) => method === "interrupt")).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("bounded wait shares one deadline across queued promotion and running observation", async () => {
+  const clock = waitClock();
+  const f = await fixture(undefined, clock.options);
+  try {
+    const first = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "First" },
+        f.captain(),
+      )
+    ).task;
+    const queued = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Second", queue: true },
+        f.captain(),
+      )
+    ).task;
+    if (!first || !queued) throw new Error("Missing tasks");
+    let polls = 0;
+    clock.onPoll(async () => {
+      if (++polls !== 1) return;
+      await f.engine.run(
+        { op: "complete", taskID: first.id, result: "First done" },
+        f.worker(first.workerSessionID),
+      );
+      f.busy.delete(first.workerSessionID);
+    });
+    expect(
+      await boundedOutcome(
+        f.engine.run({ op: "wait", taskID: queued.id }, f.captain()),
+      ),
+    ).toMatchObject({
+      status: "running",
+      task: {
+        id: queued.id,
+        inputID: queued.inputID,
+        originInputID: queued.originInputID,
+      },
+    });
+    expect(clock.now()).toBe(50);
+    expect(polls).toBe(2);
+    expect(f.inputs.map(({ id }) => id)).toEqual([
+      first.inputID,
+      queued.inputID,
+    ]);
+    expect(f.engine.state.queuedTasks("mario")).toEqual([]);
+    expect(f.calls.filter(({ method }) => method === "interrupt")).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("bounded wait counts initial promotion and authorization time without restarting its window", async () => {
+  const clock = waitClock();
+  const f = await fixture(undefined, clock.options);
+  try {
+    const first = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "First" },
+        f.captain(),
+      )
+    ).task;
+    const queued = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Second", queue: true },
+        f.captain(),
+      )
+    ).task;
+    if (!first || !queued) throw new Error("Missing tasks");
+    await f.engine.run(
+      { op: "complete", taskID: first.id, result: "Done" },
+      f.worker(first.workerSessionID),
+    );
+    f.busy.delete(first.workerSessionID);
+    const get = f.client.get;
+    let authorization = false;
+    let promotion = false;
+    f.client.get = async (input, request) => {
+      if (input.sessionID === "ses_captain_a" && !authorization) {
+        authorization = true;
+        clock.advance(25);
+      }
+      if (input.sessionID === queued.workerSessionID && !promotion) {
+        promotion = true;
+        clock.advance(25);
+      }
+      return get(input, request);
+    };
+    let polls = 0;
+    clock.onPoll(async () => {
+      polls++;
+    });
+    expect(
+      await boundedOutcome(
+        f.engine.run({ op: "wait", taskID: queued.id }, f.captain()),
+      ),
+    ).toMatchObject({
+      status: "running",
+      task: { id: queued.id, inputID: queued.inputID },
+    });
+    expect(clock.now()).toBe(50);
+    expect(polls).toBe(0);
+    expect(f.inputs).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("bounded wait preserves completion, notices, idle failure and caller abort at the deadline", async () => {
+  for (const outcome of [
+    "complete",
+    "notice",
+    "idle",
+    "failure",
+    "abort",
+    "complete-abort",
+  ] as const) {
+    const clock = waitClock();
+    const f = await fixture(undefined, clock.options);
+    const idle = Effect.runSync(Deferred.make<void>());
+    const stop = new AbortController();
+    try {
+      const task = (
+        await f.engine.run(
+          { op: "dispatch", crew: "mario", text: "Work" },
+          f.captain(),
+        )
+      ).task;
+      if (!task) throw new Error("Missing task");
+      f.client.wait = nativeWait(
+        () =>
+          Effect.gen(function* () {
+            if (!f.busy.has(task.workerSessionID)) return;
+            yield* Deferred.await(idle);
+            if (outcome === "failure")
+              return yield* Effect.fail(new Error("Native observation failed"));
+          }),
+        Context.empty(),
+      );
+      clock.onPoll(async () => {
+        if (clock.now() < 50) return;
+        if (outcome === "complete" || outcome === "complete-abort") {
+          await f.engine.run(
+            { op: "complete", taskID: task.id, result: "Done" },
+            f.worker(task.workerSessionID),
+          );
+          if (outcome === "complete-abort") stop.abort();
+        } else if (outcome === "notice")
+          f.engine.state.notice(task.id, "Need approval");
+        else if (outcome === "abort") stop.abort();
+        else Effect.runSync(Deferred.succeed(idle, undefined));
+      });
+      const waiting = boundedOutcome(
+        f.engine.run(
+          { op: "wait", taskID: task.id },
+          f.captain("ses_captain_a", stop.signal),
+        ),
+      );
+      if (outcome === "complete" || outcome === "notice") {
+        const result = await waiting;
+        expect(result.diagnostic).toBeUndefined();
+        expect(result.status).toBe(
+          outcome === "complete" ? "completed" : "running",
+        );
+        if (outcome === "complete") expect(result.task?.result).toBe("Done");
+        else expect(result.notices?.[0]?.text).toBe("Need approval");
+      } else {
+        await expect(waiting).rejects.toThrow(
+          outcome === "abort" || outcome === "complete-abort"
+            ? "Wait cancelled"
+            : "without a confirmed result",
+        );
+        expect(f.engine.state.task(task.id)?.status).toBe(
+          outcome === "complete-abort" ? "completed" : "uncertain",
+        );
+        expect(
+          f.calls.filter(({ method }) => method === "interrupt"),
+        ).toHaveLength(outcome === "abort" ? 1 : 0);
+      }
+      expect(f.inputs).toHaveLength(1);
+    } finally {
+      stop.abort();
+      Effect.runSync(Deferred.succeed(idle, undefined));
+      await f.close();
+    }
+  }
+});
+
+test("conversation eval: bounded wait lets a SQLite-queued Slack source enter after progress ends the captain turn", async () => {
+  const clock = waitClock();
+  const f = await fixture(undefined, clock.options);
+  const store = new Store(":memory:");
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const posts: string[] = [];
+  const prompts: string[] = [];
+  const stop = new AbortController();
+  let work: Promise<void> | undefined;
+  const task = (
+    await f.engine.run(
+      { op: "dispatch", crew: "mario", text: "Original A" },
+      f.captain(),
+    )
+  ).task;
+  if (!task) throw new Error("Missing task");
+  const before = f.engine.state.task(task.id);
+  clock.onPoll(async () => {
+    entered.resolve();
+    await release.promise;
+  });
+  const gateway = new Gateway(
+    bot(),
+    identity,
+    store,
+    {
+      sessionID: "ses_captain_a",
+      async createSession() {
+        return "ses_captain_a";
+      },
+      async prompt(_session, text, signal) {
+        prompts.push(text);
+        if (text === "Track A") {
+          const result = await f.engine.run(
+            { op: "wait", taskID: task.id },
+            f.captain("ses_captain_a", signal),
+          );
+          expect(result).toMatchObject({
+            status: "running",
+            diagnostic: expect.stringContaining("End this turn"),
+          });
+          return "A keeps running; I will collect it later.";
+        }
+        return "B can proceed.";
+      },
+      async close() {},
+    },
+    {
+      async post(_channel, _thread, text) {
+        posts.push(text);
+      },
+    },
+    pino({ enabled: false }),
+  );
+  try {
+    gateway.accept(event("<@UBOT> Track A", "1.000"));
+    const second = event("<@UBOT> Plan B", "2.000");
+    gateway.accept({
+      ...second,
+      event: { ...second.event, channel: "D123", channel_type: "im" },
+    });
+    const first = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
+    if (!first) throw new Error("Missing first job");
+    work = gateway.process(first, stop.signal);
+    await entered.promise;
+    expect(store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)).toEqual(
+      [],
+    );
+    expect(prompts).toEqual(["Track A"]);
+    release.resolve();
+    await boundedOutcome(work);
+    const next = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
+    if (!next) throw new Error("Missing second job");
+    await gateway.process(next, stop.signal);
+    expect(prompts).toEqual(["Track A", "Plan B"]);
+    expect(posts).toEqual([
+      "A keeps running; I will collect it later.",
+      "B can proceed.",
+    ]);
+    expect(f.engine.state.task(task.id)).toEqual(before);
+    expect(f.inputs).toHaveLength(1);
+    expect(f.calls.filter(({ method }) => method === "interrupt")).toEqual([]);
+  } finally {
+    release.resolve();
+    stop.abort();
+    await work?.catch(() => {});
+    await gateway.close();
+    store.close();
+    await f.close();
+  }
+});
 
 test("dispatch binds the exact open assistant origin before later inputs and preserves queued ancestry", async () => {
   const f = await fixture();
@@ -925,7 +1388,7 @@ test("broadcast returns partial receipts and Pi tools-none stores no unreadable 
   }
 });
 
-async function fixture(team?: Team) {
+async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
   const definition = team ?? defaultTeam;
   const directory = await mkdtemp("/tmp/opencode/pogo-crew-");
   const options: CrewOptions = {
@@ -1117,6 +1580,8 @@ async function fixture(team?: Team) {
     agents,
     undefined,
     async () => inspectionAPI,
+    undefined,
+    waitOptions,
   );
   let toolCall = 0;
   const captain = (

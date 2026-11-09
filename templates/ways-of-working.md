@@ -58,6 +58,14 @@ invent project rules. Do not change a project's instructions for ship policy.
   checks, limits and remaining work. A DM reply does not complete an assignment;
   a final answer does not substitute for a correlated DM reply. Captain records
   local checks, review, merge and verified deployment as separate milestones.
+- Before marking a task complete or returning its final answer, send one concise
+  `pogo_dm` to `captain` with task ID and verified outcome. Completion alone does
+  not wake the captain; a new send after completion cannot select that task's
+  captain route. Keep the result even if notification is deferred or unavailable.
+- Captain wait has one 60-second observation window, including queued promotion.
+  A running or queued return does not cancel work. Reply with progress and end
+  the turn; collect the same task later. Do not repeat wait in the same turn or
+  resubmit work. Explicit Stop and caller cancellation still cancel work.
 
 ## Liveness and recovery
 

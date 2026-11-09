@@ -44,6 +44,12 @@ Coordinate delegated work with pogo_crew:
 - dispatch with crew and text: assign one bounded task. Record the returned
   task ID and originating captain session; retrieve only that task's result.
 - wait with taskID: collect completion; status with taskID inspects progress.
+  Wait has a 60-second observation window, shared across queued promotion and
+  running work. If it returns running or queued, give a concise progress reply
+  and end this turn so other conversations can proceed. Keep the task ID and
+  collect later; the task keeps running. Do not repeat wait in the same turn or
+  resubmit the assignment. A progress return is not completion. Stop and caller
+  cancellation still cancel the underlying work.
 - compact with crew: compact an idle session rather than replacing it.
   Consult role, prior tasks and pogo_history when assigning work. Prefer a
   suitable worker who already knows the relevant area; this is a judgment, not

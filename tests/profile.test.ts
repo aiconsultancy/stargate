@@ -557,6 +557,8 @@ test("custom init creates only configured worktrees, generic prompts, and genera
   expect(prompt).toContain("pogo_model");
   expect(prompt).toContain("pogo_history");
   expect(prompt).toContain("queue: true");
+  expect(prompt).toContain("60-second observation window");
+  expect(prompt).toContain("Do not repeat wait in the same turn");
   expect(prompt).not.toContain("{{");
   expect(prompt).not.toContain("four");
   for (const [id, directory] of Object.entries(result.worktrees)) {
@@ -576,6 +578,8 @@ test("custom init creates only configured worktrees, generic prompts, and genera
     );
     expect(worker).not.toContain("{{");
     expect(worker).toContain("pogo_crew complete");
+    expect(worker).toContain("Before marking the task complete");
+    expect(worker).toContain("pogo_dm");
     expect(worker).toContain("pogo_history");
     expect(worker).toContain("Never create");
     if (id === "gaeta") {

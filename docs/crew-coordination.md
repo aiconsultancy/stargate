@@ -136,6 +136,25 @@ work units. One substantive reply can acknowledge and answer; no separate read
 receipt or unconditional heartbeat is required. Milestones use mail; urgent
 replies use explicit DM. Final task results include revision, checks and limits.
 
+Captain `wait` has one 60-second observation window shared by queued promotion
+and running work. A running or queued return leaves the task running or queued;
+reply with progress and end the turn, then collect the same task later. Do not
+repeat wait in one turn or dispatch it again. Stop and caller cancellation still
+stop the underlying work. Gateway timeouts at or below 60 seconds can expire
+before this window; the default gateway timeout is 30 minutes. This bounds one
+wait, not the model's whole turn or another conversation's response latency.
+
+For an unsolicited completion report, send one concise `pogo_dm` to `captain`
+with the task ID and verified outcome **before** `complete` or the final answer.
+Completion alone does not wake the captain, and completed tasks cannot select
+a captain route for a new send. The captain may briefly see running while the
+worker records the result. Stored or deferred mail is not confirmed delivery;
+retain the original result for later collection, without resubmitting work.
+
+New profile definitions include this protocol. Existing definitions and the
+captain-maintained `WAYS_OF_WORKING.md` are not overwritten by deployment; the
+OpenCode tool description carries the wait rule to existing captains.
+
 Use these distinct states: stored mail, admitted native delivery, evidenced
 reading, correlated answer and persisted or verified task completion. Native
 `accepted` means admitted, not read or answered. No acknowledgement proves task

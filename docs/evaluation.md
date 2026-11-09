@@ -33,6 +33,19 @@ return to their task's source; crew text cannot enter another turn's preview;
 Stop does not interrupt a foreign wake; and a cursor-only wake retains its origin
 before its answer arrives.
 
+Crew wait uses one 60-second observation window across queue promotion and
+running work. On expiry it returns progress without stopping the worker. The
+captain must reply and end the turn, then collect the same task later. Tests use
+a short injected window and check observer cleanup, retained task/FIFO identity,
+no worker interrupt or redispatch, and subsequent result collection. Caller
+cancellation still stops the underlying work; expiry is not cancellation.
+
+This is cooperative yielding, not guaranteed fairness. Repeated wait calls in
+one model turn can still block other sources. A configured gateway timeout of
+60 seconds or less can expire first; the default is 30 minutes. An inbox-only
+yield cannot serve a later request held in the gateway's SQLite FIFO. No change
+here admits overlapping captain turns or promises immediate replies.
+
 Controlled completion barriers test progress without machine-dependent latency
 scores. The production idle probe still has its 100 ms deadline. Cancellation
 tests require the native observer's finalizer, not just a raced Promise that
