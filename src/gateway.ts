@@ -748,12 +748,11 @@ export class Gateway {
                     thread: job.thread,
                     message: before,
                     user: job.user,
-                    team: this.identity.team,
-                    app: this.config.slack.appId,
                   },
                 }
               : undefined;
-          if (pinned || !session) {
+          // greybeard: pinned turns carry IDs only; missing history needs explicit retrieval.
+          if (!pinned && !session) {
             // Roots (including scheduled runs) have no earlier thread messages.
             if (
               this.config.threadContext &&
@@ -771,15 +770,8 @@ export class Gateway {
                 appId: this.config.slack.appId,
                 team: this.identity.team,
                 signal,
-                ...(pinned
-                  ? {
-                      allowThreadRoot: (user: string) =>
-                        isAllowedUser(this.config, user),
-                    }
-                  : {}),
               });
-              if (sourceContext) sourceContext.history = history;
-              else text = withThreadContext(text, history);
+              text = withThreadContext(text, history);
               signal.throwIfAborted();
             }
           }

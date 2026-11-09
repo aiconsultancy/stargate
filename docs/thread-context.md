@@ -1,12 +1,13 @@
 # Slack thread context
 
-Thread-history loading is disabled by default. To enable it for one bot, add
-this top-level bot setting to the Pogo configuration, then restart Pogo:
+Initial history loading for unpinned conversations is disabled by default.
+To enable it for one bot, add this top-level setting, then restart Pogo:
 
 ```json
 "threadContext": true
 ```
 
+Pinned captains do not automatically import history, even with this setting.
 This setting changes no credentials, scopes, access rules, or backend settings.
 Existing backend sessions continue unchanged. Custom `SlackDelivery`
 implementations can optionally implement `threadContext`; without it, enabled
@@ -19,13 +20,11 @@ Slack thread, Pogo reads prior messages in that same channel and thread. It does
 so only when no backend session exists for that conversation. Its later turns
 keep their existing per-thread session context without another history read.
 
-A pinned captain shares one native session across sources. With history loading
-enabled, Pogo refreshes same-thread context on every reply, including after an
-earlier backend failure or model compaction. It does not use a cached source
-owner to skip reads: a native crew reply can change the topic before that owner
-is updated. This costs one bounded Slack read and adds bounded reference text
-to the shared session per reply. New thread roots and scheduled runs have no
-earlier thread messages to import.
+A pinned captain shares one native session across sources. Each real Slack turn
+carries only a compact source line and the new user message. Pogo does not reread
+or resend prior Slack messages on a source switch, backend failure, restart or
+model compaction. This avoids accumulating repeated history in the shared
+session. New thread roots and scheduled runs have no earlier history to import.
 With `threadContext: false`, Pogo makes no thread-history calls.
 
 Pogo persists the accepted request before Slack ACK. The history call occurs
@@ -36,10 +35,9 @@ them. Cancellation aborts the history transport and prevents backend execution.
 
 ## Included text and limits
 
-Pogo imports text authored by the requesting user and this bot's own Slack user.
-For pinned captains it may also include the thread root from another allowed
-human, labelled `thread_root`; deny rules still override allows. It excludes all
-other third-party replies and bots, including otherwise allowed users.
+Automatic initial imports for unpinned conversations include text authored by
+the requesting user and this bot's own Slack user. They exclude other humans
+and bots, including otherwise allowed users.
 It excludes edited, deleted, hidden, file-bearing, attachment-bearing and
 non-message events. The only accepted subtype is `bot_message` for this bot's
 own user. It does not fetch files, attachments, links, other channels or other
@@ -55,13 +53,12 @@ page within the remaining limits. It presents them in chronological order. A
 thread longer than the API page remains truncated; this is not full history.
 
 The prompt labels imported messages as untrusted JSON reference data. Author
-labels are `requester`, `this_bot` and (where allowed) `thread_root`, not agent
-conversation roles. The actual user instruction follows separately.
+labels are `requester` and `this_bot`, not agent conversation roles.
+The actual user instruction follows separately.
 A `truncated` flag reports a remaining Slack page or a message/text limit.
 This is a filtered subset, not a claim that
 Pogo read the full thread. If no eligible messages exist and no limit was hit,
-an unpinned user instruction stays unchanged. A pinned captain still receives
-its source identity frame.
+the unpinned user instruction stays unchanged.
 
 JSON encoding prevents text from breaking the prompt's data structure; it does
 not eliminate prompt injection. Keep tool permissions restrictive. Imported
@@ -70,23 +67,32 @@ history, like the current user instruction.
 
 ## Source identity and shared captains
 
-Every pinned Slack request carries its source identity for the model, including
-workspace, app, requester, channel, thread and current message IDs. Source and
-any selected thread context occupy one JSON data frame. This is dynamic request
-data, not a repeated policy prefix. The persistent captain definition says that
-"this", "resume" and "continue" refer to the current thread's user goal,
-not the latest task in the shared session. An earlier bot reply does not replace
-the user's original goal.
+Every pinned real Slack request has this model-visible shape:
 
-IDs alone do not supply missing topic history. Keep `threadContext` enabled when
-a shared captain must interpret short follow-ups in existing threads. If the
-bounded context is insufficient, the captain should ask rather than guess.
+```text
+s=slack;c=<channel-id>;t=<thread-root-ts>;m=<message-ts>;u=<user-id>
+
+<new user message>
+```
+
+`s` identifies the source, `c` the channel, `t` the thread, `m` the current
+message and `u` the requester. Values are percent-encoded when necessary.
+The workspace and app are fixed by the bot registration and are not repeated.
+The captain definition explains this schema once; turns do not repeat that
+explanation or wrap the source in JSON. Scheduled inputs do not invent Slack IDs.
+
+The persistent captain definition says that "this", "resume" and "continue"
+refer to the current thread's user goal, not the latest task in the shared
+session. An earlier bot reply does not replace the user's original goal.
+IDs alone do not restore missing context. The captain should use an authorized
+history tool if available, or ask for clarification, rather than guess. It should
+not retrieve history when existing context is sufficient. Pogo does not add a
+history tool or summary helper as part of this source format.
 Source identity does not authorize replay, change task ownership or create a new
 captain. This supplies a context anchor, not a model-level isolation guarantee.
 
-An explicit full-thread reread or read-only summary helper is not implemented.
-The bounded refresh can restore an older source's topic, but it is not a full
-archive read.
+Existing native history remains unchanged. Only the next user input is framed;
+Pogo does not rewrite earlier messages or claim guaranteed provider cache hits.
 
 ## Slack access and errors
 

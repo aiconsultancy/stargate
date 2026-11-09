@@ -14,10 +14,6 @@ import { backendSchema } from "../src/config";
 import { Gateway, type SlackDelivery } from "../src/gateway";
 import { backendFingerprint, botKey, conversationKey } from "../src/routing";
 import { Store } from "../src/store";
-import {
-  loadThreadContext,
-  ThreadContextUnavailable,
-} from "../src/thread-context";
 import { repairTranscript } from "../src/transcript";
 import { bot, event, identity } from "./fixtures";
 
@@ -458,7 +454,7 @@ test("conversation eval: concurrent sources keep one captain execution slot", as
   expect(maximum).toBe(1);
 });
 
-test("pinned reply refreshes its own bounded root after an unseen native wake without catch-up", async () => {
+test("pinned reply keeps its source IDs without resending history after an unseen native wake", async () => {
   const f = nativeFixture();
   f.config.threadContext = true;
   let reads = 0;
@@ -482,16 +478,13 @@ test("pinned reply refreshes its own bounded root after an unseen native wake wi
   await f.drain();
   expect(f.prompts[3]?.context).toMatchObject({
     source: { channel: "C123", thread: "1.000", message: "4.000" },
-    history: {
-      messages: [{ author: "requester", text: "MIGRATION T1 ROOT" }],
-      truncated: false,
-    },
   });
   expect(JSON.stringify(f.prompts[3]?.context)).not.toContain("T2 wake report");
-  expect(reads).toBe(3);
+  expect(f.prompts[3]?.context).not.toHaveProperty("history");
+  expect(reads).toBe(0);
 });
 
-test("thread context is source-scoped and refreshes bounded history on every pinned reply", async () => {
+test("pinned replies carry only source IDs even when initial thread context is enabled", async () => {
   const f = nativeFixture();
   f.config.threadContext = true;
   const contexts: string[] = [];
@@ -508,30 +501,27 @@ test("thread context is source-scoped and refreshes bounded history on every pin
     f.gateway.accept(source(channel, "continue", "4.000", "1.000"));
     await f.drain();
   }
-  expect(contexts).toEqual(["C123", "C123", "C456", "C456"]);
-  expect(f.prompts[0]?.context?.history?.messages[0]?.text).toBe("C123");
-  expect(f.prompts[2]?.context?.history?.messages[0]?.text).toBe("C456");
+  expect(contexts).toEqual([]);
+  expect(f.prompts.map(({ context }) => context)).toEqual(
+    ["C123", "C123", "C456", "C456"].map((channel, i) => ({
+      source: {
+        channel,
+        thread: "1.000",
+        message: i % 2 ? "4.000" : "3.000",
+        user: "U123",
+      },
+    })),
+  );
   expect(f.prompts[0]?.text).toBe("summarize");
 });
 
-test("conversation eval: migration resume refreshes its root after another thread even when its first backend turn failed", async () => {
+test("conversation eval: migration resume carries only its own source after another thread and an earlier backend failure", async () => {
   const f = nativeFixture();
   f.config.threadContext = true;
-  f.config.access.users.push("UROOT");
   const reads: string[] = [];
   f.slack.threadContext = async (input) => {
     reads.push(input.thread);
-    return loadThreadContext(input, async () => ({
-      ok: true,
-      messages: [
-        {
-          type: "message",
-          user: "UROOT",
-          ts: input.thread,
-          text: input.thread === "1.000" ? "MIGRATION ROOT" : "NET1010 ROOT",
-        },
-      ],
-    }));
+    throw new Error("Pinned history must not be read automatically");
   };
   f.setTurn(async (text) => {
     if (text === "Migration initial")
@@ -555,26 +545,18 @@ test("conversation eval: migration resume refreshes its root after another threa
         thread: "1.000",
         message: "3.000",
         user: "U123",
-        team: "T123",
-        app: "A123",
-      },
-      history: {
-        messages: [{ author: "thread_root", text: "MIGRATION ROOT" }],
-        truncated: false,
       },
     },
   });
   expect(JSON.stringify(f.prompts[2]?.context)).not.toContain("NET1010");
   f.gateway.accept(source("C123", "Next migration step", "4.000", "1.000"));
   await f.drain();
-  expect(reads).toEqual(["1.000", "1.000"]);
+  expect(reads).toEqual([]);
   expect(f.prompts[3]?.context?.source.message).toBe("4.000");
-  expect(f.prompts[3]?.context?.history?.messages[0]?.text).toBe(
-    "MIGRATION ROOT",
-  );
+  expect(f.prompts[3]?.context).not.toHaveProperty("history");
 });
 
-test("cold captain refreshes a legacy same-source owner before its first newly framed reply", async () => {
+test("cold captain sends current source IDs without resending legacy history", async () => {
   const f = nativeFixture();
   f.config.threadContext = true;
   f.gateway.accept(source("C123", "<@UBOT> old migration root", "1.000"));
@@ -609,16 +591,15 @@ test("cold captain refreshes a legacy same-source owner before its first newly f
     if (!job) throw new Error("Missing fresh job");
     await fresh.process(job, f.signal);
   }
-  expect(reads).toBe(2);
-  expect(f.prompts[0]?.context?.history?.messages[0]?.text).toBe(
-    "MIGRATION ROOT",
-  );
-  expect(f.prompts[1]?.context?.history?.messages[0]?.text).toBe(
-    "MIGRATION ROOT",
-  );
+  expect(reads).toBe(0);
+  expect(f.prompts[0]?.context?.source.message).toBe("2.000");
+  expect(f.prompts[1]?.context?.source.message).toBe("3.000");
+  expect(
+    f.prompts.every(({ context }) => !Object.hasOwn(context ?? {}, "history")),
+  ).toBe(true);
 });
 
-test("failed and successful captain prompts both reread the next reply's bounded history", async () => {
+test("failed and successful captain prompts never trigger automatic history resends", async () => {
   const f = nativeFixture();
   f.config.threadContext = true;
   let reads = 0;
@@ -642,13 +623,18 @@ test("failed and successful captain prompts both reread the next reply's bounded
     f.gateway.accept(source("C123", "<@UBOT> Resume", ts, "1.000"));
     await f.drain();
   }
-  expect(reads).toBe(3);
-  expect(f.prompts[0]?.context?.history).toBeDefined();
-  expect(f.prompts[1]?.context?.history).toBeDefined();
-  expect(f.prompts[2]?.context?.history).toBeDefined();
+  expect(reads).toBe(0);
+  expect(f.prompts.map(({ context }) => context?.source.message)).toEqual([
+    "2.000",
+    "3.000",
+    "4.000",
+  ]);
+  expect(
+    f.prompts.every(({ context }) => !Object.hasOwn(context ?? {}, "history")),
+  ).toBe(true);
 });
 
-test("unmapped native ownership refreshes history and unreadable switched context fails before prompting", async () => {
+test("unmapped native ownership does not cause history reads or block current source IDs", async () => {
   const f = nativeFixture();
   f.config.threadContext = true;
   let reads = 0;
@@ -662,18 +648,24 @@ test("unmapped native ownership refreshes history and unreadable switched contex
   await f.settle();
   f.gateway.accept(source("C123", "Resume", "2.000", "1.000"));
   await f.drain();
-  expect(reads).toBe(1);
+  expect(reads).toBe(0);
   f.gateway.accept(source("C123", "<@UBOT> other root", "3.000"));
   await f.drain();
   const before = f.prompts.length;
   f.slack.threadContext = async () => {
-    throw new ThreadContextUnavailable();
+    throw new Error("Pinned history transport must not be used");
   };
   f.gateway.accept(source("C123", "Resume original", "4.000", "1.000"));
-  const failed = f.next();
+  const current = f.next();
   await f.drain();
-  expect(f.prompts).toHaveLength(before);
-  expect(f.store.failure(failed.id)).toBe("context");
+  expect(f.prompts).toHaveLength(before + 1);
+  expect(f.prompts.at(-1)?.context?.source).toEqual({
+    channel: "C123",
+    thread: "1.000",
+    message: "4.000",
+    user: "U123",
+  });
+  expect(f.store.failure(current.id)).toBeUndefined();
 });
 
 test("pinned Slack roots always carry source IDs with history disabled, without fabricating scheduled IDs", async () => {
@@ -689,8 +681,6 @@ test("pinned Slack roots always carry source IDs with history disabled, without 
       thread: "1.000",
       message: "1.000",
       user: "U123",
-      team: "T123",
-      app: "A123",
     },
   });
   f.gateway.enqueueScheduled({

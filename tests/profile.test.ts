@@ -560,6 +560,10 @@ test("custom init creates only configured worktrees, generic prompts, and genera
   expect(prompt).toContain("60-second observation window");
   expect(prompt).toContain("Do not repeat wait in the same turn");
   expect(prompt).toContain("Scope each Slack request");
+  expect(prompt).toContain(
+    "s=slack;c=<channel>;t=<thread>;m=<message>;u=<user>",
+  );
+  expect(prompt).toContain("does not automatically resend thread history");
   expect(prompt).toContain("not the last task mentioned elsewhere");
   expect(prompt).not.toContain("{{");
   expect(prompt).not.toContain("four");

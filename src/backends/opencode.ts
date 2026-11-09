@@ -289,12 +289,7 @@ export class OpenCodeBackend implements AgentBackend {
           sessionID: sessionId,
           id,
           text: context
-            ? `${JSON.stringify({
-                slackSource: context.source,
-                ...(context.history
-                  ? { untrustedSlackThreadContext: context.history }
-                  : {}),
-              })}\n\nCurrent user instruction:\n${text}`
+            ? `s=slack;c=${encodeURIComponent(context.source.channel)};t=${encodeURIComponent(context.source.thread)};m=${encodeURIComponent(context.source.message)};u=${encodeURIComponent(context.source.user)}\n\n${text}`
             : text,
           delivery: "queue",
           ...(files.length

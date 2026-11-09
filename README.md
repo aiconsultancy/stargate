@@ -127,12 +127,12 @@ channel. Add a name, cron schedule, timezone, and prompt; remove jobs with a
 confirmation button. Scheduled results start a new thread in that channel.
 See [cron jobs](docs/cron.md) for app setup and execution limits.
 
-Set `threadContext: true` on a bot to import bounded prior messages when its
-first request starts inside an existing Slack thread. Shared captains refresh
-this context on every reply and carry source IDs each turn.
-History loading is off by default. It includes requester/bot text and, for a
-pinned captain, a root from another allowed human; other participants' replies
-and historical files remain excluded. See [thread context](docs/thread-context.md)
+Shared captains receive `s=slack;c=<channel>;t=<thread>;m=<message>;u=<user>`
+and the new message each turn, without automatic history resends. Unpinned
+conversations can set `threadContext: true` to import bounded requester/bot text
+when their first request starts in an existing thread. This is off by default;
+other participants and historical files are excluded. See
+[thread context](docs/thread-context.md)
 for limits, privacy, and Slack access requirements.
 
 `/pogo pair` lets configured operators request standard OpenCode device

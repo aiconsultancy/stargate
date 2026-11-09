@@ -7,19 +7,15 @@ import type { BackendConfig } from "./config";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
 import type { MaintenanceWatch } from "./maintenance";
-import type { ThreadContext } from "./thread-context";
 
-/** Source identity is routing data; history remains untrusted Slack text. */
+/** Model-visible source identity only; never repeat Slack history here. */
 export type PromptSourceContext = {
   source: {
     channel: string;
     thread: string;
     message: string;
     user: string;
-    team: string;
-    app: string;
   };
-  history?: ThreadContext;
 };
 
 /** Latest complete visible text for this turn, not reasoning or tool output. */
