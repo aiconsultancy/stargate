@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import type { Attachment } from "../attachments";
 import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import type { BackendConfig } from "../config";
+import type { SessionHistory } from "../session-history";
 import { piDefinitionPath, piMemberDefinition } from "./instructions";
 import type { PiCrewBinding } from "./pi-extension";
 import { redactActivity } from "./reporting";
@@ -107,6 +108,7 @@ export class PiCrewWorkers {
   private readonly owned = new Set<Execution>();
   private readonly recoveryController = new AbortController();
   private readonly recoveries = new Set<Promise<CrewTask>>();
+  private readonly historyReads = new Set<Promise<unknown>>();
   private closed = false;
 
   constructor(
@@ -420,6 +422,65 @@ export class PiCrewWorkers {
     );
   }
 
+  /** Never call backend(): that path opens a scheduling harness. A live pool
+   * lease keeps its owner from closing during reads; otherwise open readOnly.
+   */
+  async readHistory<T>(
+    member: CrewMember,
+    callerSignal: AbortSignal,
+    read: (history: SessionHistory, signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const signal = AbortSignal.any([
+      callerSignal,
+      this.recoveryController.signal,
+    ]);
+    const operation = (async () => {
+      signal.throwIfAborted();
+      if (this.closed || !member.backend)
+        throw new CrewError("Pi history unavailable or cancelled.");
+      const hash = createHash("sha256").update(member.id).digest("hex");
+      const dataDirectory = join(
+        await realpath(resolve(this.stateDirectory)),
+        "pi",
+        hash,
+      );
+      for (
+        let previous = closing.get(dataDirectory);
+        previous;
+        previous = closing.get(dataDirectory)
+      )
+        await previous.catch(() => {});
+      signal.throwIfAborted();
+      if (this.closed)
+        throw new CrewError("Pi history unavailable or cancelled.");
+      const pooled = pool.get(dataDirectory);
+      if (pooled) {
+        pooled.owners.add(this);
+        this.leases.add(dataDirectory);
+        const backend = await pooled.backend;
+        signal.throwIfAborted();
+        if (!backend.history)
+          throw new CrewError("Pi history unavailable or cancelled.");
+        return read(backend.history, signal);
+      }
+      const { readPiHistory } = await import("../backends/pi-history");
+      signal.throwIfAborted();
+      return readPiHistory(dataDirectory, signal, (history) =>
+        read(history, signal),
+      );
+    })();
+    this.historyReads.add(operation);
+    try {
+      const result = await operation;
+      signal.throwIfAborted();
+      return result;
+    } catch {
+      throw new CrewError("Pi history unavailable or cancelled.");
+    } finally {
+      this.historyReads.delete(operation);
+    }
+  }
+
   async canReport(member: CrewMember, directory: string): Promise<boolean> {
     return (
       typeof (await this.backend(member, directory)).promptReport === "function"
@@ -559,7 +620,7 @@ export class PiCrewWorkers {
     for (const execution of running) execution.controller.abort();
     // Readers own native handles through their complete cleanup, even when an
     // opener ignores cancellation. Crew state may close only after this drain.
-    await Promise.allSettled([...this.recoveries]);
+    await Promise.allSettled([...this.recoveries, ...this.historyReads]);
     await Promise.all(running.map(({ done }) => done));
     await Promise.allSettled(
       [...this.leases].map(async (key) => {

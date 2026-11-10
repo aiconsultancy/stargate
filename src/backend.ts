@@ -8,6 +8,7 @@ import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
 import type { MaintenanceWatch } from "./maintenance";
 import type { QuotaSnapshot } from "./quota";
+import type { SessionHistory } from "./session-history";
 
 /** Model-visible source identity only; never repeat Slack history here. */
 export type PromptSourceContext = {
@@ -125,6 +126,8 @@ export interface AgentBackend {
   crewStatus?(input: CrewStatusInput, signal: AbortSignal): Promise<CrewStatus>;
   /** Sanitized subscription limits; never runs a model or creates a session. */
   quota?(signal: AbortSignal): Promise<QuotaSnapshot>;
+  /** Read-only transcripts for operator views; never prompts or mutates. */
+  readonly history?: SessionHistory;
   close(): Promise<void>;
 }
 

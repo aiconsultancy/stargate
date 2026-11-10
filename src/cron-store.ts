@@ -580,6 +580,32 @@ export class CronStore {
       .all(botKey);
   }
 
+  /** Newest runs for an operator view: metadata only, never prompts. */
+  recentRuns(botKey: string, limit = 20) {
+    checkBotKey(botKey);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+      throw new Error("Invalid cron run limit.");
+    return this.db
+      .query<
+        {
+          id: string;
+          name: string;
+          status: CronRun["status"];
+          dueAt: number;
+          finishedAt: number | null;
+          manual: number;
+          report: "immediate" | "daily";
+        },
+        [string, number]
+      >(`SELECT r.id,COALESCE(json_extract(r.snapshot,'$.name'),s.name) AS name,
+        r.status,r.dueAt,r.finishedAt,r.manual,
+        COALESCE(json_extract(r.snapshot,'$.report'),s.report) AS report
+      FROM cron_runs r JOIN cron_schedules s ON s.id=r.scheduleId
+      WHERE s.botKey=? ORDER BY r.dueAt DESC,r.id LIMIT ?`)
+      .all(botKey, limit)
+      .map((run) => ({ ...run, manual: run.manual === 1 }));
+  }
+
   /** Include occurrences, completions, and older active work before until. */
   dailyResults(
     botKey: string,

@@ -803,6 +803,61 @@ export class Store {
       .map((row) => row.session_id);
   }
 
+  /** Operator view: per-status totals for one bot namespace. */
+  queueCounts(botKey: string): Record<Job["status"], number> {
+    const counts = { queued: 0, running: 0, responding: 0, done: 0, failed: 0 };
+    for (const row of this.db
+      .query<{ status: Job["status"]; n: number }, [string]>(
+        "SELECT status,COUNT(*) AS n FROM jobs WHERE botKey=? GROUP BY status",
+      )
+      .all(botKey))
+      if (Object.hasOwn(counts, row.status)) counts[row.status] = row.n;
+    return counts;
+  }
+
+  /** Operator view: newest requests without prompt or reply text. */
+  recentJobs(botKey: string, limit: number) {
+    return this.db
+      .query<
+        {
+          id: number;
+          status: Job["status"];
+          channel: string;
+          thread: string;
+          user: string;
+          failure: RequestFailure | null;
+          deferDelivery: number;
+        },
+        [string, number]
+      >(`SELECT id,status,channel,thread,user,failure,deferDelivery FROM jobs
+      WHERE botKey=? ORDER BY id DESC LIMIT ?`)
+      .all(botKey, limit);
+  }
+
+  /** Native sessions this bot namespace has used, most recently used first. */
+  sessionIDs(botKey: string, limit: number): string[] {
+    return this.db
+      .query<
+        { session_id: string },
+        [string, number]
+      >(`SELECT s.session_id FROM sessions s
+      JOIN jobs j ON j.conversation=s.conversation WHERE j.botKey=?
+      GROUP BY s.session_id ORDER BY MAX(j.id) DESC LIMIT ?`)
+      .all(botKey, limit)
+      .map((row) => row.session_id);
+  }
+
+  /** True only when this bot namespace has a request mapped to the session. */
+  ownsSession(botKey: string, sessionID: string): boolean {
+    return (
+      this.db
+        .query(`SELECT 1 FROM sessions s
+      JOIN jobs j ON j.conversation=s.conversation
+      WHERE s.session_id=? AND j.botKey=? LIMIT 1`)
+        .get(sessionID, botKey) !== null
+    );
+  }
+
   close() {
     this.db.close();
   }

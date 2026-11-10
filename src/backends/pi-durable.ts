@@ -37,7 +37,9 @@ import { type BackendConfig, secret } from "../config";
 import { workingAgreementNotice } from "../crew/instructions";
 import { piCrewExtension } from "../crew/pi-extension";
 import { redactActivity } from "../crew/reporting";
+import type { SessionHistory } from "../session-history";
 import { piInputContent } from "./pi-attachments";
+import { piSessionHistory } from "./pi-history";
 
 type Config = Extract<BackendConfig, { type: "pi-durable" }>;
 const conversationId = z
@@ -145,6 +147,7 @@ export function piPartialText(view: ConversationView): string {
 
 export class PiDurableBackend implements AgentBackend {
   readonly supportsAttachments = true;
+  readonly history: SessionHistory;
 
   private constructor(
     private readonly harness: Harness,
@@ -152,7 +155,9 @@ export class PiDurableBackend implements AgentBackend {
     private readonly activeReports: Set<ConversationId>,
     private readonly reportGuard: ReturnType<typeof defineExtension>,
     private readonly acceptsImages: boolean,
-  ) {}
+  ) {
+    this.history = piSessionHistory(harness);
+  }
 
   /** Receipt inspection never opens a scheduling runtime or resolves credentials. */
   static async recover(

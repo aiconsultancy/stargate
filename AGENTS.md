@@ -50,6 +50,9 @@ Pass non-secret CLI options through `ARGS`, or `mise run TASK -- OPTIONS`.
 - `src/store.ts`: SQLite queue, session mappings, delivery progress.
 - `src/backend.ts`, `src/backends/`: backend contract and implementations.
 - `src/runtime.ts`: process ownership, startup, cancellation, cleanup.
+- `src/dashboard.ts`, `src/dashboard-source.ts`, `src/session-history.ts`:
+  read-only operator dashboard on a private Unix socket. The source owns
+  session scope; backends only answer metadata and transcript pages.
 - `src/effect.ts`: Effect/Promise interop. Effect owns lifetimes and
   concurrency in runtime, gateway workers and plugin setup; keep pure logic,
   stores and the adapter contract Promise-based. Keep `effect` pinned to the

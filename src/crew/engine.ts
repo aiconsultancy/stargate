@@ -25,6 +25,7 @@ import type {
 import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
+import { CrewHistoryRPC } from "./history-rpc";
 import { MesijClient, type MesijMessage } from "./mesij";
 import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
 import { readInputOrigin } from "./origin";
@@ -329,6 +330,7 @@ export class CrewEngine {
   readonly quotas: QuotaReader;
   private readonly pi: PiCrewWorkers;
   readonly reporting: CrewReporter;
+  readonly history: CrewHistoryRPC;
   private closing?: Promise<void>;
   private readonly waitNow: () => number;
   private readonly waitPoll: NonNullable<CrewWaitOptions["wait"]>;
@@ -393,6 +395,7 @@ export class CrewEngine {
       ...options.team.crew,
     ]);
     this.reporting = new CrewReporter(this);
+    this.history = new CrewHistoryRPC(options.team, state, this.pi);
   }
 
   /** Location-authorized read surface. Unlike tool status, never reconciles,

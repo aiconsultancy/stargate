@@ -152,6 +152,8 @@ export const botSchema = z.strictObject({
 export const configSchema = z
   .strictObject({
     dataDirectory: z.string().default(".pogo"),
+    /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
+    dashboard: z.boolean().optional(),
     bots: z.array(botSchema).min(1),
   })
   .superRefine(({ bots }, context) => {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -345,6 +345,67 @@ test("shutdown closes every intake and stops every worker together", async () =>
     expect(f.calls).toEqual(["other createSession", "other prompt"]);
     if (!late) throw new Error("Late job was not seeded");
     expect(status(path, late.key, late.id)).toBe("queued");
+  } finally {
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("the dashboard socket serves the fleet and is removed on shutdown", async () => {
+  const dataDirectory = await directory();
+  try {
+    const config = { dataDirectory, dashboard: true, bots: [bot()] };
+    const f = harness();
+    const controller = new AbortController();
+    const running = Effect.runPromise(
+      serve(config, silent, controller.signal, f.dependencies),
+    );
+    await f.started;
+    const socket = join(dataDirectory, "dashboard.sock");
+    const present = () =>
+      stat(socket).then(
+        (info) => info.isSocket(),
+        () => false,
+      );
+    for (let attempt = 0; attempt < 200 && !(await present()); attempt++)
+      await Bun.sleep(10);
+    expect((await stat(socket)).mode & 0o777).toBe(0o600);
+    const fleet = await fetch("http://pogo/api/fleet", { unix: socket });
+    expect(fleet.status).toBe(200);
+    expect(await fleet.json()).toMatchObject({
+      ships: [{ id: "helper", backend: "opencode", crew: null }],
+    });
+    const page = await fetch("http://pogo/", { unix: socket });
+    expect(page.headers.get("Content-Security-Policy")).toContain(
+      "default-src 'none'",
+    );
+    expect(await page.text()).toContain("<title>");
+    controller.abort();
+    await running;
+    expect(await present()).toBe(false);
+  } finally {
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("no dashboard socket exists unless it is configured", async () => {
+  const dataDirectory = await directory();
+  try {
+    const f = harness();
+    const controller = new AbortController();
+    const running = Effect.runPromise(
+      serve(
+        { dataDirectory, bots: [bot()] },
+        silent,
+        controller.signal,
+        f.dependencies,
+      ),
+    );
+    await f.started;
+    controller.abort();
+    await running;
+    expect(await Bun.file(join(dataDirectory, "dashboard.sock")).exists()).toBe(
+      false,
+    );
   } finally {
     await rm(dataDirectory, { recursive: true, force: true });
   }

@@ -33,6 +33,7 @@ import {
   maintenanceNoticeSchema,
 } from "../maintenance";
 import { quotaSnapshotSchema } from "../quota";
+import { OpenCodeHistory } from "./opencode-history";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
 const pinnedSessionSchema = z.object({
@@ -66,6 +67,7 @@ function publicEntry(message: SessionMessageInfo): TranscriptEntry | undefined {
 
 export class OpenCodeBackend implements AgentBackend {
   readonly supportsAttachments = true;
+  readonly history: OpenCodeHistory;
   private readonly client;
   private readonly pairingClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
@@ -81,6 +83,7 @@ export class OpenCodeBackend implements AgentBackend {
       ),
     };
     this.client = OpenCode.make(options);
+    this.history = new OpenCodeHistory(this.client, config.directory);
     // Same endpoint and authentication; never follow a pairing redirect.
     this.pairingClient = OpenCode.make({
       ...options,

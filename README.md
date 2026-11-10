@@ -136,6 +136,11 @@ Choose immediate delivery or quiet local results with one daily Slack digest
 (08:30 UTC by default).
 See [cron jobs](docs/cron.md) for app setup and execution limits.
 
+Set `"dashboard": true` for a read-only fleet dashboard: ships, captain and
+crew status, Pogo bots, queue, cronjobs and session history with subagents
+for OpenCode and Pi Durable. Pogo serves it on a private Unix socket; an
+authenticating reverse proxy publishes it. See [dashboard](docs/dashboard.md).
+
 Shared captains receive `s=slack;c=<channel>;t=<thread>;m=<message>;u=<user>`
 and the new message each turn, without automatic history resends. Unpinned
 conversations can set `threadContext: true` to import bounded requester/bot text

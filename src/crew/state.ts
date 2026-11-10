@@ -440,6 +440,39 @@ export class CrewState {
     );
   }
 
+  /** History authorization is a state read, never task reconciliation. */
+  piOwnsConversation(sessionID: string, conversationID: string): boolean {
+    return Boolean(
+      this.db
+        .query(`SELECT 1 FROM pi_peers
+      WHERE sessionID=?1 AND conversationID=?2
+      UNION ALL SELECT 1 FROM pi_task_conversations c JOIN tasks t ON t.id=c.taskID
+      JOIN peers p ON p.sessionID=t.workerSessionID AND p.crewID=t.crewID
+      WHERE p.sessionID=?1 AND c.conversationID=?2 LIMIT 1`)
+        .get(sessionID, conversationID),
+    );
+  }
+
+  /** Distinct recorded task/report conversations; bounded keyset pagination. */
+  piHistoryConversations(sessionID: string, after: string, limit: number) {
+    return this.db
+      .query<
+        { conversationID: string; title: string },
+        [string, string, number]
+      >(
+        `SELECT c.conversationID, MAX(CASE WHEN EXISTS
+        (SELECT 1 FROM activity_report_tasks r WHERE r.taskID=t.id)
+        THEN 'report' ELSE 'task' END) AS title
+      FROM pi_task_conversations c JOIN tasks t ON t.id=c.taskID
+      JOIN peers p ON p.sessionID=t.workerSessionID AND p.crewID=t.crewID
+      JOIN pi_peers pi ON pi.sessionID=p.sessionID
+      WHERE p.sessionID=?1 AND c.conversationID<>pi.conversationID
+        AND c.conversationID>?2
+      GROUP BY c.conversationID ORDER BY c.conversationID LIMIT ?3`,
+      )
+      .all(sessionID, after, limit);
+  }
+
   task(id: string): CrewTask | null {
     return (
       this.db

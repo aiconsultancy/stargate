@@ -142,6 +142,16 @@ limits to this RPC and the authorized `pogo_quota` tool on both harnesses.
 Proxy management credentials stay on the host. No model, session or queue
 operation is required; see [provider usage](usage.md).
 
+`history` is an optional read-only adapter capability for the
+[fleet dashboard](dashboard.md). It returns session metadata, child sessions
+and transcript pages in one harness-independent shape
+([`session-history.ts`](../src/session-history.ts)). OpenCode reads its
+server API and asks the crew plugin for crew roots and Pi crew transcripts.
+Pi Durable reads its own store. Adapters answer what they are asked;
+[`dashboard-source.ts`](../src/dashboard-source.ts) decides which sessions
+belong to a bot. The dashboard listens on a Unix socket in the private data
+directory, so Pogo still opens no network port.
+
 Custom modules export:
 
 ```ts

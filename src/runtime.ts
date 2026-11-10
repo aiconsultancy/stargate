@@ -22,6 +22,8 @@ import { CrewUI } from "./crew-ui";
 import { type CronDelivery, CronScheduler } from "./cron";
 import { CronStore } from "./cron-store";
 import { CronUI, type CronUIApi } from "./cron-ui";
+import { startDashboard } from "./dashboard";
+import { type DashboardShip, dashboardSource } from "./dashboard-source";
 import { abortable } from "./effect";
 import { Gateway, type SlackDelivery } from "./gateway";
 import { controlInteractions } from "./interactions";
@@ -172,6 +174,7 @@ export function serve(
           }),
         );
       const workers: Effect.Effect<void>[] = [];
+      const ships: DashboardShip[] = [];
       const identities = new Set<string>();
       for (const bot of config.bots) {
         const botLog = log.child({ bot: bot.id });
@@ -252,6 +255,31 @@ export function serve(
           ),
         );
         botLog.info("Bot connected");
+        ships.push({ bot, identity, key: botKey(bot, identity), backend });
+      }
+      if (config.dashboard) {
+        // Before the worker fork: a bind failure is an ordinary startup
+        // failure. Released after workers drain and before backends close.
+        const viewers = new AbortController();
+        yield* Effect.acquireRelease(
+          Effect.promise(async () =>
+            startDashboard({
+              socket: join(config.dataDirectory, "dashboard.sock"),
+              source: dashboardSource(ships, store, cronStore),
+              html: await Bun.file(
+                new URL("../templates/dashboard/index.html", import.meta.url),
+              ).text(),
+              signal: viewers.signal,
+              log,
+            }),
+          ),
+          (dashboard) =>
+            Effect.sync(() => viewers.abort()).pipe(
+              Effect.andThen(release(log, "Dashboard", () => dashboard.stop())),
+              Effect.timeoutOption("5 seconds"),
+            ),
+        );
+        log.info("Dashboard listening");
       }
       // Workers start only after every bot connected. A failed connection
       // leaves queued requests queued instead of consuming them as uncertain.

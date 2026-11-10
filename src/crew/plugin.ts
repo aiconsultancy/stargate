@@ -154,6 +154,22 @@ const plugin = Plugin.define({
           report(context.signal, () => engine.quotas.read(context.signal)),
         status: (input, context) =>
           report(context.signal, async () => engine.status(input)),
+        historyRoots: (_input, context) =>
+          report(context.signal, () =>
+            engine.history.historyRoots(context.signal),
+          ),
+        historyDescribe: (input, context) =>
+          report(context.signal, () =>
+            engine.history.historyDescribe(input.ids, context.signal),
+          ),
+        historyChildren: (input, context) =>
+          report(context.signal, () =>
+            engine.history.historyChildren(input, context.signal),
+          ),
+        historyEntries: (input, context) =>
+          report(context.signal, () =>
+            engine.history.historyEntries(input, context.signal),
+          ),
         start: (input, context) =>
           report(context.signal, () =>
             engine.reporting.start(input, context.signal),

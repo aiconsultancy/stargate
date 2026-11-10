@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Pogo fleet</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #f5f6f8; --panel: #fff; --text: #18212c; --muted: #4c5969; --line: #c3cad3; --link: #064ea6; --error: #a51c24; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #14181f; --panel: #1c232d; --text: #e5eaf1; --muted: #b2bfce; --line: #4b596a; --link: #91c7ff; --error: #ffa6ac; }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+      header, main, footer { max-width: 1400px; margin: auto; padding: 12px 20px; }
+      header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid var(--line); }
+      header strong { font-size: 18px; }
+      nav { flex: 1; overflow-wrap: anywhere; }
+      a { color: var(--link); text-underline-offset: 3px; }
+      button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+      button:disabled { opacity: .65; cursor: wait; }
+      :focus-visible { outline: 3px solid var(--link); outline-offset: 3px; }
+      h1 { font-size: 24px; margin: 8px 0; overflow-wrap: anywhere; }
+      h2 { font-size: 18px; margin: 14px 0 8px; }
+      summary h2 { display: inline; }
+      h3 { font-size: 15px; margin: 8px 0; }
+      p { margin: 6px 0; }
+      section, article { min-width: 0; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+      .card, .entry, .member { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 12px; margin-bottom: 10px; overflow-wrap: anywhere; }
+      .card h2 { margin-top: 0; }
+      .muted, footer { color: var(--muted); }
+      .error { color: var(--error); white-space: pre-wrap; overflow-wrap: anywhere; }
+      .counts { display: flex; flex-wrap: wrap; gap: 5px 14px; }
+      dl { display: grid; grid-template-columns: minmax(100px, 170px) minmax(0, 1fr); margin: 6px 0; gap: 3px 12px; }
+      dt { color: var(--muted); }
+      dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { padding: 6px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; max-width: 340px; overflow-wrap: anywhere; }
+      th { color: var(--muted); }
+      details { margin: 6px 0; }
+      summary { cursor: pointer; overflow-wrap: anywhere; }
+      pre { font: 13px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+      ul { padding-left: 20px; }
+      .tree { list-style: none; padding-left: 16px; border-left: 1px solid var(--line); }
+      .tree li { margin: 8px 0; overflow-wrap: anywhere; }
+      .tree button { margin: 3px 8px; padding: 2px 7px; }
+      .entry-head, .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; }
+      .entry-head { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+      .label { color: var(--muted); margin: 5px 0; }
+      #status { min-height: 1.5em; }
+      .skip { position: absolute; left: -9999px; }
+      .skip:focus { position: static; padding: 12px; }
+      @media (max-width: 540px) { header, main, footer { padding: 10px 12px; } dl { grid-template-columns: 110px minmax(0, 1fr); } }
+      @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+    <header>
+      <strong>Pogo</strong>
+      <nav id="breadcrumbs" aria-label="Breadcrumb"><a href="#/">Fleet</a></nav>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+    <main id="content" tabindex="-1">
+      <h1>Fleet</h1>
+      <p>Loading fleet…</p>
+    </main>
+    <footer>
+      <p id="status" role="status" aria-live="polite" aria-atomic="true"></p>
+      <p>Read only. Fleet and ship views refresh every 15 seconds while visible.
+        Transcripts refresh only on request.</p>
+    </footer>
+    <script>
+      "use strict";
+      const main = document.getElementById("content");
+      const breadcrumbs = document.getElementById("breadcrumbs");
+      const status = document.getElementById("status");
+      const refresh = document.getElementById("refresh");
+      let controller = new AbortController();
+      let route = { kind: "fleet" };
+      let generation = 0;
+      let refreshing = false;
+      let full = false;
+      let transcriptVersion = 0;
+      let transcriptBusy = false;
+      let entries = [];
+      let entryCursor;
+      let treeNodes = new Map();
+
+      function text(value) {
+        if (value === null || value === undefined || value === "") return "none";
+        if (Array.isArray(value)) return value.length ? value.join(", ") : "none";
+        return String(value);
+      }
+      function el(tag, value, className) {
+        const node = document.createElement(tag);
+        if (value !== undefined) node.textContent = text(value);
+        if (className) node.className = className;
+        return node;
+      }
+      function link(label, hash) {
+        const node = el("a", label);
+        node.setAttribute("href", hash);
+        return node;
+      }
+      function button(label, action, key) {
+        const node = el("button", label);
+        node.type = "button";
+        if (key) node.dataset.focus = key;
+        node.addEventListener("click", action);
+        return node;
+      }
+      function time(value) {
+        if (value === null || value === undefined) return el("span", "none");
+        const date = new Date(value);
+        if (!Number.isFinite(date.getTime())) return el("span", "none");
+        const node = el("time", date.toLocaleString());
+        node.dateTime = date.toISOString();
+        node.title = date.toISOString();
+        return node;
+      }
+      function fields(items) {
+        const node = el("dl");
+        for (const [label, value] of items) {
+          const dd = el("dd");
+          dd.append(value instanceof Node ? value : document.createTextNode(text(value)));
+          node.append(el("dt", label), dd);
+        }
+        return node;
+      }
+      function counts(values) {
+        const node = el("div", undefined, "counts");
+        for (const [key, value] of Object.entries(values || {})) {
+          node.append(el("span", `${key}: ${text(value)}`));
+        }
+        if (!node.childNodes.length) node.append(el("span", "none"));
+        return node;
+      }
+      function table(headers, rows) {
+        if (!rows.length) return el("p", "none", "muted");
+        const wrap = el("div", undefined, "table-wrap");
+        const tableNode = el("table");
+        const head = el("thead");
+        const headRow = el("tr");
+        for (const label of headers) {
+          const th = el("th", label);
+          th.scope = "col";
+          headRow.append(th);
+        }
+        head.append(headRow);
+        const body = el("tbody");
+        for (const row of rows) {
+          const tr = el("tr");
+          for (const value of row) {
+            const td = el("td");
+            td.append(value instanceof Node ? value : document.createTextNode(text(value)));
+            tr.append(td);
+          }
+          body.append(tr);
+        }
+        tableNode.append(head, body);
+        wrap.append(tableNode);
+        return wrap;
+      }
+      function section(label, key) {
+        const node = el("details");
+        node.open = true;
+        node.dataset.section = key;
+        const summary = el("summary");
+        summary.dataset.focus = `section-${key}`;
+        summary.append(el("h2", label));
+        node.append(summary);
+        return node;
+      }
+      function shipHash(id) { return `#/ship/${encodeURIComponent(id)}`; }
+      function sessionHash(ship, session) {
+        return `${shipHash(ship)}/session/${encodeURIComponent(session)}`;
+      }
+      function shipApi(id) { return `api/ships/${encodeURIComponent(id)}`; }
+      async function get(path, signal) {
+        const response = await fetch(path, { signal, headers: { Accept: "application/json" }, cache: "no-store" });
+        let data;
+        try { data = await response.json(); }
+        catch { throw new Error(`Invalid JSON response (${response.status})`); }
+        if (!response.ok) throw new Error(typeof data?.error === "string" ? data.error : `Request failed (${response.status})`);
+        return data;
+      }
+      function announce(message, error = false) {
+        status.textContent = message;
+        status.className = error ? "error" : "";
+      }
+      function viewState() {
+        return {
+          open: new Map(Array.from(main.querySelectorAll("details[data-section]"), node => [node.dataset.section, node.open])),
+          focused: main.contains(document.activeElement) ? document.activeElement?.dataset.focus : undefined,
+          x: window.scrollX, y: window.scrollY,
+        };
+      }
+      function replaceView(nodes, saved = viewState()) {
+        main.replaceChildren(...nodes);
+        for (const node of main.querySelectorAll("details[data-section]")) {
+          if (saved.open.has(node.dataset.section)) node.open = saved.open.get(node.dataset.section);
+        }
+        if (saved.focused) {
+          Array.from(main.querySelectorAll("[data-focus]")).find(node => node.dataset.focus === saved.focused)?.focus({ preventScroll: true });
+        }
+        window.scrollTo(saved.x, saved.y);
+      }
+      function updated(value) {
+        const node = el("p", undefined, "muted");
+        node.append(document.createTextNode("Updated: "), time(value));
+        return node;
+      }
+      function renderFleet(data) {
+        document.title = "Pogo fleet";
+        breadcrumbs.replaceChildren(link("Fleet", "#/"));
+        const cards = el("div", undefined, "cards");
+        for (const ship of data.ships) {
+          const card = el("article", undefined, "card");
+          const heading = el("h2");
+          const a = link(ship.name, shipHash(ship.id));
+          a.dataset.focus = `ship-${ship.id}`;
+          heading.append(a);
+          card.append(heading, fields([
+            ["Backend", ship.backend], ["Agent", ship.agent],
+            ["Crew total", ship.crew?.total], ["Crew busy", ship.crew?.busy],
+            ["Cronjobs", ship.cronjobs],
+          ]), counts(ship.queue));
+          cards.append(card);
+        }
+        if (!data.ships.length) cards.append(el("p", "No ships configured."));
+        replaceView([el("h1", "Fleet"), updated(data.generatedAt), cards]);
+      }
+      function taskFields(task) {
+        if (!task) return el("p", "none", "muted");
+        return fields([
+          ["Task", task.id], ["Status", task.status], ["Kind", task.kind],
+          ["Summary", task.summary], ["Phase", task.phase], ["Progress", task.progress],
+          ["Created", time(task.createdAt)], ["Started", time(task.startedAt)],
+          ["Updated", time(task.updatedAt)], ["Finished", time(task.finishedAt)],
+        ]);
+      }
+      function taskList(label, tasks, key) {
+        const details = el("details");
+        details.dataset.section = key;
+        const summary = el("summary", label);
+        summary.dataset.focus = key;
+        details.append(summary);
+        if (!tasks.length) details.append(el("p", "none", "muted"));
+        for (const task of tasks) details.append(taskFields(task));
+        return details;
+      }
+      function renderCrew(data) {
+        const node = section("Captain and crew", "crew");
+        if (data.crewError) node.append(el("p", data.crewError, "error"));
+        if (!data.crew) { node.append(el("p", "Crew status: none", "muted")); return node; }
+        node.append(el("p", `Members: ${data.crew.total}`));
+        if (data.crew.truncated) node.append(el("p", "Crew list truncated.", "label"));
+        if (!data.crew.members.length) node.append(el("p", "none", "muted"));
+        for (const member of data.crew.members) {
+          const card = el("article", undefined, "member");
+          card.append(el("h3", member.name), fields([
+            ["Member", member.id], ["Backend", member.backend],
+            ["Provisioned", member.provisioned], ["Observed", member.observed],
+            ["Queued", member.queuedCount], ["Recent count", member.recentCount],
+          ]), el("h3", "Current task"), taskFields(member.current),
+          el("h3", "Last outcome"), taskFields(member.lastOutcome),
+          taskList("Queued tasks", member.queued, `queued-${member.id}`),
+          taskList("Recent tasks", member.recent, `recent-${member.id}`));
+          node.append(card);
+        }
+        return node;
+      }
+      function renderBot(bot) {
+        const node = section("Pogo bot", "bot");
+        node.append(fields([
+          ["Bot ID", bot.id], ["Slack app", bot.slack.appId],
+          ["Slack team", bot.slack.team], ["Slack user", bot.slack.user],
+          ["Allowed users", bot.access.users], ["Allowed channels", bot.access.channels],
+          ["Denied users", bot.access.deniedUsers], ["Denied channels", bot.access.deniedChannels],
+          ["Mention only", bot.access.mentionOnly], ["Backend", bot.backend.type],
+          ["Agent", bot.backend.agent], ["Model", bot.backend.model],
+          ["Directory", bot.backend.directory], ["Concurrency", bot.concurrency],
+          ["Turn timeout (ms)", bot.turnTimeoutMs],
+        ]));
+        return node;
+      }
+      function renderQueue(queue) {
+        const node = section("Queue", "queue");
+        node.append(counts(queue.counts), el("h3", "Recent jobs"), table(
+          ["ID", "Status", "Channel", "Thread", "User", "Deferred", "Failure"],
+          queue.recent.map(job => [job.id, job.status, job.channel, job.thread, job.user, job.deferred, job.failure]),
+        ));
+        return node;
+      }
+      function renderCron(cron) {
+        const node = section("Cronjobs", "cron");
+        node.append(el("p", cron.fileBacked ? "File-backed schedules" : "Legacy Slack schedules"));
+        if (cron.dailyReport) node.append(fields([
+          ["Daily report channel", cron.dailyReport.channel], ["Daily report time", cron.dailyReport.time],
+          ["Timezone", cron.dailyReport.timezone],
+        ]));
+        node.append(table(
+          ["Name / ID", "State", "Report", "Channel", "User", "Next run", "Last run", "Last status"],
+          cron.jobs.map(job => [el("span", `${job.name} / ${job.id}`),
+            !job.available ? (job.paused ? "unavailable, paused" : "unavailable") : (job.paused ? "paused" : "available"),
+            job.report, job.channel, job.user, time(job.nextAt), time(job.lastRunAt), job.lastStatus]),
+        ), el("h3", "Recent runs"), table(
+          ["Name / ID", "Status", "Due", "Finished", "Manual", "Report"],
+          cron.runs.map(run => [`${run.name} / ${run.id}`, run.status, time(run.dueAt), time(run.finishedAt), run.manual, run.report]),
+        ));
+        return node;
+      }
+      function sessionNode(session, ship, ancestors = new Set()) {
+        if (ancestors.has(session.id)) return el("li", "Repeated session reference.", "muted");
+        if (treeNodes.has(session.id)) return treeNodes.get(session.id);
+        const node = el("li");
+        treeNodes.set(session.id, node);
+        const a = link(session.title || session.member || session.id, sessionHash(ship, session.id));
+        a.dataset.focus = `session-${session.id}`;
+        node.append(a, fields([
+          ["Session", session.id], ["Kind", session.kind], ["Harness", session.harness],
+          ["Member", session.member], ["Parent", session.parentID], ["Agent", session.agent],
+          ["Model", session.model], ["Created", time(session.createdAt)], ["Updated", time(session.updatedAt)],
+        ]));
+        const children = el("ul", undefined, "tree");
+        const message = el("p", undefined, "muted");
+        message.setAttribute("role", "status");
+        const more = button("Load more subagents", () => { void load(); }, `more-${session.id}`);
+        more.hidden = true;
+        let cursor;
+        let loaded = false;
+        let busy = false;
+        let expanded = false;
+        const branch = new Set([...ancestors, session.id]);
+        const childIDs = new Set();
+        const ownGeneration = generation;
+        const ownSignal = controller.signal;
+        const toggle = button("Show subagents", () => {
+          expanded = !expanded;
+          toggle.textContent = expanded ? "Hide subagents" : "Show subagents";
+          toggle.setAttribute("aria-expanded", String(expanded));
+          children.hidden = !expanded;
+          message.hidden = !expanded;
+          more.hidden = !expanded || !cursor;
+          if (expanded && !loaded && !busy) void load();
+        }, `children-${session.id}`);
+        toggle.setAttribute("aria-expanded", "false");
+        children.hidden = true;
+        message.hidden = true;
+        async function load() {
+          if (busy) return;
+          busy = true;
+          more.disabled = true;
+          message.className = "muted";
+          message.textContent = "Loading subagents…";
+          try {
+            let path = `${shipApi(ship)}/sessions?parent=${encodeURIComponent(session.id)}`;
+            if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
+            const data = await get(path, ownSignal);
+            if (ownGeneration !== generation) return;
+            for (const child of data.sessions) {
+              if (!childIDs.has(child.id)) { children.append(sessionNode(child, ship, branch)); childIDs.add(child.id); }
+            }
+            cursor = data.cursor;
+            loaded = true;
+            message.textContent = childIDs.size ? "Subagents loaded." : "No subagents.";
+            more.textContent = "Load more subagents";
+          } catch (error) {
+            if (ownSignal.aborted) return;
+            message.textContent = error.message;
+            message.className = "error";
+            more.textContent = "Retry subagents";
+          } finally {
+            busy = false;
+            more.disabled = false;
+            more.hidden = !expanded || (loaded && !cursor && message.className !== "error");
+          }
+        }
+        node.append(toggle, message, children, more);
+        return node;
+      }
+      function renderSessions(data) {
+        const node = section("Sessions", "sessions");
+        if (data.sessionsError) node.append(el("p", data.sessionsError, "error"));
+        for (const [label, kinds] of [
+          ["Captain", ["captain"]], ["Crew", ["crew"]],
+          ["Earlier conversations", ["conversation", "subagent"]],
+        ]) {
+          node.append(el("h3", label));
+          const list = el("ul", undefined, "tree");
+          for (const session of data.sessions.filter(item => kinds.includes(item.kind))) {
+            list.append(sessionNode(session, data.id));
+          }
+          node.append(list.childNodes.length ? list : el("p", "none", "muted"));
+        }
+        if (data.sessionsMore) node.append(el("p", "Only the most recently used conversation roots are listed.", "muted"));
+        return node;
+      }
+      function renderShip(data) {
+        const saved = viewState();
+        document.title = `${data.name} | Pogo`;
+        breadcrumbs.replaceChildren(link("Fleet", "#/"), document.createTextNode(" / "), el("span", data.name));
+        // Reuse session nodes so polling preserves loaded children and controls.
+        const sessions = renderSessions(data);
+        replaceView([el("h1", data.name), updated(data.generatedAt), renderCrew(data),
+          renderBot(data.bot), renderQueue(data.queue), renderCron(data.cron), sessions], saved);
+      }
+      function partDetails(label, body) {
+        const details = el("details");
+        details.append(el("summary", label), el("pre", body));
+        return details;
+      }
+      function renderEntry(entry, ship) {
+        const node = el("article", undefined, "entry");
+        const head = el("div", undefined, "entry-head");
+        head.append(el("strong", entry.role), time(entry.createdAt), el("span", `Model: ${text(entry.model)}`));
+        node.append(head);
+        for (const part of entry.parts) {
+          if (part.type === "text") node.append(el("pre", part.text));
+          else if (part.type === "reasoning") {
+            node.append(full ? partDetails("Reasoning", part.text) : el("p", "Reasoning", "label"));
+          } else if (part.type === "tool") {
+            node.append(el("p", `Tool: ${part.name} · ${text(part.status)}`, "label"));
+            if (full) node.append(partDetails("Tool input", part.input), partDetails("Tool output", part.output));
+            if (part.sessionID) node.append(link("Open child session", sessionHash(ship, part.sessionID)));
+          } else if (part.type === "notice") node.append(el("p", part.label, "label"));
+          if (part.truncated) node.append(el("p", "Truncated part.", "label"));
+        }
+        if (!entry.parts.length) node.append(el("p", "No parts.", "muted"));
+        if (entry.omittedParts) node.append(el("p", `Omitted parts: ${entry.omittedParts}`, "label"));
+        return node;
+      }
+      function transcriptShell() {
+        document.title = `Session ${route.session} | Pogo`;
+        breadcrumbs.replaceChildren(link("Fleet", "#/"), document.createTextNode(" / "),
+          link(route.ship, shipHash(route.ship)), document.createTextNode(" / Session"));
+        const toolbar = el("div", undefined, "toolbar");
+        const toggle = button("Show details", () => {
+          full = !full;
+          toggle.textContent = full ? "Hide details" : "Show details";
+          toggle.setAttribute("aria-pressed", String(full));
+          void loadEntries(false);
+        }, "detail-toggle");
+        toggle.setAttribute("aria-pressed", String(full));
+        toggle.textContent = full ? "Hide details" : "Show details";
+        toolbar.append(toggle, el("span", "Newest page first. Older pages append below.", "muted"));
+        const list = el("div");
+        list.id = "entries";
+        const message = el("p");
+        message.id = "entry-status";
+        message.setAttribute("role", "status");
+        const more = button("Load older", () => { void loadEntries(true); }, "older");
+        more.id = "older";
+        more.hidden = true;
+        replaceView([el("h1", "Session"), el("p", route.session, "muted"), toolbar, list, message, more]);
+      }
+      async function loadEntries(older) {
+        if (older && (transcriptBusy || !entryCursor)) return;
+        const version = ++transcriptVersion;
+        const ownGeneration = generation;
+        const signal = controller.signal;
+        const ship = route.ship;
+        const message = document.getElementById("entry-status");
+        const more = document.getElementById("older");
+        const list = document.getElementById("entries");
+        transcriptBusy = true;
+        more.disabled = true;
+        refresh.disabled = true;
+        if (!older) { entries = []; entryCursor = undefined; list.replaceChildren(); more.hidden = true; }
+        message.className = "muted";
+        message.textContent = "Loading transcript…";
+        announce("Loading transcript…");
+        try {
+          let path = `${shipApi(ship)}/entries?session=${encodeURIComponent(route.session)}&order=desc&detail=${full ? "full" : "summary"}&limit=30`;
+          if (older) path += `&cursor=${encodeURIComponent(entryCursor)}`;
+          const data = await get(path, signal);
+          if (ownGeneration !== generation || version !== transcriptVersion) return;
+          const seen = new Set(entries.map(entry => entry.id));
+          for (const entry of data.entries) {
+            if (!seen.has(entry.id)) { list.append(renderEntry(entry, ship)); entries.push(entry); seen.add(entry.id); }
+          }
+          entryCursor = data.cursor;
+          more.textContent = "Load older";
+          more.hidden = !entryCursor;
+          message.textContent = entries.length ? (entryCursor ? "Older entries available." : "End of transcript.") : "No entries.";
+          announce("Transcript loaded.");
+        } catch (error) {
+          if (signal.aborted || ownGeneration !== generation || version !== transcriptVersion) return;
+          message.textContent = error.message;
+          message.className = "error";
+          more.hidden = !older;
+          more.textContent = "Retry older entries";
+          announce(error.message, true);
+        } finally {
+          if (ownGeneration === generation && version === transcriptVersion) {
+            transcriptBusy = false;
+            more.disabled = false;
+            refresh.disabled = false;
+          }
+        }
+      }
+      async function loadOverview() {
+        if (refreshing || route.kind === "session" || route.kind === "invalid") return;
+        const ownGeneration = generation;
+        const signal = controller.signal;
+        refreshing = true;
+        refresh.disabled = true;
+        announce("Loading…");
+        const pending = document.getElementById("overview-state");
+        if (pending) { pending.textContent = "Loading…"; pending.className = "muted"; }
+        try {
+          const data = await get(route.kind === "fleet" ? "api/fleet" : shipApi(route.ship), signal);
+          if (ownGeneration !== generation) return;
+          if (route.kind === "fleet") renderFleet(data); else renderShip(data);
+          announce("View updated.");
+        } catch (error) {
+          if (!signal.aborted && ownGeneration === generation) {
+            if (pending) { pending.textContent = error.message; pending.className = "error"; }
+            announce(error.message, true);
+          }
+        } finally {
+          if (ownGeneration === generation) { refreshing = false; refresh.disabled = false; }
+        }
+      }
+      function navigate() {
+        // The skip link is a document anchor, not a view transition.
+        if (location.hash === "#content") { main.focus(); return; }
+        controller.abort();
+        controller = new AbortController();
+        generation += 1;
+        transcriptVersion += 1;
+        refreshing = false;
+        transcriptBusy = false;
+        refresh.disabled = false;
+        full = false;
+        entries = [];
+        entryCursor = undefined;
+        treeNodes = new Map();
+        try {
+          const parts = (location.hash || "#/").slice(1).split("/");
+          if (parts.length === 2 && parts[1] === "") route = { kind: "fleet" };
+          else if (parts[0] === "" && parts[1] === "ship" && parts[2] && parts.length === 3) {
+            route = { kind: "ship", ship: decodeURIComponent(parts[2]) };
+          } else if (parts[0] === "" && parts[1] === "ship" && parts[2] && parts[3] === "session" && parts[4] && parts.length === 5) {
+            route = { kind: "session", ship: decodeURIComponent(parts[2]), session: decodeURIComponent(parts[4]) };
+          } else throw new Error("Unknown dashboard route.");
+          const pending = el("p", "Loading…");
+          pending.id = "overview-state";
+          main.replaceChildren(el("h1", route.kind === "fleet" ? "Fleet" : "Ship"), pending);
+          breadcrumbs.replaceChildren(link("Fleet", "#/"));
+          window.scrollTo(0, 0);
+          if (route.kind === "session") { transcriptShell(); void loadEntries(false); }
+          else void loadOverview();
+        } catch (error) {
+          route = { kind: "invalid" };
+          main.replaceChildren(el("h1", "Invalid route"), link("Open fleet", "#/"));
+          announce(error.message, true);
+        }
+      }
+      refresh.addEventListener("click", () => {
+        if (route.kind === "session") void loadEntries(false);
+        else void loadOverview();
+      });
+      window.addEventListener("hashchange", navigate);
+      setInterval(() => {
+        if (!document.hidden && (route.kind === "fleet" || route.kind === "ship")) void loadOverview();
+      }, 15000);
+      navigate();
+    </script>
+  </body>
+</html>
