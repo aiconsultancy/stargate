@@ -65,6 +65,9 @@ async function fixture() {
 test("default profile uses proxy, durable crew, and 20% compaction buffer", async () => {
   const { options } = await fixture();
   const config = await renderProfile(options, "daisy");
+  expect(config.skills.some((path) => path.endsWith("/templates/skills"))).toBe(
+    true,
+  );
   expect(config.model).toBe("openai-proxy/gpt-6.1-sol");
   expect(config.default_agent).toBe("bowser-crew-daisy");
   expect(config.compaction).toMatchObject({ auto: true, buffer: "20%" });
@@ -153,6 +156,13 @@ test("profile binds every crew location to the same existing captain session", a
   ).rejects.toThrow("Invalid profile");
 });
 
+test("profile retains an explicit local cron control binding", async () => {
+  const { options } = await fixture();
+  const cron = { configPath: "/srv/pogo/pogo.json", bot: "helper" };
+  const profile = await renderProfile({ ...options, cron }, "bowser");
+  expect(profile.plugins[0]?.options.cron).toEqual(cron);
+});
+
 test("reaction protocol belongs once in the captain definition, not crew definitions", async () => {
   const { options } = await fixture();
   await initializeProfile(options);
@@ -162,6 +172,13 @@ test("reaction protocol belongs once in the captain definition, not crew definit
     "utf8",
   );
   expect(captain).toContain(reactionInstructions);
+  expect(captain).toStartWith("---\n");
+  expect(captain.split("<!-- POGO:START -->")).toHaveLength(2);
+  expect(captain.split("<!-- POGO:END -->")).toHaveLength(2);
+  expect(captain).toEndWith("<!-- POGO:END -->\n");
+  expect(captain.indexOf("<!-- POGO:START -->")).toBeGreaterThan(
+    captain.indexOf("\n---\n"),
+  );
   expect(captain.split("Slack reaction protocol (optional):")).toHaveLength(2);
   for (const member of ["mario", "luigi", "daisy", "toad"]) {
     const crew = await readFile(
@@ -175,6 +192,8 @@ test("reaction protocol belongs once in the captain definition, not crew definit
       "utf8",
     );
     expect(crew).not.toContain("Slack reaction protocol");
+    expect(crew.split("<!-- POGO:START -->")).toHaveLength(2);
+    expect(crew).toEndWith("<!-- POGO:END -->\n");
   }
 });
 
@@ -247,6 +266,11 @@ test("profile init refuses conflicting files rather than overwriting work", asyn
     "agents",
     "bowser-captain-bowser.md",
   );
+  const generated = await readFile(path, "utf8");
+  const amended = `${generated}\n## Operator notes\n\nPreserve these notes.\n`;
+  await writeFile(path, amended);
+  await expect(initializeProfile(options)).rejects.toThrow("existing");
+  expect(await readFile(path, "utf8")).toBe(amended);
   await writeFile(path, "User's custom instructions\n");
   await expect(initializeProfile(options)).rejects.toThrow("existing");
   expect(await readFile(path, "utf8")).toBe("User's custom instructions\n");
@@ -414,6 +438,8 @@ test("Pi crew receives a worktree but no OpenCode agent or session profile", asy
     "bowser-crew-twiki.md",
   );
   const definition = await readFile(definitionPath, "utf8");
+  expect(definition).toStartWith("<!-- POGO:START -->\n");
+  expect(definition).toEndWith("<!-- POGO:END -->\n");
   expect(definition).toContain("Pogo address: twiki");
   expect(worktree).toBe(join(options.worktreeDirectory, "twiki"));
   expect(definition).toContain("Do not switch worktrees");

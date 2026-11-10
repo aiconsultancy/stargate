@@ -4,6 +4,21 @@ import { join } from "node:path";
 import type { CrewCaller } from "./engine";
 import type { CrewMember } from "./team";
 
+export function managedPrompt(text: string) {
+  const start = "<!-- POGO:START -->";
+  const end = "<!-- POGO:END -->";
+  if (text.includes(start) || text.includes(end)) {
+    throw new Error("Instructions contain reserved managed-prompt markers.");
+  }
+  const frontmatter =
+    text.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0] ?? "";
+  const body = text.slice(frontmatter.length).trim();
+  const block = `${start}\n${body}\n${end}\n`;
+  return frontmatter
+    ? `${frontmatter}${frontmatter.endsWith("\n") ? "\n" : "\n\n"}${block}`
+    : block;
+}
+
 /** Small local file: compare content, not timestamps. Never publish its text. */
 export function workingAgreementNotice(path: string) {
   const seen = new Map<string, string>();
@@ -63,7 +78,7 @@ export function piMemberDefinition(
   directory: string,
   captainDirectory: string,
 ) {
-  return (
+  return managedPrompt(
     [
       `# ${member.name ?? member.id}`,
       `Pogo address: ${member.id}\nDefinition: ${member.agent ?? member.id}\nRole: ${member.role}\nWorktree: ${directory}`,
@@ -73,6 +88,6 @@ export function piMemberDefinition(
       member.instructions,
     ]
       .filter(Boolean)
-      .join("\n\n") + "\n"
+      .join("\n\n"),
   );
 }

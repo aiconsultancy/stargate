@@ -5,6 +5,10 @@
   "formatter": { "indentStyle": "space", "lineWidth": 80 },
   "overrides": [
     {
+      "includes": ["**/CRONJOB.md"],
+      "formatter": { "enabled": false }
+    },
+    {
       "includes": [
         ".agents/skills/effect-ts/SKILL.md",
         ".agents/skills/effect-v3-to-v4/SKILL.md"

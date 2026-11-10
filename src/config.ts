@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { crewActivitySchema } from "./activity";
+import { cronjobsSchema } from "./cronjob-config";
 import { waitingSchema } from "./waiting";
 
 const absolutePath = z.string().refine(isAbsolute, "Use an absolute path");
@@ -137,6 +138,7 @@ export const botSchema = z.strictObject({
     mentionOnly: z.boolean().default(false),
   }),
   backend: backendSchema,
+  cronjobs: cronjobsSchema.optional(),
   pairing: pairingSchema.optional(),
   threadContext: z.boolean().default(false),
   waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),
@@ -153,6 +155,14 @@ export const configSchema = z
     bots: z.array(botSchema).min(1),
   })
   .superRefine(({ bots }, context) => {
+    const cronDirectories = bots.flatMap((bot) =>
+      bot.cronjobs ? [resolve(bot.cronjobs.directory)] : [],
+    );
+    if (new Set(cronDirectories).size !== cronDirectories.length)
+      context.addIssue({
+        code: "custom",
+        message: "Each bot needs a separate cronjobs directory",
+      });
     const pinnedSessions = bots.flatMap((bot) =>
       bot.backend.type === "opencode" && bot.backend.sessionID !== undefined
         ? [bot.backend.sessionID]

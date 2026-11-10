@@ -7,11 +7,13 @@ import {
   Error as ToolError,
 } from "@opencode/plugin/promise/tool";
 import { Effect } from "effect";
+import { cronOperationSchema } from "../cron-control";
 import { resourceScope } from "../effect";
 import { MaintenanceRPC, maintenancePlanSchema } from "../maintenance";
 import { quotaInputSchema } from "../quota";
 import { connectHistoryAPI, historyVisible } from "./api";
 import { compactOnServer } from "./compaction";
+import { CrewCron } from "./cron";
 import { CrewEngine, crewInputSchema, mailInputSchema } from "./engine";
 import { CrewHistory, historyInputSchema } from "./history";
 import { workingAgreementContext } from "./instructions";
@@ -65,6 +67,7 @@ const plugin = Plugin.define({
         compactOnServer(engine.options.team, ctx.session, sessionID, signal),
     );
     const waiting = new CrewWaiting(engine);
+    const cron = new CrewCron(engine);
     // Released after the RPC registrations, before the engine closes.
     const maintenance = await resources.own(
       async () => new CrewMaintenance(engine),
@@ -168,6 +171,21 @@ const plugin = Plugin.define({
           ),
       });
       await ctx.tool.transform((editor) => {
+        editor.add({
+          name: "pogo_cron",
+          description:
+            "Captain-only cronjobs: create (add), list, run, remove and report retained results for the configured bot/workspace. Load pogo-cronjobs first. Definitions live in cronjobs/<name>/CRONJOB.md; reference reusable skills instead of copying prompts and load required skills before execution. Add requires a five-field schedule, explicit timezone and intended Slack destination; use enabled=false when timing is undecided. Add report=immediate posts configured reports; report=daily silently logs results for one 08:30 UTC digest. Deferred report results remain local until their configured report; missing daily reporting leaves results local. op=report reads results, not reporting settings. Run admission or busy status never proves completion. Preserve busy work; retry the same run with its requestId (host tool-call ID by default), never blindly replay uncertain work. No permission expansion, global configuration changes, duplicate OS updaters, blind self-restarts or live dependency updates.",
+          input: cronOperationSchema,
+          options: { codemode: false, permission: "pogo_crew" },
+          execute: (input, context) =>
+            guard(
+              context,
+              "pogo_crew",
+              input.op,
+              "Cronjob operation unconfirmed; raw details withheld.",
+              () => cron.run(input, context),
+            ),
+        });
         editor.add({
           name: "pogo_quota",
           description:

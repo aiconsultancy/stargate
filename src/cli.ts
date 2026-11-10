@@ -1,6 +1,9 @@
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { teamSchema } from "./crew/team";
+import { cronOperationSchema, runCronOperation } from "./cron-control";
 import { initializeProfile } from "./profile";
 import { provisionBots } from "./provision";
 import { manageService } from "./service";
@@ -28,6 +31,7 @@ Commands:
   bot add           Add a bot using flags, or interactively with no flags
   bot provision     Plan or resume a batch of Slack registrations
   crew init         Install an OpenCode captain/crew profile
+  cron              List, add, run, remove, or report cronjobs
   config check      Validate config and Slack token references
   manifest          Print Slack manifest JSON and prefilled creation URL
   service install   Install Linux systemd user unit; does not enable/start
@@ -100,6 +104,8 @@ ${slackInstructions}`,
 --mesij-command PATH   Absolute Mesij executable (default: resolved from PATH)
 --proxy-url URL        CLIProxyAPI endpoint (default: http://127.0.0.1:8317/v1)
 --proxy-key-file PATH  Reference an existing private key file; never a key value
+--cron-config PATH     Bind cron tools to this explicit Pogo config path
+--cron-bot ID          Cron bot registration; requires --cron-config (and vice versa)
 Creates named feature branches, local agent/config overlays, and private state.
 Existing conflicting files are not overwritten. No sessions, apps, or services
 are started. Crew sessions are created lazily by the captain and then reused.
@@ -109,6 +115,16 @@ Default model: openai-proxy/gpt-6.1-sol. Global authentication is unchanged.`,
 Checks JSON/schema and Slack token references using environment and <config>.env.
 --schema-only  Check JSON/schema without requiring any credentials
 Does not contact Slack or check provider credentials.`,
+  cron: `Usage: pogo cron <list|add|run|remove|report> --bot ID [options]
+--bot ID       Configured bot registration (required)
+--input PATH   Add only: JSON definition file, at most 64 KiB
+--name NAME    Run only: job name or UUID; positional name also accepted
+--id UUID      Remove only: job UUID; positional UUID also accepted
+Add JSON fields: name, description, schedule, prompt; optional timezone,
+skills, enabled, report (immediate|daily), channel, user.
+List and report accept no input or job selector. Output is JSON.
+Uses configured cronjobs directory and destination; no prompt CLI arguments.
+${common}`,
   manifest: `Usage: pogo manifest [--name NAME] [--json]
 --name NAME  Slack app display name (default: Pogo; 1–80 characters)
 --json       Print only JSON for scripts; otherwise include prefilled URL
@@ -145,6 +161,8 @@ function parseCli(args: string[]) {
       options: {
         help: { type: "boolean", short: "h" },
         config: { type: "string" },
+        bot: { type: "string" },
+        input: { type: "string" },
         name: { type: "string" },
         json: { type: "boolean" },
         "schema-only": { type: "boolean" },
@@ -175,6 +193,8 @@ function parseCli(args: string[]) {
         "mesij-command": { type: "string" },
         "proxy-url": { type: "string" },
         "proxy-key-file": { type: "string" },
+        "cron-config": { type: "string" },
+        "cron-bot": { type: "string" },
       },
     });
   } catch {
@@ -217,26 +237,30 @@ export async function runCli(args: string[]): Promise<CliResult> {
       ? p[1] === "provision"
         ? ["plan", "apply", "journal", "record-app", "json"]
         : botOptions
-      : command === "crew"
-        ? [
-            "directory",
-            "project",
-            "worktrees",
-            "team",
-            "id",
-            "session-id",
-            "base",
-            "mesij-command",
-            "proxy-url",
-            "proxy-key-file",
-          ]
-        : command === "manifest"
-          ? ["name", "json"]
-          : command === "service"
-            ? ["name"]
-            : command === "config"
-              ? ["schema-only"]
-              : []),
+      : command === "cron"
+        ? ["bot", "input", "name", "id"]
+        : command === "crew"
+          ? [
+              "directory",
+              "project",
+              "worktrees",
+              "team",
+              "id",
+              "session-id",
+              "base",
+              "mesij-command",
+              "proxy-url",
+              "proxy-key-file",
+              "cron-config",
+              "cron-bot",
+            ]
+          : command === "manifest"
+            ? ["name", "json"]
+            : command === "service"
+              ? ["name"]
+              : command === "config"
+                ? ["schema-only"]
+                : []),
   ]);
   if (Object.keys(v).some((key) => !allowed.has(key)))
     throw new Error(
@@ -244,7 +268,54 @@ export async function runCli(args: string[]): Promise<CliResult> {
     );
   if (command === "start" && p.length <= 1)
     return { command: "start", configPath };
-  if (command === "crew" && p[1] === "init" && p.length === 2) {
+  if (command === "cron") {
+    const op = p[1];
+    if (!op || !["list", "add", "run", "remove", "report"].includes(op))
+      throw new Error("Unknown cron operation. Use cron --help.");
+    if (!v.bot?.trim()) throw new Error("--bot is required.");
+    const selectors = [v.name, v.id, p[2]].filter(
+      (value) => value !== undefined,
+    );
+    if (
+      p.length > 3 ||
+      (op !== "run" && op !== "remove" && p.length > 2) ||
+      (v.input !== undefined && op !== "add") ||
+      (v.name !== undefined && op !== "run") ||
+      (v.id !== undefined && op !== "remove") ||
+      (op === "run" || op === "remove"
+        ? selectors.length !== 1
+        : selectors.length !== 0)
+    )
+      throw new Error("Invalid cron options. Use cron --help.");
+    let raw: unknown = { op };
+    if (op === "add") {
+      if (!v.input) throw new Error("cron add requires --input PATH.");
+      const input = await readCronFile(resolve(v.input));
+      if (
+        !input ||
+        typeof input !== "object" ||
+        Array.isArray(input) ||
+        "op" in input
+      )
+        throw new Error(
+          "Use a cronjob definition JSON object without an op field.",
+        );
+      raw = { ...input, op };
+    } else if (op === "run") raw = { op, name: selectors[0] };
+    else if (op === "remove") raw = { op, id: selectors[0] };
+    if (!cronOperationSchema.safeParse(raw).success)
+      throw new Error("Invalid cron input. Use cron --help.");
+    const result = await runCronOperation(
+      raw,
+      { configPath, bot: v.bot },
+      AbortSignal.timeout(30_000),
+    );
+    console.log(JSON.stringify(result, null, 2));
+  } else if (command === "crew" && p[1] === "init" && p.length === 2) {
+    if (Boolean(v["cron-config"]) !== Boolean(v["cron-bot"]))
+      throw new Error(
+        "--cron-config and --cron-bot must be supplied together.",
+      );
     if (!v.directory || !v.project || !v.worktrees)
       throw new Error("--directory, --project, and --worktrees are required.");
     const mesijCommand = v["mesij-command"] ?? Bun.which("mesij");
@@ -266,6 +337,11 @@ export async function runCli(args: string[]): Promise<CliResult> {
       ...(v["proxy-url"] ? { proxyURL: v["proxy-url"] } : {}),
       ...(v["proxy-key-file"]
         ? { apiKeyReference: `{file:${resolve(v["proxy-key-file"])}}` }
+        : {}),
+      ...(v["cron-config"] && v["cron-bot"]
+        ? {
+            cron: { configPath: resolve(v["cron-config"]), bot: v["cron-bot"] },
+          }
         : {}),
     });
     console.log(JSON.stringify(result, null, 2));
@@ -368,6 +444,36 @@ async function readTeamFile(path: string) {
   } catch {
     throw new Error(
       "Cannot load team file. Use valid team JSON without credentials.",
+    );
+  }
+}
+
+async function readCronFile(path: string): Promise<unknown> {
+  try {
+    const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      const stat = await file.stat();
+      if (!stat.isFile() || stat.size > 65_536) throw new Error();
+      const buffer = Buffer.alloc(65_537);
+      let length = 0;
+      while (length < buffer.length) {
+        const { bytesRead } = await file.read(
+          buffer,
+          length,
+          buffer.length - length,
+          null,
+        );
+        if (!bytesRead) break;
+        length += bytesRead;
+      }
+      if (length > 65_536) throw new Error();
+      return JSON.parse(buffer.subarray(0, length).toString("utf8"));
+    } finally {
+      await file.close();
+    }
+  } catch {
+    throw new Error(
+      "Cannot load cron input. Use a JSON file at most 64 KiB without credentials.",
     );
   }
 }

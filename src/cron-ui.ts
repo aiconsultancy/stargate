@@ -4,6 +4,8 @@ import { z } from "zod";
 import type { BotConfig } from "./config";
 import { validateCronInput } from "./cron";
 import type { CronStore } from "./cron-store";
+import { cronjobNameSchema } from "./cronjob-files";
+import { CronjobManager } from "./cronjob-manager";
 import {
   botKey,
   type Identity,
@@ -101,7 +103,8 @@ const submissionSchema = z
   })
   .passthrough();
 type Metadata = z.infer<typeof metadataSchema>;
-const usage = "Use /cron, /cron list, /cron add, or /cron remove.";
+const usage =
+  "Use /cron, /cron list, /cron add, /cron remove, or /cron run NAME_OR_ID.";
 const plain = (text: string) => ({
   type: "plain_text" as const,
   text,
@@ -133,7 +136,8 @@ function notice(text: string): CronView {
   };
 }
 
-function addView(scope: Metadata): CronView {
+function addView(scope: Metadata, config: BotConfig): CronView {
+  const immediate = { text: plain("Immediate"), value: "immediate" };
   return {
     type: "modal",
     callback_id: "cron_add",
@@ -144,6 +148,11 @@ function addView(scope: Metadata): CronView {
     blocks: [
       section(
         "Selecting Add authorizes recurring execution with this bot's existing tools and access. Results are posted to this channel. Timezone defaults to UTC. Five fields: minute hour day-of-month month day-of-week. Example: 0 9 * * 1-5.",
+      ),
+      section(
+        config.cronjobs?.dailyReport
+          ? `Daily results are reported at ${config.cronjobs.dailyReport.time} UTC (default 08:30 UTC).`
+          : "Daily reporting is not configured. Daily results remain in local storage; no daily Slack report is sent.",
       ),
       ...fields.map(([key, label, max]) => ({
         type: "input" as const,
@@ -157,11 +166,49 @@ function addView(scope: Metadata): CronView {
           ...(key === "prompt" ? { multiline: true } : {}),
         },
       })),
+      {
+        type: "input",
+        block_id: "report",
+        optional: true,
+        label: plain("Result reporting"),
+        element: {
+          type: "static_select",
+          action_id: "value",
+          initial_option: immediate,
+          options: [immediate, { text: plain("Daily report"), value: "daily" }],
+        },
+      },
     ],
   };
 }
 
 export class CronUI {
+  // Leave time for Slack ACK even when a local filesystem is unavailable.
+  private async bounded<T>(work: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Cron storage timed out")),
+            1500,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async sync() {
+    if (this.config.cronjobs)
+      await this.bounded(
+        new CronjobManager(this.config, this.identity, this.store).sync(
+          Date.now(),
+        ),
+      );
+  }
   constructor(
     private readonly config: BotConfig,
     private readonly identity: Identity,
@@ -221,7 +268,7 @@ export class CronUI {
         ...(jobs.length
           ? jobs.map((job) => ({
               ...section(
-                `${job.name}\n${job.expression} · ${job.timezone}\nNext: ${new Date(job.nextAt).toISOString()}\n${Array.from(job.prompt).slice(0, 500).join("")}`,
+                `${job.name}\n${job.expression} · ${job.timezone}\n${job.available ? (job.paused ? "Paused" : "Active") : "Missing or invalid definition"} · Report: ${job.report}\nNext: ${new Date(job.nextAt).toISOString()}\n${Array.from(job.prompt).slice(0, 500).join("")}`,
               ),
               accessory: {
                 ...button("Remove", "cron_remove"),
@@ -309,7 +356,8 @@ export class CronUI {
       }
       const data = parsed.data;
       const subcommand = data.text.trim();
-      if (!["", "list", "add", "remove"].includes(subcommand)) {
+      const runName = /^run\s+(.+)$/.exec(subcommand)?.[1]?.trim();
+      if (!["", "list", "add", "remove"].includes(subcommand) && !runName) {
         await once({ response_type: "ephemeral", text: usage });
         return;
       }
@@ -319,10 +367,42 @@ export class CronUI {
         user: data.user_id,
         page: 0,
       };
+      await this.sync();
+      if (
+        !this.allowed(
+          data.user_id,
+          data.channel_id,
+          data.api_app_id,
+          data.team_id,
+        )
+      ) {
+        await once({
+          response_type: "ephemeral",
+          text: "Cron unavailable for this user or channel.",
+        });
+        return;
+      }
+      if (runName) {
+        const run = this.store.runNow(
+          scopeSchema.parse(scope),
+          runName,
+          Date.now(),
+          data.trigger_id,
+        );
+        await once({
+          response_type: "ephemeral",
+          text: run
+            ? "Recurring prompt queued. Execution is not completed."
+            : "Recurring prompt busy or unavailable. No new run queued.",
+        });
+        return;
+      }
       await once();
       await this.api.open(
         data.trigger_id,
-        subcommand === "add" ? addView(scope) : this.listView(scope),
+        subcommand === "add"
+          ? addView(scope, this.config)
+          : this.listView(scope),
       );
     });
   }
@@ -373,6 +453,31 @@ export class CronUI {
               errors[key] =
                 `Enter ${key === "expression" ? "a five-field cron expression" : `a valid ${key}`} (1–${max} characters).`;
           }
+          const report = z
+            .object({
+              value: z
+                .object({
+                  type: z.literal("static_select"),
+                  selected_option: z
+                    .object({ value: z.enum(["immediate", "daily"]) })
+                    .passthrough()
+                    .nullable(),
+                })
+                .passthrough(),
+            })
+            .passthrough()
+            .safeParse(data.view.state.values["report"]);
+          if (data.view.state.values["report"] !== undefined && !report.success)
+            errors["report"] = "Choose immediate or daily reporting.";
+          raw["report"] = report.success
+            ? (report.data.value.selected_option?.value ?? "immediate")
+            : "immediate";
+          if (
+            this.config.cronjobs &&
+            !cronjobNameSchema.safeParse(raw["name"]).success
+          )
+            errors["name"] =
+              "Use a lowercase kebab-case name, for example daily-build.";
           if (Object.keys(errors).length) {
             await once({ response_action: "errors", errors });
             return;
@@ -395,12 +500,22 @@ export class CronUI {
             return;
           }
           // Synchronous SQLite commit precedes success ACK. Slack retries reuse view.id.
-          this.store.add(
-            scopeSchema.parse(scope),
-            validated.input,
-            now,
-            data.view.id,
-          );
+          if (this.config.cronjobs) {
+            await this.bounded(
+              new CronjobManager(this.config, this.identity, this.store).add(
+                scopeSchema.parse(scope),
+                validated.input,
+                now,
+                data.view.id,
+              ),
+            );
+          } else
+            this.store.add(
+              scopeSchema.parse(scope),
+              validated.input,
+              now,
+              data.view.id,
+            );
           // Clear all views after saving. The next Add gets a fresh view.id,
           // preserving durable retry deduplication without growing the stack.
           await once({ response_action: "clear" });
@@ -424,6 +539,18 @@ export class CronUI {
           return;
         }
         let message: string | undefined;
+        await this.sync();
+        if (
+          !this.metadata(
+            data.view.private_metadata,
+            data.user.id,
+            data.api_app_id,
+            data.team.id,
+          )
+        ) {
+          await once();
+          return;
+        }
         if (action.action_id === "cron_remove") {
           // Commit before ACK: a lost ACK must not lose an authorized removal.
           const removed =
@@ -444,7 +571,7 @@ export class CronUI {
         )
           return;
         if (action.action_id === "cron_add") {
-          await this.api.push(data.trigger_id, addView(scope));
+          await this.api.push(data.trigger_id, addView(scope, this.config));
           return;
         }
         const page = Math.max(

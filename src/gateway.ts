@@ -178,6 +178,7 @@ export class Gateway {
       slack,
       () => config.crewActivity,
       (job) =>
+        !job.deferDelivery &&
         isAllowedUser(config, job.user) &&
         isAllowedChannel(config, job.channel),
       log,
@@ -210,27 +211,44 @@ export class Gateway {
     prompt: string;
     thread: string;
     name: string;
+    deferDelivery?: boolean;
   }): number | undefined {
     if (
       !isAllowedUser(this.config, input.user) ||
       !isAllowedChannel(this.config, input.channel)
     )
       return;
-    const eventId = `${input.channel}:${input.thread}`;
+    const eventId = input.deferDelivery
+      ? `scheduled:${input.runId}`
+      : `${input.channel}:${input.thread}`;
     this.store.enqueue({
       eventId,
       botKey: this.key,
-      conversation: conversationKey(this.key, input.channel, input.thread),
+      conversation: input.deferDelivery
+        ? JSON.stringify([this.key, input.channel, "scheduled", input.runId])
+        : conversationKey(this.key, input.channel, input.thread),
       channel: input.channel,
       thread: input.thread,
       user: input.user,
       text: input.prompt,
+      deferDelivery: input.deferDelivery ?? false,
     });
     return this.store.queuedJob(this.key, eventId)?.id;
   }
 
   scheduledStatus(jobId: number) {
     return this.store.jobStatus(this.key, jobId);
+  }
+
+  /** At most 12,000 characters of durable public output; never starts work. */
+  scheduledResult(jobId: number):
+    | {
+        text: string;
+        status: Job["status"];
+        failure?: RequestFailure | null;
+      }
+    | undefined {
+    return this.store.scheduledResult(this.key, jobId);
   }
 
   /**
@@ -676,6 +694,10 @@ export class Gateway {
       this.store.finish(job.id, "failed");
       return;
     }
+    const statusText = (cause: RequestFailure) =>
+      job.deferDelivery && cause === "history"
+        ? "The agent finished, but its public reply is not yet readable in session history. Pogo will retain it locally when it becomes readable. The request was not repeated."
+        : failureText(cause);
     let output: string[];
     let failure = job.failure ?? undefined;
     if (job.status === "queued") {
@@ -691,18 +713,15 @@ export class Gateway {
         maintenanceFailure.signal,
         budget.controller.signal,
       ]);
-      const waiting = await resolveWaiting(this.config);
-      const live = new LiveReply(
-        job,
-        this.store,
-        this.slack,
-        signal,
-        this.log,
-        {
-          waiting: { ...waiting, name: botDisplayName(this.config) },
-          phrase: waitingPhrase,
-        },
-      );
+      const live = job.deferDelivery
+        ? undefined
+        : new LiveReply(job, this.store, this.slack, signal, this.log, {
+            waiting: {
+              ...(await resolveWaiting(this.config)),
+              name: botDisplayName(this.config),
+            },
+            phrase: waitingPhrase,
+          });
       let reacted = false;
       let reactionDelivered = false;
       let reactionTask: Promise<void> | undefined;
@@ -716,6 +735,11 @@ export class Gateway {
       let keep = 0;
       let files: PublishedFile[] = [];
       const reply = (text: string, complete: boolean) => {
+        if (job.deferDelivery)
+          return parseAttachments(
+            parseReactionReply(text, complete).text,
+            complete,
+          ).text;
         if (!this.slack.react) return parseAttachments(text, complete).text;
         const parsed = parseReactionReply(text, complete);
         if (parsed.reaction && !reacted && !signal.aborted) {
@@ -741,8 +765,10 @@ export class Gateway {
           let text = job.text;
           const before = job.eventId.slice(job.channel.length + 1);
           const slackMessage =
+            !job.deferDelivery &&
             job.eventId.startsWith(`${job.channel}:`) &&
             /^\d{1,16}\.\d{1,6}$/.test(before);
+          // This API describes Slack sources only. Digest runs have no thread.
           const sourceContext: PromptSourceContext | undefined =
             pinned && slackMessage
               ? {
@@ -781,7 +807,7 @@ export class Gateway {
           if (!session) {
             session = await this.backend.createSession({
               key: job.conversation,
-              title: `${botDisplayName(this.config)} (slack ${job.channel})`,
+              title: `${botDisplayName(this.config)} (${job.deferDelivery ? "scheduled" : "slack"} ${job.channel})`,
               signal,
             });
             if (pinned) {
@@ -824,38 +850,52 @@ export class Gateway {
           } else
             from = await this.transcriptFrom(job.conversation, session, signal);
           signal.throwIfAborted();
-          maintenance = await startMaintenanceDelivery({
-            backend: this.backend,
-            sessionID: session,
-            requestID: `slack-job-${job.id}`,
-            signal,
-            publish: async (notice) => {
-              if (
-                !isAllowedUser(this.config, job.user) ||
-                !isAllowedChannel(this.config, job.channel)
-              )
-                throw new Error("Maintenance notice access denied");
-              await live.announce(maintenanceText(notice));
-              budget.pause();
-            },
-            resume: () => {
-              budget.resume();
-              live.resume();
-            },
-            cancel: () => {
-              this.log.warn(
-                { job: job.id },
-                "Maintenance monitoring failed; stopping request",
-              );
-              maintenanceFailure.abort();
-            },
-          });
-          activity = await this.activity.start(job, session, signal, shutdown);
+          // No notice can be delivered for a digest run. Do not register a
+          // maintenance permit: the backend must keep that tool fail-closed.
+          maintenance = live
+            ? await startMaintenanceDelivery({
+                backend: this.backend,
+                sessionID: session,
+                requestID: `slack-job-${job.id}`,
+                signal,
+                publish: async (notice) => {
+                  if (
+                    !isAllowedUser(this.config, job.user) ||
+                    !isAllowedChannel(this.config, job.channel)
+                  )
+                    throw new Error("Maintenance notice access denied");
+                  await live.announce(maintenanceText(notice));
+                  budget.pause();
+                },
+                resume: () => {
+                  budget.resume();
+                  live.resume();
+                },
+                cancel: () => {
+                  this.log.warn(
+                    { job: job.id },
+                    "Maintenance monitoring failed; stopping request",
+                  );
+                  maintenanceFailure.abort();
+                },
+              })
+            : undefined;
+          if (!job.deferDelivery)
+            activity = await this.activity.start(
+              job,
+              session,
+              signal,
+              shutdown,
+            );
           const fileIDs = this.store.inputFiles(job.id);
           let inputFiles: Attachment[] = [];
           if (fileIDs.length) {
             try {
-              if (!this.slack.files || !this.backend.supportsAttachments)
+              if (
+                job.deferDelivery ||
+                !this.slack.files ||
+                !this.backend.supportsAttachments
+              )
                 throw new Error(
                   "Attachment input is unavailable for this backend",
                 );
@@ -878,7 +918,7 @@ export class Gateway {
             session,
             text,
             signal,
-            (text) => live.push(reply(text, false)),
+            live ? (text) => live.push(reply(text, false)) : undefined,
             pinned
               ? (input) => {
                   this.store.saveInput(this.key, job.id, input, pinned);
@@ -924,7 +964,7 @@ export class Gateway {
           activity?.finish();
           if (deferred) {
             failure = "history";
-            output = [failureText(failure)];
+            output = [statusText(failure)];
           } else
             output =
               reacted && !answer.trim()
@@ -949,7 +989,7 @@ export class Gateway {
                   : error instanceof AttachmentInputUnavailable
                     ? "attachments"
                     : "backend";
-          output = [failureText(failure)];
+          output = [statusText(failure)];
           transcript = undefined;
           // Keep public text that settled before the failure; shutdown recovers later.
           if (this.backend.transcript && session && failure !== "interrupted") {
@@ -981,7 +1021,7 @@ export class Gateway {
           await reactionTask;
           if (!reactionDelivered) {
             failure = "reaction";
-            output = [failureText(failure)];
+            output = [statusText(failure)];
           }
         }
         // Completion commits before awaiting preview cleanup. A late Stop cannot erase it.
@@ -998,7 +1038,7 @@ export class Gateway {
           if (!(error instanceof TranscriptConflict)) throw error;
           // Another writer moved the cursor: catch-up delivers from there.
           failure = "history";
-          output = this.store.respond(job.id, [failureText(failure)], failure);
+          output = this.store.respond(job.id, [statusText(failure)], failure);
           this.queueTranscript(
             this.backend.sessionID ? this.key : job.conversation,
           );
@@ -1008,11 +1048,16 @@ export class Gateway {
         await maintenance?.close();
         budget.close();
         this.cancellations.delete(job.id);
-        await live.close();
+        await live?.close();
         await reactionTask;
       }
     } else {
       output = JSON.parse(job.response ?? "[]") as string[];
+    }
+    if (job.deferDelivery) {
+      this.store.sent(job.id, output.length);
+      this.store.finish(job.id);
+      return;
     }
     try {
       const previews = new Map(

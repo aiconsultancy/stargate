@@ -10,7 +10,11 @@ import {
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { piDefinitionPath, piMemberDefinition } from "./crew/instructions";
+import {
+  managedPrompt,
+  piDefinitionPath,
+  piMemberDefinition,
+} from "./crew/instructions";
 import { crewPermissions } from "./crew/policy";
 import {
   defaultModelProviders,
@@ -37,6 +41,12 @@ const optionsSchema = z.strictObject({
     .string()
     .regex(/^ses_[A-Za-z0-9]+$/)
     .max(256)
+    .optional(),
+  cron: z
+    .strictObject({
+      configPath: absolute,
+      bot: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+    })
     .optional(),
   team: teamSchema.default(defaultTeam),
   base: z
@@ -131,7 +141,10 @@ export async function renderProfile(input: Options, role: string) {
   return {
     ...parsed,
     providers,
-    skills: [join(options.projectDirectory, ".agents", "opco", "skills")],
+    skills: [
+      join(options.projectDirectory, ".agents", "opco", "skills"),
+      join(packageDirectory, "templates", "skills"),
+    ],
     default_agent: agent.agent ?? role,
     agents: {
       [agent.agent ?? agent.id]: {
@@ -144,6 +157,7 @@ export async function renderProfile(input: Options, role: string) {
         package: packageDirectory,
         options: {
           namespace: options.namespace,
+          ...(options.cron ? { cron: options.cron } : {}),
           ...(options.captainSessionID
             ? { captainSessionID: options.captainSessionID }
             : {}),
@@ -452,7 +466,7 @@ export async function initializeProfile(input: Options) {
     );
     await writeProfileFile(
       join(configPath, "agents", `${agent.agent ?? role}.md`),
-      prompt,
+      managedPrompt(prompt),
     );
     await writeProfileFile(
       join(configPath, "opencode.json"),

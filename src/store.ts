@@ -13,6 +13,7 @@ export type Incoming = {
   user: string;
   text: string;
   files?: readonly string[];
+  deferDelivery?: boolean;
 };
 
 export type Job = Incoming & {
@@ -24,6 +25,12 @@ export type Job = Incoming & {
   failure?: RequestFailure | null;
   input?: string | null;
 };
+
+type StoredJob = Omit<Job, "deferDelivery"> & { deferDelivery: number };
+
+function decodeJob(row: StoredJob | null): Job | null {
+  return row && { ...row, deferDelivery: row.deferDelivery === 1 };
+}
 
 export type CaptainCursor = {
   cursor: string | undefined;
@@ -117,6 +124,7 @@ export class Store {
     column("jobs", "input", "TEXT");
     column("jobs", "input_files", "TEXT");
     column("jobs", "output_files", "TEXT");
+    column("jobs", "deferDelivery", "INTEGER NOT NULL DEFAULT 0");
     // Preserve source-first context and legacy ownership; keep statuses intact.
     if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
       this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
@@ -135,8 +143,8 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,user,text,input_files)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files)`)
+      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -146,6 +154,7 @@ export class Store {
           $user: input.user,
           $text: input.text,
           $files: input.files?.length ? JSON.stringify(input.files) : null,
+          $deferDelivery: input.deferDelivery ? 1 : 0,
         }).changes > 0
     );
   }
@@ -197,19 +206,23 @@ export class Store {
   }
 
   latestActivity(botKey: string, conversation: string): Job | null {
-    return this.db
-      .query<Job, [string, string]>(
-        "SELECT * FROM jobs WHERE botKey=? AND conversation=? AND activity IS NOT NULL ORDER BY id DESC LIMIT 1",
-      )
-      .get(botKey, conversation);
+    return decodeJob(
+      this.db
+        .query<StoredJob, [string, string]>(
+          "SELECT * FROM jobs WHERE botKey=? AND conversation=? AND activity IS NOT NULL ORDER BY id DESC LIMIT 1",
+        )
+        .get(botKey, conversation),
+    );
   }
 
   latestBotActivity(botKey: string): Job | null {
-    return this.db
-      .query<Job, [string]>(
-        "SELECT * FROM jobs WHERE botKey=? AND activity IS NOT NULL ORDER BY id DESC LIMIT 1",
-      )
-      .get(botKey);
+    return decodeJob(
+      this.db
+        .query<StoredJob, [string]>(
+          "SELECT * FROM jobs WHERE botKey=? AND activity IS NOT NULL ORDER BY id DESC LIMIT 1",
+        )
+        .get(botKey),
+    );
   }
 
   /** Persist admission correlation before the backend submits any native work. */
@@ -233,11 +246,13 @@ export class Store {
   }
 
   jobByInput(botKey: string, input: string): Job | null {
-    return this.db
-      .query<Job, [string, string]>(
-        "SELECT * FROM jobs WHERE botKey=? AND input=? ORDER BY id DESC LIMIT 1",
-      )
-      .get(botKey, input);
+    return decodeJob(
+      this.db
+        .query<StoredJob, [string, string]>(
+          "SELECT * FROM jobs WHERE botKey=? AND input=? ORDER BY id DESC LIMIT 1",
+        )
+        .get(botKey, input),
+    );
   }
 
   /** One cursor per pin. Old thread mappings and all outbox rows stay intact. */
@@ -314,17 +329,22 @@ export class Store {
         ).changes !== 1
     )
       throw new TranscriptConflict();
+    // Native ownership selects both source and delivery mode. Digest catch-ups
+    // commit as locally delivered rows, never as pending Slack work.
     for (const reply of input.replies) {
       if (
         this.db
           .query(`INSERT OR IGNORE INTO jobs
-        (eventId,botKey,conversation,channel,thread,user,text,status,response,output_files)
-        SELECT ?,botKey,conversation,channel,thread,user,'','responding',?,?
+        (eventId,botKey,conversation,channel,thread,user,text,status,response,output_files,deferDelivery,sent)
+        SELECT ?,botKey,conversation,channel,thread,user,'',
+        CASE WHEN deferDelivery=1 THEN 'done' ELSE 'responding' END,?,?,deferDelivery,
+        CASE WHEN deferDelivery=1 THEN ? ELSE 0 END
         FROM jobs WHERE botKey=? AND id=?`)
           .run(
             reply.eventId,
             JSON.stringify(reply.chunks),
             reply.files?.length ? JSON.stringify(reply.files) : null,
+            reply.chunks.length,
             input.botKey,
             reply.job,
           ).changes !== 1
@@ -398,7 +418,7 @@ export class Store {
       .map((row) => row.conversation);
   }
 
-  /** The mapped session plus the latest request's Slack destination. */
+  /** The mapped session plus the latest request's source and delivery mode. */
   transcriptTarget(botKey: string, conversation: string) {
     const row = this.db
       .query<
@@ -408,13 +428,20 @@ export class Store {
           channel: string;
           thread: string;
           user: string;
+          deferDelivery: number;
         },
         [string, string]
-      >(`SELECT s.session_id AS session, s.cursor, j.channel, j.thread, j.user
+      >(`SELECT s.session_id AS session, s.cursor, j.channel, j.thread, j.user,j.deferDelivery
       FROM sessions s JOIN jobs j ON j.conversation=s.conversation
       WHERE j.botKey=? AND s.conversation=? ORDER BY j.id DESC LIMIT 1`)
       .get(botKey, conversation);
-    return row && { ...row, cursor: row.cursor ?? undefined };
+    return (
+      row && {
+        ...row,
+        cursor: row.cursor ?? undefined,
+        deferDelivery: row.deferDelivery === 1,
+      }
+    );
   }
 
   unfinished(conversation: string) {
@@ -494,14 +521,16 @@ export class Store {
       let queued = 0;
       for (const eventId of input.requeue ?? [])
         queued += this.db
-          .query(`UPDATE jobs SET status='responding',attempts=0,retry_at=0
+          .query(`UPDATE jobs SET status=CASE WHEN deferDelivery=1 THEN 'done' ELSE 'responding' END,
+          sent=CASE WHEN deferDelivery=1 THEN COALESCE(json_array_length(response),0) ELSE sent END,
+          attempts=0,retry_at=0
           WHERE botKey=? AND conversation=? AND eventId=? AND status='failed'`)
           .run(input.botKey, input.conversation, eventId).changes;
       for (const reply of input.replies) {
         queued += this.db
           .query(`INSERT OR IGNORE INTO jobs
-          (eventId,botKey,conversation,channel,thread,user,text,status,response,output_files)
-          VALUES (?,?,?,?,?,?,'','responding',?,?)`)
+          (eventId,botKey,conversation,channel,thread,user,text,status,response,output_files,deferDelivery,sent)
+          VALUES (?,?,?,?,?,?,'',?,?,?,?,?)`)
           .run(
             reply.eventId,
             input.botKey,
@@ -509,8 +538,11 @@ export class Store {
             target.channel,
             target.thread,
             target.user,
+            target.deferDelivery ? "done" : "responding",
             JSON.stringify(reply.chunks),
             reply.files?.length ? JSON.stringify(reply.files) : null,
+            target.deferDelivery ? 1 : 0,
+            target.deferDelivery ? reply.chunks.length : 0,
           ).changes;
       }
       // An existing row would be skipped silently; never advance past it.
@@ -522,7 +554,7 @@ export class Store {
 
   ready(botKey: string, now: number, limit: number, serial = false): Job[] {
     return this.db
-      .query<Job, [string, number, number]>(`SELECT * FROM jobs j
+      .query<StoredJob, [string, number, number]>(`SELECT * FROM jobs j
       WHERE botKey = ? AND status IN ('queued','responding') AND retry_at <= ?
       AND NOT EXISTS (SELECT 1 FROM jobs earlier
         WHERE earlier.conversation=j.conversation AND earlier.id < j.id
@@ -535,7 +567,8 @@ export class Store {
           : ""
       }
       ORDER BY id LIMIT ?`)
-      .all(botKey, now, limit);
+      .all(botKey, now, limit)
+      .map((row) => ({ ...row, deferDelivery: row.deferDelivery === 1 }));
   }
 
   running(id: number) {
@@ -600,6 +633,48 @@ export class Store {
         "SELECT status FROM jobs WHERE botKey=? AND id=?",
       )
       .get(botKey, id)?.status;
+  }
+
+  /** Public outbox text only. Deferred runs also include their local catch-ups. */
+  scheduledResult(
+    botKey: string,
+    id: number,
+  ):
+    | {
+        text: string;
+        status: Job["status"];
+        failure: RequestFailure | null;
+      }
+    | undefined {
+    const job = this.db
+      .query<
+        {
+          status: Job["status"];
+          failure: RequestFailure | null;
+          conversation: string;
+          deferDelivery: number;
+        },
+        [string, number]
+      >(
+        "SELECT status,failure,conversation,deferDelivery FROM jobs WHERE botKey=? AND id=?",
+      )
+      .get(botKey, id);
+    if (!job) return;
+    // Iterate bounded public chunks; never select prompts, inputs or file metadata.
+    const parts = this.db
+      .query<{ text: string }, [string, number, number, string, number]>(
+        `SELECT substr(p.value,1,12000) AS text FROM jobs j,json_each(j.response) p
+      WHERE j.botKey=? AND (j.id=? OR (?=1 AND j.conversation=?
+      AND j.deferDelivery=1 AND j.id>? AND j.eventId LIKE 'transcript:%'))
+      ORDER BY j.id,CAST(p.key AS INTEGER)`,
+      )
+      .iterate(botKey, id, job.deferDelivery, job.conversation, id);
+    let text = "";
+    for (const part of parts) {
+      text = `${text}${text ? "\n\n" : ""}${part.text}`.slice(0, 12_000);
+      if (text.length === 12_000) break;
+    }
+    return { text, status: job.status, failure: job.failure };
   }
 
   /**

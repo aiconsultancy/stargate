@@ -1,4 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ViewsOpenArguments } from "@slack/web-api";
 import pino from "pino";
 import { CronStore } from "../src/cron-store";
@@ -8,8 +11,11 @@ import { bot, identity } from "./fixtures";
 
 type View = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
 const stores: CronStore[] = [];
+const directories: string[] = [];
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
 });
 
 const input = {
@@ -211,7 +217,7 @@ test("unknown slash subcommands return private usage without API calls", async (
   expect(f.acks).toEqual([
     {
       response_type: "ephemeral",
-      text: "Use /cron, /cron list, /cron add, or /cron remove.",
+      text: "Use /cron, /cron list, /cron add, /cron remove, or /cron run NAME_OR_ID.",
     },
   ]);
 });
@@ -348,4 +354,90 @@ test("ACL revocation during ACK does not undo durable removal", async () => {
   });
   expect(f.store.list(f.scope)).toEqual([]);
   expect(f.calls).toHaveLength(1);
+});
+
+test("manual run commits before ACK, deduplicates retries, and stays owner scoped", async () => {
+  const f = fixture();
+  f.store.add(f.scope, input);
+  const other = f.store.add(
+    { ...f.scope, user: "UOTHER" },
+    { ...input, name: "private" },
+  );
+  let commits = 0;
+  const runNow = f.store.runNow.bind(f.store);
+  f.store.runNow = (...args) => {
+    const result = runNow(...args);
+    if (result) commits++;
+    return result;
+  };
+  const body = command(`run ${input.name}`);
+  await f.ui.command(body, async (payload) => {
+    expect(commits).toBe(1);
+    await f.ack(payload);
+    throw new Error("lost ACK");
+  });
+  expect(f.acks.at(-1)?.["text"]).toContain("queued");
+  await f.ui.command(body, f.ack);
+  expect(commits).toBe(1);
+  expect(f.acks.at(-1)?.["text"]).toContain("busy");
+  await f.ui.command(command(`run ${other.id}`), f.ack);
+  expect(commits).toBe(1);
+  expect(f.calls).toEqual([]);
+});
+
+test("report selector stores daily mode; missing selector retains immediate", async () => {
+  const f = fixture();
+  await f.ui.command(command("add"), f.ack);
+  const view = f.calls[0]?.view;
+  if (!view) throw new Error("missing view");
+  expect(JSON.stringify(view)).toContain("local storage");
+  expect(JSON.stringify(view)).toContain(
+    '"initial_option":{"text":{"type":"plain_text","text":"Immediate"',
+  );
+  const body = submission(view);
+  Object.assign(body.view.state.values, {
+    report: {
+      value: {
+        type: "static_select",
+        selected_option: { value: "daily" },
+      },
+    },
+  });
+  await f.ui.interactive(body, f.ack);
+  expect(f.store.list(f.scope)[0]?.report).toBe("daily");
+  const legacy = submission(view, { ...input, name: "Legacy" });
+  legacy.view.id = "VLEGACY";
+  await f.ui.interactive(legacy, f.ack);
+  expect(
+    f.store.list(f.scope).find((job) => job.name === "Legacy")?.report,
+  ).toBe("immediate");
+});
+
+test("configured Add writes a definition, validates names, and retries safely", async () => {
+  const f = fixture();
+  const directory = mkdtempSync(join(tmpdir(), "pogo-cron-ui-"));
+  directories.push(directory);
+  f.config.cronjobs = {
+    directory,
+    channel: "C123",
+    user: "U123",
+    dailyReport: { time: "08:30", timezone: "UTC" },
+  };
+  await f.ui.command(command("add"), f.ack);
+  const view = f.calls[0]?.view;
+  if (!view) throw new Error("missing view");
+  expect(JSON.stringify(view)).toContain("08:30 UTC");
+  await f.ui.interactive(submission(view), f.ack);
+  expect(f.acks.at(-1)).toMatchObject({
+    response_action: "errors",
+    errors: { name: expect.stringContaining("kebab-case") },
+  });
+  const body = submission(view, { ...input, name: "daily-task" });
+  await f.ui.interactive(body, f.ack);
+  await f.ui.interactive(body, f.ack);
+  expect(f.acks.at(-1)).toMatchObject({ response_action: "clear" });
+  expect(
+    await Bun.file(join(directory, "daily-task", "CRONJOB.md")).text(),
+  ).toContain("Check the build");
+  expect(f.store.list(f.scope)).toHaveLength(1);
 });

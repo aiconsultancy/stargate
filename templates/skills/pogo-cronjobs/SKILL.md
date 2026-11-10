@@ -1,0 +1,67 @@
+---
+
+name: pogo-cronjobs
+description: Manage Pogo scheduled jobs when a user asks to create a job, list schedules, run a named job now, remove a job, or change immediate versus daily reporting. Use the captain-only pogo_cron tool, not OS cron or replacement services.
+---
+
+# Pogo cronjobs
+
+Load this skill before managing scheduled jobs. Use `pogo_cron` only from the
+configured captain. The host binds the tool to one bot and configuration;
+never supply another configuration path, directory, or bot identity.
+If the tool reports unavailable, explain the missing operator configuration.
+Do not change global configuration or install another scheduler.
+
+## Map requests to operations
+
+- “Create a job” → `op=add`. First use `op=list` to avoid duplicates.
+- “What jobs are scheduled?” → `op=list`.
+- “Run XYZ now” → `op=run` for the exact listed job name.
+- “Remove XYZ” → `op=remove` with the exact job ID returned by list.
+- “Show job status” → `op=report` to read retained execution metadata.
+- “Report immediately/daily” when creating → set add's `report` mode.
+
+`op=report` does not change settings. Do not claim an existing report mode
+changed unless the definition was changed through a supported operation.
+List accepts a page; follow pages when the returned job list is full.
+
+Use the declared tool fields; do not invent fields or bypass validation with
+shell commands. Retain an explicit run requestId when retrying the same request;
+otherwise the host supplies its tool-call identity. An intentional new run is
+a new request, not a retry of an uncertain run. Inspect retained status first.
+
+## Define jobs
+
+Keep the single job prompt in `cronjobs/<name>/CRONJOB.md` under the configured
+captain workspace. Frontmatter describes name, description, five-field schedule,
+explicit timezone, skills, enabled state, report mode and Slack destination.
+Use a stable lowercase job name. Confirm the intended Slack channel and user;
+never infer a destination from an unrelated conversation.
+
+Confirm schedule and timezone before enabling execution. If the time is not
+decided, create with `enabled=false` and a valid provisional schedule, clearly
+marked as provisional. Ask for the missing timing decision; do not silently
+enable it. Do not use a six-field seconds expression.
+
+Reference reusable skills in `skills`; require the executing agent to load
+every listed skill before work. Do not copy their prompts into the job body.
+Keep job-specific supporting files beside CRONJOB.md and reference them by
+relative path. Keep secrets outside job files and tool arguments.
+
+## Execute and report safely
+
+Preserve active and queued work. A busy or deferred run is not completion;
+do not interrupt a worker, reset a session, or submit duplicate work to force it.
+Report only the returned admission/status evidence. Never claim a job finished
+because its schedule was saved or its run was accepted.
+
+`report=immediate` uses the job's Slack destination. `report=daily`
+silently records results locally and includes them in one daily digest
+(08:30 UTC by default),
+not a Slack message for each run. Deferred report results remain local until
+their configured report. Do not send a separate message to bypass that policy.
+
+Check for an existing OS updater before creating update jobs; do not duplicate
+it. Never schedule blind self-restarts or live dependency updates. Maintenance
+must keep existing approval, cancellation and rollback requirements. A schedule
+does not grant permission for destructive changes or broader tool access.

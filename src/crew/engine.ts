@@ -93,6 +93,12 @@ export const crewOptionsSchema = z
     worktrees: z.record(agentIDSchema, directory),
     team: teamSchema.optional(),
     quota: quotaConfigSchema.optional(),
+    cron: z
+      .strictObject({
+        configPath: directory,
+        bot: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+      })
+      .optional(),
     allowCrewExpansion: z.boolean().optional(),
     mesijCommand: directory,
     /** The one native captain root; earlier roots stay history. */

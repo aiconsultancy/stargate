@@ -38,6 +38,29 @@ may use Linear read/write tools for their assigned tasks, including ticket
 updates and comments. This is not permission for unrelated changes or
 workspace administration. Follow the target project's delivery rules.
 
+## Generated prompt boundaries
+
+Generated captain and OpenCode crew definitions keep YAML frontmatter first.
+Their prompt bodies use one pair of valid HTML comments:
+
+```markdown
+<!-- POGO:START -->
+Pogo-generated role and ship instructions.
+<!-- POGO:END -->
+```
+
+Generated Pi worker definitions use the same markers, without frontmatter.
+The marker strings are reserved; configured instructions cannot contain them.
+Operator notes belong outside the marked body. Markers identify generated text;
+they do not authorize automatic replacement. Initialization still refuses
+conflicting OpenCode definitions and preserves existing Pi definitions.
+Existing customized or unmarked files need an explicit, backed-up migration;
+initialization does not infer their boundaries or rewrite them.
+
+Project `AGENTS.md`, the captain-maintained `WAYS_OF_WORKING.md`, ship logs and
+journals remain unchanged. If Pogo instructions are added to a shared file in
+an approved migration, mark only that section and preserve all surrounding text.
+
 ## Configured teams
 
 Captains can persist a waiting-response delay with `pogo_waiting` when a user

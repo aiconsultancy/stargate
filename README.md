@@ -130,6 +130,10 @@ not rolled back. See [cancellation](docs/cancellation.md) for setup and limits.
 `/cron` opens an interactive list of your scheduled prompts in the current
 channel. Add a name, cron schedule, timezone, and prompt; remove jobs with a
 confirmation button. Scheduled results start a new thread in that channel.
+Optional file-backed `cronjobs/<name>/CRONJOB.md` definitions support skill
+references and run-now through `/cron run` or the captain's `pogo_cron` tool.
+Choose immediate delivery or quiet local results with one daily Slack digest
+(08:30 UTC by default).
 See [cron jobs](docs/cron.md) for app setup and execution limits.
 
 Shared captains receive `s=slack;c=<channel>;t=<thread>;m=<message>;u=<user>`
