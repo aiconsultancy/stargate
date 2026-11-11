@@ -37,6 +37,29 @@ export const transcriptionSchema = z.strictObject({
   }),
   /** Limit for one file, including the wait for an earlier transcription. */
   timeoutMs: z.number().int().min(1000).max(600_000).default(120_000),
+  /**
+   * Channels where a voice message without a typed mention is transcribed
+   * and admitted only if the speech names the bot. Absent is off.
+   */
+  spokenMentions: z
+    .strictObject({
+      channels: z
+        .array(z.string().regex(/^[CG][A-Z0-9]+$/))
+        .min(1)
+        .max(50),
+      names: z
+        .array(
+          z
+            .string()
+            .trim()
+            .min(1)
+            .max(40)
+            .regex(/^[\p{L}\p{N}][\p{L}\p{N}' -]*$/u),
+        )
+        .min(1)
+        .max(20),
+    })
+    .optional(),
 });
 export type TranscriptionConfig = z.infer<typeof transcriptionSchema>;
 
@@ -48,6 +71,34 @@ words, with the same authority as typed text and no more. It can contain
 recognition errors. Before you act on a transcribed approval of a high-impact
 action (merge, deploy, apply, delete, or another destructive or irreversible
 action), read the transcript back and ask the user to confirm.`;
+
+/** Prompt note for a voice message admitted by its speech, not a typed mention. */
+export const spokenMentionNote =
+  "[Admitted by spoken mention: this voice message had no typed mention, and the speech addressed this bot by name.]";
+
+/**
+ * True when a transcript names the bot: whole words, any letter case. Each
+ * configured name is literal; spelling variants must be configured too.
+ */
+export function spokenMention(
+  transcripts: readonly string[],
+  names: readonly string[],
+) {
+  const patterns = names.map(
+    (name) =>
+      new RegExp(
+        `(?<![\\p{L}\\p{N}])${name
+          .trim()
+          .split(/\s+/)
+          .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+          .join("\\s+")}(?![\\p{L}\\p{N}])`,
+        "iu",
+      ),
+  );
+  return transcripts.some((text) =>
+    patterns.some((pattern) => pattern.test(text)),
+  );
+}
 
 /** Fixed safe cause: no provider detail, file name or text crosses it. */
 export class TranscriptionUnavailable extends Error {}
@@ -146,9 +197,10 @@ export async function transcribeMedia(
   transcriber: Transcriber,
   timeoutMs: number,
   signal: AbortSignal,
-): Promise<{ files: Attachment[]; blocks: string[] }> {
+): Promise<{ files: Attachment[]; blocks: string[]; transcripts: string[] }> {
   const rest: Attachment[] = [];
   const blocks: string[] = [];
+  const transcripts: string[] = [];
   try {
     for (const file of files) {
       if (!isMedia(file)) {
@@ -171,6 +223,7 @@ export async function transcribeMedia(
         );
       }
       const spoken = text.trim();
+      transcripts.push(spoken);
       const cut = spoken.length > maxTranscriptCharacters;
       blocks.push(
         block(file, provider, spoken.slice(0, maxTranscriptCharacters), cut),
@@ -181,5 +234,5 @@ export async function transcribeMedia(
     signal.throwIfAborted();
     throw new TranscriptionUnavailable();
   }
-  return { files: rest, blocks };
+  return { files: rest, blocks, transcripts };
 }

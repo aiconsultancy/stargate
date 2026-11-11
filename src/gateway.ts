@@ -54,6 +54,7 @@ import {
 import {
   type CaptainCursor,
   type CaptainTranscript,
+  type Incoming,
   type Job,
   type Store,
   TranscriptConflict,
@@ -67,6 +68,8 @@ import {
 } from "./thread-context";
 import {
   isMedia,
+  spokenMention,
+  spokenMentionNote,
   type Transcriber,
   TranscriptionUnavailable,
   transcribeMedia,
@@ -215,11 +218,17 @@ export class Gateway {
   }
 
   accept(body: unknown, peer?: PeerSender) {
-    const input = routeEvent(body, this.config, this.identity, peer);
-    if (
-      !input ||
-      (!input.startsConversation && !this.store.follows(input.conversation))
-    )
+    const routed = routeEvent(body, this.config, this.identity, peer);
+    if (!routed) return false;
+    const followed = this.store.follows(routed.conversation);
+    // A voice message in a thread the bot follows keeps today's behaviour,
+    // unless every turn needs a mention.
+    const held = "gate" in routed && routed.gate === "spoken";
+    const input: Incoming & { startsConversation: boolean } =
+      held && followed && !this.config.access.mentionOnly
+        ? { ...routed, gate: null }
+        : routed;
+    if (!input.startsConversation && !followed && input.gate !== "spoken")
       return false;
     // Loop protection: a peer captain gets a bounded number of turns per
     // thread. The window ends at this message's Slack time, not host time.
@@ -741,16 +750,72 @@ export class Gateway {
       .join("\n\n");
   }
 
+  /**
+   * Transcribe a held voice message and keep it only if its speech names the
+   * bot. Otherwise only a content-free row remains: no turn, no post.
+   * A failure is treated like no mention, because the speech is unknown.
+   * Shutdown leaves the row queued for the next process.
+   */
+  private async hear(
+    job: Job,
+    shutdown: AbortSignal,
+  ): Promise<Awaited<ReturnType<typeof transcribeMedia>> | undefined> {
+    const mention = this.config.transcription?.spokenMentions;
+    const timeoutMs = this.config.transcription?.timeoutMs ?? 120_000;
+    const ignore = (message: string) => {
+      this.log.info({ job: job.id }, message);
+      this.store.discard(job.id);
+      return undefined;
+    };
+    if (
+      !mention?.channels.includes(job.channel) ||
+      !this.transcriber ||
+      !this.slack.files
+    )
+      return ignore("Voice message ignored: spoken mentions not configured");
+    let heard: Awaited<ReturnType<typeof transcribeMedia>>;
+    try {
+      const signal = AbortSignal.any([
+        shutdown,
+        AbortSignal.timeout(this.config.turnTimeoutMs),
+      ]);
+      const files = await this.slack.files.download(
+        this.store.inputFiles(job.id),
+        job.channel,
+        signal,
+      );
+      checkAttachments(files);
+      if (!files.some(isMedia))
+        return ignore("Message without media or mention ignored");
+      heard = await transcribeMedia(files, this.transcriber, timeoutMs, signal);
+    } catch {
+      if (shutdown.aborted) return;
+      return ignore("Voice message not transcribed; ignored without a reply");
+    }
+    if (!spokenMention(heard.transcripts, mention.names))
+      return ignore("Voice message without spoken mention ignored");
+    return this.store.admitSpoken(job.id) ? heard : undefined;
+  }
+
   /** Public for deterministic integration tests and single-step workers. */
-  async process(job: Job, shutdown: AbortSignal) {
+  async process(held: Job, shutdown: AbortSignal) {
     // Recheck policy for queued inputs and pending delivery after a restart.
     if (
-      !isAllowedUser(this.config, job.user) ||
-      !isAllowedChannel(this.config, job.channel)
+      !isAllowedUser(this.config, held.user) ||
+      !isAllowedChannel(this.config, held.channel)
     ) {
-      this.store.finish(job.id, "failed");
+      if (held.gate === "spoken") this.store.discard(held.id);
+      else this.store.finish(held.id, "failed");
       return;
     }
+    // A transcript held only in this call; a restart transcribes again.
+    let heard: Awaited<ReturnType<typeof transcribeMedia>> | undefined;
+    if (held.status === "queued" && held.gate === "spoken") {
+      heard = await this.hear(held, shutdown);
+      if (!heard) return;
+    }
+    const job: Job =
+      held.gate === "spoken" ? { ...held, gate: "admitted" } : held;
     const statusText = (cause: RequestFailure) =>
       job.deferDelivery && cause === "history"
         ? "The agent finished, but its public reply is not yet readable in session history. Pogo will retain it locally when it becomes readable. The request was not repeated."
@@ -961,7 +1026,15 @@ export class Gateway {
             );
           const fileIDs = this.store.inputFiles(job.id);
           let inputFiles: Attachment[] = [];
-          if (fileIDs.length) {
+          // A spoken-mention gate already transcribed this message.
+          if (heard) {
+            if (heard.files.length && !this.backend.supportsAttachments)
+              throw new AttachmentInputUnavailable();
+            inputFiles = heard.files;
+            text = [text, spokenMentionNote, ...heard.blocks]
+              .filter(Boolean)
+              .join("\n\n");
+          } else if (fileIDs.length) {
             try {
               if (
                 job.deferDelivery ||
@@ -999,7 +1072,13 @@ export class Gateway {
                 signal,
               );
               inputFiles = spoken.files;
-              text = [text, ...spoken.blocks].filter(Boolean).join("\n\n");
+              text = [
+                text,
+                ...(job.gate === "admitted" ? [spokenMentionNote] : []),
+                ...spoken.blocks,
+              ]
+                .filter(Boolean)
+                .join("\n\n");
             }
           }
           this.store.started(job.id);

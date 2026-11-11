@@ -38,6 +38,59 @@ Add `transcription` to the bot in `pogo.json`, then restart Pogo:
 The app needs `files:read`, as for other attachments. No other Slack scope is
 required.
 
+## Spoken mentions in channels
+
+A voice message cannot carry a typed mention, so in a channel it normally
+does not reach the bot. `spokenMentions` lets the bot listen in chosen
+channels:
+
+```json
+"transcription": {
+  "provider": { "...": "..." },
+  "spokenMentions": {
+    "channels": ["C0EXAMPLE03"],
+    "names": ["Galactica", "Adama", "captain"]
+  }
+}
+```
+
+In those channels, a message from an allowed user that has a file and no
+typed mention is held, not admitted. Pogo downloads and transcribes it with
+the same path and limits as other voice messages. If a transcript contains
+one of `names` as a whole word, in any letter case, the message starts a turn
+like a mention would. The prompt has this line before the transcript block:
+
+```text
+[Admitted by spoken mention: this voice message had no typed mention, and the speech addressed this bot by name.]
+```
+
+Otherwise Pogo ignores the held message: no agent turn, no reply, no notice.
+The same applies when the file is not audio or video, is too large, or cannot
+be transcribed, because Pogo cannot know whether the speech named the bot.
+Pogo deletes an ignored message and keeps no transcript, media, typed text or
+file IDs of it. Only its Slack event ID remains, so a redelivered event is not
+transcribed again. Logs record only that a message was ignored. A held
+message is never the delivery target of its thread.
+
+Rules:
+
+- Each name is literal. Whisper can spell a name differently, for example
+  `Adamah`; add such variants to `names` if they occur. Spaces inside a name
+  match any whitespace. Up to 20 names of up to 40 characters.
+- `channels` takes channel IDs (`C…` or `G…`), not DMs and not `*`. DMs need
+  no mention, so they are never held.
+- A typed mention works as before. A voice reply in a thread the bot already
+  follows is an ordinary follow-up and is not held, unless
+  `access.mentionOnly` is set; then its speech must name the bot.
+- User, channel and deny rules apply before a message is held. A held message
+  does not make its thread followed until its speech names the bot.
+- Every held message uses one provider request, also when it does not name
+  the bot. With a deployment that admits one request each minute, a busy
+  channel delays voice messages. A pinned captain handles held messages in
+  order with its other requests.
+- If Pogo stops while a message is held, the message stays held and is
+  transcribed again after the restart.
+
 ## Authentication
 
 Pogo reads a Microsoft Entra token for

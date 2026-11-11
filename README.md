@@ -99,7 +99,9 @@ a marked transcript in the prompt, before the agent turn starts. It uses
 Slack's own transcript when Slack has a complete one, and otherwise an Azure
 OpenAI deployment with the host's managed identity; no key is stored. A file
 that cannot be transcribed starts no agent turn. The setting is off by
-default. See [transcription](docs/transcription.md).
+default. In chosen channels, a voice message without a typed mention can
+start a turn when its speech names the bot (`spokenMentions`). See
+[transcription](docs/transcription.md).
 
 Requests have a 30-minute time limit by default. Set `turnTimeoutMs` on the bot
 to change it, up to one hour. Ordinary long replies stream in the same thread;

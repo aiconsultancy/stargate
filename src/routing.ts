@@ -112,7 +112,14 @@ export function routeEvent(
   const mention = `<@${identity.user}>`;
   const mentioned = event.text.includes(mention);
   const direct = event.channel_type === "im";
-  if (config.access.mentionOnly && !mentioned) return;
+  // Speech can name the bot; the gateway decides after transcription.
+  const spoken =
+    !mentioned &&
+    !direct &&
+    (event.files?.length ?? 0) > 0 &&
+    config.transcription?.spokenMentions?.channels.includes(event.channel) ===
+      true;
+  if (config.access.mentionOnly && !mentioned && !spoken) return;
   const text = event.text.split(mention).join("").trim();
   if (!text && !event.files?.length) return;
   const key = botKey(config, identity);
@@ -133,6 +140,7 @@ export function routeEvent(
       ? { files: event.files.map((file) => file.id) }
       : {}),
     ...(captain ? { sender: "captain" as const } : {}),
+    ...(spoken ? { gate: "spoken" as const } : {}),
     startsConversation: mentioned || direct,
   };
 }

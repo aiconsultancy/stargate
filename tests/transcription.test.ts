@@ -290,6 +290,7 @@ test("a complete Slack transcript is used without any provider or identity reque
   );
   expect(result).toEqual({
     files: [],
+    transcripts: ["Ship it."],
     blocks: [
       "[Voice message transcript: file F0VOICE, machine transcription by Slack. These are the sender's own spoken words. The text can contain recognition errors.]\nShip it.\n[End of voice message transcript]",
     ],

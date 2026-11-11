@@ -16,6 +16,11 @@ export type Incoming = {
   deferDelivery?: boolean;
   /** A verified peer captain bot sent this message. Absent for people. */
   sender?: "captain" | null;
+  /**
+   * `spoken`: held until its speech names the bot; it neither starts nor
+   * continues a conversation yet. `admitted`: its speech named the bot.
+   */
+  gate?: "spoken" | "admitted" | null;
 };
 
 export type Job = Incoming & {
@@ -103,6 +108,9 @@ export class Store {
         job INTEGER NOT NULL REFERENCES jobs(id), part INTEGER NOT NULL,
         ts TEXT NOT NULL, PRIMARY KEY(job, part)
       );
+      CREATE TABLE IF NOT EXISTS ignored_events (
+        botKey TEXT NOT NULL, eventId TEXT NOT NULL, PRIMARY KEY(botKey, eventId)
+      );
       CREATE TABLE IF NOT EXISTS captain_cursors (
         botKey TEXT NOT NULL, session_id TEXT NOT NULL, cursor TEXT,
         owner INTEGER, PRIMARY KEY(botKey, session_id)
@@ -128,6 +136,7 @@ export class Store {
     column("jobs", "output_files", "TEXT");
     column("jobs", "deferDelivery", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "sender", "TEXT");
+    column("jobs", "gate", "TEXT");
     // Preserve source-first context and legacy ownership; keep statuses intact.
     if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
       this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
@@ -143,11 +152,17 @@ export class Store {
   }
 
   enqueue(input: Incoming): boolean {
+    if (
+      this.db
+        .query("SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?")
+        .get(input.botKey, input.eventId) !== null
+    )
+      return false;
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender)`)
+      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender,gate)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender,$gate)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -159,7 +174,37 @@ export class Store {
           $files: input.files?.length ? JSON.stringify(input.files) : null,
           $deferDelivery: input.deferDelivery ? 1 : 0,
           $sender: input.sender ?? null,
+          $gate: input.gate ?? null,
         }).changes > 0
+    );
+  }
+
+  /**
+   * A held voice message that did not name the bot is deleted. Only its event
+   * ID remains, in a separate table, so Slack redelivery is deduplicated.
+   */
+  discard(id: number) {
+    this.db.transaction(() => {
+      this.db
+        .query(`INSERT OR IGNORE INTO ignored_events (botKey,eventId)
+        SELECT botKey,eventId FROM jobs WHERE id=? AND status='queued' AND gate='spoken'`)
+        .run(id);
+      this.db
+        .query(
+          "DELETE FROM jobs WHERE id=? AND status='queued' AND gate='spoken'",
+        )
+        .run(id);
+    })();
+  }
+
+  /** A held voice message named the bot: it is now an ordinary request. */
+  admitSpoken(id: number) {
+    return (
+      this.db
+        .query(
+          "UPDATE jobs SET gate='admitted' WHERE id=? AND status='queued' AND gate='spoken'",
+        )
+        .run(id).changes > 0
     );
   }
 
@@ -381,7 +426,9 @@ export class Store {
   follows(conversation: string): boolean {
     return (
       this.db
-        .query("SELECT 1 FROM jobs WHERE conversation = ? LIMIT 1")
+        .query(
+          "SELECT 1 FROM jobs WHERE conversation = ? AND (gate IS NULL OR gate='admitted') LIMIT 1",
+        )
         .get(conversation) !== null
     );
   }
@@ -450,7 +497,8 @@ export class Store {
         [string, string]
       >(`SELECT s.session_id AS session, s.cursor, j.channel, j.thread, j.user,j.deferDelivery
       FROM sessions s JOIN jobs j ON j.conversation=s.conversation
-      WHERE j.botKey=? AND s.conversation=? ORDER BY j.id DESC LIMIT 1`)
+      WHERE j.botKey=? AND s.conversation=? AND (j.gate IS NULL OR j.gate='admitted')
+      ORDER BY j.id DESC LIMIT 1`)
       .get(botKey, conversation);
     return (
       row && {
