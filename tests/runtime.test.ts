@@ -28,7 +28,10 @@ function harness(turn: Turn = async () => "Answer.") {
   const started = Promise.withResolvers<void>();
   const intakes = new Map<
     string,
-    { accept: (body: unknown) => boolean; open: () => boolean }
+    {
+      accept: (body: unknown) => boolean | Promise<boolean>;
+      open: () => boolean;
+    }
   >();
   const backends: AgentBackend[] = [];
   const dependencies: RuntimeDependencies = {

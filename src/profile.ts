@@ -22,6 +22,7 @@ import {
   profileTeam,
   teamSchema,
 } from "./crew/team";
+import { peerInstructions } from "./peers";
 import { reactionInstructions } from "./reactions";
 import { voiceInstructions } from "./transcription";
 
@@ -458,6 +459,7 @@ export async function initializeProfile(input: Options) {
         .join("\n"),
       reactionInstructions,
       voiceInstructions,
+      peerInstructions,
       instructions:
         agent.instructions ??
         "Follow the assigned task and project instructions.",

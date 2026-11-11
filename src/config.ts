@@ -137,6 +137,8 @@ export const botSchema = z.strictObject({
     deniedUsers: z.array(userRule).default([]),
     deniedChannels: z.array(channelRule).default([]),
     mentionOnly: z.boolean().default(false),
+    /** Admit verified peer captain bots (`*-captain`); other bots stay rejected. */
+    peerCaptains: z.boolean().optional(),
   }),
   backend: backendSchema,
   cronjobs: cronjobsSchema.optional(),

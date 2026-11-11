@@ -54,6 +54,9 @@ Replies in that thread continue its session without another mention.
 Allowed DMs can start sessions without mentions. Both user and channel must
 be allowed; messages from bots, edits, and empty prompts are ignored.
 Set `access.mentionOnly` to require a mention for every turn.
+Set `access.peerCaptains: true` to admit other fleet captains' bots, such as
+`defiant-captain`, with a thread limit. Other bots stay ignored. See
+[peer captains](docs/peer-captains.md).
 
 New sessions use `<bot name> (slack <conversation ID>)` as their title, for
 example `Galactica Captain (slack D123)`. Set `displayName` on the bot to choose

@@ -14,6 +14,8 @@ export type Incoming = {
   text: string;
   files?: readonly string[];
   deferDelivery?: boolean;
+  /** A verified peer captain bot sent this message. Absent for people. */
+  sender?: "captain" | null;
 };
 
 export type Job = Incoming & {
@@ -125,6 +127,7 @@ export class Store {
     column("jobs", "input_files", "TEXT");
     column("jobs", "output_files", "TEXT");
     column("jobs", "deferDelivery", "INTEGER NOT NULL DEFAULT 0");
+    column("jobs", "sender", "TEXT");
     // Preserve source-first context and legacy ownership; keep statuses intact.
     if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
       this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
@@ -143,8 +146,8 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery)`)
+      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -155,8 +158,22 @@ export class Store {
           $text: input.text,
           $files: input.files?.length ? JSON.stringify(input.files) : null,
           $deferDelivery: input.deferDelivery ? 1 : 0,
+          $sender: input.sender ?? null,
         }).changes > 0
     );
+  }
+
+  /** Peer captain messages in a conversation whose Slack time is after `since`. */
+  peerTurns(conversation: string, since: number): number {
+    return this.db
+      .query<{ eventId: string }, [string]>(
+        "SELECT eventId FROM jobs WHERE conversation=? AND sender='captain' ORDER BY id DESC LIMIT 100",
+      )
+      .all(conversation)
+      .filter(({ eventId }) => {
+        const ts = Number(eventId.slice(eventId.lastIndexOf(":") + 1));
+        return Number.isFinite(ts) && ts * 1000 >= since;
+      }).length;
   }
 
   inputFiles(id: number): string[] {

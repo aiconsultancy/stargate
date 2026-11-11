@@ -314,7 +314,7 @@ export class OpenCodeBackend implements AgentBackend {
           sessionID: sessionId,
           id,
           text: context
-            ? `s=slack;c=${encodeURIComponent(context.source.channel)};t=${encodeURIComponent(context.source.thread)};m=${encodeURIComponent(context.source.message)};u=${encodeURIComponent(context.source.user)}\n\n${text}`
+            ? `s=slack;c=${encodeURIComponent(context.source.channel)};t=${encodeURIComponent(context.source.thread)};m=${encodeURIComponent(context.source.message)};u=${encodeURIComponent(context.source.user)}${context.source.sender ? `;k=${context.source.sender}` : ""}\n\n${text}`
             : text,
           delivery: "queue",
           ...(files.length

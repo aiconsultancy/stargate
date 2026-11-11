@@ -3,6 +3,7 @@ import { z } from "zod";
 import { maxAttachments } from "./attachments";
 import type { BotConfig } from "./config";
 import { markdownChunks } from "./markdown-chunks";
+import type { PeerSender } from "./peers";
 
 const eventSchema = z.object({
   type: z.enum(["app_mention", "message"]),
@@ -73,10 +74,15 @@ export function isAllowedChannel(config: BotConfig, channel: string) {
   );
 }
 
+/**
+ * `peer` is a sender that Slack's directory proved to be a peer captain bot.
+ * Without it, every bot message is rejected.
+ */
 export function routeEvent(
   raw: unknown,
   config: BotConfig,
   identity: Identity,
+  peer?: PeerSender,
 ) {
   const parsed = envelopeSchema.safeParse(raw);
   if (!parsed.success) return;
@@ -86,8 +92,13 @@ export function routeEvent(
   const result = eventSchema.safeParse(body.event);
   if (!result.success) return;
   const event = result.data;
+  const captain =
+    event.bot_id !== undefined &&
+    config.access.peerCaptains &&
+    peer?.user === event.user &&
+    peer.bot === event.bot_id;
   if (
-    event.bot_id ||
+    (event.bot_id && !captain) ||
     (event.subtype && event.subtype !== "file_share") ||
     event.hidden ||
     event.user === identity.user
@@ -121,6 +132,7 @@ export function routeEvent(
     ...(event.files?.length
       ? { files: event.files.map((file) => file.id) }
       : {}),
+    ...(captain ? { sender: "captain" as const } : {}),
     startsConversation: mentioned || direct,
   };
 }

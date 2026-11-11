@@ -99,6 +99,8 @@ SQLite, `bun:test`, and the existing Promise adapter contract.
   exchange, or confuse it with permission to collect persistent credentials.
 - Never log raw SDK exceptions, request headers, prompts, or credential files.
 - Keep allowlists nonempty and fail closed. Reject messages sent by bots.
+  The only exception is a peer captain bot that Slack's directory verifies,
+  when the bot sets `access.peerCaptains`. See `docs/peer-captains.md`.
 - Only on explicit operator request, allow `*` for users or channels/DMs.
   `deniedUsers` and `deniedChannels` always override allows, including `*`.
   Keep app/workspace routing and bot rejection; missing deny lists default empty.

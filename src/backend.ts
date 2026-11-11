@@ -17,6 +17,8 @@ export type PromptSourceContext = {
     thread: string;
     message: string;
     user: string;
+    /** A verified peer captain bot sent the message. */
+    sender?: "captain";
   };
 };
 

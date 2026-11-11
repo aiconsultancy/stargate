@@ -44,7 +44,7 @@ export interface SlackInteractions {
  */
 export async function handleSlackRequest(
   request: SocketRequest,
-  accept: (body: unknown) => boolean,
+  accept: (body: unknown) => boolean | Promise<boolean>,
   log: Logger,
   interactions?: SlackInteractions,
   open: () => boolean = () => true,
@@ -56,7 +56,12 @@ export async function handleSlackRequest(
     } else if (request.type === "interactive" && interactions) {
       await interactions.interactive(request.body, request.ack);
     } else {
-      if (request.type === "events_api") accept(request.body);
+      if (request.type === "events_api") {
+        await accept(request.body);
+        // Intake closed during an async check: Slack redelivers to the next
+        // connection; a stored copy is deduplicated by its event ID.
+        if (!open()) return;
+      }
       await request.ack();
     }
   } catch {
@@ -122,6 +127,11 @@ export class SlackConnection implements SlackDelivery {
     });
   }
 
+  /** Slack `users.info`; the caller parses the untrusted result. */
+  async userInfo(user: string, signal: AbortSignal): Promise<unknown> {
+    return this.historyWeb(signal).users.info({ user });
+  }
+
   async identity(): Promise<Identity> {
     const auth = await this.web.auth.test();
     if (!auth.team_id || !auth.user_id || !auth.bot_id)
@@ -136,7 +146,7 @@ export class SlackConnection implements SlackDelivery {
   }
 
   async start(
-    accept: (body: unknown) => boolean,
+    accept: (body: unknown) => boolean | Promise<boolean>,
     log: Logger,
     interactions?: SlackInteractions,
     open?: () => boolean,

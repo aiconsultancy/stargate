@@ -26,6 +26,15 @@ import type { BotConfig } from "./config";
 import { abortable, runAbortable } from "./effect";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
+import {
+  botSender,
+  type PeerDirectory,
+  type PeerSender,
+  peerLookupMs,
+  peerPrefix,
+  peerTurnsPerHour,
+  peerWindowMs,
+} from "./peers";
 import { parseReactionReply, type ReactionName } from "./reactions";
 import {
   AttachmentInputUnavailable,
@@ -188,6 +197,8 @@ export class Gateway {
     private readonly log: Logger,
     /** Present only when the bot configures transcription. */
     private readonly transcriber?: Transcriber,
+    /** Slack user directory for peer captain checks. */
+    private readonly peers?: PeerDirectory,
   ) {
     this.key = botKey(config, identity);
     this.activity = new ActivityDelivery(
@@ -203,14 +214,42 @@ export class Gateway {
     );
   }
 
-  accept(body: unknown) {
-    const input = routeEvent(body, this.config, this.identity);
+  accept(body: unknown, peer?: PeerSender) {
+    const input = routeEvent(body, this.config, this.identity, peer);
     if (
       !input ||
       (!input.startsConversation && !this.store.follows(input.conversation))
     )
       return false;
+    // Loop protection: a peer captain gets a bounded number of turns per
+    // thread. The window ends at this message's Slack time, not host time.
+    const sent = Number(input.eventId.slice(input.channel.length + 1)) * 1000;
+    if (
+      input.sender === "captain" &&
+      (!Number.isFinite(sent) ||
+        this.store.peerTurns(input.conversation, sent - peerWindowMs) >=
+          peerTurnsPerHour)
+    ) {
+      this.log.warn("Peer captain thread limit reached; message not admitted");
+      return false;
+    }
     return this.store.enqueue(input);
+  }
+
+  /**
+   * Slack intake. A bot message is admitted only after Slack's directory
+   * proves a peer captain; a failed or slow lookup admits nothing. `open` is
+   * checked again after the lookup, before anything is stored.
+   */
+  async receive(body: unknown, open: () => boolean = () => true) {
+    const sender = botSender(body);
+    if (!sender || !this.config.access.peerCaptains || !this.peers)
+      return this.accept(body);
+    const verified = await this.peers
+      .verify(sender, AbortSignal.timeout(peerLookupMs))
+      .catch(() => false);
+    if (!open()) return false;
+    return this.accept(body, verified ? sender : undefined);
   }
 
   /** Commit the exact requester-authorized target before Socket Mode ACK. */
@@ -804,9 +843,15 @@ export class Gateway {
                     thread: job.thread,
                     message: before,
                     user: job.user,
+                    ...(job.sender === "captain"
+                      ? { sender: "captain" as const }
+                      : {}),
                   },
                 }
               : undefined;
+          // Without a source line, the prompt itself names a peer sender.
+          if (job.sender === "captain" && !sourceContext)
+            text = `${peerPrefix(job.user)}\n\n${text}`;
           // greybeard: pinned turns carry IDs only; missing history needs explicit retrieval.
           if (!pinned && !session) {
             // Roots (including scheduled runs) have no earlier thread messages.

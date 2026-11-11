@@ -28,6 +28,7 @@ import { abortable } from "./effect";
 import { Gateway, type SlackDelivery } from "./gateway";
 import { controlInteractions } from "./interactions";
 import { PairingUI } from "./pairing";
+import { PeerDirectory } from "./peers";
 import { botKey, type Identity } from "./routing";
 import { SlackConnection, type SlackInteractions } from "./slack";
 import { Store } from "./store";
@@ -61,8 +62,10 @@ export class RuntimeStopped extends Data.TaggedError("RuntimeStopped")<{
 /** One registration's Slack surface: intake, Web API delivery and modals. */
 export interface SlackApp extends SlackDelivery, CronDelivery {
   identity(): Promise<Identity>;
+  /** Slack `users.info`; required for peer captain admission. */
+  userInfo?(user: string, signal: AbortSignal): Promise<unknown>;
   start(
-    accept: (body: unknown) => boolean,
+    accept: (body: unknown) => boolean | Promise<boolean>,
     log: Logger,
     interactions: SlackInteractions,
     open: () => boolean,
@@ -208,6 +211,13 @@ export function serve(
           slack,
           botLog,
           bot.transcription ? createTranscriber(bot.transcription) : undefined,
+          bot.access.peerCaptains && slack.userInfo
+            ? new PeerDirectory(
+                (user, signal) =>
+                  slack.userInfo?.(user, signal) ?? Promise.resolve(undefined),
+                identity.team,
+              )
+            : undefined,
         );
         const cron = new CronScheduler(
           bot,
@@ -231,7 +241,7 @@ export function serve(
         yield* Effect.addFinalizer(() => closeIntake(close));
         yield* Effect.promise(() =>
           slack.start(
-            (body) => open && gateway.accept(body),
+            async (body) => open && gateway.receive(body, () => open),
             botLog,
             controlInteractions(
               new CronUI(bot, identity, cronStore, slack.cronUI, botLog),
