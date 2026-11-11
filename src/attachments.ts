@@ -19,6 +19,13 @@ export type Attachment = {
   name: string;
   mime: string;
   data: Uint8Array;
+  /** Facts from the chat platform about an accepted input file. */
+  source?: {
+    id: string;
+    durationMs?: number;
+    /** Complete platform transcript of audio or video; never a preview. */
+    transcript?: string;
+  };
 };
 
 const mimePattern = /^[\w.+-]+\/[\w.+-]+$/;

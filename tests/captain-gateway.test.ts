@@ -12,6 +12,7 @@ import {
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
 import { Gateway, type SlackDelivery } from "../src/gateway";
+import { failureText } from "../src/request-failure";
 import { backendFingerprint, botKey, conversationKey } from "../src/routing";
 import { Store } from "../src/store";
 import { repairTranscript } from "../src/transcript";
@@ -914,6 +915,78 @@ test("a silent captain reply needs no delayed-reply notice when history is unrea
   expect(f.posts).toEqual([]);
   expect(f.prompts).toHaveLength(1);
 });
+
+for (const cause of ["transcription", "attachments"] as const) {
+  test(`a request refused before admission (${cause}) never receives another source's reply after cursor loss`, async () => {
+    const f = nativeFixture();
+    const privateReply = "answer: private DM request";
+    f.gateway.accept(source("D123", "private DM request", "1.000"));
+    await f.drain();
+    expect(f.posts).toEqual([
+      { channel: "D123", thread: "1.000", text: privateReply },
+    ]);
+    // The delivered message leaves native history; SQLite keeps its cursor and
+    // the adapter keeps the DM input as its latest. A reply follows that input.
+    const lost = f.store.captainCursor(
+      f.gateway.key,
+      "original-captain",
+    ).cursor;
+    expect(f.history.pop()?.id).toBe(lost);
+    f.add("assistant", privateReply);
+    const slack: SlackDelivery = {
+      ...f.slack,
+      files: {
+        async download() {
+          if (cause === "attachments") throw new Error("Slack file refused");
+          return [
+            { name: "voice.m4a", mime: "audio/mp4", data: new Uint8Array([1]) },
+          ];
+        },
+        async reserveUpload() {
+          throw new Error("unused");
+        },
+        async putUpload() {},
+        async completeUpload() {},
+        async sharedIn() {
+          return false;
+        },
+      },
+    };
+    const gateway = new Gateway(
+      f.config,
+      identity,
+      f.store,
+      { ...f.backend, supportsAttachments: true },
+      slack,
+      pino({ enabled: false }),
+      {
+        label: "fixture",
+        async transcribe() {
+          throw new Error("fixture transcription failure");
+        },
+      },
+    );
+    cleanup.push(() => gateway.close());
+    expect(gateway.key).toBe(f.gateway.key);
+    const request = source("C123", "<@UBOT>", "2.000");
+    gateway.accept({
+      ...request,
+      event: {
+        ...request.event,
+        subtype: "file_share",
+        files: [{ id: "FVOICE" }],
+      },
+    });
+    const job = f.next();
+    await gateway.process(job, f.signal);
+    expect(f.prompts).toHaveLength(1);
+    expect(f.store.failure(job.id)).toBe(cause);
+    expect(f.posts.filter(({ channel }) => channel === "C123")).toEqual([
+      { channel: "C123", thread: "2.000", text: failureText(cause) },
+    ]);
+    expect(f.posts.filter(({ text }) => text === privateReply)).toHaveLength(1);
+  });
+}
 
 test("legacy mappings never broadcast; matching original cursor retains one owner", async () => {
   const f = nativeFixture();

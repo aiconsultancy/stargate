@@ -56,6 +56,12 @@ import {
   ThreadContextUnavailable,
   withThreadContext,
 } from "./thread-context";
+import {
+  isMedia,
+  type Transcriber,
+  TranscriptionUnavailable,
+  transcribeMedia,
+} from "./transcription";
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
 
 // Catch-up retries read history only; they never prompt the agent.
@@ -180,6 +186,8 @@ export class Gateway {
     private readonly backend: AgentBackend,
     private readonly slack: SlackDelivery,
     private readonly log: Logger,
+    /** Present only when the bot configures transcription. */
+    private readonly transcriber?: Transcriber,
   ) {
     this.key = botKey(config, identity);
     this.activity = new ActivityDelivery(
@@ -733,6 +741,7 @@ export class Gateway {
             phrase: waitingPhrase,
           });
       let reacted = false;
+      let admitted = false;
       let silent = false;
       let reactionDelivered = false;
       let reactionTask: Promise<void> | undefined;
@@ -912,7 +921,7 @@ export class Gateway {
               if (
                 job.deferDelivery ||
                 !this.slack.files ||
-                !this.backend.supportsAttachments
+                !(this.backend.supportsAttachments || this.transcriber)
               )
                 throw new Error(
                   "Attachment input is unavailable for this backend",
@@ -925,13 +934,31 @@ export class Gateway {
               checkAttachments(inputFiles);
               if (inputFiles.length !== fileIDs.length)
                 throw new Error("Some requested attachments are unavailable");
+              // Refuse before any audio leaves: speech alone needs no file input.
+              if (
+                !this.backend.supportsAttachments &&
+                !inputFiles.every(isMedia)
+              )
+                throw new Error("Backend accepts no files");
             } catch {
               signal.throwIfAborted();
               throw new AttachmentInputUnavailable();
             }
             signal.throwIfAborted();
+            // Speech becomes prompt text before admission; the media is dropped.
+            if (this.transcriber && inputFiles.some(isMedia)) {
+              const spoken = await transcribeMedia(
+                inputFiles,
+                this.transcriber,
+                this.config.transcription?.timeoutMs ?? 120_000,
+                signal,
+              );
+              inputFiles = spoken.files;
+              text = [text, ...spoken.blocks].filter(Boolean).join("\n\n");
+            }
           }
           this.store.started(job.id);
+          admitted = true;
           const streamed = await this.backend.prompt(
             session,
             text,
@@ -1013,11 +1040,25 @@ export class Gateway {
                   ? "context"
                   : error instanceof AttachmentInputUnavailable
                     ? "attachments"
-                    : "backend";
+                    : error instanceof TranscriptionUnavailable
+                      ? "transcription"
+                      : "backend";
           output = [statusText(failure)];
           transcript = undefined;
+          // A request refused before admission submitted no input and owns no
+          // text: reading history for it could assign another source's reply
+          // to this thread. Earlier continuations stay with catch-up.
+          if (this.backend.transcript && session && !admitted)
+            this.queueTranscript(
+              this.backend.sessionID ? this.key : job.conversation,
+            );
           // Keep public text that settled before the failure; shutdown recovers later.
-          if (this.backend.transcript && session && failure !== "interrupted") {
+          if (
+            this.backend.transcript &&
+            session &&
+            admitted &&
+            failure !== "interrupted"
+          ) {
             transcript = await this.finalTranscript(
               session,
               from,

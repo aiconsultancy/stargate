@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { LogLevel, WebClient } from "@slack/web-api";
 import {
+  type Attachment,
   maxAttachmentBytes,
   maxAttachmentTotalBytes,
 } from "../src/attachments";
@@ -156,15 +157,86 @@ test("Slack file download resolves IDs, checks channel membership and returns PN
     });
   });
   expect(await f.files.download(["F1"], "C1", signal())).toEqual([
-    { name: "image.png", mime: "image/png", data: png },
+    { name: "image.png", mime: "image/png", data: png, source: { id: "F1" } },
   ]);
   expect(await f.files.download(["F2"], "D1", signal())).toEqual([
-    { name: "report.pdf", mime: "application/pdf", data: pdf },
+    {
+      name: "report.pdf",
+      mime: "application/pdf",
+      data: pdf,
+      source: { id: "F2" },
+    },
   ]);
   expect(f.records.map(({ params }) => params.get("file"))).toEqual([
     "F1",
     "F2",
   ]);
+});
+
+test("Slack clip facts: only a finished, untruncated transcript is returned", async () => {
+  const audio = new TextEncoder().encode("fixture m4a bytes");
+  const cases: [Record<string, unknown>, NonNullable<Attachment["source"]>][] =
+    [
+      [{}, { id: "F1" }],
+      [
+        { duration_ms: 68638, transcription: { status: "none" } },
+        { id: "F1", durationMs: 68638 },
+      ],
+      [
+        {
+          transcription: {
+            status: "complete",
+            preview: { content: "Deploy it.", has_more: false },
+          },
+        },
+        { id: "F1", transcript: "Deploy it." },
+      ],
+      [
+        {
+          transcription: {
+            status: "complete",
+            preview: { content: "Deploy it." },
+          },
+        },
+        { id: "F1", transcript: "Deploy it." },
+      ],
+      // A preview that continues elsewhere, an unfinished or empty transcript and
+      // an unknown shape never stand in for the speech.
+      [
+        {
+          transcription: {
+            status: "complete",
+            preview: { content: "Deploy", has_more: true },
+          },
+        },
+        { id: "F1" },
+      ],
+      [
+        {
+          transcription: { status: "processing", preview: { content: "Dep" } },
+        },
+        { id: "F1" },
+      ],
+      [
+        { transcription: { status: "complete", preview: { content: "  " } } },
+        { id: "F1" },
+      ],
+      [{ transcription: "complete", duration_ms: "long" }, { id: "F1" }],
+    ];
+  for (const [change, source] of cases) {
+    const f = fixture();
+    f.info.set("F1", {
+      ...f.file("F1", audio, "audio/mp4", "Audio clip.m4a"),
+      ...change,
+    });
+    f.download(
+      async () =>
+        new Response(audio, { headers: { "content-type": "audio/mp4" } }),
+    );
+    expect(await f.files.download(["F1"], "C1", signal())).toEqual([
+      { name: "Audio clip.m4a", mime: "audio/mp4", data: audio, source },
+    ]);
+  }
 });
 
 test("Slack file metadata refuses missing scope, foreign IDs/channels and external files before download", async () => {

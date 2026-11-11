@@ -33,6 +33,10 @@ reported before agent admission instead of silently dropping attachments.
 Files are untrusted input. Pogo does not execute them, unpack archives or treat
 their contents as instructions. The agent must apply the project's normal rules.
 
+Audio and video files are passed to the backend as files unless the bot sets
+`transcription`. With that setting they become transcript text and are not
+passed on. See [transcription](transcription.md).
+
 ## Agent to Slack
 
 The app needs `files:write` and `files:read`. Publish a requested local file in

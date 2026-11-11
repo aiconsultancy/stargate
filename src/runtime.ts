@@ -31,6 +31,7 @@ import { PairingUI } from "./pairing";
 import { botKey, type Identity } from "./routing";
 import { SlackConnection, type SlackInteractions } from "./slack";
 import { Store } from "./store";
+import { createTranscriber } from "./transcribers/azure-openai";
 
 export async function loadEnvironment(configPath: string) {
   const file = Bun.file(`${configPath}.env`);
@@ -206,6 +207,7 @@ export function serve(
           backend,
           slack,
           botLog,
+          bot.transcription ? createTranscriber(bot.transcription) : undefined,
         );
         const cron = new CronScheduler(
           bot,

@@ -56,7 +56,29 @@ const hostedFile = z.object({
   shares: shares.optional(),
   url_private_download: z.string().max(8192).optional(),
   url_private: z.string().max(8192).optional(),
+  duration_ms: z.number().int().positive().optional().catch(undefined),
+  // Slack's clip transcript. An unknown shape is treated as no transcript.
+  transcription: z
+    .object({
+      status: z.string(),
+      preview: z
+        .object({ content: z.string(), has_more: z.boolean().optional() })
+        .optional(),
+    })
+    .optional()
+    .catch(undefined),
 });
+
+/** Only a finished, untruncated transcript replaces a provider request. */
+function slackTranscript(file: z.infer<typeof hostedFile>) {
+  const preview = file.transcription?.preview;
+  return file.transcription?.status === "complete" &&
+    preview &&
+    preview.has_more !== true &&
+    preview.content.trim()
+    ? preview.content
+    : undefined;
+}
 const downloadResponse = z.object({ ok: z.literal(true), file: hostedFile });
 const shareResponse = z.object({
   ok: z.literal(true),
@@ -223,7 +245,19 @@ export class SlackFiles {
           )
             throw new Error("Slack file length mismatch");
           const data = await readBounded(response, file.size, stop);
-          files.push({ name: file.name, mime: file.mimetype, data });
+          const transcript = slackTranscript(file);
+          files.push({
+            name: file.name,
+            mime: file.mimetype,
+            data,
+            source: {
+              id: file.id,
+              ...(file.duration_ms !== undefined
+                ? { durationMs: file.duration_ms }
+                : {}),
+              ...(transcript !== undefined ? { transcript } : {}),
+            },
+          });
           total += data.byteLength;
         } finally {
           await response.body?.cancel().catch(() => {});

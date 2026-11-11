@@ -23,6 +23,7 @@ import {
   teamSchema,
 } from "./crew/team";
 import { reactionInstructions } from "./reactions";
+import { voiceInstructions } from "./transcription";
 
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const absolute = z
@@ -456,6 +457,7 @@ export async function initializeProfile(input: Options) {
         )
         .join("\n"),
       reactionInstructions,
+      voiceInstructions,
       instructions:
         agent.instructions ??
         "Follow the assigned task and project instructions.",

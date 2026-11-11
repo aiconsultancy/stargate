@@ -2,6 +2,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { crewActivitySchema } from "./activity";
 import { cronjobsSchema } from "./cronjob-config";
+import { transcriptionSchema } from "./transcription";
 import { waitingSchema } from "./waiting";
 
 const absolutePath = z.string().refine(isAbsolute, "Use an absolute path");
@@ -141,6 +142,8 @@ export const botSchema = z.strictObject({
   cronjobs: cronjobsSchema.optional(),
   pairing: pairingSchema.optional(),
   threadContext: z.boolean().default(false),
+  /** Speech-to-text for accepted audio and video messages; absent is off. */
+  transcription: transcriptionSchema.optional(),
   waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),
   crewActivity: crewActivitySchema.default({
     detail: "off",

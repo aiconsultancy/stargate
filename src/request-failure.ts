@@ -10,6 +10,7 @@ export type RequestFailure =
   | "backend"
   | "context"
   | "attachments"
+  | "transcription"
   | "interrupted"
   | "reaction"
   | "history";
@@ -31,6 +32,10 @@ const failures = {
   attachments: {
     title: "Attachments unavailable",
     text: "Pogo could not pass these attachments to the agent. Check files:read access, channel sharing, supported file types and size limits. No agent turn was admitted; the files were not silently dropped.",
+  },
+  transcription: {
+    title: "Voice message not transcribed: please type it",
+    text: "Pogo could not transcribe this audio or video message. No agent turn was started. Please type your message. Accepted formats are m4a, mp3, mp4, mpeg, mpga, wav and webm.",
   },
   interrupted: {
     title: "Gateway interrupted",

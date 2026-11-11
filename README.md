@@ -90,6 +90,14 @@ Accepted Slack messages can carry images and files. Agents can publish requested
 local evidence into the proven source thread. See [attachments](docs/attachments.md)
 for scopes, supported backends, limits and explicit file publication syntax.
 
+A bot can transcribe audio and video messages, such as Slack voice notes.
+With the `transcription` setting, Pogo replaces each audio or video file with
+a marked transcript in the prompt, before the agent turn starts. It uses
+Slack's own transcript when Slack has a complete one, and otherwise an Azure
+OpenAI deployment with the host's managed identity; no key is stored. A file
+that cannot be transcribed starts no agent turn. The setting is off by
+default. See [transcription](docs/transcription.md).
+
 Requests have a 30-minute time limit by default. Set `turnTimeoutMs` on the bot
 to change it, up to one hour. Ordinary long replies stream in the same thread;
 large builds can need a longer limit or smaller requests. Failures end the
