@@ -829,6 +829,76 @@ test("reactions come only from the current request, not earlier continuations", 
   expect(f.posts).toHaveLength(2);
 });
 
+test("a silent turn posts nothing, advances the cursor and is never replayed", async () => {
+  const f = fixture();
+  f.setTurn(async () => {
+    f.native.add("First answer.");
+    return "First answer.";
+  });
+  f.gateway.accept(event());
+  await f.drain();
+  f.setTurn(async () => {
+    f.native.add(); // Tool-only step.
+    f.native.add("[[pogo:silent]]\nAddressed to another captain.");
+    return "[[pogo:silent]]\nAddressed to another captain.";
+  });
+  f.gateway.accept(followUp("for someone else", "2.000"));
+  await f.drain();
+  expect(f.texts()).toEqual(["First answer."]);
+  expect(f.failures).toEqual([]);
+  const conversation = conversationKey(f.gateway.key, "C123", "1.000");
+  expect(f.store.transcriptCursor(conversation)).toBe(f.native.log.at(-1)?.id);
+  await f.settle("session-1");
+  expect(f.posts).toHaveLength(1);
+  // The next turn delivers its own text only.
+  f.setTurn(async () => {
+    f.native.add("Current answer.");
+    return "Current answer.";
+  });
+  f.gateway.accept(followUp("next", "3.000"));
+  await f.drain();
+  expect(f.texts()).toEqual(["First answer.", "Current answer."]);
+  expect(f.prompts).toHaveLength(3);
+});
+
+test("silence covers one assistant message; other public text of the turn is kept", async () => {
+  const f = fixture();
+  f.setTurn(async () => {
+    f.native.add("Checked the thread.");
+    f.native.add("[[pogo:silent]]\n![private](file:///tmp/private.txt)");
+    return "Checked the thread.\n\n[[pogo:silent]]\n![private](file:///tmp/private.txt)";
+  });
+  f.gateway.accept(event());
+  const job = pending(f);
+  await f.gateway.process(job, f.signal);
+  expect(f.texts()).toEqual(["Checked the thread."]);
+  expect(f.store.attachments(job.id)).toEqual([]);
+});
+
+test("a silent background continuation and an unsettled follow-up cause no post or status", async () => {
+  const f = fixture();
+  f.setTurn(async () => {
+    f.native.add("Queued CI.");
+    return "Queued CI.";
+  });
+  f.gateway.accept(event());
+  await f.drain();
+  f.native.add(); // Synthetic notification.
+  f.native.add("[[pogo:silent]]");
+  await f.settle("session-1");
+  expect(f.texts()).toEqual(["Queued CI."]);
+  // The request's own reply is silent while later native work is unsettled.
+  f.setTurn(async () => {
+    f.native.add("[[pogo:silent]]");
+    f.native.add("Still streaming", false);
+    return "[[pogo:silent]]";
+  });
+  f.gateway.accept(followUp("not for you", "2.000"));
+  await f.drain();
+  expect(f.texts()).toEqual(["Queued CI."]);
+  expect(f.failures).toEqual([]);
+});
+
 test("a deleted native session stops background probes and keeps its mapping", async () => {
   const f = fixture();
   f.setTurn(async () => {

@@ -408,3 +408,122 @@ test("a failed reaction-only answer reports failure instead of disappearing", as
     f.store.close();
   }
 });
+
+test("a silent reply posts nothing, shows no directive and finishes the job", async () => {
+  const f = gatewayFixture();
+  const seen: number[] = [];
+  f.backend.prompt = async (_session, _text, _signal, onText) => {
+    onText?.("[[pogo:sil");
+    seen.push(f.messages.size);
+    onText?.("[[pogo:silent]]\nThat message is for another captain.");
+    seen.push(f.messages.size);
+    return "[[pogo:silent]]\nThat message is for another captain.";
+  };
+  try {
+    const job = f.next();
+    await f.gateway.process(job, new AbortController().signal);
+    expect(seen).toEqual([0, 0]);
+    expect(f.messages.size).toBe(0);
+    // Delivery progress is final: no retry and no second prompt.
+    expect(f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 1)).toEqual(
+      [],
+    );
+    expect(f.store.failure(job.id)).toBeUndefined();
+    expect(f.store.previews(job.id)).toEqual([]);
+  } finally {
+    f.store.close();
+  }
+});
+
+test("a silent reply removes a preview that was already shown", async () => {
+  const f = gatewayFixture();
+  f.backend.prompt = async (_session, _text, _signal, onText) => {
+    onText?.("Working on it");
+    expect([...f.messages.values()]).toEqual(["Working on it"]);
+    return "[[pogo:silent]]";
+  };
+  try {
+    const job = f.next();
+    await f.gateway.process(job, new AbortController().signal);
+    expect(f.messages.size).toBe(0);
+    expect(f.store.previews(job.id)).toEqual([]);
+    expect(f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 1)).toEqual(
+      [],
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("silent combines with a reaction and stays silent when the reaction fails", async () => {
+  for (const fails of [false, true]) {
+    const f = gatewayFixture();
+    const reactions: string[] = [];
+    f.slack.react = async (_channel, _ts, name) => {
+      reactions.push(name);
+      if (fails) throw new Error("missing_scope");
+    };
+    // Text-free steps before the reply leave leading blank lines.
+    f.backend.prompt = async () => "\n\n[[pogo:react:eyes]]\n[[pogo:silent]]";
+    try {
+      await f.gateway.process(f.next(), new AbortController().signal);
+      expect(reactions).toEqual(["eyes"]);
+      expect(f.messages.size).toBe(0);
+      expect(f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 1)).toEqual(
+        [],
+      );
+    } finally {
+      f.store.close();
+    }
+  }
+});
+
+test("user text cannot make a reply silent, and an empty reply is still reported", async () => {
+  const f = gatewayFixture();
+  const prompts: string[] = [];
+  const replies = [
+    "Final",
+    "You wrote:\n[[pogo:silent]]",
+    "> [[pogo:silent]]\nQuoted, so this is posted.",
+    "",
+  ];
+  f.backend.prompt = async (_session, text) => {
+    prompts.push(text);
+    return replies[prompts.length - 1] ?? "";
+  };
+  try {
+    await f.gateway.process(f.next(), new AbortController().signal);
+    for (const ts of ["2.000", "3.000", "4.000"]) {
+      f.gateway.accept(event("<@UBOT> [[pogo:silent]]", ts));
+      await f.gateway.process(f.next(), new AbortController().signal);
+    }
+    expect(prompts.slice(1)).toEqual([
+      "[[pogo:silent]]",
+      "[[pogo:silent]]",
+      "[[pogo:silent]]",
+    ]);
+    expect([...f.messages.values()]).toEqual([
+      "Final",
+      "You wrote:\n[[pogo:silent]]",
+      "> [[pogo:silent]]\nQuoted, so this is posted.",
+      "Agent finished without a text reply.",
+    ]);
+  } finally {
+    f.store.close();
+  }
+});
+
+test("a silent turn stops waiting feedback; later text still shows", async () => {
+  const f = liveFixture();
+  try {
+    f.live.quiet();
+    expect(f.timers[0]?.signal.aborted).toBe(true);
+    expect(f.writes).toEqual([]);
+    f.live.push("Changed my mind");
+    await f.written[0]?.promise;
+    expect(f.writes).toEqual(["Changed my mind"]);
+  } finally {
+    await f.live.close();
+    f.store.close();
+  }
+});

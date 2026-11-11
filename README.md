@@ -78,6 +78,14 @@ same message becomes the answer when text arrives. See [waiting settings](docs/w
 for configurable delays, disabling feedback, and captain-managed changes.
 Existing module backends can still return a final answer without streaming.
 
+An agent can decline to post. When the first line of its reply is
+`[[pogo:silent]]`, Pogo posts no message for that reply, removes waiting
+feedback that is already shown, and records the request as delivered. Use it
+in shared channels for messages addressed to someone else. A reply with no
+text and no directive is different: Pogo still posts "Agent finished without a
+text reply.", because an accidental empty answer must stay visible. See
+[silent replies](docs/setup.md#silent-replies).
+
 Accepted Slack messages can carry images and files. Agents can publish requested
 local evidence into the proven source thread. See [attachments](docs/attachments.md)
 for scopes, supported backends, limits and explicit file publication syntax.

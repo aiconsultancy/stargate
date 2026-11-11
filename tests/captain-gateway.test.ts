@@ -859,6 +859,62 @@ test("a source turn excludes interleaved native UI output", async () => {
   expect(f.posts).toHaveLength(1);
 });
 
+test("a silent captain turn in a shared channel posts nothing and is not replayed", async () => {
+  const f = nativeFixture();
+  f.gateway.accept(source("D123", "first", "1.000"));
+  await f.drain();
+  f.setTurn(async () => {
+    f.add("assistant", "[[pogo:silent]]\nAddressed to another captain.");
+    return "[[pogo:silent]]\nAddressed to another captain.";
+  });
+  f.gateway.accept(source("C456", "<@UBOT> is the terraform applied", "2.000"));
+  await f.drain();
+  // A crew wake that needs no post stays silent too.
+  f.add("synthetic");
+  f.add("assistant", "[[pogo:silent]]");
+  await f.settle();
+  await f.settle();
+  expect(f.posts).toEqual([
+    { channel: "D123", thread: "1.000", text: "answer: first" },
+  ]);
+  expect(f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 1)).toEqual([]);
+  expect(f.store.captainCursor(f.gateway.key, "original-captain").cursor).toBe(
+    f.history.at(-1)?.id,
+  );
+  f.setTurn(async (text) => {
+    f.add("assistant", `answer: ${text}`);
+    return `answer: ${text}`;
+  });
+  f.gateway.accept(source("C456", "and now for you", "3.000", "2.000"));
+  await f.drain();
+  expect(f.posts.at(-1)).toEqual({
+    channel: "C456",
+    thread: "2.000",
+    text: "answer: and now for you",
+  });
+  expect(f.posts).toHaveLength(2);
+  expect(f.prompts).toHaveLength(3);
+});
+
+test("a silent captain reply needs no delayed-reply notice when history is unreadable", async () => {
+  const f = nativeFixture();
+  f.setTurn(async () => {
+    f.add("assistant"); // Tool-only step, as OpenCode joins it.
+    f.add("assistant", "[[pogo:silent]]");
+    f.breakReads(true);
+    return "\n\n[[pogo:silent]]";
+  });
+  f.gateway.accept(source("C456", "<@UBOT> not for you", "1.000"));
+  await f.drain();
+  expect(f.posts).toEqual([]);
+  f.breakReads(false);
+  await f.gateway.catchUp(f.signal);
+  await f.drain();
+  await f.settle();
+  expect(f.posts).toEqual([]);
+  expect(f.prompts).toHaveLength(1);
+});
+
 test("legacy mappings never broadcast; matching original cursor retains one owner", async () => {
   const f = nativeFixture();
   const old = f.add("assistant", "Already delivered");

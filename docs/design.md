@@ -308,6 +308,11 @@ Pogo accounted for in Slack. NULL means the mapping predates the cursor.
   delayed** and catch-up delivers from the moved cursor.
 - Reactions come only from the prompt's own reply to the current input.
   Directives in earlier continuations are removed and never applied.
+- A message whose first line is `[[pogo:silent]]` has no public text and no
+  files, in a turn and in a continuation. A turn with no other public text
+  commits an empty reply with its cursor and posts nothing. When the prompt's
+  own reply is silent, unreadable or unsettled history queues catch-up without
+  a **Reply delayed** notice.
 - The final read retries briefly (100, 200, 400 ms) for completion marks. If
   history stays unreadable, or no public text has settled, the turn posts one
   **Reply delayed** status box and catch-up delivers the reply from history.

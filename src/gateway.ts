@@ -72,7 +72,12 @@ const gapNote =
 
 type FinalTranscript = Transcript & { gap?: true; anchored?: true };
 
-/** Settled public text without reaction controls; never applies a reaction. */
+/** True when a settled message of this turn asked for no Slack post. */
+function transcriptSilent(entries: readonly TranscriptEntry[]) {
+  return entries.some((entry) => parseReactionReply(entry.text).silent);
+}
+
+/** Settled public text without reply controls; never applies a reaction. */
 export function transcriptReply(entries: readonly TranscriptEntry[]) {
   return entries
     .map((entry) =>
@@ -82,11 +87,15 @@ export function transcriptReply(entries: readonly TranscriptEntry[]) {
     .join("\n\n");
 }
 
+/** A message that starts with the silent directive publishes no files. */
 export function transcriptAttachments(entries: readonly TranscriptEntry[]) {
   return [
     ...new Map(
       entries
-        .flatMap((entry) => parseAttachments(entry.text).files)
+        .flatMap(
+          (entry) =>
+            parseAttachments(parseReactionReply(entry.text).text).files,
+        )
         .map((file) => [file.path, file]),
     ).values(),
   ];
@@ -534,7 +543,12 @@ export class Gateway {
     from: CaptainCursor,
     read: FinalTranscript,
     current?: number,
-  ): { commit: CaptainTranscript; text: string; files: PublishedFile[] } {
+  ): {
+    commit: CaptainTranscript;
+    text: string;
+    files: PublishedFile[];
+    silent: boolean;
+  } {
     let owner = read.anchored && current !== undefined ? current : from.owner;
     const groups: { job: number; entries: TranscriptEntry[] }[] = [];
     const ownerFor = (input: string) =>
@@ -548,17 +562,13 @@ export class Gateway {
     }
     // A native input with no public reply must still clear/set ownership.
     if (read.input !== undefined) owner = ownerFor(read.input);
+    const own = groups
+      .filter((group) => group.job === current)
+      .flatMap((group) => group.entries);
     return {
-      text: transcriptReply(
-        groups
-          .filter((group) => group.job === current)
-          .flatMap((group) => group.entries),
-      ),
-      files: transcriptAttachments(
-        groups
-          .filter((group) => group.job === current)
-          .flatMap((group) => group.entries),
-      ),
+      text: transcriptReply(own),
+      files: transcriptAttachments(own),
+      silent: transcriptSilent(own),
       commit: {
         botKey: this.key,
         sessionID,
@@ -723,6 +733,7 @@ export class Gateway {
             phrase: waitingPhrase,
           });
       let reacted = false;
+      let silent = false;
       let reactionDelivered = false;
       let reactionTask: Promise<void> | undefined;
       let activity: ActivityHandle | undefined;
@@ -740,9 +751,16 @@ export class Gateway {
             parseReactionReply(text, complete).text,
             complete,
           ).text;
-        if (!this.slack.react) return parseAttachments(text, complete).text;
         const parsed = parseReactionReply(text, complete);
-        if (parsed.reaction && !reacted && !signal.aborted) {
+        // A silent turn needs no "working" notice; the final cleanup removes
+        // one that is already shown.
+        if (parsed.silent && !complete) live?.quiet();
+        if (
+          this.slack.react &&
+          parsed.reaction &&
+          !reacted &&
+          !signal.aborted
+        ) {
           reacted = true;
           // eventId deduplicates by channel:message-ts, not Slack's envelope ID.
           const messageTs = job.eventId.slice(job.channel.length + 1);
@@ -933,7 +951,10 @@ export class Gateway {
           );
           signal.throwIfAborted();
           // The prompt reply is this request's own text: only it can react.
-          const own = reply(streamed, true);
+          // Text-free steps before the first text leave only blank lines.
+          const settled = streamed.replace(/^(?:\r?\n)+/, "");
+          const own = reply(settled, true);
+          const ownReply = parseReactionReply(settled);
           if (this.backend.transcript)
             transcript = await this.finalTranscript(session, from, signal);
           signal.throwIfAborted();
@@ -948,26 +969,29 @@ export class Gateway {
             ? owned.files
             : transcript
               ? transcriptAttachments(transcript.entries)
-              : parseAttachments(streamed).files;
+              : parseAttachments(ownReply.text).files;
           const answer = owned
             ? owned.text
             : transcript
               ? this.transcriptText(transcript)
               : own;
+          silent = ownReply.silent || owned?.silent === true;
           // Unread or unsettled text is never posted without its cursor.
-          const deferred = transcript
+          const unread = transcript
             ? transcript.pending && !answer.trim()
             : from !== undefined ||
               (pinned !== undefined && this.backend.transcript !== undefined);
-          if (deferred || transcript?.pending)
+          if (unread || transcript?.pending)
             this.queueTranscript(pinned ? this.key : job.conversation);
+          // This request's own reply is silent: there is no text to wait for.
+          const deferred = unread && !ownReply.silent;
           activity?.finish();
           if (deferred) {
             failure = "history";
             output = [statusText(failure)];
           } else
             output =
-              reacted && !answer.trim()
+              (reacted || silent) && !answer.trim()
                 ? []
                 : transcript && answer.trim()
                   ? transcriptChunks(answer)
@@ -978,6 +1002,7 @@ export class Gateway {
             activity?.cancel();
           else if (!shutdown.aborted) activity?.finish();
           this.log.warn({ job: job.id }, "Agent request failed or timed out");
+          silent = false;
           failure = cancellation.signal.aborted
             ? "cancelled"
             : shutdown.aborted
@@ -1017,7 +1042,8 @@ export class Gateway {
           }
         }
         // A reaction-only reply has no answer to preserve until delivery settles.
-        if (output.length === 0) {
+        // A silent reply stays silent, also when its optional reaction fails.
+        if (output.length === 0 && !silent) {
           await reactionTask;
           if (!reactionDelivered) {
             failure = "reaction";

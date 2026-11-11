@@ -53,6 +53,12 @@ export class LiveReply {
     this.enqueue(text);
   };
 
+  /** Stop waiting feedback for a turn that posts nothing; later text still shows. */
+  quiet() {
+    this.hasText = true;
+    this.waitingStop.abort();
+  }
+
   /** Confirm a cancellable notice before its opt-out timer can start. */
   async announce(text: string) {
     this.held = true;

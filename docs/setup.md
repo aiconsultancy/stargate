@@ -451,6 +451,30 @@ agents or Pi bots that need reactions should put the protocol in their agent
 definition or configured `systemPrompt`; reply parsing and target checks remain
 in the gateway.
 
+### Silent replies
+
+An agent posts nothing when the first line of its reply is exactly
+`[[pogo:silent]]`. The same instructions block that describes reactions
+describes this directive. Rules:
+
+- Only the agent's own reply is read. The directive in a user message, a
+  quotation, a code block or a later line is ordinary text.
+- Text and file markers after the directive are not posted. They stay in the
+  agent's session history.
+- One reaction line can come before or after the directive. The reaction is
+  applied; a reaction that fails does not cause a status message.
+- Pogo removes waiting feedback and previews that are already shown, and
+  records the request as delivered. Nothing is retried or replayed.
+- With OpenCode, each assistant message is read separately. Other public text
+  of the same turn is still posted, so a silent turn must contain no other
+  text.
+- A reply with no text and no directive still posts "Agent finished without a
+  text reply.".
+
+No Slack scope is required. An agent definition that was generated before this
+directive existed does not contain it: add the "Slack silent reply" paragraph
+to that definition, as for other changes to generated instructions.
+
 Guide the operator through these human-controlled steps:
 
 1. Under **Basic Information**, copy the non-secret App ID (`A…`).
