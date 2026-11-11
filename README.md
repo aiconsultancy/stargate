@@ -57,6 +57,9 @@ Set `access.mentionOnly` to require a mention for every turn.
 Set `access.peerCaptains: true` to admit other fleet captains' bots, such as
 `defiant-captain`, with a thread limit. Other bots stay ignored. See
 [peer captains](docs/peer-captains.md).
+Set `access.textMentions` to start a conversation when a top-level message in
+chosen channels names the bot in plain text, such as "all captains". See
+[text mentions](docs/text-mentions.md).
 
 New sessions use `<bot name> (slack <conversation ID>)` as their title, for
 example `Galactica Captain (slack D123)`. Set `displayName` on the bot to choose

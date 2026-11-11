@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Attachment } from "./attachments";
+import { findMention, mentionRuleSchema } from "./mentions";
 
 /** One transcript block in a prompt; longer speech is cut and marked. */
 export const maxTranscriptCharacters = 20_000;
@@ -41,25 +42,7 @@ export const transcriptionSchema = z.strictObject({
    * Channels where a voice message without a typed mention is transcribed
    * and admitted only if the speech names the bot. Absent is off.
    */
-  spokenMentions: z
-    .strictObject({
-      channels: z
-        .array(z.string().regex(/^[CG][A-Z0-9]+$/))
-        .min(1)
-        .max(50),
-      names: z
-        .array(
-          z
-            .string()
-            .trim()
-            .min(1)
-            .max(40)
-            .regex(/^[\p{L}\p{N}][\p{L}\p{N}' -]*$/u),
-        )
-        .min(1)
-        .max(20),
-    })
-    .optional(),
+  spokenMentions: mentionRuleSchema.optional(),
 });
 export type TranscriptionConfig = z.infer<typeof transcriptionSchema>;
 
@@ -76,28 +59,12 @@ action), read the transcript back and ask the user to confirm.`;
 export const spokenMentionNote =
   "[Admitted by spoken mention: this voice message had no typed mention, and the speech addressed this bot by name.]";
 
-/**
- * True when a transcript names the bot: whole words, any letter case. Each
- * configured name is literal; spelling variants must be configured too.
- */
+/** True when a transcript names the bot; see `findMention`. */
 export function spokenMention(
   transcripts: readonly string[],
   names: readonly string[],
 ) {
-  const patterns = names.map(
-    (name) =>
-      new RegExp(
-        `(?<![\\p{L}\\p{N}])${name
-          .trim()
-          .split(/\s+/)
-          .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-          .join("\\s+")}(?![\\p{L}\\p{N}])`,
-        "iu",
-      ),
-  );
-  return transcripts.some((text) =>
-    patterns.some((pattern) => pattern.test(text)),
-  );
+  return findMention(transcripts, names) !== undefined;
 }
 
 /** Fixed safe cause: no provider detail, file name or text crosses it. */

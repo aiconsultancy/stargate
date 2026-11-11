@@ -3,6 +3,7 @@ import { z } from "zod";
 import { maxAttachments } from "./attachments";
 import type { BotConfig } from "./config";
 import { markdownChunks } from "./markdown-chunks";
+import { findMention, visibleText } from "./mentions";
 import type { PeerSender } from "./peers";
 
 const eventSchema = z.object({
@@ -112,15 +113,25 @@ export function routeEvent(
   const mention = `<@${identity.user}>`;
   const mentioned = event.text.includes(mention);
   const direct = event.channel_type === "im";
+  const text = event.text.split(mention).join("").trim();
+  // A top-level channel message can address the bot by name, without a mention.
+  const textRule = config.access.textMentions;
+  const named =
+    !mentioned &&
+    !direct &&
+    (event.thread_ts === undefined || event.thread_ts === event.ts) &&
+    textRule?.channels.includes(event.channel)
+      ? findMention([visibleText(text)], textRule.names)
+      : undefined;
   // Speech can name the bot; the gateway decides after transcription.
   const spoken =
     !mentioned &&
     !direct &&
+    named === undefined &&
     (event.files?.length ?? 0) > 0 &&
     config.transcription?.spokenMentions?.channels.includes(event.channel) ===
       true;
-  if (config.access.mentionOnly && !mentioned && !spoken) return;
-  const text = event.text.split(mention).join("").trim();
+  if (config.access.mentionOnly && !mentioned && !spoken && !named) return;
   if (!text && !event.files?.length) return;
   const key = botKey(config, identity);
   return {
@@ -141,7 +152,8 @@ export function routeEvent(
       : {}),
     ...(captain ? { sender: "captain" as const } : {}),
     ...(spoken ? { gate: "spoken" as const } : {}),
-    startsConversation: mentioned || direct,
+    ...(named ? { textMention: named } : {}),
+    startsConversation: mentioned || direct || named !== undefined,
   };
 }
 

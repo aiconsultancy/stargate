@@ -26,6 +26,7 @@ import type { BotConfig } from "./config";
 import { abortable, runAbortable } from "./effect";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
+import { textMentionNote } from "./mentions";
 import {
   botSender,
   type PeerDirectory,
@@ -917,6 +918,8 @@ export class Gateway {
           // Without a source line, the prompt itself names a peer sender.
           if (job.sender === "captain" && !sourceContext)
             text = `${peerPrefix(job.user)}\n\n${text}`;
+          if (job.textMention)
+            text = `${textMentionNote(job.textMention)}\n\n${text}`;
           // greybeard: pinned turns carry IDs only; missing history needs explicit retrieval.
           if (!pinned && !session) {
             // Roots (including scheduled runs) have no earlier thread messages.

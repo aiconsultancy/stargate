@@ -20,6 +20,7 @@ import {
   type Team,
   teamSchema,
 } from "../src/crew/team";
+import { textMentionInstructions } from "../src/mentions";
 import { peerInstructions } from "../src/peers";
 import { initializeProfile, renderProfile } from "../src/profile";
 import { reactionInstructions } from "../src/reactions";
@@ -184,6 +185,7 @@ test("reaction protocol belongs once in the captain definition, not crew definit
   expect(captain.split("Slack reaction protocol (optional):")).toHaveLength(2);
   expect(captain.split(voiceInstructions)).toHaveLength(2);
   expect(captain.split(peerInstructions)).toHaveLength(2);
+  expect(captain.split(textMentionInstructions)).toHaveLength(2);
   expect(voiceInstructions).toContain("read the transcript back");
   for (const member of ["mario", "luigi", "daisy", "toad"]) {
     const crew = await readFile(

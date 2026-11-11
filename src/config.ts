@@ -2,6 +2,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { crewActivitySchema } from "./activity";
 import { cronjobsSchema } from "./cronjob-config";
+import { mentionRuleSchema } from "./mentions";
 import { transcriptionSchema } from "./transcription";
 import { waitingSchema } from "./waiting";
 
@@ -139,6 +140,11 @@ export const botSchema = z.strictObject({
     mentionOnly: z.boolean().default(false),
     /** Admit verified peer captain bots (`*-captain`); other bots stay rejected. */
     peerCaptains: z.boolean().optional(),
+    /**
+     * In these channels, a top-level message whose text contains one of the
+     * names starts a conversation like a mention. Absent is off.
+     */
+    textMentions: mentionRuleSchema.optional(),
   }),
   backend: backendSchema,
   cronjobs: cronjobsSchema.optional(),

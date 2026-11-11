@@ -21,6 +21,8 @@ export type Incoming = {
    * continues a conversation yet. `admitted`: its speech named the bot.
    */
   gate?: "spoken" | "admitted" | null;
+  /** The configured name that admitted a message without a mention. */
+  textMention?: string | null;
 };
 
 export type Job = Incoming & {
@@ -137,6 +139,7 @@ export class Store {
     column("jobs", "deferDelivery", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "sender", "TEXT");
     column("jobs", "gate", "TEXT");
+    column("jobs", "textMention", "TEXT");
     // Preserve source-first context and legacy ownership; keep statuses intact.
     if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
       this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
@@ -161,8 +164,8 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender,gate)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender,$gate)`)
+      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender,gate,textMention)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -175,6 +178,7 @@ export class Store {
           $deferDelivery: input.deferDelivery ? 1 : 0,
           $sender: input.sender ?? null,
           $gate: input.gate ?? null,
+          $textMention: input.textMention ?? null,
         }).changes > 0
     );
   }
