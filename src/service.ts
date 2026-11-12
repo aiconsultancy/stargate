@@ -20,7 +20,7 @@ export function serviceName(name = "pogo") {
   return `${name}.service`;
 }
 
-function quote(value: string, command = false) {
+export function quote(value: string, command = false) {
   if (
     [...value].some(
       (character) =>

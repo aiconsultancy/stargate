@@ -6,6 +6,9 @@ import { Effect } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { type BotConfig, botSchema } from "../src/config";
+import { maintenanceSchema } from "../src/nightly/config";
+import { readReady } from "../src/nightly/ready";
+import { queueNotice } from "../src/nightly/report";
 import { botKey, conversationKey } from "../src/routing";
 import {
   lockInstance,
@@ -409,6 +412,53 @@ test("no dashboard socket exists unless it is configured", async () => {
     expect(await Bun.file(join(dataDirectory, "dashboard.sock")).exists()).toBe(
       false,
     );
+  } finally {
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("gateway writes a readiness record and delivers maintenance summaries", async () => {
+  const dataDirectory = await directory();
+  try {
+    await queueNotice(dataDirectory, {
+      schema: "pogo.maintenance.notice.v1",
+      channel: "C123",
+      text: "Nightly maintenance: completed.",
+      report: "r.json",
+    });
+    const f = harness();
+    const announced: string[] = [];
+    const slack = f.dependencies.slack;
+    const dependencies: RuntimeDependencies = {
+      ...f.dependencies,
+      slack: (config, log) => ({
+        ...slack(config, log),
+        async announce(channel, text) {
+          announced.push(`${channel} ${text}`);
+          return "9.000";
+        },
+      }),
+    };
+    const config = {
+      dataDirectory,
+      bots: [bot()],
+      maintenance: maintenanceSchema.parse({
+        report: { bot: "helper", channel: "C123" },
+      }),
+    };
+    const controller = new AbortController();
+    const before = Date.now();
+    const running = Effect.runPromise(
+      serve(config, silent, controller.signal, dependencies),
+    );
+    await f.started;
+    for (let i = 0; i < 100 && !announced.length; i++) await Bun.sleep(20);
+    const ready = await readReady(dataDirectory);
+    expect(ready?.readyAt).toBeGreaterThanOrEqual(before);
+    expect(ready?.pid).toBe(process.pid);
+    expect(announced).toEqual(["C123 Nightly maintenance: completed."]);
+    controller.abort();
+    await running;
   } finally {
     await rm(dataDirectory, { recursive: true, force: true });
   }

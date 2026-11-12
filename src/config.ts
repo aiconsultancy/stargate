@@ -3,6 +3,7 @@ import { z } from "zod";
 import { crewActivitySchema } from "./activity";
 import { cronjobsSchema } from "./cronjob-config";
 import { mentionRuleSchema } from "./mentions";
+import { maintenanceSchema } from "./nightly/config";
 import { transcriptionSchema } from "./transcription";
 import { waitingSchema } from "./waiting";
 
@@ -166,8 +167,27 @@ export const configSchema = z
     /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
     dashboard: z.boolean().optional(),
     bots: z.array(botSchema).min(1),
+    /** Nightly self-update and host maintenance; see docs/maintenance.md. */
+    maintenance: maintenanceSchema.optional(),
   })
-  .superRefine(({ bots }, context) => {
+  .superRefine(({ bots, maintenance }, context) => {
+    const report = maintenance?.report;
+    if (report) {
+      const bot = bots.find((item) => item.id === report.bot);
+      const allowed = (rules: readonly string[]) =>
+        rules.includes("*") || rules.includes(report.channel);
+      if (
+        !bot ||
+        !allowed(bot.access.channels) ||
+        allowed(bot.access.deniedChannels)
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["maintenance", "report"],
+          message:
+            "Maintenance report bot must exist and allow the report channel",
+        });
+    }
     const cronDirectories = bots.flatMap((bot) =>
       bot.cronjobs ? [resolve(bot.cronjobs.directory)] : [],
     );

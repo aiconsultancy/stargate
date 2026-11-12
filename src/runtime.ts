@@ -27,9 +27,11 @@ import { type DashboardShip, dashboardSource } from "./dashboard-source";
 import { abortable } from "./effect";
 import { Gateway, type SlackDelivery } from "./gateway";
 import { controlInteractions } from "./interactions";
+import { MaintenanceOutbox } from "./nightly/outbox";
+import { writeReady } from "./nightly/ready";
 import { PairingUI } from "./pairing";
 import { PeerDirectory } from "./peers";
-import { botKey, type Identity } from "./routing";
+import { botKey, type Identity, isAllowedChannel } from "./routing";
 import { SlackConnection, type SlackInteractions } from "./slack";
 import { Store } from "./store";
 import { createTranscriber } from "./transcribers/azure-openai";
@@ -231,6 +233,20 @@ export function serve(
           supervise(botLog, "gateway", (signal) => gateway.work(signal)),
           supervise(botLog, "cron", (signal) => cron.work(signal)),
         );
+        if (config.maintenance?.report?.bot === bot.id) {
+          // Maintenance summaries use this bot's normal Slack client.
+          const outbox = new MaintenanceOutbox(
+            config.dataDirectory,
+            (channel) => isAllowedChannel(bot, channel),
+            (channel, text, signal) => slack.announce(channel, text, signal),
+            botLog,
+          );
+          workers.push(
+            abortable((signal) => outbox.work(signal)).pipe(
+              Effect.catchCause(() => Effect.void),
+            ),
+          );
+        }
         let closing: Promise<void> | undefined;
         const close = () => {
           closing ??= slack.close();
@@ -304,6 +320,12 @@ export function serve(
       yield* Effect.addFinalizer(() => closeIntake());
       started = true;
       log.info("Pogo ready");
+      // Readiness record for maintenance health checks; never fatal.
+      yield* Effect.promise(() =>
+        writeReady(config.dataDirectory).catch(() =>
+          log.warn("Readiness record not written"),
+        ),
+      );
       yield* Effect.raceFirst(
         Deferred.await(stopped),
         Effect.callback<void>((resume) => {

@@ -2,8 +2,10 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { loadConfig } from "./config";
 import { teamSchema } from "./crew/team";
 import { cronOperationSchema, runCronOperation } from "./cron-control";
+import { maintenanceCli, maintenanceHelp } from "./nightly/cli";
 import { initializeProfile } from "./profile";
 import { provisionBots } from "./provision";
 import { manageService } from "./service";
@@ -33,6 +35,7 @@ Commands:
   crew init         Install an OpenCode captain/crew profile
   cron              List, add, run, remove, or report cronjobs
   config check      Validate config and Slack token references
+  maintenance       Nightly self-update and host maintenance (plan/run/timer)
   manifest          Print Slack manifest JSON and prefilled creation URL
   service install   Install Linux systemd user unit; does not enable/start
   service start     Start the user unit
@@ -106,6 +109,8 @@ ${slackInstructions}`,
 --proxy-key-file PATH  Reference an existing private key file; never a key value
 --cron-config PATH     Bind cron tools to this explicit Pogo config path
 --cron-bot ID          Cron bot registration; requires --cron-config (and vice versa)
+--maintenance-config PATH  Render this Pogo config's nightly maintenance window
+                       into captain and crew instructions (when enabled)
 Creates named feature branches, local agent/config overlays, and private state.
 Existing conflicting files are not overwritten. No sessions, apps, or services
 are started. Crew sessions are created lazily by the captain and then reused.
@@ -125,6 +130,7 @@ skills, enabled, report (immediate|daily), channel, user.
 List and report accept no input or job selector. Output is JSON.
 Uses configured cronjobs directory and destination; no prompt CLI arguments.
 ${common}`,
+  maintenance: `${maintenanceHelp}\n${common}`,
   manifest: `Usage: pogo manifest [--name NAME] [--json]
 --name NAME  Slack app display name (default: Pogo; 1–80 characters)
 --json       Print only JSON for scripts; otherwise include prefilled URL
@@ -195,6 +201,14 @@ function parseCli(args: string[]) {
         "proxy-key-file": { type: "string" },
         "cron-config": { type: "string" },
         "cron-bot": { type: "string" },
+        "maintenance-config": { type: "string" },
+        release: { type: "string" },
+        version: { type: "string" },
+        print: { type: "boolean" },
+        "outside-window": { type: "boolean" },
+        "after-run": { type: "boolean" },
+        "accept-current": { type: "string" },
+        yes: { type: "boolean" },
       },
     });
   } catch {
@@ -253,14 +267,27 @@ export async function runCli(args: string[]): Promise<CliResult> {
               "proxy-key-file",
               "cron-config",
               "cron-bot",
+              "maintenance-config",
             ]
-          : command === "manifest"
-            ? ["name", "json"]
-            : command === "service"
-              ? ["name"]
-              : command === "config"
-                ? ["schema-only"]
-                : []),
+          : command === "maintenance"
+            ? [
+                "json",
+                "name",
+                "print",
+                "release",
+                "version",
+                "outside-window",
+                "after-run",
+                "accept-current",
+                "yes",
+              ]
+            : command === "manifest"
+              ? ["name", "json"]
+              : command === "service"
+                ? ["name"]
+                : command === "config"
+                  ? ["schema-only"]
+                  : []),
   ]);
   if (Object.keys(v).some((key) => !allowed.has(key)))
     throw new Error(
@@ -268,6 +295,25 @@ export async function runCli(args: string[]): Promise<CliResult> {
     );
   if (command === "start" && p.length <= 1)
     return { command: "start", configPath };
+  if (command === "maintenance") {
+    if (p.length !== 2) throw new Error("Use maintenance --help.");
+    const code = await maintenanceCli(p[1], {
+      configPath,
+      ...(v.json ? { json: true } : {}),
+      ...(v.name ? { name: v.name } : {}),
+      ...(v.print ? { print: true } : {}),
+      ...(v.release ? { release: v.release } : {}),
+      ...(v.version ? { version: v.version } : {}),
+      ...(v["outside-window"] ? { outsideWindow: true } : {}),
+      ...(v["after-run"] ? { afterRun: true } : {}),
+      ...(v["accept-current"] !== undefined
+        ? { acceptCurrent: v["accept-current"] }
+        : {}),
+      ...(v.yes ? { yes: true } : {}),
+    });
+    if (code !== 0) process.exitCode = code;
+    return { command: "exit" };
+  }
   if (command === "cron") {
     const op = p[1];
     if (!op || !["list", "add", "run", "remove", "report"].includes(op))
@@ -325,6 +371,9 @@ export async function runCli(args: string[]): Promise<CliResult> {
       );
     const team =
       v.team !== undefined ? await readTeamFile(resolve(v.team)) : undefined;
+    const maintenanceWindow = v["maintenance-config"]
+      ? await readMaintenanceWindow(resolve(v["maintenance-config"]))
+      : undefined;
     const result = await initializeProfile({
       directory: resolve(v.directory),
       projectDirectory: resolve(v.project),
@@ -334,6 +383,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
       ...(v.id ? { namespace: v.id } : {}),
       ...(v["session-id"] ? { captainSessionID: v["session-id"] } : {}),
       ...(v.base ? { base: v.base } : {}),
+      ...(maintenanceWindow ? { maintenanceWindow } : {}),
       ...(v["proxy-url"] ? { proxyURL: v["proxy-url"] } : {}),
       ...(v["proxy-key-file"]
         ? { apiKeyReference: `{file:${resolve(v["proxy-key-file"])}}` }
@@ -436,6 +486,19 @@ export async function runCli(args: string[]): Promise<CliResult> {
     }
   } else throw new Error("Unknown command or extra arguments. Use --help.");
   return { command: "exit" };
+}
+
+async function readMaintenanceWindow(path: string) {
+  let config: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    config = await loadConfig(path);
+  } catch {
+    throw new Error("Cannot load --maintenance-config. Run pogo config check.");
+  }
+  const maintenance = config.maintenance;
+  if (!maintenance?.enabled) return undefined;
+  const { start, end, timeZone } = maintenance.window;
+  return { start, end, timeZone };
 }
 
 async function readTeamFile(path: string) {

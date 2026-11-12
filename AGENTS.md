@@ -53,6 +53,9 @@ Pass non-secret CLI options through `ARGS`, or `mise run TASK -- OPTIONS`.
 - `src/dashboard.ts`, `src/dashboard-source.ts`, `src/session-history.ts`:
   read-only operator dashboard on a private Unix socket. The source owns
   session scope; backends only answer metadata and transcript pages.
+- `src/nightly/`: nightly maintenance (window, idle gate, release, host and
+  model updates, reports). Every external command goes through the injectable
+  `CommandRunner`; tests never call real providers. See `docs/maintenance.md`.
 - `src/effect.ts`: Effect/Promise interop. Effect owns lifetimes and
   concurrency in runtime, gateway workers and plugin setup; keep pure logic,
   stores and the adapter contract Promise-based. Keep `effect` pinned to the

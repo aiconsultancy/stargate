@@ -45,3 +45,5 @@ recoverable issues within the assigned task, verify repairs, and report findings
 checks, actions, lessons and remaining blockers to the originating captain.
 Only the captain delivers human-facing updates. A schedule must be configured
 explicitly; these instructions do not create nightly work.
+
+{{maintenanceInstructions}}

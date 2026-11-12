@@ -416,6 +416,24 @@ two Socket Mode listeners with the same credentials; Slack can distribute
 events between them. One data directory has one process owner, enforced by a
 SQLite file lock that the OS releases on exit.
 
+## Nightly maintenance
+
+Optional and off by default. In a configured window (default 00:00–01:00
+Europe/London, with a stable per-install jitter) `pogo maintenance run`
+updates Pogo from verified GitHub releases, CLIProxyAPI and the agent CLIs
+(one-day supply-chain cool-off), and moves agent profiles and live
+captain/crew sessions to newer models of the same family. It waits for an
+idle boundary, checks health after every change, rolls back automatically,
+and writes a versioned JSON report plus one Slack summary.
+
+```sh
+pogo maintenance plan --config /srv/pogo/pogo.json        # read-only
+pogo maintenance install-timer --config /srv/pogo/pogo.json --print
+```
+
+See [nightly maintenance](docs/maintenance.md) for configuration, the install
+layout, the report schema and the one-time migration.
+
 ## Guarantees and limits
 
 - Bot/app/workspace/backend identity separates session namespaces. Ordinary

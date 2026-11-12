@@ -23,6 +23,10 @@ import {
   teamSchema,
 } from "./crew/team";
 import { textMentionInstructions } from "./mentions";
+import {
+  nightlyInstructions,
+  nightlyWindowSchema,
+} from "./nightly/instructions";
 import { peerInstructions } from "./peers";
 import { reactionInstructions } from "./reactions";
 import { voiceInstructions } from "./transcription";
@@ -63,6 +67,8 @@ const optionsSchema = z.strictObject({
     .string()
     .regex(/^\{(?:env:[A-Z_][A-Z0-9_]*|file:[^\r\n{}]+)\}$/)
     .default("{env:CLIPROXYAPI_API_KEY}"),
+  /** Nightly maintenance window rendered into captain and crew instructions. */
+  maintenanceWindow: nightlyWindowSchema.optional(),
 });
 type Options = z.input<typeof optionsSchema>;
 const document = z.record(z.string(), z.unknown());
@@ -391,7 +397,12 @@ export async function initializeProfile(input: Options) {
     if (member?.backend) {
       await writeProfileFile(
         piDefinitionPath(options.directory, member),
-        piMemberDefinition(member, directory, options.directory),
+        piMemberDefinition(
+          member,
+          directory,
+          options.directory,
+          nightlyInstructions(options.maintenanceWindow),
+        ),
         true,
       );
       continue;
@@ -462,6 +473,7 @@ export async function initializeProfile(input: Options) {
       voiceInstructions,
       textMentionInstructions,
       peerInstructions,
+      maintenanceInstructions: nightlyInstructions(options.maintenanceWindow),
       instructions:
         agent.instructions ??
         "Follow the assigned task and project instructions.",

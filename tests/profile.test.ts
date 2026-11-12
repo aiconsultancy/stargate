@@ -21,6 +21,7 @@ import {
   teamSchema,
 } from "../src/crew/team";
 import { textMentionInstructions } from "../src/mentions";
+import { nightlyInstructions } from "../src/nightly/instructions";
 import { peerInstructions } from "../src/peers";
 import { initializeProfile, renderProfile } from "../src/profile";
 import { reactionInstructions } from "../src/reactions";
@@ -781,4 +782,66 @@ test("crew CLI loads non-secret --team JSON and rejects invalid input without ec
   expect(config.default_agent).toBe("adama-captain-adama");
   expect(config.plugins[0].options.namespace).toBe("adama");
   expect(config.plugins[0].options.team).toEqual(profileTeam(team, "adama"));
+});
+
+test("captain, crew and Pi instructions render the configured maintenance window", async () => {
+  const { options } = await fixture();
+  const window = { start: "00:00", end: "01:00", timeZone: "Europe/London" };
+  const paragraph = nightlyInstructions(window);
+  expect(paragraph).toContain("from 00:00 to 01:00 (Europe/London)");
+  expect(paragraph).toContain(
+    "the OpenCode server and your session can restart",
+  );
+  expect(paragraph).toContain("checkpoint work in progress");
+  expect(paragraph).toContain("Do not start long tasks");
+  const team = teamSchema.parse({
+    captain: { id: "adama" },
+    crew: [
+      { id: "chief", role: "Engineer", permissionProfile: "coding" },
+      {
+        id: "twiki",
+        role: "Cleanup",
+        permissionProfile: "coding",
+        backend: { type: "pi-durable", model: "openai/x", tools: "coding" },
+      },
+    ],
+  });
+  await initializeProfile({ ...options, team, maintenanceWindow: window });
+  const read = (path: string) => readFile(path, "utf8");
+  const captain = await read(
+    join(options.directory, ".opencode", "agents", "bowser-captain-adama.md"),
+  );
+  const crew = await read(
+    join(
+      options.worktreeDirectory,
+      "chief",
+      ".opencode",
+      "agents",
+      "bowser-crew-chief.md",
+    ),
+  );
+  const pi = await read(
+    join(
+      options.directory,
+      ".local",
+      "ship",
+      "definitions",
+      "bowser-crew-twiki.md",
+    ),
+  );
+  for (const text of [captain, crew, pi])
+    expect(text.split(paragraph)).toHaveLength(2);
+  expect(captain).toEndWith("<!-- POGO:END -->\n");
+  expect(nightlyInstructions(undefined)).toBe("");
+});
+
+test("without a maintenance window no paragraph or placeholder is rendered", async () => {
+  const { options } = await fixture();
+  await initializeProfile(options);
+  const captain = await readFile(
+    join(options.directory, ".opencode", "agents", "bowser-captain-bowser.md"),
+    "utf8",
+  );
+  expect(captain).not.toContain("Nightly maintenance:");
+  expect(captain).not.toContain("{{maintenanceInstructions}}");
 });

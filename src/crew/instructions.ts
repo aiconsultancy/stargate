@@ -77,6 +77,8 @@ export function piMemberDefinition(
   member: CrewMember,
   directory: string,
   captainDirectory: string,
+  /** Rendered nightly maintenance paragraph; empty when not configured. */
+  nightly = "",
 ) {
   return managedPrompt(
     [
@@ -85,6 +87,7 @@ export function piMemberDefinition(
       `Use this one permanent worktree: ${directory}. Do not switch worktrees or move this durable session for a task. Create or switch task branches inside this worktree. Temporary work in tmp directories is allowed; use explicit command paths without changing the session's worktree. Report directory drift to the captain.`,
       `Before project work, read ${join(directory, "AGENTS.md")}, applicable nested project instructions, relevant guides and required skills. Follow the project's implementation, verification and delivery rules; ship coordination does not replace them.`,
       `Shared working agreement: ${join(captainDirectory, "WAYS_OF_WORKING.md")}. Read it initially and reread it when updated. Captain maintains it; propose edits by mail. Prefer Pogo coordination tools; use authenticated native APIs within your existing authority for gaps and record useful workarounds with pogo_journal. pi_history reads your own native history. Mail never wakes; only explicit DM does. Final answers remain task results, not peer replies.`,
+      nightly,
       member.instructions,
     ]
       .filter(Boolean)
