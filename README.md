@@ -359,17 +359,28 @@ the three direct Pi packages are pinned together.
 
 - `model`: `openai/modelId` or `anthropic/modelId`.
 - Credentials: `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
+- `thinkingLevel`: optional Pi SDK level (`off`, `minimal`, `low`, `medium`,
+  `high`, `xhigh`, `max`). Unset keeps Pi's default `off`. Pogo refuses a
+  level the model does not support instead of clamping it. Changing it on a
+  bot selects a new session namespace; existing crew conversations keep the
+  level they were created with, like `model`.
 - `systemPrompt`: optional instructions.
 - `tools`: `none` by default; `coding` enables read, write, edit, and bash.
 - `directory`: initial working directory, **not a sandbox**.
 
 Optional `provider: { baseURL, apiKeyEnv }` selects an explicit proxy instead
-of native provider credentials. The supported proxy model is
-`openai/opencode-go/deepseek-v4.1-flash`. Use loopback HTTP or HTTPS, with no
-URL credentials, query or fragment. `apiKeyEnv` names the private proxy client
-key variable; never place its value in JSON. Requests identify Pogo and retain
-a stable Go session header per Pi conversation. There is no native-provider
-fallback when a proxy is configured.
+of native provider credentials. The supported proxy models are
+`openai/opencode-go/deepseek-v4.1-flash` (chat completions) and
+`anthropic/claude-haiku-5-5` (Anthropic Messages); other models fail closed.
+Use loopback HTTP or HTTPS, with no URL credentials, query or fragment. The
+Claude route requires a `baseURL` that ends with `/v1`, the same endpoint as
+OpenCode's `claude-proxy`. `apiKeyEnv` names the private proxy client
+key variable; never place its value in JSON. Go requests identify Pogo and retain
+a stable Go session header per Pi conversation. Capabilities, cost and limits
+come from the pinned Pi catalog. Without `thinkingLevel`, Haiku requests
+disable thinking; `"thinkingLevel": "low"` sends adaptive thinking with effort
+`low` (OpenCode's `#low`). There is no native-provider fallback,
+`ANTHROPIC_*` variable, or redirect when a proxy is configured.
 
 Without `provider`, Pi uses standard provider environment variables.
 Registrations in one process can share credentials; use separate processes

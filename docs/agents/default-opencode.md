@@ -251,6 +251,11 @@ OpenCode workers. For example, add this member to the team's `crew` array:
 Do not set the member's OpenCode `model` field as well. `backend.model` selects
 the Pi model; `backend.directory` is not accepted because the crew worktree
 supplies it. The proxy must publish `opencode-go/deepseek-v4.1-flash`.
+For Claude, use `"model": "anthropic/claude-haiku-5-5"` with the same
+`provider` and `"thinkingLevel": "low"`; the proxy must publish
+`claude-haiku-5-5`. Pi model IDs take no `#variant` suffix. Without
+`thinkingLevel`, Pi's default `off` disables Haiku thinking. Set the level
+before `pogo_crew ensure`: an existing worker conversation keeps its level.
 The key variable must exist in the **OpenCode plugin host's** environment,
 not only the Slack gateway's environment. No paid/native route is substituted.
 

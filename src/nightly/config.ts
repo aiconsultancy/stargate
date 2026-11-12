@@ -1,6 +1,11 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { piModelSchema, piProviderSchema, piProxyModel } from "../pi-model";
+import {
+  piModelSchema,
+  piProviderSchema,
+  piProxyModel,
+  piProxyModels,
+} from "../pi-model";
 
 /** Strict `maintenance` section of pogo.json. Every component is opt-in. */
 const absolutePath = z
@@ -337,15 +342,17 @@ export const maintenanceSchema = z
         path: ["droid", "enabled"],
         message: "droid requires the report section (its Slack destination)",
       });
-    // The proxy provider serves exactly one model (see pi-durable.ts).
+    // The proxy provider serves only named models (see pi-durable.ts).
     if (
       droid &&
-      (droid.backend.model === piProxyModel) !== !!droid.backend.provider
+      (droid.backend.provider
+        ? !piProxyModels.includes(droid.backend.model)
+        : droid.backend.model === piProxyModel)
     )
       context.addIssue({
         code: "custom",
         path: ["droid", "backend"],
-        message: `A provider requires model ${piProxyModel}, and that model requires a provider`,
+        message: `A provider requires model ${piProxyModels.join(" or ")}, and ${piProxyModel} requires a provider`,
       });
     need("pogo", ["pogo"]);
     need("cliproxyapi", ["cliproxyapi", "proxy"]);

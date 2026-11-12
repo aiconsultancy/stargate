@@ -9,7 +9,11 @@ import {
   mentionRuleSchema,
 } from "./mentions";
 import { maintenanceSchema } from "./nightly/config";
-import { piModelSchema, piProviderSchema } from "./pi-model";
+import {
+  piModelSchema,
+  piProviderSchema,
+  piThinkingLevelSchema,
+} from "./pi-model";
 import { transcriptionSchema } from "./transcription";
 import { waitingSchema } from "./waiting";
 
@@ -26,6 +30,7 @@ export const piDurableBackendSchema = z.strictObject({
   directory: absolutePath,
   model: piModelSchema,
   provider: piProviderSchema.optional(),
+  thinkingLevel: piThinkingLevelSchema.optional(),
   systemPrompt: z
     .string()
     .default("You are a helpful assistant responding in Slack."),

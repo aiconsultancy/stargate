@@ -926,10 +926,16 @@ describe("droid configuration and units", () => {
     for (const droid of [
       // The default model goes through the proxy: a provider is required.
       { enabled: true },
-      // The proxy provider serves only the DeepSeek model.
+      // The proxy provider serves only the named DeepSeek and Haiku models.
       {
         backend: {
           model: "openai/gpt-5",
+          provider: { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv: "K" },
+        },
+      },
+      {
+        backend: {
+          model: "anthropic/claude-opus-5-5",
           provider: { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv: "K" },
         },
       },
@@ -941,6 +947,17 @@ describe("droid configuration and units", () => {
       },
     ])
       expect(() => maintenanceSchema.parse({ ...base, droid })).toThrow();
+    expect(
+      maintenanceSchema.parse({
+        ...base,
+        droid: {
+          backend: {
+            model: "anthropic/claude-haiku-5-5",
+            provider: { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv: "K" },
+          },
+        },
+      }).droid?.backend.model,
+    ).toBe("anthropic/claude-haiku-5-5");
     expect(() =>
       maintenanceSchema.parse({
         droid: {

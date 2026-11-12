@@ -172,7 +172,8 @@ No service installation, login persistence, or updater is implied.
 4. Follow [Slack batch setup](setup.md), reuse the live Bowser App ID, and
    register additional bots with private token references. Pogo's `backend.url`
    addresses OpenCode, not port 8317. Pi uses this proxy only with an explicit
-   `provider` configuration and the supported DeepSeek Go model; see
+   `provider` configuration and a supported model (DeepSeek Go or Claude
+   Haiku 5.5); see
    [Pi Durable crew](agents/default-opencode.md#pi-durable-crew).
    Keep only one live Socket Mode listener per registration.
 5. Obtain consent for actual model requests, then verify a Slack mention and
