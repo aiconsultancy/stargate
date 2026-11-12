@@ -48,6 +48,23 @@ Every account must log in with SASL. Pogo never creates accounts. With
 Ergo, `force-nick-equals-account` keeps each nick equal to its account, and
 `multiclient` lets a reconnect take over the nick.
 
+### Optional features
+
+Pogo uses each of these only when the server offers it. A switch under
+`irc[].features` turns one off; every switch defaults to `true`.
+
+| Server offers                                                                   | Switch       | Pogo then                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `soju.im/FILEHOST` or `draft/FILEHOST` (ISUPPORT), or `server.filehostOverride` | `filesIn`    | Downloads FILEHOST links in admitted messages as attachments ([files](#files))                                                                                                                       |
+| the same FILEHOST                                                               | `filesOut`   | Uploads published reply files and posts one link line each ([files](#files))                                                                                                                         |
+| `draft/multiline` (with `batch`)                                                | `multiline`  | Sends each reply chunk as one batch within `max-bytes`/`max-lines`, continues long lines with `draft/multiline-concat`, and reads incoming batches as one message                                    |
+| `message-tags` (client tags pass through)                                       | `typing`     | Sends `+typing=active` every 3 s while a turn runs and `+typing=done` before the reply, in channels and direct messages                                                                              |
+| `message-tags` (`+draft/react`, `+draft/reply`)                                 | `reactions`  | Sends reaction replies as `+draft/react`; a person reacting with a `stopReactions` emoji (default ✋, 🛑) on a request or its bot answer stops the active turn ([Stop](#stop-by-reaction))           |
+| `draft/chathistory` (with `batch`, `server-time`)                               | `catchUp`    | On each (re)connect replays missed channel messages (`AFTER`) and direct messages (`TARGETS`, then `AFTER`) from a cursor stored in SQLite, at most `catchUpHours` (24) back ([catch-up](#catch-up)) |
+| `draft/persistence`                                                             | `alwaysOn`   | Sends `PERSISTENCE SET ON` after each connect: the server keeps the account in its channels and stores direct messages while Pogo is away ([presence](#presence))                                    |
+| ISUPPORT `BOT` (for example `BOT=B`)                                            | `botMode`    | Sets that user mode on its own nick (`MODE <nick> +B`) after each connect, so clients show the account as a bot                                                                                      |
+| `draft/read-marker`                                                             | `readMarker` | Sends `MARKREAD <target> timestamp=<time>` after a message is accepted, so the account's other clients see it read                                                                                   |
+
 ## Configuration
 
 Add an `irc` array beside `bots`. Either array may be empty, but not both.
@@ -94,19 +111,24 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
 ]
 ```
 
-| Field                          | Rule                                                                                  |
-| ------------------------------ | ------------------------------------------------------------------------------------- |
-| `server.host`, `server.port`   | IRC server address                                                                    |
-| `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                 |
-| `server.caFile`                | Absolute PEM path of a private CA; TLS only                                           |
-| `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused        |
-| `account`, `passwordEnv`       | SASL PLAIN account and the environment variable with its password                     |
-| `nick`                         | Optional; defaults to the account                                                     |
-| `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes |
-| `access`                       | See [access](#access)                                                                 |
-| `crew`                         | See [crew](#crew-on-irc); at most 20                                                  |
-| `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                 |
-| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                         |
+| Field                          | Rule                                                                                                |
+| ------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `server.host`, `server.port`   | IRC server address                                                                                  |
+| `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                               |
+| `server.caFile`                | Absolute PEM path of a private CA; TLS only                                                         |
+| `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused                      |
+| `account`, `passwordEnv`       | SASL PLAIN account and the environment variable with its password                                   |
+| `nick`                         | Optional; defaults to the account                                                                   |
+| `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes               |
+| `access`                       | See [access](#access)                                                                               |
+| `crew`                         | See [crew](#crew-on-irc); at most 20                                                                |
+| `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                               |
+| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                                       |
+| `server.filehostOverride`      | Optional FILEHOST upload URL when the server does not advertise one ([files](#files))               |
+| `features`                     | Switches for [optional features](#optional-features); each defaults to `true`                       |
+| `stopReactions`                | Emoji that stop a turn ([Stop](#stop-by-reaction)); default `["✋", "🛑"]`, at most 10, `[]` is off |
+| `catchUpHours`                 | Longest [catch-up](#catch-up) window, 1–168 hours (default 24)                                      |
+| `transcription`                | Audio transcription for FILEHOST audio files, as for Slack bots ([files](#files))                   |
 
 Put passwords in the private `<config>.env` companion or the service
 environment, never in JSON. Every account needs its own `passwordEnv`.
@@ -225,7 +247,16 @@ message that arrives twice, for example from a history replay.
 - Each line fits 512 bytes, including Pogo's tags and the source prefix
   that the server adds. Long lines break at spaces, otherwise at a UTF-8
   character boundary. Blank lines are not sent.
-- The first line carries `+draft/reply` to the request's message.
+- With `draft/multiline`, each stored reply chunk goes as one batch (more
+  only when it exceeds the server's `max-bytes` or `max-lines`); a long line
+  is split losslessly and continued with `draft/multiline-concat`. Every
+  fragment fits both one IRC line and `max-bytes`, and a batch counts each
+  line's text plus one byte per line break (at least what the server
+  counts). A line longer than `max-bytes` continues in the next batch, so
+  clients show it as two messages. The server delivers a batch atomically.
+  A `max-bytes` below 64 is not used. Without multiline, lines are sent
+  one by one.
+- The first line (or batch) carries `+draft/reply` to the request's message.
 - A direct reply goes only to a nick that WHOIS (`330`) shows is logged in
   to the requester's account at that moment: the last nick seen for the
   account, then the account name. A nick with another account, or none,
@@ -237,20 +268,104 @@ message that arrives twice, for example from a history replay.
   hands with no event Pogo can see (no shared channel) after the WHOIS is
   not detected for that chunk.
 - Sends are throttled: a burst of 4 lines, then one line every 600 ms.
+- While a turn runs, Pogo sends `+typing=active` (TAGMSG) every 3 seconds
+  and `+typing=done` before the reply. Typing is skipped while replies wait
+  in the send queue, so it never delays them. In a direct message it goes
+  only to a nick that WHOIS shows holds the requester's account, checked
+  again for each TAGMSG and at the socket write, as for reply lines; once
+  the nick changes hands, typing stops for that turn.
 - With `labeled-response`, each line waits for the server's labeled echo or
   `ACK`; a labeled error fails the delivery.
 - `[[pogo:silent]]` posts nothing. `[[pogo:react:NAME]]` sends a
   `+draft/react` TAGMSG to the request's message.
 - A reply is stored before delivery. A failed delivery retries the stored
-  chunk later and never reruns the agent. A retried chunk can repeat lines
-  that were already sent. Delivery waits up to 30 seconds for a reconnect,
-  then retries with the gateway's backoff (eight attempts).
+  chunk later and never reruns the agent. Pogo stores how it split each
+  chunk into units (batches or lines) and how many the server confirmed, so
+  a retry resends only the units after the last confirmed one; only a unit
+  whose confirmation was lost can repeat. When the server no longer offers
+  `draft/multiline` before a retry, or its limits no longer fit a stored
+  batch, the remaining batches become plain lines, each stored as its own
+  unit, so confirmed lines are not repeated either. Delivery waits up to 30 seconds
+  for a reconnect, then retries with the gateway's backoff (eight attempts).
 
-IRC cannot edit or delete messages, so there are no streaming previews,
-waiting messages, Stop buttons, activity boxes or cancellable maintenance
-notices. A captain tool that needs a cancellable notice stays fail-closed on
-IRC. Files and images are not transferred; a published file posts a short
-"attachment is unavailable" notice.
+### Stop by reaction
+
+A person stops an active (queued or running) turn by reacting to its
+request message, or to a bot message that answers it, with one of
+`irc[].stopReactions` (default `["✋", "🛑"]`; skin tones and the emoji
+variation selector are ignored; `[]` turns Stop off). Pogo then cancels the
+turn exactly like Slack Stop: the cancel signal reaches the backend, the
+"stop request" notice is posted, and tool effects are not rolled back.
+Only people can stop a turn: the reaction needs an account tag, must pass
+the deny lists and channel rules, and this ship's own accounts and peer
+captains are ignored. Any admitted person in the conversation can stop it,
+not only the requester. A reaction to the request stops every ship agent
+working on it (for example after an all-call). `+draft/unreact` is ignored:
+a Stop cannot be undone.
+
+### Not available on IRC
+
+- **Edits and deletion.** Pogo never edits or deletes an IRC message, so
+  there are no streaming previews, waiting messages, activity boxes or
+  cancellable maintenance notices. A captain tool that needs a cancellable
+  notice stays fail-closed on IRC.
+- **Redaction.** `draft/message-redaction` is not used: Ergo ships with
+  redaction disabled. The extension point is the optional `remove` method
+  of the delivery interface (`SlackDelivery.remove` in `src/gateway.ts`),
+  which `IrcDelivery` does not implement; a `REDACT <target> <msgid>`
+  version would go there, used only when the server offers the capability.
+- **Buttons and interactive controls.** Stop is a reaction
+  ([Stop by reaction](#stop-by-reaction)); there is no Stop button.
+- **Undo of Stop.** `+draft/unreact` is ignored.
+- **Files without a FILEHOST.** Files move only through a FILEHOST (see
+  [files](#files)); without one, a published file posts a short
+  "attachment is unavailable" notice.
+- **Slash commands.** No `/cron`, `/pogo` commands or scheduled prompts.
+
+## Files
+
+Ergo can advertise a FILEHOST: an upload URL in ISUPPORT
+(`soju.im/FILEHOST` or `draft/FILEHOST`, see the
+[spec](https://github.com/emersion/soju/blob/master/doc/ext/filehost.md)).
+Set `server.filehostOverride` to the same upload URL when the server does
+not advertise it. When both exist with different origins, Pogo turns files
+off and logs one warning. The URL must be HTTPS; plain HTTP is accepted only
+on `127.0.0.1`/`::1` and only when the IRC connection is plaintext.
+
+**Files in** (`features.filesIn`): a link in an admitted message whose
+origin is exactly the FILEHOST origin becomes an attachment, as for Slack
+files (at most 10). Links to any other host stay text and are never
+fetched. Pogo downloads with HTTP Basic and the registration's own SASL
+account and password, refuses redirects, verifies TLS with `server.caFile`,
+and applies a 30-second timeout and the attachment limits (10 MiB a file,
+25 MiB in total). HTML, XHTML and SVG (declared or detected) reach the
+backend as `text/plain` source, never as a renderable page. Audio and video
+use the same path as Slack voice notes: with `irc[].transcription` (same
+settings as for Slack bots, without `spokenMentions`), Pogo replaces them
+with a transcript; without it, they go to the backend as files. A download
+failure ends the turn with the attachment failure notice, as on Slack.
+
+**Files out** (`features.filesOut`): files that the agent publishes with
+`![caption](file:///absolute/path)` (the Slack path, see
+[attachments](attachments.md)) are uploaded to the FILEHOST with the same
+credentials (`POST`, `Content-Type`, `Content-Disposition` with the file
+name), after the reply text. Pogo then posts one line per file,
+`caption: URL`. The upload's `Location` must be on the FILEHOST origin and
+carry no user name or password; any other answer makes the file
+unavailable, and Pogo never posts such a URL. The FILEHOST serves uploaded HTML sandboxed and renders
+Markdown, so `.html` and `.md` links open as pages. Upload is part of
+delivery, and Pogo never repeats an upload that may have stored the file:
+it records "uploading" before the `POST` and the returned URL before the
+link line. A retry posts a recorded URL without uploading again. When an
+upload had no certain outcome (Pogo stopped, the answer was lost, it timed
+out, the FILEHOST answered `429`, a `5xx` or another unexpected status, or
+a `201` without a usable `Location`), the file becomes unavailable and Pogo
+posts the "attachment is unavailable or its upload is unconfirmed" notice;
+the FILEHOST may then hold an unlinked copy. Only a proven refusal (`400`,
+`401`, `403`, `413` or `415`), after which the FILEHOST holds nothing, is
+tried again. A crash between the post and the record
+can repeat only the link line. Without a FILEHOST, or with `filesOut` off,
+Pogo posts the existing "attachment is unavailable" notice.
 
 ## Connection
 
@@ -262,11 +377,59 @@ IRC. Files and images are not transferred; a published file posts a short
   5 minutes.
 - If the nick is taken, Pogo uses `<nick>_` and retries the configured nick
   every 30 seconds.
-- After a reconnect, with `draft/chathistory`, Pogo fetches up to 100
-  channel messages after the last one it saw. The normal rules apply.
+- Catch-up with `draft/chathistory`: see [catch-up](#catch-up).
 - Shutdown sends `QUIT` and closes every connection before workers drain.
 - IRC connection failures never stop Slack or Pogo startup; they retry in
   the background.
+
+## Catch-up
+
+With `draft/chathistory` (and `features.catchUp`), each IRC connection
+keeps cursors in SQLite: the newest server time it has seen in each of its
+channels and with each direct-message partner (by nick), plus a
+direct-message baseline set on the first start. A cursor moves only after
+a message has been stored or refused, so a stop between the two replays
+it. Each partner has its own cursor, so one partner's newer message never
+skips another partner's older ones. On every connect and reconnect Pogo
+asks for what it missed:
+
+- for each joined channel, `CHATHISTORY AFTER <channel> timestamp=<cursor>`;
+- for direct messages, `CHATHISTORY TARGETS` from the baseline, then
+  `AFTER <nick>` from that partner's cursor (or the baseline) for each
+  partner with a newer message (crew connections ignore direct messages
+  anyway). A partner known under a new nick starts from the baseline;
+  message IDs prevent a second admission.
+
+Requests ask for at most 100 messages (or the server's `CHATHISTORY`
+limit) per target. Replayed messages go through the same access, trigger
+and turn-limit rules, and their IRC message IDs deduplicate them against
+messages already stored, so nothing is admitted twice. The replay window is
+at most `irc[].catchUpHours` (default 24, maximum 168): an older cursor
+starts there, and replayed messages older than that are ignored. On a first
+start without a cursor, Pogo sets the cursor to now and replays nothing, so
+an existing backlog is not answered. Replayed reactions never stop a turn.
+
+## Presence
+
+Each IRC connection (captain and crew) uses these when the server offers
+them:
+
+- **Always-on** (`draft/persistence`, switch `alwaysOn`): after each connect
+  Pogo sends `PERSISTENCE SET ON`. On Ergo an always-on account stays in its
+  channels and keeps receiving direct messages (stored for later) while
+  Pogo is stopped or disconnected; with [catch-up](#catch-up) Pogo then
+  reads what it missed. Ergo allows this only when
+  `accounts.multiclient.always-on` is `opt-in` (or `opt-out`); otherwise
+  the server refuses it and Pogo logs the `PERSISTENCE STATUS` it gets.
+  Always-on stays set on the server after Pogo stops; turn it off with
+  `PERSISTENCE SET DEFAULT` from another client of the account.
+- **Bot mode** (ISUPPORT `BOT`, switch `botMode`): Pogo sets that user mode
+  (Ergo: `+B`) on its nick after each connect. Clients can show the account
+  as a bot.
+- **Read marker** (`draft/read-marker`, switch `readMarker`): after a
+  message is accepted (stored as a turn), Pogo sends `MARKREAD` with the
+  message's server time for that channel, or for the sender's nick in a
+  direct message. Messages that are not admitted are not marked read.
 
 ## Crew on IRC
 
@@ -419,19 +582,20 @@ model of their agent definition. Nightly model upgrades do not switch them.
 
 ## Limits
 
-- Messages sent while Pogo is stopped are not replayed. Direct messages
-  missed during a reconnect are not replayed.
-- No `/cron`, `/pogo` commands or scheduled prompts on IRC.
-- Replies to bot messages are recognised only for message IDs seen since
-  the process started.
+- Catch-up needs `draft/chathistory` and the server's own history: what the
+  server did not keep (or older than `catchUpHours`) is not replayed. A
+  channel replay is capped at 100 messages per connect.
+- Replies and Stop reactions to bot messages are recognised only for message
+  IDs seen since the process started; a reaction to the request itself
+  always works.
 - Only channel names that start with `#` or `&` are supported. JOIN
   commands are split so each line stays within 512 bytes.
 - The fleet dashboard lists Slack registrations only. A captain pinned on
   both transports shows its IRC turns in that shared session's history;
   IRC queue counts and crew IRC sessions are not listed.
-- No streaming, edits, Stop, activity box, files or interactive controls.
-- Exactly-once delivery is not guaranteed: a retried chunk can repeat
-  lines, and a crash after the server accepts a line can repeat it.
+- See also [not available on IRC](#not-available-on-irc).
+- Exactly-once delivery is not guaranteed: a line or batch whose
+  confirmation is lost (or a crash after the server accepts it) can repeat.
 
 ## Tests
 

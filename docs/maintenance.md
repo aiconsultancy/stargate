@@ -363,7 +363,10 @@ pass; any failure fails closed:
 - `bun install --frozen-lockfile` and `bun test` pass in the new directory.
   They run with a minimal environment (`PATH`, a private `HOME` and `TMPDIR`
   inside the staging directory, `LANG`): no inherited tokens, proxy keys or
-  session bus, and no way to find the live OpenCode service.
+  session bus, and no way to find the live OpenCode service. The staging
+  directory is hidden (`.staging-*`), so tests must not depend on a visible
+  `TMPDIR`. `make test-release-env` runs the suite in the same environment;
+  CI runs it for every pull request.
 
 A release that failed plugin loading or gateway readiness after a switch is
 recorded in `state.json` and skipped (`known-bad`) until a newer release

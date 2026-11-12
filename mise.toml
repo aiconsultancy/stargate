@@ -66,6 +66,10 @@ run = "bun run check"
 description = "Run tests"
 run = "bun test"
 
+[tasks.test-release-env]
+description = "Run tests as a self-update does: minimal environment, hidden TMPDIR"
+run = "bun run scripts/test-release-env.ts"
+
 [tasks.eval]
 description = "Evaluate conversation liveness, isolation, routing, and no-replay behavior"
 run = "bun test tests/conversation-eval.test.ts tests/crew.test.ts tests/captain-gateway.test.ts tests/backends.test.ts tests/gateway-attachments.test.ts tests/opencode-attachments.test.ts -t '(conversation|attachment) eval:'"

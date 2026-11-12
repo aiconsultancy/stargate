@@ -12,6 +12,7 @@ import {
   type PublishedFile,
   parseAttachments,
   readPreparedAttachment,
+  UploadRefused,
 } from "./attachments";
 import {
   type AgentBackend,
@@ -120,12 +121,8 @@ export function transcriptAttachments(entries: readonly TranscriptEntry[]) {
   ];
 }
 
-export interface AttachmentTransport {
-  download(
-    ids: readonly string[],
-    channel: string,
-    signal: AbortSignal,
-  ): Promise<Attachment[]>;
+/** Slack-style three-step upload: reserve, put, then complete in a thread. */
+export interface UploadTransport {
   reserveUpload(
     name: string,
     length: number,
@@ -147,8 +144,72 @@ export interface AttachmentTransport {
   ): Promise<boolean>;
 }
 
+/**
+ * One-step upload (IRC FILEHOST): a durable URL, then a link in the thread.
+ * "uploading" is stored before the upload and the URL before the link is
+ * posted, so a retry never uploads a file again: an upload that may have
+ * run (crash, lost answer, timeout) makes the file unavailable with a
+ * notice. Only `UploadRefused` (the host certainly stored nothing, for
+ * example a 401 or 413 from a FILEHOST) allows another upload. A crash
+ * between post and record can repeat the link.
+ */
+export interface LinkTransport {
+  upload(file: Attachment, signal: AbortSignal): Promise<string>;
+  link(
+    channel: string,
+    thread: string,
+    url: string,
+    title: string,
+    signal: AbortSignal,
+  ): Promise<void>;
+}
+
+/** Input downloads, plus uploads when the transport can publish files. */
+export interface AttachmentTransport
+  extends Partial<UploadTransport>,
+    Partial<LinkTransport> {
+  download(
+    ids: readonly string[],
+    channel: string,
+    signal: AbortSignal,
+  ): Promise<Attachment[]>;
+}
+
+/** The transport's link-style upload half, if it has one. */
+function links(
+  transport: AttachmentTransport | undefined,
+): LinkTransport | undefined {
+  if (!transport?.upload || !transport.link) return;
+  const { upload, link } = transport;
+  return { upload: upload.bind(transport), link: link.bind(transport) };
+}
+
+/** The transport's upload half, or undefined for a download-only one. */
+function uploads(
+  transport: AttachmentTransport | undefined,
+): UploadTransport | undefined {
+  if (
+    !transport?.reserveUpload ||
+    !transport.putUpload ||
+    !transport.completeUpload ||
+    !transport.sharedIn
+  )
+    return;
+  const { reserveUpload, putUpload, completeUpload, sharedIn } = transport;
+  return {
+    reserveUpload: reserveUpload.bind(transport),
+    putUpload: putUpload.bind(transport),
+    completeUpload: completeUpload.bind(transport),
+    sharedIn: sharedIn.bind(transport),
+  };
+}
+
+/** One stored reply chunk of one job. */
+export type DeliveryUnit = { job: number; part: number };
+
 export interface SlackDelivery {
-  readonly files?: AttachmentTransport;
+  /** Undefined (or absent) while the transport cannot move files. */
+  readonly files?: AttachmentTransport | undefined;
   /** Replace a preview when ts is set; false means it was removed. */
   failure?(
     channel: string,
@@ -169,6 +230,8 @@ export interface SlackDelivery {
     thread: string,
     text: string,
     stopJob?: number,
+    /** Final delivery of stored chunk `part`: lets a transport keep progress. */
+    unit?: DeliveryUnit,
   ): Promise<string> | Promise<void>;
   /** false means the user removed the preview; post a replacement. */
   update?(
@@ -179,6 +242,11 @@ export interface SlackDelivery {
   ): Promise<boolean> | Promise<void>;
   remove?(channel: string, ts: string): Promise<void>;
   react?(channel: string, ts: string, name: ReactionName): Promise<void>;
+  /**
+   * Show that a turn is running (IRC +typing) until `signal` aborts, then
+   * clear it. Best effort: failures never affect the turn.
+   */
+  working?(channel: string, thread: string, signal: AbortSignal): Promise<void>;
 }
 
 /**
@@ -196,6 +264,7 @@ export type GatewayConfig =
       | "turnTimeoutMs"
       | "waiting"
       | "crewActivity"
+      | "transcription"
     >;
 
 /** Transport rules the gateway applies to every job of one registration. */
@@ -342,6 +411,18 @@ export class Gateway {
     const target = cancellationTarget(body, this.bot, this.identity);
     if (!target || !this.store.cancel(this.key, target)) return false;
     this.cancellations.get(target.id)?.abort();
+    return true;
+  }
+
+  /**
+   * Transport Stop (IRC reaction): cancel the active turn for one request in
+   * one conversation, exactly like an accepted Slack Stop. The transport
+   * has already checked who may stop it.
+   */
+  stopTurn(conversation: string, thread: string) {
+    const id = this.store.cancelTurn(this.key, conversation, thread);
+    if (id === undefined) return false;
+    this.cancellations.get(id)?.abort();
     return true;
   }
 
@@ -888,6 +969,17 @@ export class Gateway {
     let failure = job.failure ?? undefined;
     if (job.status === "queued") {
       if (!this.store.running(job.id)) return;
+      // Ends before delivery, so a typing indicator never outlasts the turn.
+      const typing = new AbortController();
+      const working = job.deferDelivery
+        ? undefined
+        : this.slack
+            .working?.(
+              job.channel,
+              job.thread,
+              AbortSignal.any([typing.signal, shutdown]),
+            )
+            .catch(() => {});
       // Only an accepted requester Stop aborts this controller.
       const cancellation = new AbortController();
       const maintenanceFailure = new AbortController();
@@ -1116,7 +1208,7 @@ export class Gateway {
               const spoken = await transcribeMedia(
                 inputFiles,
                 this.transcriber,
-                this.bot?.transcription?.timeoutMs ?? 120_000,
+                this.config.transcription?.timeoutMs ?? 120_000,
                 signal,
               );
               inputFiles = spoken.files;
@@ -1284,6 +1376,8 @@ export class Gateway {
         }
         failure = this.store.failure(job.id);
       } finally {
+        typing.abort();
+        await working;
         await maintenance?.close();
         budget.close();
         this.cancellations.delete(job.id);
@@ -1330,10 +1424,16 @@ export class Gateway {
             throw new Error("Slack preview update unavailable");
           if ((await this.slack.update(job.channel, ts, text)) === false) {
             this.store.removePreview(job.id, i);
-            await this.slack.post(job.channel, job.thread, text);
+            await this.slack.post(job.channel, job.thread, text, undefined, {
+              job: job.id,
+              part: i,
+            });
           }
         } else {
-          await this.slack.post(job.channel, job.thread, text);
+          await this.slack.post(job.channel, job.thread, text, undefined, {
+            job: job.id,
+            part: i,
+          });
         }
         this.store.sent(job.id, i + 1);
       }
@@ -1370,7 +1470,9 @@ export class Gateway {
       ["localhost", "127.0.0.1", "[::1]"].includes(
         new URL(this.config.backend.url).hostname,
       );
-    if (!local || files.length > maxAttachments || !this.slack.files) {
+    const linked = links(this.slack.files);
+    const transport = linked ? undefined : uploads(this.slack.files);
+    if (!local || files.length > maxAttachments || !(transport || linked)) {
       for (const file of files) file.phase = "unavailable";
       save();
     } else {
@@ -1415,7 +1517,6 @@ export class Gateway {
             .trim() || file.prepared.name;
         save();
       }
-      const transport = this.slack.files;
       const signal = AbortSignal.any([shutdown, AbortSignal.timeout(30_000)]);
       if (file.phase === "completing" && file.fileID && transport) {
         if (
@@ -1429,7 +1530,16 @@ export class Gateway {
         file.phase = "unavailable";
         save();
       }
-      if (file.phase === "unavailable" || !file.prepared || !transport) {
+      if (file.phase === "uploading" && !file.fileID) {
+        // The last upload attempt had no certain outcome: never repeat it.
+        file.phase = "unavailable";
+        save();
+      }
+      if (
+        file.phase === "unavailable" ||
+        !file.prepared ||
+        !(transport || linked)
+      ) {
         if (!file.noticeSent) {
           if (!files.some((item) => item.noticeSent))
             await this.slack.post(
@@ -1442,6 +1552,45 @@ export class Gateway {
         }
         continue;
       }
+      if (linked) {
+        // Record the hosted URL first: a retry posts it, never re-uploads.
+        if (!file.fileID) {
+          let content: Attachment;
+          try {
+            content = await readPreparedAttachment(file.prepared);
+          } catch {
+            file.phase = "unavailable";
+            save();
+            throw new Error(
+              "Published attachment changed or became unavailable",
+            );
+          }
+          file.phase = "uploading";
+          save();
+          try {
+            file.fileID = await linked.upload(content, signal);
+          } catch (error) {
+            if (error instanceof UploadRefused) {
+              delete file.phase;
+              save();
+            }
+            throw error;
+          }
+          file.phase = "uploaded";
+          save();
+        }
+        await linked.link(
+          job.channel,
+          job.thread,
+          file.fileID,
+          file.title ?? file.prepared.name,
+          signal,
+        );
+        file.phase = "shared";
+        save();
+        continue;
+      }
+      if (!transport) continue;
       if (file.phase !== "uploaded") {
         let content: Attachment;
         try {

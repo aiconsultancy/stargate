@@ -35,6 +35,8 @@ export type IrcTiming = {
   intervalMs: number;
   /** CAP, SASL and welcome must finish within this time. */
   registerMs: number;
+  /** +typing=active refresh while a turn runs (the spec allows 3 s). */
+  typingMs: number;
 };
 
 export const defaultTiming: IrcTiming = {
@@ -48,6 +50,7 @@ export const defaultTiming: IrcTiming = {
   burst: 4,
   intervalMs: 600,
   registerMs: 30_000,
+  typingMs: 3000,
 };
 
 export type IrcClientOptions = {
@@ -68,6 +71,25 @@ export type IrcClientOptions = {
    * it is also one of these under the server's CASEMAPPING.
    */
   captainChannels?: readonly string[];
+  /** Request draft/multiline when offered (default true). */
+  multiline?: boolean;
+  /**
+   * Catch-up after each (re)connect: the server time to replay after, per
+   * channel; the start of the CHATHISTORY TARGETS window for direct
+   * messages; and per direct-message partner (with the time of the
+   * partner's latest message from TARGETS). Undefined skips that target.
+   * Without it, channels replay after the last message seen in this
+   * process, and direct messages do not replay.
+   */
+  history?: {
+    channel(name: string): string | undefined;
+    targets(): string | undefined;
+    direct(nick: string, latest: string | undefined): string | undefined;
+  };
+  /** Request (draft/)chathistory when offered (default true). */
+  catchUp?: boolean;
+  /** Presence features, each used only when offered (default true). */
+  presence?: { alwaysOn: boolean; botMode: boolean; readMarker: boolean };
   log: Logger;
   timing?: Partial<IrcTiming>;
 };
@@ -99,6 +121,8 @@ const optional = [
   "extended-join",
 ];
 const chathistoryCaps = ["draft/chathistory", "chathistory"];
+/** Smallest draft/multiline max-bytes that Pogo uses. */
+const minMultilineBytes = 64;
 
 type Pending = {
   resolve(): void;
@@ -107,7 +131,8 @@ type Pending = {
   failed?: boolean;
 };
 type Queued = {
-  line: string;
+  /** Written together: one line, or a whole multiline batch. */
+  lines: readonly string[];
   done?: (error?: Error) => void;
   /** Checked at the socket write; false drops the line. */
   guard?: () => boolean;
@@ -153,6 +178,9 @@ export class IrcClient {
   /** 001 seen; readiness waits for the end of the registration burst. */
   private welcomed = false;
   private networkName: string | undefined;
+  /** FILEHOST advertised in this connection's ISUPPORT, then since ready. */
+  private advertisedFilehost: string | undefined;
+  private readyFilehost: string | undefined;
   private userhost: string | undefined;
   private chantypes = "#&";
   private readonly joinedChannels = new Set<string>();
@@ -171,11 +199,18 @@ export class IrcClient {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
-  private readonly own = new Recent(1024);
+  /** Own message ID → the +draft/reply it carried (the request it answers). */
+  private readonly own = new Recent<string | true>(1024);
   private readonly lastSeen = new Map<string, string>();
   private readonly labels = new Map<string, Pending>();
   private readonly labelBatches = new Map<string, string>();
   private readonly replayBatches = new Set<string>();
+  /** Incoming draft/multiline batches being assembled, by reference. */
+  private readonly multilineIn = new Map<
+    string,
+    { open: IrcMessage; label: string | undefined; parts: IrcMessage[] }
+  >();
+  private multilineOffer: { maxBytes: number; maxLines: number } | undefined;
   private queue: Queued[] = [];
   private tokens: number;
   private refilled = Date.now();
@@ -210,6 +245,23 @@ export class IrcClient {
   hasCap(name: string) {
     return this.caps.has(name);
   }
+  /**
+   * soju.im/FILEHOST or draft/FILEHOST from the last completed registration
+   * (kept across a reconnect until the next one finishes). Unvalidated.
+   */
+  get filehost() {
+    return this.readyFilehost;
+  }
+  /** draft/multiline limits when negotiated (needs batch). */
+  get multiline() {
+    return this.caps.has("draft/multiline") && this.caps.has("batch")
+      ? this.multilineOffer
+      : undefined;
+  }
+  /** True when the IRC connection uses TLS (FILEHOST must then be HTTPS). */
+  get secure() {
+    return this.options.tls;
+  }
   isChannel(target: string) {
     return target !== "" && this.chantypes.includes(target[0] ?? "");
   }
@@ -228,6 +280,11 @@ export class IrcClient {
   /** A message ID that this connection sent (from its echo). */
   sent(msgid: string) {
     return this.own.has(msgid);
+  }
+  /** The request message that one of our messages replied to. */
+  anchor(msgid: string) {
+    const value = this.own.get(msgid);
+    return typeof value === "string" ? value : undefined;
   }
   /** The nick bound to an account in both directions, if any. */
   boundNick(account: string) {
@@ -277,7 +334,7 @@ export class IrcClient {
     }, this.timing.confirmMs);
     this.whois.set(key, { result, timer });
     this.enqueue({
-      line: formatMessage("WHOIS", [nick]),
+      lines: [formatMessage("WHOIS", [nick])],
       done: (error) => {
         if (!error) return;
         clearTimeout(timer);
@@ -347,6 +404,32 @@ export class IrcClient {
     return this.send("TAGMSG", [target], tags, guard);
   }
 
+  /**
+   * Fire-and-forget TAGMSG for client-only status such as +typing: never
+   * labeled, never waited for, and skipped while replies wait in the send
+   * queue, so it cannot delay them. `guard` is checked now and again at
+   * the socket write, as for direct lines.
+   */
+  notify(target: string, tags: Record<string, string>, guard?: () => boolean) {
+    if (
+      !this.registeredNow ||
+      !this.socket ||
+      !this.caps.has("message-tags") ||
+      this.queue.length ||
+      (guard && !guard())
+    )
+      return false;
+    this.enqueue({
+      lines: [formatMessage("TAGMSG", [target], tags)],
+      ...(guard ? { guard } : {}),
+    });
+    return true;
+  }
+
+  get typingMs() {
+    return this.timing.typingMs;
+  }
+
   /** True while `nick` is bound to `account` in both directions. */
   holds(account: string, nick: string) {
     const bound = this.boundNick(account);
@@ -357,7 +440,7 @@ export class IrcClient {
   join(name: string) {
     const channel = this.channel(name);
     if (!channel || !this.registeredNow) return false;
-    this.enqueue({ line: formatMessage("JOIN", [channel]) });
+    this.enqueue({ lines: [formatMessage("JOIN", [channel])] });
     return true;
   }
 
@@ -382,13 +465,61 @@ export class IrcClient {
     tags: Record<string, string> = {},
     guard?: () => boolean,
   ): Promise<void> {
+    return this.transmit(
+      (label) => [
+        formatMessage(command, params, {
+          ...(label === undefined ? {} : { label }),
+          ...tags,
+        }),
+      ],
+      guard,
+    );
+  }
+
+  /**
+   * One draft/multiline batch: `BATCH +ref draft/multiline target` (with
+   * the label and client tags), the lines tagged `batch=ref` (continuations
+   * with `draft/multiline-concat`), then `BATCH -ref`, written together as
+   * one throttled unit. The server delivers it atomically.
+   */
+  sendBatch(
+    target: string,
+    lines: readonly { text: string; concat: boolean }[],
+    tags: Record<string, string> = {},
+    guard?: () => boolean,
+  ): Promise<void> {
+    if (!this.multiline)
+      return Promise.reject(new Error("IRC multiline unavailable"));
+    const reference = `pogo${++this.label}`;
+    return this.transmit(
+      (label) => [
+        formatMessage("BATCH", [`+${reference}`, "draft/multiline", target], {
+          ...(label === undefined ? {} : { label }),
+          ...tags,
+        }),
+        ...lines.map((line) =>
+          formatMessage("PRIVMSG", [target, line.text], {
+            batch: reference,
+            ...(line.concat ? { "draft/multiline-concat": "" } : {}),
+          }),
+        ),
+        formatMessage("BATCH", [`-${reference}`]),
+      ],
+      guard,
+    );
+  }
+
+  private transmit(
+    build: (label: string | undefined) => string[],
+    guard?: () => boolean,
+  ): Promise<void> {
     if (!this.registeredNow || !this.socket)
       return Promise.reject(new IrcUnavailable());
     const result = Promise.withResolvers<void>();
     try {
       if (this.caps.has("labeled-response")) {
         const label = `pogo${++this.label}`;
-        const line = formatMessage(command, params, { label, ...tags });
+        const lines = build(label);
         const timer = setTimeout(() => {
           this.labels.delete(label);
           result.reject(new Error("IRC delivery unconfirmed"));
@@ -399,7 +530,7 @@ export class IrcClient {
           timer,
         });
         this.enqueue({
-          line,
+          lines,
           ...(guard ? { guard } : {}),
           done: (error) => {
             if (!error) return;
@@ -409,9 +540,8 @@ export class IrcClient {
           },
         });
       } else {
-        const line = formatMessage(command, params, tags);
         this.enqueue({
-          line,
+          lines: build(undefined),
           ...(guard ? { guard } : {}),
           done: (error) => (error ? result.reject(error) : result.resolve()),
         });
@@ -574,7 +704,7 @@ export class IrcClient {
       return;
     this.reclaimed = now;
     if (this.fold(this.currentNick) !== this.fold(this.options.nick))
-      this.enqueue({ line: formatMessage("NICK", [this.options.nick]) });
+      this.enqueue({ lines: [formatMessage("NICK", [this.options.nick])] });
     for (const channel of this.options.channels)
       if (!this.inChannel(channel)) this.join(channel);
   }
@@ -584,6 +714,8 @@ export class IrcClient {
     this.registeredNow = false;
     this.welcomed = false;
     this.networkName = undefined;
+    this.advertisedFilehost = undefined;
+    this.botMode = undefined;
     this.output = undefined;
     this.caps = new Set();
     this.joinedChannels.clear();
@@ -597,6 +729,7 @@ export class IrcClient {
     this.whois.clear();
     this.labelBatches.clear();
     this.replayBatches.clear();
+    this.multilineIn.clear();
     if (this.pumpTimer) clearTimeout(this.pumpTimer);
     this.pumpTimer = undefined;
     const error = new IrcUnavailable();
@@ -649,7 +782,7 @@ export class IrcClient {
         continue;
       }
       this.tokens -= 1;
-      this.raw(item.line);
+      for (const line of item.lines) this.raw(line);
       item.done?.();
     }
     if (this.queue.length && this.socket)
@@ -666,6 +799,12 @@ export class IrcClient {
     const { command, params } = message;
     const label = message.tags.get("label");
     const batch = message.tags.get("batch");
+    const assembling =
+      batch === undefined ? undefined : this.multilineIn.get(batch);
+    if (assembling && (command === "PRIVMSG" || command === "NOTICE")) {
+      assembling.parts.push(message);
+      return;
+    }
     if (label !== undefined && command !== "BATCH") this.settle(label, message);
     if (batch !== undefined) {
       const owner = this.labelBatches.get(batch);
@@ -705,10 +844,20 @@ export class IrcClient {
         return;
       case "005":
         for (const token of params.slice(1, -1)) {
-          const [key, value] = token.split("=", 2);
+          const equals = token.indexOf("=");
+          const key = equals < 0 ? token : token.slice(0, equals);
+          const value =
+            equals < 0 ? undefined : isupportValue(token.slice(equals + 1));
           if (key === "CHANTYPES" && value) this.chantypes = value;
           if (key === "CASEMAPPING") this.mapping = casemapping(value);
           if (key === "NETWORK") this.networkName = value;
+          if (key === "BOT" && value && /^[A-Za-z]$/.test(value))
+            this.botMode = value;
+          // CHATHISTORY=0 means no server maximum.
+          if (key === "CHATHISTORY" && value && /^\d+$/.test(value))
+            this.historyLimit = Math.min(100, Number(value) || 100);
+          if ((key === "soju.im/FILEHOST" || key === "draft/FILEHOST") && value)
+            this.advertisedFilehost = value;
         }
         return;
       // End of MOTD, or no MOTD: ISUPPORT is complete.
@@ -744,7 +893,7 @@ export class IrcClient {
           // A server-forced join to an unlisted channel is left at once.
           const allowed = this.channel(channel);
           if (!allowed) {
-            this.enqueue({ line: formatMessage("PART", [channel]) });
+            this.enqueue({ lines: [formatMessage("PART", [channel])] });
             return;
           }
           this.joinedChannels.add(allowed);
@@ -808,34 +957,67 @@ export class IrcClient {
         return;
       case "BATCH":
         return this.batch(message, label);
+      case "PERSISTENCE":
+        // PERSISTENCE STATUS <requested> <effective>
+        if (params[0] === "STATUS")
+          this.options.log.info(
+            { alwaysOn: params[2] === "ON" },
+            "IRC persistence status",
+          );
+        return;
+      case "CHATHISTORY":
+        // TARGETS reply: one direct-message partner and the time of its
+        // latest message (plain, or with a `timestamp=` prefix).
+        if (params[0] === "TARGETS" && params[1] && !this.isChannel(params[1]))
+          this.history(
+            params[1],
+            this.options.history?.direct(
+              params[1],
+              params[2]?.replace(/^timestamp=/, ""),
+            ),
+          );
+        return;
       case "ERROR":
         this.options.log.warn("IRC server closed the connection");
         return;
       case "PRIVMSG":
       case "NOTICE":
-      case "TAGMSG": {
-        const nick = sourceNick(message.source);
-        const account = message.tags.get("account");
-        const target = params[0] ?? "";
-        const time = message.tags.get("time");
-        const replay = batch !== undefined && this.replayBatches.has(batch);
-        // History shows who held a nick then, not now.
-        if (!replay && message.source?.includes("!")) {
-          if (account && account !== "*") this.bind(account, nick);
-          else this.unbindNick(nick);
-        }
-        if (time && this.isChannel(target)) {
-          const seen = this.lastSeen.get(this.fold(target));
-          if (!seen || time > seen) this.lastSeen.set(this.fold(target), time);
-        }
-        const msgid = message.tags.get("msgid");
-        if (msgid && this.fold(nick) === this.fold(this.currentNick))
-          this.own.set(msgid, true);
-        // A labeled echo confirms our own send; it is not new input.
-        if (label === undefined) this.events.message?.(message, replay);
-        return;
-      }
+      case "TAGMSG":
+        return this.chat(
+          message,
+          label,
+          batch !== undefined && this.replayBatches.has(batch),
+        );
     }
+  }
+
+  /** One chat message (or an assembled multiline batch). */
+  private chat(
+    message: IrcMessage,
+    label: string | undefined,
+    replay: boolean,
+  ) {
+    const nick = sourceNick(message.source);
+    const account = message.tags.get("account");
+    const target = message.params[0] ?? "";
+    const time = message.tags.get("time");
+    // History shows who held a nick then, not now.
+    if (!replay && message.source?.includes("!")) {
+      if (account && account !== "*") this.bind(account, nick);
+      else this.unbindNick(nick);
+    }
+    if (time && this.isChannel(target)) {
+      const seen = this.lastSeen.get(this.fold(target));
+      if (!seen || time > seen) this.lastSeen.set(this.fold(target), time);
+    }
+    const msgid = message.tags.get("msgid");
+    if (msgid && this.fold(nick) === this.fold(this.currentNick))
+      this.own.set(
+        msgid,
+        message.tags.get("+draft/reply") ?? message.tags.get("+reply") ?? true,
+      );
+    // A labeled echo confirms our own send; it is not new input.
+    if (label === undefined) this.events.message?.(message, replay);
   }
 
   /** Bind account ↔ nick, dropping both previous partners. */
@@ -876,9 +1058,14 @@ export class IrcClient {
       if (label !== undefined) this.labelBatches.set(id, label);
       if (type === "chathistory" || type === "draft/chathistory")
         this.replayBatches.add(id);
+      if (type === "draft/multiline")
+        this.multilineIn.set(id, { open: message, label, parts: [] });
       return;
     }
     if (!reference.startsWith("-")) return;
+    const assembled = this.multilineIn.get(id);
+    this.multilineIn.delete(id);
+    if (assembled) this.assemble(assembled);
     this.replayBatches.delete(id);
     const owner = this.labelBatches.get(id);
     if (owner === undefined) return;
@@ -890,6 +1077,46 @@ export class IrcClient {
     if (pending.failed)
       pending.reject(new Error("IRC server refused the message"));
     else pending.resolve();
+  }
+
+  /**
+   * A received draft/multiline batch as one message: the opening BATCH's
+   * tags (msgid, time, account, client tags) and the lines joined with line
+   * breaks, or directly for draft/multiline-concat parts.
+   */
+  private assemble(batch: {
+    open: IrcMessage;
+    label: string | undefined;
+    parts: IrcMessage[];
+  }) {
+    const [first] = batch.parts;
+    if (!first) return;
+    const tags = new Map(batch.open.tags);
+    for (const key of ["account", "time"])
+      if (!tags.has(key)) {
+        const value = first.tags.get(key);
+        if (value !== undefined) tags.set(key, value);
+      }
+    tags.delete("batch");
+    const outer = batch.open.tags.get("batch");
+    const text = batch.parts
+      .map((part, index) =>
+        index && !part.tags.has("draft/multiline-concat")
+          ? `\n${part.params[1] ?? ""}`
+          : (part.params[1] ?? ""),
+      )
+      .join("");
+    const source = batch.open.source ?? first.source;
+    this.chat(
+      {
+        tags,
+        ...(source ? { source } : {}),
+        command: first.command,
+        params: [batch.open.params[2] ?? first.params[0] ?? "", text],
+      },
+      batch.label,
+      outer !== undefined && this.replayBatches.has(outer),
+    );
   }
 
   private capability(message: IrcMessage) {
@@ -910,11 +1137,44 @@ export class IrcClient {
         this.refuse("IRC server lacks SASL PLAIN or account-tag");
         return;
       }
-      const history = chathistoryCaps.find((cap) => offered.has(cap));
+      const history =
+        this.options.catchUp === false
+          ? undefined
+          : chathistoryCaps.find((cap) => offered.has(cap));
+      const multiline = offered.get("draft/multiline");
+      if (multiline !== undefined) {
+        const limits = new Map(
+          multiline.split(",").map((item) => {
+            const [key = "", value = ""] = item.split("=");
+            return [key, Number(value)] as const;
+          }),
+        );
+        const maxBytes = limits.get("max-bytes") ?? 0;
+        const maxLines = limits.get("max-lines") ?? 100;
+        // Below 64 bytes a batch holds less than a plain line: not used.
+        this.multilineOffer =
+          Number.isInteger(maxBytes) && maxBytes >= minMultilineBytes
+            ? {
+                maxBytes,
+                maxLines:
+                  Number.isInteger(maxLines) && maxLines > 0 ? maxLines : 100,
+              }
+            : undefined;
+      } else this.multilineOffer = undefined;
+      const presence = this.options.presence;
       const wanted = [
         ...required,
         ...optional.filter((cap) => offered.has(cap)),
         ...(history ? [history] : []),
+        ...(presence?.alwaysOn !== false && offered.has("draft/persistence")
+          ? ["draft/persistence"]
+          : []),
+        ...(presence?.readMarker !== false && offered.has("draft/read-marker")
+          ? ["draft/read-marker"]
+          : []),
+        ...(this.multilineOffer && this.options.multiline !== false
+          ? ["draft/multiline"]
+          : []),
       ];
       this.requested = wanted.length;
       for (const cap of wanted) this.raw(formatMessage("CAP", ["REQ", cap]));
@@ -966,28 +1226,93 @@ export class IrcClient {
       return;
     }
     this.registeredNow = true;
+    this.readyFilehost = this.advertisedFilehost;
     this.options.log.info("IRC registered");
     for (const wake of this.waiters) wake();
     const channels = this.options.channels.filter(
       (channel) => this.channel(channel) !== undefined,
     );
-    for (const line of joinLines(channels)) this.enqueue({ line });
+    const presence = this.options.presence;
+    // Always-on keeps the account in its channels and stores direct
+    // messages while Pogo is away (Ergo draft/persistence).
+    if (presence?.alwaysOn !== false && this.caps.has("draft/persistence"))
+      this.enqueue({ lines: [formatMessage("PERSISTENCE", ["SET", "ON"])] });
+    if (presence?.botMode !== false && this.botMode)
+      this.enqueue({
+        lines: [formatMessage("MODE", [this.currentNick, `+${this.botMode}`])],
+      });
+    for (const line of joinLines(channels)) this.enqueue({ lines: [line] });
+    this.replayDirect();
   }
 
-  /** After a reconnect, fetch channel messages missed while disconnected. */
-  private replay(channel: string) {
-    const history = chathistoryCaps.find((cap) => this.caps.has(cap));
-    const since = this.lastSeen.get(this.fold(channel));
-    if (!history || !since || !this.caps.has("batch")) return;
+  private historyLimit = 100;
+  /** ISUPPORT BOT: the user mode that marks a bot, for example `B`. */
+  private botMode: string | undefined;
+
+  /**
+   * draft/read-marker: mark `target` (a channel, or a direct partner's
+   * nick) read up to this server time. Best effort.
+   */
+  markRead(target: string, time: string) {
+    if (
+      this.options.presence?.readMarker === false ||
+      !this.caps.has("draft/read-marker") ||
+      !this.registeredNow
+    )
+      return;
     this.enqueue({
-      line: formatMessage("CHATHISTORY", [
-        "AFTER",
-        channel,
-        `timestamp=${since}`,
-        "100",
-      ]),
+      lines: [formatMessage("MARKREAD", [target, `timestamp=${time}`])],
     });
   }
+
+  /** After a (re)connect, fetch channel messages missed meanwhile. */
+  private replay(channel: string) {
+    this.history(
+      channel,
+      this.options.history
+        ? this.options.history.channel(channel)
+        : this.lastSeen.get(this.fold(channel)),
+    );
+  }
+
+  private history(target: string, since: string | undefined) {
+    const offered = chathistoryCaps.find((cap) => this.caps.has(cap));
+    if (!offered || !since || !this.caps.has("batch")) return;
+    this.enqueue({
+      lines: [
+        formatMessage("CHATHISTORY", [
+          "AFTER",
+          target,
+          `timestamp=${since}`,
+          String(this.historyLimit),
+        ]),
+      ],
+    });
+  }
+
+  /** Direct messages: which partners wrote since the cursor (TARGETS). */
+  private replayDirect() {
+    const offered = chathistoryCaps.find((cap) => this.caps.has(cap));
+    const since = this.options.history?.targets();
+    if (!offered || !since || !this.caps.has("batch")) return;
+    this.enqueue({
+      lines: [
+        formatMessage("CHATHISTORY", [
+          "TARGETS",
+          `timestamp=${since}`,
+          `timestamp=${new Date().toISOString()}`,
+          String(this.historyLimit),
+        ]),
+      ],
+    });
+  }
+}
+
+/** ISUPPORT values escape bytes as \\xHH (space, `=`, backslash). */
+function isupportValue(value: string) {
+  return value.replace(/\\x([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
+    String.fromCharCode(Number.parseInt(hex, 16)),
+  );
 }
 
 /** JOIN lines for these channels, each within the 510-byte line limit. */

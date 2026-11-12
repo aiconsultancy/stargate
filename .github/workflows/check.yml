@@ -47,6 +47,11 @@ jobs:
         run: mkdir -p /tmp/opencode
       - name: Run pre-commit and quality checks
         run: mise run hooks
+      # Self-updates test a release with a minimal environment and a hidden
+      # TMPDIR; a test that only passes with the developer's environment
+      # would block every update.
+      - name: Run tests in the self-update environment
+        run: mise run test-release-env
 
   release:
     name: Release

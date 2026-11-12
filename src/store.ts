@@ -68,7 +68,13 @@ export type CaptainTranscript = {
 export type AttachmentDelivery = PublishedFile & {
   title?: string;
   prepared?: PreparedAttachment;
-  phase?: "reserved" | "uploaded" | "completing" | "shared" | "unavailable";
+  phase?:
+    | "reserved"
+    | "uploading"
+    | "uploaded"
+    | "completing"
+    | "shared"
+    | "unavailable";
   fileID?: string;
   noticeSent?: boolean;
 };
@@ -121,6 +127,15 @@ export class Store {
       CREATE TABLE IF NOT EXISTS captain_cursors (
         botKey TEXT NOT NULL, session_id TEXT NOT NULL, cursor TEXT,
         owner INTEGER, PRIMARY KEY(botKey, session_id)
+      );
+      CREATE TABLE IF NOT EXISTS irc_cursors (
+        botKey TEXT NOT NULL, target TEXT NOT NULL, time TEXT NOT NULL,
+        PRIMARY KEY(botKey, target)
+      );
+      CREATE TABLE IF NOT EXISTS delivery_units (
+        job INTEGER NOT NULL REFERENCES jobs(id), part INTEGER NOT NULL,
+        plan TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(job, part)
       );
     `);
     const column = (table: string, name: string, type: string) => {
@@ -270,7 +285,13 @@ export class Store {
       .get(id);
     return row?.input_files
       ? z
-          .array(z.string().regex(/^F[A-Z0-9]+$/))
+          // Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
+          .array(
+            z
+              .string()
+              .max(2048)
+              .regex(/^(?:F[A-Z0-9]+|https?:\/\/\S+)$/),
+          )
           .max(10)
           .parse(JSON.parse(row.input_files))
       : [];
@@ -725,6 +746,34 @@ export class Store {
     );
   }
 
+  /**
+   * Request Stop for the active (queued or running) turn of one request in
+   * one conversation; a queued one settles at once with the stop notice.
+   * IRC Stop by reaction; Slack's button uses `cancel`.
+   */
+  cancelTurn(
+    botKey: string,
+    conversation: string,
+    thread: string,
+  ): number | undefined {
+    return this.db.transaction(() => {
+      const row = this.db
+        .query<{ id: number }, [string, string, string]>(`SELECT id FROM jobs
+        WHERE botKey=? AND conversation=? AND thread=?
+        AND status IN ('queued','running') ORDER BY id DESC LIMIT 1`)
+        .get(botKey, conversation, thread);
+      if (!row) return;
+      this.db
+        .query(`UPDATE jobs SET cancel_requested=1,
+        response=CASE WHEN status='queued' THEN ? ELSE response END,
+        failure=CASE WHEN status='queued' THEN 'cancelled' ELSE failure END,
+        status=CASE WHEN status='queued' THEN 'responding' ELSE status END
+        WHERE id=? AND status IN ('queued','running')`)
+        .run(JSON.stringify([cancellationNotice]), row.id);
+      return row.id;
+    })();
+  }
+
   queuedJob(botKey: string, eventId: string) {
     return this.db
       .query<{ id: number; status: Job["status"] }, [string, string]>(
@@ -875,7 +924,72 @@ export class Store {
   }
 
   finish(id: number, status: "done" | "failed" = "done") {
-    this.db.query("UPDATE jobs SET status=? WHERE id=?").run(status, id);
+    this.db.transaction(() => {
+      this.db.query("UPDATE jobs SET status=? WHERE id=?").run(status, id);
+      this.db.query("DELETE FROM delivery_units WHERE job=?").run(id);
+    })();
+  }
+
+  /**
+   * A transport's delivery plan for one stored reply chunk and how many of
+   * its units (IRC lines or multiline batches) were confirmed. The first
+   * plan wins, so a retry splits the chunk exactly as before and resends
+   * only the units after `done`.
+   */
+  deliveryPlan(job: number, part: number, plan: string) {
+    this.db
+      .query(
+        "INSERT OR IGNORE INTO delivery_units (job,part,plan) VALUES (?,?,?)",
+      )
+      .run(job, part, plan);
+    const row = this.db
+      .query<{ plan: string; done: number }, [number, number]>(
+        "SELECT plan,done FROM delivery_units WHERE job=? AND part=?",
+      )
+      .get(job, part);
+    if (!row) throw new Error("Delivery plan not found");
+    return row;
+  }
+
+  /**
+   * Replace a stored plan whose first `done` units are unchanged, for a
+   * transport that must re-split the rest (IRC: multiline lost before a
+   * retry). Progress stays.
+   */
+  replaceDeliveryPlan(job: number, part: number, plan: string) {
+    this.db
+      .query("UPDATE delivery_units SET plan=? WHERE job=? AND part=?")
+      .run(plan, job, part);
+  }
+
+  /**
+   * Newest IRC server time seen in one target (folded channel, or "" for
+   * direct messages) of one registration: CHATHISTORY catch-up resumes
+   * after it.
+   */
+  ircCursor(botKey: string, target: string): string | undefined {
+    return (
+      this.db
+        .query<{ time: string }, [string, string]>(
+          "SELECT time FROM irc_cursors WHERE botKey=? AND target=?",
+        )
+        .get(botKey, target)?.time ?? undefined
+    );
+  }
+
+  /** Moves forward only, unless `replace` (operator repair and tests). */
+  saveIrcCursor(botKey: string, target: string, time: string, replace = false) {
+    this.db
+      .query(`INSERT INTO irc_cursors (botKey,target,time) VALUES (?,?,?)
+      ON CONFLICT(botKey,target) DO UPDATE SET time=excluded.time
+      WHERE ? OR excluded.time > irc_cursors.time`)
+      .run(botKey, target, time, replace ? 1 : 0);
+  }
+
+  deliveredUnits(job: number, part: number, done: number) {
+    this.db
+      .query("UPDATE delivery_units SET done=? WHERE job=? AND part=?")
+      .run(done, job, part);
   }
 
   retry(id: number, now: number) {

@@ -324,10 +324,14 @@ export function serve(
             backend,
             registration.delivery,
             registration.log,
-            undefined,
+            irc.transcription
+              ? createTranscriber(irc.transcription)
+              : undefined,
             undefined,
             registration.transport,
           );
+          registration.stopTurn = (conversation, thread) =>
+            gateway.stopTurn(conversation, thread);
           workers.push(
             supervise(registration.log, "gateway", (signal) =>
               gateway.work(signal),

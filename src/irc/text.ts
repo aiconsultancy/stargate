@@ -111,3 +111,31 @@ export function ircLines(text: string, budget: number): string[] {
   }
   return lines;
 }
+
+/**
+ * Lossless split of one line into parts of at most `budget` UTF-8 bytes,
+ * for draft/multiline-concat: joining the parts gives the line back. A
+ * break after a space keeps the space at the end of the earlier part.
+ */
+export function ircParts(line: string, budget: number): string[] {
+  if (budget < 16) throw new Error("IRC line budget too small");
+  const parts: string[] = [];
+  let rest = line;
+  while (utf8Bytes(rest) > budget) {
+    let bytes = 0;
+    let end = 0;
+    let space = -1;
+    for (const char of rest) {
+      const size = utf8Bytes(char);
+      if (bytes + size > budget) break;
+      bytes += size;
+      end += char.length;
+      if (char === " " && bytes > budget / 2) space = end;
+    }
+    const cut = space > 0 ? space : end;
+    parts.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest) parts.push(rest);
+  return parts;
+}

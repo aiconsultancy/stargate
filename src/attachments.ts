@@ -77,6 +77,17 @@ export const preparedAttachmentSchema = z.strictObject({
 export type PreparedAttachment = z.infer<typeof preparedAttachmentSchema>;
 
 /** Generic by design: messages never contain the requested path or its name. */
+/**
+ * An upload that certainly did not store the file: the host answered with
+ * a refusal that rejects the request itself, or nothing was sent. Any
+ * other upload failure is uncertain.
+ */
+export class UploadRefused extends Error {
+  constructor() {
+    super("Upload refused");
+  }
+}
+
 export class AttachmentUnavailable extends Error {
   constructor(
     readonly reason:

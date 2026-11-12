@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { maxAttachments } from "../attachments";
 import { defaultAllCallWords, type IrcConfig } from "../config";
 import { findMention } from "../mentions";
 import { peerTurnsPerHour } from "../peers";
@@ -33,7 +34,29 @@ export type IrcRouteContext = {
   now(): number;
   /** Case folding under the server's CASEMAPPING. */
   fold(value: string): string;
+  /** Current FILEHOST upload URL; its links become attachments. */
+  filehost?: URL | undefined;
 };
+
+/**
+ * Links on the FILEHOST origin, in order, at most `maxAttachments`. Other
+ * hosts are never collected (and so never fetched). Trailing punctuation
+ * from prose is trimmed.
+ */
+export function filehostLinks(text: string, filehost: URL | undefined) {
+  if (!filehost) return [];
+  const links: string[] = [];
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
+    const candidate = match[0].replace(/[)\].,;:!?]+$/, "");
+    if (!URL.canParse(candidate)) continue;
+    const url = new URL(candidate);
+    if (url.origin !== filehost.origin || url.username || url.password)
+      continue;
+    if (!links.includes(url.href)) links.push(url.href);
+    if (links.length === maxAttachments) break;
+  }
+  return links;
+}
 
 /** Case folding for names: the server's CASEMAPPING, rfc1459 by default. */
 export type Fold = (value: string) => string;
@@ -147,7 +170,8 @@ export function routeIrcMessage(
   if (direct && caseFold(target) !== caseFold(context.currentNick)) return;
   const channel = caseFold(direct ? account : target);
   if (!ircAllowed(config, member, user, channel, caseFold)) return;
-  const body = cleanText(raw).trim();
+  // A multiline message keeps its line breaks; each line is cleaned.
+  const body = raw.split("\n").map(cleanText).join("\n").trim();
   const nicks = [...new Set([context.currentNick, member.nick])];
   const mentioned = nicks.some((nick) =>
     mentions(caseFold(body), caseFold(nick)),
@@ -182,6 +206,7 @@ export function routeIrcMessage(
         .update(JSON.stringify([received, user, target, raw]))
         .digest("hex")
         .slice(0, 32)}`;
+  const files = filehostLinks(body, context.filehost);
   return {
     eventId: `${channel}:${msgid}`,
     botKey: member.key,
@@ -191,8 +216,58 @@ export function routeIrcMessage(
     user,
     text,
     received,
+    ...(files.length ? { files } : {}),
     ...(sender ? { sender } : {}),
     ...(named ? { textMention: named } : {}),
+  };
+}
+
+/** Emoji compare without variation selector or skin tone. */
+export function reactionKey(value: string) {
+  return value.replace(/[\u{FE0F}\u{1F3FB}-\u{1F3FF}]/gu, "");
+}
+
+export type IrcStopContext = Pick<
+  IrcRouteContext,
+  "config" | "member" | "currentNick" | "fold"
+> & {
+  /** Request message ID that one of this connection's messages answered. */
+  anchor(msgid: string): string | undefined;
+};
+
+/**
+ * A Stop reaction: a TAGMSG with `+draft/react` set to one of
+ * `stopReactions` and `+draft/reply` naming the request, or a bot message
+ * that answers it. Only a person may stop: the account tag is required and
+ * this ship's accounts and peer captains are refused; deny lists and
+ * channel rules apply as for messages. `+draft/unreact` never stops or
+ * undoes anything.
+ */
+export function routeIrcStop(message: IrcMessage, context: IrcStopContext) {
+  const { config, member } = context;
+  const caseFold = context.fold;
+  if (message.command !== "TAGMSG") return;
+  const react = message.tags.get("+draft/react");
+  const reply = message.tags.get("+draft/reply") ?? message.tags.get("+reply");
+  if (react === undefined || !validMsgid(reply)) return;
+  const stops = config.stopReactions.map(reactionKey);
+  if (!stops.includes(reactionKey(react))) return;
+  const account = message.tags.get("account");
+  if (!account || account === "*") return;
+  const user = caseFold(account);
+  if (
+    shipAccounts(config, caseFold).has(user) ||
+    config.access.peerCaptains.some((peer) => caseFold(peer) === user)
+  )
+    return;
+  const target = message.params[0] ?? "";
+  const direct = !isIrcChannel(target);
+  if (direct && caseFold(target) !== caseFold(context.currentNick)) return;
+  const channel = caseFold(direct ? account : target);
+  if (!ircAllowed(config, member, user, channel, caseFold)) return;
+  return {
+    conversation: JSON.stringify([member.key, channel]),
+    thread: context.anchor(reply) ?? reply,
   };
 }
 

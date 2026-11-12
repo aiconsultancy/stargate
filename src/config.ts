@@ -183,6 +183,27 @@ const ircServerSchema = z
       .string()
       .regex(/^[A-Za-z0-9._-]{1,64}$/)
       .optional(),
+    /**
+     * FILEHOST upload URL to use when the server does not advertise
+     * soju.im/FILEHOST or draft/FILEHOST. A different advertised origin
+     * turns files off rather than choosing one.
+     */
+    filehostOverride: z
+      .url()
+      .max(2048)
+      .refine((value) => {
+        const url = new URL(value);
+        return (
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash &&
+          (url.protocol === "https:" ||
+            (url.protocol === "http:" &&
+              ["127.0.0.1", "[::1]"].includes(url.hostname)))
+        );
+      }, "Use an HTTPS URL (HTTP only on loopback) without credentials, query or fragment")
+      .optional(),
   })
   .refine(
     (server) => server.tls || loopbackHosts.has(server.host),
@@ -214,6 +235,42 @@ const ircCrewSchema = z.strictObject({
   concurrency: z.number().int().min(1).max(32).default(2),
   turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
 });
+
+/**
+ * Optional IRCv3 features. Each is used only when the server offers it;
+ * these switches can turn one off. All default on.
+ */
+const ircFeaturesSchema = z.strictObject({
+  /** Download FILEHOST links in admitted messages as attachments. */
+  filesIn: z.boolean().default(true),
+  /** Upload published reply files to FILEHOST and post their links. */
+  filesOut: z.boolean().default(true),
+  /** Send each reply chunk as one draft/multiline batch. */
+  multiline: z.boolean().default(true),
+  /** Send +typing while a turn runs (needs message-tags). */
+  typing: z.boolean().default(true),
+  /** +draft/react for reaction replies, and Stop by reaction. */
+  reactions: z.boolean().default(true),
+  /** CHATHISTORY catch-up of missed messages (persisted cursor). */
+  catchUp: z.boolean().default(true),
+  /** draft/persistence: ask the server to keep the account always-on. */
+  alwaysOn: z.boolean().default(true),
+  /** Set the ISUPPORT BOT user mode (for example +B). */
+  botMode: z.boolean().default(true),
+  /** draft/read-marker: MARKREAD after each accepted message. */
+  readMarker: z.boolean().default(true),
+});
+const ircFeatureDefaults = {
+  filesIn: true,
+  filesOut: true,
+  multiline: true,
+  typing: true,
+  reactions: true,
+  catchUp: true,
+  alwaysOn: true,
+  botMode: true,
+  readMarker: true,
+};
 
 export const ircSchema = z
   .strictObject({
@@ -265,6 +322,27 @@ export const ircSchema = z
         shipTurnsPerAgentPerHour: 60,
       }),
     crew: z.array(ircCrewSchema).max(20).default([]),
+    features: ircFeaturesSchema.default(ircFeatureDefaults),
+    /**
+     * Reactions (+draft/react) that stop an active turn when a person
+     * reacts to its request or to a bot message answering it. `[]` is off.
+     */
+    stopReactions: z
+      .array(z.string().min(1).max(32))
+      .max(10)
+      .default(["✋", "🛑"]),
+    /** Catch-up replays at most this many hours, whatever the cursor. */
+    catchUpHours: z.number().int().min(1).max(168).default(24),
+    /**
+     * Speech-to-text for audio and video files in admitted messages, as for
+     * Slack bots; absent is off. Spoken mentions are Slack-only.
+     */
+    transcription: transcriptionSchema
+      .refine(
+        (value) => value.spokenMentions === undefined,
+        "spokenMentions is not supported on IRC",
+      )
+      .optional(),
     backend: backendSchema,
     concurrency: z.number().int().min(1).max(32).default(4),
     turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
