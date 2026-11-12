@@ -3,18 +3,26 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { MesijClient, MesijError } from "../src/crew/mesij";
 
-const locator = Bun.spawn(["mise", "which", "mesij"], {
-  cwd: resolve(import.meta.dir, ".."),
-  stdout: "pipe",
-  stderr: "ignore",
-});
-const [locatedCommand, locatorExit] = await Promise.all([
-  new Response(locator.stdout).text(),
-  locator.exited,
-]);
-if (locatorExit !== 0)
-  throw new Error("Install the pinned Mesij tool with mise.");
-const command = locatedCommand.trim();
+// Release checks run `bun test` with a minimal PATH and no mise; only the
+// real-binary tests need the pinned Mesij, so skip just those there.
+const mise = Bun.which("mise");
+// Fake-command tests replace this; it only has to pass option validation.
+let command = "/nonexistent/mesij";
+if (mise) {
+  const locator = Bun.spawn([mise, "which", "mesij"], {
+    cwd: resolve(import.meta.dir, ".."),
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const [locatedCommand, locatorExit] = await Promise.all([
+    new Response(locator.stdout).text(),
+    locator.exited,
+  ]);
+  if (locatorExit !== 0)
+    throw new Error("Install the pinned Mesij tool with mise.");
+  command = locatedCommand.trim();
+}
+const realMesij = test.skipIf(!mise);
 const signal = new AbortController().signal;
 
 async function fixture() {
@@ -55,106 +63,119 @@ const message = {
   key: "task:assignment",
 };
 
-test("real Mesij preserves named sessions, direct replies and inbox cursors", async () => {
-  const setup = await fixture();
-  try {
-    const first = await setup.client.register("Bowser", "indra-bowser", signal);
-    await setup.client.register("Mario", "indra-mario", signal);
-    expect(
-      await setup.client.inbox({ sessionID: "indra-mario" }, signal),
-    ).toEqual([]);
-    const sent = await setup.client.send(message, signal);
-    expect(await setup.client.send(message, signal)).toEqual(sent);
-    const reopened = new MesijClient(setup.options);
-    expect(await reopened.register("Bowser", "indra-bowser", signal)).toEqual(
-      first,
-    );
-    expect(
-      await reopened.inbox({ sessionID: "indra-mario", limit: 1 }, signal),
-    ).toEqual([
-      {
-        ...sent,
-        actor: "Bowser",
-        sessionID: "indra-bowser",
-        to: "indra-mario",
-        type: "message.posted",
-        text: message.text,
-      },
-    ]);
-    const reply = await reopened.send(
-      {
-        actor: "Mario",
-        sessionID: "indra-mario",
-        to: "indra-bowser",
-        text: "Reviewed.",
-        key: "task:reply",
-        replyTo: sent.id,
-      },
-      signal,
-    );
-    expect(
-      await reopened.inbox(
-        { sessionID: "indra-bowser", after: sent.sequence },
+realMesij(
+  "real Mesij preserves named sessions, direct replies and inbox cursors",
+  async () => {
+    const setup = await fixture();
+    try {
+      const first = await setup.client.register(
+        "Bowser",
+        "indra-bowser",
         signal,
-      ),
-    ).toEqual([
-      {
-        ...reply,
-        actor: "Mario",
-        sessionID: "indra-mario",
-        to: "indra-bowser",
-        replyTo: sent.id,
-        type: "message.replied",
-        text: "Reviewed.",
-      },
-    ]);
-    expect(
-      await reopened.inbox(
-        { sessionID: "indra-mario", after: reply.sequence },
+      );
+      await setup.client.register("Mario", "indra-mario", signal);
+      expect(
+        await setup.client.inbox({ sessionID: "indra-mario" }, signal),
+      ).toEqual([]);
+      const sent = await setup.client.send(message, signal);
+      expect(await setup.client.send(message, signal)).toEqual(sent);
+      const reopened = new MesijClient(setup.options);
+      expect(await reopened.register("Bowser", "indra-bowser", signal)).toEqual(
+        first,
+      );
+      expect(
+        await reopened.inbox({ sessionID: "indra-mario", limit: 1 }, signal),
+      ).toEqual([
+        {
+          ...sent,
+          actor: "Bowser",
+          sessionID: "indra-bowser",
+          to: "indra-mario",
+          type: "message.posted",
+          text: message.text,
+        },
+      ]);
+      const reply = await reopened.send(
+        {
+          actor: "Mario",
+          sessionID: "indra-mario",
+          to: "indra-bowser",
+          text: "Reviewed.",
+          key: "task:reply",
+          replyTo: sent.id,
+        },
         signal,
-      ),
-    ).toEqual([]);
-    const isolated = new MesijClient({
-      ...setup.options,
-      dataDirectory: join(setup.directory, "other-data"),
-    });
-    await isolated.register("Mario", "indra-mario", signal);
-    expect(await isolated.inbox({ sessionID: "indra-mario" }, signal)).toEqual(
-      [],
-    );
-  } finally {
-    await setup.close();
-  }
-});
+      );
+      expect(
+        await reopened.inbox(
+          { sessionID: "indra-bowser", after: sent.sequence },
+          signal,
+        ),
+      ).toEqual([
+        {
+          ...reply,
+          actor: "Mario",
+          sessionID: "indra-mario",
+          to: "indra-bowser",
+          replyTo: sent.id,
+          type: "message.replied",
+          text: "Reviewed.",
+        },
+      ]);
+      expect(
+        await reopened.inbox(
+          { sessionID: "indra-mario", after: reply.sequence },
+          signal,
+        ),
+      ).toEqual([]);
+      const isolated = new MesijClient({
+        ...setup.options,
+        dataDirectory: join(setup.directory, "other-data"),
+      });
+      await isolated.register("Mario", "indra-mario", signal);
+      expect(
+        await isolated.inbox({ sessionID: "indra-mario" }, signal),
+      ).toEqual([]);
+    } finally {
+      await setup.close();
+    }
+  },
+);
 
-test("real Mesij paginates and rejects changed idempotent retries safely", async () => {
-  const setup = await fixture();
-  try {
-    await setup.client.register("Bowser", "indra-bowser", signal);
-    await setup.client.register("Mario", "indra-mario", signal);
-    const first = await setup.client.send(message, signal);
-    const second = await setup.client.send(
-      { ...message, text: "Next task.", key: "next:assignment" },
-      signal,
-    );
-    expect(
-      await setup.client.inbox({ sessionID: "indra-mario", limit: 1 }, signal),
-    ).toHaveLength(1);
-    const page = await setup.client.inbox(
-      { sessionID: "indra-mario", after: first.sequence, limit: 1 },
-      signal,
-    );
-    expect(page[0]?.id).toBe(second.id);
-    await expect(
-      setup.client.send(
-        { ...message, text: "Changed private prompt." },
+realMesij(
+  "real Mesij paginates and rejects changed idempotent retries safely",
+  async () => {
+    const setup = await fixture();
+    try {
+      await setup.client.register("Bowser", "indra-bowser", signal);
+      await setup.client.register("Mario", "indra-mario", signal);
+      const first = await setup.client.send(message, signal);
+      const second = await setup.client.send(
+        { ...message, text: "Next task.", key: "next:assignment" },
         signal,
-      ),
-    ).rejects.toThrow("Mesij command failed.");
-  } finally {
-    await setup.close();
-  }
-});
+      );
+      expect(
+        await setup.client.inbox(
+          { sessionID: "indra-mario", limit: 1 },
+          signal,
+        ),
+      ).toHaveLength(1);
+      const page = await setup.client.inbox(
+        { sessionID: "indra-mario", after: first.sequence, limit: 1 },
+        signal,
+      );
+      expect(page[0]?.id).toBe(second.id);
+      await expect(
+        setup.client.send(
+          { ...message, text: "Changed private prompt." },
+          signal,
+        ),
+      ).rejects.toThrow("Mesij command failed.");
+    } finally {
+      await setup.close();
+    }
+  },
+);
 
 test("emit sends strict JSON on stdin, never prompt text in argv", async () => {
   const setup = await fixture();
