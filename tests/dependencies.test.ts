@@ -82,15 +82,62 @@ test("dependency provenance checks every page, signature, count, and current hea
 test("Effect and native ID schema stay pinned to the OpenCode SDK release", async () => {
   const manifest = z.object({
     dependencies: z.record(z.string(), z.string()),
+    peerDependencies: z.record(z.string(), z.string()).default({}),
   });
   const read = async (path: string) =>
     manifest.parse(await Bun.file(new URL(path, import.meta.url)).json());
   const pogo = await read("../package.json");
   const plugin = await read("../node_modules/@opencode/plugin/package.json");
+  const client = await read("../node_modules/@opencode/client/package.json");
+  const schema = await read("../node_modules/@opencode/schema/package.json");
   // One runtime copy: Pogo programs and the SDK share fiber/runtime types.
   expect(pogo.dependencies["effect"]).toMatch(/^\d+\.\d+\.\d+$/);
   expect(pogo.dependencies["effect"]).toBe(plugin.dependencies["effect"]);
+  expect(pogo.dependencies["effect"]).toBe(client.peerDependencies["effect"]);
+  expect(pogo.dependencies["effect"]).toBe(schema.dependencies["effect"]);
   expect(pogo.dependencies["@opencode/schema"]).toBe(
     plugin.dependencies["@opencode/schema"],
   );
+  expect(pogo.dependencies["@opencode/schema"]).toBe(
+    client.dependencies["@opencode/schema"],
+  );
+});
+
+test("Dependabot updates OpenCode and Effect together after one day", async () => {
+  const { updates } = z
+    .object({
+      updates: z.array(
+        z.object({
+          "package-ecosystem": z.string(),
+          schedule: z.object({ interval: z.string() }),
+          cooldown: z.object({ "default-days": z.number() }),
+          ignore: z.array(z.unknown()).default([]),
+          groups: z.record(
+            z.string(),
+            z.object({ patterns: z.array(z.string()) }),
+          ),
+        }),
+      ),
+    })
+    .parse(
+      Bun.YAML.parse(
+        await Bun.file(
+          new URL("../.github/dependabot.yml", import.meta.url),
+        ).text(),
+      ),
+    );
+  const bun = updates.find((update) => update["package-ecosystem"] === "bun");
+  expect(bun?.groups["opencode-sdk"]?.patterns).toEqual([
+    "@opencode/*",
+    "effect",
+  ]);
+  expect(bun?.ignore).toEqual([]);
+  const groups = Object.keys(bun?.groups ?? {});
+  expect(groups.indexOf("opencode-sdk")).toBeLessThan(
+    groups.indexOf("dependencies"),
+  );
+  for (const update of updates) {
+    expect(update.schedule.interval).toBe("daily");
+    expect(update.cooldown["default-days"]).toBe(1);
+  }
 });

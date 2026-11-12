@@ -60,9 +60,9 @@ SQLite schema or Slack scopes.
 
 ### Version
 
-`effect` is pinned to **4.0.6**, the exact version that the installed
-`@opencode/plugin` and `@opencode/client` 2.2.5 depend on. Pogo and the SDK
-then load one Effect runtime. Effect 4.1.2 is the current npm `latest`.
+`effect` is pinned to **4.1.0**, the exact version that the installed
+`@opencode/plugin` 2.2.7 requires and `@opencode/client` 2.2.7 declares as a peer.
+Pogo and the SDK then load one Effect runtime.
 Upgrade Effect together with the OpenCode SDK; a dependency test enforces the
 match. API usage follows the Effect 4 documentation at
 <https://effect.website/docs/v4> and the installed declarations.

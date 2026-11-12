@@ -13,14 +13,12 @@ updates:
     commit-message:
       prefix: chore
       include: scope
-    ignore:
-      # Effect stays pinned to the OpenCode SDK's version (AGENTS.md).
-      - dependency-name: effect
     groups:
       pi-runtime:
         patterns: ["@earendil-works/*"]
       opencode-sdk:
-        patterns: ["@opencode/client", "@opencode/plugin"]
+        # Keep Effect compatible with the OpenCode SDK (AGENTS.md).
+        patterns: ["@opencode/*", "effect"]
       dependencies:
         patterns: ["*"]
       security-updates:

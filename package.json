@@ -22,21 +22,21 @@
     "check": "bun run typecheck && bun run lint && bun test"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-durable": "1.5.0",
-    "@opencode/client": "^2.2.5",
-    "@opencode/plugin": "2.2.5",
-    "@opencode/schema": "2.2.5",
-    "@slack/socket-mode": "^3.1.1",
+    "@earendil-works/chord": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-durable": "1.5.2",
+    "@opencode/client": "^2.2.7",
+    "@opencode/plugin": "2.2.7",
+    "@opencode/schema": "2.2.7",
+    "@slack/socket-mode": "^3.2.0",
     "@slack/web-api": "^8.3.0",
     "croner": "^11.0.0",
-    "effect": "4.0.6",
+    "effect": "4.1.0",
     "pino": "^10.4.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.5",
+    "@biomejs/biome": "^2.6.6",
     "@types/bun": "^1.4.4",
     "typescript": "^7.0.2"
   }

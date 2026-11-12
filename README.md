@@ -349,7 +349,7 @@ Consult the server's V2 permission documentation before permitting tools.
 
 ### Pi Durable
 
-Pogo embeds `@earendil-works/pi-durable` **1.5.0**, using SQLite on Bun.
+Pogo embeds `@earendil-works/pi-durable` **1.5.2**, using SQLite on Bun.
 It does not require a Pi server or the Pi CLI. Pi Durable's API is experimental;
 the three direct Pi packages are pinned together.
 
@@ -497,7 +497,7 @@ because it conflicts with `noPropertyAccessFromIndexSignature`; record keys use
 bracket access. Do not replace it with casts, suppression comments, or weaker
 type-safety rules.
 
-Effect **4.0.6** stays pinned to the OpenCode SDK's version. The official
+Effect **4.1.0** stays pinned to the OpenCode SDK's version. The official
 `effect-ts` and `effect-v3-to-v4` skills are installed in `.agents/skills`;
 [provenance and file hashes](.agents/effect-skills.json) record their upstream
 revision. Read `node_modules/effect/AGENTS.md` before changing Effect code.
@@ -507,11 +507,12 @@ Biome leaves these two upstream skill files unformatted to preserve their hashes
 
 ### Dependency updates
 
-Dependabot checks Bun dependencies and pinned GitHub Actions each Monday.
-Pi runtime packages and OpenCode SDK packages have separate groups; other
-dependencies are grouped together. Security updates also use a group.
-Version updates have a seven-day cooldown; security updates bypass it.
-CI checks that all three Pi runtime packages stay pinned to one release.
+Dependabot checks Bun dependencies and pinned GitHub Actions daily.
+Pi runtime packages have their own group. All `@opencode/*` packages and
+`effect` update together; other dependencies are grouped together.
+Security updates also use a group. Version updates have a one-day cooldown;
+security updates bypass it. CI checks that all three Pi runtime packages stay
+pinned to one release and that Effect matches the OpenCode SDK's version.
 
 The repository policy permits auto-merge for all version levels, including
 major updates, only after the required `Quality checks` gate passes. `main`
