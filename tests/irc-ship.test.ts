@@ -81,7 +81,7 @@ async function setup(
     account: "galactica",
     passwordEnv: "POGO_IRC_GALACTICA",
     channels: ["#galactica"],
-    access: { crewTurnsPerHour: 3, ...access },
+    access: { shipTurnsPerAgentPerHour: 1, ...access },
     crew: [
       {
         id: "chief",
@@ -251,7 +251,7 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
   );
   // jack → captain; captain → chief (1); chief → tyrol by mention (2) and
   // → captain by reply (3); tyrol → captain would be the 4th ship message in
-  // this hour and exceeds crewTurnsPerHour = 3.
+  // this hour and exceeds 1 per agent × 3 agents.
   await until(() => backends.tyrol.prompts.length === 1, 5000, "tyrol prompt");
   await until(
     () => backends.captain.prompts.length === 2,
@@ -266,7 +266,7 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
   await delay(300);
   expect(backends.chief.prompts).toHaveLength(1);
   expect(backends.chief.prompts[0]?.text).toBe(
-    "[IRC #galactica, from account galactica, an account of this ship (captain or crew). Reply only if the message needs your action; answer [[pogo:silent]] to acknowledgements and thanks. IRC shows plain text only.]\n\nplease check the CI run.",
+    "[IRC #galactica, from account galactica, an account of this ship (captain or crew). Reply only if you are tagged and can add something useful, to correct an error, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.]\n\nplease check the CI run.",
   );
   expect(backends.tyrol.prompts[0]?.text).toContain(
     "can you look at the flaky test?",
@@ -401,3 +401,38 @@ test("irc ship: a DM reply never goes to a nick another account now holds", asyn
     ["jack", "Private answer for jack."],
   ]);
 }, 15_000);
+
+test("irc ship: an all-call reaches the captain and every crew member", async () => {
+  const { fake, backends } = await setup();
+  fake.say(
+    { nick: "jack", account: "jack" },
+    "#galactica",
+    "Everyone, report status",
+  );
+  await until(
+    () =>
+      backends.captain.prompts.length === 1 &&
+      backends.chief.prompts.length === 1 &&
+      backends.tyrol.prompts.length === 1,
+    5000,
+    "all-call fan-out",
+  );
+  expect(backends.captain.prompts[0]?.text).toBe(
+    "[Admitted by text mention: everyone]\n\nEveryone, report status",
+  );
+  for (const crew of [backends.chief, backends.tyrol])
+    expect(crew.prompts[0]?.text).toContain("This is an all-call");
+  // Untagged traffic that is not an all-call reaches nobody.
+  fake.say(
+    { nick: "jack", account: "jack" },
+    "#galactica",
+    "the build is green",
+  );
+  fake.say({ nick: "jack", account: "jack" }, "#galactica", "everyones build");
+  await delay(300);
+  expect(
+    [backends.captain, backends.chief, backends.tyrol].map(
+      (b) => b.prompts.length,
+    ),
+  ).toEqual([1, 1, 1]);
+});

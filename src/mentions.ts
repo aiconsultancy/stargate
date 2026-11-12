@@ -4,17 +4,13 @@ import { z } from "zod";
  * Names that address a bot without a typed Slack mention, shared by spoken
  * and text mentions. Each name is literal; spelling variants must be listed.
  */
-export const mentionNamesSchema = z
-  .array(
-    z
-      .string()
-      .trim()
-      .min(1)
-      .max(40)
-      .regex(/^[\p{L}\p{N}][\p{L}\p{N}' -]*$/u),
-  )
+export const mentionNameSchema = z
+  .string()
+  .trim()
   .min(1)
-  .max(20);
+  .max(40)
+  .regex(/^[\p{L}\p{N}][\p{L}\p{N}' -]*$/u);
+export const mentionNamesSchema = z.array(mentionNameSchema).min(1).max(20);
 
 /** Channel IDs only: not DMs, which need no mention, and not `*`. */
 export const mentionChannelsSchema = z

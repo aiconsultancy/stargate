@@ -619,6 +619,7 @@ test("custom init creates only configured worktrees, generic prompts, and genera
       "utf8",
     );
     expect(worker).not.toContain("{{");
+    expect(worker).toContain("IRC sessions:");
     expect(worker).toContain("pogo_crew complete");
     expect(worker).toContain("Before marking the task complete");
     expect(worker).toContain("pogo_dm");

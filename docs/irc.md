@@ -65,8 +65,9 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
       "deniedAccounts": [],
       "deniedChannels": [],
       "textMentions": ["all captains"],
+      "allCallWords": ["all hands", "all crew", "everyone"],
       "peerCaptains": [],
-      "crewTurnsPerHour": 10
+      "shipTurnsPerAgentPerHour": 60
     },
     "crew": [
       {
@@ -167,9 +168,16 @@ the request that dispatched them.
 
 A channel message starts a turn when it:
 
-- names the captain's nick as a whole word, for example `galactica: status?`;
-- contains one of `access.textMentions` (captain only); or
+- names the agent's nick as a whole word, for example `galactica: status?`;
+- contains one of `access.textMentions` (captain only);
+- is an **all-call**: it contains one of `access.allCallWords` (default
+  `all hands`, `all crew`, `everyone`; whole words, any letter case, so
+  `Everyone,` counts and `everyones` does not). An all-call reaches the
+  captain and every crew member in that channel. `[]` turns all-calls off;
+  or
 - is a `+draft/reply` to one of the connection's own recent messages.
+
+No other channel traffic reaches a captain or crew session.
 
 A direct message to the captain always starts a turn. Crew connections
 ignore direct messages.
@@ -304,18 +312,31 @@ member's task session, the captain uses `pogo_crew` as usual.
 
 ### Crew-to-crew messages
 
-A crew member hears a ship channel message that mentions its nick, or that
-replies to one of its messages. The sender can be a person, the captain or
-another crew member. A message from any of this ship's accounts (captain or
+A crew member hears a ship channel message that mentions its nick, replies
+to one of its messages, or is an all-call. It does not see other channel
+traffic. The sender can be a person, the captain or another crew member. A message from any of this ship's accounts (captain or
 crew) is a **ship message**:
 
 - the pinned captain sees `;k=crew`; crew sessions see a note that the
   sender is a ship account and that acknowledgements need
   `[[pogo:silent]]`;
-- Pogo admits at most `access.crewTurnsPerHour` ship messages (default
-  10) per channel in a rolling hour, across the captain and every crew
-  member of the ship. Later ship messages are ignored with one warning in
-  the log. `0` turns ship messages off. Restarts do not reset the count.
+- An all-call from a ship account counts once for each agent it reaches,
+  like other ship messages; an all-call from a person is not limited by
+  this cap.
+- Pogo admits at most `access.shipTurnsPerAgentPerHour` (default 60,
+  maximum 600) ship messages **per agent** in a rolling hour. A channel's
+  cap is that value times the ship agents configured in it: the captain
+  plus each crew member whose `channels` list it, with names folded like
+  every other channel key. For example, a captain and two crew in
+  `#galactica` give 180 ship messages an hour; a channel with only the
+  captain gives 60. The count is per channel across the whole ship, not
+  per sender. A direct message from a crew account to the captain has two
+  participants: its cap is the per-agent value times 2 (default 120), counted
+  in that direct-message conversation. Later ship messages are ignored with one warning in the log.
+  `0` turns ship messages off. Restarts do not reset the count.
+- `shipTurnsPerAgentPerHour` replaces `crewTurnsPerHour` (v0.4.0, a flat
+  per-channel total). The old key is rejected, so a config that set it
+  fails `config check` instead of silently changing meaning.
 - No connection ever answers its own messages.
 
 ### Breakout channels (future)
@@ -327,11 +348,58 @@ same join, invite and invite-ignore rules. Grants must stay captain-owned
 and auditable, and the `length(1)` rule on `crew[].channels` would become
 a captain-managed limit.
 
+## Response policy
+
+Generated definitions carry the same reply rules for the captain ("IRC
+messages" paragraph) and for crew ("IRC sessions" paragraph). Unpinned IRC
+sessions (crew, Pi) also get a one-line reminder in each turn's note. An
+agent replies on IRC only when:
+
+1. it is tagged and has something useful to add;
+2. it must correct a factual error or a wrong instruction in a message it
+   can see; or
+3. an all-call asks everyone to answer.
+
+Otherwise it answers `[[pogo:silent]]` and Pogo posts nothing. For an
+all-call it answers once and briefly, and stays silent if another agent
+already said the same. No acknowledgements, thanks, agreement-only or status
+messages; one short, specific message, no repeats.
+
+### Who speaks to whom
+
+Crew speak to the captain, not to each other. The captain coordinates and
+gives crew work or information with `pogo_dm` (a reply is needed now),
+`pogo_mail` (no reply is needed now) or `pogo_crew`. A crew member reaches
+the captain in the ship channel, or with `pogo_dm` to `captain` from its
+task session, and reaches another crew member with `pogo_dm` or `pogo_mail`
+from its task session. An agent tags another crew member on IRC only when a
+person or the captain asks for it in that channel, or to correct an error.
+The mention/reply mechanism and the ship message limit stay in force; this
+is guidance, not a hard block.
+
+`pogo_mail` and `pogo_dm` do not work in a crew IRC session, so there the
+crew member asks the captain to relay:
+
+- both tools need the `pogo_mail` permission; a crew IRC session gets the
+  registration's `backend.permissions`, which default to deny-all;
+- the crew plugin accepts a crew caller only from that member's own crew
+  task session (the session it provisioned). An IRC session uses the same
+  agent but is another root session, so the plugin refuses it. Tool identity
+  comes from the host, so a session cannot send as another member;
+- crew mail also needs an originating captain task or a validated reply,
+  which an IRC session does not have;
+- Pi Durable crew IRC registrations get no crew tools at all.
+
+Giving IRC sessions these tools would need a new crew identity binding
+(IRC session → member) in the crew plugin. That is not implemented.
+
 ## Captain instructions
 
 Generated captain definitions include an "IRC messages" paragraph that
-explains `s=irc`, `;k=crew` and plain text. A definition generated before
-this feature does not contain it: add it, as for other instruction changes.
+explains `s=irc`, `;k=crew`, all-calls, plain text and the response policy.
+Generated crew definitions include an "IRC sessions" paragraph. A definition
+generated before these features does not contain them: add them, as for
+other instruction changes.
 
 ## Implementation
 

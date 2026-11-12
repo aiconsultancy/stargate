@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { IrcConfig } from "../config";
+import { defaultAllCallWords, type IrcConfig } from "../config";
 import { findMention } from "../mentions";
 import { peerTurnsPerHour } from "../peers";
 import type { Incoming, Job } from "../store";
@@ -122,8 +122,10 @@ function withoutAddress(
  * IRCv3 `account` tag, never the nick: a message without it is rejected.
  * The connection's own account (its echoes, other sessions of the same
  * account) is never admitted. Channels need a nick mention, a configured
- * text mention (captain only) or a `+draft/reply` to this connection's own
- * message; direct messages to the captain always start a turn. NOTICE,
+ * text mention (captain only), an all-call word (captain and crew) or a
+ * `+draft/reply` to this connection's own message; other channel traffic
+ * never reaches the session. Direct messages to the captain always start a
+ * turn. NOTICE,
  * TAGMSG and CTCP never start one. Turn limits are applied by the caller.
  * Channel and account keys are folded, so every spelling of a channel
  * shares one conversation and one turn limit.
@@ -152,10 +154,15 @@ export function routeIrcMessage(
   );
   const reply = message.tags.get("+draft/reply") ?? message.tags.get("+reply");
   const replied = validMsgid(reply) && context.sent(reply);
-  const textRule = config.access.textMentions;
+  // Captain text mentions and all-calls; the matched word becomes the
+  // turn's text mention, so the session sees why it was admitted.
+  const words = [
+    ...(member.role === "captain" ? (config.access.textMentions ?? []) : []),
+    ...config.access.allCallWords,
+  ];
   const named =
-    !direct && !mentioned && !replied && member.role === "captain" && textRule
-      ? findMention([body], textRule)
+    !direct && !mentioned && !replied && words.length
+      ? findMention([body], words)
       : undefined;
   if (!direct && !mentioned && !replied && named === undefined) return;
   const text = withoutAddress(body, nicks, caseFold).trim();
@@ -204,14 +211,34 @@ export type IrcLimits = {
 export const ircWindowMs = 60 * 60_000;
 
 /**
+ * Ship agents configured in a channel: the captain when it lists the
+ * channel, plus each crew member that lists it and may use it (it must also
+ * be a captain channel). Names fold like every other channel key.
+ */
+export function shipAgents(
+  config: IrcConfig,
+  channel: string,
+  caseFold: Fold = rfc1459,
+) {
+  const key = caseFold(channel);
+  const lists = (channels: readonly string[]) =>
+    channels.some((name) => caseFold(name) === key);
+  if (!lists(config.channels)) return 0;
+  return 1 + config.crew.filter((member) => lists(member.channels)).length;
+}
+
+/**
  * Peer captains: at most five messages per conversation (channel or direct
  * message) in a rolling hour. Ship accounts (captain and crew): at most
- * `crewTurnsPerHour` messages per channel across the whole ship.
+ * `shipTurnsPerAgentPerHour` × the ship agents configured in the channel,
+ * per channel across the whole ship; in a direct message between two ship
+ * agents, `shipTurnsPerAgentPerHour` × 2 for that conversation.
  */
 export function withinLimits(
   admission: IrcAdmission,
   config: IrcConfig,
   limits: IrcLimits,
+  caseFold: Fold = rfc1459,
 ) {
   const since = admission.received - ircWindowMs;
   if (admission.sender === "captain")
@@ -223,28 +250,62 @@ export function withinLimits(
         scope: { conversation: admission.conversation },
       }) < peerTurnsPerHour
     );
-  if (admission.sender === "crew")
+  if (admission.sender === "crew") {
+    // A channel's cap scales with the ship agents configured in it. A direct
+    // message between two ship agents has exactly two participants; it
+    // counts in its own conversation.
+    const channel = isIrcChannel(admission.channel);
     return (
       limits.count({
         botKeys: limits.shipKeys,
         sender: "crew",
         since,
-        scope: { channel: admission.channel },
-      }) < config.access.crewTurnsPerHour
+        scope: channel
+          ? { channel: admission.channel }
+          : { conversation: admission.conversation },
+      }) <
+      config.access.shipTurnsPerAgentPerHour *
+        (channel ? shipAgents(config, admission.channel, caseFold) : 2)
     );
+  }
   return true;
 }
 
-/** Prompt prefix for sessions without a source line (crew and Pi). */
-export function ircNote(job: Pick<Job, "channel" | "user" | "sender">) {
+/** Reply rules for every ship agent on IRC (captain and crew). */
+export const ircResponsePolicy = `Reply on IRC only when:
+(a) you are tagged and you have something useful to add;
+(b) you must correct a factual error or a wrong instruction in a message you
+can see;
+(c) an all-call asks everyone to answer.
+In all other cases, answer [[pogo:silent]]. For an all-call, answer once and
+briefly. If another agent already said what you would say, answer
+[[pogo:silent]]. Do not post acknowledgements, thanks, agreement only or
+status chatter. Keep each reply short and specific: one message, no repeats.`;
+
+/**
+ * Prompt prefix for sessions without a source line (crew and Pi): who
+ * wrote, where, and a one-line reminder of the reply rules.
+ */
+export function ircNote(
+  job: Pick<Job, "channel" | "user" | "sender"> & {
+    textMention?: string | null | undefined;
+  },
+  allCallWords: readonly string[] = defaultAllCallWords,
+) {
   const where = isIrcChannel(job.channel) ? job.channel : "a direct message";
   const who =
     job.sender === "crew"
-      ? `${job.user}, an account of this ship (captain or crew). Reply only if the message needs your action; answer [[pogo:silent]] to acknowledgements and thanks`
+      ? `${job.user}, an account of this ship (captain or crew)`
       : job.sender === "captain"
         ? `${job.user}, another fleet captain's bot, not an operator`
         : job.user;
-  return `[IRC ${where}, from account ${who}. IRC shows plain text only.]`;
+  const allCall =
+    job.textMention !== undefined &&
+    job.textMention !== null &&
+    allCallWords.includes(job.textMention)
+      ? " This is an all-call: answer once and briefly, or answer [[pogo:silent]] if another agent already said it."
+      : "";
+  return `[IRC ${where}, from account ${who}. Reply only if you are tagged and can add something useful, to correct an error, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.${allCall}]`;
 }
 
 /** Persistent captain instructions, never a per-message user prefix. */
@@ -252,9 +313,29 @@ export const ircInstructions = `IRC messages:
 A source line that starts with s=irc came from the fleet IRC network, not
 Slack. c is the channel (percent-encoded, for example %23galactica) or, for a
 direct message, the sender's account; t and m are IRC message IDs; u is the
-sender's SASL account, which is the identity, never the nick. IRC shows plain
-text only: write short paragraphs and lists, no tables or headings. ;k=captain
-marks another fleet captain (peer rules apply). ;k=crew marks this ship's own
-crew account in a shared channel: answer only when the message needs your
-action, and answer acknowledgements with [[pogo:silent]]. Pogo admits only a
-few ship messages per channel per hour, so keep crew exchanges short.`;
+sender's SASL account. The account is the identity, not the nick. IRC shows
+plain text only: write short paragraphs and lists, no tables or headings.
+;k=captain marks another fleet captain (peer rules apply). ;k=crew marks an
+account of this ship. [Admitted by text mention: WORD] with an all-call word
+(by default: all hands, all crew, everyone) is an all-call to every agent in
+that channel.
+${ircResponsePolicy}
+You coordinate the crew. Crew speak to you, not to each other. To give a crew
+member work or information, use pogo_dm when you need a reply now, pogo_mail
+in other cases, and pogo_crew for tasks. Tag a crew nick on IRC only when a
+person asks for it in that channel, or to correct an error. Pogo admits a
+bounded number of ship messages per channel per hour.`;
+
+/** Persistent crew instructions (crew definitions), never a prefix. */
+export const ircCrewInstructions = `IRC sessions:
+A message that starts with [IRC ...] came from the fleet IRC network. Pogo
+runs it in a separate IRC session, not in your task session. You see only
+messages that tag you, reply to you, or are all-calls.
+${ircResponsePolicy}
+Speak to the captain, not to other crew. To reach the captain, write in the
+ship channel, or use pogo_dm to captain from your task session. To reach
+another crew member, use pogo_dm when you need a reply now and pogo_mail in
+other cases. These tools work only in your task session: an IRC session is
+not your crew session, so they refuse it. In an IRC session, ask the captain
+to relay. Tag another crew member on IRC only when a person or the captain
+asks for it in that channel, or to correct an error.`;

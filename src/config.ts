@@ -3,7 +3,11 @@ import { z } from "zod";
 import { crewActivitySchema } from "./activity";
 import { cronjobsSchema } from "./cronjob-config";
 import { fold } from "./irc/protocol";
-import { mentionNamesSchema, mentionRuleSchema } from "./mentions";
+import {
+  mentionNameSchema,
+  mentionNamesSchema,
+  mentionRuleSchema,
+} from "./mentions";
 import { maintenanceSchema } from "./nightly/config";
 import { piModelSchema, piProviderSchema } from "./pi-model";
 import { transcriptionSchema } from "./transcription";
@@ -156,6 +160,7 @@ const ircChannel = z
     "IRC channel names cannot contain control characters",
   );
 const loopbackHosts = new Set(["127.0.0.1", "::1"]);
+export const defaultAllCallWords = ["all hands", "all crew", "everyone"];
 
 const ircServerSchema = z
   .strictObject({
@@ -229,16 +234,30 @@ export const ircSchema = z
           .default([]),
         /** Words that address the captain in its channels, like a nick mention. */
         textMentions: mentionNamesSchema.optional(),
+        /**
+         * All-call words (whole words, any case): a channel message that
+         * contains one reaches the captain and every crew member in that
+         * channel. `[]` turns all-calls off.
+         */
+        allCallWords: z
+          .array(mentionNameSchema)
+          .max(20)
+          .default([...defaultAllCallWords]),
         /** Accounts of other fleet captains: peer rules, 5 per target an hour. */
         peerCaptains: z.array(ircAccount).max(50).default([]),
-        /** Ship (captain/crew) messages admitted per channel in a rolling hour. */
-        crewTurnsPerHour: z.number().int().min(0).max(100).default(10),
+        /**
+         * Ship (captain/crew) messages admitted per agent in a rolling hour.
+         * A channel's cap is this value times the ship agents configured in
+         * it, counted across the whole ship. `0` turns ship messages off.
+         */
+        shipTurnsPerAgentPerHour: z.number().int().min(0).max(600).default(60),
       })
       .default({
         deniedAccounts: [],
         deniedChannels: [],
         peerCaptains: [],
-        crewTurnsPerHour: 10,
+        allCallWords: [...defaultAllCallWords],
+        shipTurnsPerAgentPerHour: 60,
       }),
     crew: z.array(ircCrewSchema).max(20).default([]),
     backend: backendSchema,

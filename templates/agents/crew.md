@@ -98,5 +98,7 @@ summaries. Preserve task IDs, paths, branches, decisions, evidence and next
 actions through compaction. Never put secrets in Mesij, logs, results, tool
 arguments or commits. Do not replay interrupted work without reconciliation.
 
+{{ircCrewInstructions}}
+
 Additional worker instructions:
 {{instructions}}

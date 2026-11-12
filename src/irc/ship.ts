@@ -180,7 +180,7 @@ export class IrcShip {
             user: job.user,
             ...(job.sender ? { sender: job.sender } : {}),
           }),
-          note: ircNote,
+          note: (job) => ircNote(job, config.access.allCallWords),
         },
         delivery: new IrcDelivery(client, options.readyMs),
         client,
@@ -233,10 +233,15 @@ export class IrcShip {
     });
     if (!admission) return;
     if (
-      !withinLimits(admission, this.config, {
-        shipKeys: keys,
-        count: (input) => this.store.turnsSince(input),
-      })
+      !withinLimits(
+        admission,
+        this.config,
+        {
+          shipKeys: keys,
+          count: (input) => this.store.turnsSince(input),
+        },
+        client.fold,
+      )
     ) {
       this.log.warn(
         { irc: member.id },

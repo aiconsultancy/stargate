@@ -14,6 +14,7 @@ import {
 import {
   type IrcMember,
   ircAllowed,
+  ircCrewInstructions,
   ircInstructions,
   ircNote,
   routeIrcMessage,
@@ -46,7 +47,7 @@ function shipConfig(overrides: Record<string, unknown> = {}): IrcConfig {
       deniedAccounts: ["mallory"],
       textMentions: ["all captains"],
       peerCaptains: ["defiant"],
-      crewTurnsPerHour: 2,
+      shipTurnsPerAgentPerHour: 1,
     },
     crew: [
       {
@@ -246,7 +247,7 @@ test("irc routing: ship and peer senders are marked; access rechecks", () => {
     ircNote({ channel: "#galactica", user: "galactica", sender: "crew" }),
   ).toContain("[[pogo:silent]]");
   expect(ircNote({ channel: "jack", user: "jack", sender: null })).toBe(
-    "[IRC a direct message, from account jack. IRC shows plain text only.]",
+    "[IRC a direct message, from account jack. Reply only if you are tagged and can add something useful, to correct an error, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.]",
   );
   expect(
     sourceLine({
@@ -297,7 +298,7 @@ test("irc limits: peers per conversation, ship messages per channel", async () =
   };
   const at = (minute: number) =>
     new Date(Date.UTC(2026, 10, 12, 10, minute)).toISOString();
-  // Ship messages: 2 per channel per hour across captain and crew.
+  // Ship messages: 1 per agent × 2 agents per channel per hour.
   expect(admit(captain, "galactica-chief", "s1", at(0))).toBe(true);
   expect(admit(chief, "galactica", "s2", at(1))).toBe(true);
   expect(admit(captain, "galactica-chief", "s3", at(2))).toBe(false);
@@ -529,7 +530,7 @@ test("irc casemapping: one folded channel key for caps, routing and denies", asy
     if (!admission) throw new Error("not routed");
     return withinLimits(admission, mixed, limits) && store.enqueue(admission);
   };
-  // crewTurnsPerHour is 2 for the whole ship channel, whatever its spelling.
+  // 1 per agent × 2 agents: 2 for the whole ship channel, whatever its spelling.
   expect(
     admit(routeAs(captainMember, "#galactica", "galactica-chief", "a")),
   ).toBe(true);
@@ -629,4 +630,321 @@ test("irc crew confinement: runtime checks use the negotiated CASEMAPPING", () =
       },
     ),
   ).toBeUndefined();
+});
+
+test("irc ship cap: per agent, times the ship agents configured in the channel", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-cap-"));
+  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  const store = new Store(join(directory, "pogo.sqlite"));
+  cleanup.push(() => store.close());
+  const [chiefConfig] = shipConfig().crew;
+  if (!chiefConfig) throw new Error("missing crew fixture");
+  // Captain in #galactica and #bridge; chief (spelled #Galactica) and
+  // tyrol in #galactica only. Default: 60 ship messages per agent an hour.
+  const ship = shipConfig({
+    channels: ["#galactica", "#bridge"],
+    access: {},
+    crew: [
+      { ...chiefConfig, channels: ["#Galactica"] },
+      {
+        ...chiefConfig,
+        id: "tyrol",
+        account: "galactica-tyrol",
+        passwordEnv: "POGO_IRC_GALACTICA_TYROL",
+      },
+    ],
+  });
+  expect(ship.access.shipTurnsPerAgentPerHour).toBe(60);
+  const two = shipConfig({ access: {} });
+  const limits = {
+    shipKeys: [captain.key, chief.key],
+    count: (input: Parameters<Store["turnsSince"]>[0]) =>
+      store.turnsSince(input),
+  };
+  let id = 0;
+  const admitted = (config: IrcConfig, target: string, attempts: number) => {
+    let count = 0;
+    for (let i = 0; i < attempts; i++) {
+      const admission = routeIrcMessage(
+        message(target, "galactica: status", {
+          account: "galactica-chief",
+          msgid: `cap${++id}`,
+          time: "2026-11-12T10:00:00.000Z",
+        }),
+        {
+          config,
+          member: { ...captain, channels: config.channels },
+          currentNick: "galactica",
+          sent: () => false,
+          now: () => 0,
+          fold: (value) => fold(value, "ascii"),
+        },
+      );
+      if (!admission) throw new Error("not routed");
+      if (withinLimits(admission, config, limits, (v) => fold(v, "ascii")))
+        count += store.enqueue(admission) ? 1 : 0;
+    }
+    return count;
+  };
+  // Two agents (captain + chief) in #galactica: 120 admitted, the 121st dropped.
+  expect(admitted(two, "#galactica", 121)).toBe(120);
+  // Three agents in #galactica (crew spelling folded): 180 in total.
+  expect(admitted(ship, "#GALACTICA", 61)).toBe(60);
+  expect(admitted(ship, "#galactica", 1)).toBe(0);
+  // #bridge has only the captain: 60.
+  expect(admitted(ship, "#bridge", 61)).toBe(60);
+  // 0 turns ship messages off.
+  const off = shipConfig({
+    channels: ["#galactica", "#quiet"],
+    access: { shipTurnsPerAgentPerHour: 0 },
+  });
+  expect(admitted(off, "#quiet", 1)).toBe(0);
+  expect(
+    ircSchema.safeParse({ ...shipConfig(), access: { crewTurnsPerHour: 10 } })
+      .success,
+  ).toBe(false);
+  expect(
+    ircSchema.safeParse({
+      ...shipConfig(),
+      access: { shipTurnsPerAgentPerHour: 601 },
+    }).success,
+  ).toBe(false);
+});
+
+test("irc ship cap: a crew → captain DM is capped at per agent × 2", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-dm-cap-"));
+  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  const store = new Store(join(directory, "pogo.sqlite"));
+  cleanup.push(() => store.close());
+  const limits = {
+    shipKeys: [captain.key, chief.key],
+    count: (input: Parameters<Store["turnsSince"]>[0]) =>
+      store.turnsSince(input),
+  };
+  const dm = (config: IrcConfig, msgid: string) => {
+    const admission = routeIrcMessage(
+      message("galactica", "status of the build?", {
+        account: "galactica-chief",
+        msgid,
+        time: "2026-11-12T10:00:00.000Z",
+      }),
+      {
+        config,
+        member: captain,
+        currentNick: "galactica",
+        sent: () => false,
+        now: () => 0,
+        fold: (value) => fold(value, "ascii"),
+      },
+    );
+    if (!admission) throw new Error("not routed");
+    expect(admission.sender).toBe("crew");
+    expect(admission.channel).toBe("galactica-chief");
+    return (
+      withinLimits(admission, config, limits, (v) => fold(v, "ascii")) &&
+      store.enqueue(admission)
+    );
+  };
+  // Default 60 per agent, two participants: 120 admitted, the 121st dropped.
+  const ship = shipConfig({ access: {} });
+  let admitted = 0;
+  for (let i = 0; i < 121; i++) if (dm(ship, `dm${i}`)) admitted++;
+  expect(admitted).toBe(120);
+  // 0 still turns ship messages off, in direct messages too.
+  const off = shipConfig({ access: { shipTurnsPerAgentPerHour: 0 } });
+  const fresh = new Store(join(directory, "off.sqlite"));
+  cleanup.push(() => fresh.close());
+  const offLimits = {
+    shipKeys: [captain.key],
+    count: (input: Parameters<Store["turnsSince"]>[0]) =>
+      fresh.turnsSince(input),
+  };
+  const admission = routeIrcMessage(
+    message("galactica", "hello", { account: "galactica-chief", msgid: "x" }),
+    {
+      config: off,
+      member: captain,
+      currentNick: "galactica",
+      sent: () => false,
+      now: () => 0,
+      fold: (value) => fold(value),
+    },
+  );
+  if (!admission) throw new Error("not routed");
+  expect(withinLimits(admission, off, offLimits)).toBe(false);
+});
+
+test("irc all-call: reaches every ship agent in the channel, word-bounded", async () => {
+  const [chiefConfig] = shipConfig().crew;
+  if (!chiefConfig) throw new Error("missing crew fixture");
+  const ship = shipConfig({
+    channels: ["#galactica", "#bridge"],
+    access: {},
+    crew: [
+      chiefConfig,
+      {
+        ...chiefConfig,
+        id: "tyrol",
+        account: "galactica-tyrol",
+        passwordEnv: "POGO_IRC_GALACTICA_TYROL",
+        channels: ["#bridge"],
+      },
+    ],
+  });
+  expect(ship.access.allCallWords).toEqual([
+    "all hands",
+    "all crew",
+    "everyone",
+  ]);
+  const tyrol: IrcMember = {
+    ...chief,
+    id: "galactica-irc-tyrol",
+    account: "galactica-tyrol",
+    nick: "galactica-tyrol",
+    channels: ["#bridge"],
+    key: "tyrol-key",
+  };
+  const members = {
+    captain: { ...captain, channels: ship.channels },
+    chief,
+    tyrol,
+  };
+  const reach = (
+    text: string,
+    target = "#galactica",
+    config = ship,
+    account = "jack",
+  ) =>
+    Object.entries(members)
+      .filter(
+        ([, member]) =>
+          routeIrcMessage(message(target, text, { account }), {
+            config,
+            member,
+            currentNick: member.nick,
+            sent: () => false,
+            now: () => 0,
+            fold: (value) => fold(value, "ascii"),
+          }) !== undefined,
+      )
+      .map(([name]) => name);
+  // Everyone in #galactica (captain, chief); tyrol is only in #bridge.
+  expect(reach("Everyone, report fuel levels")).toEqual(["captain", "chief"]);
+  expect(reach("ALL HANDS to stations")).toEqual(["captain", "chief"]);
+  expect(reach("status, all crew?")).toEqual(["captain", "chief"]);
+  expect(reach("everyone: muster", "#bridge")).toEqual(["captain", "tyrol"]);
+  // Word boundaries: no partial words.
+  expect(reach("everyones favourite build is green")).toEqual([]);
+  expect(reach("allcrew")).toEqual([]);
+  // Untagged traffic that is not an all-call reaches no crew.
+  expect(reach("the build is green")).toEqual([]);
+  // Tags still work and reach only the tagged agent.
+  expect(reach("galactica-chief: check CI")).toEqual(["chief"]);
+  // The admission records the all-call word for the session note.
+  expect(
+    routeIrcMessage(
+      message("#galactica", "Everyone, report", { account: "jack" }),
+      {
+        config: ship,
+        member: chief,
+        currentNick: chief.nick,
+        sent: () => false,
+        now: () => 0,
+        fold: (value) => fold(value),
+      },
+    )?.textMention,
+  ).toBe("everyone");
+  // The list is configurable per registration; [] turns all-calls off.
+  const muster = shipConfig({ access: { allCallWords: ["muster"] } });
+  expect(reach("muster on deck", "#galactica", muster)).toEqual([
+    "captain",
+    "chief",
+  ]);
+  expect(reach("everyone, report", "#galactica", muster)).toEqual([]);
+  const none = shipConfig({ access: { allCallWords: [] } });
+  expect(reach("everyone, report", "#galactica", none)).toEqual([]);
+  expect(
+    ircSchema.safeParse({ ...shipConfig(), access: { allCallWords: ["a,b"] } })
+      .success,
+  ).toBe(false);
+});
+
+test("irc all-call: ship senders count against the channel cap, people do not", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-allcall-"));
+  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  const store = new Store(join(directory, "pogo.sqlite"));
+  cleanup.push(() => store.close());
+  // 1 per agent × 2 agents (captain + chief) = 2 ship messages an hour.
+  const config = shipConfig({ access: { shipTurnsPerAgentPerHour: 1 } });
+  const limits = {
+    shipKeys: [captain.key, chief.key],
+    count: (input: Parameters<Store["turnsSince"]>[0]) =>
+      store.turnsSince(input),
+  };
+  let id = 0;
+  const call = (member: IrcMember, account: string) => {
+    const admission = routeIrcMessage(
+      message("#galactica", "everyone: report", {
+        account,
+        msgid: `all${++id}`,
+        time: "2026-11-12T10:00:00.000Z",
+      }),
+      {
+        config,
+        member,
+        currentNick: member.nick,
+        sent: () => false,
+        now: () => 0,
+        fold: (value) => fold(value),
+      },
+    );
+    if (!admission) throw new Error("not routed");
+    return withinLimits(admission, config, limits) && store.enqueue(admission);
+  };
+  // People are never capped by the ship limit.
+  for (let i = 0; i < 5; i++) expect(call(chief, "jack")).toBe(true);
+  // Ship all-calls fan out and count: the captain's reaches chief (1),
+  // chief's reaches the captain (2), the next one is dropped.
+  expect(call(chief, "galactica")).toBe(true);
+  expect(call(captain, "galactica-chief")).toBe(true);
+  expect(call(chief, "galactica")).toBe(false);
+});
+
+test("irc instructions: response policy, all-calls and crew routing via the captain", async () => {
+  for (const text of [ircInstructions, ircCrewInstructions]) {
+    expect(text).toContain("[[pogo:silent]]");
+    expect(text).toContain("tagged");
+    expect(text).toContain("correct");
+    expect(text).toContain("all-call");
+    expect(text).toContain("answer once");
+    expect(text).toContain("acknowledgements");
+    expect(text).toContain("one message");
+  }
+  // Crew speak to the captain. Crew-to-crew uses pogo_dm (reply needed now)
+  // or pogo_mail (otherwise); those refuse an IRC session, so there the
+  // crew member asks the captain to relay.
+  expect(ircCrewInstructions).toContain("Speak to the captain");
+  expect(ircCrewInstructions).toContain("pogo_dm");
+  expect(ircCrewInstructions).toContain("pogo_mail");
+  expect(ircCrewInstructions).toContain("ask the captain");
+  expect(ircCrewInstructions).not.toContain("Mesij");
+  expect(ircInstructions).toContain("You coordinate the crew");
+  expect(ircInstructions).toContain("pogo_dm");
+  // Crew definitions carry the paragraph; every unpinned IRC turn a reminder.
+  expect(
+    await Bun.file(
+      new URL("../templates/agents/crew.md", import.meta.url),
+    ).text(),
+  ).toContain("{{ircCrewInstructions}}");
+  const note = ircNote({ channel: "#galactica", user: "jack", sender: null });
+  expect(note).toContain("[[pogo:silent]]");
+  expect(note).toContain("all-call");
+  expect(
+    ircNote({
+      channel: "#galactica",
+      user: "jack",
+      sender: null,
+      textMention: "everyone",
+    }),
+  ).toContain("This is an all-call");
 });

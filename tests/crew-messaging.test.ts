@@ -612,3 +612,26 @@ test("lost reply receipts recover the original captain route without cross-capta
     await f.close();
   }
 });
+
+test("crew mail refuses a crew agent session that is not the member's session", async () => {
+  // A Pogo IRC session uses the crew agent but is a separate root session:
+  // it cannot send Mesij mail as that member.
+  const f = await fixture();
+  try {
+    const irc: CrewCaller = {
+      sessionID: "ses_irc_worker",
+      agent: "worker",
+      id: "host-call",
+      signal: new AbortController().signal,
+    };
+    await expect(
+      f.engine.mail({ op: "send", to: "captain", text: "From IRC" }, irc),
+    ).rejects.toThrow("Only the configured captain or assigned worker");
+    await expect(
+      f.engine.dm({ op: "send", to: "captain", text: "From IRC" }, irc),
+    ).rejects.toThrow("Only the configured captain or assigned worker");
+    expect(f.events).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
