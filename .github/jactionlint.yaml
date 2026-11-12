@@ -2,3 +2,9 @@ required-checks:
   - name: Quality checks
     events: [pull_request]
     branches: [main]
+
+# Operator decision (2026-11-12): daily dependency updates with a one-day
+# supply-chain cool-off, matched by bunfig.toml minimumReleaseAge.
+rules:
+  dependabot-cooldown:
+    days: 1

@@ -1,0 +1,4 @@
+[install]
+# Supply-chain cool-off: install only package versions published at least one
+# day ago. Matches the Dependabot cooldown.
+minimumReleaseAge = 86400

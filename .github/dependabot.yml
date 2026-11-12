@@ -4,16 +4,18 @@ updates:
   - package-ecosystem: bun
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: daily
       time: "07:00"
       timezone: Etc/UTC
     open-pull-requests-limit: 5
     cooldown:
-      default-days: 7
+      default-days: 1
     commit-message:
       prefix: chore
       include: scope
+    ignore:
+      # Effect stays pinned to the OpenCode SDK's version (AGENTS.md).
+      - dependency-name: effect
     groups:
       pi-runtime:
         patterns: ["@earendil-works/*"]
@@ -28,13 +30,12 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: daily
       time: "07:00"
       timezone: Etc/UTC
     open-pull-requests-limit: 5
     cooldown:
-      default-days: 7
+      default-days: 1
     commit-message:
       prefix: chore
       include: scope

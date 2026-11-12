@@ -122,3 +122,14 @@ Work on a feature branch, not `main`. Preserve unrelated user changes. Use
 Conventional Commits, for example `feat: add backend endpoint configuration`
 or `fix: preserve reply progress after delivery failure`. Stage only intended
 project files and inspect the staged diff for credentials before committing.
+
+Every merge to `main` that passes Quality checks becomes a GitHub release.
+The squash-merge subject (the PR title) sets the version bump, so the PR title
+must also be a Conventional Commit:
+
+- `feat:` → minor; `fix:`, `perf:`, `chore:`, `docs:` and others → patch;
+- `!` after the type, or a `BREAKING CHANGE:` footer → major (minor before
+  1.0.0).
+
+Do not edit the version in `package.json` or create tags by hand. See
+`docs/releases.md`.
