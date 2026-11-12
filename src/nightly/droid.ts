@@ -17,6 +17,7 @@ import {
 } from "./droid-facts";
 import type { Reason } from "./exec";
 import { atomicWrite, readOptional } from "./files";
+import { queuedTaskAction } from "./idle";
 import { Journal } from "./journal";
 import { maintenanceDirectory } from "./paths";
 import { noticeSchemaID, queueNotice, type Report, summary } from "./report";
@@ -442,6 +443,12 @@ function describeReport(report: ReportDigest) {
   return `Run started ${report.startedAt}: ${report.outcome}${report.reason ? ` (${report.reason})` : ""}.${changed.length ? ` ${changed.join("; ")}.` : ""}`;
 }
 
+/** One queued crew assignment and the captain action that resolves it. */
+function queuedNote(task: DroidFacts["crewQueue"][number]) {
+  const action = queuedTaskAction(task);
+  return `Queued crew task ${task.taskID} (${task.crew}, ${task.originIsPin ? "from the pinned captain" : "from an earlier captain session"}): ${action.charAt(0).toLowerCase()}${action.slice(1)}`;
+}
+
 function fallbackBody(trigger: Trigger, facts: DroidFacts, list: Finding[]) {
   const lines: string[] = [];
   const newest = facts.reports[0];
@@ -470,6 +477,10 @@ function prompt(input: {
     newest
       ? `Newest report ${newest.name}: ${describeReport(newest)}`
       : "No maintenance report exists yet.",
+    ...facts.crewQueue.map(
+      (task) =>
+        `Note: ${queuedNote(task)}. ${task.report ? "It keeps maintenance busy (busy-crew) while queued." : "It does not block maintenance; it waits until the captain asks."}`,
+    ),
     `maintenance_recover preconditions: ${input.recoverBlocked ? `not met (${input.recoverBlocked})` : "met, subject to the idle check"}.`,
     "Use the tools as needed, then write the Slack post body.",
   ].join("\n");
@@ -497,6 +508,9 @@ function composePost(input: {
     [
       `Droid actions: ${input.actions.length ? input.actions.join("; ") : "none"}.`,
       `Checks: ${input.list.length ? input.list.map((finding) => finding.code).join(", ") : "all clear"}.`,
+      ...input.facts.crewQueue
+        .slice(0, 5)
+        .map((task) => `${queuedNote(task)}.`),
       ...(commands.length
         ? ["Operator commands:", ...commands.map((command) => `  ${command}`)]
         : []),

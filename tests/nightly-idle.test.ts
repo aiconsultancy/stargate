@@ -2,10 +2,18 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { CrewState } from "../src/crew/state";
 import { CronStore } from "../src/cron-store";
+import { maintenanceSchema } from "../src/nightly/config";
 import { type Crew, crewDatabase, piDatabase } from "../src/nightly/crews";
-import { checkIdle, type IdleInput, waitForIdle } from "../src/nightly/idle";
+import {
+  checkIdle,
+  type IdleInput,
+  queuedCrewTasks,
+  waitForIdle,
+} from "../src/nightly/idle";
 import type { OpenCodeControl } from "../src/nightly/opencode";
+import { bounds } from "../src/nightly/run";
 import { Store } from "../src/store";
 
 const root = await mkdtemp("/tmp/opencode/pogo-idle-");
@@ -53,8 +61,10 @@ beforeEach(async () => {
     CREATE TABLE peers (crewID TEXT PRIMARY KEY, sessionID TEXT, status TEXT);
     CREATE TABLE pi_peers (sessionID TEXT PRIMARY KEY);
     CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT);
-    CREATE TABLE pending_tasks (id TEXT PRIMARY KEY);
+    CREATE TABLE pending_tasks (id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'queued', released INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE worker_controls (crewID TEXT PRIMARY KEY);
+    CREATE TABLE activity_report_tasks (taskID TEXT PRIMARY KEY, captureID TEXT NOT NULL UNIQUE);
     INSERT INTO peers VALUES ('chief','ses_chief','ready');
     INSERT INTO tasks VALUES ('t1','completed');`);
   db.close();
@@ -162,11 +172,183 @@ describe("idle gate", () => {
     ).toEqual({ idle: false, reason: "idle-unknown" });
   });
 
-  test("crew tasks, queued assignments, controllers and Pi tasks block", async () => {
+  test("queued and cancelled assignments do not block; only a captain turn starts them", async () => {
+    // The engine's own store, not a hand-made table.
+    const real: Crew = {
+      namespace: "real-ship",
+      captainDirectory: join(data, "captain"),
+      stateDirectory: join(data, "real-state"),
+      roots: [],
+      piMembers: [],
+    };
+    const state = await CrewState.open(
+      real.stateDirectory,
+      real.namespace,
+      "fingerprint",
+    );
+    try {
+      const peer = state.reservePeer("chief");
+      const first = state.enqueue(peer, "captain", "first");
+      const second = state.enqueue(peer, "captain", "second");
+      const gate = () => checkIdle({ ...input(), crews: [real] });
+      // An ordinary assignment starts only via pogo_crew status/wait, inside
+      // a captain turn, which the gate sees as an active session.
+      expect(await gate()).toEqual({ idle: true });
+      expect(state.cancelQueued(first.id, "captain")).toBe(true);
+      expect(state.cancelQueued(second.id, "captain")).toBe(true);
+      expect(state.queuedTasks(peer.crewID)).toEqual([]);
+      expect(await gate()).toEqual({ idle: true });
+    } finally {
+      state.close();
+    }
+  });
+
+  test("Galactica shape: a queued task from an earlier captain is idle but named", async () => {
+    const real: Crew = {
+      namespace: "galactica",
+      captainDirectory: join(data, "captain"),
+      stateDirectory: join(data, "galactica-state"),
+      roots: [],
+      piMembers: [],
+      captainSessionID: "ses_pinned",
+    };
+    const state = await CrewState.open(
+      real.stateDirectory,
+      real.namespace,
+      "fingerprint",
+    );
+    try {
+      const chief = state.reservePeer("chief");
+      const rows = Array.from({ length: 5 }, (_, i) =>
+        state.enqueue(chief, "ses_e49d787old", `secret task text ${i}`),
+      );
+      for (const row of rows.slice(0, 4))
+        expect(state.cancelQueued(row.id, "ses_e49d787old")).toBe(true);
+      const queued = rows[4];
+      if (!queued) throw new Error("no queued task");
+      expect(await checkIdle({ ...input("server"), crews: [real] })).toEqual({
+        idle: true,
+      });
+      const listed = queuedCrewTasks([real]);
+      expect(listed).toEqual([
+        {
+          taskID: queued.id,
+          crew: "chief",
+          originCaptain: "ses_e49d787old",
+          originIsPin: false,
+          report: false,
+        },
+      ]);
+      expect(JSON.stringify(listed)).not.toContain("secret task text");
+      // From the pinned captain: named as such.
+      const own = state.enqueue(chief, "ses_pinned", "more");
+      expect(queuedCrewTasks([real]).at(-1)).toMatchObject({
+        taskID: own.id,
+        originIsPin: true,
+      });
+      // A captain turn is what starts it, and that turn is busy.
+      opencode.active = ["ses_pinned"];
+      expect(await checkIdle({ ...input("server"), crews: [real] })).toEqual({
+        idle: false,
+        reason: "busy-opencode",
+      });
+    } finally {
+      state.close();
+    }
+  });
+
+  test("a queued activity-report task blocks: the gateway can admit it without a turn", async () => {
+    const real: Crew = {
+      namespace: "report-ship",
+      captainDirectory: join(data, "captain"),
+      stateDirectory: join(data, "report-state"),
+      roots: [],
+      piMembers: ["twiki"],
+    };
+    const state = await CrewState.open(
+      real.stateDirectory,
+      real.namespace,
+      "fingerprint",
+    );
+    try {
+      const capture = state.reporting.start("ses_captain", "req-1", "twiki");
+      state.reporting.finish(capture);
+      const report = state.enqueue(
+        state.reservePeer("twiki"),
+        "ses_captain",
+        "summary prompt",
+        capture.id,
+      );
+      expect(state.reporting.isReport(report.id)).toBe(true);
+      expect(await checkIdle({ ...input("server"), crews: [real] })).toEqual({
+        idle: false,
+        reason: "busy-crew",
+      });
+      expect(queuedCrewTasks([real])).toMatchObject([
+        { taskID: report.id, report: true },
+      ]);
+    } finally {
+      state.close();
+    }
+  });
+
+  test("an hourly cron blocks only near its run; the gate passes after it", async () => {
+    const horizon =
+      maintenanceSchema.parse({}).idle.cronHorizonMinutes * 60_000;
+    const cron = join(data, "cron.sqlite");
+    const at = (time: string) => Date.parse(`2026-11-12T${time}Z`);
+    // `15 * * * *`, as on Galactica: a run is never more than an hour away.
+    exec(
+      cron,
+      `INSERT INTO cron_schedules (id,botKey,channel,user,name,expression,timezone,prompt,nextAt,createdAt)
+       VALUES ('hourly','k','C1','U1','n','15 * * * *','UTC','p',${at("00:15:00")},0)`,
+    );
+    let time = now;
+    const clock = {
+      now: () => time,
+      async sleep(ms: number) {
+        time += ms;
+        // The gateway claims the 00:15 run and finishes it two minutes later.
+        if (time >= at("00:15:00") && time < at("00:17:00"))
+          exec(
+            cron,
+            `UPDATE cron_schedules SET nextAt=${at("01:15:00")};
+             INSERT OR IGNORE INTO cron_runs (id,scheduleId,dueAt) VALUES ('r1','hourly',${at("00:15:00")})`,
+          );
+        if (time >= at("00:17:00"))
+          exec(cron, "UPDATE cron_runs SET status='done' WHERE id='r1'");
+      },
+    };
+    const result = await waitForIdle(
+      { ...input(), cronHorizonMs: horizon },
+      at("00:50:00"),
+      30_000,
+      clock,
+    );
+    expect(result).toEqual({ idle: true });
+    expect(time).toBeGreaterThanOrEqual(at("00:17:00"));
+    expect(time).toBeLessThan(at("00:20:00"));
+  });
+
+  test("the default cron horizon covers the longest disruptive step", () => {
+    const horizon =
+      maintenanceSchema.parse({}).idle.cronHorizonMinutes * 60_000;
+    expect(horizon).toBeLessThan(60 * 60_000);
+    expect(horizon).toBeGreaterThanOrEqual(
+      bounds.openCodeRestart + bounds.openCodeVerify,
+    );
+    expect(horizon).toBeGreaterThanOrEqual(bounds.start + bounds.ready);
+    expect(horizon).toBeGreaterThanOrEqual(
+      bounds.proxyRestart + bounds.proxyHealth,
+    );
+  });
+
+  test("crew tasks, queued report tasks, controllers and Pi tasks block", async () => {
     const path = crewDatabase(crew);
     for (const sql of [
       "UPDATE tasks SET status='running'",
-      "UPDATE tasks SET status='completed'; INSERT INTO pending_tasks VALUES ('p')",
+      // A queued activity-report task (the engine's marker row).
+      "UPDATE tasks SET status='completed'; INSERT INTO pending_tasks (id) VALUES ('p'); INSERT INTO activity_report_tasks VALUES ('p','c')",
       "DELETE FROM pending_tasks; INSERT INTO worker_controls VALUES ('chief')",
     ]) {
       exec(path, sql);

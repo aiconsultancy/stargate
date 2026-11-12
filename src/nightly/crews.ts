@@ -24,6 +24,8 @@ export type Crew = {
   roots: CrewRoot[];
   /** Pi crew IDs; their task state lives under `<state>/pi/<sha256(id)>`. */
   piMembers: string[];
+  /** The pinned captain session: the plugin's own pin, else the bot's. */
+  captainSessionID?: string;
 };
 
 const pluginOptions = z.object({
@@ -31,6 +33,7 @@ const pluginOptions = z.object({
   stateDirectory: z.string().min(1),
   captainDirectory: z.string().min(1),
   worktrees: z.record(z.string(), z.string()),
+  captainSessionID: z.string().optional(),
   team: z
     .object({
       crew: z.array(
@@ -138,12 +141,14 @@ export async function discoverCrews(config: Config): Promise<Crew[]> {
         pluginPackage: plugin.pluginPackage,
       });
     }
+    const pin = captain.options.captainSessionID ?? bot.backend.sessionID;
     crews.push({
       namespace: captain.options.namespace,
       captainDirectory: captain.options.captainDirectory,
       stateDirectory: captain.options.stateDirectory,
       roots,
       piMembers: [...pi],
+      ...(pin ? { captainSessionID: pin } : {}),
     });
   }
   return crews;

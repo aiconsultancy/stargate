@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { queuedPendingTask, reportTask } from "../crew/pending";
 import { type Crew, crewDatabase, piDatabase } from "./crews";
 import type { Reason } from "./exec";
 import type { OpenCodeControl } from "./opencode";
@@ -108,7 +109,14 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
               db,
               "SELECT COUNT(*) AS n FROM tasks WHERE status IN ('dispatching','running','cancelling')",
             ) ||
-            count(db, "SELECT COUNT(*) AS n FROM pending_tasks") ||
+            // Queued report tasks only: the gateway can admit them without a
+            // captain turn. An ordinary queued assignment starts only inside
+            // a captain turn, which the session check below sees. Cancelled
+            // rows are terminal.
+            count(
+              db,
+              `SELECT COUNT(*) AS n FROM pending_tasks WHERE ${queuedPendingTask} AND ${reportTask("pending_tasks.id")}`,
+            ) ||
             count(db, "SELECT COUNT(*) AS n FROM worker_controls")
           )
             throw new Busy("busy-crew");
@@ -150,6 +158,66 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
     if (error instanceof Busy) return { idle: false, reason: error.reason };
     return { idle: false, reason: "idle-unknown" };
   }
+}
+
+export type QueuedCrewTask = {
+  taskID: string;
+  crew: string;
+  originCaptain: string;
+  /** The origin is the crew's pinned captain (not an earlier session). */
+  originIsPin: boolean;
+  /** An activity-report task: it blocks the gate; the gateway admits it. */
+  report: boolean;
+};
+
+/** What resolves a queued task; the same words in reports and droid posts. */
+export function queuedTaskAction(task: QueuedCrewTask) {
+  return task.report
+    ? "Activity report: the gateway admits or cancels it; it blocks maintenance while queued"
+    : `Ask the captain to run pogo_crew status ${task.taskID}`;
+}
+
+/**
+ * Queued crew tasks, for reports: IDs and origins only, never the task
+ * text. Every queued task is listed, also the ordinary assignments that do
+ * not block the gate: one starts only when its captain asks for its status,
+ * so a forgotten one (for example from an earlier captain session) waits
+ * until the operator asks. Unreadable state lists nothing; the gate itself
+ * treats it as busy.
+ */
+export function queuedCrewTasks(crews: readonly Crew[]): QueuedCrewTask[] {
+  const id = /^[A-Za-z0-9_-]{1,100}$/;
+  const session = /^ses_[A-Za-z0-9]{1,250}$/;
+  const list: QueuedCrewTask[] = [];
+  for (const crew of crews) {
+    try {
+      const rows = read(
+        crewDatabase(crew),
+        (db) =>
+          db
+            .query<
+              { id: string; crewID: string; origin: string; report: number },
+              []
+            >(
+              `SELECT id, crewID, originCaptainID AS origin, ${reportTask("pending_tasks.id")} AS report FROM pending_tasks WHERE ${queuedPendingTask} ORDER BY sequence LIMIT 50`,
+            )
+            .all(),
+        [],
+      );
+      for (const row of rows)
+        if (id.test(row.id) && id.test(row.crewID) && session.test(row.origin))
+          list.push({
+            taskID: row.id,
+            crew: row.crewID,
+            originCaptain: row.origin,
+            originIsPin: row.origin === crew.captainSessionID,
+            report: row.report === 1,
+          });
+    } catch {
+      // Reported as busy by the gate; nothing to name here.
+    }
+  }
+  return list.slice(0, 50);
 }
 
 /**

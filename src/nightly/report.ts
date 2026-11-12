@@ -70,6 +70,7 @@ export const limits = {
   steps: 300,
   rollbacks: 300,
   restarts: 50,
+  notes: 50,
 };
 
 export const reportSchema = z.strictObject({
@@ -129,6 +130,25 @@ export const reportSchema = z.strictObject({
       }),
     )
     .max(limits.restarts),
+  /**
+   * Informational: queued crew assignments that keep the idle gate busy
+   * until their captain resolves them. IDs and origins, never task text.
+   */
+  notes: z
+    .array(
+      z.strictObject({
+        kind: z.literal("queued-crew-task"),
+        taskID: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/),
+        crew: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/),
+        originCaptain: z.string().regex(/^ses_[A-Za-z0-9]{1,250}$/),
+        originIsPin: z.boolean(),
+        /** An activity-report task, which blocks the idle gate while queued. */
+        report: z.boolean(),
+        action: z.string().max(200),
+      }),
+    )
+    .max(limits.notes)
+    .optional(),
   /** Items dropped to keep the report bounded, per array. */
   truncated: z.record(z.string(), z.number().int().min(1)).optional(),
 });
@@ -187,10 +207,13 @@ export function boundReport(report: Report): Report {
       to: cut(r.to, 300),
     })),
     restarts: take("restarts", report.restarts),
+    ...(report.notes ? { notes: take("notes", report.notes) } : {}),
   };
   if (Object.keys(truncated).length) bounded.truncated = truncated;
   return bounded;
 }
+
+const withoutNotes = ({ notes: _notes, ...rest }: Report) => rest;
 
 /**
  * Atomically writes `<data>/maintenance/reports/<timestamp>-<run>.json`.
@@ -203,7 +226,7 @@ export async function writeReport(dataDirectory: string, report: Report) {
   if (parsed.success) valid = parsed.data;
   else
     valid = reportSchema.parse({
-      ...report,
+      ...withoutNotes(report),
       components: [],
       models: [],
       steps: [],
@@ -305,6 +328,13 @@ export function summary(report: Report, reportName: string) {
     parts.push(
       line(
         `- model ${key}: ${entry.applied} applied${entry.other ? `, ${entry.other} not applied` : ""}`,
+      ),
+    );
+  for (const note of (report.notes ?? []).slice(0, 5))
+    parts.push(
+      line(
+        `- crew task ${note.taskID} for ${note.crew} is queued (${note.originIsPin ? "from the pinned captain" : "from an earlier captain session"}): ${note.action.charAt(0).toLowerCase()}${note.action.slice(1)}`,
+        300,
       ),
     );
   if (report.rollbacks.length)

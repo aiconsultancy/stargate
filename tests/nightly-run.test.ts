@@ -16,6 +16,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { type Config, configSchema } from "../src/config";
+import { CrewState } from "../src/crew/state";
 import { CronStore } from "../src/cron-store";
 import {
   type CommandResult,
@@ -599,6 +600,58 @@ describe("nightly maintenance run", () => {
     expect(await readFile(join(fixture.dir, "team.json"), "utf8")).toBe(before);
   });
 
+  test("a queued crew assignment does not defer the run; the report names it", async () => {
+    const { config, path } = await install();
+    const state = await CrewState.open(
+      join(fixture.dir, "captain", ".local", "pogo-crew"),
+      "ship",
+      "fingerprint",
+    );
+    let id = "";
+    try {
+      const chief = state.reservePeer("chief");
+      // Galactica: four cancelled rows and one queued by an earlier captain.
+      const rows = Array.from({ length: 5 }, (_, i) =>
+        state.enqueue(chief, "ses_e49d787old", `private task text ${i}`),
+      );
+      for (const row of rows.slice(0, 4))
+        state.cancelQueued(row.id, "ses_e49d787old");
+      id = rows[4]?.id ?? "";
+    } finally {
+      state.close();
+    }
+    const note = {
+      kind: "queued-crew-task" as const,
+      taskID: id,
+      crew: "chief",
+      originCaptain: "ses_e49d787old",
+      originIsPin: false,
+      report: false,
+      action: `Ask the captain to run pogo_crew status ${id}`,
+    };
+    const planned = await run(config, path, "plan");
+    expect(planned.report.notes).toEqual([note]);
+    const { report, reportPath } = await run(config, path);
+    expect(report.outcome).toBe("completed");
+    expect(report.notes).toEqual([note]);
+    const text = await readFile(reportPath ?? "", "utf8");
+    expect(text).not.toContain("private task text");
+    expect(reportSchema.parse(JSON.parse(text)).notes).toEqual([note]);
+    const [notice] = await readdir(
+      join(fixture.dir, "data/maintenance/outbox"),
+    );
+    const summary = JSON.parse(
+      await readFile(
+        join(fixture.dir, "data/maintenance/outbox", notice ?? ""),
+        "utf8",
+      ),
+    ).text as string;
+    expect(summary).toContain(
+      `crew task ${id} for chief is queued (from an earlier captain session): ask the captain to run pogo_crew status ${id}`,
+    );
+    await expectConsistent(report);
+  });
+
   test("busy work defers everything to the next window", async () => {
     const { config, path } = await install();
     fixture.active = ["ses_operator"];
@@ -716,6 +769,76 @@ describe("nightly maintenance run", () => {
     expect(next.report.components.find((c) => c.id === "pogo")).toMatchObject({
       status: "skipped",
       reason: "known-bad",
+    });
+  });
+
+  test("a readiness rollback does not restart while a cron run that started on return is active", async () => {
+    const { config, path } = await install();
+    // 0.2.0 never becomes ready; the previous release would.
+    fixture.readyVersions = new Set(["0.1.0"]);
+    const cron = join(config.dataDirectory, "cron.sqlite");
+    new CronStore(cron).close();
+    const sql = (text: string) => {
+      const db = new Database(cron);
+      db.exec(text);
+      db.close();
+    };
+    sql(
+      `INSERT INTO cron_schedules (id,botKey,channel,user,name,expression,timezone,prompt,nextAt,createdAt)
+       VALUES ('s1','k','C1','U1','n','15 * * * *','UTC','p',${now + 86_400_000},0)`,
+    );
+    // A schedule that came due while the gateway was stopped starts as soon
+    // as the gateway is back, before readiness is decided.
+    let started = false;
+    fixture.onCommand = async (command) => {
+      if (command === "systemctl --user restart pogo.service" && !started) {
+        started = true;
+        sql(
+          `INSERT INTO cron_runs (id,scheduleId,dueAt) VALUES ('r1','s1',${now})`,
+        );
+      }
+    };
+    const gatewayRestarts = () =>
+      commands("systemctl --user restart pogo.service").length;
+    const { report, attention } = await run(config, path, "run", {
+      env: invocation,
+    });
+    expect(report.reason).toBe("readiness-failed");
+    expect(attention).toBe(true);
+    // Only the forward start: no rollback restart of OpenCode or the gateway.
+    expect(gatewayRestarts()).toBe(1);
+    expect(fixture.openCodeRestarts).toBe(1);
+    expect(report.steps).toContainEqual(
+      expect.objectContaining({
+        name: "recover-before-opencode",
+        status: "skipped",
+        reason: "busy-cron",
+      }),
+    );
+    const kept = JSON.parse(
+      (await readJournalFile(config.dataDirectory)) ?? "{}",
+    );
+    expect(kept.gateway).toEqual({ restartPending: true });
+    expect(kept.openCode).toEqual({ restarted: true, restartPending: true });
+    // The timer's ExecStopPost finishes its own journal, but ingress is open.
+    const after = await recoverInterruptedRun(
+      config,
+      deps({ env: invocation }),
+      { afterRun: true },
+    );
+    expect(after.ok).toBe(false);
+    expect(gatewayRestarts()).toBe(1);
+    expect(fixture.openCodeRestarts).toBe(1);
+    // The cron run finishes; recovery then completes.
+    sql("UPDATE cron_runs SET status='done' WHERE id='r1'");
+    expect((await recoverInterruptedRun(config, deps())).ok).toBe(true);
+    expect(fixture.openCodeRestarts).toBe(2);
+    expect(gatewayRestarts()).toBe(2);
+    const state = await live();
+    expect(state).toMatchObject({
+      release: "releases/old",
+      gateway: "active",
+      journal: null,
     });
   });
 

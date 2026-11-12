@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ActivitySnapshot } from "../activity";
 import type { CrewCaller, CrewEngine } from "./engine";
 import { JournalStore } from "./journal";
+import { reportTask } from "./pending";
 import { CrewError, type CrewTask } from "./state";
 
 // Active requests renew this lease on each read; only abandoned captures expire.
@@ -226,9 +227,7 @@ export class ReportingStore {
 
   isReport(taskID: string): boolean {
     return Boolean(
-      this.db
-        .query("SELECT 1 FROM activity_report_tasks WHERE taskID=?")
-        .get(taskID),
+      this.db.query(`SELECT 1 WHERE ${reportTask("?1")}`).get(taskID),
     );
   }
 

@@ -2,8 +2,10 @@ import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import type { Config } from "../config";
+import { discoverCrews } from "./crews";
 import type { CommandRunner } from "./exec";
 import { proxyModels } from "./host";
+import { queuedCrewTasks } from "./idle";
 import { Journal, journalEntries } from "./journal";
 import { maintenanceDirectory } from "./paths";
 import { readReady, readyProcessAlive } from "./ready";
@@ -234,6 +236,8 @@ export async function collectFacts(input: {
   const proxyUnit = m.cliproxyapi?.unit;
   const openCode = openCodeUnit(m.services.openCodeRestart);
   const ready = await readReady(data);
+  // IDs and origins only; unknown crew state is the gate's to report.
+  const crewQueue = await discoverCrews(config).then(queuedCrewTasks, () => []);
   const journal = await Journal.read(config);
   const state = await readState(data);
   const current = m.pogo
@@ -368,6 +372,7 @@ export async function collectFacts(input: {
     },
     reports,
     unreadableReports: unreadable,
+    crewQueue,
   };
 }
 export type DroidFacts = Awaited<ReturnType<typeof collectFacts>>;

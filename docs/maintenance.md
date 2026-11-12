@@ -80,7 +80,7 @@ Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
 | `services.gateway`                        | `pogo.service`                                                      | User unit of this gateway.                                                                                      |
 | `services.openCodeRestart`                | `systemctl --user restart opencode2.service`                        | Command that restarts the shared OpenCode server.                                                               |
 | `idle.pollSeconds`                        | `30`                                                                | Idle-gate poll interval.                                                                                        |
-| `idle.cronHorizonMinutes`                 | `60`                                                                | A cron schedule due within this time blocks maintenance.                                                        |
+| `idle.cronHorizonMinutes`                 | `10`                                                                | A cron schedule due within this time blocks maintenance. See [Idle gate](#idle-gate).                           |
 | `proxy.url`, `proxy.clientKeyFile`        | loopback `:8317`, required                                          | CLIProxyAPI endpoint and its private client-key file (mode 0600).                                               |
 | `pogo.root`                               | required                                                            | Install root. See [install layout](#install-layout).                                                            |
 | `pogo.repository`, `pogo.branch`          | `aiconsultancy/pogo`, `main`                                        | Release source.                                                                                                 |
@@ -189,10 +189,16 @@ the window, the jitter and the next start.
     when it ends, the remaining sessions keep their old, still valid model and
     are reported as `skipped` with reason `deadline`.
 11. **Start the gateway** and wait for a new readiness record with the version
-    of the release `current` points to. On failure the run records the release as known-bad,
-    restores the previous release, restarts OpenCode and the gateway, and
-    waits again. If the gateway still is not ready, the journal stays, the
-    run exits 1 and writes an alert.
+    of the release `current` points to. On failure the run records the
+    release as known-bad, restores the previous release, restarts OpenCode
+    and the gateway, and waits again. From the first start on, ingress is
+    open (a schedule that came due while the gateway was stopped starts at
+    once), so every undo step that restarts a running service rechecks idle
+    first, as leftover recovery does. Busy: that step is not done, the
+    journal stays and `recover`, the droid or the next run finishes it. A
+    gateway that is `inactive` or `failed` is started without the check. If
+    the gateway still is not ready, the journal stays, the run exits 1 and
+    writes an alert.
 12. **Prune** old releases and write the report.
 
 Every abnormal end (exception, `SIGTERM`, timeout) applies the same journal
@@ -253,7 +259,9 @@ Who recovers:
   journal of the run that this systemd invocation started: `last-run.json`
   must hold the current `INVOCATION_ID` and the journal's run ID, because
   only that run held the idle gate. Its undo runs with the gateway still
-  stopped, and the gateway is started last. A file left by an earlier run
+  stopped, and the gateway is started last. If the run had already started
+  the gateway again, ingress is open: the undo then rechecks idle before
+  each step that changes live state, and a busy check keeps the journal. A file left by an earlier run
   (one that exited before it wrote its own, for example disabled, outside the
   window or with the lock busy) does not match. For any other journal,
   `--after-run` only starts a stopped gateway when the journal holds
@@ -497,7 +505,8 @@ real target receives the change.
 All of these must be true, observed read-only:
 
 - no gateway job is `queued`, `running` or `responding`;
-- no cron schedule is due within `cronHorizonMinutes`, and no cron run is
+- no cron schedule is due within `cronHorizonMinutes` (default 10), and no
+  cron run is
   `pending`, `announcing`, `announced`, `queued` or `blocked`. A schedule
   that is already overdue counts only while the gateway runs it: its ready
   record names a live process and the unit is not `inactive` or `failed`
@@ -505,8 +514,20 @@ All of these must be true, observed read-only:
   stopped or crash-looping gateway never advances it, and would otherwise
   block its own recovery forever;
 - for each crew found through the gateway's OpenCode bots: no task is
-  `dispatching`, `running` or `cancelling`, no assignment is queued and no
-  worker controller is held; no Pi task is outside `terminal`;
+  `dispatching`, `running` or `cancelling`, no activity-report task is
+  queued and no worker controller is held; no Pi task is outside
+  `terminal`. A queued activity-report task (the engine marks it in
+  `activity_report_tasks`) blocks because it can start outside a captain
+  turn: the gateway's activity delivery admits it for up to ten minutes
+  after a turn and when the gateway starts. An ordinary queued assignment
+  does not block: it starts only when its captain runs `pogo_crew` status
+  or wait, inside a captain turn, which the OpenCode check below sees, and
+  it stays queued in SQLite across restarts. A cancelled task is terminal.
+  Each report names every queued task in `notes`, and the Slack summary and
+  the [droid](#maintenance-droid) list them with the action that resolves
+  them; for an ordinary assignment, for example a forgotten one from an
+  earlier captain session: ask the captain to run `pogo_crew status
+  <taskID>`;
 - no OpenCode session on the shared server is running (`session.active`), and
   no form or permission request is pending at any loaded location.
 
@@ -519,6 +540,15 @@ are followed. The gate never changes, cancels or replays work.
 
 The gate runs again immediately before each disruptive action: the gateway
 stop, the proxy restart and the OpenCode restart (and once after the stop).
+The same recheck runs before every restart in an undo once the gateway is
+back (readiness rollback, `recover --after-run`, leftover recovery, the
+droid). So the cron horizon only has to cover the longest single step after a gate,
+the OpenCode restart and plugin check (4 minutes); the default of 10
+minutes adds margin. A schedule that comes due while the gateway is stopped
+runs once, late, when the gateway is back. A horizon of an hour or more
+never passes on a ship with an hourly cron: one is always due within the
+hour. With an hourly cron, the gate passes once that hour's run has finished
+and the next one is more than the horizon away.
 
 ## Reports
 
@@ -549,7 +579,8 @@ Readers must reject an unknown `schema` value.
 | `steps[]`                 | `name`, `status` (`ok`, `failed`, `skipped`), `at`, optional `reason`                                                                                        |
 | `rollbacks[]`             | `component`, `from`, `to`, `status` (`ok`, `failed`), optional `reason`                                                                                      |
 | `restarts[]`              | `service` (`gateway`, `opencode`, `cliproxyapi`), `status`, `at`                                                                                             |
-| `truncated`               | Optional: dropped items per array (bounds: 100 components, 1000 models, 300 steps, 300 rollbacks, 50 restarts)                                               |
+| `notes[]`                 | Optional: `kind` (`queued-crew-task`), `taskID`, `crew`, `originCaptain`, `originIsPin`, `report`, `action`. IDs and origins only, never task text           |
+| `truncated`               | Optional: dropped items per array (bounds: 100 components, 1000 models, 300 steps, 300 rollbacks, 50 restarts, 50 notes)                                     |
 
 Component `status`: `unchanged`, `planned`, `updated`, `rolled-back`,
 `failed`, `skipped` (for example `migration-required`), `deferred`.
@@ -637,6 +668,7 @@ The droid timer starts `pogo maintenance droid` at `window.end` plus
    to outcome, reason codes, changed components, failed steps, rollbacks and
    model counts; `ALERT.json`; whether a journal exists and its entry names;
    known-bad releases from `state.json` that are newer than `current`;
+   queued crew assignments (task ID, crew, origin captain, never the text);
    `last-run.json`; the maintenance timer's `ActiveState`,
    `LastTriggerUSec`, `NextElapseUSecRealtime`, `Result` and
    `ActiveEnterTimestamp` (`systemctl --user show`); the `ActiveState` of
@@ -681,7 +713,9 @@ The droid timer starts `pogo maintenance droid` at `window.end` plus
 5. **Post.** One top-level message of at most 2,800 characters: a header,
    the explanation (at most 1,800 characters, scrubbed like the facts),
    `Droid actions:` (every request, refused ones too),
-   `Checks:` (the finding codes) and `Operator commands:` for the findings.
+   `Checks:` (the finding codes), one line per queued crew task (task ID,
+   crew, whether it came from the pinned captain, and the action that
+   resolves it) and `Operator commands:` for the findings.
    Slack receives it as plain text, so it cannot mention or link anyone.
 6. **Fallback.** If the model cannot be opened, fails, times out or answers
    nothing, the explanation is Pogo's deterministic summary: the newest

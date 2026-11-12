@@ -71,6 +71,15 @@ const npmName = z
   .regex(/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/)
   .max(214);
 
+/**
+ * The idle gate runs again immediately before every disruptive step, so the
+ * horizon only has to cover the longest single step after a gate: the
+ * OpenCode restart and plugin check (4 minutes), with margin. A schedule
+ * that comes due while the gateway is stopped runs once when it is back.
+ * A whole-run horizon would block every night on a ship with an hourly cron.
+ */
+export const defaultCronHorizonMinutes = 10;
+
 export const defaultAgentPackages = [
   { name: "@opencode/cli", command: "opencode2" },
   { name: "@openai/codex", command: "codex" },
@@ -147,9 +156,17 @@ export const maintenanceSchema = z
       .strictObject({
         pollSeconds: z.number().int().min(5).max(600).default(30),
         /** A cron schedule due within this horizon blocks maintenance. */
-        cronHorizonMinutes: z.number().int().min(0).max(720).default(60),
+        cronHorizonMinutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(720)
+          .default(defaultCronHorizonMinutes),
       })
-      .default({ pollSeconds: 30, cronHorizonMinutes: 60 }),
+      .default({
+        pollSeconds: 30,
+        cronHorizonMinutes: defaultCronHorizonMinutes,
+      }),
     /** CLIProxyAPI endpoint used for health checks, catalog and model probes. */
     proxy: z
       .strictObject({

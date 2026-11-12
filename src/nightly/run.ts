@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { type Config, pinnedSessionIDs } from "../config";
 import { isAllowedChannel } from "../routing";
-import type { MaintenanceConfig } from "./config";
+import { defaultCronHorizonMinutes, type MaintenanceConfig } from "./config";
 import { type Crew, crewDatabase, discoverCrews } from "./crews";
 import {
   type CommandRunner,
@@ -32,7 +32,13 @@ import {
   probeModel,
   proxyModels,
 } from "./host";
-import { checkIdle, type IdleResult, waitForIdle } from "./idle";
+import {
+  checkIdle,
+  type IdleResult,
+  queuedCrewTasks,
+  queuedTaskAction,
+  waitForIdle,
+} from "./idle";
 import {
   backupDirectory,
   currentVersion,
@@ -198,6 +204,7 @@ class Recorder {
   readonly steps: Report["steps"] = [];
   readonly rollbacks: Report["rollbacks"] = [];
   readonly restarts: Report["restarts"] = [];
+  notes: NonNullable<Report["notes"]> = [];
   constructor(private readonly clock: Clock) {}
   at() {
     return new Date(this.clock.now()).toISOString();
@@ -551,6 +558,24 @@ async function gatewayServing(config: Config, runner: CommandRunner) {
 }
 
 /**
+ * The gateway unit may serve Slack and cron: anything but `inactive` or
+ * `failed`, including an unknown state (busy-safe).
+ */
+async function ingressMayBeOpen(config: Config, runner: CommandRunner) {
+  const unit = config.maintenance?.services.gateway ?? "pogo.service";
+  try {
+    const state = (
+      await runner.run(["systemctl", "--user", "is-active", unit], {
+        timeoutMs: 15_000,
+      })
+    ).stdout.trim();
+    return state !== "inactive" && state !== "failed";
+  } catch {
+    return true;
+  }
+}
+
+/**
  * One read-only idle check at server scope, as the run's gates make it,
  * without waiting. For callers outside a run (the maintenance droid).
  */
@@ -569,7 +594,9 @@ export async function idleNow(
     dataDirectory: config.dataDirectory,
     crews,
     pinnedSessions: pinnedSessionIDs(config),
-    cronHorizonMs: (config.maintenance?.idle.cronHorizonMinutes ?? 60) * 60_000,
+    cronHorizonMs:
+      (config.maintenance?.idle.cronHorizonMinutes ??
+        defaultCronHorizonMinutes) * 60_000,
     now: deps.clock.now(),
     scope: "server",
     connect: deps.connect,
@@ -630,7 +657,14 @@ export async function recoverInterruptedRun(
         };
       }
       // This run's own journal: undo with Slack ingress still stopped; the
-      // gateway is started last.
+      // gateway is started last. If the run had already started the gateway
+      // again, ingress is open: the undo rechecks idle before each step,
+      // like leftover recovery, and a busy check keeps the journal.
+      if (await ingressMayBeOpen(config, deps.runner)) {
+        const check = () => idleNow(config, deps, AbortSignal.timeout(60_000));
+        const result = await recoverJournal(config, deps, undefined, check);
+        return { ok: result.ok, message: result.message };
+      }
     }
     return await recoverJournal(config, deps);
   } finally {
@@ -697,6 +731,7 @@ export async function runMaintenance(
       steps: rec.steps,
       rollbacks: rec.rollbacks,
       restarts: rec.restarts,
+      ...(rec.notes.length ? { notes: rec.notes } : {}),
     };
     if (mode === "plan") return { report, attention: false };
     // Writing the report must never hide the outcome.
@@ -756,6 +791,12 @@ export async function runMaintenance(
       crewsUnknown = true;
     }
     const sessionList = sessions(config, crews);
+    // Named in every report: queued assignments wait for their captain.
+    rec.notes = queuedCrewTasks(crews).map((task) => ({
+      kind: "queued-crew-task" as const,
+      ...task,
+      action: queuedTaskAction(task),
+    }));
 
     // A journal left by an interrupted run is finished first, never
     // replaced, and only at an idle boundary: undo restarts services too.
@@ -943,6 +984,28 @@ export async function runMaintenance(
 
     const journal = Journal.create(config.dataDirectory, runID);
     const ctx = undoContext(config, deps, rec);
+    /**
+     * Set when the run starts the gateway again: Slack and cron may arrive
+     * from then on (a schedule that came due while the gateway was stopped
+     * starts at once). After that, every undo step that changes live state
+     * rechecks idle first, as leftover recovery does; a busy check keeps the
+     * journal for recover, the droid or the next run. While the gateway unit
+     * is inactive or failed, nothing can arrive and the step is not gated.
+     */
+    let gatewayReturned = false;
+    const afterIngress: UndoContext = {
+      ...ctx,
+      gate: async () => {
+        if (!(await ingressMayBeOpen(config, deps.runner)))
+          return { idle: true };
+        if (crewsUnknown) return { idle: false, reason: "idle-unknown" };
+        return checkIdle({
+          ...idleInput(),
+          now: clock.now(),
+          signal: AbortSignal.timeout(30_000),
+        });
+      },
+    };
     // Set when an agent CLI install verified; runs after OpenCode restarts.
     let commitClis: (() => Promise<void>) | undefined;
     let endReason: Reason | undefined;
@@ -970,7 +1033,7 @@ export async function runMaintenance(
         .filter((entry) => journal.get(entry) !== undefined)
         .map((entry) => ({ entry, ids: componentsOf(entry) }));
       if (!journal.empty && deps.undoOnExit !== false)
-        await undoJournal(journal, ctx);
+        await undoJournal(journal, gatewayReturned ? afterIngress : ctx);
       for (const { entry, ids } of entries) {
         const restored = journal.get(entry) === undefined;
         for (const id of ids)
@@ -1034,7 +1097,8 @@ export async function runMaintenance(
         pinnedSessions: sessionList
           .filter((s) => s.scope === "captain-session")
           .map((s) => s.id),
-        cronHorizonMs: (m?.idle.cronHorizonMinutes ?? 60) * 60_000,
+        cronHorizonMs:
+          (m?.idle.cronHorizonMinutes ?? defaultCronHorizonMinutes) * 60_000,
         scope: "server" as const,
         connect: deps.connect,
         signal,
@@ -1344,6 +1408,7 @@ export async function runMaintenance(
 
       // Gateway back; readiness failure rolls the release back.
       if (journal.get("gateway")) {
+        gatewayReturned = true;
         let ready = await startGateway(
           config,
           gatewayUnit,
@@ -1354,16 +1419,23 @@ export async function runMaintenance(
         );
         if (!ready && journal.get("release") && staged) {
           await markFailedRelease(staged, "readiness-failed");
-          const restored = await undoJournal(journal, ctx, [
+          // The gateway is back: idle-gated, like leftover recovery.
+          const restored = await undoJournal(journal, afterIngress, [
             "release",
             "openCode",
           ]);
+          const linkRestored = journal.get("release") === undefined;
           rec.update("pogo", {
-            status: restored ? "rolled-back" : "failed",
+            status: linkRestored ? "rolled-back" : "failed",
             reason: "readiness-failed",
-            after: restored ? (pogo?.before ?? null) : null,
+            after: linkRestored ? (pogo?.before ?? null) : null,
           });
-          if (restored)
+          const idle = restored
+            ? await afterIngress.gate?.("gateway")
+            : undefined;
+          if (idle && !idle.idle)
+            rec.step("recover-before-gateway", "skipped", idle.reason);
+          else if (restored)
             ready = await startGateway(
               config,
               gatewayUnit,

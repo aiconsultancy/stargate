@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { canExpandCrew } from "./identity";
 import { MemberActivityStore } from "./member-activity";
 import { MailRoutes } from "./messaging";
+import { queuedPendingTask, reportTask } from "./pending";
 import { ReportingStore, redactActivity } from "./reporting";
 export type CrewID = string;
 export type Peer = {
@@ -460,8 +461,7 @@ export class CrewState {
         { conversationID: string; title: string },
         [string, string, number]
       >(
-        `SELECT c.conversationID, MAX(CASE WHEN EXISTS
-        (SELECT 1 FROM activity_report_tasks r WHERE r.taskID=t.id)
+        `SELECT c.conversationID, MAX(CASE WHEN ${reportTask("t.id")}
         THEN 'report' ELSE 'task' END) AS title
       FROM pi_task_conversations c JOIN tasks t ON t.id=c.taskID
       JOIN peers p ON p.sessionID=t.workerSessionID AND p.crewID=t.crewID
@@ -537,7 +537,7 @@ export class CrewState {
     return this.db
       .query<CrewTask, [string]>(
         `SELECT id,crewID,workerSessionID,originCaptainID,originInputID,inputID,status,result,released,notifying
-         FROM pending_tasks WHERE crewID=? AND status='queued' ORDER BY sequence`,
+         FROM pending_tasks WHERE crewID=? AND ${queuedPendingTask} ORDER BY sequence`,
       )
       .all(crewID);
   }
@@ -922,7 +922,7 @@ export class CrewState {
         const count =
           this.db
             .query<{ count: number }, [string]>(
-              "SELECT COUNT(*) AS count FROM pending_tasks WHERE crewID=? AND status='queued'",
+              `SELECT COUNT(*) AS count FROM pending_tasks WHERE crewID=? AND ${queuedPendingTask}`,
             )
             .get(peer.crewID)?.count ?? 0;
         if (count >= pendingTaskLimit)
@@ -962,7 +962,7 @@ export class CrewState {
       .transaction(() => {
         const queued = this.db
           .query<QueuedTask, [string]>(
-            "SELECT * FROM pending_tasks WHERE id=? AND status='queued'",
+            `SELECT * FROM pending_tasks WHERE id=? AND ${queuedPendingTask}`,
           )
           .get(id);
         if (queued?.status !== "queued" || this.controlled(queued.crewID))

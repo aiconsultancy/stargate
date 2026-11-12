@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { type Config, configSchema } from "../src/config";
+import { CrewState } from "../src/crew/state";
 import { maintenanceSchema } from "../src/nightly/config";
 import {
   type DroidDependencies,
@@ -1327,5 +1328,62 @@ describe("droid scrubbing and dates", () => {
       ),
     );
     expect(state.recovers).toEqual({ "2026-11-12": 1, "2026-11-13": 1 });
+  });
+});
+
+describe("droid crew queue notes", () => {
+  test("the droid names queued crew tasks with the command to resolve them", async () => {
+    const { config, path } = await install();
+    const captain = join(host.dir, "captain");
+    const stateDirectory = join(captain, ".local", "pogo-crew");
+    await mkdir(join(captain, ".opencode"), { recursive: true });
+    await writeFile(
+      join(captain, ".opencode", "opencode.json"),
+      `${JSON.stringify({
+        plugins: [
+          {
+            package: join(host.dir, "plugin"),
+            options: {
+              namespace: "ship",
+              stateDirectory,
+              captainDirectory: captain,
+              worktrees: {},
+              team: { crew: [] },
+            },
+          },
+        ],
+      })}\n`,
+    );
+    const state = await CrewState.open(stateDirectory, "ship", "fingerprint");
+    let id = "";
+    try {
+      const chief = state.reservePeer("chief");
+      id = state.enqueue(chief, "ses_e49d787old", "private task text").id;
+    } finally {
+      state.close();
+    }
+    await writeReport(
+      config.dataDirectory,
+      report("deferred", "2026-11-12T00:05:00.000Z", { reason: "busy-crew" }),
+    );
+    let status = "";
+    await check(
+      config,
+      path,
+      deps(
+        scripted(async (tools) => {
+          status = JSON.stringify(await tools.status());
+          return "The run deferred on a queued crew task.";
+        }),
+      ),
+    );
+    expect(status).toContain(`"taskID":"${id}"`);
+    expect(status).toContain('"originIsPin":false');
+    const [post] = await posts(config);
+    expect(post?.text).toContain(
+      `Queued crew task ${id} (chief, from an earlier captain session): ask the captain to run pogo_crew status ${id}`,
+    );
+    const everything = [...agentPrompts, status, post?.text ?? ""].join("\n");
+    expect(everything).not.toContain("private task text");
   });
 });
