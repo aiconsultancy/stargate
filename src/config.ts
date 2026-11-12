@@ -2,7 +2,8 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { crewActivitySchema } from "./activity";
 import { cronjobsSchema } from "./cronjob-config";
-import { mentionRuleSchema } from "./mentions";
+import { fold } from "./irc/protocol";
+import { mentionNamesSchema, mentionRuleSchema } from "./mentions";
 import { maintenanceSchema } from "./nightly/config";
 import { piModelSchema, piProviderSchema } from "./pi-model";
 import { transcriptionSchema } from "./transcription";
@@ -138,16 +139,227 @@ export const botSchema = z.strictObject({
   turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
 });
 
+// IRC names are matched without case. Accounts and nicks stay within the
+// common RFC 2812 nick alphabet; channels use `#` or `&`, no spaces/commas.
+const ircNickPattern = /^[A-Za-z[\]\\`_^{|}][A-Za-z0-9[\]\\`_^{|}-]{0,31}$/;
+const ircAccount = z.string().regex(ircNickPattern);
+// At most 50 bytes (a common CHANNELLEN); JOIN lines are batched to 512.
+const ircChannel = z
+  .string()
+  .regex(/^[#&][^\s,:]{1,49}$/)
+  .refine(
+    (name) => Buffer.byteLength(name, "utf8") <= 50,
+    "IRC channel names are limited to 50 bytes",
+  )
+  .refine(
+    (name) => [...name].every((char) => char >= " " && char !== "\u007f"),
+    "IRC channel names cannot contain control characters",
+  );
+const loopbackHosts = new Set(["127.0.0.1", "::1"]);
+
+const ircServerSchema = z
+  .strictObject({
+    host: z.string().regex(/^[A-Za-z0-9.:-]{1,253}$/),
+    port: z.number().int().min(1).max(65_535),
+    tls: z.boolean(),
+    /** PEM file of a private CA. Without it, system roots verify the server. */
+    caFile: absolutePath.optional(),
+    /**
+     * Expected ISUPPORT NETWORK name, for example `Fleet`. Pogo refuses a
+     * server that announces another name. Part of the namespace, with host
+     * and port.
+     */
+    network: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,64}$/)
+      .optional(),
+  })
+  .refine(
+    (server) => server.tls || loopbackHosts.has(server.host),
+    "Plaintext IRC is allowed only for 127.0.0.1 or ::1; set tls: true",
+  )
+  .refine(
+    (server) => server.tls || server.caFile === undefined,
+    "caFile requires tls: true",
+  );
+
+const ircCrewSchema = z.strictObject({
+  /** Short crew member ID, for example `chief`. */
+  id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/),
+  displayName: z.string().trim().min(1).max(100).optional(),
+  account: ircAccount,
+  passwordEnv: envName,
+  /** Defaults to the account; Ergo forces nick = account anyway. */
+  nick: ircAccount.optional(),
+  /**
+   * Channels the captain grants this member. Only these are ever joined; an
+   * invite to any other channel is ignored. Currently exactly one channel.
+   */
+  channels: z.array(ircChannel).length(1),
+  /** Unpinned: one session per IRC channel, never the crew task session. */
+  backend: backendSchema.refine(
+    (backend) => backend.type !== "opencode" || backend.sessionID === undefined,
+    "IRC crew backends must not pin a sessionID; crew task sessions stay with the crew plugin",
+  ),
+  concurrency: z.number().int().min(1).max(32).default(2),
+  turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
+});
+
+export const ircSchema = z
+  .strictObject({
+    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+    displayName: z.string().trim().min(1).max(100).optional(),
+    server: ircServerSchema,
+    /** SASL PLAIN account of the captain bot. */
+    account: ircAccount,
+    passwordEnv: envName,
+    /** Defaults to the account. */
+    nick: ircAccount.optional(),
+    /** The only channels the captain joins; the first is the ship channel. */
+    channels: z.array(ircChannel).min(1).max(20),
+    access: z
+      .strictObject({
+        /** Any SASL account may write unless denied; `*` denies everyone. */
+        deniedAccounts: z
+          .array(z.union([z.literal("*"), ircAccount]))
+          .default([]),
+        /** `*` also blocks direct messages. */
+        deniedChannels: z
+          .array(z.union([z.literal("*"), ircChannel]))
+          .default([]),
+        /** Words that address the captain in its channels, like a nick mention. */
+        textMentions: mentionNamesSchema.optional(),
+        /** Accounts of other fleet captains: peer rules, 5 per target an hour. */
+        peerCaptains: z.array(ircAccount).max(50).default([]),
+        /** Ship (captain/crew) messages admitted per channel in a rolling hour. */
+        crewTurnsPerHour: z.number().int().min(0).max(100).default(10),
+      })
+      .default({
+        deniedAccounts: [],
+        deniedChannels: [],
+        peerCaptains: [],
+        crewTurnsPerHour: 10,
+      }),
+    crew: z.array(ircCrewSchema).max(20).default([]),
+    backend: backendSchema,
+    concurrency: z.number().int().min(1).max(32).default(4),
+    turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
+  })
+  .superRefine((irc, context) => {
+    const issue = (message: string) =>
+      context.addIssue({ code: "custom", message });
+    // Collisions fold with rfc1459, the widest classic CASEMAPPING, so names
+    // any server treats as equal are refused. Grants (crew ⊆ captain) only
+    // ASCII-lower-case, the narrowest: a name that differs under any
+    // mapping is not the captain's channel.
+    const lower = (value: string) => fold(value);
+    const exact = (value: string) => fold(value, "ascii");
+    const accounts = [irc.account, ...irc.crew.map((member) => member.account)];
+    if (new Set(accounts.map(lower)).size !== accounts.length)
+      issue("Captain and crew need distinct IRC accounts");
+    const nicks = [
+      irc.nick ?? irc.account,
+      ...irc.crew.map((member) => member.nick ?? member.account),
+    ];
+    if (new Set(nicks.map(lower)).size !== nicks.length)
+      issue("Captain and crew need distinct IRC nicks");
+    const secrets = [irc.passwordEnv, ...irc.crew.map((m) => m.passwordEnv)];
+    if (new Set(secrets).size !== secrets.length)
+      issue("Captain and crew need separate passwordEnv variables");
+    if (new Set(irc.crew.map((member) => member.id)).size !== irc.crew.length)
+      issue("Duplicate IRC crew id");
+    if (new Set(irc.channels.map(lower)).size !== irc.channels.length)
+      issue("Duplicate IRC channel");
+    const granted = new Set(irc.channels.map(exact));
+    for (const member of irc.crew)
+      if (!member.channels.every((channel) => granted.has(exact(channel))))
+        issue(`IRC crew ${member.id} may only join captain channels`);
+    const ship = new Set(accounts.map(lower));
+    if (irc.access.peerCaptains.some((account) => ship.has(lower(account))))
+      issue("peerCaptains must not list this ship's own accounts");
+  });
+
+export type IrcConfig = z.infer<typeof ircSchema>;
+export type IrcCrewConfig = IrcConfig["crew"][number];
+
+/** Registration IDs: Slack bots, IRC captains and `<irc id>-<crew id>`. */
+export function registrationIds(config: {
+  bots: readonly { id: string }[];
+  irc: readonly IrcConfig[];
+}) {
+  return [
+    ...config.bots.map((bot) => bot.id),
+    ...config.irc.flatMap((irc) => [
+      irc.id,
+      ...irc.crew.map((member) => `${irc.id}-${member.id}`),
+    ]),
+  ];
+}
+
+/** Pinned captain sessions of every transport. */
+export function pinnedSessionIDs(config: {
+  bots: readonly BotConfig[];
+  irc: readonly IrcConfig[];
+}) {
+  return [
+    ...new Set(
+      [...config.bots, ...config.irc].flatMap((registration) =>
+        registration.backend.type === "opencode" &&
+        registration.backend.sessionID !== undefined
+          ? [registration.backend.sessionID]
+          : [],
+      ),
+    ),
+  ];
+}
+
 export const configSchema = z
   .strictObject({
     dataDirectory: z.string().default(".pogo"),
     /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
     dashboard: z.boolean().optional(),
-    bots: z.array(botSchema).min(1),
+    bots: z.array(botSchema).default([]),
+    /** IRCv3 registrations, independent of Slack; see docs/irc.md. */
+    irc: z.array(ircSchema).default([]),
     /** Nightly self-update and host maintenance; see docs/maintenance.md. */
     maintenance: maintenanceSchema.optional(),
   })
-  .superRefine(({ bots, maintenance }, context) => {
+  .superRefine(({ bots, irc, maintenance }, context) => {
+    if (bots.length + irc.length === 0)
+      context.addIssue({
+        code: "custom",
+        path: ["bots"],
+        message: "Configure at least one Slack bot or IRC registration",
+      });
+    const ids = registrationIds({ bots, irc });
+    if (new Set(ids).size !== ids.length)
+      context.addIssue({
+        code: "custom",
+        message: "Duplicate registration ID across bots, irc and IRC crew",
+      });
+    // One Slack bot and one IRC captain may share a pin: each delivers only
+    // replies attributed to its own native inputs. Same-transport pins stay
+    // unique, so one queue never owns another's cursor.
+    const ircPins = irc.flatMap((registration) =>
+      registration.backend.type === "opencode" &&
+      registration.backend.sessionID !== undefined
+        ? [registration.backend.sessionID]
+        : [],
+    );
+    if (new Set(ircPins).size !== ircPins.length)
+      context.addIssue({
+        code: "custom",
+        message: "Duplicate pinned OpenCode sessionID across IRC registrations",
+      });
+    const ircSecrets = irc.flatMap((registration) => [
+      registration.passwordEnv,
+      ...registration.crew.map((member) => member.passwordEnv),
+    ]);
+    if (new Set(ircSecrets).size !== ircSecrets.length)
+      context.addIssue({
+        code: "custom",
+        message: "Each IRC account needs its own passwordEnv",
+      });
     const report = maintenance?.report;
     if (report) {
       const bot = bots.find((item) => item.id === report.bot);

@@ -5,7 +5,7 @@ import { access, mkdir, realpath, rename } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import type { Config } from "../config";
+import { type Config, pinnedSessionIDs } from "../config";
 import { isAllowedChannel } from "../routing";
 import type { MaintenanceConfig } from "./config";
 import { type Crew, crewDatabase, discoverCrews } from "./crews";
@@ -263,9 +263,8 @@ function lock(dataDirectory: string) {
  */
 function sessions(config: Config, crews: readonly Crew[]): Session[] {
   const found = new Map<string, Session["scope"]>();
-  for (const bot of config.bots)
-    if (bot.backend.type === "opencode" && bot.backend.sessionID)
-      found.set(bot.backend.sessionID, "captain-session");
+  for (const sessionID of pinnedSessionIDs(config))
+    found.set(sessionID, "captain-session");
   for (const crew of crews) {
     const path = crewDatabase(crew);
     if (!existsSync(path)) continue;
@@ -569,11 +568,7 @@ export async function idleNow(
   return checkIdle({
     dataDirectory: config.dataDirectory,
     crews,
-    pinnedSessions: config.bots.flatMap((bot) =>
-      bot.backend.type === "opencode" && bot.backend.sessionID
-        ? [bot.backend.sessionID]
-        : [],
-    ),
+    pinnedSessions: pinnedSessionIDs(config),
     cronHorizonMs: (config.maintenance?.idle.cronHorizonMinutes ?? 60) * 60_000,
     now: deps.clock.now(),
     scope: "server",

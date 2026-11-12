@@ -61,6 +61,10 @@ Set `access.textMentions` to start a conversation when a top-level message in
 chosen channels names the bot in plain text, such as "all captains". See
 [text mentions](docs/text-mentions.md).
 
+Captains and their crew can also be reached over IRCv3 (SASL accounts,
+TLS with a private CA, plain-text replies), beside or without Slack. Add an
+`irc` registration; see [IRC transport](docs/irc.md).
+
 New sessions use `<bot name> (slack <conversation ID>)` as their title, for
 example `Galactica Captain (slack D123)`. Set `displayName` on the bot to choose
 its name; otherwise Pogo uses the OpenCode agent name, then the bot ID.
@@ -473,8 +477,9 @@ and the one-time migration.
   old backend identity remain on disk; they are not executed with new settings.
   Adding `backend.sessionID` only binds an existing native session; it does not
   change the namespace, thread admission or cron schedules. Changing that pin
-  requires an explicit idle migration. One pinned session can have only one bot
-  registration and one Pogo process owner.
+  requires an explicit idle migration. One pinned session can have only one
+  Slack bot registration, at most one IRC registration and one Pogo process
+  owner; each transport delivers only replies to its own inputs.
 - Responses render Markdown, with no tool output or reasoning, at most 60,000
   Unicode characters; OpenCode transcript replies are not clipped. Streaming,
   `/cron`, and its interactive controls are supported. File transport and

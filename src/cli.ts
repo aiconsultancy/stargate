@@ -34,7 +34,7 @@ Commands:
   bot provision     Plan or resume a batch of Slack registrations
   crew init         Install an OpenCode captain/crew profile
   cron              List, add, run, remove, or report cronjobs
-  config check      Validate config and Slack token references
+  config check      Validate config, Slack token and IRC password references
   maintenance       Nightly self-update and host maintenance (plan/run/timer)
   manifest          Print Slack manifest JSON and prefilled creation URL
   service install   Install Linux systemd user unit; does not enable/start
@@ -117,9 +117,10 @@ are started. Crew sessions are created lazily by the captain and then reused.
 The trusted crew profile enables implementation tools; it is not a sandbox.
 Default model: openai-proxy/gpt-6.1-sol. Global authentication is unchanged.`,
   config: `Usage: pogo config check [--config PATH] [--schema-only]\n${common}
-Checks JSON/schema and Slack token references using environment and <config>.env.
+Checks JSON/schema, Slack token references and IRC password references
+(presence only) using environment and <config>.env, and that IRC caFile exists.
 --schema-only  Check JSON/schema without requiring any credentials
-Does not contact Slack or check provider credentials.`,
+Does not contact Slack or IRC, or check provider credentials.`,
   cron: `Usage: pogo cron <list|add|run|remove|report> --bot ID [options]
 --bot ID       Configured bot registration (required)
 --input PATH   Add only: JSON definition file, at most 64 KiB
@@ -413,7 +414,8 @@ export async function runCli(args: string[]): Promise<CliResult> {
     await setupWizard(configPath);
   else if (command === "config" && p[1] === "check" && p.length === 2) {
     const config = await readConfiguration(configPath);
-    if (!v["schema-only"]) await checkCredentials(configPath, config.bots);
+    if (!v["schema-only"])
+      await checkCredentials(configPath, config.bots, process.env, config.irc);
     console.log("Configuration valid.");
   } else if (command === "manifest" && p.length === 1) {
     console.log(JSON.stringify(buildManifest(v.name), null, 2));

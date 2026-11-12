@@ -13,7 +13,12 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import { parseEnv } from "node:util";
-import { type BotConfig, botSchema, configSchema } from "./config";
+import {
+  type BotConfig,
+  botSchema,
+  configSchema,
+  type IrcConfig,
+} from "./config";
 
 export function buildManifest(name = "Pogo") {
   if (!name.trim() || name.length > 80)
@@ -108,6 +113,7 @@ export async function checkCredentials(
   path: string,
   bots: BotConfig[],
   environment: NodeJS.ProcessEnv = process.env,
+  irc: readonly IrcConfig[] = [],
 ) {
   let companion: NodeJS.ProcessEnv = {};
   try {
@@ -117,6 +123,20 @@ export async function checkCredentials(
       throw new Error("Cannot read credential companion.");
   }
   const env = { ...companion, ...environment };
+  // Presence only: values are never printed or sent anywhere.
+  for (const registration of irc) {
+    for (const name of [
+      registration.passwordEnv,
+      ...registration.crew.map((member) => member.passwordEnv),
+    ])
+      if (!env[name]?.trim())
+        throw new Error(
+          "Missing IRC password environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
+        );
+    const ca = registration.server.caFile;
+    if (ca && !(await lstat(ca).catch(() => undefined))?.isFile())
+      throw new Error("IRC caFile is not a readable file.");
+  }
   for (const bot of bots) {
     if (
       !/^xapp-[A-Za-z0-9-]+$/.test(env[bot.slack.appTokenEnv] ?? "") ||

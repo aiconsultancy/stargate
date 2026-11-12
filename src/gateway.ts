@@ -181,6 +181,67 @@ export interface SlackDelivery {
   react?(channel: string, ts: string, name: ReactionName): Promise<void>;
 }
 
+/**
+ * Registration settings the transport-neutral worker reads. A Slack
+ * `BotConfig` carries `slack` and enables Slack-only intake and controls.
+ */
+export type GatewayConfig =
+  | BotConfig
+  | Pick<
+      BotConfig,
+      | "id"
+      | "displayName"
+      | "backend"
+      | "concurrency"
+      | "turnTimeoutMs"
+      | "waiting"
+      | "crewActivity"
+    >;
+
+/** Transport rules the gateway applies to every job of one registration. */
+export interface GatewayTransport {
+  /** Session title and source label. */
+  readonly name: "slack" | "irc";
+  /** Queue, session and outbox namespace of this registration. */
+  readonly key: string;
+  /** Current access rules, rechecked before work and before delivery. */
+  allowed(user: string, channel: string): boolean;
+  /** Model-visible source of a chat message; undefined for other jobs. */
+  source(job: Job): PromptSourceContext["source"] | undefined;
+  /** Prompt prefix naming the sender when no source line is sent. */
+  note(job: Job): string | undefined;
+}
+
+/** Slack rules: bot/app/workspace namespace and Slack message timestamps. */
+export function slackTransport(
+  config: BotConfig,
+  identity: Identity,
+): GatewayTransport {
+  return {
+    name: "slack",
+    key: botKey(config, identity),
+    allowed: (user, channel) =>
+      isAllowedUser(config, user) && isAllowedChannel(config, channel),
+    source(job) {
+      const message = job.eventId.slice(job.channel.length + 1);
+      if (
+        !job.eventId.startsWith(`${job.channel}:`) ||
+        !/^\d{1,16}\.\d{1,6}$/.test(message)
+      )
+        return;
+      return {
+        channel: job.channel,
+        thread: job.thread,
+        message,
+        user: job.user,
+        ...(job.sender === "captain" ? { sender: "captain" as const } : {}),
+      };
+    },
+    note: (job) =>
+      job.sender === "captain" ? peerPrefix(job.user) : undefined,
+  };
+}
+
 export class Gateway {
   private readonly activity: ActivityDelivery;
   private readonly cancellations = new Map<number, AbortController>();
@@ -191,9 +252,12 @@ export class Gateway {
   >();
   /** Deleted sessions or lost cursors: no background probes until a request. */
   private readonly unavailable = new Set<string>();
+  /** Slack intake, controls and thread context; absent for other transports. */
+  private readonly bot: BotConfig | undefined;
+  private readonly transport: GatewayTransport;
   readonly key: string;
   constructor(
-    private readonly config: BotConfig,
+    private readonly config: GatewayConfig,
     private readonly identity: Identity,
     private readonly store: Store,
     private readonly backend: AgentBackend,
@@ -203,30 +267,40 @@ export class Gateway {
     private readonly transcriber?: Transcriber,
     /** Slack user directory for peer captain checks. */
     private readonly peers?: PeerDirectory,
+    /** Defaults to Slack rules for a Slack `BotConfig`. */
+    transport?: GatewayTransport,
   ) {
-    this.key = botKey(config, identity);
+    this.bot = "slack" in config ? config : undefined;
+    const selected =
+      transport ?? (this.bot ? slackTransport(this.bot, identity) : undefined);
+    if (!selected) throw new Error("Gateway transport is required");
+    this.transport = selected;
+    this.key = selected.key;
     this.activity = new ActivityDelivery(
       backend,
       slack,
       () => config.crewActivity,
-      (job) =>
-        !job.deferDelivery &&
-        isAllowedUser(config, job.user) &&
-        isAllowedChannel(config, job.channel),
+      (job) => !job.deferDelivery && selected.allowed(job.user, job.channel),
       log,
       { store },
     );
   }
 
+  private allowed(job: { user: string; channel: string }) {
+    return this.transport.allowed(job.user, job.channel);
+  }
+
   accept(body: unknown, peer?: PeerSender) {
-    const routed = routeEvent(body, this.config, this.identity, peer);
+    const bot = this.bot;
+    if (!bot) return false;
+    const routed = routeEvent(body, bot, this.identity, peer);
     if (!routed) return false;
     const followed = this.store.follows(routed.conversation);
     // A voice message in a thread the bot follows keeps today's behaviour,
     // unless every turn needs a mention.
     const held = "gate" in routed && routed.gate === "spoken";
     const input: Incoming & { startsConversation: boolean } =
-      held && followed && !this.config.access.mentionOnly
+      held && followed && !bot.access.mentionOnly
         ? { ...routed, gate: null }
         : routed;
     if (!input.startsConversation && !followed && input.gate !== "spoken")
@@ -253,7 +327,7 @@ export class Gateway {
    */
   async receive(body: unknown, open: () => boolean = () => true) {
     const sender = botSender(body);
-    if (!sender || !this.config.access.peerCaptains || !this.peers)
+    if (!sender || !this.bot?.access.peerCaptains || !this.peers)
       return this.accept(body);
     const verified = await this.peers
       .verify(sender, AbortSignal.timeout(peerLookupMs))
@@ -264,7 +338,8 @@ export class Gateway {
 
   /** Commit the exact requester-authorized target before Socket Mode ACK. */
   cancel(body: unknown) {
-    const target = cancellationTarget(body, this.config, this.identity);
+    if (!this.bot) return false;
+    const target = cancellationTarget(body, this.bot, this.identity);
     if (!target || !this.store.cancel(this.key, target)) return false;
     this.cancellations.get(target.id)?.abort();
     return true;
@@ -279,11 +354,7 @@ export class Gateway {
     name: string;
     deferDelivery?: boolean;
   }): number | undefined {
-    if (
-      !isAllowedUser(this.config, input.user) ||
-      !isAllowedChannel(this.config, input.channel)
-    )
-      return;
+    if (!this.allowed(input)) return;
     const eventId = input.deferDelivery
       ? `scheduled:${input.runId}`
       : `${input.channel}:${input.thread}`;
@@ -547,12 +618,7 @@ export class Gateway {
     if (this.backend.sessionID)
       return this.captainCatchUp(this.backend.sessionID, shutdown);
     const target = this.store.transcriptTarget(this.key, conversation);
-    if (
-      !target ||
-      !this.backend.transcript ||
-      !isAllowedUser(this.config, target.user) ||
-      !isAllowedChannel(this.config, target.channel)
-    )
+    if (!target || !this.backend.transcript || !this.allowed(target))
       return true;
     const signal = AbortSignal.any([
       shutdown,
@@ -761,8 +827,8 @@ export class Gateway {
     job: Job,
     shutdown: AbortSignal,
   ): Promise<Awaited<ReturnType<typeof transcribeMedia>> | undefined> {
-    const mention = this.config.transcription?.spokenMentions;
-    const timeoutMs = this.config.transcription?.timeoutMs ?? 120_000;
+    const mention = this.bot?.transcription?.spokenMentions;
+    const timeoutMs = this.bot?.transcription?.timeoutMs ?? 120_000;
     const ignore = (message: string) => {
       this.log.info({ job: job.id }, message);
       this.store.discard(job.id);
@@ -801,10 +867,7 @@ export class Gateway {
   /** Public for deterministic integration tests and single-step workers. */
   async process(held: Job, shutdown: AbortSignal) {
     // Recheck policy for queued inputs and pending delivery after a restart.
-    if (
-      !isAllowedUser(this.config, held.user) ||
-      !isAllowedChannel(this.config, held.channel)
-    ) {
+    if (!this.allowed(held)) {
       if (held.gate === "spoken") this.store.discard(held.id);
       else this.store.finish(held.id, "failed");
       return;
@@ -895,48 +958,31 @@ export class Gateway {
           const pinned = this.backend.sessionID;
           session = pinned ? undefined : this.store.session(job.conversation);
           let text = job.text;
-          const before = job.eventId.slice(job.channel.length + 1);
-          const slackMessage =
-            !job.deferDelivery &&
-            job.eventId.startsWith(`${job.channel}:`) &&
-            /^\d{1,16}\.\d{1,6}$/.test(before);
-          // This API describes Slack sources only. Digest runs have no thread.
+          // Chat messages only. Digest runs have no thread.
+          const source = job.deferDelivery
+            ? undefined
+            : this.transport.source(job);
           const sourceContext: PromptSourceContext | undefined =
-            pinned && slackMessage
-              ? {
-                  source: {
-                    channel: job.channel,
-                    thread: job.thread,
-                    message: before,
-                    user: job.user,
-                    ...(job.sender === "captain"
-                      ? { sender: "captain" as const }
-                      : {}),
-                  },
-                }
-              : undefined;
-          // Without a source line, the prompt itself names a peer sender.
-          if (job.sender === "captain" && !sourceContext)
-            text = `${peerPrefix(job.user)}\n\n${text}`;
+            pinned && source ? { source } : undefined;
+          // Without a source line, the prompt itself names a special sender.
+          const note = sourceContext ? undefined : this.transport.note(job);
+          if (note) text = `${note}\n\n${text}`;
           if (job.textMention)
             text = `${textMentionNote(job.textMention)}\n\n${text}`;
           // greybeard: pinned turns carry IDs only; missing history needs explicit retrieval.
-          if (!pinned && !session) {
+          const bot = this.bot;
+          if (!pinned && !session && bot) {
             // Roots (including scheduled runs) have no earlier thread messages.
-            if (
-              this.config.threadContext &&
-              slackMessage &&
-              before !== job.thread
-            ) {
+            if (bot.threadContext && source && source.message !== job.thread) {
               if (!this.slack.threadContext)
                 throw new ThreadContextUnavailable();
               const history = await this.slack.threadContext({
                 channel: job.channel,
                 thread: job.thread,
-                before,
+                before: source.message,
                 user: job.user,
                 botUser: this.identity.user,
-                appId: this.config.slack.appId,
+                appId: bot.slack.appId,
                 team: this.identity.team,
                 signal,
               });
@@ -947,7 +993,7 @@ export class Gateway {
           if (!session) {
             session = await this.backend.createSession({
               key: job.conversation,
-              title: `${botDisplayName(this.config)} (${job.deferDelivery ? "scheduled" : "slack"} ${job.channel})`,
+              title: `${botDisplayName(this.config)} (${job.deferDelivery ? "scheduled" : this.transport.name} ${job.channel})`,
               signal,
             });
             if (pinned) {
@@ -990,36 +1036,35 @@ export class Gateway {
           } else
             from = await this.transcriptFrom(job.conversation, session, signal);
           signal.throwIfAborted();
-          // No notice can be delivered for a digest run. Do not register a
-          // maintenance permit: the backend must keep that tool fail-closed.
-          maintenance = live
-            ? await startMaintenanceDelivery({
-                backend: this.backend,
-                sessionID: session,
-                requestID: `slack-job-${job.id}`,
-                signal,
-                publish: async (notice) => {
-                  if (
-                    !isAllowedUser(this.config, job.user) ||
-                    !isAllowedChannel(this.config, job.channel)
-                  )
-                    throw new Error("Maintenance notice access denied");
-                  await live.announce(maintenanceText(notice));
-                  budget.pause();
-                },
-                resume: () => {
-                  budget.resume();
-                  live.resume();
-                },
-                cancel: () => {
-                  this.log.warn(
-                    { job: job.id },
-                    "Maintenance monitoring failed; stopping request",
-                  );
-                  maintenanceFailure.abort();
-                },
-              })
-            : undefined;
+          // No notice can be delivered for a digest run, and only Slack has a
+          // cancel button. Without a permit the backend keeps that tool
+          // fail-closed.
+          maintenance =
+            live && this.transport.name === "slack"
+              ? await startMaintenanceDelivery({
+                  backend: this.backend,
+                  sessionID: session,
+                  requestID: `slack-job-${job.id}`,
+                  signal,
+                  publish: async (notice) => {
+                    if (!this.allowed(job))
+                      throw new Error("Maintenance notice access denied");
+                    await live.announce(maintenanceText(notice));
+                    budget.pause();
+                  },
+                  resume: () => {
+                    budget.resume();
+                    live.resume();
+                  },
+                  cancel: () => {
+                    this.log.warn(
+                      { job: job.id },
+                      "Maintenance monitoring failed; stopping request",
+                    );
+                    maintenanceFailure.abort();
+                  },
+                })
+              : undefined;
           if (!job.deferDelivery)
             activity = await this.activity.start(
               job,
@@ -1071,7 +1116,7 @@ export class Gateway {
               const spoken = await transcribeMedia(
                 inputFiles,
                 this.transcriber,
-                this.config.transcription?.timeoutMs ?? 120_000,
+                this.bot?.transcription?.timeoutMs ?? 120_000,
                 signal,
               );
               inputFiles = spoken.files;
@@ -1349,10 +1394,7 @@ export class Gateway {
     }
     for (const file of files) {
       shutdown.throwIfAborted();
-      if (
-        !isAllowedUser(this.config, job.user) ||
-        !isAllowedChannel(this.config, job.channel)
-      )
+      if (!this.allowed(job))
         throw new Error("Attachment delivery access denied");
       if (file.phase === "shared") continue;
       if (file.prepared && !file.title) {

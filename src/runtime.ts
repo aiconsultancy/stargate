@@ -14,6 +14,7 @@ import {
   type BackendConfig,
   type BotConfig,
   type Config,
+  type IrcConfig,
   loadConfig,
   secret,
 } from "./config";
@@ -27,6 +28,7 @@ import { type DashboardShip, dashboardSource } from "./dashboard-source";
 import { abortable } from "./effect";
 import { Gateway, type SlackDelivery } from "./gateway";
 import { controlInteractions } from "./interactions";
+import { IrcShip } from "./irc/ship";
 import { MaintenanceOutbox } from "./nightly/outbox";
 import { writeReady } from "./nightly/ready";
 import { PairingUI } from "./pairing";
@@ -83,7 +85,12 @@ export type RuntimeDependencies = {
     config: BackendConfig,
     context: BackendContext,
   ): Promise<AgentBackend>;
+  /** IRC ship connections; tests shorten the timings. */
+  irc?(config: IrcConfig, store: Store, log: Logger): Promise<IrcShip>;
 };
+
+/** Programmatic callers may omit transports they do not use. */
+export type ServeConfig = Omit<Config, "irc"> & { irc?: Config["irc"] };
 
 const defaults: RuntimeDependencies = {
   slack: (bot, log) =>
@@ -115,7 +122,7 @@ const release = (log: Logger, name: string, close: () => unknown) =>
  * restarts it.
  */
 export function serve(
-  config: Config,
+  config: ServeConfig,
   log: Logger,
   shutdown: AbortSignal,
   dependencies: RuntimeDependencies = defaults,
@@ -284,6 +291,58 @@ export function serve(
         );
         botLog.info("Bot connected");
         ships.push({ bot, identity, key: botKey(bot, identity), backend });
+      }
+      // IRC never blocks startup or Slack: connections retry in the
+      // background, and delivery waits for them or retries later.
+      for (const irc of config.irc ?? []) {
+        const ship = yield* Effect.promise(() =>
+          (dependencies.irc ?? IrcShip.create)(irc, store, log),
+        );
+        for (const registration of ship.registrations) {
+          const namespace = createHash("sha256")
+            .update(registration.key)
+            .digest("hex");
+          const dataDirectory = join(
+            config.dataDirectory,
+            registration.id,
+            namespace,
+          );
+          yield* Effect.promise(() =>
+            mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
+          );
+          const backend = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              dependencies.backend(registration.backend, { dataDirectory }),
+            ),
+            (backend) =>
+              release(registration.log, "Resource", () => backend.close()),
+          );
+          const gateway = new Gateway(
+            registration.settings,
+            registration.identity,
+            store,
+            backend,
+            registration.delivery,
+            registration.log,
+            undefined,
+            undefined,
+            registration.transport,
+          );
+          workers.push(
+            supervise(registration.log, "gateway", (signal) =>
+              gateway.work(signal),
+            ),
+          );
+        }
+        let closing: Promise<void> | undefined;
+        const close = () => {
+          closing ??= ship.close();
+          return closing;
+        };
+        connections.push(close);
+        yield* Effect.addFinalizer(() => closeIntake(close));
+        ship.start(() => open);
+        log.info({ irc: irc.id }, "IRC connecting");
       }
       if (config.dashboard) {
         // Before the worker fork: a bind failure is an ordinary startup

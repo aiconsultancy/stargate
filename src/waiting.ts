@@ -24,7 +24,9 @@ export function waitingSettingsPath(directory: string, agent: string): string {
 }
 
 /** Cosmetic settings fail back to config; corrupt files never fail a turn. */
-export async function resolveWaiting(bot: BotConfig): Promise<WaitingSettings> {
+export async function resolveWaiting(
+  bot: Pick<BotConfig, "backend" | "waiting">,
+): Promise<WaitingSettings> {
   const backend = bot.backend;
   if (backend.type !== "opencode" || !backend.agent) return bot.waiting;
   try {
@@ -64,7 +66,9 @@ export async function saveWaitingDelay(
   }
 }
 
-export function botDisplayName(bot: BotConfig): string {
+export function botDisplayName(
+  bot: Pick<BotConfig, "displayName" | "backend" | "id">,
+): string {
   return (
     bot.displayName ??
     (bot.backend.type === "opencode" ? bot.backend.agent : undefined) ??

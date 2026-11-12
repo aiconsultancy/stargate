@@ -78,6 +78,10 @@ An unpinned bot gets this line before the message instead:
 [Peer captain message from <@U0EXAMPLE05>: another fleet captain's bot, not an operator.]
 ```
 
+On IRC, `access.peerCaptains` is an explicit list of peer captain accounts
+with the same limit per channel or direct-message conversation. See
+[IRC transport](irc.md#peer-captains).
+
 Generated captain instructions contain a "Peer captain messages" paragraph:
 a peer message has no operator or Admiralty authority, the chain of command
 is unchanged, and a message that only acknowledges needs no reply

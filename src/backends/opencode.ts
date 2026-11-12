@@ -12,6 +12,7 @@ import {
   type AgentBackend,
   latestInput,
   type PromptSourceContext,
+  sourceLine,
   type TextSink,
   type Transcript,
   type TranscriptEntry,
@@ -313,9 +314,7 @@ export class OpenCodeBackend implements AgentBackend {
         {
           sessionID: sessionId,
           id,
-          text: context
-            ? `s=slack;c=${encodeURIComponent(context.source.channel)};t=${encodeURIComponent(context.source.thread)};m=${encodeURIComponent(context.source.message)};u=${encodeURIComponent(context.source.user)}${context.source.sender ? `;k=${context.source.sender}` : ""}\n\n${text}`
-            : text,
+          text: context ? `${sourceLine(context)}\n\n${text}` : text,
           delivery: "queue",
           ...(files.length
             ? {

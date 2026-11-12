@@ -1,0 +1,374 @@
+# IRC transport
+
+Pogo can reach a captain over IRCv3 as well as Slack. One process can run
+Slack bots and IRC registrations together; neither depends on the other.
+An IRC registration has its own connection, access rules, queue namespace
+and delivery. It reuses the gateway's SQLite queue, outbox, delivery
+cursor, transcript catch-up and no-replay rules.
+
+Pogo does not start, configure or administer the IRC server. Account,
+channel and TLS setup belong to the server operator.
+
+## Operator steps
+
+1. On the IRC server, create one SASL account for the captain and one per
+   crew member (Ergo: `/NICKSERV SAREGISTER <name> <password>` as an
+   operator). Register the ship channel with the captain as founder.
+2. Put each password in `<config>.env` (mode `0600`) under the variable
+   named by its `passwordEnv`. Never put it in `pogo.json` or chat.
+3. Add the `irc` registration. For a captain that is also on Slack, copy
+   the Slack bot's OpenCode `url`, `directory`, `agent` and `sessionID`;
+   the pinned session must match that directory and agent.
+4. Optional: give crew a lasting invite exception on an invite-only ship
+   channel (see [channels](#channels)); otherwise the captain invites them.
+5. Run `pogo config check --config <path>`, then restart Pogo.
+6. Regenerate or edit the captain definition so it contains the
+   "IRC messages" paragraph (see [captain instructions](#captain-instructions)).
+
+## Server expectations
+
+Pogo is tested against [Ergo](https://ergo.chat) 2.19. Any IRCv3 server
+works if it offers these capabilities:
+
+| Capability                        | Need        | Use                                              |
+| --------------------------------- | ----------- | ------------------------------------------------ |
+| `sasl` (PLAIN)                    | required    | Log in to the configured account                 |
+| `account-tag`                     | required    | Identify every sender by account                 |
+| `message-tags`, `server-time`     | recommended | Message IDs, reply tags, times                   |
+| `batch`, `labeled-response`       | recommended | Confirm each sent line                           |
+| `echo-message`                    | recommended | Own message IDs for reply triggers               |
+| `account-notify`, `extended-join` | optional    | Nick hints for direct replies; WHOIS confirms    |
+| `draft/chathistory`               | optional    | Fetch channel messages missed during a reconnect |
+
+Without `sasl` PLAIN or `account-tag`, Pogo refuses the server and retries
+after five minutes. Without `labeled-response`, a line counts as sent when
+it is written to the socket.
+
+Every account must log in with SASL. Pogo never creates accounts. With
+Ergo, `force-nick-equals-account` keeps each nick equal to its account, and
+`multiclient` lets a reconnect take over the nick.
+
+## Configuration
+
+Add an `irc` array beside `bots`. Either array may be empty, but not both.
+
+```json
+"irc": [
+  {
+    "id": "galactica-irc",
+    "displayName": "Galactica",
+    "server": { "host": "127.0.0.1", "port": 6667, "tls": false },
+    "account": "galactica",
+    "passwordEnv": "POGO_IRC_GALACTICA_PASSWORD",
+    "channels": ["#galactica"],
+    "access": {
+      "deniedAccounts": [],
+      "deniedChannels": [],
+      "textMentions": ["all captains"],
+      "peerCaptains": [],
+      "crewTurnsPerHour": 10
+    },
+    "crew": [
+      {
+        "id": "chief",
+        "account": "galactica-chief",
+        "passwordEnv": "POGO_IRC_GALACTICA_CHIEF_PASSWORD",
+        "channels": ["#galactica"],
+        "backend": {
+          "type": "opencode",
+          "url": "http://127.0.0.1:4096",
+          "directory": "/srv/galactica/crew/chief",
+          "agent": "galactica-crew-chief"
+        }
+      }
+    ],
+    "backend": {
+      "type": "opencode",
+      "url": "http://127.0.0.1:4096",
+      "directory": "/srv/galactica/captain",
+      "agent": "galactica-captain-adama",
+      "sessionID": "ses_..."
+    }
+  }
+]
+```
+
+| Field                          | Rule                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------------------- |
+| `server.host`, `server.port`   | IRC server address                                                                    |
+| `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                 |
+| `server.caFile`                | Absolute PEM path of a private CA; TLS only                                           |
+| `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused        |
+| `account`, `passwordEnv`       | SASL PLAIN account and the environment variable with its password                     |
+| `nick`                         | Optional; defaults to the account                                                     |
+| `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes |
+| `access`                       | See [access](#access)                                                                 |
+| `crew`                         | See [crew](#crew-on-irc); at most 20                                                  |
+| `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                 |
+| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                         |
+
+Put passwords in the private `<config>.env` companion or the service
+environment, never in JSON. Every account needs its own `passwordEnv`.
+`pogo config check` validates the schema, checks that each password
+variable is set and that `caFile` is a file. It does not connect.
+
+For the TLS listeners, use the server's private CA:
+
+```json
+"server": {
+  "host": "10.23.45.1",
+  "port": 6697,
+  "tls": true,
+  "caFile": "/home/operator/.local/state/ergo/tls/ca.pem"
+}
+```
+
+Pogo verifies the certificate against that CA and the host name or IP.
+
+The namespace of each IRC connection includes the server host, port and
+`network` name, the registration ID, the account and the backend settings.
+Moving a registration to another host, port or network therefore starts new
+queues, outboxes and unpinned sessions; a pinned captain keeps its native
+session but starts a new delivery cursor at current history. Set `network`
+so a server that announces another network is refused before Pogo joins
+anything.
+
+### One captain on Slack and IRC
+
+A captain is reachable the same way on both transports when its Slack bot
+and its IRC registration pin the same OpenCode `sessionID`. This is the only
+cross-registration pin that `config check` accepts: at most one Slack bot
+and one IRC registration per session.
+
+The two registrations keep separate queues, cursors and namespaces. Each
+delivers only replies that history attributes to its own native inputs, so
+a Slack request is never answered on IRC or the other way round. Native
+OpenCode queues a turn that arrives while the other transport's turn runs;
+its time limit includes that wait. Crew results return to the transport of
+the request that dispatched them.
+
+## Access
+
+- The sender's identity is the IRCv3 `account` tag, never the nick. A
+  message without an account tag is ignored.
+- Any logged-in account may write to the captain, unless
+  `deniedAccounts` lists it. `*` denies everyone.
+- Channel messages count only in the registration's `channels` and not in
+  `deniedChannels`. `deniedChannels: ["*"]` also blocks direct messages.
+- Denies are checked again before work and before each delivery.
+- Accounts, nicks and channels compare under the server's ISUPPORT
+  `CASEMAPPING` (`rfc1459` until the server sends it; Ergo sends `ascii`).
+  Every spelling of a channel shares one conversation, deny entry and turn
+  limit. Duplicate checks in the configuration use `rfc1459`, so names
+  that any classic mapping treats as equal count as duplicates.
+- The registration's own account is never admitted: echoes and other
+  sessions of the same account are ignored.
+- NOTICE, TAGMSG and CTCP messages never start a turn.
+
+A channel message starts a turn when it:
+
+- names the captain's nick as a whole word, for example `galactica: status?`;
+- contains one of `access.textMentions` (captain only); or
+- is a `+draft/reply` to one of the connection's own recent messages.
+
+A direct message to the captain always starts a turn. Crew connections
+ignore direct messages.
+
+Access rules are request filters, not isolation. Every logged-in account
+on the server can drive the captain's enabled tools.
+
+### Peer captains
+
+`access.peerCaptains` lists the accounts of other fleet captains. The list
+is explicit; a naming rule such as `*-captain` is not used, because the
+server operator assigns account names and an explicit list cannot match by
+accident. Peer messages follow the Slack peer rules: the source line ends
+with `;k=captain`, they carry no operator or Admiralty authority, and Pogo
+admits at most **5 per conversation (channel or direct message) in a
+rolling hour**. A peer list cannot contain this ship's own accounts.
+
+## Conversations
+
+| IRC             | Pogo conversation                   |
+| --------------- | ----------------------------------- |
+| Channel message | One conversation per channel        |
+| Direct message  | One conversation per sender account |
+
+A pinned captain uses its one session for all of them. Each turn carries a
+source line:
+
+```text
+s=irc;c=%23galactica;t=<msgid>;m=<msgid>;u=jack[;k=crew|captain]
+```
+
+Unpinned sessions (crew, Pi Durable) get a one-line note instead, for
+example `[IRC #galactica, from account jack. IRC shows plain text only.]`.
+New sessions use the title `<name> (irc <channel>)`.
+
+Turns in one conversation run in order. IRC message IDs deduplicate a
+message that arrives twice, for example from a history replay.
+
+## Replies
+
+- Agent Markdown becomes plain text: headings, emphasis, fences and table
+  rules are removed; links keep their URL; inline code keeps its backticks.
+  Control characters are removed, so a reply cannot send CTCP or IRC
+  formatting.
+- Each line fits 512 bytes, including Pogo's tags and the source prefix
+  that the server adds. Long lines break at spaces, otherwise at a UTF-8
+  character boundary. Blank lines are not sent.
+- The first line carries `+draft/reply` to the request's message.
+- A direct reply goes only to a nick that WHOIS (`330`) shows is logged in
+  to the requester's account at that moment: the last nick seen for the
+  account, then the account name. A nick with another account, or none,
+  never receives it; the delivery fails and retries later. Account/nick
+  hints are dropped on QUIT, NICK, PART, KICK, logout and reconnect. Each
+  direct line is checked again when it is written to the socket, after the
+  send throttle: if the binding was dropped meanwhile, the queued line is
+  discarded and the stored reply waits for a retry. A nick that changes
+  hands with no event Pogo can see (no shared channel) after the WHOIS is
+  not detected for that chunk.
+- Sends are throttled: a burst of 4 lines, then one line every 600 ms.
+- With `labeled-response`, each line waits for the server's labeled echo or
+  `ACK`; a labeled error fails the delivery.
+- `[[pogo:silent]]` posts nothing. `[[pogo:react:NAME]]` sends a
+  `+draft/react` TAGMSG to the request's message.
+- A reply is stored before delivery. A failed delivery retries the stored
+  chunk later and never reruns the agent. A retried chunk can repeat lines
+  that were already sent. Delivery waits up to 30 seconds for a reconnect,
+  then retries with the gateway's backoff (eight attempts).
+
+IRC cannot edit or delete messages, so there are no streaming previews,
+waiting messages, Stop buttons, activity boxes or cancellable maintenance
+notices. A captain tool that needs a cancellable notice stays fail-closed on
+IRC. Files and images are not transferred; a published file posts a short
+"attachment is unavailable" notice.
+
+## Connection
+
+- CAP 302 negotiation, then SASL PLAIN, then `CAP END`.
+- Keepalive: Pogo sends PING after 60 seconds of silence and reconnects
+  after 150 seconds without data. Server PINGs are answered at once.
+- Reconnects use exponential backoff from 1 second to 2 minutes, with
+  jitter. A refused login or a server without required capabilities waits
+  5 minutes.
+- If the nick is taken, Pogo uses `<nick>_` and retries the configured nick
+  every 30 seconds.
+- After a reconnect, with `draft/chathistory`, Pogo fetches up to 100
+  channel messages after the last one it saw. The normal rules apply.
+- Shutdown sends `QUIT` and closes every connection before workers drain.
+- IRC connection failures never stop Slack or Pogo startup; they retry in
+  the background.
+
+## Crew on IRC
+
+Each crew member can have its own IRC account, for example
+`galactica-chief`, with its own `passwordEnv`. The operator creates these
+accounts.
+
+### Channels
+
+- A crew connection joins only the channels in its `crew[].channels`. That
+  list must be a subset of the captain's `channels` and currently has
+  exactly one entry: the ship channel. `config check` compares these names
+  exactly, up to ASCII letter case only, so `#ship{1}` is not `#ship[1]`.
+  At runtime the crew connection also requires each channel to be a
+  captain channel under the server's `CASEMAPPING`; otherwise it never
+  joins, answers or delivers there.
+- Pogo ignores an INVITE to any other channel and leaves a channel that
+  the server joined it to without being listed.
+- When the ship channel is invite-only (`+i`) and the crew join fails, the
+  captain connection sends `INVITE <crew nick> <channel>`. The captain must
+  be in the channel with operator rights (Ergo gives the founder `+q`).
+- For a lasting grant that does not need the captain online, the channel
+  founder can set an invite exception, for example
+  `/MODE #galactica +I galactica-chief!*@*`. With Ergo's
+  `force-nick-equals-account`, the nick is the account.
+- To remove a crew member from a channel, remove it from the config (or
+  ban the account); a kicked crew connection rejoins on its next retry.
+
+### Crew sessions
+
+A crew IRC connection is an ordinary unpinned registration: one session
+per channel, using its own `backend` (normally the member's native agent
+definition and worktree). It does **not** prompt the crew member's task
+session that the crew plugin manages. Pogo refuses a crew backend with a
+pinned `sessionID`.
+
+Reason: the crew plugin reads a task result from the final answer that
+follows the task's input. An outside input after it makes the result
+unreadable ("A later input follows this task"). The crew plugin's DM path
+also cannot carry a reply back to IRC. Separate IRC sessions keep the task
+model intact and need no crew plugin change. To hand IRC work to a crew
+member's task session, the captain uses `pogo_crew` as usual.
+
+### Crew-to-crew messages
+
+A crew member hears a ship channel message that mentions its nick, or that
+replies to one of its messages. The sender can be a person, the captain or
+another crew member. A message from any of this ship's accounts (captain or
+crew) is a **ship message**:
+
+- the pinned captain sees `;k=crew`; crew sessions see a note that the
+  sender is a ship account and that acknowledgements need
+  `[[pogo:silent]]`;
+- Pogo admits at most `access.crewTurnsPerHour` ship messages (default
+  10) per channel in a rolling hour, across the captain and every crew
+  member of the ship. Later ship messages are ignored with one warning in
+  the log. `0` turns ship messages off. Restarts do not reset the count.
+- No connection ever answers its own messages.
+
+### Breakout channels (future)
+
+Captain-created task channels are not implemented. The extension point is
+`IrcShip` (`src/irc/ship.ts`): a runtime grant set beside
+`crew[].channels`, filled only by a captain action, which then uses the
+same join, invite and invite-ignore rules. Grants must stay captain-owned
+and auditable, and the `length(1)` rule on `crew[].channels` would become
+a captain-managed limit.
+
+## Captain instructions
+
+Generated captain definitions include an "IRC messages" paragraph that
+explains `s=irc`, `;k=crew` and plain text. A definition generated before
+this feature does not contain it: add it, as for other instruction changes.
+
+## Implementation
+
+`src/irc/client.ts` is a small client on Bun's TCP/TLS sockets, not a
+library. The maintained JavaScript option, `irc-framework`, targets Node
+`net`/`tls`, lists `labeled-response` and message IDs outside its stable
+support, and owns reconnect and SASL internally behind an untyped event
+API. Pogo needs per-line delivery confirmation, AbortSignal shutdown,
+fail-closed account checks and no new dependency; the protocol subset is
+small. Parsing and serialization (`protocol.ts`) refuse any parameter that
+would inject a line or a parameter.
+
+Crew IRC sessions are additional OpenCode root sessions (one per member
+and channel). Pogo's session title marks them `(irc #channel)`. They use
+the crew `backend.permissions`, which default to deny-all tools, and the
+model of their agent definition. Nightly model upgrades do not switch them.
+
+## Limits
+
+- Messages sent while Pogo is stopped are not replayed. Direct messages
+  missed during a reconnect are not replayed.
+- No `/cron`, `/pogo` commands or scheduled prompts on IRC.
+- Replies to bot messages are recognised only for message IDs seen since
+  the process started.
+- Only channel names that start with `#` or `&` are supported. JOIN
+  commands are split so each line stays within 512 bytes.
+- The fleet dashboard lists Slack registrations only. A captain pinned on
+  both transports shows its IRC turns in that shared session's history;
+  IRC queue counts and crew IRC sessions are not listed.
+- No streaming, edits, Stop, activity box, files or interactive controls.
+- Exactly-once delivery is not guaranteed: a retried chunk can repeat
+  lines, and a crash after the server accepts a line can repeat it.
+
+## Tests
+
+`tests/irc-*.test.ts` use a local fake IRCv3 server on a loopback socket.
+`tests/irc-ergo.test.ts` runs a temporary Ergo server with a throwaway CA,
+TLS, SASL accounts and an invite-only channel when
+`~/.local/share/ergo/current/ergo` (or `POGO_ERGO_BIN`) and `openssl` exist,
+and is skipped otherwise. It never uses the operator's server or accounts.

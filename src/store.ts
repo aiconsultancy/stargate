@@ -14,8 +14,13 @@ export type Incoming = {
   text: string;
   files?: readonly string[];
   deferDelivery?: boolean;
-  /** A verified peer captain bot sent this message. Absent for people. */
-  sender?: "captain" | null;
+  /**
+   * `captain`: a verified peer captain bot. `crew`: this ship's own captain
+   * or crew account on IRC. Absent for people.
+   */
+  sender?: "captain" | "crew" | null;
+  /** Transport time of the message in ms, for rolling turn limits (IRC). */
+  received?: number | null;
   /**
    * `spoken`: held until its speech names the bot; it neither starts nor
    * continues a conversation yet. `admitted`: its speech named the bot.
@@ -140,6 +145,10 @@ export class Store {
     column("jobs", "sender", "TEXT");
     column("jobs", "gate", "TEXT");
     column("jobs", "textMention", "TEXT");
+    column("jobs", "received", "INTEGER");
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS jobs_received ON jobs(sender,received) WHERE received IS NOT NULL",
+    );
     // Preserve source-first context and legacy ownership; keep statuses intact.
     if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
       this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
@@ -164,8 +173,8 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender,gate,textMention)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention)`)
+      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender,gate,textMention,received)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -179,7 +188,35 @@ export class Store {
           $sender: input.sender ?? null,
           $gate: input.gate ?? null,
           $textMention: input.textMention ?? null,
+          $received: input.received ?? null,
         }).changes > 0
+    );
+  }
+
+  /**
+   * Admitted messages of one sender kind received at or after `since` (ms),
+   * in these registrations and in one conversation or channel. IRC only:
+   * Slack rows carry no `received` time.
+   */
+  turnsSince(input: {
+    botKeys: readonly string[];
+    sender: "captain" | "crew";
+    since: number;
+    scope: { conversation: string } | { channel: string };
+  }): number {
+    if (!input.botKeys.length) return 0;
+    const keys = input.botKeys.map(() => "?").join(",");
+    const [column, value] =
+      "conversation" in input.scope
+        ? ["conversation", input.scope.conversation]
+        : ["channel", input.scope.channel];
+    return (
+      this.db
+        .query<{ n: number }, (string | number)[]>(
+          `SELECT COUNT(*) AS n FROM jobs WHERE sender=? AND received>=?
+        AND ${column}=? AND botKey IN (${keys})`,
+        )
+        .get(input.sender, input.since, value, ...input.botKeys)?.n ?? 0
     );
   }
 

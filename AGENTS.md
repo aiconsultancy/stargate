@@ -45,6 +45,9 @@ Pass non-secret CLI options through `ARGS`, or `mise run TASK -- OPTIONS`.
 - `src/config.ts`: strict boundary validation and environment references.
 - `src/cli.ts`, `src/setup.ts`, `src/service.ts`: CLI, wizard, user service.
 - `src/slack.ts`: one Socket Mode/Web API connection per bot registration.
+- `src/irc/`: IRCv3 transport: client (CAP/SASL/TLS/reconnect), admission
+  and turn limits, plain-text line delivery, captain/crew ship wiring.
+  See `docs/irc.md`; it must not depend on Slack.
 - `src/routing.ts`: event validation, access rules, conversation identity.
 - `src/gateway.ts`: per-thread ordering, backend execution, reply delivery.
 - `src/store.ts`: SQLite queue, session mappings, delivery progress.

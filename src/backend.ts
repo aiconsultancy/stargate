@@ -10,17 +10,25 @@ import type { MaintenanceWatch } from "./maintenance";
 import type { QuotaSnapshot } from "./quota";
 import type { SessionHistory } from "./session-history";
 
-/** Model-visible source identity only; never repeat Slack history here. */
+/** Model-visible source identity only; never repeat chat history here. */
 export type PromptSourceContext = {
   source: {
+    /** Absent means Slack. */
+    transport?: "irc";
     channel: string;
     thread: string;
     message: string;
     user: string;
-    /** A verified peer captain bot sent the message. */
-    sender?: "captain";
+    /** `captain`: a verified peer captain; `crew`: this ship's IRC account. */
+    sender?: "captain" | "crew";
   };
 };
+
+/** Compact source line: `s=slack;c=…;t=…;m=…;u=…[;k=…]`. */
+export function sourceLine({ source }: PromptSourceContext) {
+  const value = encodeURIComponent;
+  return `s=${source.transport ?? "slack"};c=${value(source.channel)};t=${value(source.thread)};m=${value(source.message)};u=${value(source.user)}${source.sender ? `;k=${source.sender}` : ""}`;
+}
 
 /** Latest complete visible text for this turn, not reasoning or tool output. */
 export type TextSink = (text: string) => void;

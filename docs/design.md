@@ -23,7 +23,10 @@ the queue, delivery cursor, and session mappings. `runtime.ts` owns startup,
 the exclusive process lock, cancellation, and resource cleanup.
 
 No shared agent implementation depends on Slack. No Slack implementation
-depends on a particular agent protocol. Effect 4 owns lifetimes and
+depends on a particular agent protocol. The gateway takes a
+`GatewayTransport` (namespace, access recheck, source line, sender note);
+Slack supplies `slackTransport`, and `src/irc/` supplies the IRC one with its
+own client, admission rules and line delivery. See [IRC transport](irc.md). Effect 4 owns lifetimes and
 concurrency: the process scope in `runtime.ts`, the per-conversation worker
 slots in `Gateway.work`, and the crew plugin's resource scope. Pure logic,
 SQLite stores and the adapter contract stay Promise-based TypeScript with

@@ -22,6 +22,7 @@ import {
   profileTeam,
   teamSchema,
 } from "./crew/team";
+import { ircInstructions } from "./irc/routing";
 import { textMentionInstructions } from "./mentions";
 import {
   nightlyInstructions,
@@ -473,6 +474,7 @@ export async function initializeProfile(input: Options) {
       voiceInstructions,
       textMentionInstructions,
       peerInstructions,
+      ircInstructions,
       maintenanceInstructions: nightlyInstructions(options.maintenanceWindow),
       instructions:
         agent.instructions ??
