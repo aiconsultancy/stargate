@@ -32,7 +32,7 @@ import {
   probeModel,
   proxyModels,
 } from "./host";
-import { checkIdle, waitForIdle } from "./idle";
+import { checkIdle, type IdleResult, waitForIdle } from "./idle";
 import {
   backupDirectory,
   currentVersion,
@@ -323,6 +323,8 @@ function outcome(rec: Recorder): Report["outcome"] {
 function recordUndo(rec: Recorder) {
   return (event: UndoEvent) => {
     if (event.kind === "restart") rec.restart(event.service, event.ok);
+    else if (event.kind === "deferred")
+      rec.step(`recover-before-${event.step}`, "skipped", event.reason);
     else
       rec.rollbacks.push({
         component: event.component,
@@ -362,15 +364,21 @@ const lastRunSchema = z.strictObject({
 const lastRunPath = (dataDirectory: string) =>
   join(maintenanceDirectory(dataDirectory), "last-run.json");
 
-/** Undo a journal while the caller holds the run lock. */
+export const nothingToRecover = "Nothing to recover.";
+
+/**
+ * Undo a journal while the caller holds the run lock. With `gate`, every
+ * step that changes live state is idle-checked immediately before it; a
+ * busy check stops the undo and is returned as `busy`.
+ */
 async function recoverJournal(
   config: Config,
   deps: Dependencies,
   record?: (event: UndoEvent) => void,
-): Promise<{ ok: boolean; message: string }> {
+  gate?: UndoContext["gate"],
+): Promise<{ ok: boolean; message: string; busy?: Reason }> {
   const found = await Journal.read(config);
-  if (found.kind === "none")
-    return { ok: true, message: "Nothing to recover." };
+  if (found.kind === "none") return { ok: true, message: nothingToRecover };
   if (found.kind === "corrupt") {
     const unit = config.maintenance?.services.gateway;
     if (unit)
@@ -383,23 +391,113 @@ async function recoverJournal(
     };
   }
   const actions: string[] = [];
+  let busy: Reason | undefined;
   const done = await undoJournal(found.journal, {
     ...undoContext(config, deps),
+    ...(gate ? { gate } : {}),
     record: (event) => {
       record?.(event);
+      if (event.kind === "deferred") busy = event.reason;
       actions.push(
         event.kind === "restart"
           ? `${event.service} restart ${event.ok ? "ok" : "failed"}`
-          : `${event.component} → ${event.to} ${event.ok ? "ok" : `failed${event.reason ? ` (${event.reason})` : ""}`}`,
+          : event.kind === "deferred"
+            ? `stopped before ${event.step}: host busy (${event.reason})`
+            : `${event.component} → ${event.to} ${event.ok ? "ok" : `failed${event.reason ? ` (${event.reason})` : ""}`}`,
       );
     },
   });
   return {
     ok: done,
+    ...(busy ? { busy } : {}),
     message: done
       ? `Recovered an interrupted run: ${actions.join("; ") || "no change needed"}.`
-      : `Recovery incomplete; the journal is kept: ${actions.join("; ")}. See recover --accept-current <entry>.`,
+      : busy
+        ? `Recovery paused at an idle check; the journal is kept for the next idle boundary: ${actions.join("; ")}.`
+        : `Recovery incomplete; the journal is kept: ${actions.join("; ")}. See recover --accept-current <entry>.`,
   };
+}
+
+/**
+ * Leftover-journal recovery at an idle boundary: the run's first step and
+ * the maintenance droid's recover use this one path. The caller holds the
+ * run lock. A stopped gateway that the journal names is started first
+ * (that interrupts nothing). Then the host must be idle (`idle`), and
+ * `gate` checks again immediately before every step of the undo that
+ * changes live state, so work that arrives during a long undo stops it
+ * before the next restart. A corrupt journal is never undone: recovery only
+ * starts the gateway.
+ */
+async function recoverAtIdle(
+  config: Config,
+  deps: Dependencies,
+  input: {
+    idle: () => Promise<IdleResult>;
+    gate: () => Promise<IdleResult>;
+    record?: (event: UndoEvent) => void;
+    onGatewayStart?: (started: boolean) => void;
+  },
+): Promise<
+  | { kind: "none" }
+  | { kind: "busy"; reason: Reason; message: string }
+  | { kind: "done"; ok: boolean; message: string }
+> {
+  const found = await Journal.read(config);
+  if (found.kind === "none") return { kind: "none" };
+  if (found.kind === "ok") {
+    const started = await startStoppedGateway(config, deps, found.journal);
+    if (started !== undefined) input.onGatewayStart?.(started);
+    const idle = await input.idle();
+    if (!idle.idle)
+      return {
+        kind: "busy",
+        reason: idle.reason,
+        message: `The host is busy (${idle.reason}); nothing was undone.`,
+      };
+  }
+  const result = await recoverJournal(config, deps, input.record, input.gate);
+  return result.busy
+    ? { kind: "busy", reason: result.busy, message: result.message }
+    : { kind: "done", ok: result.ok, message: result.message };
+}
+
+/**
+ * The maintenance droid's recover: the run's leftover recovery
+ * (`recoverAtIdle`) under the run lock, taken first, with a single idle
+ * check instead of a wait. Busy: nothing more is undone and the journal
+ * waits for the next idle boundary.
+ */
+export async function recoverWhenIdle(
+  config: Config,
+  deps: Dependencies,
+  signal: AbortSignal,
+): Promise<{ ok: boolean; message: string; busy?: Reason }> {
+  await mkdir(maintenanceDirectory(config.dataDirectory), {
+    recursive: true,
+    mode: 0o700,
+  });
+  let held: Database;
+  try {
+    held = lock(config.dataDirectory);
+  } catch {
+    return {
+      ok: false,
+      message: "A maintenance run holds the lock; nothing was changed.",
+    };
+  }
+  try {
+    const check = () => idleNow(config, deps, signal);
+    const result = await recoverAtIdle(config, deps, {
+      idle: check,
+      gate: check,
+    });
+    if (result.kind === "none") return { ok: true, message: nothingToRecover };
+    if (result.kind === "busy")
+      return { ok: false, busy: result.reason, message: result.message };
+    return { ok: result.ok, message: result.message };
+  } finally {
+    held.close();
+  }
 }
 
 /**
@@ -451,6 +549,38 @@ async function gatewayServing(config: Config, runner: CommandRunner) {
     })
   ).stdout.trim();
   return state !== "inactive" && state !== "failed";
+}
+
+/**
+ * One read-only idle check at server scope, as the run's gates make it,
+ * without waiting. For callers outside a run (the maintenance droid).
+ */
+export async function idleNow(
+  config: Config,
+  deps: Dependencies,
+  signal: AbortSignal,
+): Promise<IdleResult> {
+  let crews: Crew[];
+  try {
+    crews = await discoverCrews(config);
+  } catch {
+    return { idle: false, reason: "idle-unknown" };
+  }
+  return checkIdle({
+    dataDirectory: config.dataDirectory,
+    crews,
+    pinnedSessions: config.bots.flatMap((bot) =>
+      bot.backend.type === "opencode" && bot.backend.sessionID
+        ? [bot.backend.sessionID]
+        : [],
+    ),
+    cronHorizonMs: (config.maintenance?.idle.cronHorizonMinutes ?? 60) * 60_000,
+    now: deps.clock.now(),
+    scope: "server",
+    connect: deps.connect,
+    signal,
+    gatewayRunning: () => gatewayServing(config, deps.runner),
+  });
 }
 
 /**
@@ -635,47 +765,47 @@ export async function runMaintenance(
     // A journal left by an interrupted run is finished first, never
     // replaced, and only at an idle boundary: undo restarts services too.
     if (mode === "run") {
-      const previous = await Journal.read(config);
-      if (previous.kind === "ok") {
-        const started = await startStoppedGateway(
-          config,
-          deps,
-          previous.journal,
-        );
-        if (started !== undefined)
+      const unknown = { idle: false, reason: "idle-unknown" } as const;
+      const leftover = await recoverAtIdle(config, deps, {
+        idle: async () =>
+          crewsUnknown
+            ? unknown
+            : waitForIdle(
+                idleInput(),
+                window.deadline,
+                m.idle.pollSeconds * 1000,
+                clock,
+              ),
+        gate: async () =>
+          crewsUnknown
+            ? unknown
+            : checkIdle({ ...idleInput(), now: clock.now() }),
+        record: recordUndo(rec),
+        onGatewayStart: (started) =>
           rec.step(
             "start-stopped-gateway",
             started ? "ok" : "failed",
             started ? undefined : "readiness-failed",
-          );
-        const idle = crewsUnknown
-          ? ({ idle: false, reason: "idle-unknown" } as const)
-          : await waitForIdle(
-              idleInput(),
-              window.deadline,
-              m.idle.pollSeconds * 1000,
-              clock,
-            );
-        if (!idle.idle) {
-          rec.step("recover-previous-run", "skipped", idle.reason);
-          attention = true;
-          return await finish("deferred", idle.reason);
-        }
+          ),
+      });
+      if (leftover.kind === "busy") {
+        rec.step("recover-previous-run", "skipped", leftover.reason);
+        attention = true;
+        return await finish("deferred", leftover.reason);
       }
-      // A corrupt journal is not undone: recovery only starts the gateway.
-      if (previous.kind !== "none") {
-        const recovered = await recoverJournal(config, deps, recordUndo(rec));
+      if (leftover.kind === "done") {
         rec.step(
           "recover-previous-run",
-          recovered.ok ? "ok" : "failed",
-          recovered.ok ? undefined : "recovery-required",
+          leftover.ok ? "ok" : "failed",
+          leftover.ok ? undefined : "recovery-required",
         );
-        if (!recovered.ok) {
+        if (!leftover.ok) {
           attention = true;
           return await finish("failed", "recovery-required");
         }
       }
     }
+
     const state = await readState(config.dataDirectory);
     const pogo = await discoverPogo(m, deps, rec, startedAt, state);
     const proxy = await discoverProxy(m, rec, startedAt);
@@ -1588,8 +1718,7 @@ export async function acceptCurrent(
   }
   try {
     const found = await Journal.read(config);
-    if (found.kind === "none")
-      return { ok: true, message: "Nothing to recover." };
+    if (found.kind === "none") return { ok: true, message: nothingToRecover };
     const confirmHint = `Nothing changed. Add --yes to keep the current state and drop ${name === "journal" ? "the whole journal" : `the ${name} entry`}.`;
     if (name === "journal") {
       const files = [];

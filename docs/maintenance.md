@@ -106,6 +106,7 @@ Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
 | `models.agentProfiles`                    | none                                                                | Global child-agent profiles directory.                                                                          |
 | `models.teamFiles`                        | `[]`                                                                | Team JSON files whose models follow upgrades.                                                                   |
 | `models.probes`                           | `2`                                                                 | Maximum health probes per current model and night.                                                              |
+| `droid`                                   | none                                                                | Monitoring agent; see [Maintenance droid](#maintenance-droid).                                                  |
 
 Default agent CLIs: `@opencode/cli` (`opencode2`), `@openai/codex` (`codex`),
 `@anthropic-ai/claude-code` (`claude`), `@earendil-works/pi-coding-agent` (`pi`).
@@ -142,8 +143,12 @@ the window, the jitter and the next start.
    [Journal and recovery](#journal-and-recovery)). If the journal holds
    `gateway` and the gateway unit is not running, the run starts it at once
    and waits for its readiness record: starting a stopped gateway interrupts
-   nothing, and only a ready gateway advances its cron schedules. The undo itself waits for the idle gate,
-   because it restarts services too. Busy until the deadline: the journal
+   nothing, and only a ready gateway advances its cron schedules. The undo
+   itself waits for the idle gate, because it restarts services too, and the
+   gate runs again immediately before each undo step that changes live
+   state: the session switch-back, the config restore, the CLI reinstall
+   and every restart of a running proxy, OpenCode or gateway. Work that
+   arrives during a long undo stops it there. Busy: the rest of the journal
    stays, the run is `deferred` and writes an alert. If the undo fails, the
    run stops with `recovery-required` and changes nothing.
 2. **Discover (read-only).** Current and candidate versions of each component;
@@ -253,7 +258,10 @@ Who recovers:
   window or with the lock busy) does not match. For any other journal,
   `--after-run` only starts a stopped gateway when the journal holds
   `gateway`;
-- the next run, after its idle gate (see step 1);
+- the next run, after its idle gate and with the gate again before each
+  undo step that changes live state (see step 1);
+- the maintenance droid's `recover`, through the same path (see
+  [Maintenance droid](#maintenance-droid));
 - an operator with `pogo maintenance recover`, unconditionally.
 
 The run commits a verified release before it drops the `gateway` entry, so
@@ -271,8 +279,8 @@ Files that need an operator:
 - `maintenance/ALERT.json` (`pogo.maintenance.alert.v1`): written when the
   outcome is `failed`, the journal remains, the gateway did not become ready,
   the run was aborted or the report could not be written. It names the run,
-  reason and report. Delete it after review. The reporting droid reads it
-  with the reports.
+  reason and report. Delete it after review. The
+  [maintenance droid](#maintenance-droid) reads it with the reports.
 - `maintenance/state.json`: the npm cutoff that produced each installed CLI,
   pinned CLIProxyAPI digests, and releases that failed after a switch.
 
@@ -570,6 +578,200 @@ message. A notice is claimed by rename before the post; a crash or an
 uncertain post is never repeated (`.claimed`, `.failed`). A channel that the
 bot does not allow is refused.
 
+## Maintenance droid
+
+`pogo-maintenance-droid` is a Pi Durable agent built into Pogo. It monitors
+nightly maintenance, explains each run in plain English and escalates
+problems. It has no Slack app of its own: it posts through `report.bot` to
+`report.channel`, with the same outbox as the run summary. Slack users cannot
+address it. It is off by default.
+
+The deterministic engine stays authoritative. Pogo decides when to check,
+collects the facts, computes the findings, enforces every precondition and
+limit, and writes the findings, the droid's actions and the operator commands
+into each post itself. The model only chooses among four tools and writes the
+explanation.
+
+### Droid configuration
+
+```json
+"droid": {
+  "enabled": true,
+  "backend": {
+    "model": "openai/opencode-go/deepseek-v4.1-flash",
+    "provider": {
+      "baseURL": "http://127.0.0.1:8317/v1",
+      "apiKeyEnv": "POGO_GALACTICA_CLIPROXYAPI_API_KEY"
+    }
+  },
+  "healthCheck": "12:00",
+  "maxRecoversPerDay": 2
+}
+```
+
+| Setting                   | Default                                  | Meaning                                                                                           |
+| ------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `droid.enabled`           | `false`                                  | `droid` refuses to run when false. Requires `report`.                                             |
+| `droid.backend.model`     | `openai/opencode-go/deepseek-v4.1-flash` | Pi model, as for Pi backends. This model requires `provider`, and `provider` requires this model. |
+| `droid.backend.provider`  | none                                     | CLIProxyAPI endpoint and the name of the environment variable with its key (in `<config>.env`).   |
+| `droid.healthCheck`       | `12:00`                                  | Daily health check, local time in `window.timeZone`.                                              |
+| `droid.afterRunMinutes`   | `15`                                     | The post-run check starts this long after `window.end`.                                           |
+| `droid.maxRecoversPerDay` | `2`                                      | `recover` requests per local day; `0` disables the action.                                        |
+| `droid.reports`           | `7`                                      | Latest reports the droid reads.                                                                   |
+| `droid.failedNights`      | `2`                                      | Failed or deferred runs in a row that count as a problem.                                         |
+| `droid.timer`             | `pogo-maintenance`                       | Name of the maintenance timer (`install-timer --name`) whose status is checked.                   |
+| `droid.timeoutMinutes`    | `5`                                      | Upper bound of one model answer, tool calls included.                                             |
+
+Without `provider`, an `anthropic/` or `openai/` model uses `ANTHROPIC_API_KEY`
+or `OPENAI_API_KEY` from the environment.
+
+### One check
+
+The droid timer starts `pogo maintenance droid` at `window.end` plus
+`afterRunMinutes` and at `healthCheck`. One check:
+
+1. **Facts (read-only, by Pogo code).** The latest `reports` reports, reduced
+   to outcome, reason codes, changed components, failed steps, rollbacks and
+   model counts; `ALERT.json`; whether a journal exists and its entry names;
+   known-bad releases from `state.json` that are newer than `current`;
+   `last-run.json`; the maintenance timer's `ActiveState`,
+   `LastTriggerUSec`, `NextElapseUSecRealtime`, `Result` and
+   `ActiveEnterTimestamp` (`systemctl --user show`); the `ActiveState` of
+   the gateway, proxy and OpenCode units; `ready.json`; and the proxy's
+   `GET /v1/models`. Never file contents beyond schema-checked fields,
+   command output, environment values or credentials. Every text field is
+   scrubbed before it is bounded, so a cut never lands inside a secret that
+   the scrubber would have recognised whole: the values of every
+   environment variable the configuration names (every `…Env` setting, and
+   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are removed, then credential-looking
+   text (`token=…`, `Bearer …`, Slack, GitHub and API keys, private keys) and
+   control characters. Text that was already cut where it was written (the
+   report writer marks its cuts with `…`) can end inside a secret: a prefix
+   of 12 or more characters of a configured secret at a cut (end of text or
+   line, or `…`) is removed too. The check message, every tool result (a
+   plan's report before its summary is bounded) and every part of the post
+   pass the same scrubber before any cut.
+2. **Findings (deterministic).** While a maintenance run is active, its own
+   stops and journal are expected and not reported.
+
+   | Code                 | Condition                                                                       |
+   | -------------------- | ------------------------------------------------------------------------------- |
+   | `timer-inactive`     | Maintenance is enabled and its timer is not active or not installed.            |
+   | `timer-missed`       | The timer was active before last night's planned start and did not fire for it. |
+   | `alert`              | `ALERT.json` exists.                                                            |
+   | `journal`            | An interrupted run left a journal.                                              |
+   | `journal-corrupt`    | The journal is corrupt or not private.                                          |
+   | `gateway-down`       | The gateway unit is not active, or it has no live readiness record.             |
+   | `opencode-down`      | The OpenCode unit (from `services.openCodeRestart`) is not active.              |
+   | `proxy-unhealthy`    | The proxy unit is not active, or `GET /v1/models` fails.                        |
+   | `runs-failing`       | The last `failedNights` runs ended `failed` or `deferred`.                      |
+   | `known-bad`          | A failed Pogo release newer than `current` blocks updates.                      |
+   | `reports-unreadable` | A recent report cannot be read or has an unknown schema.                        |
+
+3. **Trigger.** A report newer than the last one the droid explained means a
+   run finished: this check always posts. Otherwise it is a health check,
+   which posts only when there is a finding. A healthy health check asks no
+   model and posts nothing.
+4. **Model.** The droid asks its model, with the findings and the newest
+   report in the message. The model may call its tools, then writes the
+   explanation.
+5. **Post.** One top-level message of at most 2,800 characters: a header,
+   the explanation (at most 1,800 characters, scrubbed like the facts),
+   `Droid actions:` (every request, refused ones too),
+   `Checks:` (the finding codes) and `Operator commands:` for the findings.
+   Slack receives it as plain text, so it cannot mention or link anyone.
+6. **Fallback.** If the model cannot be opened, fails, times out or answers
+   nothing, the explanation is Pogo's deterministic summary: the newest
+   report and every finding. Alerts are never lost to a model failure.
+
+`pogo maintenance droid --print` shows the facts' findings and the
+deterministic post. It asks no model, runs no action and writes nothing.
+
+### What the model can do
+
+| Tool                  | Effect                                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| `maintenance_status`  | The facts above and the findings. Read-only.                                               |
+| `maintenance_reports` | Report digests, newest first. Read-only.                                                   |
+| `maintenance_plan`    | `pogo maintenance plan` in process; returns its summary. Once per check; not during a run. |
+| `maintenance_recover` | The run's leftover recovery in process, under the run lock. Preconditions below.           |
+
+The droid's Pi Durable store has only these four tools installed: no shell,
+files, network, systemd or Slack. A call of any other tool name fails, and a
+tool call from an earlier, interrupted check does nothing. The droid never
+runs `run` or `--accept-current`.
+
+`maintenance_recover` runs only when all of these hold; otherwise Pogo
+refuses it and the refusal is final for the check:
+
+- it was not requested before in this check;
+- fewer than `maxRecoversPerDay` recovers started today. The count is per
+  local day in `window.timeZone`, kept in `state.json`, and checked and
+  incremented in one update when the recover is admitted, with the date at
+  that moment: a check that starts before midnight and recovers after it
+  charges the new day. It is never pruned for the current day, and an
+  unreadable `state.json` refuses every recover and counts today as spent;
+- no maintenance run is active (`<timer>.service`);
+- a journal is left, or the gateway unit is `inactive` or `failed`.
+
+The recover then follows the run's own leftover recovery, not the operator
+`recover`. It takes the run lock first (a held lock: nothing happens, not
+even an idle check). It starts a stopped gateway that the journal names
+(that interrupts nothing). Then the host must pass the idle gate, and the
+gate runs again immediately before each undo step that changes live state.
+Busy at any of these checks: the undo stops, the rest of the journal stays
+for the next idle boundary, and the post says `recover deferred`. A deferred
+recover counts against the daily limit.
+
+Without a journal, `recover` has nothing to do: it never starts a gateway
+that someone stopped. The post then says so and lists the operator commands.
+An action that is still running when the model times out is not cut off: the
+check waits for it before it posts.
+
+### Session and files
+
+Everything is in `<dataDirectory>/maintenance/droid/` (0700):
+
+- `pi.sqlite`: the droid's Pi Durable store, separate from Pi bots and
+  workers. It holds one conversation per local day (`conversation.json`
+  names the current one), which bounds the history that a check sends to the
+  model. At the start of each check, live work left by an interrupted check
+  is aborted.
+- `state.json` (0600): the last report the droid explained and the recover
+  count per local day (today and at most six older days).
+- `audit.jsonl` (0600): one JSON line per check, action request and result,
+  model fallback and post, with the check ID. Past 512 KiB it keeps the
+  newest 1,000 lines.
+- `lock.sqlite`: one check at a time; a second check exits without work.
+
+### Install the droid timer
+
+```sh
+pogo maintenance droid --config pogo.json --print
+pogo maintenance install-droid-timer --config pogo.json --print   # review
+pogo maintenance install-droid-timer --config pogo.json
+systemctl --user enable --now pogo-maintenance-droid.timer
+```
+
+`install-droid-timer` writes `pogo-maintenance-droid.timer` and `.service`
+(`--name` changes the name) like `install-timer`: it refuses to overwrite,
+runs `daemon-reload` and enables nothing. The timer has one `OnCalendar` line
+per check time in `window.timeZone`, with `Persistent=false`. The service is a
+oneshot with the config companion as `EnvironmentFile` (for the provider
+key), `UMask=0077` and `TimeoutStartSec` = `timeoutMinutes` + 3 (plan) + the
+undo budget + 5 minutes. Reinstall it after you change the check times.
+
+### Droid limits
+
+- The post goes through the gateway outbox. While the gateway is down, the
+  post waits in the outbox and is sent when the gateway starts. The audit log
+  and `systemctl --user status pogo-maintenance-droid` show it before that.
+- The model can misjudge or miss a problem. The findings, actions and
+  commands in each post come from Pogo, not from the model.
+- `pi.sqlite` keeps old daily conversations. It grows by a few small
+  conversations per day; to reset it, stop the droid timer and delete the
+  droid directory.
+
 ## Commands
 
 ```sh
@@ -581,6 +783,8 @@ pogo maintenance install-timer --config pogo.json [--name NAME] [--print]
 pogo maintenance adopt --config pogo.json --release DIR [--version X.Y.Z]
 pogo maintenance recover --config pogo.json [--after-run]
 pogo maintenance recover --config pogo.json --accept-current ENTRY [--yes]
+pogo maintenance droid --config pogo.json [--print]
+pogo maintenance install-droid-timer --config pogo.json [--name NAME] [--print]
 pogo maintenance schema
 ```
 

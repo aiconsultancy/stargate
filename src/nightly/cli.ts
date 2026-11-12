@@ -3,6 +3,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { type Config, loadConfig } from "../config";
+import type { MaintenanceConfig } from "./config";
+import { runDroid } from "./droid";
 import { processRunner } from "./exec";
 import { nightlyInstructions } from "./instructions";
 import { recoveryBudgetMs } from "./journal";
@@ -10,7 +12,7 @@ import { packageDirectory } from "./ready";
 import { adoptRelease, layout } from "./release";
 import { reportSchema, summary } from "./report";
 import { acceptCurrent, recoverInterruptedRun, runMaintenance } from "./run";
-import { buildMaintenanceUnits, timerName } from "./timer";
+import { buildDroidUnits, buildMaintenanceUnits, timerName } from "./timer";
 import {
   currentWindow,
   defaultInstallID,
@@ -39,11 +41,22 @@ Commands:
                   still covers; with --yes it keeps the current state and
                   drops that entry. ENTRY journal moves a corrupt journal
                   aside. See docs/maintenance.md before you use it.
+  droid           One maintenance droid check (the droid timer runs it):
+                  facts, findings, a Pi Durable model explanation and one
+                  Slack post through the report bot, when there is
+                  something to say. The model may only run plan and
+                  recover, within Pogo's preconditions and limits.
+                  --print shows the facts' deterministic post; no model,
+                  actions or writes.
   window          Print the window, this install's jitter and next start.
   instructions    Print the captain/crew paragraph for the configured window.
   install-timer   Write ~/.config/systemd/user/<name>.timer and .service
                   (--name NAME, default pogo-maintenance), then daemon-reload.
                   Does not enable or start. --print shows units, writes none.
+  install-droid-timer
+                  Same for the droid (--name NAME, default
+                  pogo-maintenance-droid): checks at the window end plus
+                  droid.afterRunMinutes and at droid.healthCheck.
   adopt           One-time migration: --release DIR [--version X.Y.Z] marks an
                   existing release under <pogo.root>/releases as managed and
                   creates <pogo.root>/current if absent.
@@ -74,6 +87,64 @@ function windowText(config: Config, configPath: string) {
         : `Next planned start: ${new Date(next.start).toISOString()}`,
     ].join("\n"),
   };
+}
+
+/** Bun, the entrypoint that follows release switches, and PATH. */
+function unitCommand(m: MaintenanceConfig, configPath: string) {
+  return {
+    configPath,
+    executable: process.execPath,
+    entrypoint: m.pogo
+      ? join(layout(m.pogo.root).current, "src", "main.ts")
+      : join(packageDirectory, "src", "main.ts"),
+    path: [
+      dirname(process.execPath),
+      process.env["PATH"] ?? "/usr/bin:/bin",
+    ].join(":"),
+  };
+}
+
+/** Write both units (never overwriting), then daemon-reload. */
+async function installUnits(
+  name: string,
+  units: { timer: string; service: string },
+) {
+  if (process.platform !== "linux")
+    throw new Error("User timers require Linux with systemd.");
+  const directory = join(homedir(), ".config/systemd/user");
+  await mkdir(directory, { recursive: true });
+  for (const [suffix, contents] of [
+    ["timer", units.timer],
+    ["service", units.service],
+  ] as const) {
+    let file: Awaited<ReturnType<typeof open>>;
+    try {
+      file = await open(join(directory, `${name}.${suffix}`), "wx", 0o600);
+    } catch {
+      throw new Error(
+        `${name}.${suffix} exists or cannot be created. Refusing to overwrite it.`,
+      );
+    }
+    try {
+      await file.writeFile(contents);
+    } finally {
+      await file.close();
+    }
+  }
+  const reload = await processRunner.run(
+    ["systemctl", "--user", "daemon-reload"],
+    {
+      timeoutMs: 30_000,
+    },
+  );
+  if (reload.code !== 0)
+    throw new Error(
+      "systemctl --user daemon-reload failed. Check the user session bus.",
+    );
+  console.log(
+    `Installed ${name}.timer and ${name}.service (not enabled).\nReview, then: systemctl --user enable --now ${name}.timer`,
+  );
+  return 0;
 }
 
 export async function maintenanceCli(
@@ -143,18 +214,9 @@ export async function maintenanceCli(
   if (operation === "install-timer") {
     const { m, jitter } = windowText(config, options.configPath);
     const name = timerName(options.name);
-    const entrypoint = m.pogo
-      ? join(layout(m.pogo.root).current, "src", "main.ts")
-      : join(packageDirectory, "src", "main.ts");
     const units = buildMaintenanceUnits({
       name,
-      configPath: options.configPath,
-      executable: process.execPath,
-      entrypoint,
-      path: [
-        dirname(process.execPath),
-        process.env["PATH"] ?? "/usr/bin:/bin",
-      ].join(":"),
+      ...unitCommand(m, options.configPath),
       spec: m.window,
       jitter,
       recoveryMinutes: Math.ceil(recoveryBudgetMs(m) / 60_000) + 5,
@@ -165,42 +227,56 @@ export async function maintenanceCli(
       );
       return 0;
     }
-    if (process.platform !== "linux")
-      throw new Error("User timers require Linux with systemd.");
-    const directory = join(homedir(), ".config/systemd/user");
-    await mkdir(directory, { recursive: true });
-    for (const [suffix, contents] of [
-      ["timer", units.timer],
-      ["service", units.service],
-    ] as const) {
-      let file: Awaited<ReturnType<typeof open>>;
-      try {
-        file = await open(join(directory, `${name}.${suffix}`), "wx", 0o600);
-      } catch {
-        throw new Error(
-          `${name}.${suffix} exists or cannot be created. Refusing to overwrite it.`,
-        );
-      }
-      try {
-        await file.writeFile(contents);
-      } finally {
-        await file.close();
-      }
-    }
-    const reload = await processRunner.run(
-      ["systemctl", "--user", "daemon-reload"],
-      {
-        timeoutMs: 30_000,
-      },
-    );
-    if (reload.code !== 0)
-      throw new Error(
-        "systemctl --user daemon-reload failed. Check the user session bus.",
+    return installUnits(name, units);
+  }
+  if (operation === "install-droid-timer") {
+    const { m } = windowText(config, options.configPath);
+    const droid = m.droid;
+    if (!droid)
+      throw new Error("No maintenance.droid section in configuration.");
+    const name = timerName(options.name ?? "pogo-maintenance-droid");
+    const units = buildDroidUnits({
+      name,
+      ...unitCommand(m, options.configPath),
+      spec: m.window,
+      afterRunMinutes: droid.afterRunMinutes,
+      healthCheck: droid.healthCheck,
+      // Model answer, a plan (3 min) and a full undo, with margin.
+      timeoutMinutes:
+        droid.timeoutMinutes + 3 + Math.ceil(recoveryBudgetMs(m) / 60_000) + 5,
+    });
+    if (options.print) {
+      console.log(
+        `# ${name}.timer\n${units.timer}\n# ${name}.service\n${units.service}`,
       );
-    console.log(
-      `Installed ${name}.timer and ${name}.service (not enabled).\nReview, then: systemctl --user enable --now ${name}.timer`,
-    );
-    return 0;
+      return 0;
+    }
+    return installUnits(name, units);
+  }
+  if (operation === "droid") {
+    process.umask(0o077);
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    try {
+      const result = await runDroid({
+        config,
+        configPath: options.configPath,
+        signal: controller.signal,
+        ...(options.print ? { preview: true } : {}),
+      });
+      if (result.text) console.log(result.text);
+      console.log(
+        result.skipped
+          ? "Another droid check is running; nothing was done."
+          : `Droid ${result.trigger} check: ${result.findings.length ? result.findings.join(", ") : "all clear"}; ${result.posted ? `post queued (${result.model ? "model" : "deterministic"})` : "no post"}.`,
+      );
+      return 0;
+    } finally {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    }
   }
   if (operation === "plan" || operation === "run") {
     process.umask(0o077);

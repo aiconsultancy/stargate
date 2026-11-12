@@ -106,6 +106,24 @@ export function nextWindow(now: number, spec: WindowSpec, jitter: number) {
   throw new Error("No maintenance window found.");
 }
 
+/** The latest window whose planned start is at or before `now`. */
+export function previousWindow(now: number, spec: WindowSpec, jitter: number) {
+  let date = localDate(now, spec.timeZone).add({ days: 1 });
+  for (let day = 0; day < 4; day++, date = date.subtract({ days: 1 })) {
+    const window = occurrence(date, spec, jitter);
+    if (window.start <= now) return window;
+  }
+  throw new Error("No maintenance window found.");
+}
+
+/** Local `HH:MM` plus minutes, wrapped to the day. */
+export function addClock(time: string, minutes: number) {
+  const { hour, minute } = clock(time);
+  const total = (((hour * 60 + minute + minutes) % 1440) + 1440) % 1440;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
+}
+
 /** systemd OnCalendar for the planned start in the window's time zone. */
 export function timerCalendar(spec: WindowSpec, jitter: number) {
   const { hour, minute } = clock(spec.start);

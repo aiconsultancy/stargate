@@ -1,6 +1,11 @@
 import { dirname, isAbsolute } from "node:path";
 import { quote } from "../service";
-import { timerCalendar, type WindowSpec, windowMinutes } from "./window";
+import {
+  addClock,
+  timerCalendar,
+  type WindowSpec,
+  windowMinutes,
+} from "./window";
 
 const marker = "# Managed by Pogo CLI";
 
@@ -71,6 +76,63 @@ Description=Pogo nightly maintenance window (${window})
 
 [Timer]
 OnCalendar=${timerCalendar(input.spec, input.jitter)}
+AccuracySec=1min
+Persistent=false
+Unit=${name}.service
+
+[Install]
+WantedBy=timers.target
+`;
+  return { service, timer };
+}
+
+/**
+ * The droid's timer: one check after the window (end plus
+ * `afterRunMinutes`) and one daily health check, both local times in the
+ * window's time zone. The oneshot service runs `maintenance droid`, which
+ * decides from the reports whether this is a post-run check.
+ */
+export function buildDroidUnits(input: {
+  name: string;
+  configPath: string;
+  executable: string;
+  entrypoint: string;
+  path: string;
+  spec: WindowSpec;
+  afterRunMinutes: number;
+  healthCheck: string;
+  /** Model answer, plan and a full journal undo, with margin. */
+  timeoutMinutes: number;
+}) {
+  for (const path of [input.configPath, input.executable, input.entrypoint])
+    if (!isAbsolute(path)) throw new Error("Unit paths must be absolute.");
+  const name = timerName(input.name);
+  const times = [
+    ...new Set([
+      addClock(input.spec.end, input.afterRunMinutes),
+      input.healthCheck,
+    ]),
+  ];
+  const service = `${marker}
+[Unit]
+Description=Pogo maintenance droid (checks ${times.join(", ")} ${input.spec.timeZone})
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=${dirname(input.configPath).replaceAll("%", "%%")}/
+EnvironmentFile=-${`${input.configPath}.env`.replaceAll("%", "%%")}
+Environment=${quote(`PATH=${input.path}`)}
+ExecStart=${quote(input.executable, true)} ${quote(input.entrypoint, true)} maintenance droid --config ${quote(input.configPath, true)}
+UMask=0077
+TimeoutStartSec=${input.timeoutMinutes}min
+`;
+  const timer = `${marker}
+[Unit]
+Description=Pogo maintenance droid checks
+
+[Timer]
+${times.map((time) => `OnCalendar=*-*-* ${time}:00 ${input.spec.timeZone}`).join("\n")}
 AccuracySec=1min
 Persistent=false
 Unit=${name}.service

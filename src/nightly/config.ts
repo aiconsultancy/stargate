@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { piModelSchema, piProviderSchema, piProxyModel } from "../pi-model";
 
 /** Strict `maintenance` section of pogo.json. Every component is opt-in. */
 const absolutePath = z
@@ -264,6 +265,38 @@ export const maintenanceSchema = z
         probes: z.number().int().min(1).max(5).default(2),
       })
       .optional(),
+    /**
+     * Monitoring agent: explains reports and escalates through `report`.
+     * It may only read maintenance state and run `plan` or `recover`.
+     */
+    droid: z
+      .strictObject({
+        enabled: z.boolean().default(false),
+        /** Pi Durable model selection, as for Pi backends. */
+        backend: z
+          .strictObject({
+            model: piModelSchema.default(piProxyModel),
+            provider: piProviderSchema.optional(),
+          })
+          .default({ model: piProxyModel }),
+        /** Daily health check, local time in `window.timeZone`. */
+        healthCheck: clock.default("12:00"),
+        /** The post-run check starts this long after the window end. */
+        afterRunMinutes: z.number().int().min(5).max(180).default(15),
+        maxRecoversPerDay: z.number().int().min(0).max(5).default(2),
+        /** Reports the droid may read, newest first. */
+        reports: z.number().int().min(1).max(14).default(7),
+        /** Failed or deferred runs in a row that count as a problem. */
+        failedNights: z.number().int().min(1).max(14).default(2),
+        /** Name of the maintenance timer (install-timer --name). */
+        timer: z
+          .string()
+          .regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/)
+          .default("pogo-maintenance"),
+        /** Upper bound of one model answer, tool calls included. */
+        timeoutMinutes: z.number().int().min(1).max(30).default(5),
+      })
+      .optional(),
   })
   .superRefine((value, context) => {
     const minutes = (clock: string) => {
@@ -297,6 +330,23 @@ export const maintenanceSchema = z
             message: `components.${component} requires the ${section} section`,
           });
     };
+    const droid = value.droid;
+    if (droid?.enabled && !value.report)
+      context.addIssue({
+        code: "custom",
+        path: ["droid", "enabled"],
+        message: "droid requires the report section (its Slack destination)",
+      });
+    // The proxy provider serves exactly one model (see pi-durable.ts).
+    if (
+      droid &&
+      (droid.backend.model === piProxyModel) !== !!droid.backend.provider
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["droid", "backend"],
+        message: `A provider requires model ${piProxyModel}, and that model requires a provider`,
+      });
     need("pogo", ["pogo"]);
     need("cliproxyapi", ["cliproxyapi", "proxy"]);
     need("agentClis", ["agentClis"]);

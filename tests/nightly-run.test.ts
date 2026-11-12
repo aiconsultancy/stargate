@@ -1633,6 +1633,38 @@ describe("journal recovery", () => {
     expect(commands("systemctl --user restart")).toEqual([]);
   });
 
+  test("a leftover journal's undo stops when work arrives before a restart", async () => {
+    const { config, path } = await install();
+    await writeJournal(
+      config,
+      v2({
+        gateway: { restartPending: true },
+        openCode: { restarted: true, restartPending: true },
+      }),
+    );
+    const original = opencode.active;
+    let calls = 0;
+    // Idle at the run's first gate; a session starts during the undo.
+    opencode.active = async () => (++calls >= 2 ? ["ses_new"] : []);
+    try {
+      const { report, attention } = await run(config, path);
+      expect(report).toMatchObject({
+        outcome: "deferred",
+        reason: "busy-opencode",
+      });
+      expect(attention).toBe(true);
+    } finally {
+      opencode.active = original;
+    }
+    expect(fixture.openCodeRestarts).toBe(0);
+    expect(commands("systemctl --user restart pogo.service")).toEqual([]);
+    const left = JSON.parse(
+      (await readJournalFile(config.dataDirectory)) ?? "{}",
+    );
+    expect(left.openCode).toEqual({ restarted: true, restartPending: true });
+    expect(left.gateway).toEqual({ restartPending: true });
+  });
+
   test("recover refuses while a run holds the lock", async () => {
     const { config } = await install();
     await writeJournal(config, v2({ gateway: { restartPending: true } }));

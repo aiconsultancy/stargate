@@ -4,6 +4,7 @@ import { crewActivitySchema } from "./activity";
 import { cronjobsSchema } from "./cronjob-config";
 import { mentionRuleSchema } from "./mentions";
 import { maintenanceSchema } from "./nightly/config";
+import { piModelSchema, piProviderSchema } from "./pi-model";
 import { transcriptionSchema } from "./transcription";
 import { waitingSchema } from "./waiting";
 
@@ -15,35 +16,11 @@ const channelRule = z.union([
   z.string().regex(/^[CGD][A-Z0-9]+$/),
 ]);
 
-const piProxyURL = z.url().refine((value) => {
-  const url = new URL(value);
-  const loopback =
-    url.hostname === "localhost" ||
-    url.hostname === "[::1]" ||
-    /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
-  return (
-    (url.protocol === "https:" || (url.protocol === "http:" && loopback)) &&
-    !url.username &&
-    !url.password &&
-    !url.search &&
-    !url.hash &&
-    !value.includes("?") &&
-    !value.includes("#")
-  );
-}, "Use HTTPS or loopback HTTP without credentials, query, or fragment");
-
 export const piDurableBackendSchema = z.strictObject({
   type: z.literal("pi-durable"),
   directory: absolutePath,
-  model: z
-    .string()
-    .regex(
-      /^(openai|anthropic)\/.+$/,
-      "Use openai/model-id or anthropic/model-id",
-    ),
-  provider: z
-    .strictObject({ baseURL: piProxyURL, apiKeyEnv: envName })
-    .optional(),
+  model: piModelSchema,
+  provider: piProviderSchema.optional(),
   systemPrompt: z
     .string()
     .default("You are a helpful assistant responding in Slack."),

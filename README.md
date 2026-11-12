@@ -431,8 +431,13 @@ pogo maintenance plan --config /srv/pogo/pogo.json        # read-only
 pogo maintenance install-timer --config /srv/pogo/pogo.json --print
 ```
 
+An optional built-in maintenance droid (a Pi Durable agent) explains each
+run and escalates problems through the report bot. It can only read
+maintenance state and run `plan` or `recover`, within Pogo's limits.
+
 See [nightly maintenance](docs/maintenance.md) for configuration, the install
-layout, the report schema and the one-time migration.
+layout, the report schema, the [maintenance droid](docs/maintenance.md#maintenance-droid)
+and the one-time migration.
 
 ## Guarantees and limits
 

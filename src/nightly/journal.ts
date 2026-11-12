@@ -21,6 +21,7 @@ import {
   binaryPath,
   proxyModels,
 } from "./host";
+import type { IdleResult } from "./idle";
 import { agentFile, managedFolder } from "./models";
 import type { OpenCodeControl } from "./opencode";
 import { maintenanceDirectory } from "./paths";
@@ -655,7 +656,18 @@ export type UndoEvent =
       kind: "restart";
       service: "gateway" | "opencode" | "cliproxyapi";
       ok: boolean;
-    };
+    }
+  /** The idle gate before `step` was busy: the undo stopped there. */
+  | { kind: "deferred"; step: UndoStep; reason: Reason };
+
+/** Undo steps that change live state, each gated when `UndoContext.gate` is set. */
+export type UndoStep =
+  | "sessions"
+  | "files"
+  | "clis"
+  | "cliproxyapi"
+  | "opencode"
+  | "gateway";
 
 export type UndoContext = {
   config: Config;
@@ -664,6 +676,14 @@ export type UndoContext = {
   sleep: (ms: number) => Promise<void>;
   now: () => number;
   record?: (event: UndoEvent) => void;
+  /**
+   * Idle check immediately before each step that changes live state: the
+   * session switch-back, the config restore, the CLI reinstall, and every
+   * restart of a running service. A busy answer stops the undo there; the
+   * remaining entries (and owed restarts) stay for the next idle boundary.
+   * Unset: the undo never waits (in-run rollback, operator recover).
+   */
+  gate?: (step: UndoStep) => Promise<IdleResult>;
 };
 
 /** Per-entry undo bounds (ms); the timer's TimeoutStopSec is derived from them. */
@@ -724,8 +744,15 @@ export async function undoJournal(
     if (journal.get("gateway"))
       await journal.set("gateway", { restartPending: true });
   };
+  const idle = async (step: UndoStep) => {
+    const result = await ctx.gate?.(step);
+    if (!result || result.idle) return true;
+    record({ kind: "deferred", step, reason: result.reason });
+    return false;
+  };
 
   const sessions = wanted("sessions") ? journal.get("sessions") : undefined;
+  if (sessions?.length && !(await idle("sessions"))) return false;
   if (sessions?.length) {
     const left: SessionItem[] = [...sessions];
     const control = await ctx.connect().catch(() => undefined);
@@ -753,6 +780,7 @@ export async function undoJournal(
   } else if (wanted("sessions")) await journal.clear("sessions");
 
   if (wanted("files") && journal.get("files")) {
+    if (!(await idle("files"))) return false;
     let reason: Reason | undefined;
     try {
       // The restart is owed from the first restored file on.
@@ -797,6 +825,7 @@ export async function undoJournal(
 
   const clis = wanted("clis") ? journal.get("clis") : undefined;
   if (clis && m?.agentClis) {
+    if (!(await idle("clis"))) return false;
     const settings = m.agentClis;
     const left = [];
     for (const item of clis.packages) {
@@ -853,6 +882,7 @@ export async function undoJournal(
       else {
         const binary = await lstat(target).catch(() => null);
         if (!binary?.isFile()) throw new StepError("not-found");
+        if (!(await idle("cliproxyapi"))) return false;
         await replaceLink(settings.link, target);
         const restartedProxy = await ctx.runner.run(
           ["systemctl", "--user", "restart", settings.unit],
@@ -882,6 +912,7 @@ export async function undoJournal(
   // Restart OpenCode while a restart is owed; the flag survives interruption.
   let openCodeOK = true;
   if (wanted("openCode") && journal.get("openCode")?.restartPending && m) {
+    if (!(await idle("opencode"))) return false;
     const result = await ctx.runner.run(m.services.openCodeRestart, {
       timeoutMs: 120_000,
     });
@@ -926,6 +957,14 @@ export async function undoJournal(
     )
       ok = true;
     else {
+      // Starting a stopped gateway interrupts nothing; restarting a running
+      // (or unknown) one does.
+      if (
+        state !== "inactive" &&
+        state !== "failed" &&
+        !(await idle("gateway"))
+      )
+        return false;
       const since = ctx.now();
       const started = await ctx.runner.run(
         ["systemctl", "--user", "restart", unit],
