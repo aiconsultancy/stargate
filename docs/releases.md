@@ -22,8 +22,9 @@ Every merge to `main` creates a GitHub release. The first release is
 
    Before `1.0.0`, a major bump increments the minor version.
 5. The workflow creates `pogo-vX.Y.Z.tar.gz` (a `git archive` of the commit)
-   and its SHA-256 file, records GitHub build provenance for the archive, and
-   publishes the tag and release with the commit subjects as notes.
+   and its SHA-256 file, and publishes the tag and release with the commit
+   subjects as notes. GitHub build provenance (artifact attestations) is not
+   available on the organization's current plan.
 
 The version lives in the tag, not in `package.json`. CI never commits to
 `main`, so branch protection stays unchanged.
@@ -33,8 +34,12 @@ The version lives in the tag, not in `package.json`. CI never commits to
 ```sh
 gh release download v0.1.0 --repo aiconsultancy/pogo
 sha256sum -c pogo-v0.1.0.tar.gz.sha256
-gh attestation verify pogo-v0.1.0.tar.gz --repo aiconsultancy/pogo
+# Strongest check without attestations: rebuild the archive from the tag.
+git archive --format=tar.gz --prefix=pogo-v0.1.0/ v0.1.0 | sha256sum
 ```
+
+`git archive` output is reproducible for one git version; compare the
+unpacked trees (`diff -r`) if the hashes differ only because of compression.
 
 ## Dependency updates
 
