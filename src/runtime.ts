@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
-import { Cause, Data, Deferred, Effect } from "effect";
+import { Cause, Data, Deferred, Effect, FiberMap } from "effect";
 import pino, { type Logger } from "pino";
 import {
   type AgentBackend,
@@ -15,9 +15,14 @@ import {
   type BotConfig,
   type Config,
   type IrcConfig,
-  loadConfig,
   secret,
 } from "./config";
+import {
+  ConfigReload,
+  type ReloadCandidate,
+  ReloadRejected,
+  readReloadCandidate,
+} from "./config-reload";
 import type { CrewUIApi } from "./crew-ui";
 import { CrewUI } from "./crew-ui";
 import { type CronDelivery, CronScheduler } from "./cron";
@@ -28,7 +33,7 @@ import { type DashboardShip, dashboardSource } from "./dashboard-source";
 import { abortable } from "./effect";
 import { Gateway, type SlackDelivery } from "./gateway";
 import { controlInteractions } from "./interactions";
-import { IrcShip } from "./irc/ship";
+import { type IrcRegistration, IrcShip } from "./irc/ship";
 import { MaintenanceOutbox } from "./nightly/outbox";
 import { writeReady } from "./nightly/ready";
 import { PairingUI } from "./pairing";
@@ -111,6 +116,32 @@ const release = (log: Logger, name: string, close: () => unknown) =>
     }
   });
 
+/** One idempotent close owner, shared by reload retirement and shutdown. */
+function ownedBackend(backend: AgentBackend) {
+  let closing: Promise<void> | undefined;
+  return {
+    backend,
+    close: () => (closing ??= Promise.resolve().then(() => backend.close())),
+  };
+}
+
+/** Injected signal source keeps tests away from the real process. */
+export function listenForReload(
+  reload: Pick<ConfigReload, "request">,
+  source: {
+    on(event: "SIGHUP", listener: () => void): unknown;
+    off(event: "SIGHUP", listener: () => void): unknown;
+  } = process,
+) {
+  const request = () => {
+    void reload.request();
+  };
+  source.on("SIGHUP", request);
+  return () => {
+    source.off("SIGHUP", request);
+  };
+}
+
 /**
  * Process ownership as one scope. Workers start only after every bot has
  * connected. Finalizers run in reverse order: one shared gate closes Slack
@@ -126,6 +157,7 @@ export function serve(
   log: Logger,
   shutdown: AbortSignal,
   dependencies: RuntimeDependencies = defaults,
+  reload?: ConfigReload,
 ) {
   let started = false;
   const program = Effect.scoped(
@@ -186,10 +218,18 @@ export function serve(
             return Deferred.fail(stopped, new RuntimeStopped({ worker }));
           }),
         );
-      const workers: Effect.Effect<void>[] = [];
+      const workers: { key: string; work: Effect.Effect<void> }[] = [];
+      const botBindings = new Map<
+        string,
+        (
+          next: BotConfig,
+          transcriber: ReturnType<typeof createTranscriber> | undefined,
+        ) => void
+      >();
       const ships: DashboardShip[] = [];
       const identities = new Set<string>();
       for (const bot of config.bots) {
+        let currentBot = bot;
         const botLog = log.child({ bot: bot.id });
         const slack = dependencies.slack(bot, botLog);
         const identity = yield* Effect.promise(() => slack.identity());
@@ -206,12 +246,15 @@ export function serve(
         yield* Effect.promise(() =>
           mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
         );
-        const backend = yield* Effect.acquireRelease(
-          Effect.promise(() =>
-            dependencies.backend(bot.backend, { dataDirectory }),
+        const resource = yield* Effect.acquireRelease(
+          Effect.promise(async () =>
+            ownedBackend(
+              await dependencies.backend(bot.backend, { dataDirectory }),
+            ),
           ),
-          (backend) => release(botLog, "Resource", () => backend.close()),
+          (resource) => release(botLog, "Resource", resource.close),
         );
+        const backend = resource.backend;
         const gateway = new Gateway(
           bot,
           identity,
@@ -220,7 +263,7 @@ export function serve(
           slack,
           botLog,
           bot.transcription ? createTranscriber(bot.transcription) : undefined,
-          bot.access.peerCaptains && slack.userInfo
+          slack.userInfo
             ? new PeerDirectory(
                 (user, signal) =>
                   slack.userInfo?.(user, signal) ?? Promise.resolve(undefined),
@@ -237,22 +280,31 @@ export function serve(
           botLog,
         );
         workers.push(
-          supervise(botLog, "gateway", (signal) => gateway.work(signal)),
-          supervise(botLog, "cron", (signal) => cron.work(signal)),
+          {
+            key: `gateway:${bot.id}`,
+            work: supervise(botLog, "gateway", (signal) =>
+              gateway.work(signal),
+            ),
+          },
+          {
+            key: `cron:${bot.id}`,
+            work: supervise(botLog, "cron", (signal) => cron.work(signal)),
+          },
         );
         if (config.maintenance?.report?.bot === bot.id) {
           // Maintenance summaries use this bot's normal Slack client.
           const outbox = new MaintenanceOutbox(
             config.dataDirectory,
-            (channel) => isAllowedChannel(bot, channel),
+            (channel) => isAllowedChannel(currentBot, channel),
             (channel, text, signal) => slack.announce(channel, text, signal),
             botLog,
           );
-          workers.push(
-            abortable((signal) => outbox.work(signal)).pipe(
+          workers.push({
+            key: `maintenance:${bot.id}`,
+            work: abortable((signal) => outbox.work(signal)).pipe(
               Effect.catchCause(() => Effect.void),
             ),
-          );
+          });
         }
         let closing: Promise<void> | undefined;
         const close = () => {
@@ -262,66 +314,85 @@ export function serve(
         connections.push(close);
         // Startup failure: close this socket before its backend closes.
         yield* Effect.addFinalizer(() => closeIntake(close));
+        const cronUI = new CronUI(
+          bot,
+          identity,
+          cronStore,
+          slack.cronUI,
+          botLog,
+        );
+        const pairing = new PairingUI(
+          bot,
+          identity,
+          backend,
+          slack.cronUI,
+          botLog,
+          requests.signal,
+        );
+        const crewUI = new CrewUI(
+          bot,
+          identity,
+          backend,
+          slack.crewUI,
+          botLog,
+          requests.signal,
+        );
+        const interactions = controlInteractions(
+          cronUI,
+          pairing,
+          (body) => gateway.cancel(body),
+          crewUI,
+        );
         yield* Effect.promise(() =>
           slack.start(
             async (body) => open && gateway.receive(body, () => open),
             botLog,
-            controlInteractions(
-              new CronUI(bot, identity, cronStore, slack.cronUI, botLog),
-              new PairingUI(
-                bot,
-                identity,
-                backend,
-                slack.cronUI,
-                botLog,
-                requests.signal,
-              ),
-              (body) => gateway.cancel(body),
-              new CrewUI(
-                bot,
-                identity,
-                backend,
-                slack.crewUI,
-                botLog,
-                requests.signal,
-              ),
-            ),
+            interactions,
             () => open,
           ),
         );
         botLog.info("Bot connected");
-        ships.push({ bot, identity, key: botKey(bot, identity), backend });
+        const dashboardShip = {
+          bot,
+          identity,
+          key: botKey(bot, identity),
+          backend,
+        };
+        ships.push(dashboardShip);
+        botBindings.set(bot.id, (next, transcriber) => {
+          gateway.reconfigure(next, transcriber);
+          cron.reconfigure(next);
+          cronUI.reconfigure(next);
+          pairing.reconfigure(next);
+          crewUI.reconfigure(next);
+          dashboardShip.bot = next;
+          currentBot = next;
+        });
       }
       // IRC never blocks startup or Slack: connections retry in the
       // background, and delivery waits for them or retries later.
-      for (const irc of config.irc ?? []) {
-        const ship = yield* Effect.promise(() =>
-          (dependencies.irc ?? IrcShip.create)(irc, store, log),
+      const buildRegistration = async (
+        registration: IrcRegistration,
+        irc: IrcConfig,
+      ) => {
+        const namespace = createHash("sha256")
+          .update(registration.key)
+          .digest("hex");
+        const dataDirectory = join(
+          config.dataDirectory,
+          registration.id,
+          namespace,
         );
-        for (const registration of ship.registrations) {
-          const namespace = createHash("sha256")
-            .update(registration.key)
-            .digest("hex");
-          const dataDirectory = join(
-            config.dataDirectory,
-            registration.id,
-            namespace,
-          );
-          yield* Effect.promise(() =>
-            mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
-          );
-          const backend = yield* Effect.acquireRelease(
-            Effect.promise(() =>
-              dependencies.backend(registration.backend, { dataDirectory }),
-            ),
-            (backend) =>
-              release(registration.log, "Resource", () => backend.close()),
-          );
+        await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
+        const resource = ownedBackend(
+          await dependencies.backend(registration.backend, { dataDirectory }),
+        );
+        try {
           const gateway = new Gateway(
             registration.settings,
             registration.identity,
             store,
-            backend,
+            resource.backend,
             registration.delivery,
             registration.log,
             irc.transcription
@@ -332,17 +403,39 @@ export function serve(
           );
           registration.stopTurn = (conversation, thread) =>
             gateway.stopTurn(conversation, thread);
-          workers.push(
-            supervise(registration.log, "gateway", (signal) =>
-              gateway.work(signal),
-            ),
-          );
+          return { registration, gateway, resource };
+        } catch (error) {
+          await resource.close();
+          throw error;
         }
+      };
+      type Registration = Awaited<ReturnType<typeof buildRegistration>>;
+      const ircBindings = new Map<
+        string,
+        { ship: IrcShip; entries: Map<string, Registration> }
+      >();
+      for (const irc of config.irc ?? []) {
+        const ship = yield* Effect.promise(() =>
+          (dependencies.irc ?? IrcShip.create)(irc, store, log),
+        );
+        const entries = new Map<string, Registration>();
+        for (const registration of ship.registrations) {
+          const entry = yield* Effect.acquireRelease(
+            Effect.promise(() => buildRegistration(registration, irc)),
+            (entry) =>
+              release(registration.log, "Resource", entry.resource.close),
+          );
+          entries.set(registration.key, entry);
+          workers.push({
+            key: registration.key,
+            work: supervise(registration.log, "gateway", (signal) =>
+              entry.gateway.work(signal),
+            ),
+          });
+        }
+        ircBindings.set(irc.id, { ship, entries });
         let closing: Promise<void> | undefined;
-        const close = () => {
-          closing ??= ship.close();
-          return closing;
-        };
+        const close = () => (closing ??= ship.close());
         connections.push(close);
         yield* Effect.addFinalizer(() => closeIntake(close));
         ship.start(() => open);
@@ -372,14 +465,173 @@ export function serve(
         );
         log.info("Dashboard listening");
       }
-      // Workers start only after every bot connected. A failed connection
-      // leaves queued requests queued instead of consuming them as uncertain.
-      // One fiber: shutdown interrupts every worker at once.
-      yield* Effect.forkScoped(
-        Effect.all(workers, { concurrency: "unbounded", discard: true }),
+      // Dynamic backend resources close after worker interruption, before the
+      // stores. The single finalizer also owns later roster additions.
+      const addedResources: Registration[] = [];
+      yield* Effect.addFinalizer(() =>
+        Effect.all(
+          addedResources.map((entry) =>
+            release(entry.registration.log, "Resource", entry.resource.close),
+          ),
+          { concurrency: "unbounded", discard: true },
+        ),
       );
-      // Must stay registered after the worker fork: LIFO finalizers then set
-      // `open = false` for every bot before any worker drain can block.
+      // Registered after backends: shutdown interrupts every worker first.
+      const fibers = yield* FiberMap.make<string, void>();
+      for (const worker of workers)
+        yield* FiberMap.run(fibers, worker.key, worker.work);
+      if (reload) {
+        const apply = async (candidate: ReloadCandidate) => {
+          const staged: {
+            entry: Registration;
+            start: Deferred.Deferred<void>;
+          }[] = [];
+          const paused: Gateway[] = [];
+          let committed = false;
+          try {
+            const bots = candidate.config.bots.map((next) => {
+              const publish = botBindings.get(next.id);
+              if (!publish) throw new ReloadRejected("unavailable");
+              return {
+                publish,
+                next,
+                transcriber: next.transcription
+                  ? createTranscriber(next.transcription)
+                  : undefined,
+              };
+            });
+            const plans = [];
+            for (const next of candidate.config.irc) {
+              const binding = ircBindings.get(next.id);
+              if (!binding) throw new ReloadRejected("unavailable");
+              const plan = binding.ship.prepareReload(
+                next,
+                candidate.environment,
+              );
+              for (const registration of plan.added) {
+                const entry = await buildRegistration(registration, next);
+                const start = Deferred.makeUnsafe<void>();
+                staged.push({ entry, start });
+                // A staged worker cannot recover or process anything until the
+                // synchronous commit publishes the whole candidate.
+                await Effect.runPromise(
+                  FiberMap.run(
+                    fibers,
+                    registration.key,
+                    Deferred.await(start).pipe(
+                      Effect.andThen(
+                        supervise(registration.log, "gateway", (signal) =>
+                          entry.gateway.work(signal),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }
+              plans.push({
+                binding,
+                plan,
+                next,
+                transcriber: next.transcription
+                  ? createTranscriber(next.transcription)
+                  : undefined,
+              });
+            }
+            if (!open || requests.signal.aborted)
+              throw new ReloadRejected("unavailable");
+            for (const { binding, plan } of plans)
+              for (const registration of plan.removed) {
+                const entry = binding.entries.get(registration.key);
+                if (!entry) throw new ReloadRejected("unavailable");
+                entry.gateway.pause();
+                paused.push(entry.gateway);
+              }
+            if (paused.some((gateway) => !gateway.isIdle()))
+              throw new ReloadRejected("busy");
+            // Resolve every entry and namespace before publishing anything.
+            const updates = plans.flatMap(({ binding, plan, transcriber }) => {
+              const removed = new Set(plan.removed);
+              const registrations = [
+                ...binding.ship.registrations.filter(
+                  (registration) => !removed.has(registration),
+                ),
+                ...plan.added,
+              ];
+              return registrations.map((registration) => {
+                const entry =
+                  staged.find(
+                    ({ entry }) => entry.registration === registration,
+                  )?.entry ?? binding.entries.get(registration.key);
+                if (!entry || entry.gateway.key !== registration.transport.key)
+                  throw new ReloadRejected("unavailable");
+                return { binding, registration, entry, transcriber };
+              });
+            });
+            // No awaits: publish all access/settings and roster references in
+            // one JS turn. Admission cannot observe a half-applied candidate.
+            for (const { binding, plan } of plans)
+              plan.commit(
+                (key) => binding.entries.get(key)?.gateway.isIdle() ?? false,
+              );
+            for (const bot of bots) bot.publish(bot.next, bot.transcriber);
+            for (const {
+              binding,
+              registration,
+              entry,
+              transcriber,
+            } of updates) {
+              entry.gateway.reconfigure(
+                registration.settings,
+                transcriber,
+                registration.transport,
+              );
+              binding.entries.set(registration.key, entry);
+            }
+            committed = true;
+            for (const { entry, start } of staged) {
+              addedResources.push(entry);
+              Effect.runSync(Deferred.succeed(start, undefined));
+            }
+            // Removed members are already detached. They were idle, so worker
+            // cancellation and cleanup cannot discard queued or active work.
+            for (const { binding, plan } of plans) {
+              for (const registration of plan.removed) {
+                const entry = binding.entries.get(registration.key);
+                binding.entries.delete(registration.key);
+                await Effect.runPromise(
+                  FiberMap.remove(fibers, registration.key),
+                ).catch(() => log.warn("Retired worker cleanup failed"));
+                await entry?.resource
+                  .close()
+                  .catch(() => log.warn("Retired backend cleanup failed"));
+              }
+              await plan
+                .retire()
+                .catch(() => log.warn("Retired IRC cleanup failed"));
+            }
+          } finally {
+            if (!committed) {
+              for (const gateway of paused) gateway.pause(false);
+              for (const { entry } of staged) {
+                await Effect.runPromise(
+                  FiberMap.remove(fibers, entry.registration.key),
+                );
+                await entry.resource
+                  .close()
+                  .catch(() => log.warn("Staged backend cleanup failed"));
+              }
+            }
+          }
+        };
+        const unsubscribe = reload.listen(apply);
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            unsubscribe();
+            reload.close();
+          }),
+        );
+      }
+      // LIFO: close intake and abort reload preparation before workers drain.
       yield* Effect.addFinalizer(() => closeIntake());
       started = true;
       log.info("Pogo ready");
@@ -416,18 +668,31 @@ export function serve(
 
 export async function start(configPath: string) {
   process.umask(0o077);
-  await loadEnvironment(configPath);
-  const config = await loadConfig(configPath);
+  const baseEnvironment = { ...process.env };
+  const initial = await readReloadCandidate(configPath, baseEnvironment);
+  // Startup still supplies companion references to backend modules. Reload
+  // candidates never mutate process.env or connected transport credentials.
+  for (const [key, value] of Object.entries(initial.environment))
+    if (process.env[key] === undefined && value !== undefined)
+      process.env[key] = value;
+  const log = pino({ level: "info" });
+  const reload = new ConfigReload(
+    initial,
+    () => readReloadCandidate(configPath, baseEnvironment),
+    log,
+  );
   const controller = new AbortController();
   const stop = () => controller.abort();
+  const unlisten = listenForReload(reload);
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
   try {
-    // Rejects with RuntimeStopped after a worker failure; main sets exit 1.
     await Effect.runPromise(
-      serve(config, pino({ level: "info" }), controller.signal),
+      serve(initial.config, log, controller.signal, defaults, reload),
     );
   } finally {
+    unlisten();
+    reload.close();
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
   }

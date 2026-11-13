@@ -333,7 +333,65 @@ connectivity or provider credentials. `--schema-only` needs no credentials.
 See [`pogo.example.json`](pogo.example.json) for two registrations.
 Relative `dataDirectory` paths resolve beside the config file. Environment
 variables take precedence over companion-file values in foreground operation.
-Restart Pogo after configuration changes.
+Use SIGHUP for the live-safe changes below. Other changes require a restart.
+
+### Reload configuration without restarting
+
+Validate the file, then signal the running gateway (replace the unit name if
+this installation uses another name):
+
+```sh
+pogo config check --config /srv/pogo/pogo.json
+systemctl --user kill --signal=HUP pogo.service
+```
+
+SIGHUP reads the same regular configuration file and credential companion as
+`config check`. Requests are serialised. Pogo validates the complete candidate
+before publishing any setting. Invalid input, missing credentials, a busy crew
+removal or any restart-only change refuses the whole candidate; the current
+configuration and connections stay in place. Startup now uses these same checks:
+configuration and CA files must be regular files, not symlinks, and
+Slack token prefixes must be valid. Run `config check` before upgrading a service.
+Foreground SIGHUP now reloads instead of terminating the process on terminal
+hangup; use SIGINT or SIGTERM to stop it. Logs name the outcome and, for
+`restart required`, the changed field paths. They do not contain secret values.
+There is no automatic file watcher.
+
+| Live-safe fields                              | Effect                                                                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------- |
+| `bots[].access`                               | Users/channels, denies, mention-only/text mentions, peer captains and their cap |
+| `irc[].access`                                | Denied accounts/channels, text mentions, all-calls, peer captains and turn caps |
+| `bots[].transcription`, `irc[].transcription` | Provider/settings for future turns; spoken mentions are Slack-only              |
+| `irc[].crew` additions                        | Validate credentials and stage the backend/worker before connecting             |
+| `irc[].crew` removals                         | Refuse while any removed member has queued, running or responding work          |
+
+`access.peerTurnsPerHour` is optional on Slack and IRC registrations. It defaults
+to 5; the range is 0–600, where 0 refuses peer turns. IRC's existing
+`access.shipTurnsPerAgentPerHour` remains live-safe.
+
+Turns retain their starting execution and transcription settings. Delivery
+requires both the starting and current access policies: a new deny blocks the
+next delivery, including previews, files and IRC queued lines; a new allow does
+not expand an in-flight turn. A request already sent to Slack cannot be recalled.
+Queued turns use the configuration current when they start.
+
+All unlisted keys are restart-only. This includes transport additions/removals,
+Slack/IRC credentials, existing credential values, backends, server/bind settings,
+joined channels/JOIN/PART, existing crew-member fields, concurrency/timeouts,
+feature switches, cron/waiting/activity, dashboard, maintenance and state paths.
+An invalid or mixed live/restart change is never partially applied. Environment
+variables keep precedence over the companion; values supplied by the service
+manager remain fixed for the process lifetime. Reload never mutates the process
+environment. New companion variables can supply added IRC crew `passwordEnv` values only.
+Backend secret references must already exist in the process environment; adding
+backend secrets to the companion requires a restart. Repeated transcript-read
+failures keep removal busy until catch-up succeeds or the service is restarted.
+
+The reloadable roster is `pogo.json`'s IRC crew, not the separate OpenCode
+crew-plugin team. Reload preserves existing queue/session namespaces. Re-adding
+an IRC member resumes its retained cursor/history, as after a restart. This is
+configuration reload only; code updates and service handover still require their
+separate maintenance procedure.
 
 ## Backend configuration
 

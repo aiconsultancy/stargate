@@ -96,12 +96,12 @@ export class CronScheduler {
   private recovered = false;
   private ticking = false;
   private queuedAfter = "";
-  private readonly files: CronjobManager;
+  private files: CronjobManager;
   private syncAfter = 0;
   private definitionErrors: string[] = [];
 
   constructor(
-    private readonly config: BotConfig,
+    private config: BotConfig,
     private readonly identity: Identity,
     private readonly store: CronStore,
     private readonly gateway: SchedulerGateway,
@@ -110,6 +110,12 @@ export class CronScheduler {
   ) {
     this.key = botKey(config, identity);
     this.files = new CronjobManager(config, identity, store);
+  }
+
+  /** Access changes apply before the next operation or delivery. */
+  reconfigure(config: BotConfig) {
+    this.config = config;
+    this.files = new CronjobManager(config, this.identity, this.store);
   }
 
   private allowed(scope: CronScope) {

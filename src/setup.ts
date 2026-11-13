@@ -109,12 +109,17 @@ function validBot(input: unknown): BotConfig {
   return parsed.data;
 }
 
+/**
+ * Validates credential references and returns the effective environment:
+ * the `<config>.env` companion, overridden by `environment`. Neither input is
+ * changed, and values are never logged.
+ */
 export async function checkCredentials(
   path: string,
-  bots: BotConfig[],
+  bots: readonly BotConfig[],
   environment: NodeJS.ProcessEnv = process.env,
   irc: readonly IrcConfig[] = [],
-) {
+): Promise<NodeJS.ProcessEnv> {
   let companion: NodeJS.ProcessEnv = {};
   try {
     companion = parseEnv(await readFile(`${path}.env`, "utf8"));
@@ -147,6 +152,7 @@ export async function checkCredentials(
       );
     }
   }
+  return env;
 }
 
 export async function readConfiguration(path: string) {

@@ -6,6 +6,7 @@ import { type ReplyChunk, replyText } from "./slack-format";
 import type { Job, Store } from "./store";
 
 export type LiveReplyOptions = {
+  allowed?: () => boolean;
   intervalMs?: number;
   waiting?: { delayMs: number | null; intervalMs: number; name: string };
   phrase?: (name: string, index: number) => string;
@@ -27,6 +28,7 @@ export class LiveReply {
   private readonly waitingTask: Promise<void>;
   private readonly wait: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly intervalMs: number;
+  private readonly allowed: () => boolean;
 
   constructor(
     private readonly job: Job,
@@ -38,6 +40,7 @@ export class LiveReply {
   ) {
     this.signal = AbortSignal.any([signal, this.stop.signal]);
     this.intervalMs = options.intervalMs ?? 1500;
+    this.allowed = options.allowed ?? (() => true);
     this.wait =
       options.wait ?? ((ms, signal) => delay(ms, undefined, { signal }));
     this.waitingTask = this.waiting(options).catch(() => {
@@ -67,6 +70,7 @@ export class LiveReply {
     this.waitingStop.abort();
     await this.task;
     this.signal.throwIfAborted();
+    if (!this.allowed()) throw new Error("Delivery access denied");
     if (!this.slack.update || !this.slack.remove || this.disabled)
       throw new Error("Cancellable maintenance notices unavailable");
     const preview = this.store
@@ -162,6 +166,7 @@ export class LiveReply {
         this.slack.prepareReply?.(text) ?? chunks(text);
       for (let i = 0; i < parts.length; i++) {
         this.signal.throwIfAborted();
+        if (!this.allowed()) throw new Error("Delivery access denied");
         const part = parts[i];
         if (part === undefined) continue;
         const body = replyText(part);

@@ -41,6 +41,37 @@ abort and records an `interrupted` outcome. Backends, stores and the instance
 lock close last. A failure after startup stops every bot and exits with code
 1, so the service manager restarts Pogo.
 
+## Live configuration reload
+
+`config-reload.ts` reads a complete candidate with the CLI's schema and
+credential checks. It resolves the companion against a base environment captured
+before startup loading, without changing `process.env`. Reload requests are
+serialised. A pure allowlist planner rejects reconnect-only field or existing
+effective-environment changes, returning paths without values. Invalid/rejected
+candidates never advance the current snapshot. SIGHUP is the only trigger;
+watching files and gap-free code replacement are not implemented here.
+
+The runtime stages added IRC clients, backends and blocked worker fibres before
+commit. Removed members are paused and checked synchronously for queued,
+running or responding work and active Gateway processing. The commit publishes
+all settings and roster references without an await, then releases new workers.
+Removed idle workers/connections retire independently. Dynamic workers share the
+existing process scope and writer; shutdown still closes intake before draining
+workers, then closes backend resources and stores. No second runtime is started.
+
+A Gateway turn captures its execution settings, source/note and transcriber by
+reference to an immutable configuration version. Future turns use the replaced
+version. Access is an intersection, not a frozen grant: new denies apply before
+every subsequent delivery; new allows cannot expand the starting policy. IRC
+checks that gate again when a queued line reaches its socket. Calls already sent
+to Slack cannot be recalled. Cron and interactive surfaces also receive current
+access rules without replacing their pending state.
+
+See [reload fields and operator commands](../README.md#reload-configuration-without-restarting)
+for the exact live-safe set and conservative restart-only policy. Only the IRC
+crew roster is in this configuration; the separate OpenCode crew-plugin roster
+keeps its existing append-only/migration requirements.
+
 ## Adapter contract
 
 ```ts

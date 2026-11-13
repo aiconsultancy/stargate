@@ -1030,3 +1030,30 @@ test("transcript cleanup retains indentation before full-source classification",
   expect(JSON.stringify(payloads)).not.toContain('"user_id":"U123"');
   expect(JSON.stringify(payloads)).toContain('"type":"rich_text_preformatted"');
 });
+
+test("roster idle checks include pending and in-flight transcript catch-ups", async () => {
+  const f = fixture();
+  f.setTurn(async () => {
+    f.native.add("Complete.");
+    return "Complete.";
+  });
+  f.gateway.accept(event());
+  await f.drain();
+  const entered = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  const read = f.backend.transcript;
+  if (!read) throw new Error("Missing transcript fixture");
+  f.backend.transcript = async (...args) => {
+    entered.resolve();
+    await resume.promise;
+    return read(...args);
+  };
+  f.gateway.settle("session-1");
+  expect(f.gateway.isIdle()).toBe(false);
+  const work = f.gateway.catchUp(new AbortController().signal);
+  await entered.promise;
+  expect(f.gateway.isIdle()).toBe(false);
+  resume.resolve();
+  await work;
+  expect(f.gateway.isIdle()).toBe(true);
+});

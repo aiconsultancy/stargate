@@ -210,12 +210,17 @@ export class CronUI {
       );
   }
   constructor(
-    private readonly config: BotConfig,
+    private config: BotConfig,
     private readonly identity: Identity,
     private readonly store: CronStore,
     private readonly api: CronUIApi,
     private readonly log: Logger,
   ) {}
+
+  /** Access changes apply before the next operation or delivery. */
+  reconfigure(config: BotConfig) {
+    this.config = config;
+  }
 
   private allowed(user: string, channel: string, app: string, team: string) {
     return (

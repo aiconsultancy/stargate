@@ -45,7 +45,10 @@ Commands:
 Use <command> --help for full options.\n${common}`,
   start: `Usage: pogo start [--config PATH]\n${common}
 Provide token values through environment variables or <config>.env.
-Both user and channel must be allowed; deny rules always win. Bots are rejected.`,
+Both user and channel must be allowed; deny rules always win. Bots are rejected.
+SIGHUP validates and reloads live access, transcription and IRC crew changes.
+Reconnect-only changes report "restart required"; running turns keep their
+execution snapshot, but new denies block delivery. No file watcher is enabled.`,
   init: `Usage: pogo init [--config PATH]\n${common}
 Requires an interactive terminal; token input is hidden.
 Creates a prefilled Slack manifest link, collects IDs and backend settings,

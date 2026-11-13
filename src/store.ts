@@ -269,7 +269,7 @@ export class Store {
   peerTurns(conversation: string, since: number): number {
     return this.db
       .query<{ eventId: string }, [string]>(
-        "SELECT eventId FROM jobs WHERE conversation=? AND sender='captain' ORDER BY id DESC LIMIT 100",
+        "SELECT eventId FROM jobs WHERE conversation=? AND sender='captain' ORDER BY id DESC LIMIT 600",
       )
       .all(conversation)
       .filter(({ eventId }) => {

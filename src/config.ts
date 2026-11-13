@@ -128,6 +128,8 @@ export const botSchema = z.strictObject({
     mentionOnly: z.boolean().default(false),
     /** Admit verified peer captain bots (`*-captain`); other bots stay rejected. */
     peerCaptains: z.boolean().optional(),
+    /** Peer captain turns per thread/hour; absent keeps the default of five. */
+    peerTurnsPerHour: z.number().int().min(0).max(600).optional(),
     /**
      * In these channels, a top-level message whose text contains one of the
      * names starts a conversation like a mention. Absent is off.
@@ -307,6 +309,8 @@ export const ircSchema = z
           .default([...defaultAllCallWords]),
         /** Accounts of other fleet captains: peer rules, 5 per target an hour. */
         peerCaptains: z.array(ircAccount).max(50).default([]),
+        /** Peer turns per conversation/hour; absent keeps the default of five. */
+        peerTurnsPerHour: z.number().int().min(0).max(600).optional(),
         /**
          * Ship (captain/crew) messages admitted per agent in a rolling hour.
          * A channel's cap is this value times the ship agents configured in

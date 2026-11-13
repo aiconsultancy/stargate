@@ -461,3 +461,38 @@ test("irc client: crew join only channels the captain also has, per CASEMAPPING"
   ).toEqual(["#galactica"]);
   expect(client.inChannel("#ship{1}")).toBe(false);
 });
+
+test("irc delivery rechecks live access after waiting and before the socket write", async () => {
+  const fake = server();
+  const { client } = start(fake);
+  await client.waitReady(2000);
+  await until(() => client.inChannel("#galactica"), 2000, "join");
+  const delivery = new IrcDelivery(client, 2000);
+  let checks = 0;
+  // Permission was present when delivery started, then a live deny arrived.
+  await expect(
+    delivery.post("#galactica", "m1", "Must not send.", undefined, {
+      job: 1,
+      part: 0,
+      allowed: () => ++checks === 1,
+    }),
+  ).rejects.toThrow();
+  expect(checks).toBeGreaterThanOrEqual(2);
+  expect(lineOf(fake.received("galactica"), "PRIVMSG")).toHaveLength(0);
+});
+
+test("irc status notices recheck access without durable reply progress", async () => {
+  const fake = server();
+  const { client } = start(fake);
+  await client.waitReady(2000);
+  await until(() => client.inChannel("#galactica"), 2000, "join");
+  const delivery = new IrcDelivery(client, 2000);
+  let checks = 0;
+  await expect(
+    delivery.post("#galactica", "m1", "Attachment unavailable.", undefined, {
+      allowed: () => ++checks === 1,
+    }),
+  ).rejects.toThrow();
+  expect(checks).toBeGreaterThanOrEqual(2);
+  expect(lineOf(fake.received("galactica"), "PRIVMSG")).toHaveLength(0);
+});

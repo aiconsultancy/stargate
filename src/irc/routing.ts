@@ -323,7 +323,7 @@ export function withinLimits(
         sender: "captain",
         since,
         scope: { conversation: admission.conversation },
-      }) < peerTurnsPerHour
+      }) < (config.access.peerTurnsPerHour ?? peerTurnsPerHour)
     );
   if (admission.sender === "crew") {
     // A channel's cap scales with the ship agents configured in it. A direct

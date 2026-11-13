@@ -21,7 +21,9 @@ channel and TLS setup belong to the server operator.
    the pinned session must match that directory and agent.
 4. Optional: give crew a lasting invite exception on an invite-only ship
    channel (see [channels](#channels)); otherwise the captain invites them.
-5. Run `pogo config check --config <path>`, then restart Pogo.
+5. Run `pogo config check --config <path>`, then restart for connection changes.
+   Access/transcription and IRC crew additions/idle removals can use
+   [SIGHUP reload](../README.md#reload-configuration-without-restarting).
 6. Regenerate or edit the captain definition so it contains the
    "IRC messages" paragraph (see [captain instructions](#captain-instructions)).
 
@@ -172,13 +174,20 @@ the request that dispatched them.
 
 ## Access
 
+`access.peerTurnsPerHour` overrides the default five peer-captain turns per
+conversation/hour (0–600; 0 refuses them). It reloads live with the other access
+settings and `shipTurnsPerAgentPerHour`.
+
 - The sender's identity is the IRCv3 `account` tag, never the nick. A
   message without an account tag is ignored.
 - Any logged-in account may write to the captain, unless
   `deniedAccounts` lists it. `*` denies everyone.
 - Channel messages count only in the registration's `channels` and not in
   `deniedChannels`. `deniedChannels: ["*"]` also blocks direct messages.
-- Denies are checked again before work and before each delivery.
+- Denies are checked again before work and before each delivery, including
+  queued socket writes. A SIGHUP deny also blocks delivery from a running turn;
+  its execution/transcription settings stay on the starting snapshot. New allows
+  affect only future turns. Joined channel lists still require a restart.
 - Accounts, nicks and channels compare under the server's ISUPPORT
   `CASEMAPPING` (`rfc1459` until the server sends it; Ergo sends `ascii`).
   Every spelling of a channel shares one conversation, deny entry and turn

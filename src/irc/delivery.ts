@@ -135,7 +135,8 @@ export class IrcDelivery implements SlackDelivery {
   ) {
     // Without reactions the gateway never asks for one.
     if (presence.reactions !== false)
-      this.react = (channel, ts, name) => this.reaction(channel, ts, name);
+      this.react = (channel, ts, name, allowed) =>
+        this.reaction(channel, ts, name, allowed);
   }
 
   /**
@@ -145,10 +146,15 @@ export class IrcDelivery implements SlackDelivery {
    * socket write like direct lines: once the nick changes hands, typing
    * stops for this turn. Skipped when the send queue is busy.
    */
-  async working(channel: string, _thread: string, signal: AbortSignal) {
+  async working(
+    channel: string,
+    _thread: string,
+    signal: AbortSignal,
+    allowed?: () => boolean,
+  ) {
     if (!this.presence.typing || !this.client.hasCap("message-tags")) return;
     const target = await this.target(channel);
-    const guard = this.guard(channel, target);
+    const guard = this.guard(channel, target, allowed);
     const timer = this.client.typingMs;
     while (!signal.aborted) {
       if (guard && !guard()) return;
@@ -213,8 +219,8 @@ export class IrcDelivery implements SlackDelivery {
       ...(hosted.upload
         ? {
             upload: (file, signal) => hosted.files.upload(file, signal),
-            link: (channel, thread, url, title) =>
-              this.link(channel, thread, url, title),
+            link: (channel, thread, url, title, _signal, allowed) =>
+              this.link(channel, thread, url, title, allowed),
           }
         : {}),
     };
@@ -226,6 +232,7 @@ export class IrcDelivery implements SlackDelivery {
     thread: string,
     url: string,
     title: string,
+    allowed?: () => boolean,
   ) {
     await this.client.waitReady(this.readyMs);
     const host = this.hosted?.filehost();
@@ -244,7 +251,7 @@ export class IrcDelivery implements SlackDelivery {
       target,
       `${name}: ${url}`,
       reply,
-      this.guard(channel, target),
+      this.guard(channel, target, allowed),
     );
   }
 
@@ -264,10 +271,9 @@ export class IrcDelivery implements SlackDelivery {
    * socket write, so a QUIT or NICK seen meanwhile drops the line; the
    * stored reply stays for the gateway's retry.
    */
-  private guard(channel: string, target: string) {
-    return isIrcChannel(channel)
-      ? undefined
-      : () => this.client.holds(channel, target);
+  private guard(channel: string, target: string, allowed?: () => boolean) {
+    if (isIrcChannel(channel)) return allowed;
+    return () => this.client.holds(channel, target) && (allowed?.() ?? true);
   }
 
   private reply(thread: string): Record<string, string> {
@@ -287,15 +293,18 @@ export class IrcDelivery implements SlackDelivery {
     thread: string,
     text: string,
     _stopJob?: number,
-    unit?: DeliveryUnit,
+    unit?: DeliveryUnit | { allowed: () => boolean },
   ) {
     await this.client.waitReady(this.readyMs);
+    if (unit?.allowed && !unit.allowed())
+      throw new Error("IRC delivery access denied");
     const target = await this.target(channel);
     const reply = this.reply(thread);
+    const tracked = unit && "job" in unit ? unit : undefined;
     let plan: Plan = this.plan(channel, text, reply);
     let done = 0;
-    if (unit && this.progress) {
-      const stored = this.progress.plan(unit, JSON.stringify(plan));
+    if (tracked && this.progress) {
+      const stored = this.progress.plan(tracked, JSON.stringify(plan));
       plan = planSchema.parse(JSON.parse(stored.plan));
       done = stored.done;
     }
@@ -315,13 +324,14 @@ export class IrcDelivery implements SlackDelivery {
       // each remaining line becomes its own unit, stored, so line progress
       // survives a retry.
       plan = this.unbatch(plan, done, planTarget(channel), reply);
-      if (unit && this.progress)
-        this.progress.replan(unit, JSON.stringify(plan));
+      if (tracked && this.progress)
+        this.progress.replan(tracked, JSON.stringify(plan));
     }
     // greybeard: a nick that changes hands without a QUIT/NICK/ACCOUNT we
     // can see (no shared channel) after WHOIS is not detected for the
     // lines of this chunk; each delivery attempt revalidates with WHOIS.
-    const guard = this.guard(channel, target);
+    const recipient = this.guard(channel, target);
+    const guard = () => (recipient?.() ?? true) && (unit?.allowed?.() ?? true);
     for (let index = done; index < plan.units.length; index++) {
       const lines = plan.units[index]?.lines ?? [];
       const tags = index === 0 ? reply : {};
@@ -334,7 +344,7 @@ export class IrcDelivery implements SlackDelivery {
             position === 0 ? tags : {},
             guard,
           );
-      if (unit && this.progress) this.progress.done(unit, index + 1);
+      if (tracked && this.progress) this.progress.done(tracked, index + 1);
     }
   }
 
@@ -366,9 +376,19 @@ export class IrcDelivery implements SlackDelivery {
   }
 
   /** +draft/react to a request's message; absent with reactions off. */
-  react?: (channel: string, ts: string, name: ReactionName) => Promise<void>;
+  react?: (
+    channel: string,
+    ts: string,
+    name: ReactionName,
+    allowed?: () => boolean,
+  ) => Promise<void>;
 
-  private async reaction(channel: string, ts: string, name: ReactionName) {
+  private async reaction(
+    channel: string,
+    ts: string,
+    name: ReactionName,
+    allowed?: () => boolean,
+  ) {
     await this.client.waitReady(this.readyMs);
     const reply = this.reply(ts);
     if (!("+draft/reply" in reply))
@@ -377,7 +397,7 @@ export class IrcDelivery implements SlackDelivery {
     await this.client.tagmsg(
       target,
       { ...reply, "+draft/react": emoji[name] },
-      this.guard(channel, target),
+      this.guard(channel, target, allowed),
     );
   }
 }

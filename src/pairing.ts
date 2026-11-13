@@ -84,7 +84,7 @@ type Confirmation = {
 export class PairingUI {
   private readonly pending = new Map<string, Confirmation>();
   constructor(
-    private readonly config: BotConfig,
+    private config: BotConfig,
     private readonly identity: Identity,
     private readonly backend: Pick<AgentBackend, "pair">,
     private readonly api: Pick<CronUIApi, "open" | "update">,
@@ -95,6 +95,11 @@ export class PairingUI {
       AbortSignal.timeout(15_000),
     private readonly wallNow: () => number = Date.now,
   ) {}
+
+  /** Access changes apply before the next operation or delivery. */
+  reconfigure(config: BotConfig) {
+    this.config = config;
+  }
 
   private allowed(user: string, channel: string, app: string, team: string) {
     return (

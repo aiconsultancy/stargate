@@ -302,3 +302,23 @@ test("cron config rejects duplicate file roots and unsupported report times", ()
     }).success,
   ).toBe(false);
 });
+
+test("file cron sync follows reloaded access without restarting the scheduler", async () => {
+  const f = await fixture();
+  const settings = f.config.cronjobs;
+  if (!settings) throw new Error("Missing cron fixture");
+  await writeCronjob(
+    settings.directory,
+    { ...f.definition, slack: { channel: "C456", user: "U123" } },
+    now,
+  );
+  const scheduler = f.scheduler();
+  await scheduler.tick(now, signal);
+  expect(f.store.list({ ...f.scope, channel: "C456" })).toHaveLength(0);
+  scheduler.reconfigure({
+    ...f.config,
+    access: { ...f.config.access, channels: ["C123", "C456"] },
+  });
+  await scheduler.tick(now + 10_000, signal);
+  expect(f.store.list({ ...f.scope, channel: "C456" })).toHaveLength(1);
+});

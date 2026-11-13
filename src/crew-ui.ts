@@ -164,7 +164,7 @@ export function quotaStatusView(
 
 export class CrewUI {
   constructor(
-    private readonly config: BotConfig,
+    private config: BotConfig,
     private readonly identity: Identity,
     private readonly backend: Pick<AgentBackend, "crewStatus" | "quota">,
     private readonly api: CrewUIApi,
@@ -173,6 +173,11 @@ export class CrewUI {
     private readonly deadline: () => AbortSignal = () =>
       AbortSignal.timeout(10_000),
   ) {}
+
+  /** Access changes apply before the next operation or delivery. */
+  reconfigure(config: BotConfig) {
+    this.config = config;
+  }
 
   private allowed(data: z.infer<typeof commandSchema>) {
     return (

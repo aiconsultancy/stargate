@@ -393,3 +393,21 @@ test("attachment eval: real OpenCode parser routes late private proof, not publi
   expect(f.prompts).toHaveLength(2);
   expect(f.posts.map((post) => post.text).join("\n")).not.toContain("file://");
 });
+
+test("attachment delivery rechecks a live deny after upload and before sharing", async () => {
+  const f = await fixture();
+  const put = f.transport.putUpload;
+  if (!put) throw new Error("Missing upload fixture");
+  f.transport.putUpload = async (...args) => {
+    await put(...args);
+    f.gateway.reconfigure({
+      ...f.config,
+      access: { ...f.config.access, deniedUsers: ["U123"] },
+    });
+  };
+  f.answer(`Proof.\n![proof](${pathToFileURL(f.image).href})`);
+  f.gateway.accept(f.source("D123", "Show proof", "1.000"));
+  await f.drain();
+  expect(f.counters().puts).toBe(1);
+  expect(f.uploads).toEqual([]);
+});

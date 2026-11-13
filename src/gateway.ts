@@ -165,6 +165,7 @@ export interface LinkTransport {
     url: string,
     title: string,
     signal: AbortSignal,
+    allowed?: () => boolean,
   ): Promise<void>;
 }
 
@@ -209,7 +210,11 @@ function uploads(
 }
 
 /** One stored reply chunk of one job. */
-export type DeliveryUnit = { job: number; part: number };
+export type DeliveryUnit = {
+  job: number;
+  part: number;
+  allowed?: () => boolean;
+};
 
 export interface SlackDelivery {
   /** Undefined (or absent) while the transport cannot move files. */
@@ -235,7 +240,7 @@ export interface SlackDelivery {
     text: string,
     stopJob?: number,
     /** Final delivery of stored chunk `part`: lets a transport keep progress. */
-    unit?: DeliveryUnit,
+    unit?: DeliveryUnit | { allowed: () => boolean },
     /** Already classified content of `text`; the transport must not reparse. */
     content?: SlackContent,
   ): Promise<string> | Promise<void>;
@@ -253,12 +258,22 @@ export interface SlackDelivery {
    * deliver plain `chunks`/`transcriptChunks` strings.
    */
   prepareReply?(text: string, unbounded?: boolean): ReplyChunk[];
-  react?(channel: string, ts: string, name: ReactionName): Promise<void>;
+  react?(
+    channel: string,
+    ts: string,
+    name: ReactionName,
+    allowed?: () => boolean,
+  ): Promise<void>;
   /**
    * Show that a turn is running (IRC +typing) until `signal` aborts, then
    * clear it. Best effort: failures never affect the turn.
    */
-  working?(channel: string, thread: string, signal: AbortSignal): Promise<void>;
+  working?(
+    channel: string,
+    thread: string,
+    signal: AbortSignal,
+    allowed?: () => boolean,
+  ): Promise<void>;
 }
 
 /**
@@ -334,18 +349,21 @@ export class Gateway {
   /** Deleted sessions or lost cursors: no background probes until a request. */
   private readonly unavailable = new Set<string>();
   /** Slack intake, controls and thread context; absent for other transports. */
-  private readonly bot: BotConfig | undefined;
-  private readonly transport: GatewayTransport;
+  private bot: BotConfig | undefined;
+  private transport: GatewayTransport;
+  private paused = false;
+  private active = 0;
+  private readonly turnPolicies = new Map<number, GatewayTransport>();
   readonly key: string;
   constructor(
-    private readonly config: GatewayConfig,
+    private config: GatewayConfig,
     private readonly identity: Identity,
     private readonly store: Store,
     private readonly backend: AgentBackend,
     private readonly slack: SlackDelivery,
     private readonly log: Logger,
     /** Present only when the bot configures transcription. */
-    private readonly transcriber?: Transcriber,
+    private transcriber?: Transcriber,
     /** Slack user directory for peer captain checks. */
     private readonly peers?: PeerDirectory,
     /** Defaults to Slack rules for a Slack `BotConfig`. */
@@ -360,10 +378,47 @@ export class Gateway {
     this.activity = new ActivityDelivery(
       backend,
       slack,
-      () => config.crewActivity,
-      (job) => !job.deferDelivery && selected.allowed(job.user, job.channel),
+      () => this.config.crewActivity,
+      (job) =>
+        !job.deferDelivery &&
+        (this.turnPolicies.get(job.id) ?? this.transport).allowed(
+          job.user,
+          job.channel,
+        ) &&
+        this.allowed(job),
       log,
       { store },
+    );
+  }
+
+  /** Replace future-turn settings; existing turns hold immutable references. */
+  reconfigure(
+    config: GatewayConfig,
+    transcriber?: Transcriber,
+    transport?: GatewayTransport,
+  ) {
+    const bot = "slack" in config ? config : undefined;
+    const selected =
+      transport ?? (bot ? slackTransport(bot, this.identity) : this.transport);
+    if (selected.key !== this.key)
+      throw new Error("restart required: gateway namespace");
+    this.config = config;
+    this.bot = bot;
+    this.transcriber = transcriber;
+    this.transport = selected;
+  }
+
+  /** Stop taking new slots while an idle roster member is detached. */
+  pause(value = true) {
+    this.paused = value;
+  }
+
+  isIdle() {
+    const counts = this.store.queueCounts(this.key);
+    return (
+      this.active === 0 &&
+      this.settled.size === 0 &&
+      counts.queued + counts.running + counts.responding === 0
     );
   }
 
@@ -375,8 +430,18 @@ export class Gateway {
     );
   }
 
-  private allowed(job: { user: string; channel: string }) {
-    return this.transport.allowed(job.user, job.channel);
+  private allowed(job: {
+    user: string;
+    channel: string;
+    sender?: string | null;
+  }) {
+    return (
+      !(
+        this.bot &&
+        job.sender === "captain" &&
+        !this.bot.access.peerCaptains
+      ) && this.transport.allowed(job.user, job.channel)
+    );
   }
 
   accept(body: unknown, peer?: PeerSender) {
@@ -401,7 +466,7 @@ export class Gateway {
       input.sender === "captain" &&
       (!Number.isFinite(sent) ||
         this.store.peerTurns(input.conversation, sent - peerWindowMs) >=
-          peerTurnsPerHour)
+          (bot.access.peerTurnsPerHour ?? peerTurnsPerHour))
     ) {
       this.log.warn("Peer captain thread limit reached; message not admitted");
       return false;
@@ -577,6 +642,7 @@ export class Gateway {
   private poll(slots: FiberMap.FiberMap<string>) {
     const gateway = this;
     return Effect.gen(function* () {
+      if (gateway.paused) return;
       const used = yield* FiberMap.size(slots);
       const jobs = gateway.store.ready(
         gateway.key,
@@ -652,6 +718,7 @@ export class Gateway {
   private startCatchUps(slots: FiberMap.FiberMap<string>) {
     const gateway = this;
     return Effect.gen(function* () {
+      if (gateway.paused) return;
       const now = Date.now();
       for (const [conversation, retry] of gateway.settled) {
         if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
@@ -683,6 +750,7 @@ export class Gateway {
     retry: { attempts: number },
     signal: AbortSignal,
   ) {
+    this.active++;
     try {
       if (!(await this.transcriptCatchUp(conversation, signal)))
         this.queueTranscript(conversation);
@@ -711,6 +779,8 @@ export class Gateway {
         attempts: retry.attempts + 1,
         at: Date.now() + Math.min(retryCeilingMs, 1000 * 2 ** retry.attempts),
       });
+    } finally {
+      this.active--;
     }
   }
 
@@ -927,9 +997,14 @@ export class Gateway {
   private async hear(
     job: Job,
     shutdown: AbortSignal,
+    snapshot: {
+      config: GatewayConfig;
+      bot: BotConfig | undefined;
+      transcriber: Transcriber | undefined;
+    },
   ): Promise<Awaited<ReturnType<typeof transcribeMedia>> | undefined> {
-    const mention = this.bot?.transcription?.spokenMentions;
-    const timeoutMs = this.bot?.transcription?.timeoutMs ?? 120_000;
+    const mention = snapshot.bot?.transcription?.spokenMentions;
+    const timeoutMs = snapshot.bot?.transcription?.timeoutMs ?? 120_000;
     const ignore = (message: string) => {
       this.log.info({ job: job.id }, message);
       this.store.discard(job.id);
@@ -937,7 +1012,7 @@ export class Gateway {
     };
     if (
       !mention?.channels.includes(job.channel) ||
-      !this.transcriber ||
+      !snapshot.transcriber ||
       !this.slack.files
     )
       return ignore("Voice message ignored: spoken mentions not configured");
@@ -945,7 +1020,7 @@ export class Gateway {
     try {
       const signal = AbortSignal.any([
         shutdown,
-        AbortSignal.timeout(this.config.turnTimeoutMs),
+        AbortSignal.timeout(snapshot.config.turnTimeoutMs),
       ]);
       const files = await this.slack.files.download(
         this.store.inputFiles(job.id),
@@ -955,7 +1030,12 @@ export class Gateway {
       checkAttachments(files);
       if (!files.some(isMedia))
         return ignore("Message without media or mention ignored");
-      heard = await transcribeMedia(files, this.transcriber, timeoutMs, signal);
+      heard = await transcribeMedia(
+        files,
+        snapshot.transcriber,
+        timeoutMs,
+        signal,
+      );
     } catch {
       if (shutdown.aborted) return;
       return ignore("Voice message not transcribed; ignored without a reply");
@@ -967,8 +1047,50 @@ export class Gateway {
 
   /** Public for deterministic integration tests and single-step workers. */
   async process(held: Job, shutdown: AbortSignal) {
+    const config = this.config;
+    const bot = this.bot;
+    const transcriber = this.transcriber;
+    const transport = this.transport;
+    // New allows never expand this turn; new denies stop its next delivery.
+    const allowed = (job: {
+      user: string;
+      channel: string;
+      sender?: string | null;
+    }) => transport.allowed(job.user, job.channel) && this.allowed(job);
+    this.active++;
+    this.turnPolicies.set(held.id, transport);
+    try {
+      return await this.processTurn(held, shutdown, {
+        config,
+        bot,
+        transcriber,
+        transport,
+        allowed,
+      });
+    } finally {
+      this.active--;
+      this.turnPolicies.delete(held.id);
+    }
+  }
+
+  private async processTurn(
+    held: Job,
+    shutdown: AbortSignal,
+    snapshot: {
+      config: GatewayConfig;
+      bot: BotConfig | undefined;
+      transcriber: Transcriber | undefined;
+      transport: GatewayTransport;
+      allowed: (job: {
+        user: string;
+        channel: string;
+        sender?: string | null;
+      }) => boolean;
+    },
+  ) {
+    const { config, bot, transcriber, transport, allowed } = snapshot;
     // Recheck policy for queued inputs and pending delivery after a restart.
-    if (!this.allowed(held)) {
+    if (!allowed(held)) {
       if (held.gate === "spoken") this.store.discard(held.id);
       else this.store.finish(held.id, "failed");
       return;
@@ -976,7 +1098,7 @@ export class Gateway {
     // A transcript held only in this call; a restart transcribes again.
     let heard: Awaited<ReturnType<typeof transcribeMedia>> | undefined;
     if (held.status === "queued" && held.gate === "spoken") {
-      heard = await this.hear(held, shutdown);
+      heard = await this.hear(held, shutdown, { config, bot, transcriber });
       if (!heard) return;
     }
     const job: Job =
@@ -998,12 +1120,13 @@ export class Gateway {
               job.channel,
               job.thread,
               AbortSignal.any([typing.signal, shutdown]),
+              () => allowed(job),
             )
             .catch(() => {});
       // Only an accepted requester Stop aborts this controller.
       const cancellation = new AbortController();
       const maintenanceFailure = new AbortController();
-      const budget = new TurnBudget(this.config.turnTimeoutMs);
+      const budget = new TurnBudget(config.turnTimeoutMs);
       this.cancellations.set(job.id, cancellation);
       const signal = AbortSignal.any([
         shutdown,
@@ -1015,10 +1138,11 @@ export class Gateway {
         ? undefined
         : new LiveReply(job, this.store, this.slack, signal, this.log, {
             waiting: {
-              ...(await resolveWaiting(this.config)),
-              name: botDisplayName(this.config),
+              ...(await resolveWaiting(config)),
+              name: botDisplayName(config),
             },
             phrase: waitingPhrase,
+            allowed: () => allowed(job),
           });
       let reacted = false;
       let admitted = false;
@@ -1045,6 +1169,7 @@ export class Gateway {
         // one that is already shown.
         if (parsed.silent && !complete) live?.quiet();
         if (
+          allowed(job) &&
           this.slack.react &&
           parsed.reaction &&
           !reacted &&
@@ -1054,7 +1179,7 @@ export class Gateway {
           // eventId deduplicates by channel:message-ts, not Slack's envelope ID.
           const messageTs = job.eventId.slice(job.channel.length + 1);
           reactionTask = this.slack
-            .react(job.channel, messageTs, parsed.reaction)
+            .react(job.channel, messageTs, parsed.reaction, () => allowed(job))
             .then(() => {
               reactionDelivered = true;
             })
@@ -1071,18 +1196,15 @@ export class Gateway {
           session = pinned ? undefined : this.store.session(job.conversation);
           let text = job.text;
           // Chat messages only. Digest runs have no thread.
-          const source = job.deferDelivery
-            ? undefined
-            : this.transport.source(job);
+          const source = job.deferDelivery ? undefined : transport.source(job);
           const sourceContext: PromptSourceContext | undefined =
             pinned && source ? { source } : undefined;
           // Without a source line, the prompt itself names a special sender.
-          const note = sourceContext ? undefined : this.transport.note(job);
+          const note = sourceContext ? undefined : transport.note(job);
           if (note) text = `${note}\n\n${text}`;
           if (job.textMention)
             text = `${textMentionNote(job.textMention)}\n\n${text}`;
           // greybeard: pinned turns carry IDs only; missing history needs explicit retrieval.
-          const bot = this.bot;
           if (!pinned && !session && bot) {
             // Roots (including scheduled runs) have no earlier thread messages.
             if (bot.threadContext && source && source.message !== job.thread) {
@@ -1105,7 +1227,7 @@ export class Gateway {
           if (!session) {
             session = await this.backend.createSession({
               key: job.conversation,
-              title: `${botDisplayName(this.config)} (${job.deferDelivery ? "scheduled" : this.transport.name} ${job.channel})`,
+              title: `${botDisplayName(config)} (${job.deferDelivery ? "scheduled" : transport.name} ${job.channel})`,
               signal,
             });
             if (pinned) {
@@ -1152,14 +1274,14 @@ export class Gateway {
           // cancel button. Without a permit the backend keeps that tool
           // fail-closed.
           maintenance =
-            live && this.transport.name === "slack"
+            live && transport.name === "slack"
               ? await startMaintenanceDelivery({
                   backend: this.backend,
                   sessionID: session,
                   requestID: `slack-job-${job.id}`,
                   signal,
                   publish: async (notice) => {
-                    if (!this.allowed(job))
+                    if (!allowed(job))
                       throw new Error("Maintenance notice access denied");
                     await live.announce(maintenanceText(notice));
                     budget.pause();
@@ -1199,7 +1321,7 @@ export class Gateway {
               if (
                 job.deferDelivery ||
                 !this.slack.files ||
-                !(this.backend.supportsAttachments || this.transcriber)
+                !(this.backend.supportsAttachments || transcriber)
               )
                 throw new Error(
                   "Attachment input is unavailable for this backend",
@@ -1224,11 +1346,11 @@ export class Gateway {
             }
             signal.throwIfAborted();
             // Speech becomes prompt text before admission; the media is dropped.
-            if (this.transcriber && inputFiles.some(isMedia)) {
+            if (transcriber && inputFiles.some(isMedia)) {
               const spoken = await transcribeMedia(
                 inputFiles,
-                this.transcriber,
-                this.config.transcription?.timeoutMs ?? 120_000,
+                transcriber,
+                config.transcription?.timeoutMs ?? 120_000,
                 signal,
               );
               inputFiles = spoken.files;
@@ -1427,6 +1549,7 @@ export class Gateway {
       }
       for (let i = job.sent; i < output.length; i++) {
         if (shutdown.aborted) return;
+        if (!allowed(job)) throw new Error("Delivery access denied");
         const chunk = output[i];
         if (chunk === undefined) continue;
         const text = replyText(chunk);
@@ -1460,7 +1583,7 @@ export class Gateway {
               job.thread,
               text,
               undefined,
-              { job: job.id, part: i },
+              { job: job.id, part: i, allowed: () => allowed(job) },
               content,
             );
           }
@@ -1470,18 +1593,19 @@ export class Gateway {
             job.thread,
             text,
             undefined,
-            { job: job.id, part: i },
+            { job: job.id, part: i, allowed: () => allowed(job) },
             content,
           );
         }
         this.store.sent(job.id, i + 1);
       }
-      await this.deliverAttachments(job, shutdown);
+      await this.deliverAttachments(job, shutdown, allowed);
       this.store.finish(job.id);
     } catch {
       this.log.warn({ job: job.id }, "Slack delivery failed");
       if (job.attempts >= 7) {
         if (
+          allowed(job) &&
           this.store.attachments(job.id).some((file) => file.phase !== "shared")
         )
           await this.slack
@@ -1489,6 +1613,8 @@ export class Gateway {
               job.channel,
               job.thread,
               "Attachment delivery failed or is unconfirmed. The agent work was not rerun.",
+              undefined,
+              { allowed: () => allowed(job) },
             )
             .catch(() => {});
         this.store.finish(job.id, "failed");
@@ -1500,7 +1626,11 @@ export class Gateway {
     }
   }
 
-  private async deliverAttachments(job: Job, shutdown: AbortSignal) {
+  private async deliverAttachments(
+    job: Job,
+    shutdown: AbortSignal,
+    allowed = (job: Job) => this.allowed(job),
+  ) {
     const files = this.store.attachments(job.id);
     if (!files.length) return;
     const save = () => this.store.saveAttachments(job.id, files);
@@ -1535,8 +1665,7 @@ export class Gateway {
     }
     for (const file of files) {
       shutdown.throwIfAborted();
-      if (!this.allowed(job))
-        throw new Error("Attachment delivery access denied");
+      if (!allowed(job)) throw new Error("Attachment delivery access denied");
       if (file.phase === "shared") continue;
       if (file.prepared && !file.title) {
         file.title =
@@ -1580,11 +1709,15 @@ export class Gateway {
         !(transport || linked)
       ) {
         if (!file.noticeSent) {
+          if (!allowed(job))
+            throw new Error("Attachment delivery access denied");
           if (!files.some((item) => item.noticeSent))
             await this.slack.post(
               job.channel,
               job.thread,
               "An attachment is unavailable or its upload is unconfirmed. The agent work was not rerun.",
+              undefined,
+              { allowed: () => allowed(job) },
             );
           file.noticeSent = true;
           save();
@@ -1618,12 +1751,14 @@ export class Gateway {
           file.phase = "uploaded";
           save();
         }
+        if (!allowed(job)) throw new Error("Attachment delivery access denied");
         await linked.link(
           job.channel,
           job.thread,
           file.fileID,
           file.title ?? file.prepared.name,
           signal,
+          () => allowed(job),
         );
         file.phase = "shared";
         save();
@@ -1653,6 +1788,7 @@ export class Gateway {
         save();
       }
       if (!file.fileID) throw new Error("Attachment upload identity missing");
+      if (!allowed(job)) throw new Error("Attachment delivery access denied");
       file.phase = "completing";
       save();
       await transport.completeUpload(
