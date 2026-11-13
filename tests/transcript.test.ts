@@ -15,6 +15,7 @@ import type { BotConfig } from "../src/config";
 import { Gateway, type SlackDelivery } from "../src/gateway";
 import type { RequestFailure } from "../src/request-failure";
 import { conversationKey } from "../src/routing";
+import { prepareSlackReply } from "../src/slack-format";
 import { type Job, Store } from "../src/store";
 import { repairTranscript } from "../src/transcript";
 import { bot, event, identity } from "./fixtures";
@@ -985,4 +986,47 @@ test("repair requeues a failed outbox row and refuses conflicting rows atomicall
     rows,
   );
   expect(f.store.transcriptCursor(conversation)).toBe(cursor);
+});
+
+test("repair deduplicates prepared replies using original Markdown source", async () => {
+  const f = fixture();
+  f.slack.prepareReply = prepareSlackReply;
+  const source =
+    "# Report\n\n**Bold** <@U123>\n\n" + "A long paragraph. ".repeat(300);
+  let replyID = "";
+  f.setTurn(async () => {
+    replyID = f.native.add(source);
+    return source;
+  });
+  f.gateway.accept(event());
+  await f.drain();
+  const result = await repairTranscript({
+    store: f.store,
+    backend: f.backend,
+    botKey: f.gateway.key,
+    channel: "C123",
+    thread: "1.000",
+    since: "",
+  });
+  expect(result.missing).toEqual([]);
+  expect(result.delivered).toEqual([replyID]);
+});
+
+test("transcript cleanup retains indentation before full-source classification", async () => {
+  const f = fixture();
+  f.slack.prepareReply = prepareSlackReply;
+  const payloads: unknown[] = [];
+  f.slack.post = async (_channel, _thread, _text, _stop, _unit, content) => {
+    payloads.push(content);
+    return "101.000";
+  };
+  const source = "    <@U123> code example\n    second line";
+  f.setTurn(async () => {
+    f.native.add(source);
+    return source;
+  });
+  f.gateway.accept(event());
+  await f.drain();
+  expect(JSON.stringify(payloads)).not.toContain('"user_id":"U123"');
+  expect(JSON.stringify(payloads)).toContain('"type":"rich_text_preformatted"');
 });

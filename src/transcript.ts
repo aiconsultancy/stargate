@@ -11,6 +11,7 @@ import {
   transcriptChunks,
 } from "./routing";
 import { loadEnvironment } from "./runtime";
+import { type ReplyChunk, replySource } from "./slack-format";
 import { Store } from "./store";
 
 export type TranscriptRepair = {
@@ -51,6 +52,8 @@ export async function repairTranscript(input: {
   apply?: boolean;
   limit?: number;
   signal?: AbortSignal;
+  /** Classify one whole reply once; defaults to plain unclassified chunks. */
+  prepare?: (text: string, unbounded: boolean) => ReplyChunk[];
 }): Promise<TranscriptRepair> {
   if (input.backend.sessionID)
     throw new Error("Captain-scoped transcript repair unsupported");
@@ -88,7 +91,7 @@ export async function repairTranscript(input: {
       ...input.store.replies(input.botKey, conversation),
       ...requeue.map((row) => row.response),
     ]
-      .map((reply) => reply.join("\n"))
+      .map(replySource)
       .join("\n"),
   );
   const delivered: string[] = [];
@@ -120,8 +123,9 @@ export async function repairTranscript(input: {
       // Slack cannot insert older replies; label their original time instead.
       replies: missing.map((entry) => ({
         eventId: `transcript:${entry.id}`,
-        chunks: transcriptChunks(
+        chunks: (input.prepare ?? transcriptChunks)(
           `_Delayed update, originally written ${time(entry.created)}._\n\n${entry.text}`,
+          true,
         ),
       })),
       requeue: requeue.map((row) => row.eventId),

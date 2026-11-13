@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { Gateway, type SlackDelivery } from "../src/gateway";
+import { slackContent } from "../src/slack-format";
 import { Store } from "../src/store";
 import { LiveReply } from "../src/streaming";
 import { bot, event, identity } from "./fixtures";
@@ -525,5 +526,43 @@ test("a silent turn stops waiting feedback; later text still shows", async () =>
   } finally {
     await f.live.close();
     f.store.close();
+  }
+});
+
+test("reaction and silent directives are removed before mixed Markdown rendering", async () => {
+  for (const silent of [false, true]) {
+    const f = gatewayFixture();
+    const payloads: string[] = [];
+    const post = f.slack.post;
+    const update = f.slack.update;
+    f.slack.post = async (channel, thread, text, ...rest) => {
+      payloads.push(JSON.stringify(slackContent(text)));
+      return (await post(channel, thread, text, ...rest)) ?? "fixture-message";
+    };
+    f.slack.update = async (channel, ts, text, ...rest) => {
+      payloads.push(JSON.stringify(slackContent(text)));
+      await update?.(channel, ts, text, ...rest);
+      return true;
+    };
+    f.slack.react = async () => {};
+    const prefix =
+      "[[pogo:react:eyes]]\n" + (silent ? "[[pogo:silent]]\n" : "");
+    f.backend.prompt = async (_session, _text, _signal, onText) => {
+      onText?.("[[pogo:react:ey");
+      onText?.(prefix + "**Working** <@U123>");
+      return prefix + "**Done** <@U123>";
+    };
+    try {
+      await f.gateway.process(f.next(), new AbortController().signal);
+      expect(payloads.join("")).not.toContain("[[pogo:");
+      if (silent) expect(payloads).toEqual([]);
+      else {
+        expect(payloads.length).toBeGreaterThan(0);
+        expect(payloads.at(-1)).toContain('"type":"user","user_id":"U123"');
+        expect(payloads.at(-1)).toContain('"bold":true');
+      }
+    } finally {
+      f.store.close();
+    }
   }
 });

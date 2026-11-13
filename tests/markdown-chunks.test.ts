@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { chunks } from "../src/routing";
+import { prepareSlackReply, replyText } from "../src/slack-format";
 
 describe("Markdown reply chunks", () => {
   test("keeps short replies unchanged and prefers paragraph boundaries", () => {
@@ -93,4 +94,97 @@ describe("Markdown reply chunks", () => {
       `${"a".repeat(60_000)}\n[Response truncated by Pogo.]`,
     );
   });
+});
+
+test("chunk boundaries never cut bounded complete user or channel mentions", () => {
+  for (const mention of ["<@U123>", "<#C123|general>"]) {
+    for (let shift = 1; shift < mention.length; shift++) {
+      const text = "a".repeat(2800 - shift) + mention + "z".repeat(3000);
+      const parts = prepareSlackReply(text).map(replyText);
+      expect(parts.join("")).toBe(text.replace("|general", ""));
+      expect(
+        parts.some((part) => part.includes(mention.replace("|general", ""))),
+      ).toBe(true);
+      expect(parts.every((part) => Array.from(part).length <= 2800)).toBe(true);
+    }
+  }
+  const unicode = "🦘".repeat(2798) + "<@U123>";
+  expect(prepareSlackReply(unicode).map(replyText)).toEqual([
+    "🦘".repeat(2798),
+    "<@U123>",
+  ]);
+});
+
+test("inline code cannot notify when split, including marker-free middle chunks", () => {
+  for (const close of ["` tail <@U9>", ""]) {
+    const source = `Use \`${"x".repeat(3000)} <@U123> ${"y".repeat(5500)}${close}`;
+    const parts = prepareSlackReply(source);
+    expect(parts.length).toBeGreaterThan(3);
+    for (const part of parts) {
+      expect(Array.from(replyText(part)).length).toBeLessThanOrEqual(2800);
+      expect(JSON.stringify(part)).not.toContain('"user_id":"U123"');
+    }
+    if (close) expect(JSON.stringify(parts)).toContain('"user_id":"U9"');
+  }
+  const parts = prepareSlackReply(`${"a".repeat(2796)}\`<@U123>\``);
+  expect(parts.length).toBe(2);
+  expect(JSON.stringify(parts)).not.toContain('"type":"user"');
+});
+
+test("an unmatched code span crossing a fence cannot hang chunking", () => {
+  const result = Bun.spawnSync(
+    [
+      process.execPath,
+      "-e",
+      `
+    import { chunks } from "./src/routing";
+    const parts = chunks("p".repeat(1500) + " \\\`\\n\\\`\\\`\\\`\\n" + "x".repeat(2792));
+    if (parts.some(part => Array.from(part).length > 2800)) process.exit(2);
+  `,
+    ],
+    { cwd: new URL("..", import.meta.url).pathname, timeout: 2000 },
+  );
+  expect(result.exitCode).toBe(0);
+});
+
+test("a stray backtick cannot flatten subsequent Markdown paragraphs", () => {
+  const prefix = "Press the ` key to open the console.\n\n";
+  const text =
+    prefix +
+    Array.from(
+      { length: 8 },
+      (_, index) =>
+        `## Heading ${index}\n\n${"Plain prose. ".repeat(40)}\n\n- First\n- Second\n\n`,
+    ).join("");
+  const parts = chunks(text);
+  expect(parts[0]).toStartWith(prefix);
+  expect(parts.join("")).toBe(text.trimEnd());
+  expect(parts.join("")).not.toContain("~~~");
+});
+
+test("full-reply classification protects blockquote fences across messages", () => {
+  const quote =
+    "> ```\n" +
+    ("> " + "x".repeat(70) + "\n").repeat(60) +
+    "> <@U123> ping\n" +
+    ("> " + "y".repeat(70) + "\n").repeat(10) +
+    "> ```";
+  const parts = prepareSlackReply(quote);
+  expect(parts.length).toBeGreaterThan(1);
+  expect(JSON.stringify(parts)).not.toContain('"user_id":"U123"');
+  expect(JSON.stringify(parts)).toContain('"code":true');
+});
+
+test("uncertain full replies fall back to plain text for every chunk", () => {
+  for (const source of [
+    "Use `<@U1>" + "x".repeat(6000),
+    "<@U1>\n\n> ```\n> code",
+    "<@U1>\n\n```\ncode",
+  ]) {
+    const parts = prepareSlackReply(source);
+    for (const part of parts) {
+      expect(JSON.stringify(part)).toContain('"type":"plain_text"');
+      expect(JSON.stringify(part)).not.toContain('"type":"user"');
+    }
+  }
 });

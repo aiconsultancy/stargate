@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import type { SlackDelivery } from "./gateway";
 import { chunks } from "./routing";
+import { type ReplyChunk, replyText } from "./slack-format";
 import type { Job, Store } from "./store";
 
 export type LiveReplyOptions = {
@@ -155,33 +156,46 @@ export class LiveReply {
       const previews = new Map(
         this.store.previews(this.job.id).map(({ part, ts }) => [part, ts]),
       );
-      const parts = chunks(text);
+      // Classify the whole cleaned snapshot once, then deliver each chunk
+      // with its own content; the transport never reparses a chunk.
+      const parts: ReplyChunk[] =
+        this.slack.prepareReply?.(text) ?? chunks(text);
       for (let i = 0; i < parts.length; i++) {
         this.signal.throwIfAborted();
         const part = parts[i];
-        if (part === undefined || this.shown.get(i) === part) continue;
+        if (part === undefined) continue;
+        const body = replyText(part);
+        const content = typeof part === "string" ? undefined : part.content;
+        const key =
+          typeof part === "string"
+            ? part
+            : JSON.stringify({ text: body, content });
+        if (this.shown.get(i) === key) continue;
         const ts = previews.get(i);
         if (
           !ts ||
           (await this.slack.update?.(
             this.job.channel,
             ts,
-            part,
+            body,
             i === 0 ? this.job.id : undefined,
+            content,
           )) === false
         ) {
           if (ts) this.store.removePreview(this.job.id, i);
           const created = await this.slack.post(
             this.job.channel,
             this.job.thread,
-            part,
+            body,
             i === 0 ? this.job.id : undefined,
+            undefined,
+            content,
           );
           if (!created)
             throw new Error("Slack did not return a message timestamp");
           this.store.savePreview(this.job.id, i, created);
         }
-        this.shown.set(i, part);
+        this.shown.set(i, key);
         this.nextWrite = Date.now() + this.intervalMs;
         // Respect channel posting limits even when a snapshot spans messages.
         if (this.intervalMs > 0 && i + 1 < parts.length)

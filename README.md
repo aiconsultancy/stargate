@@ -79,10 +79,17 @@ Use the same session in OpenCode's native interfaces. See
 [captain session binding](docs/agents/default-opencode.md#one-captain-session).
 
 Built-in backends stream visible response text through coalesced Slack message
-updates. Agent replies use Slack's native Markdown blocks for headings, links,
-lists, tables, and code. Long replies prefer paragraph boundaries and keep
-ordinary fenced code blocks balanced across messages. Chunks with Slack mention
-or broadcast controls stay literal to avoid accidental notifications.
+updates. Ordinary replies with no Slack controls keep native Markdown blocks
+unchanged. For control-containing replies, Pogo parses the full reply or
+cumulative preview once, then splits already-classified rich text into messages. Code classification survives
+message boundaries and delivery retries. Complete user/channel mentions and safe
+links render alongside formatted text; broadcasts, unsupported controls and
+controls inside code stay literal and cannot notify. Headings become bold text,
+tables become readable rows and images become literal alt text plus URL.
+Unterminated or uncertain Markdown in a control-containing reply falls back
+to plain text for the whole reply.
+Old stored string chunks and repair output without classification also stay
+literal. Pogo never infers code state from a continuation chunk.
 Slow responses show named, rotating feedback after five seconds; the
 same message becomes the answer when text arrives. See [waiting settings](docs/waiting.md)
 for configurable delays, disabling feedback, and captain-managed changes.

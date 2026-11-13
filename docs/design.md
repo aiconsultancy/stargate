@@ -228,11 +228,34 @@ without this hook receive the stored plain-text notice through `post`/`update`.
 Delivery retries reuse the persisted cause and do not repeat backend work.
 
 Live replies use ordinary Slack posts and edits with the existing `chat:write`
-scope. Both posts and edits use native `markdown` blocks, without converting
-standard Markdown to Slack's separate `mrkdwn` syntax. The top-level text remains
-an escaped notification/accessibility fallback. Chunks with explicit Slack
-mention or broadcast controls use literal `plain_text` blocks instead; ordinary
-code contents are not rewritten. Scheduled announcement names also stay literal.
+scope. Ordinary replies with no Slack controls retain the native `markdown`
+blocks and source chunking used before this change. Only control-containing
+replies enter the new preparation path: Bun's Markdown parser classifies the
+entire clean reply or cumulative preview before any message split. Complete user (`<@U…>`/`<@W…>`) and channel
+(`<#C…>`/`<#G…>`) controls become structured mentions only in non-code text.
+HTTP, HTTPS and mailto angle links become link elements; credential-bearing or
+whitespace-containing URLs are not promoted. Broadcasts, bare
+`@here`/`@channel`/`@everyone`, subteam/date controls and malformed controls remain
+literal. Code spans and code blocks keep their classification in every chunk,
+including quoted fences and marker-free middle chunks. No continuation chunk
+is parsed again or used to infer code state.
+
+Each chunk carries its pre-classified `rich_text` payload in the existing JSON
+outbox. Delivery and restart retries reuse that payload. Original Markdown is
+retained once with the reply for repair deduplication, separately from rendered
+fallback text. Legacy string chunks, CLI repairs without classification and
+unprepared posts/edits use literal `plain_text`; they are never reparsed locally.
+Unmatched fences, raw inline delimiters, parser failures and oversized atomic
+links cause the whole control-containing reply to use plain text. This conservative fallback can
+suppress intended mentions: correctness takes precedence over formatting.
+
+Rich text keeps emphasis, lists, quotes and code. Headings become bold text,
+tables become readable rows and images become literal alt text plus URL. Image
+alt text is always literal because Bun strips its source styles before the
+image callback. Native Markdown cannot carry structured mention elements. The
+top-level fallback is escaped; top-level `mrkdwn` parsing is never enabled.
+Scheduled names remain literal. The gateway consumes reaction and silent
+directives before classification, including streaming previews.
 Updates are coalesced, not sent for every token. Preview timestamps are
 stored in SQLite; completion, errors, and restart recovery update those same
 messages. If the final reply is shorter, Pogo removes its extra preview messages.
@@ -240,11 +263,14 @@ Slack failures stop live updates but do not stop or rerun tools. Final delivery
 uses the durable response and retry cursor. A crash between a Slack post and
 timestamp persistence can still leave an extra preview.
 
-Replies keep the existing 60,000-codepoint ceiling and 2800-codepoint message
-budget. Splitting prefers paragraphs or lines and closes/reopens ordinary
-top-level backtick and tilde fences with their language. Very long tables,
-inline constructs, nested Markdown containers, and fence lines over 512
-codepoints are not structurally reconstructed across messages.
+Replies keep the existing 60,000-codepoint source ceiling; transcript replies
+remain unbounded. The classified-element packer caps each Slack message at
+2800 text-plus-URL codepoints. It splits only text leaves, retaining their styles and
+code classification. Mentions and links are atomic. Each chunk uses one content
+block plus at most one Stop block, below Slack's 50-block message cap; text
+leaves remain below 3,000 characters. A list item can continue in another message
+with its list context. The transport-neutral legacy chunker remains available
+to deliveries without a classification hook, but Slack never reparses its output.
 
 Waiting feedback starts only if no visible text arrives before the configured
 delay. It reuses the first preview message. Visible text stops rotations, and

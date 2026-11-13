@@ -11,7 +11,11 @@ import type { ReactionName } from "./reactions";
 import { failureContent, type RequestFailure } from "./request-failure";
 import type { Identity } from "./routing";
 import { SlackFiles, type SlackFilesFetch } from "./slack-files";
-import { slackContent } from "./slack-format";
+import {
+  prepareSlackReply,
+  type SlackContent,
+  slackContent,
+} from "./slack-format";
 import { loadThreadContext, type ThreadContextRequest } from "./thread-context";
 
 function slackError(error: unknown, code: string) {
@@ -165,8 +169,9 @@ export class SlackConnection implements SlackDelivery {
     text: string,
     format: "markdown" | "plain",
     stopJob?: number,
+    prepared?: SlackContent,
   ) {
-    const content = slackContent(text, format);
+    const content = prepared ?? slackContent(text, format);
     const result = await this.web.chat.postMessage({
       channel,
       ...(thread ? { thread_ts: thread } : {}),
@@ -184,8 +189,17 @@ export class SlackConnection implements SlackDelivery {
     return result.ts;
   }
 
-  async post(channel: string, thread: string, text: string, stopJob?: number) {
-    return this.send(channel, thread, text, "markdown", stopJob);
+  readonly prepareReply = prepareSlackReply;
+
+  async post(
+    channel: string,
+    thread: string,
+    text: string,
+    stopJob?: number,
+    _unit?: { job: number; part: number },
+    content?: SlackContent,
+  ) {
+    return this.send(channel, thread, text, "plain", stopJob, content);
   }
 
   async announce(channel: string, text: string, signal?: AbortSignal) {
@@ -279,9 +293,15 @@ export class SlackConnection implements SlackDelivery {
     },
   };
 
-  async update(channel: string, ts: string, text: string, stopJob?: number) {
+  async update(
+    channel: string,
+    ts: string,
+    text: string,
+    stopJob?: number,
+    prepared?: SlackContent,
+  ) {
     try {
-      const content = slackContent(text);
+      const content = prepared ?? slackContent(text, "plain");
       await this.web.chat.update({
         channel,
         ts,

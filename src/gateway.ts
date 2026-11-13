@@ -53,6 +53,7 @@ import {
   routeEvent,
   transcriptChunks,
 } from "./routing";
+import { type ReplyChunk, replyText, type SlackContent } from "./slack-format";
 import {
   type CaptainCursor,
   type CaptainTranscript,
@@ -101,9 +102,12 @@ function transcriptSilent(entries: readonly TranscriptEntry[]) {
 export function transcriptReply(entries: readonly TranscriptEntry[]) {
   return entries
     .map((entry) =>
-      parseAttachments(parseReactionReply(entry.text).text).text.trim(),
+      parseAttachments(parseReactionReply(entry.text).text).text.replace(
+        /^(?:\r?\n)+|(?:\r?\n)+$/g,
+        "",
+      ),
     )
-    .filter(Boolean)
+    .filter((text) => text.trim())
     .join("\n\n");
 }
 
@@ -232,6 +236,8 @@ export interface SlackDelivery {
     stopJob?: number,
     /** Final delivery of stored chunk `part`: lets a transport keep progress. */
     unit?: DeliveryUnit,
+    /** Already classified content of `text`; the transport must not reparse. */
+    content?: SlackContent,
   ): Promise<string> | Promise<void>;
   /** false means the user removed the preview; post a replacement. */
   update?(
@@ -239,8 +245,14 @@ export interface SlackDelivery {
     ts: string,
     text: string,
     stopJob?: number,
+    content?: SlackContent,
   ): Promise<boolean> | Promise<void>;
   remove?(channel: string, ts: string): Promise<void>;
+  /**
+   * Pure: classify one whole reply once, then split it. Absent transports
+   * deliver plain `chunks`/`transcriptChunks` strings.
+   */
+  prepareReply?(text: string, unbounded?: boolean): ReplyChunk[];
   react?(channel: string, ts: string, name: ReactionName): Promise<void>;
   /**
    * Show that a turn is running (IRC +typing) until `signal` aborts, then
@@ -352,6 +364,14 @@ export class Gateway {
       (job) => !job.deferDelivery && selected.allowed(job.user, job.channel),
       log,
       { store },
+    );
+  }
+
+  /** Classify one whole reply once; chunks carry their own content. */
+  private prepare(text: string, unbounded = false): ReplyChunk[] {
+    return (
+      this.slack.prepareReply?.(text, unbounded) ??
+      (unbounded ? transcriptChunks(text) : chunks(text))
     );
   }
 
@@ -732,7 +752,7 @@ export class Gateway {
             ? [
                 {
                   eventId: `transcript:${last.id}`,
-                  chunks: transcriptChunks(text),
+                  chunks: this.prepare(text, true),
                   files,
                 },
               ]
@@ -787,7 +807,7 @@ export class Gateway {
                 {
                   job: group.job,
                   eventId: `transcript:${last.id}`,
-                  chunks: transcriptChunks(text),
+                  chunks: this.prepare(text, true),
                   files: transcriptAttachments(group.entries),
                 },
               ]
@@ -965,7 +985,7 @@ export class Gateway {
       job.deferDelivery && cause === "history"
         ? "The agent finished, but its public reply is not yet readable in session history. Pogo will retain it locally when it becomes readable. The request was not repeated."
         : failureText(cause);
-    let output: string[];
+    let output: ReplyChunk[];
     let failure = job.failure ?? undefined;
     if (job.status === "queued") {
       if (!this.store.running(job.id)) return;
@@ -1285,8 +1305,8 @@ export class Gateway {
               (reacted || silent) && !answer.trim()
                 ? []
                 : transcript && answer.trim()
-                  ? transcriptChunks(answer)
-                  : chunks(answer);
+                  ? this.prepare(answer, true)
+                  : this.prepare(answer);
           if (transcript) keep = deferred ? 0 : output.length;
         } catch (error) {
           if (cancellation.signal.aborted || maintenanceFailure.signal.aborted)
@@ -1342,7 +1362,7 @@ export class Gateway {
               : transcript
                 ? this.transcriptText(transcript)
                 : "";
-            if (text) output = [...transcriptChunks(text), ...output];
+            if (text) output = [...this.prepare(text, true), ...output];
             keep = output.length - 1;
           }
         }
@@ -1385,7 +1405,7 @@ export class Gateway {
         await reactionTask;
       }
     } else {
-      output = JSON.parse(job.response ?? "[]") as string[];
+      output = JSON.parse(job.response ?? "[]") as ReplyChunk[];
     }
     if (job.deferDelivery) {
       this.store.sent(job.id, output.length);
@@ -1407,8 +1427,11 @@ export class Gateway {
       }
       for (let i = job.sent; i < output.length; i++) {
         if (shutdown.aborted) return;
-        const text = output[i];
-        if (text === undefined) continue;
+        const chunk = output[i];
+        if (chunk === undefined) continue;
+        const text = replyText(chunk);
+        // Persisted classification is final: never derive it again here.
+        const content = typeof chunk === "string" ? undefined : chunk.content;
         const ts = previews.get(i);
         // Only the final chunk is the status; earlier chunks are public text.
         if (failure && this.slack.failure && i === output.length - 1) {
@@ -1422,18 +1445,34 @@ export class Gateway {
         } else if (ts) {
           if (!this.slack.update)
             throw new Error("Slack preview update unavailable");
-          if ((await this.slack.update(job.channel, ts, text)) === false) {
+          if (
+            (await this.slack.update(
+              job.channel,
+              ts,
+              text,
+              undefined,
+              content,
+            )) === false
+          ) {
             this.store.removePreview(job.id, i);
-            await this.slack.post(job.channel, job.thread, text, undefined, {
-              job: job.id,
-              part: i,
-            });
+            await this.slack.post(
+              job.channel,
+              job.thread,
+              text,
+              undefined,
+              { job: job.id, part: i },
+              content,
+            );
           }
         } else {
-          await this.slack.post(job.channel, job.thread, text, undefined, {
-            job: job.id,
-            part: i,
-          });
+          await this.slack.post(
+            job.channel,
+            job.thread,
+            text,
+            undefined,
+            { job: job.id, part: i },
+            content,
+          );
         }
         this.store.sent(job.id, i + 1);
       }

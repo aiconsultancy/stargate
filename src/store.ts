@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { PreparedAttachment, PublishedFile } from "./attachments";
 import { cancellationNotice } from "./cancellation";
 import { failureText, type RequestFailure } from "./request-failure";
+import type { ReplyChunk } from "./slack-format";
 
 export type Incoming = {
   eventId: string;
@@ -60,7 +61,7 @@ export type CaptainTranscript = {
   replies: {
     job: number;
     eventId: string;
-    chunks: string[];
+    chunks: ReplyChunk[];
     files?: PublishedFile[];
   }[];
 };
@@ -591,13 +592,13 @@ export class Store {
   }
 
   /** Persisted reply chunks, including replies that are still delivering. */
-  replies(botKey: string, conversation: string): string[][] {
+  replies(botKey: string, conversation: string): ReplyChunk[][] {
     return this.db
       .query<{ response: string }, [string, string]>(`SELECT response FROM jobs
       WHERE botKey=? AND conversation=? AND response IS NOT NULL
       AND status IN ('responding','done') ORDER BY id`)
       .all(botKey, conversation)
-      .map((row) => JSON.parse(row.response) as string[]);
+      .map((row) => JSON.parse(row.response) as ReplyChunk[]);
   }
 
   /** This thread's `transcript:*` outbox rows, for targeted repair. */
@@ -611,7 +612,7 @@ export class Store {
       .all(botKey, conversation)
       .map((row) => ({
         ...row,
-        response: JSON.parse(row.response ?? "[]") as string[],
+        response: JSON.parse(row.response ?? "[]") as ReplyChunk[],
       }));
   }
 
@@ -626,7 +627,11 @@ export class Store {
     conversation: string;
     from: string | undefined;
     cursor: string;
-    replies: { eventId: string; chunks: string[]; files?: PublishedFile[] }[];
+    replies: {
+      eventId: string;
+      chunks: ReplyChunk[];
+      files?: PublishedFile[];
+    }[];
     requeue?: string[];
   }): number | undefined {
     return this.db.transaction(() => {
@@ -818,7 +823,7 @@ export class Store {
     // Iterate bounded public chunks; never select prompts, inputs or file metadata.
     const parts = this.db
       .query<{ text: string }, [string, number, number, string, number]>(
-        `SELECT substr(p.value,1,12000) AS text FROM jobs j,json_each(j.response) p
+        `SELECT substr(CASE p.type WHEN 'object' THEN json_extract(p.value,'$.text') ELSE p.value END,1,12000) AS text FROM jobs j,json_each(j.response) p
       WHERE j.botKey=? AND (j.id=? OR (?=1 AND j.conversation=?
       AND j.deferDelivery=1 AND j.id>? AND j.eventId LIKE 'transcript:%'))
       ORDER BY j.id,CAST(p.key AS INTEGER)`,
@@ -840,7 +845,7 @@ export class Store {
    */
   respond(
     id: number,
-    chunks: string[],
+    chunks: ReplyChunk[],
     failure?: RequestFailure,
     options: {
       keep?: number;
