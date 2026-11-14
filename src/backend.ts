@@ -161,6 +161,10 @@ export async function createBackend(
       const { ClaudeBackend } = await import("./backends/claude");
       return ClaudeBackend.open(config, context);
     }
+    case "codex": {
+      const { CodexBackend } = await import("./backends/codex");
+      return CodexBackend.open(config, context);
+    }
     case "module": {
       const plugin: unknown = await import(pathToFileURL(config.module).href);
       if (

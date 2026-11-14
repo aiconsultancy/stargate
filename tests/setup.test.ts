@@ -188,6 +188,21 @@ test("scripted add stores references, validates without secrets, rejects token a
   await expect(
     runCli(["bot", "add", "--app-token", "secret-value"]),
   ).rejects.toThrow("Invalid CLI arguments");
+  for (const backend of ["claude", "codex"])
+    await expect(
+      runCli([
+        "bot",
+        "add",
+        "--config",
+        config,
+        "--id",
+        "two",
+        "--backend",
+        backend,
+        "--directory",
+        "/project",
+      ]),
+    ).rejects.toThrow(`see docs/${backend}.md`);
   await expect(runCli(["start", "--model", "invalid"])).rejects.toThrow(
     "not supported",
   );

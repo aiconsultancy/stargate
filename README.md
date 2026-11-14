@@ -3,7 +3,8 @@
 One Slack gateway. Multiple bot registrations. Pluggable agent backends.
 
 Pogo connects Slack to **OpenCode V2** over its TypeScript client, embeds
-**Pi Durable** directly, or runs **Claude Code** through the Claude Agent SDK.
+**Pi Durable** directly, or runs **Claude Code** through the Claude Agent SDK
+or the **Codex CLI** through the Codex SDK.
 Each bot has separate Slack credentials, access rules, agent settings, and
 sessions. Captains use one durable session across chat sources; ordinary bots
 can use separate thread sessions. No public HTTP endpoint is required.
@@ -466,6 +467,20 @@ tool names, and no other tool exists for the model. Settings files,
 a minimal environment and a private `CLAUDE_CONFIG_DIR`. `directory` is a
 starting location, not a sandbox. See [Claude Agent SDK backend](docs/claude.md)
 for setup, permissions, recovery and limits.
+
+### Codex SDK
+
+Pogo pins `@openai/codex-sdk` to one exact version and runs the Codex CLI of
+that version for each turn. `backend.type: "codex"` works for Slack bots, IRC
+captains and IRC crew members. The model is reached only through an explicit
+`provider: { baseURL, apiKeyEnv }`, such as the local CLIProxyAPI at
+`http://127.0.0.1:8317/v1` with `gpt-6.1-sol`; there is no ChatGPT login,
+`~/.codex` or API-key fallback. Tool commands run in Codex's `read-only`
+sandbox by default, with approval policy `never` and no network;
+`sandbox: "workspace-write"` and `network: true` widen it explicitly.
+`AGENTS.md`, skills, plugins, hooks, MCP servers and web search are off. The
+CLI gets a minimal environment and a private `CODEX_HOME`. See
+[Codex SDK backend](docs/codex.md) for setup, sandbox, recovery and limits.
 
 ### Custom adapters
 

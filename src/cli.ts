@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { checkCodexConfiguration } from "./backends/codex-paths";
 import { loadConfig } from "./config";
 import { teamSchema } from "./crew/team";
 import { cronOperationSchema, runCronOperation } from "./cron-control";
@@ -69,7 +70,7 @@ Required:
   --bot-token-env NAME    Environment reference for xoxb- token
   --allowed-users U...,W...  Human Slack IDs, or '*' for all workspace humans
   --allowed-channels C...,G...,D...  Channel/DM IDs, or '*' for all accessible channels/DMs
-  --backend TYPE         opencode or pi-durable (claude: see docs/claude.md)
+  --backend TYPE         opencode or pi-durable (claude, codex: see docs/)
   --directory PATH       Backend working directory (resolved to absolute)
 OpenCode:
   --url URL              Server URL (default: http://localhost:4096)
@@ -417,8 +418,10 @@ export async function runCli(args: string[]): Promise<CliResult> {
     await setupWizard(configPath);
   else if (command === "config" && p[1] === "check" && p.length === 2) {
     const config = await readConfiguration(configPath);
-    if (!v["schema-only"])
+    if (!v["schema-only"]) {
       await checkCredentials(configPath, config.bots, process.env, config.irc);
+      await checkCodexConfiguration(config, configPath);
+    }
     console.log("Configuration valid.");
   } else if (command === "manifest" && p.length === 1) {
     console.log(JSON.stringify(buildManifest(v.name), null, 2));
@@ -435,9 +438,9 @@ export async function runCli(args: string[]): Promise<CliResult> {
       await setupWizard(configPath);
     else {
       if (!v.directory) throw new Error("--directory is required.");
-      if (v.backend === "claude")
+      if (v.backend === "claude" || v.backend === "codex")
         throw new Error(
-          "Add claude backends to the configuration JSON; see docs/claude.md.",
+          `Add ${v.backend} backends to the configuration JSON; see docs/${v.backend}.md.`,
         );
       if (v.backend === "opencode" && Boolean(v.provider) !== Boolean(v.model))
         throw new Error(

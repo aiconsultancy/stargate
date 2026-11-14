@@ -10,9 +10,12 @@ One process
   ├─ Bot B: Socket Mode + Web API → routing/access → durable queue
   │                                                ↓
   │                                       Pi Durable adapter → SDK/SQLite
-  └─ Bot C: Socket Mode + Web API → routing/access → durable queue
+  ├─ Bot C: Socket Mode + Web API → routing/access → durable queue
+  │                                                ↓
+  │                                       Claude adapter → Agent SDK → CLI
+  └─ Bot D: Socket Mode + Web API → routing/access → durable queue
                                                    ↓
-                                          Claude adapter → Agent SDK → CLI
+                                          Codex adapter → Codex SDK → CLI
 ```
 
 `config.ts` validates input and resolves environment references. `setup.ts`
@@ -149,7 +152,7 @@ adapter's latest submitted prompt input for that session. `watch` reports
 sessions that settle outside a prompt and reports each (re)connection. Both
 exclude reasoning, tool data, user and synthetic messages, and system text.
 OpenCode implements them with message pages, session idle state, and the
-client's shared event stream. Pi Durable, Claude and existing modules omit
+client's shared event stream. Pi Durable, Claude, Codex and existing modules omit
 them and keep the prompt-only contract. See [session transcript](#session-transcript).
 
 The Claude adapter starts one Claude Code CLI per turn through the pinned
@@ -166,6 +169,36 @@ the process's start time, user IDs and marker (no pidfd API is available).
 Records of running CLIs let `interrupt` stop what an earlier Pogo process
 left: the group only while its recorded leader still matches, other
 processes only by that check. See [Claude backend](claude.md).
+
+The Codex adapter starts one Codex CLI per turn (`codex exec`) through the
+pinned Codex SDK, with a minimal environment and a private `CODEX_HOME` per
+namespace. Command-line `--config` overrides define the only model provider
+(the configured proxy), the sandbox (`read-only` by default), approval
+policy `never`, and turn off project instructions, skills, plugins, hooks,
+subagents and optional network traffic. `createSession` allocates a Pogo
+UUID; the first turn's `thread.started` event stores the Codex thread ID,
+and later turns resume it. Previews and the answer are the completed agent
+messages of the turn; failures carry fixed causes, never CLI stderr. The
+CLI shares Pogo's process group and its sandbox uses new sessions and PID
+namespaces, so clean-up uses only the turn marker (`POGO_CODEX_TURN`) and
+the same verified per-process signals as Claude, from the shared
+`backends/cli-agent.ts` module. Cancellation starts that clean-up at once,
+not after the SDK's stream ends, because the SDK only sends `SIGTERM` and
+then waits for the CLI's output. The SDK exposes no process or stream
+handle, so Pogo's `sh` launcher (`codexPathOverride`) `exec`s the CLI with
+its output through an unlinked FIFO and a marked `cat`: only marked
+processes hold Pogo's pipes, and the clean-up closes them. The launcher
+is written (`O_EXCL | O_NOFOLLOW`) and verified per turn at its canonical
+path and runs root-owned system utilities by absolute path; after
+validation every path that Pogo writes, checks or runs is used only in
+canonical form, and changeable symbolic links are refused; `codex-paths.ts`
+refuses a `workspace-write` directory that overlaps Pogo's data,
+installation, the SDK packages or the home directory. The CLI never sees
+the operator's `PATH`: it gets a fixed one built at start-up from the SDK
+helper directory, root-controlled system directories (every program
+checked over its full link chain) and the checked `extraPath`. The turn stops
+waiting for a stream that is still open shortly after the clean-up. Run
+records hold only the marker and start time. See [Codex backend](codex.md).
 
 `startActivity` is an optional, request-scoped reporting capability. Its
 `ActivityWatch` reads bounded visible journal facts and can finish or cancel
@@ -231,8 +264,8 @@ An explicit OpenCode `sessionID` pin is excluded from this hash. It binds the
 existing captain without changing thread admission or cron scope. Other
 backend settings still select separate namespaces.
 Changing credentials for the same installation does not discard sessions.
-Changing backend settings selects a new session namespace, Pi database and
-Claude configuration directory.
+Changing backend settings selects a new session namespace, Pi database,
+Claude configuration directory and Codex home.
 
 One shared SQLite database stores all registrations' queue rows. Private Pi
 storage lives in per-bot/per-backend directories. This is logical separation,
@@ -504,7 +537,7 @@ behavior, and required Slack app configuration.
 ## Initial ceilings
 
 The initial release supported text conversations, explicit allowlists, two
-built-in adapters (now three, with Claude), trusted module adapters, local
+built-in adapters (now four, with Claude and Codex), trusted module adapters, local
 setup, and user services. It does not
 add file transfer, tool-event streaming, interactive approvals, OAuth SaaS
 installation, clustering, or a plugin discovery/package system. Those require

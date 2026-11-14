@@ -107,6 +107,64 @@ export const claudeBackendSchema = z.strictObject({
   maxTurns: z.number().int().min(1).max(500).default(50),
 });
 
+/**
+ * Codex SDK backend. The model is reached only through the explicit proxy
+ * `provider` (an OpenAI Responses API endpoint); there is no ChatGPT login,
+ * `~/.codex` or API-key fallback. Only settings the Codex sandbox enforces
+ * are accepted.
+ */
+export const codexBackendSchema = z
+  .strictObject({
+    type: z.literal("codex"),
+    /** Starting working directory and sandbox root, not a host boundary. */
+    directory: absolutePath,
+    model: z
+      .string()
+      .regex(
+        /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
+        "Use a proxy model ID such as gpt-6.1-sol",
+      ),
+    /** OpenAI Responses API endpoint ending in `/v1`, as for OpenCode. */
+    provider: piProviderSchema.refine(
+      (provider) => provider.baseURL.endsWith("/v1"),
+      "Codex provider baseURL must end with /v1",
+    ),
+    reasoningEffort: z
+      .enum(["minimal", "low", "medium", "high", "xhigh"])
+      .optional(),
+    /** Added as Codex developer instructions. */
+    systemPrompt: z.string().trim().min(1).max(64_000).optional(),
+    /**
+     * Codex sandbox for tool commands. `read-only` by default;
+     * `workspace-write` permits writes under `directory`;
+     * `danger-full-access` runs commands without a sandbox.
+     */
+    sandbox: z
+      .enum(["read-only", "workspace-write", "danger-full-access"])
+      .default("read-only"),
+    /**
+     * Network for tool commands. Only `workspace-write` switches it; the
+     * read-only sandbox always blocks it, and `danger-full-access` cannot
+     * block it, so that mode requires `network: true`.
+     */
+    network: z.boolean().default(false),
+    /** Read `AGENTS.md` project instructions from `directory`. */
+    projectDocs: z.boolean().default(false),
+    /**
+     * Directories after the system ones on the CLI's `PATH`. The operator's
+     * own `PATH` is never inherited; every entry is checked at start-up.
+     */
+    extraPath: z.array(absolutePath).max(32).default([]),
+  })
+  .refine(
+    (backend) => !backend.network || backend.sandbox !== "read-only",
+    "The read-only sandbox always blocks network; network: true needs workspace-write",
+  )
+  .refine(
+    (backend) => backend.network || backend.sandbox !== "danger-full-access",
+    "danger-full-access cannot block the network; set network: true",
+  );
+
 // HTTP is permitted only for Tailscale names/addresses. Public routes need TLS.
 const pairingOrigin = z
   .url()
@@ -176,6 +234,7 @@ export const backendSchema = z.discriminatedUnion("type", [
   }),
   piDurableBackendSchema,
   claudeBackendSchema,
+  codexBackendSchema,
   z.strictObject({
     type: z.literal("module"),
     module: absolutePath,

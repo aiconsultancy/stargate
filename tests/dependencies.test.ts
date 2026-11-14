@@ -29,6 +29,32 @@ test("Claude Agent SDK stays pinned to one exact release", async () => {
   );
 });
 
+test("Codex SDK stays pinned to one exact release with its CLI", async () => {
+  const { dependencies } = z
+    .object({ dependencies: z.record(z.string(), z.string()) })
+    .parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
+  const pinned = z
+    .string()
+    .regex(/^\d+\.\d+\.\d+$/)
+    .parse(dependencies["@openai/codex-sdk"]);
+  // The SDK runs the CLI of its own version; the lock must agree.
+  const sdk = z
+    .object({
+      version: z.string(),
+      dependencies: z.record(z.string(), z.string()),
+    })
+    .parse(
+      await Bun.file(
+        new URL(
+          "../node_modules/@openai/codex-sdk/package.json",
+          import.meta.url,
+        ),
+      ).json(),
+    );
+  expect(sdk.version).toBe(pinned);
+  expect(sdk.dependencies["@openai/codex"]).toBe(pinned);
+});
+
 test("dependency provenance checks every page, signature, count, and current head", async () => {
   const workflow = z
     .object({

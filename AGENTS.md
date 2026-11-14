@@ -3,9 +3,10 @@
 ## Project
 
 Pogo is a Bun/TypeScript Slack gateway. One process hosts multiple Slack app
-registrations. Built-in backends connect to OpenCode V2, embed Pi Durable, or
-run Claude Code through the Claude Agent SDK (`docs/claude.md`); trusted local
-modules can implement the same adapter interface.
+registrations. Built-in backends connect to OpenCode V2, embed Pi Durable,
+run Claude Code through the Claude Agent SDK (`docs/claude.md`), or run the
+Codex CLI through the Codex SDK (`docs/codex.md`); trusted local modules can
+implement the same adapter interface.
 
 Read `README.md` for setup and limits, `docs/design.md` for architecture, and
 `docs/cliproxyapi.md` for the separate local proxy installation.
@@ -113,7 +114,10 @@ SQLite, `bun:test`, and the existing Promise adapter contract.
   Keep app/workspace routing and bot rejection; missing deny lists default empty.
 - Tool access is separate from Slack access. Default OpenCode tools to deny
   and Pi and Claude tools to none; directories are starting locations, not
-  sandboxes. Never default Claude to `bypassPermissions`.
+  sandboxes. Never default Claude to `bypassPermissions`. Default Codex to
+  the `read-only` sandbox, approval policy `never` and no tool network.
+  Nothing that runs outside the Codex sandbox (launcher, CLI, Pogo data,
+  `PATH` entries) may be writable from inside it.
 - Persist accepted requests before Slack ACK. Delivery retries must not rerun
   tools. Interrupted execution has uncertain outcomes; do not blindly replay it.
 - Do not claim exactly-once external side effects or delivery.
@@ -121,10 +125,11 @@ SQLite, `bun:test`, and the existing Promise adapter contract.
   an error without explicit authorization and an appropriate backup.
 - Do not install/start/stop user services, change global OpenCode configuration,
   or edit the separate CLIProxyAPI installation unless the user requests it.
-- Pi and Claude proxy routing require explicit provider endpoint and
+- Pi, Claude and Codex proxy routing require explicit provider endpoint and
   credential-reference configuration. Installing CLIProxyAPI does not select
-  it automatically. Claude children get a minimal environment and a private
-  `CLAUDE_CONFIG_DIR`; never pass the host's `~/.claude` or other secrets.
+  it automatically. Claude and Codex children get a minimal environment and a
+  private `CLAUDE_CONFIG_DIR` or `CODEX_HOME`; never pass the host's
+  `~/.claude`, `~/.codex` or other secrets.
 
 ## Git
 

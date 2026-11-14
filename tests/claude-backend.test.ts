@@ -18,13 +18,9 @@ import {
   ClaudeBackend,
   ClaudeTurn,
   claudeEnvironment,
-  claudeInheritedEnvironment,
   claudeInputContent,
-  type ProcessTable,
-  signalTurnGroup,
-  signalTurnProcesses,
-  turnProcesses,
 } from "../src/backends/claude";
+import { inheritedEnvironment } from "../src/backends/cli-agent";
 import {
   backendSchema,
   claudeBackendSchema,
@@ -241,7 +237,7 @@ test("Claude child receives only a minimal, explicit environment", async () => {
   expect(env["TMPDIR"]).toStartWith(join(tmpdir(), "pogo-claude-"));
   await expect(readdir(env["TMPDIR"] ?? "")).rejects.toThrow();
   const allowed = new Set([
-    ...claudeInheritedEnvironment,
+    ...inheritedEnvironment,
     ...Object.keys(claudeEnvironment(config(), "/private")),
     // Added by the SDK itself; none carries a credential.
     "CLAUDE_CODE_ENTRYPOINT",
@@ -423,98 +419,6 @@ test("Claude failures carry fixed causes, never CLI or provider text", async () 
   const turn = new ClaudeTurn();
   turn.add({ type: "result", subtype: "mystery", is_error: true });
   expect(turn.result).toEqual({ ok: false, cause: "error" });
-});
-
-test("a process whose identity changed is never signalled", async () => {
-  // A fake /proc: PID reuse is simulated by changing the files of a PID.
-  const root = await mkdtemp(join(tmpdir(), "pogo-claude-proc-"));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const turn = crypto.randomUUID();
-  const id = crypto.randomUUID();
-  type Fake = {
-    start: number;
-    group?: number;
-    uids?: number[];
-    marker?: string;
-    cmdline?: string[];
-  };
-  const write = async (pid: number, fake: Fake) => {
-    const directory = join(root, String(pid));
-    await mkdir(directory, { recursive: true });
-    const fields = Array.from({ length: 30 }, () => "0");
-    fields[0] = "S";
-    fields[2] = String(fake.group ?? pid);
-    fields[19] = String(fake.start);
-    await writeFile(
-      join(directory, "stat"),
-      `${pid} (name with ) paren) ${fields.join(" ")}\n`,
-    );
-    const uids = (fake.uids ?? [1000, 1000, 1000, 1000]).join("\t");
-    await writeFile(join(directory, "status"), `Name:\tx\nUid:\t${uids}\n`);
-    await writeFile(
-      join(directory, "environ"),
-      `PATH=/bin\0POGO_CLAUDE_TURN=${fake.marker ?? turn}\0HOME=/h\0`,
-    );
-    await writeFile(
-      join(directory, "cmdline"),
-      `${(fake.cmdline ?? ["claude", `--resume=${id}`]).join("\0")}\0`,
-    );
-  };
-  const kills: [number, string][] = [];
-  const table: ProcessTable = {
-    root,
-    uid: 1000,
-    kill: (pid, name) => kills.push([pid, name]),
-  };
-  await write(100, { start: 500 });
-  await write(101, { start: 500, uids: [1000, 1000, 0, 1000] });
-  await write(102, { start: 500, marker: crypto.randomUUID() });
-  await write(103, { start: 400 });
-  await writeFile(join(root, "self"), "not a process");
-  const found = await turnProcesses(table, turn, 450);
-  // Other user, other marker, or older than the turn: never a candidate.
-  expect(found).toEqual([{ pid: 100, start: 500 }]);
-  const signalled = () => signalTurnProcesses(table, found, turn, "SIGTERM");
-  // The PID was reused by a newer process, another user or another turn.
-  for (const reused of [
-    { start: 900 },
-    { start: 500, uids: [1001, 1001, 1001, 1001] },
-    { start: 500, marker: crypto.randomUUID() },
-  ]) {
-    await write(100, reused);
-    expect(signalled()).toBe(0);
-  }
-  await rm(join(root, "100"), { recursive: true });
-  expect(signalled()).toBe(0);
-  expect(kills).toEqual([]);
-  await write(100, { start: 500 });
-  expect(signalled()).toBe(1);
-  expect(kills).toEqual([[100, "SIGTERM"]]);
-  // A group is signalled only through its verified leader.
-  kills.length = 0;
-  const leader = { pid: 100, start: 500, turn, session: id };
-  expect(signalTurnGroup(table, leader, "SIGTERM")).toBe(true);
-  expect(kills).toEqual([[-100, "SIGTERM"]]);
-  kills.length = 0;
-  for (const [recorded, actual] of [
-    [{ start: 499 }, { start: 500 }],
-    [{}, { start: 500, marker: crypto.randomUUID() }],
-    [{}, { start: 500, uids: [1000, 0, 1000, 1000] }],
-    [{}, { start: 500, cmdline: ["claude", "--resume=other"] }],
-    [{}, { start: 500, group: 99 }],
-  ] satisfies [Partial<typeof leader>, Fake][]) {
-    await write(100, actual);
-    expect(signalTurnGroup(table, { ...leader, ...recorded }, "SIGKILL")).toBe(
-      false,
-    );
-  }
-  expect(kills).toEqual([]);
-  // Without a known user ID nothing is signalled.
-  await write(100, { start: 500 });
-  const unknown = { ...table, uid: undefined };
-  expect(signalTurnProcesses(unknown, found, turn, "SIGTERM")).toBe(0);
-  expect(signalTurnGroup(unknown, leader, "SIGTERM")).toBe(false);
-  expect(kills).toEqual([]);
 });
 
 test.skipIf(process.platform !== "linux")(

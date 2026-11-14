@@ -95,6 +95,7 @@ refused; access is never widened.
 | Pi Durable bot         | Conversations                | None               |
 | Pi Durable crew member | The member's conversation    | Recorded task runs |
 | Claude bot             | Not available                | Not available      |
+| Codex bot              | Not available                | Not available      |
 | Module                 | Not available                | Not available      |
 
 Pi crew history is read by the crew plugin in the OpenCode server process,

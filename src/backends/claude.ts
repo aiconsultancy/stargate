@@ -34,6 +34,15 @@ import {
 } from "../backend";
 import { type BackendConfig, secret } from "../config";
 import { AttachmentInputUnavailable } from "../request-failure";
+import {
+  inherited,
+  isTextAttachment,
+  statStart,
+  stopTurnGroup,
+  stopTurnProcesses,
+  systemProcesses,
+  textAttachment,
+} from "./cli-agent";
 
 type Config = Extract<BackendConfig, { type: "claude" }>;
 type UserContent = Exclude<SDKUserMessage["message"]["content"], string>;
@@ -43,23 +52,6 @@ class ClaudeTurnError extends Error {}
 
 /** Claude session IDs are UUIDs; anything else never reaches the filesystem. */
 const sessionIDSchema = z.uuid();
-
-/**
- * Non-secret variables the Claude Code child inherits. Everything else in
- * Pogo's environment, including Slack tokens and provider keys, is dropped.
- */
-export const claudeInheritedEnvironment = [
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "TZ",
-  "TMPDIR",
-] as const;
 
 /**
  * Non-secret routing variables. They are also passed as flag settings, the
@@ -94,13 +86,8 @@ export function claudeEnvironment(
   configDirectory: string,
   parent: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const name of claudeInheritedEnvironment) {
-    const value = parent[name];
-    if (value) env[name] = value;
-  }
   return {
-    ...env,
+    ...inherited(parent),
     ...claudeRouting(config),
     CLAUDE_CONFIG_DIR: configDirectory,
     ANTHROPIC_AUTH_TOKEN: secret(config.provider.apiKeyEnv, parent),
@@ -114,12 +101,6 @@ const imageTypes = [
   "image/gif",
   "image/webp",
 ] as const;
-const textTypes = [
-  "application/json",
-  "application/xml",
-  "application/yaml",
-  "application/javascript",
-];
 
 /** Images, PDFs and UTF-8 text become content blocks; other files fail. */
 export function claudeInputContent(
@@ -153,29 +134,8 @@ export function claudeInputContent(
         title: file.name,
         source: { type: "base64", media_type: "application/pdf", data },
       });
-    } else if (file.mime.startsWith("text/") || textTypes.includes(file.mime)) {
-      let decoded: string;
-      try {
-        decoded = new TextDecoder("utf-8", { fatal: true }).decode(file.data);
-      } catch {
-        throw new AttachmentInputUnavailable(
-          "Claude text attachments require valid UTF-8",
-        );
-      }
-      if (
-        file.data.some(
-          (byte) =>
-            byte === 127 ||
-            (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13),
-        )
-      )
-        throw new AttachmentInputUnavailable(
-          "Claude text attachment contains binary control bytes",
-        );
-      content.push({
-        type: "text",
-        text: `Attachment: ${file.name}\n${decoded}`,
-      });
+    } else if (isTextAttachment(file)) {
+      content.push({ type: "text", text: textAttachment(file) });
     } else {
       throw new AttachmentInputUnavailable(
         "Claude supports UTF-8 text, PDF and PNG/JPEG/GIF/WebP attachments only",
@@ -357,227 +317,8 @@ export class ClaudeTurn {
   }
 }
 
-/**
- * Every process of a turn inherits this variable with a random value. Claude
- * Code runs Bash commands in their own sessions, outside the CLI's process
- * group, so the marker is how Pogo finds what a turn left behind.
- */
+/** The turn marker variable of Claude Code children; see `TurnMarker`. */
 const turnVariable = "POGO_CLAUDE_TURN";
-
-/**
- * The Linux process table: `/proc`, this process's user ID and `kill`. Tests
- * use a fake root to simulate PID reuse.
- */
-export type ProcessTable = {
-  root: string;
-  uid: number | undefined;
-  kill(pid: number, signal: NodeJS.Signals): void;
-};
-const systemProcesses: ProcessTable = {
-  root: "/proc",
-  uid: process.getuid?.(),
-  kill: (pid, signal) => process.kill(pid, signal),
-};
-
-/** A process found for a turn: its PID and start time pin its identity. */
-export type TurnProcess = { pid: number; start: number };
-/** A recorded CLI: the leader of its process group. */
-export type TurnLeader = TurnProcess & { turn: string; session: string };
-
-/** Start time in clock ticks since boot: field 22 of `/proc/<pid>/stat`. */
-function statStart(stat: string) {
-  return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
-}
-
-/** Start time, process group (field 5) and the four user IDs. */
-function facts(stat: string, status: string) {
-  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-  const start = Number(fields[19]);
-  const group = Number(fields[2]);
-  const uids = /^Uid:[ \t]+(.+)$/m.exec(status)?.[1]?.trim().split(/\s+/);
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(group) || !uids)
-    return undefined;
-  return { start, group, uids };
-}
-
-/** Real, effective, saved and filesystem user IDs are all Pogo's own. */
-function owned(table: ProcessTable, uids: readonly string[]) {
-  return (
-    table.uid !== undefined &&
-    uids.length === 4 &&
-    uids.every((uid) => uid === String(table.uid))
-  );
-}
-
-function carries(environ: Buffer, turn: string) {
-  return Buffer.concat([Buffer.from([0]), environ]).includes(
-    Buffer.from(`\0${turnVariable}=${turn}\0`),
-  );
-}
-
-/** One process's facts and environment, read now and synchronously. */
-function inspect(table: ProcessTable, pid: number) {
-  try {
-    const base = join(table.root, String(pid));
-    const known = facts(
-      readFileSync(join(base, "stat"), "utf8"),
-      readFileSync(join(base, "status"), "utf8"),
-    );
-    return known && { ...known, environ: readFileSync(join(base, "environ")) };
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Processes of Pogo's user that started at or after `since` and carry the
- * turn marker. Linux only: without `/proc` nothing is found.
- */
-export async function turnProcesses(
-  table: ProcessTable,
-  turn: string,
-  since: number,
-): Promise<TurnProcess[]> {
-  let entries: string[];
-  try {
-    entries = await readdir(table.root);
-  } catch {
-    return [];
-  }
-  const found: TurnProcess[] = [];
-  await Promise.all(
-    entries.map(async (entry) => {
-      if (!/^\d+$/.test(entry) || Number(entry) === process.pid) return;
-      try {
-        const base = join(table.root, entry);
-        const known = facts(
-          await readFile(join(base, "stat"), "utf8"),
-          await readFile(join(base, "status"), "utf8"),
-        );
-        if (!known || known.start < since || !owned(table, known.uids)) return;
-        if (carries(await readFile(join(base, "environ")), turn))
-          found.push({ pid: Number(entry), start: known.start });
-      } catch {
-        // Gone, or not readable by this user.
-      }
-    }),
-  );
-  return found.sort((a, b) => a.pid - b.pid);
-}
-
-/**
- * Signal each process only while it is still the one that was found: the
- * same start time, all user IDs Pogo's, and the turn marker. Bun and Node
- * have no pidfd API, so the check and `kill` run synchronously, without
- * yielding; a PID could change owner only inside that window. Returns the
- * number signalled.
- */
-export function signalTurnProcesses(
-  table: ProcessTable,
-  processes: readonly TurnProcess[],
-  turn: string,
-  signal: NodeJS.Signals,
-) {
-  let sent = 0;
-  for (const { pid, start } of processes) {
-    const now = inspect(table, pid);
-    if (
-      !now ||
-      now.start !== start ||
-      !owned(table, now.uids) ||
-      !carries(now.environ, turn)
-    )
-      continue;
-    try {
-      table.kill(pid, signal);
-      sent++;
-    } catch {
-      // Exited after the check.
-    }
-  }
-  return sent;
-}
-
-/**
- * True while the recorded CLI still leads its group: same start time, Pogo's
- * user, the turn marker and the session ID in its arguments. While it lives,
- * its group ID cannot be reused.
- */
-function leads(table: ProcessTable, leader: TurnLeader) {
-  const now = inspect(table, leader.pid);
-  if (
-    !now ||
-    now.start !== leader.start ||
-    now.group !== leader.pid ||
-    !owned(table, now.uids) ||
-    !carries(now.environ, leader.turn)
-  )
-    return false;
-  try {
-    return readFileSync(join(table.root, String(leader.pid), "cmdline"), "utf8")
-      .split("\0")
-      .some((argument) => argument.includes(leader.session));
-  } catch {
-    return false;
-  }
-}
-
-/** Signal a recorded CLI's group only after `leads` holds, synchronously. */
-export function signalTurnGroup(
-  table: ProcessTable,
-  leader: TurnLeader,
-  signal: NodeJS.Signals,
-) {
-  if (!leads(table, leader)) return false;
-  try {
-    table.kill(-leader.pid, signal);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function until(
-  done: () => boolean | Promise<boolean>,
-  ms: number,
-  signal?: AbortSignal,
-) {
-  const deadline = Date.now() + ms;
-  while (!(await done())) {
-    if (Date.now() >= deadline || signal?.aborted) return false;
-    await delay(50);
-  }
-  return true;
-}
-
-/** SIGTERM a recorded CLI's group, then SIGKILL it if it still leads. */
-async function stopTurnGroup(
-  table: ProcessTable,
-  leader: TurnLeader,
-  grace: number,
-  signal?: AbortSignal,
-) {
-  const gone = () => !leads(table, leader);
-  if (!signalTurnGroup(table, leader, "SIGTERM")) return;
-  if (await until(gone, grace, signal)) return;
-  if (signalTurnGroup(table, leader, "SIGKILL")) await until(gone, grace);
-}
-
-/** SIGTERM a turn's processes, then SIGKILL whatever remains after `grace`. */
-async function stopTurnProcesses(
-  table: ProcessTable,
-  turn: string,
-  since: number,
-  grace: number,
-  signal?: AbortSignal,
-) {
-  const left = () => turnProcesses(table, turn, since);
-  const gone = async () => (await left()).length === 0;
-  if (!signalTurnProcesses(table, await left(), turn, "SIGTERM")) return;
-  if (await until(gone, grace, signal)) return;
-  if (signalTurnProcesses(table, await left(), turn, "SIGKILL"))
-    await until(gone, grace);
-}
 
 /** One spawned Claude Code CLI in its own process group. */
 class ClaudeProcess implements SpawnedProcess {
@@ -962,7 +703,12 @@ export class ClaudeBackend implements AgentBackend {
       cli.kill("SIGKILL");
     }
     await cli.exited;
-    await stopTurnProcesses(systemProcesses, run.turn, run.since, this.grace);
+    await stopTurnProcesses(
+      systemProcesses,
+      { variable: turnVariable, value: run.turn },
+      run.since,
+      this.grace,
+    );
     await rm(run.record, { force: true });
   }
 
@@ -981,16 +727,17 @@ export class ClaudeBackend implements AgentBackend {
     } catch {
       return;
     }
+    const marker = { variable: turnVariable, value: record.turn };
     const leader = {
       pid: record.pid,
       start: record.since,
-      turn: record.turn,
+      marker,
       session: id,
     };
     await stopTurnGroup(systemProcesses, leader, this.grace, signal);
     await stopTurnProcesses(
       systemProcesses,
-      record.turn,
+      marker,
       record.since,
       this.grace,
       signal,

@@ -642,7 +642,9 @@ per channel, using its own `backend` (normally the member's native agent
 definition and worktree). It does **not** prompt the crew member's task
 session that the crew plugin manages. Pogo refuses a crew backend with a
 pinned `sessionID`. A crew member can also run on Claude Code with a
-`claude` backend; see the [Galactica example](claude.md#set-up-through-cliproxyapi).
+`claude` backend, or on the Codex CLI with a `codex` backend; see the
+Galactica examples for [Claude](claude.md#set-up-through-cliproxyapi) and
+[Codex](codex.md#set-up-through-cliproxyapi).
 
 Reason: the crew plugin reads a task result from the final answer that
 follows the task's input. An outside input after it makes the result
@@ -782,8 +784,8 @@ crew IRC session to its crew member in the crew plugin, so `pogo_dm` and
   deny rule in the crew registration's `backend.permissions`.
 - **Requirements.** An OpenCode captain and crew on the same OpenCode
   server (`backend.url`), a pinned captain session, and a crew IRC
-  `backend.directory` equal to the member's worktree. Pi Durable and
-  Claude crew IRC registrations get no crew tools. The captain's own IRC
+  `backend.directory` equal to the member's worktree. Pi Durable, Claude
+  and Codex crew IRC registrations get no crew tools. The captain's own IRC
   conversations run in the pinned captain session, which already has the
   captain's tools.
 

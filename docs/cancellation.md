@@ -15,8 +15,9 @@ aborts the request's signal. The built-in adapters first withdraw their own
 queued input. They interrupt session execution only when that input was placed:
 OpenCode checks history; Pi Durable uses its submission record. The Claude
 adapter stops the turn's Claude Code process group and the tool processes
-marked for that turn. Custom adapters must honour the existing cancellation
-contract.
+marked for that turn. The Codex adapter aborts the Codex CLI and then stops
+every process marked for that turn, including sandboxed commands. Custom
+adapters must honour the existing cancellation contract.
 
 The reply becomes a stop notice after the backend call settles. With a
 transcript-capable backend (OpenCode), public text that settled before the

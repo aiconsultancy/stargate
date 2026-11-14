@@ -196,7 +196,9 @@ export function dashboardSource(
         bot.backend.type === "opencode"
           ? bot.backend.model &&
             `${bot.backend.model.providerID}/${bot.backend.model.id}`
-          : bot.backend.type === "pi-durable" || bot.backend.type === "claude"
+          : bot.backend.type === "pi-durable" ||
+              bot.backend.type === "claude" ||
+              bot.backend.type === "codex"
             ? bot.backend.model
             : undefined;
       const report = bot.cronjobs?.dailyReport;

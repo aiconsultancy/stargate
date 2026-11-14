@@ -175,8 +175,9 @@ No service installation, login persistence, or updater is implied.
    `provider` configuration and a supported model (DeepSeek Go or Claude
    Haiku 5.5); see
    [Pi Durable crew](agents/default-opencode.md#pi-durable-crew).
-   A `claude` backend also needs an explicit `provider` with this `/v1`
-   endpoint and the client-key variable; see [Claude backend](claude.md).
+   A `claude` or `codex` backend also needs an explicit `provider` with this
+   `/v1` endpoint and the client-key variable; see [Claude backend](claude.md)
+   and [Codex backend](codex.md).
    Keep only one live Socket Mode listener per registration.
 5. Obtain consent for actual model requests, then verify a Slack mention and
    same-thread follow-up. A running proxy, provider listing, or Socket Mode
