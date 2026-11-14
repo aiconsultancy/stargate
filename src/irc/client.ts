@@ -71,6 +71,12 @@ export type IrcClientOptions = {
    * it is also one of these under the server's CASEMAPPING.
    */
   captainChannels?: readonly string[];
+  /**
+   * Captain only: the DM audit channel. Joined like a configured channel,
+   * but never replayed by catch-up; the ship never treats it as a
+   * conversation. Ignored on a crew connection (with `captainChannels`).
+   */
+  auditChannel?: string;
   /** Request draft/multiline when offered (default true). */
   multiline?: boolean;
   /**
@@ -97,6 +103,16 @@ export type IrcClientOptions = {
 export interface IrcEvents {
   /** PRIVMSG/NOTICE/TAGMSG, including own echoes. `replay`: chathistory. */
   message?(message: IrcMessage, replay: boolean): void;
+  /**
+   * A PRIVMSG or NOTICE that this connection sent to a nick, after the
+   * server confirmed it (or it was written, without labeled-response). A
+   * multiline batch is one message with its lines joined.
+   */
+  sent?(message: {
+    command: "PRIVMSG" | "NOTICE";
+    target: string;
+    text: string;
+  }): void;
   /** An INVITE addressed to this connection. */
   invite?(channel: string): void;
   joinFailed?(channel: string, numeric: string): void;
@@ -138,6 +154,16 @@ type Queued = {
   guard?: () => boolean;
 };
 
+/**
+ * A send that timed out while it still waited in the send queue: it was
+ * removed and is never written, so nothing reached the server.
+ */
+export class IrcSendExpired extends Error {
+  constructor() {
+    super("IRC send expired before it was written");
+  }
+}
+
 /** A direct message whose recipient no longer holds the target nick. */
 export class IrcRecipientChanged extends Error {
   constructor() {
@@ -145,8 +171,11 @@ export class IrcRecipientChanged extends Error {
   }
 }
 
+/** Send lanes: `low` items go only when no normal item waits. */
+export type SendPriority = "normal" | "low";
+
 /** Insertion-ordered set with a size bound. */
-class Recent<V = true> extends Map<string, V> {
+export class Recent<V = true> extends Map<string, V> {
   constructor(private readonly limit: number) {
     super();
   }
@@ -212,6 +241,8 @@ export class IrcClient {
   >();
   private multilineOffer: { maxBytes: number; maxLines: number } | undefined;
   private queue: Queued[] = [];
+  /** Low-priority lane (DM audit lines): sent only when `queue` is empty. */
+  private background: Queued[] = [];
   private tokens: number;
   private refilled = Date.now();
   private pumpTimer: ReturnType<typeof setTimeout> | undefined;
@@ -268,10 +299,21 @@ export class IrcClient {
   /** Configured spelling of an allowed channel, or undefined. */
   channel(name: string) {
     const key = this.fold(name);
+    if (this.isAudit(name)) return this.options.auditChannel;
     const granted = this.options.captainChannels;
     if (granted && !granted.some((channel) => this.fold(channel) === key))
       return;
     return this.options.channels.find((channel) => this.fold(channel) === key);
+  }
+  /** The captain's DM audit channel (never one on a crew connection). */
+  isAudit(name: string) {
+    const audit = this.options.auditChannel;
+    return (
+      audit !== undefined &&
+      this.options.captainChannels === undefined &&
+      this.isChannel(name) &&
+      this.fold(name) === this.fold(audit)
+    );
   }
   inChannel(name: string) {
     const channel = this.channel(name);
@@ -285,6 +327,10 @@ export class IrcClient {
   anchor(msgid: string) {
     const value = this.own.get(msgid);
     return typeof value === "string" ? value : undefined;
+  }
+  /** The account last seen for a nick (a hint; WHOIS proves it), if any. */
+  knownAccount(nick: string) {
+    return this.nickAccounts.get(this.fold(nick));
   }
   /** The nick bound to an account in both directions, if any. */
   boundNick(account: string) {
@@ -394,8 +440,9 @@ export class IrcClient {
     text: string,
     tags: Record<string, string> = {},
     guard?: () => boolean,
+    priority: SendPriority = "normal",
   ) {
-    return this.send("PRIVMSG", [target, text], tags, guard);
+    return this.send("PRIVMSG", [target, text], tags, guard, priority);
   }
 
   tagmsg(target: string, tags: Record<string, string>, guard?: () => boolean) {
@@ -464,8 +511,9 @@ export class IrcClient {
     params: readonly string[],
     tags: Record<string, string> = {},
     guard?: () => boolean,
+    priority: SendPriority = "normal",
   ): Promise<void> {
-    return this.transmit(
+    const result = this.transmit(
       (label) => [
         formatMessage(command, params, {
           ...(label === undefined ? {} : { label }),
@@ -473,6 +521,31 @@ export class IrcClient {
         }),
       ],
       guard,
+      priority,
+    );
+    const [target, text = ""] = params;
+    if ((command === "PRIVMSG" || command === "NOTICE") && target !== undefined)
+      this.whenSent(result, command, target, text);
+    return result;
+  }
+
+  /** Report a confirmed message to a nick (`events.sent`); never throws. */
+  private whenSent(
+    result: Promise<void>,
+    command: "PRIVMSG" | "NOTICE",
+    target: string,
+    text: string,
+  ) {
+    if (this.isChannel(target) || !this.events.sent) return;
+    result.then(
+      () => {
+        try {
+          this.events.sent?.({ command, target, text });
+        } catch {
+          this.options.log.warn("IRC sent-message handler failed");
+        }
+      },
+      () => {},
     );
   }
 
@@ -487,11 +560,12 @@ export class IrcClient {
     lines: readonly { text: string; concat: boolean }[],
     tags: Record<string, string> = {},
     guard?: () => boolean,
+    priority: SendPriority = "normal",
   ): Promise<void> {
     if (!this.multiline)
       return Promise.reject(new Error("IRC multiline unavailable"));
     const reference = `pogo${++this.label}`;
-    return this.transmit(
+    const result = this.transmit(
       (label) => [
         formatMessage("BATCH", [`+${reference}`, "draft/multiline", target], {
           ...(label === undefined ? {} : { label }),
@@ -506,12 +580,25 @@ export class IrcClient {
         formatMessage("BATCH", [`-${reference}`]),
       ],
       guard,
+      priority,
     );
+    this.whenSent(
+      result,
+      "PRIVMSG",
+      target,
+      lines
+        .map((line, index) =>
+          index && !line.concat ? `\n${line.text}` : line.text,
+        )
+        .join(""),
+    );
+    return result;
   }
 
   private transmit(
     build: (label: string | undefined) => string[],
     guard?: () => boolean,
+    priority: SendPriority = "normal",
   ): Promise<void> {
     if (!this.registeredNow || !this.socket)
       return Promise.reject(new IrcUnavailable());
@@ -519,18 +606,8 @@ export class IrcClient {
     try {
       if (this.caps.has("labeled-response")) {
         const label = `pogo${++this.label}`;
-        const lines = build(label);
-        const timer = setTimeout(() => {
-          this.labels.delete(label);
-          result.reject(new Error("IRC delivery unconfirmed"));
-        }, this.timing.confirmMs);
-        this.labels.set(label, {
-          resolve: result.resolve,
-          reject: result.reject,
-          timer,
-        });
-        this.enqueue({
-          lines,
+        const item: Queued = {
+          lines: build(label),
           ...(guard ? { guard } : {}),
           done: (error) => {
             if (!error) return;
@@ -538,13 +615,32 @@ export class IrcClient {
             this.labels.delete(label);
             result.reject(error);
           },
+        };
+        // Still queued at the deadline: remove it, so a send that already
+        // failed is never written later (and a backlog cannot grow).
+        const timer = setTimeout(() => {
+          this.labels.delete(label);
+          result.reject(
+            this.unqueue(item)
+              ? new IrcSendExpired()
+              : new Error("IRC delivery unconfirmed"),
+          );
+        }, this.timing.confirmMs);
+        this.labels.set(label, {
+          resolve: result.resolve,
+          reject: result.reject,
+          timer,
         });
+        this.enqueue(item, priority);
       } else {
-        this.enqueue({
-          lines: build(undefined),
-          ...(guard ? { guard } : {}),
-          done: (error) => (error ? result.reject(error) : result.resolve()),
-        });
+        this.enqueue(
+          {
+            lines: build(undefined),
+            ...(guard ? { guard } : {}),
+            done: (error) => (error ? result.reject(error) : result.resolve()),
+          },
+          priority,
+        );
       }
     } catch (error) {
       result.reject(
@@ -705,8 +801,19 @@ export class IrcClient {
     this.reclaimed = now;
     if (this.fold(this.currentNick) !== this.fold(this.options.nick))
       this.enqueue({ lines: [formatMessage("NICK", [this.options.nick])] });
-    for (const channel of this.options.channels)
+    for (const channel of this.joinable())
       if (!this.inChannel(channel)) this.join(channel);
+  }
+
+  /** Configured channels this connection may join, then the audit channel. */
+  private joinable() {
+    const audit = this.options.auditChannel;
+    return [
+      ...this.options.channels.filter(
+        (channel) => this.channel(channel) !== undefined,
+      ),
+      ...(audit !== undefined && this.isAudit(audit) ? [audit] : []),
+    ];
   }
 
   private disconnected() {
@@ -733,7 +840,8 @@ export class IrcClient {
     if (this.pumpTimer) clearTimeout(this.pumpTimer);
     this.pumpTimer = undefined;
     const error = new IrcUnavailable();
-    for (const item of this.queue.splice(0)) item.done?.(error);
+    for (const item of [...this.queue.splice(0), ...this.background.splice(0)])
+      item.done?.(error);
     for (const [label, pending] of this.labels) {
       clearTimeout(pending.timer);
       this.labels.delete(label);
@@ -759,9 +867,25 @@ export class IrcClient {
       written >= output.byteLength ? undefined : output.subarray(written);
   }
 
-  private enqueue(item: Queued) {
-    this.queue.push(item);
+  private enqueue(item: Queued, priority: SendPriority = "normal") {
+    (priority === "low" ? this.background : this.queue).push(item);
     this.pump();
+  }
+
+  /** Remove a queued item that was not written yet; true if it was queued. */
+  private unqueue(item: Queued) {
+    for (const lane of [this.queue, this.background]) {
+      const index = lane.indexOf(item);
+      if (index >= 0) {
+        lane.splice(index, 1);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private waiting() {
+    return this.queue.length > 0 || this.background.length > 0;
   }
 
   private pump() {
@@ -772,8 +896,8 @@ export class IrcClient {
       this.tokens + (now - this.refilled) / this.timing.intervalMs,
     );
     this.refilled = now;
-    while (this.queue.length && this.tokens >= 1 && this.socket) {
-      const item = this.queue.shift();
+    while (this.waiting() && this.tokens >= 1 && this.socket) {
+      const item = this.queue.shift() ?? this.background.shift();
       if (!item) break;
       // Recheck at the write: a queued direct line must not follow its
       // recipient's nick to another account.
@@ -785,7 +909,7 @@ export class IrcClient {
       for (const line of item.lines) this.raw(line);
       item.done?.();
     }
-    if (this.queue.length && this.socket)
+    if (this.waiting() && this.socket)
       this.pumpTimer = setTimeout(() => {
         this.pumpTimer = undefined;
         this.pump();
@@ -897,7 +1021,8 @@ export class IrcClient {
             return;
           }
           this.joinedChannels.add(allowed);
-          this.replay(allowed);
+          // The audit channel holds Pogo's own copies: nothing to catch up.
+          if (!this.isAudit(allowed)) this.replay(allowed);
         } else if (params[1] !== undefined && this.caps.has("extended-join")) {
           if (params[1] === "*") this.unbindNick(nick);
           else this.bind(params[1], nick);
@@ -1229,9 +1354,7 @@ export class IrcClient {
     this.readyFilehost = this.advertisedFilehost;
     this.options.log.info("IRC registered");
     for (const wake of this.waiters) wake();
-    const channels = this.options.channels.filter(
-      (channel) => this.channel(channel) !== undefined,
-    );
+    const channels = this.joinable();
     const presence = this.options.presence;
     // Always-on keeps the account in its channels and stores direct
     // messages while Pogo is away (Ergo draft/persistence).

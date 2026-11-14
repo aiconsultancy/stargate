@@ -182,9 +182,10 @@ export class FakeIrcServer {
     target: string,
     text: string,
     tags: Record<string, string> = {},
+    command: "PRIVMSG" | "NOTICE" = "PRIVMSG",
   ) {
     this.setUser(from.nick, from.account ?? null);
-    const line = formatMessage("PRIVMSG", [target, text], {
+    const line = formatMessage(command, [target, text], {
       time: new Date().toISOString(),
       msgid: `m${++this.msgid}`,
       ...(from.account ? { account: from.account } : {}),
@@ -326,6 +327,7 @@ export class FakeIrcServer {
         );
       }
       case "PRIVMSG":
+      case "NOTICE":
       case "TAGMSG": {
         const target = first;
         const open = message.tags.get("batch");

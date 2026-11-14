@@ -187,6 +187,22 @@ export function fold(value: string, mapping: Casemapping = "rfc1459") {
   );
 }
 
+/**
+ * A key at least as coarse as `fold` under every CASEMAPPING: two names
+ * that any mapping treats as equal get the same key. For isolation checks
+ * (configuration), never for routing. It starts from the `unicode` fold
+ * (NFKC, lower case), so names equal there stay equal; upper then lower
+ * case again makes ẞ, ß, SS and ss converge (and ı with i, ſ with s); NFKC
+ * once more; then rfc1459, the widest classic mapping, which also covers
+ * `ascii` and `strict-rfc1459`.
+ */
+export function widestFold(value: string) {
+  return fold(
+    fold(value, "unicode").toUpperCase().toLowerCase().normalize("NFKC"),
+    "rfc1459",
+  );
+}
+
 /** `cap1 cap2=value` → capability map. */
 export function parseCapabilities(text: string) {
   const caps = new Map<string, string>();

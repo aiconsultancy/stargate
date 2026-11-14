@@ -21,10 +21,11 @@ channel and TLS setup belong to the server operator.
    the pinned session must match that directory and agent.
 4. Optional: give crew a lasting invite exception on an invite-only ship
    channel (see [channels](#channels)); otherwise the captain invites them.
-5. Run `pogo config check --config <path>`, then restart for connection changes.
+5. Optional: create the [DM audit](#dm-audit) channel.
+6. Run `pogo config check --config <path>`, then restart for connection changes.
    Access/transcription and IRC crew additions/idle removals can use
    [SIGHUP reload](../README.md#reload-configuration-without-restarting).
-6. Regenerate or edit the captain definition so it contains the
+7. Regenerate or edit the captain definition so it contains the
    "IRC messages" paragraph (see [captain instructions](#captain-instructions)).
 
 ## Server expectations
@@ -77,9 +78,9 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
     "id": "galactica-irc",
     "displayName": "Galactica",
     "server": { "host": "127.0.0.1", "port": 6667, "tls": false },
-    "account": "galactica",
-    "passwordEnv": "POGO_IRC_GALACTICA_PASSWORD",
-    "channels": ["#galactica"],
+    "account": "galactica-captain",
+    "passwordEnv": "POGO_IRC_GALACTICA_CAPTAIN_PASSWORD",
+    "channels": ["#ship-galactica"],
     "access": {
       "deniedAccounts": [],
       "deniedChannels": [],
@@ -93,7 +94,7 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
         "id": "chief",
         "account": "galactica-chief",
         "passwordEnv": "POGO_IRC_GALACTICA_CHIEF_PASSWORD",
-        "channels": ["#galactica"],
+        "channels": ["#ship-galactica"],
         "backend": {
           "type": "opencode",
           "url": "http://127.0.0.1:4096",
@@ -102,6 +103,8 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
         }
       }
     ],
+    "audit": { "channel": "#agent-dms" },
+    "dmPolicy": "agent",
     "backend": {
       "type": "opencode",
       "url": "http://127.0.0.1:4096",
@@ -113,24 +116,41 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
 ]
 ```
 
-| Field                          | Rule                                                                                                |
-| ------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `server.host`, `server.port`   | IRC server address                                                                                  |
-| `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                               |
-| `server.caFile`                | Absolute PEM path of a private CA; TLS only                                                         |
-| `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused                      |
-| `account`, `passwordEnv`       | SASL PLAIN account and the environment variable with its password                                   |
-| `nick`                         | Optional; defaults to the account                                                                   |
-| `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes               |
-| `access`                       | See [access](#access)                                                                               |
-| `crew`                         | See [crew](#crew-on-irc); at most 20                                                                |
-| `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                               |
-| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                                       |
-| `server.filehostOverride`      | Optional FILEHOST upload URL when the server does not advertise one ([files](#files))               |
-| `features`                     | Switches for [optional features](#optional-features); each defaults to `true`                       |
-| `stopReactions`                | Emoji that stop a turn ([Stop](#stop-by-reaction)); default `["✋", "🛑"]`, at most 10, `[]` is off |
-| `catchUpHours`                 | Longest [catch-up](#catch-up) window, 1–168 hours (default 24)                                      |
-| `transcription`                | Audio transcription for FILEHOST audio files, as for Slack bots ([files](#files))                   |
+| Field                          | Rule                                                                                                  |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `server.host`, `server.port`   | IRC server address                                                                                    |
+| `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                                 |
+| `server.caFile`                | Absolute PEM path of a private CA; TLS only                                                           |
+| `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused                        |
+| `account`, `passwordEnv`       | SASL PLAIN account and the environment variable with its password                                     |
+| `nick`                         | Optional; defaults to the account                                                                     |
+| `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes                 |
+| `access`                       | See [access](#access)                                                                                 |
+| `crew`                         | See [crew](#crew-on-irc); at most 20                                                                  |
+| `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                                 |
+| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                                         |
+| `server.filehostOverride`      | Optional FILEHOST upload URL when the server does not advertise one ([files](#files))                 |
+| `features`                     | Switches for [optional features](#optional-features); each defaults to `true`                         |
+| `stopReactions`                | Emoji that stop a turn ([Stop](#stop-by-reaction)); default `["✋", "🛑"]`, at most 10, `[]` is off   |
+| `catchUpHours`                 | Longest [catch-up](#catch-up) window, 1–168 hours (default 24)                                        |
+| `transcription`                | Audio transcription for FILEHOST audio files, as for Slack bots ([files](#files))                     |
+| `audit`                        | Optional `{ "channel": "#agent-dms" }`: mirror every agent DM to that channel ([DM audit](#dm-audit)) |
+| `dmPolicy`                     | `agent` (default: the captain answers DMs) or `redirect` ([DM audit](#dm-audit))                      |
+
+### Naming
+
+The examples use this naming rule for a ship `<ship>`:
+
+| Name                 | Rule             | Example             |
+| -------------------- | ---------------- | ------------------- |
+| Ship channel         | `#ship-<ship>`   | `#ship-galactica`   |
+| Captain account/nick | `<ship>-captain` | `galactica-captain` |
+| Crew account/nick    | `<ship>-<crew>`  | `galactica-chief`   |
+
+Pogo does not enforce the rule: the server operator assigns names, and
+peer captains stay an explicit list (see [peer captains](#peer-captains)).
+The rule makes ship accounts easy to grant with one invite exception mask
+such as `galactica-*!*@*`.
 
 Put passwords in the private `<config>.env` companion or the service
 environment, never in JSON. Every account needs its own `passwordEnv`.
@@ -199,7 +219,8 @@ settings and `shipTurnsPerAgentPerHour`.
 
 A channel message starts a turn when it:
 
-- names the agent's nick as a whole word, for example `galactica: status?`;
+- names the agent's nick as a whole word, for example
+  `galactica-captain: status?`;
 - contains one of `access.textMentions` (captain only);
 - is an **all-call**: it contains one of `access.allCallWords` (default
   `all hands`, `all crew`, `everyone`; whole words, any letter case, so
@@ -211,7 +232,8 @@ A channel message starts a turn when it:
 No other channel traffic reaches a captain or crew session.
 
 A direct message to the captain always starts a turn. Crew connections
-ignore direct messages.
+ignore direct messages. With `dmPolicy: "redirect"`, no direct message
+starts a turn (see [DM audit](#dm-audit)).
 
 Access rules are request filters, not isolation. Every logged-in account
 on the server can drive the captain's enabled tools.
@@ -237,11 +259,11 @@ A pinned captain uses its one session for all of them. Each turn carries a
 source line:
 
 ```text
-s=irc;c=%23galactica;t=<msgid>;m=<msgid>;u=jack[;k=crew|captain]
+s=irc;c=%23ship-galactica;t=<msgid>;m=<msgid>;u=jack[;k=crew|captain]
 ```
 
 Unpinned sessions (crew, Pi Durable) get a one-line note instead, for
-example `[IRC #galactica, from account jack. IRC shows plain text only.]`.
+example `[IRC #ship-galactica, from account jack. IRC shows plain text only.]`.
 New sessions use the title `<name> (irc <channel>)`.
 
 Turns in one conversation run in order. IRC message IDs deduplicate a
@@ -284,7 +306,9 @@ message that arrives twice, for example from a history replay.
   again for each TAGMSG and at the socket write, as for reply lines; once
   the nick changes hands, typing stops for that turn.
 - With `labeled-response`, each line waits for the server's labeled echo or
-  `ACK`; a labeled error fails the delivery.
+  `ACK`; a labeled error fails the delivery. A line that is still in the
+  send queue at the confirmation deadline (20 seconds) is removed and never
+  written later, so a delivery that already failed cannot send it twice.
 - `[[pogo:silent]]` posts nothing. `[[pogo:react:NAME]]` sends a
   `+draft/react` TAGMSG to the request's message.
 - A reply is stored before delivery. A failed delivery retries the stored
@@ -440,6 +464,144 @@ them:
   message's server time for that channel, or for the sender's nick in a
   direct message. Messages that are not admitted are not marked read.
 
+## DM audit
+
+The DM audit gives the operator a live copy of every direct message (DM)
+that the ship's agents receive or send. Set it per registration:
+
+```json
+"audit": { "channel": "#agent-dms" }
+```
+
+Without `audit`, nothing is mirrored. The captain connection joins the
+channel and posts one entry per DM:
+
+```text
+[dm] jack → galactica-captain: status of the fuel tanks?
+[dm] galactica-captain → jack: All tanks at 40%.
+[dm] jackie (jack) → galactica-captain: same person, other nick
+[dm] ghost (no account) → galactica-chief: hello?
+[dm] * jack waves (→ galactica-captain)
+[dm 2026-11-14T10:42Z] jack → galactica-captain: sent while Pogo was down
+```
+
+**What is mirrored**
+
+- Incoming: every PRIVMSG and NOTICE from a user to the nick of the captain
+  or of a crew connection, whether or not it starts a turn.
+- Outgoing: every PRIVMSG and NOTICE that a ship connection sends to a nick
+  and the server confirms: agent replies, Pogo's own notices (for example
+  "attachment unavailable" or the stop notice), FILEHOST link lines and
+  `dmPolicy` redirects.
+- The sender or recipient shows as its nick. When its account differs, the
+  account follows in parentheses; `(no account)` marks a user who is not
+  logged in. The agent shows as its account.
+- A message that [catch-up](#catch-up) replays (it arrived while Pogo was
+  stopped or disconnected) shows its server time: `[dm <time>]`. Message
+  IDs prevent a second entry for the same message.
+
+**What is not mirrored**
+
+- Typing (`+typing`) and reactions (`+draft/react`): both are TAGMSGs.
+  Reactions are left out on purpose, to keep the mirror to text; a Stop
+  reaction in a DM is visible in the stop notice that follows it.
+- Service traffic: anything to or from a nick that ends in `Serv` (any
+  letter case: NickServ, ChanServ, HostServ, …), nicks that start with `*`
+  (bouncer modules such as `*status`), and server notices.
+- CTCP other than ACTION (VERSION, PING, TIME, …). ACTION shows as
+  `[dm] * <sender> <text> (→ <recipient>)`.
+- Credentials. When any line of a DM (or of a multiline batch) looks like
+  a credential or services traffic, the whole entry is withheld and reads
+  `[not mirrored: may contain credentials]`: services commands with an
+  argument (`identify …`, `register …`, `login …`, `ghost …`, `passwd …`,
+  `set password …`, also after `/msg <nick>`), messages to a `*Serv`
+  (`/msg NickServ …`, `nickserv …`), services aliases (`/ns …`, `/cs …`),
+  private keys, provider tokens (`xox…`, `sk-…`, `ghp_…`, …),
+  `Bearer`/`Basic` values and `password=`/`token:`-style pairs. The rule is a heuristic: it errs on the
+  side of withholding, and it cannot recognise a bare password.
+- DMs that another client of the same account sends (for example the
+  operator logged in as the captain account): Pogo does not see them as
+  sent. Ergo's stored DM history (see below) has them.
+
+**Rules**
+
+- The audit channel is never a conversation: no message in it starts a
+  turn (mentions, all-calls and replies included), no reaction in it stops
+  one, and catch-up never replays it. Pogo never mirrors what it posts
+  there, so the mirror cannot loop. `config check` refuses an audit channel
+  that is a captain or crew channel of this registration, or a ship channel
+  of any other IRC registration, on any server: host names and ports do not
+  prove two servers distinct. The comparison uses one key that is at least
+  as coarse as every CASEMAPPING Pogo knows (`widestFold` in
+  `src/irc/protocol.ts`, built on the runtime `unicode` fold): Unicode
+  compatibility forms, lower, upper and lower case again, then rfc1459.
+  So `#Ärger` equals `#ärger`, and `#STRAẞE`, `#straße` and `#STRASSE`
+  are one name.
+- Each entry stays whole. A long entry splits into lines like a reply. A
+  multiline DM is one entry: with `draft/multiline` it is posted as one
+  batch, otherwise as consecutive lines.
+- The mirror never delays or blocks the message it copies. Entries wait in
+  a queue of 256 and go out one at a time on the captain connection's
+  low-priority lane, after replies and other traffic. When the captain is
+  offline or not in the channel, entries wait. A full queue drops new
+  entries, and an entry that waits longer than the confirmation timeout
+  (20 seconds) behind other traffic is removed from the send queue unsent;
+  both count as dropped. Pogo logs one warning with the count at most every
+  10 seconds, and a final count at shutdown. A post that the server refuses or does
+  not confirm is dropped and logged. Logs carry counts only, never text.
+- The mirror is a convenience view, not the record. Exactly-once is not
+  guaranteed: a dropped entry is lost, and a crash can repeat one. A DM
+  between two connections of the same ship shows twice (once per side).
+
+**Crew connections and the audit channel**
+
+Crew connections never join the audit channel. Each crew connection hands
+its DM entries to the ship, and the captain connection alone joins the
+channel and posts them. This keeps the crew rule unchanged: a crew
+connection joins only its `crew[].channels`, which must be captain
+channels.
+
+The other design would give every crew connection a separately validated
+exception to join the audit channel and post its own entries. It was not
+chosen:
+
+|                         | Captain posts (chosen)                                   | Each connection posts                   |
+| ----------------------- | -------------------------------------------------------- | --------------------------------------- |
+| Crew channel rule       | Unchanged                                                | New exception for every crew connection |
+| Joins and invite grants | One account                                              | Every ship account                      |
+| Entry attribution       | Pogo's text (`[dm] galactica-chief → …`)                 | The server's source nick as well        |
+| Captain offline         | Crew entries wait in the queue (or drop when it is full) | Each connection posts on its own        |
+| Send rate               | Shares the captain's throttle (low priority)             | Each connection's throttle              |
+
+Attribution in the chosen design comes from Pogo's text, not from the
+poster's account. That is acceptable because only Pogo posts the entries,
+and Ergo's stored DM history keeps the authoritative copy.
+
+**Redirect policy**
+
+`"dmPolicy": "redirect"` (default `"agent"`) stops agents from acting on
+DMs. No DM starts a turn. Every connection, captain and crew, answers a DM
+from a logged-in account with a NOTICE, `Please ask in #ship-galactica`
+(its first channel); a DM without an account gets no answer, so rotating
+nicks cannot make Pogo flood. The mirror still records every DM and
+answer. Pogo answers each account at most once every 5 minutes per
+connection, never answers a NOTICE (so two bots cannot answer each
+other), and never answers services or CTCP other than ACTION. Channel
+messages are not affected.
+
+**Server setup (Ergo)**
+
+- Register the channel with the operator as founder and make it private:
+  `/CS REGISTER #agent-dms`, then `/MODE #agent-dms +Cinst`.
+- Give the captain an invite exception: `/MODE #agent-dms +I
+  galactica-captain!*@*` (a `galactica-*!*@*` mask also covers crew, which
+  this design does not need). Everyone in the channel reads every DM of
+  the ship: grant only the operator.
+- For a complete record, store DMs on the server (Ergo persistent
+  history with `direct-messages: mandatory` and a retention period). The
+  mirror shows DMs while Pogo runs; the server keeps all of them.
+- `audit` and `dmPolicy` changes need a restart; SIGHUP reload refuses them.
+
 ## Crew on IRC
 
 Each crew member can have its own IRC account, for example
@@ -462,7 +624,7 @@ accounts.
   be in the channel with operator rights (Ergo gives the founder `+q`).
 - For a lasting grant that does not need the captain online, the channel
   founder can set an invite exception, for example
-  `/MODE #galactica +I galactica-chief!*@*`. With Ergo's
+  `/MODE #ship-galactica +I galactica-chief!*@*`. With Ergo's
   `force-nick-equals-account`, the nick is the account.
 - To remove a crew member from a channel, remove it from the config (or
   ban the account); a kicked crew connection rejoins on its next retry.
@@ -500,7 +662,7 @@ crew) is a **ship message**:
   cap is that value times the ship agents configured in it: the captain
   plus each crew member whose `channels` list it, with names folded like
   every other channel key. For example, a captain and two crew in
-  `#galactica` give 180 ship messages an hour; a channel with only the
+  `#ship-galactica` give 180 ship messages an hour; a channel with only the
   captain gives 60. The count is per channel across the whole ship, not
   per sender. A direct message from a crew account to the captain has two
   participants: its cap is the per-agent value times 2 (default 120), counted

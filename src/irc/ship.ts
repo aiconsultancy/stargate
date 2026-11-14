@@ -3,7 +3,8 @@ import { type BackendConfig, type IrcConfig, secret } from "../config";
 import type { GatewayConfig, GatewayTransport } from "../gateway";
 import { backendFingerprint, type Identity } from "../routing";
 import type { Store } from "../store";
-import { IrcClient, type IrcTiming } from "./client";
+import { ctcp, IrcAudit, serviceNick } from "./audit";
+import { IrcClient, type IrcTiming, Recent } from "./client";
 import { IrcDelivery } from "./delivery";
 import { Filehost, filehostURL } from "./filehost";
 import { fold, type IrcMessage, sourceNick } from "./protocol";
@@ -94,7 +95,12 @@ type ShipOptions = {
   env?: NodeJS.ProcessEnv;
   timing?: Partial<IrcTiming>;
   readyMs?: number;
+  /** DM audit queue bound (default 256 entries). */
+  auditQueue?: number;
 };
+
+/** dmPolicy redirect: one answer per sender and connection in this time. */
+const redirectCooldownMs = 5 * 60_000;
 
 /** One configured connection of a ship: the captain or one crew member. */
 type ShipMember = {
@@ -150,6 +156,7 @@ function connection(config: IrcConfig, member: ShipMember) {
     config.server,
     config.features,
     config.channels,
+    config.audit ?? null,
     member,
   ]);
 }
@@ -220,6 +227,13 @@ export class IrcShip {
   private open: () => boolean = () => false;
   private started = false;
   private filehostConflict = false;
+  /**
+   * DM audit mirror on the captain connection, shared by every connection
+   * of the ship: crew hand their DMs to it and never join the channel.
+   */
+  private readonly audit: IrcAudit | undefined;
+  /** dmPolicy redirect: last answer per connection and sender. */
+  private readonly redirected = new Recent<number>(4096);
 
   private constructor(
     private config: IrcConfig,
@@ -232,6 +246,16 @@ export class IrcShip {
     this.current = shipMembers(config).map((member) =>
       this.adopt(this.build(member, config, env)),
     );
+    const captain = this.current[0];
+    this.audit =
+      config.audit && captain
+        ? new IrcAudit(
+            captain.client,
+            config.audit.channel,
+            log.child({ irc: config.id }),
+            options.auditQueue,
+          )
+        : undefined;
   }
 
   /** Reads the CA file and password references; never logs them. */
@@ -262,7 +286,17 @@ export class IrcShip {
     if (this.started) return;
     this.started = true;
     this.open = open;
+    if (this.audit) this.track(this.audit.run(this.controller.signal));
     for (const registration of this.current) this.run(registration);
+  }
+
+  /** Count a loop until it ends, so `close` waits for it. */
+  private track(loop: Promise<void>) {
+    this.loops.add(loop);
+    const ended = () => {
+      this.loops.delete(loop);
+    };
+    loop.then(ended, ended);
   }
 
   /**
@@ -378,11 +412,7 @@ export class IrcShip {
       AbortSignal.any([this.controller.signal, lifetime.controller.signal]),
     );
     lifetime.loop = loop;
-    this.loops.add(loop);
-    const ended = () => {
-      this.loops.delete(loop);
-    };
-    loop.then(ended, ended);
+    this.track(loop);
   }
 
   /**
@@ -427,6 +457,10 @@ export class IrcShip {
         nick: member.nick,
         channels: member.channels,
         ...(member.role === "crew" ? { captainChannels: config.channels } : {}),
+        // Only the captain joins the audit channel; crew hand it their DMs.
+        ...(member.role === "captain" && config.audit
+          ? { auditChannel: config.audit.channel }
+          : {}),
         multiline: config.features.multiline,
         catchUp: config.features.catchUp,
         presence: {
@@ -447,10 +481,16 @@ export class IrcShip {
         // Chathistory replays use the same rules; event IDs deduplicate.
         message: (message, replay) => {
           if (detached()) return;
+          this.mirrorIncoming(identity, client, message, replay);
+          // The audit channel is never a conversation: no turn, no Stop.
+          if (this.isAuditChannel(client, message.params[0] ?? "")) return;
           // A replayed reaction is old intent: it never stops a turn.
           if (message.command === "TAGMSG") {
             if (!replay) this.stop(registration, message);
           } else this.receive(identity, client, message, filehost, replay);
+        },
+        sent: (sent) => {
+          if (!detached()) this.mirrorOutgoing(identity, client, sent);
         },
         invite: (channel) => {
           if (detached()) return;
@@ -577,6 +617,15 @@ export class IrcShip {
     const time = message.tags.get("time");
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
     if (replay && (!time || Date.parse(time) < oldest)) return;
+    if (
+      this.config.dmPolicy === "redirect" &&
+      !client.isChannel(message.params[0] ?? "")
+    ) {
+      // Never a turn: answer with the ship channel, act on nothing.
+      this.advance(member, client, message);
+      this.redirect(member, client, message);
+      return;
+    }
     const admission = routeIrcMessage(message, {
       config: this.config,
       member,
@@ -645,6 +694,113 @@ export class IrcShip {
     }
   }
 
+  /** The DM audit channel of this ship, under the server's case folding. */
+  private isAuditChannel(client: IrcClient, name: string) {
+    const audit = this.config.audit?.channel;
+    return (
+      audit !== undefined &&
+      client.isChannel(name) &&
+      client.fold(name) === client.fold(audit)
+    );
+  }
+
+  /**
+   * Mirror a PRIVMSG or NOTICE that a user sent to this connection's nick.
+   * Server notices (no `nick!user@host` source) and own echoes are not DMs.
+   * Replays keep the catch-up age limit; message IDs skip duplicates.
+   */
+  private mirrorIncoming(
+    member: IrcMember,
+    client: IrcClient,
+    message: IrcMessage,
+    replay: boolean,
+  ) {
+    const audit = this.audit;
+    if (
+      !audit ||
+      (message.command !== "PRIVMSG" && message.command !== "NOTICE")
+    )
+      return;
+    const [target = "", text = ""] = message.params;
+    if (
+      client.isChannel(target) ||
+      client.fold(target) !== client.fold(client.nick)
+    )
+      return;
+    if (!message.source?.includes("!")) return;
+    const nick = sourceNick(message.source);
+    if (client.fold(nick) === client.fold(client.nick)) return;
+    const time = message.tags.get("time");
+    const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
+    if (replay && (!time || Date.parse(time) < oldest)) return;
+    const account = message.tags.get("account");
+    audit.record(
+      {
+        direction: "in",
+        agent: member.account,
+        // With account-tag, a missing tag means not logged in.
+        peer: { nick, account: account && account !== "*" ? account : null },
+        text,
+        ...(replay && time ? { replayed: time } : {}),
+      },
+      message.tags.get("msgid"),
+    );
+  }
+
+  /** Mirror a confirmed PRIVMSG or NOTICE that this connection sent a nick. */
+  private mirrorOutgoing(
+    member: IrcMember,
+    client: IrcClient,
+    sent: { target: string; text: string },
+  ) {
+    if (!this.audit || this.isAuditChannel(client, sent.target)) return;
+    const account = client.knownAccount(sent.target);
+    this.audit.record({
+      direction: "out",
+      agent: member.account,
+      peer: { nick: sent.target, ...(account ? { account } : {}) },
+      text: sent.text,
+    });
+  }
+
+  /**
+   * dmPolicy redirect: answer a direct PRIVMSG with a NOTICE that names
+   * the connection's ship channel. Only a logged-in account is answered,
+   * once per account in `redirectCooldownMs`, so rotating nicks cannot
+   * flood the connection. Never a NOTICE in reply to a NOTICE (so two bots
+   * cannot answer each other), never to services, CTCP other than ACTION
+   * or this connection's own account.
+   */
+  private redirect(member: IrcMember, client: IrcClient, message: IrcMessage) {
+    if (message.command !== "PRIVMSG") return;
+    const [target = "", text = ""] = message.params;
+    if (client.fold(target) !== client.fold(client.nick)) return;
+    const command = ctcp(text);
+    if (command && command.verb !== "ACTION") return;
+    if (!message.source?.includes("!")) return;
+    const nick = sourceNick(message.source);
+    const account = message.tags.get("account");
+    if (!account || account === "*") return;
+    if (
+      serviceNick(nick) ||
+      client.fold(nick) === client.fold(client.nick) ||
+      client.fold(account) === client.fold(member.account)
+    )
+      return;
+    const channel = member.channels[0];
+    if (!channel) return;
+    const key = `${member.id} ${client.fold(account)}`;
+    const now = Date.now();
+    const last = this.redirected.get(key);
+    if (last !== undefined && now - last < redirectCooldownMs) return;
+    this.redirected.set(key, now);
+    client
+      .send("NOTICE", [nick, `Please ask in ${channel}`])
+      .catch(() =>
+        this.log.warn({ irc: member.id }, "IRC DM redirect not sent"),
+      );
+  }
+
   /** A Stop reaction from a person stops that request's active turn. */
   private stop(registration: IrcRegistration, message: IrcMessage) {
     if (!this.open() || !this.config.features.reactions) return;
@@ -669,6 +825,13 @@ export class IrcShip {
     numeric: string,
   ) {
     const captain = this.current[0];
+    if (this.isAuditChannel(client, channel)) {
+      this.log.warn(
+        { irc: member.id },
+        "IRC DM audit channel join refused; audit lines wait",
+      );
+      return;
+    }
     if (member.role !== "crew" || numeric !== "473" || !captain) {
       this.log.warn({ irc: member.id }, "IRC channel join refused");
       return;

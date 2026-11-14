@@ -2,7 +2,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { crewActivitySchema } from "./activity";
 import { cronjobsSchema } from "./cronjob-config";
-import { fold } from "./irc/protocol";
+import { fold, widestFold } from "./irc/protocol";
 import {
   mentionNameSchema,
   mentionNamesSchema,
@@ -167,6 +167,7 @@ const ircChannel = z
     "IRC channel names cannot contain control characters",
   );
 const loopbackHosts = new Set(["127.0.0.1", "::1"]);
+
 export const defaultAllCallWords = ["all hands", "all crew", "everyone"];
 
 const ircServerSchema = z
@@ -347,6 +348,18 @@ export const ircSchema = z
         "spokenMentions is not supported on IRC",
       )
       .optional(),
+    /**
+     * DM audit mirror: the captain connection posts a copy of every direct
+     * message that the captain or a crew connection receives or sends to
+     * this channel. Absent is off. The channel is never a conversation.
+     */
+    audit: z.strictObject({ channel: ircChannel }).optional(),
+    /**
+     * `agent`: the captain answers direct messages (crew ignore them).
+     * `redirect`: every connection answers a direct message with a NOTICE
+     * that points to its ship channel and never acts on its content.
+     */
+    dmPolicy: z.enum(["agent", "redirect"]).default("agent"),
     backend: backendSchema,
     concurrency: z.number().int().min(1).max(32).default(4),
     turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
@@ -383,6 +396,14 @@ export const ircSchema = z
     const ship = new Set(accounts.map(lower));
     if (irc.access.peerCaptains.some((account) => ship.has(lower(account))))
       issue("peerCaptains must not list this ship's own accounts");
+    const audit = irc.audit?.channel;
+    if (
+      audit !== undefined &&
+      [...irc.channels, ...irc.crew.flatMap((member) => member.channels)].some(
+        (channel) => widestFold(channel) === widestFold(audit),
+      )
+    )
+      issue("The IRC audit channel must not be a captain or crew channel");
   });
 
 export type IrcConfig = z.infer<typeof ircSchema>;
@@ -457,6 +478,21 @@ export const configSchema = z
         code: "custom",
         message: "Duplicate pinned OpenCode sessionID across IRC registrations",
       });
+    // An audit channel is never a conversation in any registration: another
+    // ship listing it would answer mirrored lines. Host names and ports do
+    // not prove two servers distinct (aliases, addresses, proxies), so every
+    // IRC registration counts, under the widest name folding.
+    const shipChannels = new Set(
+      irc.flatMap((registration) => registration.channels.map(widestFold)),
+    );
+    for (const registration of irc) {
+      const audit = registration.audit?.channel;
+      if (audit !== undefined && shipChannels.has(widestFold(audit)))
+        context.addIssue({
+          code: "custom",
+          message: `IRC audit channel of ${registration.id} is a ship channel of an IRC registration`,
+        });
+    }
     const ircSecrets = irc.flatMap((registration) => [
       registration.passwordEnv,
       ...registration.crew.map((member) => member.passwordEnv),
