@@ -156,6 +156,11 @@ export async function createBackend(
       return new OpenCodeBackend(config);
     case "pi-durable":
       return PiDurableBackend.open(config, context);
+    case "claude": {
+      // Loaded on demand: the SDK bundle is large and most bots do not use it.
+      const { ClaudeBackend } = await import("./backends/claude");
+      return ClaudeBackend.open(config, context);
+    }
     case "module": {
       const plugin: unknown = await import(pathToFileURL(config.module).href);
       if (

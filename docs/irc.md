@@ -635,7 +635,8 @@ A crew IRC connection is an ordinary unpinned registration: one session
 per channel, using its own `backend` (normally the member's native agent
 definition and worktree). It does **not** prompt the crew member's task
 session that the crew plugin manages. Pogo refuses a crew backend with a
-pinned `sessionID`.
+pinned `sessionID`. A crew member can also run on Claude Code with a
+`claude` backend; see the [Galactica example](claude.md#set-up-through-cliproxyapi).
 
 Reason: the crew plugin reads a task result from the final answer that
 follows the task's input. An outside input after it makes the result
@@ -722,7 +723,7 @@ crew member asks the captain to relay:
   comes from the host, so a session cannot send as another member;
 - crew mail also needs an originating captain task or a validated reply,
   which an IRC session does not have;
-- Pi Durable crew IRC registrations get no crew tools at all.
+- Pi Durable and Claude crew IRC registrations get no crew tools at all.
 
 Giving IRC sessions these tools would need a new crew identity binding
 (IRC session → member) in the crew plugin. That is not implemented.

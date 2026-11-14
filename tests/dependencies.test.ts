@@ -19,6 +19,16 @@ test("Pi runtime packages stay pinned to one release", async () => {
   expect(new Set(versions).size).toBe(1);
 });
 
+test("Claude Agent SDK stays pinned to one exact release", async () => {
+  const { dependencies } = z
+    .object({ dependencies: z.record(z.string(), z.string()) })
+    .parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
+  // The SDK bundles its Claude Code CLI; a range would change it silently.
+  expect(dependencies["@anthropic-ai/claude-agent-sdk"]).toMatch(
+    /^\d+\.\d+\.\d+$/,
+  );
+});
+
 test("dependency provenance checks every page, signature, count, and current head", async () => {
   const workflow = z
     .object({

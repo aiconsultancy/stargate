@@ -2,11 +2,11 @@
 
 One Slack gateway. Multiple bot registrations. Pluggable agent backends.
 
-Pogo connects Slack to **OpenCode V2** over its TypeScript client or embeds
-**Pi Durable** directly. Each bot has separate Slack credentials, access rules,
-agent settings, and sessions. Captains use one durable session across chat
-sources; ordinary bots can use separate thread sessions. No public HTTP
-endpoint is required.
+Pogo connects Slack to **OpenCode V2** over its TypeScript client, embeds
+**Pi Durable** directly, or runs **Claude Code** through the Claude Agent SDK.
+Each bot has separate Slack credentials, access rules, agent settings, and
+sessions. Captains use one durable session across chat sources; ordinary bots
+can use separate thread sessions. No public HTTP endpoint is required.
 
 ## Quick start
 
@@ -453,6 +453,20 @@ for credential or OS-level isolation. OpenCode header mappings can differ per
 bot. The captain can also manage [Pi Durable crew members](docs/agents/default-opencode.md#pi-durable-crew),
 without another Slack app or OpenCode root session.
 
+### Claude Agent SDK
+
+Pogo pins `@anthropic-ai/claude-agent-sdk` to one exact version and runs its
+bundled Claude Code CLI for each turn. `backend.type: "claude"` works for
+Slack bots, IRC captains and IRC crew members. The model is reached only
+through an explicit `provider: { baseURL, apiKeyEnv }`, such as the local
+CLIProxyAPI at `http://127.0.0.1:8317/v1`; there is no native login or
+API-key fallback. Tools default to none; `allowedTools` lists the permitted
+tool names, and no other tool exists for the model. Settings files,
+`CLAUDE.md` and MCP servers are not loaded by default. The child process gets
+a minimal environment and a private `CLAUDE_CONFIG_DIR`. `directory` is a
+starting location, not a sandbox. See [Claude Agent SDK backend](docs/claude.md)
+for setup, permissions, recovery and limits.
+
 ### Custom adapters
 
 Use `backend.type: "module"`, an absolute `module` path, and an `options`
@@ -556,6 +570,8 @@ and the one-time migration.
   requires an explicit idle migration. One pinned session can have only one
   Slack bot registration, at most one IRC registration and one Pogo process
   owner; each transport delivers only replies to its own inputs.
+- Claude Agent SDK backends deliver only each turn's own reply: no
+  transcript catch-up, dashboard history or pinned captain session.
 - Responses render Markdown, with no tool output or reasoning, at most 60,000
   Unicode characters; OpenCode transcript replies are not clipped. Streaming,
   `/cron`, and its interactive controls are supported. File transport and
@@ -646,8 +662,10 @@ Dependabot does not update the tool pins in `mise.toml`; update them separately.
 
 Tests cover routing, multi-bot isolation,
 access denial, SQLite persistence/locking, queue ordering, retries, interrupted
-turns, setup safety, systemd escaping, the OpenCode HTTP contract, and a real
-Pi Durable session/store reopen. No Slack or paid provider calls run in tests.
+turns, setup safety, systemd escaping, the OpenCode HTTP contract, a real
+Pi Durable session/store reopen, and the Claude Agent SDK with a fake CLI and
+the pinned real CLI against a loopback fixture. No Slack or paid provider
+calls run in tests.
 Live Slack and model verification still requires your credentials.
 
 PIPA was evaluated as a reference for Slack setup and thread behavior.

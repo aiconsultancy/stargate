@@ -37,6 +37,76 @@ export const piDurableBackendSchema = z.strictObject({
   tools: z.enum(["none", "coding"]).default("none"),
 });
 
+/**
+ * Built-in Claude Code tools that a `claude` backend may enable. Others, such
+ * as scheduling, notification or plan-mode tools, need a reviewed change.
+ * Tests check that the pinned SDK still defines every name.
+ */
+export const claudeToolNames = [
+  "Agent",
+  "Bash",
+  "Edit",
+  "Glob",
+  "Grep",
+  "LSP",
+  "NotebookEdit",
+  "Read",
+  "TodoWrite",
+  "WebFetch",
+  "WebSearch",
+  "Write",
+] as const;
+/**
+ * Bare tool names only. A scoped rule such as `Read(./src/**)` is refused:
+ * Claude Code permits reads anywhere in its working directory regardless of
+ * the scope, so the rule would promise a limit that nothing enforces.
+ */
+const claudeToolsSchema = z
+  .array(z.enum(claudeToolNames))
+  .max(claudeToolNames.length)
+  .refine((tools) => new Set(tools).size === tools.length, {
+    message: "Duplicate allowedTools entry",
+  });
+
+/**
+ * Claude Agent SDK backend. The model is reached only through the explicit
+ * proxy `provider`; there is no native login or API-key fallback.
+ */
+export const claudeBackendSchema = z.strictObject({
+  type: z.literal("claude"),
+  /** Starting working directory, not a sandbox. */
+  directory: absolutePath,
+  model: z
+    .string()
+    .regex(
+      /^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,127}$/,
+      "Use a proxy model ID such as claude-sonnet-5-5",
+    ),
+  /** Anthropic Messages endpoint ending in `/v1`, as for OpenCode and Pi. */
+  provider: piProviderSchema.refine(
+    (provider) => provider.baseURL.endsWith("/v1"),
+    "Claude provider baseURL must end with /v1",
+  ),
+  effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+  /** Appended to Claude Code's own system prompt. */
+  systemPrompt: z.string().trim().min(1).max(64_000).optional(),
+  /** The only tools the model can see and run; every other one is absent. */
+  allowedTools: claudeToolsSchema.default([]),
+  /**
+   * Filesystem settings to load from `directory`: `project` loads
+   * `.claude/settings.json` and CLAUDE.md, `local` loads
+   * `.claude/settings.local.json`. Empty by default.
+   */
+  settingSources: z
+    .array(z.enum(["project", "local"]))
+    .max(2)
+    .refine((sources) => new Set(sources).size === sources.length, {
+      message: "Duplicate settingSources entry",
+    })
+    .default([]),
+  maxTurns: z.number().int().min(1).max(500).default(50),
+});
+
 // HTTP is permitted only for Tailscale names/addresses. Public routes need TLS.
 const pairingOrigin = z
   .url()
@@ -105,6 +175,7 @@ export const backendSchema = z.discriminatedUnion("type", [
       .default([{ action: "*", resource: "*", effect: "deny" }]),
   }),
   piDurableBackendSchema,
+  claudeBackendSchema,
   z.strictObject({
     type: z.literal("module"),
     module: absolutePath,

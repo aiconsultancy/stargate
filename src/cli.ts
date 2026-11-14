@@ -69,7 +69,7 @@ Required:
   --bot-token-env NAME    Environment reference for xoxb- token
   --allowed-users U...,W...  Human Slack IDs, or '*' for all workspace humans
   --allowed-channels C...,G...,D...  Channel/DM IDs, or '*' for all accessible channels/DMs
-  --backend TYPE         opencode or pi-durable
+  --backend TYPE         opencode or pi-durable (claude: see docs/claude.md)
   --directory PATH       Backend working directory (resolved to absolute)
 OpenCode:
   --url URL              Server URL (default: http://localhost:4096)
@@ -435,6 +435,10 @@ export async function runCli(args: string[]): Promise<CliResult> {
       await setupWizard(configPath);
     else {
       if (!v.directory) throw new Error("--directory is required.");
+      if (v.backend === "claude")
+        throw new Error(
+          "Add claude backends to the configuration JSON; see docs/claude.md.",
+        );
       if (v.backend === "opencode" && Boolean(v.provider) !== Boolean(v.model))
         throw new Error(
           "OpenCode --provider and --model must be supplied together.",

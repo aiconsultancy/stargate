@@ -15,7 +15,7 @@ export type ShipSummary = {
   /** Configured bot ID; one bot registration is one ship. */
   id: string;
   name: string;
-  backend: "opencode" | "pi-durable" | "module";
+  backend: "opencode" | "pi-durable" | "claude" | "module";
   agent?: string;
   /** Null when this backend has no crew or its status read failed. */
   crew: { total: number; busy: number } | null;
@@ -58,7 +58,7 @@ export type ShipView = {
       mentionOnly: boolean;
     };
     backend: {
-      type: "opencode" | "pi-durable" | "module";
+      type: "opencode" | "pi-durable" | "claude" | "module";
       directory?: string;
       agent?: string;
       model?: string;

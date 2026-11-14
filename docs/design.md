@@ -7,9 +7,12 @@ One process
   ├─ Bot A: Socket Mode + Web API → routing/access → durable queue
   │                                                ↓
   │                                       OpenCode adapter → V2 server
-  └─ Bot B: Socket Mode + Web API → routing/access → durable queue
+  ├─ Bot B: Socket Mode + Web API → routing/access → durable queue
+  │                                                ↓
+  │                                       Pi Durable adapter → SDK/SQLite
+  └─ Bot C: Socket Mode + Web API → routing/access → durable queue
                                                    ↓
-                                          Pi Durable adapter → SDK/SQLite
+                                          Claude adapter → Agent SDK → CLI
 ```
 
 `config.ts` validates input and resolves environment references. `setup.ts`
@@ -146,8 +149,23 @@ adapter's latest submitted prompt input for that session. `watch` reports
 sessions that settle outside a prompt and reports each (re)connection. Both
 exclude reasoning, tool data, user and synthetic messages, and system text.
 OpenCode implements them with message pages, session idle state, and the
-client's shared event stream. Pi Durable and existing modules omit them and
-keep the prompt-only contract. See [session transcript](#session-transcript).
+client's shared event stream. Pi Durable, Claude and existing modules omit
+them and keep the prompt-only contract. See [session transcript](#session-transcript).
+
+The Claude adapter starts one Claude Code CLI per turn through the pinned
+Agent SDK, in its own process group, with a minimal environment and a private
+`CLAUDE_CONFIG_DIR` per namespace. `createSession` allocates a UUID; the
+first turn creates that native session and later turns resume it from the
+namespace's transcript directory. Previews come from streamed main-agent
+text blocks; the answer comes from completed assistant messages, never from
+error frames. When the CLI exits, is cancelled or lingers after its result,
+Pogo stops its process group and every process that carries the turn's random
+environment marker (Claude Code runs Bash in separate sessions), and forces
+survivors after a grace period. Each signal follows a synchronous check of
+the process's start time, user IDs and marker (no pidfd API is available).
+Records of running CLIs let `interrupt` stop what an earlier Pogo process
+left: the group only while its recorded leader still matches, other
+processes only by that check. See [Claude backend](claude.md).
 
 `startActivity` is an optional, request-scoped reporting capability. Its
 `ActivityWatch` reads bounded visible journal facts and can finish or cancel
@@ -213,7 +231,8 @@ An explicit OpenCode `sessionID` pin is excluded from this hash. It binds the
 existing captain without changing thread admission or cron scope. Other
 backend settings still select separate namespaces.
 Changing credentials for the same installation does not discard sessions.
-Changing backend settings selects a new session namespace and Pi database.
+Changing backend settings selects a new session namespace, Pi database and
+Claude configuration directory.
 
 One shared SQLite database stores all registrations' queue rows. Private Pi
 storage lives in per-bot/per-backend directories. This is logical separation,
@@ -484,8 +503,9 @@ behavior, and required Slack app configuration.
 
 ## Initial ceilings
 
-The initial release supports text conversations, explicit allowlists, two built-in
-adapters, trusted module adapters, local setup, and user services. It does not
+The initial release supported text conversations, explicit allowlists, two
+built-in adapters (now three, with Claude), trusted module adapters, local
+setup, and user services. It does not
 add file transfer, tool-event streaming, interactive approvals, OAuth SaaS
 installation, clustering, or a plugin discovery/package system. Those require
 specific use cases before extending these boundaries.

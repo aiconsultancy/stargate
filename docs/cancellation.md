@@ -13,8 +13,10 @@ even if the bot allows all users. A stale button cannot stop a later request.
 Pogo saves the stop request before it acknowledges the interaction. It then
 aborts the request's signal. The built-in adapters first withdraw their own
 queued input. They interrupt session execution only when that input was placed:
-OpenCode checks history; Pi Durable uses its submission record. Custom adapters
-must honour the existing cancellation contract.
+OpenCode checks history; Pi Durable uses its submission record. The Claude
+adapter stops the turn's Claude Code process group and the tool processes
+marked for that turn. Custom adapters must honour the existing cancellation
+contract.
 
 The reply becomes a stop notice after the backend call settles. With a
 transcript-capable backend (OpenCode), public text that settled before the
