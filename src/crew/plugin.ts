@@ -17,6 +17,7 @@ import { CrewCron } from "./cron";
 import { CrewEngine, crewInputSchema, mailInputSchema } from "./engine";
 import { CrewHistory, historyInputSchema } from "./history";
 import { workingAgreementContext } from "./instructions";
+import { CrewIrc } from "./irc-rpc";
 import { journalInputSchema } from "./journal";
 import { CrewMaintenance } from "./maintenance";
 import { dmInputSchema } from "./messaging";
@@ -148,6 +149,14 @@ const plugin = Plugin.define({
           report(context.signal, async () => maintenance.delivered(input)),
         close: (input, context) =>
           report(context.signal, async () => maintenance.close(input)),
+      });
+      await register(CrewIrc, {
+        bind: (input, context) =>
+          report(context.signal, () =>
+            engine.bindIrcSession(input, context.signal),
+          ),
+        outbox: (input, context) =>
+          report(context.signal, async () => engine.ircOutbox(input)),
       });
       await register(CrewReporting, {
         quota: (_input, context) =>

@@ -403,7 +403,8 @@ test("irc ship: a DM reply never goes to a nick another account now holds", asyn
 }, 15_000);
 
 test("irc ship: an all-call reaches the captain and every crew member", async () => {
-  const { fake, backends } = await setup();
+  // Turn order and timing are covered in irc-allcall.test.ts.
+  const { fake, backends } = await setup({}, { allCallStaggerMs: 0 });
   fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",

@@ -1,22 +1,28 @@
+import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { type BackendConfig, type IrcConfig, secret } from "../config";
+import { type OutboxPage, outboxMaxAgeMs } from "../crew/irc-rpc";
 import type { GatewayConfig, GatewayTransport } from "../gateway";
 import { backendFingerprint, type Identity } from "../routing";
 import type { Store } from "../store";
-import { ctcp, IrcAudit, serviceNick } from "./audit";
+import { ctcp, IrcAudit, sensitive, serviceNick } from "./audit";
 import { IrcClient, type IrcTiming, Recent } from "./client";
+import { type CrewLink, crewLink } from "./crew-link";
 import { IrcDelivery } from "./delivery";
 import { Filehost, filehostURL } from "./filehost";
-import { fold, type IrcMessage, sourceNick } from "./protocol";
+import { cleanText, fold, type IrcMessage, sourceNick } from "./protocol";
 import {
+  agentTurn,
   type Fold,
   type IrcMember,
   ircAllowed,
   ircNote,
   routeIrcMessage,
   routeIrcStop,
+  shipAccounts,
   withinLimits,
 } from "./routing";
+import { ircLines } from "./text";
 
 /** Everything the runtime needs to run one IRC connection's gateway. */
 export type IrcRegistration = IrcMember & {
@@ -97,7 +103,38 @@ type ShipOptions = {
   readyMs?: number;
   /** DM audit queue bound (default 256 entries). */
   auditQueue?: number;
+  /** Crew plugin link; default from the captain backend, null for none. */
+  crewLink?: CrewLink | null;
+  /** pogo_dm outbox poll interval (default 2000 ms). */
+  copyPollMs?: number;
 };
+
+/** An IRC copy of a pogo_dm: its text limit, and how long it is retried. */
+const copyBytes = 1800;
+const copyRetryMs = 10 * 60_000;
+/** Client-only tag of an IRC copy: the pogo_dm's Mesij receipt ID. */
+const copyTag = "+pogo/dm";
+
+/**
+ * IRC text of a pogo_dm copy: marked `[pogo_dm]`, plain text, at most
+ * `copyBytes`, and withheld entirely when it may carry a credential (the
+ * server stores every DM).
+ */
+export function copyText(item: { id: string; text: string }) {
+  const clean = item.text.split("\n").map(cleanText).join("\n").trim();
+  if (sensitive(item.text) || sensitive(clean))
+    return `[pogo_dm ${item.id}: not copied to IRC, it may contain credentials. Read it with pogo_mail.]`;
+  const marked = `[pogo_dm] ${clean}`;
+  if (Buffer.byteLength(marked) <= copyBytes) return marked;
+  const suffix = " … (truncated; full text in pogo_mail)";
+  let cut = marked;
+  while (Buffer.byteLength(cut + suffix) > copyBytes)
+    cut = [...cut].slice(0, -64).join("");
+  return `${cut.trimEnd()}${suffix}`;
+}
+
+/** Crew IRC session binding: one attempt's limit. */
+const bindMs = 10_000;
 
 /** dmPolicy redirect: one answer per sender and connection in this time. */
 const redirectCooldownMs = 5 * 60_000;
@@ -106,6 +143,8 @@ const redirectCooldownMs = 5 * 60_000;
 type ShipMember = {
   id: string;
   role: "captain" | "crew";
+  /** Crew member ID in the team (`crew[].id`); undefined for the captain. */
+  crewID: string | undefined;
   account: string;
   nick: string;
   channels: readonly string[];
@@ -122,6 +161,7 @@ function shipMembers(config: IrcConfig): ShipMember[] {
     {
       id: config.id,
       role: "captain",
+      crewID: undefined,
       account: config.account,
       nick: config.nick ?? config.account,
       channels: config.channels,
@@ -134,6 +174,7 @@ function shipMembers(config: IrcConfig): ShipMember[] {
     ...config.crew.map((member) => ({
       id: `${config.id}-${member.id}`,
       role: "crew" as const,
+      crewID: member.id,
       account: member.account,
       nick: member.nick ?? member.account,
       channels: member.channels,
@@ -175,13 +216,29 @@ function gatewaySettings(config: IrcConfig, member: ShipMember): GatewayConfig {
   };
 }
 
-/** Access rules and notes of one config version, never a later one. */
+/** One channel line a connection saw, for all-call turns. */
+type Said = { time: number; msgid: string | undefined; text: string };
+/** Lines kept per connection and channel, and how long. */
+const saidLimit = 50;
+const saidMs = 30 * 60_000;
+/** Lines and characters per line that an all-call note lists. */
+const sinceLines = 20;
+const sinceChars = 300;
+
+/**
+ * Access rules and notes of one config version, never a later one. An
+ * all-call note lists the channel lines that `said` returns: those after
+ * the all-call's server time, read when the (staggered) turn starts.
+ */
 function shipTransport(
   config: IrcConfig,
   member: IrcMember,
   caseFold: Fold,
+  said: (channel: string, after: number, except: string) => string[] = () => [],
+  sessionReady?: GatewayTransport["sessionReady"],
 ): GatewayTransport {
   return {
+    ...(sessionReady ? { sessionReady } : {}),
     name: "irc",
     key: member.key,
     allowed: (user, channel) =>
@@ -194,7 +251,17 @@ function shipTransport(
       user: job.user,
       ...(job.sender ? { sender: job.sender } : {}),
     }),
-    note: (job) => ircNote(job, config.access.allCallWords),
+    note: (job) =>
+      ircNote(
+        job,
+        config.access.allCallWords,
+        job.textMention &&
+          config.access.allCallWords.includes(job.textMention) &&
+          job.received !== undefined &&
+          job.received !== null
+          ? said(job.channel, job.received, job.thread)
+          : [],
+      ),
   };
 }
 
@@ -234,6 +301,12 @@ export class IrcShip {
   private readonly audit: IrcAudit | undefined;
   /** dmPolicy redirect: last answer per connection and sender. */
   private readonly redirected = new Recent<number>(4096);
+  /** Recent channel lines per connection and folded channel (all-calls). */
+  private readonly said = new Map<string, Said[]>();
+  /** The team's crew plugin, when the captain runs on OpenCode. */
+  private readonly link: CrewLink | undefined;
+  /** IRC sessions bound in this process. */
+  private readonly bound = new Set<string>();
 
   private constructor(
     private config: IrcConfig,
@@ -243,6 +316,13 @@ export class IrcShip {
     private readonly options: ShipOptions,
   ) {
     const env = options.env ?? process.env;
+    // Only an opted-in registration ever calls the crew plugin.
+    this.link =
+      options.crewLink === undefined
+        ? config.crewMessaging.sessions || config.crewMessaging.ircCopies
+          ? crewLink(config.backend, env)
+          : undefined
+        : (options.crewLink ?? undefined);
     this.current = shipMembers(config).map((member) =>
       this.adopt(this.build(member, config, env)),
     );
@@ -287,6 +367,8 @@ export class IrcShip {
     this.started = true;
     this.open = open;
     if (this.audit) this.track(this.audit.run(this.controller.signal));
+    if (this.link && this.config.crewMessaging.ircCopies)
+      this.track(this.copies(this.link, this.controller.signal));
     for (const registration of this.current) this.run(registration);
   }
 
@@ -372,6 +454,8 @@ export class IrcShip {
             next,
             slot.kept,
             slot.kept.client.fold,
+            this.saidSince(slot.kept, slot.kept.client),
+            this.sessionReady(next, slot.member),
           );
           slot.kept.settings = gatewaySettings(next, slot.member);
           return slot.kept;
@@ -481,9 +565,16 @@ export class IrcShip {
         // Chathistory replays use the same rules; event IDs deduplicate.
         message: (message, replay) => {
           if (detached()) return;
+          // Our own pogo_dm copy: delivered natively already, and mirrored
+          // as the sender's outgoing DM. Never a turn, never mirrored twice.
+          if (this.ownCopy(client, message)) {
+            this.advance(identity, client, message);
+            return;
+          }
           this.mirrorIncoming(identity, client, message, replay);
           // The audit channel is never a conversation: no turn, no Stop.
           if (this.isAuditChannel(client, message.params[0] ?? "")) return;
+          if (!replay) this.remember(identity, client, message);
           // A replayed reaction is old intent: it never stops a turn.
           if (message.command === "TAGMSG") {
             if (!replay) this.stop(registration, message);
@@ -513,7 +604,13 @@ export class IrcShip {
       settings: gatewaySettings(config, member),
       backend: member.backend,
       identity: { team: `irc:${config.id}`, user: fold(member.account) },
-      transport: shipTransport(config, identity, client.fold),
+      transport: shipTransport(
+        config,
+        identity,
+        client.fold,
+        this.saidSince(identity, client),
+        this.sessionReady(config, member),
+      ),
       delivery: new IrcDelivery(
         client,
         this.options.readyMs,
@@ -659,7 +756,10 @@ export class IrcShip {
       this.advance(member, client, message);
       return;
     }
-    this.store.enqueue(admission);
+    this.store.enqueue({
+      ...admission,
+      ...this.stagger(member, client, admission),
+    });
     this.advance(member, client, message);
     // Accepted: tell the server's read marker (channel, or the partner).
     const target = message.params[0] ?? "";
@@ -692,6 +792,232 @@ export class IrcShip {
           time,
         );
     }
+  }
+
+  /**
+   * Copy each stored pogo_dm between two ship agents as an IRC DM from the
+   * sender's connection: poll the crew plugin's outbox from a stored cursor
+   * (the first read only sets it), one item at a time and in order. An item
+   * that cannot be sent yet (connection down, recipient not online) holds
+   * the cursor and is retried, for at most `copyRetryMs`.
+   */
+  private async copies(link: CrewLink, signal: AbortSignal) {
+    const captain = this.current[0];
+    if (!captain) return;
+    const first = new Map<string, number>();
+    let failing = false;
+    while (!signal.aborted) {
+      try {
+        const cursor = this.store.pogoDmCursor(captain.key);
+        const page = await link.outbox(
+          cursor === undefined ? { limit: 50 } : { after: cursor, limit: 50 },
+          AbortSignal.any([signal, AbortSignal.timeout(bindMs)]),
+        );
+        failing = false;
+        // A baseline, or nothing listed although newer entries exist: all of
+        // those expired, so the cursor moves past them.
+        if (
+          cursor === undefined ||
+          (!page.items.length && page.latest > cursor)
+        )
+          this.store.savePogoDmCursor(captain.key, page.latest);
+        for (const item of cursor === undefined ? [] : page.items) {
+          if ((await this.copy(item)) === "retry") {
+            const since = first.get(item.id) ?? Date.now();
+            first.set(item.id, since);
+            if (Date.now() - since < copyRetryMs) break;
+            this.log.warn(
+              { irc: this.config.id },
+              "IRC pogo_dm copy not sent in time; skipped",
+            );
+          }
+          first.delete(item.id);
+          this.store.savePogoDmCursor(captain.key, item.sequence);
+        }
+      } catch {
+        if (signal.aborted) break;
+        if (!failing)
+          this.log.warn(
+            { irc: this.config.id },
+            "Crew pogo_dm outbox unavailable; IRC copies wait",
+          );
+        failing = true;
+      }
+      await delay(this.options.copyPollMs ?? 2000, undefined, {
+        signal,
+      }).catch(() => {});
+    }
+  }
+
+  /** The registration of a team member on this ship, if it has one. */
+  private registrationOf(member: OutboxPage["items"][number]["from"]) {
+    return member.role === "captain"
+      ? this.current.find((item) => item.role === "captain")
+      : this.current.find(
+          (item) =>
+            item.role === "crew" &&
+            item.id === `${this.config.id}-${member.id}`,
+        );
+  }
+
+  /**
+   * One copy: PRIVMSG from the sender's connection to the nick that WHOIS
+   * proves holds the recipient's account, every line tagged with the
+   * receipt ID. Skipped when either member has no IRC connection here, or
+   * without message-tags (the recipient could not recognise the copy).
+   */
+  private async copy(
+    item: OutboxPage["items"][number],
+  ): Promise<"sent" | "skipped" | "retry"> {
+    // Never send a copy that has expired, even after retries.
+    if (Date.now() - item.created > outboxMaxAgeMs) return "skipped";
+    const sender = this.registrationOf(item.from);
+    const recipient = this.registrationOf(item.to);
+    if (!sender || !recipient || sender === recipient) return "skipped";
+    const client = sender.client;
+    if (!client.registered) return "retry";
+    if (!client.hasCap("message-tags")) return "skipped";
+    try {
+      const nick = await client.verifiedNick(recipient.account);
+      this.store.markPogoDmCopy(item.id);
+      const tags = { [copyTag]: item.id };
+      const guard = () => client.holds(recipient.account, nick);
+      for (const line of ircLines(
+        copyText(item),
+        client.budget("PRIVMSG", "n".repeat(32), tags),
+      ))
+        await client.privmsg(nick, line, tags, guard);
+      return "sent";
+    } catch {
+      return "retry";
+    }
+  }
+
+  /**
+   * A DM to this connection that is one of this ship's own pogo_dm copies:
+   * from a ship account, tagged with a receipt ID this process recorded.
+   * An unknown ID is an ordinary ship DM.
+   */
+  private ownCopy(client: IrcClient, message: IrcMessage) {
+    const id = message.tags.get(copyTag);
+    const account = message.tags.get("account");
+    const target = message.params[0] ?? "";
+    return (
+      message.command === "PRIVMSG" &&
+      id !== undefined &&
+      /^[a-f0-9]{32}$/.test(id) &&
+      account !== undefined &&
+      !client.isChannel(target) &&
+      client.fold(target) === client.fold(client.nick) &&
+      shipAccounts(this.config, client.fold).has(client.fold(account)) &&
+      this.store.pogoDmCopy(id)
+    );
+  }
+
+  /**
+   * Crew only: bind each IRC session to its crew member in the crew plugin
+   * before a turn, once per process, so pogo_dm and pogo_mail accept it.
+   * Needs an OpenCode crew backend on the captain's OpenCode server. A
+   * failure is logged and retried next turn; the turn never waits on it
+   * longer than `bindMs`.
+   */
+  private sessionReady(
+    config: IrcConfig,
+    member: ShipMember,
+  ): GatewayTransport["sessionReady"] {
+    const link = this.link;
+    const crewID = member.crewID;
+    if (
+      !link ||
+      crewID === undefined ||
+      !config.crewMessaging.sessions ||
+      config.backend.type !== "opencode" ||
+      member.backend.type !== "opencode" ||
+      member.backend.url !== config.backend.url
+    )
+      return;
+    return async (sessionID, signal) => {
+      if (this.bound.has(sessionID)) return;
+      try {
+        await link.bind(
+          sessionID,
+          crewID,
+          AbortSignal.any([signal, AbortSignal.timeout(bindMs)]),
+        );
+        this.bound.add(sessionID);
+        this.log.info({ irc: member.id }, "IRC crew session bound");
+      } catch {
+        if (!signal.aborted)
+          this.log.warn(
+            { irc: member.id },
+            "IRC crew session not bound; pogo_dm and pogo_mail stay unavailable there",
+          );
+      }
+    };
+  }
+
+  /**
+   * All-call turns start in agent order (captain first), one
+   * `allCallStaggerMs` step apart from the all-call's server time, so a
+   * later agent can see the earlier answers.
+   */
+  private stagger(
+    member: IrcMember,
+    client: IrcClient,
+    admission: {
+      channel: string;
+      received: number;
+      textMention?: string | null;
+    },
+  ) {
+    const step = this.config.access.allCallStaggerMs;
+    if (
+      !step ||
+      !admission.textMention ||
+      !this.config.access.allCallWords.includes(admission.textMention)
+    )
+      return {};
+    const turn = agentTurn(this.config, member, admission.channel, client.fold);
+    return turn ? { notBefore: admission.received + turn * step } : {};
+  }
+
+  /** Keep a live channel PRIVMSG for later all-call turns of this agent. */
+  private remember(member: IrcMember, client: IrcClient, message: IrcMessage) {
+    const [target = "", raw = ""] = message.params;
+    if (
+      message.command !== "PRIVMSG" ||
+      !client.isChannel(target) ||
+      !client.channel(target) ||
+      raw.startsWith("\u0001")
+    )
+      return;
+    const key = `${member.id} ${client.fold(target)}`;
+    const time = Date.parse(message.tags.get("time") ?? "");
+    const now = Date.now();
+    const lines = (this.said.get(key) ?? []).filter(
+      (line) => now - line.time < saidMs,
+    );
+    const text = raw.split("\n").map(cleanText).join(" / ").trim();
+    if (!text) return;
+    lines.push({
+      time: Number.isFinite(time) ? time : now,
+      msgid: message.tags.get("msgid"),
+      text: `${cleanText(sourceNick(message.source))}: ${text}`,
+    });
+    this.said.set(key, lines.slice(-saidLimit));
+  }
+
+  /** Lines a connection saw in a channel after `after`, oldest first. */
+  private saidSince(member: IrcMember, client: IrcClient) {
+    return (channel: string, after: number, except: string) =>
+      (this.said.get(`${member.id} ${client.fold(channel)}`) ?? [])
+        .filter((line) => line.time >= after && line.msgid !== except)
+        .slice(-sinceLines)
+        .map((line) =>
+          line.text.length > sinceChars
+            ? `${line.text.slice(0, sinceChars - 1)}…`
+            : line.text,
+        );
   }
 
   /** The DM audit channel of this ship, under the server's case folding. */

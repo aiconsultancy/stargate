@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { canExpandCrew } from "./identity";
+import { IrcSessions } from "./irc";
 import { MemberActivityStore } from "./member-activity";
 import { MailRoutes } from "./messaging";
 import { queuedPendingTask, reportTask } from "./pending";
@@ -118,6 +119,7 @@ export class CrewState {
   readonly reporting: ReportingStore;
   readonly activity: MemberActivityStore;
   readonly mailRoutes: MailRoutes;
+  readonly ircSessions: IrcSessions;
   private constructor(
     readonly path: string,
     private readonly db: Database,
@@ -127,6 +129,7 @@ export class CrewState {
     this.reporting = new ReportingStore(db, (id) => this.captainRoute(id));
     this.activity = new MemberActivityStore(db);
     this.mailRoutes = new MailRoutes(db);
+    this.ircSessions = new IrcSessions(db);
   }
 
   static async open(

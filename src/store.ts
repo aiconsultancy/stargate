@@ -29,6 +29,8 @@ export type Incoming = {
   gate?: "spoken" | "admitted" | null;
   /** The configured name that admitted a message without a mention. */
   textMention?: string | null;
+  /** Earliest start in ms (IRC all-call turns); absent starts at once. */
+  notBefore?: number | null;
 };
 
 export type Job = Incoming & {
@@ -133,6 +135,12 @@ export class Store {
         botKey TEXT NOT NULL, target TEXT NOT NULL, time TEXT NOT NULL,
         PRIMARY KEY(botKey, target)
       );
+      CREATE TABLE IF NOT EXISTS irc_pogo_dm (
+        id TEXT PRIMARY KEY, sent INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS irc_pogo_dm_cursor (
+        botKey TEXT PRIMARY KEY, sequence INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS delivery_units (
         job INTEGER NOT NULL REFERENCES jobs(id), part INTEGER NOT NULL,
         plan TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0,
@@ -189,8 +197,8 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender,gate,textMention,received)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received)`)
+      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -205,6 +213,7 @@ export class Store {
           $gate: input.gate ?? null,
           $textMention: input.textMention ?? null,
           $received: input.received ?? null,
+          $retryAt: input.notBefore ?? 0,
         }).changes > 0
     );
   }
@@ -989,6 +998,46 @@ export class Store {
       ON CONFLICT(botKey,target) DO UPDATE SET time=excluded.time
       WHERE ? OR excluded.time > irc_cursors.time`)
       .run(botKey, target, time, replace ? 1 : 0);
+  }
+
+  /**
+   * A pogo_dm receipt ID that this process copies to IRC: recorded before
+   * the IRC copy is sent, so the recipient connection recognises it and
+   * never admits it as a second turn. Kept 7 days.
+   */
+  markPogoDmCopy(id: string, now = Date.now()) {
+    this.db.transaction(() => {
+      this.db
+        .query("INSERT OR IGNORE INTO irc_pogo_dm VALUES (?,?)")
+        .run(id, now);
+      this.db
+        .query("DELETE FROM irc_pogo_dm WHERE sent<?")
+        .run(now - 7 * 24 * 60 * 60_000);
+    })();
+  }
+
+  pogoDmCopy(id: string) {
+    return (
+      this.db.query("SELECT 1 FROM irc_pogo_dm WHERE id=?").get(id) !== null
+    );
+  }
+
+  /** Last crew-plugin outbox sequence handled for one ship (its captain). */
+  pogoDmCursor(botKey: string): number | undefined {
+    return (
+      this.db
+        .query<{ sequence: number }, [string]>(
+          "SELECT sequence FROM irc_pogo_dm_cursor WHERE botKey=?",
+        )
+        .get(botKey)?.sequence ?? undefined
+    );
+  }
+
+  savePogoDmCursor(botKey: string, sequence: number) {
+    this.db
+      .query(`INSERT INTO irc_pogo_dm_cursor VALUES (?,?)
+      ON CONFLICT(botKey) DO UPDATE SET sequence=excluded.sequence`)
+      .run(botKey, sequence);
   }
 
   deliveredUnits(job: number, part: number, done: number) {

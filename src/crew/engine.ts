@@ -202,6 +202,8 @@ export type CrewCaller = {
   id?: string;
   messageID?: string;
   [piIdentity]?: true;
+  /** Set by `authorizeMail`: the crew member a bound IRC session serves. */
+  [ircIdentity]?: string;
 };
 export type CrewSession = Pick<
   SessionInfo,
@@ -316,6 +318,7 @@ async function physicalDirectory(path: string): Promise<string> {
 // rather than racing Pi's durable conversation-creation reservation.
 const reportAdmissions = new Map<string, Promise<void>>();
 const piIdentity = Symbol("host-bound Pi caller");
+const ircIdentity = Symbol("Pogo-bound IRC session");
 // greybeard: cooperative 60s observation, not a turn/fairness guarantee. Native
 // admission/read calls can overrun; add turn-aware yielding only when required.
 const crewWaitWindowMs = 60_000;
@@ -539,9 +542,12 @@ export class CrewEngine {
   }
 
   private actor(sessionID: string): string {
+    const irc = this.state.ircSessions.crewID(sessionID);
     const role =
       this.state.peerBySession(sessionID)?.crewID ??
-      `${this.options.team.captain.id}:${sessionID}`;
+      (irc
+        ? `${irc}@irc:${sessionID}`
+        : `${this.options.team.captain.id}:${sessionID}`);
     const namespace = createHash("sha256")
       .update(this.options.namespace)
       .digest("hex");
@@ -584,6 +590,12 @@ export class CrewEngine {
     id?: string,
     historical = false,
   ): CrewTask | null {
+    // An IRC session never has a task, not even its member's current one.
+    if (caller[ircIdentity]) {
+      if (id)
+        throw new CrewError("IRC sessions have no task context; omit taskID.");
+      return null;
+    }
     const task = id
       ? caller.agent === this.options.team.captain.id
         ? historical && this.state.requestedStatus(id, caller.sessionID)
@@ -721,6 +733,8 @@ export class CrewEngine {
     text: string,
     delivery: "steer" | "queue",
   ): Promise<string> {
+    // A reply to an IRC session waits in its inbox: nothing prompts it.
+    if (this.state.ircSessions.crewID(route.recipient)) return "inbox";
     const peer = this.state.peerBySession(route.recipient);
     const task = peer ? this.state.activeTask(peer.crewID) : null;
     const busy =
@@ -739,7 +753,9 @@ export class CrewEngine {
     const senderCaptainID =
       caller.agent === this.options.team.captain.id
         ? caller.sessionID
-        : this.mailTask(caller)?.originCaptainID;
+        : caller[ircIdentity]
+          ? this.options.captainSessionID
+          : this.mailTask(caller)?.originCaptainID;
     if (busy && !this.sameCaptain(senderCaptainID, route.captainID))
       return "deferred";
     if (busy && delivery === "queue" && !this.member(busy.crewID).backend)
@@ -1124,6 +1140,88 @@ export class CrewEngine {
       throw new CrewError(
         "Captain must be a root configured captain session in the configured project directory.",
       );
+  }
+
+  /** Stored pogo_dm sends for Pogo's IRC copies (CrewIrc outbox RPC). */
+  ircOutbox(input: { after?: number | undefined; limit: number }) {
+    return this.state.ircSessions.outbox(input);
+  }
+
+  /** Crew member that a bound IRC session serves, if any. */
+  ircMember(sessionID: string): string | undefined {
+    return this.state.ircSessions.crewID(sessionID);
+  }
+
+  /**
+   * Bind a Pogo IRC session to a crew member. The session must be a root
+   * OpenCode session with that member's agent in its configured worktree,
+   * not the member's task session, and the team must pin its captain (IRC
+   * mail uses that captain context). A binding never changes member.
+   */
+  async bindIrcSession(
+    input: { sessionID: string; crewID: string },
+    signal: AbortSignal,
+  ): Promise<{ bound: true }> {
+    if (input.crewID === this.options.team.captain.id)
+      throw new CrewError(
+        "The captain's IRC conversations use the pinned captain session; bind crew sessions only.",
+      );
+    const member = this.member(input.crewID);
+    if (member.backend)
+      throw new CrewError("Pi crew IRC sessions have no crew tools.");
+    if (!this.options.captainSessionID)
+      throw new CrewError(
+        "IRC crew messaging needs a pinned captain session (captainSessionID).",
+      );
+    if (this.state.peerBySession(input.sessionID))
+      throw new CrewError("A crew task session is not an IRC session.");
+    await this.validIrcSession(input.sessionID, input.crewID, signal);
+    if (!this.state.ircSessions.bind(input.sessionID, input.crewID))
+      throw new CrewError(
+        "IRC session must be a root session of that crew member; it is bound to another member.",
+      );
+    return { bound: true };
+  }
+
+  private async validIrcSession(
+    sessionID: string,
+    crewID: string,
+    signal: AbortSignal,
+  ) {
+    const member = this.member(crewID);
+    const session = await this.sessions.get({ sessionID }, { signal });
+    if (
+      session.id !== sessionID ||
+      session.parentID ||
+      ![member.agent ?? crewID, crewID].includes(session.agent ?? "") ||
+      resolve(session.location.directory) !==
+        resolve(this.options.worktrees[crewID] ?? "")
+    )
+      throw new CrewError(
+        "IRC session must be a root session of that crew member's agent in its worktree.",
+      );
+  }
+
+  /**
+   * pogo_dm and pogo_mail: the captain and assigned workers as before, plus
+   * Pogo-bound IRC sessions, which act only as their member. The member
+   * comes from the binding and must equal the host's agent for the call.
+   */
+  async authorizeMail(caller: CrewCaller): Promise<CrewCaller> {
+    caller = this.logicalCaller(caller);
+    const bound = this.state.ircSessions.crewID(caller.sessionID);
+    if (!bound) {
+      await this.authorize(caller);
+      return caller;
+    }
+    if (caller.agent !== bound)
+      throw new CrewError(
+        "This IRC session belongs to another crew member; it sends only as that member.",
+      );
+    if (this.member(bound).backend || !this.options.captainSessionID)
+      throw new CrewError("IRC crew messaging is unavailable for this member.");
+    await this.validIrcSession(caller.sessionID, bound, caller.signal);
+    return { ...caller, [ircIdentity]: bound };
   }
 
   async authorize(caller: CrewCaller): Promise<void> {

@@ -87,7 +87,8 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
       "textMentions": ["all captains"],
       "allCallWords": ["all hands", "all crew", "everyone"],
       "peerCaptains": [],
-      "shipTurnsPerAgentPerHour": 60
+      "shipTurnsPerAgentPerHour": 60,
+      "allCallStaggerMs": 4000
     },
     "crew": [
       {
@@ -116,26 +117,27 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
 ]
 ```
 
-| Field                          | Rule                                                                                                  |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `server.host`, `server.port`   | IRC server address                                                                                    |
-| `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                                 |
-| `server.caFile`                | Absolute PEM path of a private CA; TLS only                                                           |
-| `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused                        |
-| `account`, `passwordEnv`       | SASL PLAIN account and the environment variable with its password                                     |
-| `nick`                         | Optional; defaults to the account                                                                     |
-| `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes                 |
-| `access`                       | See [access](#access)                                                                                 |
-| `crew`                         | See [crew](#crew-on-irc); at most 20                                                                  |
-| `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                                 |
-| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                                         |
-| `server.filehostOverride`      | Optional FILEHOST upload URL when the server does not advertise one ([files](#files))                 |
-| `features`                     | Switches for [optional features](#optional-features); each defaults to `true`                         |
-| `stopReactions`                | Emoji that stop a turn ([Stop](#stop-by-reaction)); default `["✋", "🛑"]`, at most 10, `[]` is off   |
-| `catchUpHours`                 | Longest [catch-up](#catch-up) window, 1–168 hours (default 24)                                        |
-| `transcription`                | Audio transcription for FILEHOST audio files, as for Slack bots ([files](#files))                     |
-| `audit`                        | Optional `{ "channel": "#agent-dms" }`: mirror every agent DM to that channel ([DM audit](#dm-audit)) |
-| `dmPolicy`                     | `agent` (default: the captain answers DMs) or `redirect` ([DM audit](#dm-audit))                      |
+| Field                          | Rule                                                                                                                                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server.host`, `server.port`   | IRC server address                                                                                                                                                                                                              |
+| `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                                                                                                                                                           |
+| `server.caFile`                | Absolute PEM path of a private CA; TLS only                                                                                                                                                                                     |
+| `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused                                                                                                                                                  |
+| `account`, `passwordEnv`       | SASL PLAIN account and the environment variable with its password                                                                                                                                                               |
+| `nick`                         | Optional; defaults to the account                                                                                                                                                                                               |
+| `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes                                                                                                                                           |
+| `access`                       | See [access](#access)                                                                                                                                                                                                           |
+| `crew`                         | See [crew](#crew-on-irc); at most 20                                                                                                                                                                                            |
+| `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                                                                                                                                                           |
+| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                                                                                                                                                                   |
+| `server.filehostOverride`      | Optional FILEHOST upload URL when the server does not advertise one ([files](#files))                                                                                                                                           |
+| `features`                     | Switches for [optional features](#optional-features); each defaults to `true`                                                                                                                                                   |
+| `stopReactions`                | Emoji that stop a turn ([Stop](#stop-by-reaction)); default `["✋", "🛑"]`, at most 10, `[]` is off                                                                                                                             |
+| `catchUpHours`                 | Longest [catch-up](#catch-up) window, 1–168 hours (default 24)                                                                                                                                                                  |
+| `transcription`                | Audio transcription for FILEHOST audio files, as for Slack bots ([files](#files))                                                                                                                                               |
+| `audit`                        | Optional `{ "channel": "#agent-dms" }`: mirror every agent DM to that channel ([DM audit](#dm-audit))                                                                                                                           |
+| `crewMessaging`                | `{ "sessions": false, "ircCopies": false }`: crew IRC sessions may use `pogo_dm`/`pogo_mail`; `pogo_dm` is also sent as an IRC DM ([crew sessions](#pogo_dm-and-pogo_mail-in-crew-irc-sessions), [copies](#pogo_dm-as-irc-dms)) |
+| `dmPolicy`                     | `agent` (default: the captain answers DMs) or `redirect` ([DM audit](#dm-audit))                                                                                                                                                |
 
 ### Naming
 
@@ -225,8 +227,8 @@ A channel message starts a turn when it:
 - is an **all-call**: it contains one of `access.allCallWords` (default
   `all hands`, `all crew`, `everyone`; whole words, any letter case, so
   `Everyone,` counts and `everyones` does not). An all-call reaches the
-  captain and every crew member in that channel. `[]` turns all-calls off;
-  or
+  captain and every crew member in that channel, in turn (see
+  [all-call turns](#all-call-turns)). `[]` turns all-calls off; or
 - is a `+draft/reply` to one of the connection's own recent messages.
 
 No other channel traffic reaches a captain or crew session.
@@ -517,8 +519,12 @@ channel and posts one entry per DM:
   `set password …`, also after `/msg <nick>`), messages to a `*Serv`
   (`/msg NickServ …`, `nickserv …`), services aliases (`/ns …`, `/cs …`),
   private keys, provider tokens (`xox…`, `sk-…`, `ghp_…`, …),
-  `Bearer`/`Basic` values and `password=`/`token:`-style pairs. The rule is a heuristic: it errs on the
-  side of withholding, and it cannot recognise a bare password.
+  `Bearer`/`Basic` values and `password=`/`token:`-style pairs. The check
+  reads the raw text: every part after a CTCP delimiter (`\x01`), with and
+  without its verb, counts as a line, so `\x01ACTION identify secret\x01`
+  or any other CTCP wrapper cannot hide a command. The rule is a
+  heuristic: it errs on the side of withholding, and it cannot recognise a
+  bare password.
 - DMs that another client of the same account sends (for example the
   operator logged in as the captain account): Pogo does not see them as
   sent. Ergo's stored DM history (see below) has them.
@@ -700,6 +706,32 @@ all-call it answers once and briefly, and stays silent if another agent
 already said the same. No acknowledgements, thanks, agreement-only or status
 messages; one short, specific message, no repeats.
 
+### All-call turns
+
+Agents answer an all-call in turn, so a later agent can see the earlier
+answers and stay silent instead of repeating them:
+
+- Turn order in the channel: the captain first, then each crew member that
+  lists the channel, in `crew[]` order.
+- Agent number _n_ in that order starts its turn _n_ ×
+  `access.allCallStaggerMs` after the all-call's server time (default
+  4000 ms, 0–30000; `0` turns the stagger off). The captain starts at once.
+  With a captain and two crew, the turns start at 0, 4 and 8 seconds. A
+  turn can start later when its conversation is busy, never earlier.
+- When its turn starts, a crew member's note lists the channel messages
+  its connection saw since the all-call, oldest first (at most 20, each at
+  most 300 characters), and tells it to answer `[[pogo:silent]]` if one
+  already says what it would say. The pinned captain answers first and has
+  nothing to read.
+- The list comes from what the connection received while it was online;
+  it is reference text, not instructions. The stagger does not change the
+  ship message caps, ack-silence or "crew speak to the captain" rules.
+- A message is an all-call whenever it contains an all-call word, even
+  when a nick mention or a `+draft/reply` also admits it, so
+  `galactica-chief: all hands, status?` is staggered for every agent.
+- `allCallStaggerMs` reloads live with the other `access` settings; a
+  reload applies to all-calls received after it.
+
 ### Who speaks to whom
 
 Crew speak to the captain, not to each other. The captain coordinates and
@@ -712,21 +744,86 @@ person or the captain asks for it in that channel, or to correct an error.
 The mention/reply mechanism and the ship message limit stay in force; this
 is guidance, not a hard block.
 
-`pogo_mail` and `pogo_dm` do not work in a crew IRC session, so there the
-crew member asks the captain to relay:
+#### pogo_dm and pogo_mail in crew IRC sessions
 
-- both tools need the `pogo_mail` permission; a crew IRC session gets the
-  registration's `backend.permissions`, which default to deny-all;
-- the crew plugin accepts a crew caller only from that member's own crew
-  task session (the session it provisioned). An IRC session uses the same
-  agent but is another root session, so the plugin refuses it. Tool identity
-  comes from the host, so a session cannot send as another member;
-- crew mail also needs an originating captain task or a validated reply,
-  which an IRC session does not have;
-- Pi Durable and Claude crew IRC registrations get no crew tools at all.
+With `"crewMessaging": { "sessions": true }` (default off), Pogo binds each
+crew IRC session to its crew member in the crew plugin, so `pogo_dm` and
+`pogo_mail` work there as that member:
 
-Giving IRC sessions these tools would need a new crew identity binding
-(IRC session → member) in the crew plugin. That is not implemented.
+- **Binding.** Before each turn of a crew IRC session, once per process,
+  Pogo calls the crew plugin's `pogo.crew.irc` `bind` RPC at the captain
+  location (the plugin answers it nowhere else) with the session ID and
+  the crew ID (`crew[].id`, which must equal the member's ID in the team).
+  The plugin binds the session only if it is a root OpenCode session with
+  that member's agent in that member's configured worktree, is not the
+  member's task session, and the team pins its captain. A binding never
+  moves to another member. A failed binding is logged and retried on the
+  next turn; the turn does not wait for it.
+- **Identity.** The member comes from the binding; the host's tool context
+  (agent) must name the same member, so a session cannot send as another
+  member and the model cannot choose an identity. Other crew tools
+  (`pogo_crew`, `pogo_journal`, …) still refuse IRC sessions.
+- **No task.** An IRC session never has a task, not even its member's
+  current one: `taskID` is refused, and its mail carries the pinned
+  captain as its captain context. Self-sends to its own member are refused,
+  so it never prompts that member's task session.
+- **Sending.** `to: captain` stores the mail and wakes the captain as any
+  `pogo_dm` does. `to: <crew>` goes to that member's task session under the
+  existing wake rules: a busy task keeps its result rule ("your final
+  answer remains task X's result"), and a task for another captain defers.
+- **Replies and inbox.** A reply (`replyTo`) to a message an IRC session
+  sent goes back to that IRC session's own inbox, never to the member's
+  task session, and never wakes either (`notification: "inbox"`). The IRC
+  session reads it with `pogo_mail` `op: inbox` on its next turn. It reads
+  only its own inbox; mail addressed to the member goes to the task
+  session as before.
+- **Permissions.** Both tools need the `pogo_mail` permission: add
+  `{ "action": "pogo_mail", "resource": "*", "effect": "allow" }` after the
+  deny rule in the crew registration's `backend.permissions`.
+- **Requirements.** An OpenCode captain and crew on the same OpenCode
+  server (`backend.url`), a pinned captain session, and a crew IRC
+  `backend.directory` equal to the member's worktree. Pi Durable and
+  Claude crew IRC registrations get no crew tools. The captain's own IRC
+  conversations run in the pinned captain session, which already has the
+  captain's tools.
+
+#### pogo_dm as IRC DMs
+
+With `"crewMessaging": { "ircCopies": true }` (default off), every
+`pogo_dm` between two members of this ship that both have IRC connections
+here is also sent as a real IRC DM, so Ergo stores it with the other DMs
+and the [DM audit](#dm-audit) mirror shows it. The native delivery does
+not change; the IRC DM is a copy.
+
+- **Path.** The crew plugin records each stored `pogo_dm` (never plain
+  `pogo_mail`) in a bounded outbox (24 hours, 1000 entries). The ship polls
+  it every 2 seconds through the `pogo.crew.irc` `outbox` RPC at the
+  captain location, from a cursor in Pogo's SQLite store; the first read
+  only sets the cursor, so older messages are not copied. Items go out one
+  at a time and in order. An entry older than 24 hours is never listed or
+  sent, even after a longer Pogo downtime or retries.
+- **Delivery.** The sender's IRC connection sends `[pogo_dm] <text>` as
+  PRIVMSG to the nick that WHOIS shows holds the recipient's account (as
+  for DM replies), rechecked at each socket write. Each line carries the
+  client tag `+pogo/dm=<receipt ID>`, the Mesij receipt ID, which is stable
+  across retries. A copy that cannot be sent yet (connection down,
+  recipient offline) holds the cursor and is retried for 10 minutes, then
+  skipped with a warning. A member without an IRC connection here, or a
+  server without `message-tags`, gets no copy.
+- **Text.** Plain text, at most 1800 bytes, then `… (truncated; full text
+  in pogo_mail)`. Text that may carry a credential (the same rules as the
+  DM audit, CTCP parts included) is not copied: the copy reads `[pogo_dm <id>: not copied to
+  IRC, it may contain credentials. Read it with pogo_mail.]`.
+- **Dedupe.** Pogo records each receipt ID before it sends the copy
+  (7 days). On the receiving connection, a DM from a ship account with a
+  recorded `+pogo/dm` ID is never admitted as a turn (the native delivery
+  already reached the recipient), never answered by `dmPolicy: "redirect"`,
+  and mirrored only once, as the sender's outgoing DM. A DM from a ship
+  account with an unknown or no ID follows the existing ship-agent rules
+  and caps.
+- **Peers.** `pogo_dm` addresses only this team's captain and crew, so
+  there are no copies to peer captains of other ships; their IRC DMs keep
+  the peer rules.
 
 ## Captain instructions
 

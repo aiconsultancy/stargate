@@ -389,6 +389,12 @@ export const ircSchema = z
          * it, counted across the whole ship. `0` turns ship messages off.
          */
         shipTurnsPerAgentPerHour: z.number().int().min(0).max(600).default(60),
+        /**
+         * All-call turns start this many milliseconds apart: the captain at
+         * once, then each crew member of the channel in configuration order.
+         * Each later turn lists what was said since the all-call. `0` is off.
+         */
+        allCallStaggerMs: z.number().int().min(0).max(30_000).default(4000),
       })
       .default({
         deniedAccounts: [],
@@ -396,6 +402,7 @@ export const ircSchema = z
         peerCaptains: [],
         allCallWords: [...defaultAllCallWords],
         shipTurnsPerAgentPerHour: 60,
+        allCallStaggerMs: 4000,
       }),
     crew: z.array(ircCrewSchema).max(20).default([]),
     features: ircFeaturesSchema.default(ircFeatureDefaults),
@@ -431,6 +438,19 @@ export const ircSchema = z
      * that points to its ship channel and never acts on its content.
      */
     dmPolicy: z.enum(["agent", "redirect"]).default("agent"),
+    /**
+     * Crew messaging over IRC (OpenCode captain; opt-in). `sessions` binds
+     * each crew IRC session to its crew member in the crew plugin, so
+     * pogo_dm and pogo_mail work there. `ircCopies` also sends each pogo_dm
+     * between two ship agents with IRC connections as an IRC DM from the
+     * sender's account.
+     */
+    crewMessaging: z
+      .strictObject({
+        sessions: z.boolean().default(false),
+        ircCopies: z.boolean().default(false),
+      })
+      .default({ sessions: false, ircCopies: false }),
     backend: backendSchema,
     concurrency: z.number().int().min(1).max(32).default(4),
     turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),

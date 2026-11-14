@@ -306,6 +306,11 @@ export interface GatewayTransport {
   source(job: Job): PromptSourceContext["source"] | undefined;
   /** Prompt prefix naming the sender when no source line is sent. */
   note(job: Job): string | undefined;
+  /**
+   * Best effort, before each turn of an unpinned session (IRC crew: bind
+   * the session to its crew member). Never fails or blocks the turn.
+   */
+  sessionReady?(sessionID: string, signal: AbortSignal): Promise<void>;
 }
 
 /** Slack rules: bot/app/workspace namespace and Slack message timestamps. */
@@ -1242,6 +1247,9 @@ export class Gateway {
               );
             }
           }
+          signal.throwIfAborted();
+          if (!pinned && transport.sessionReady)
+            await transport.sessionReady(session, signal).catch(() => {});
           signal.throwIfAborted();
           this.unavailable.delete(pinned ? this.key : job.conversation);
           if (pinned) {

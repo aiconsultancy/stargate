@@ -224,7 +224,13 @@ export class CrewMessaging {
       : mailInputSchema.safeParse(raw);
     if (!parsed.success) throw new CrewError("Invalid mail/DM input.");
     const input = parsed.data;
-    await this.engine.authorize(caller);
+    caller = await this.engine.authorizeMail(caller);
+    // A bound IRC session: member identity from the binding, no task, and
+    // the pinned captain as its captain context.
+    const ircMember = this.engine.ircMember(caller.sessionID);
+    const memberOf = (sessionID: string) =>
+      this.engine.state.peerBySession(sessionID)?.crewID ??
+      this.engine.ircMember(sessionID);
     const routes = this.engine.state.mailRoutes;
     const reply =
       input.op === "send" && input.replyTo
@@ -261,6 +267,7 @@ export class CrewMessaging {
         ? caller.sessionID
         : (reply?.captainID ??
           contextTask?.originCaptainID ??
+          (ircMember ? this.engine.options.captainSessionID : undefined) ??
           (input.op === "inbox" ? "" : undefined));
     if (captainID === undefined)
       throw new CrewError(
@@ -313,8 +320,7 @@ export class CrewMessaging {
                 id: event.id,
                 sequence: event.sequence,
                 from:
-                  this.engine.state.peerBySession(route.sender)?.crewID ??
-                  this.engine.options.team.captain.id,
+                  memberOf(route.sender) ?? this.engine.options.team.captain.id,
                 text: envelope.data.text,
                 ...(route.sourceTaskID
                   ? { sourceTaskID: route.sourceTaskID }
@@ -334,7 +340,7 @@ export class CrewMessaging {
     const to = input.to === "captain" ? captain : input.to;
     if (reply) {
       const sender =
-        this.engine.state.peerBySession(reply.sender)?.crewID ??
+        memberOf(reply.sender) ??
         (reply.sender === reply.captainID ? captain : undefined);
       if (to !== sender)
         throw new CrewError(
@@ -393,17 +399,30 @@ export class CrewMessaging {
         });
         continue;
       }
+      // A reply to an IRC session goes back to that session, never to the
+      // member's task session.
+      const ircReply =
+        reply && this.engine.ircMember(reply.sender) === member
+          ? reply.sender
+          : undefined;
       const peer =
-        member === captain ? null : this.engine.state.reservePeer(member);
+        member === captain || ircReply
+          ? null
+          : this.engine.state.reservePeer(member);
       // Earlier captain roots are evidence; pinned teams wake only the pin.
       const recipient =
+        ircReply ??
         peer?.sessionID ??
         this.engine.state.captainRoute(
           reply && reply.sender === reply.captainID
             ? reply.captainID
             : captainID,
         );
-      const candidate = peer ? this.engine.state.activeTask(member) : source;
+      const candidate = ircReply
+        ? null
+        : peer
+          ? this.engine.state.activeTask(member)
+          : source;
       const target = statusReply
         ? source
         : candidate &&
@@ -467,6 +486,17 @@ export class CrewMessaging {
         const receipt = await this.mailer.send(message, caller.signal);
         const storedRoute: MailRoute = { id: receipt.id, ...route };
         routes.save(storedRoute, message.key);
+        // A stored pogo_dm (never plain mail) can be copied to IRC by Pogo.
+        if (direct)
+          this.engine.state.ircSessions.enqueue({
+            id: receipt.id,
+            from: {
+              role: caller.agent === captain ? "captain" : "crew",
+              id: caller.agent,
+            },
+            to: { role: member === captain ? "captain" : "crew", id: member },
+            text: input.text,
+          });
         if (!source || !this.engine.state.reporting.isReport(source.id))
           this.engine.state.reporting.journal.append(
             {

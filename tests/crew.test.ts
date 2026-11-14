@@ -278,7 +278,8 @@ test("conversation eval: exported plugin wires cancellable native wait through i
           expect(observers).toBe(0);
           expect(unexpected).toEqual([]);
           expect(historyRequests).toEqual([]);
-          expect(disposed).toBe(5);
+          // Every registration is released once (the IRC RPC added one).
+          expect(disposed).toBe(6);
         }
       }
     }

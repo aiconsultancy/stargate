@@ -973,3 +973,32 @@ test("irc audit: dmPolicy redirect points every DM to the ship channel", async (
   expect(bare.prompts).toEqual([]);
   expect(bare.captain.client.inChannel("#agent-dms")).toBe(false);
 });
+
+test("irc audit: CTCP wrappers never hide a credential or services command", () => {
+  const entry = (text: string) =>
+    auditLine({
+      direction: "in",
+      agent: captainAccount,
+      peer: { nick: "jack", account: "jack" },
+      text,
+    });
+  const hidden = `[dm] jack → galactica-captain: ${withheld}`;
+  expect(entry("\u0001ACTION identify secret\u0001")).toBe(
+    `[dm] * jack ${withheld} (→ galactica-captain)`,
+  );
+  for (const text of [
+    "hello\n\u0001ACTION identify secret\u0001",
+    "ok \u0001ACTION set password hunter2\u0001 thanks",
+    "fine\n\u0001VERSION identify secret",
+    "note\n\u0001PING /msg NickServ identify secret\u0001",
+    "a\n\u0001\u0001ACTION ghost galactica-captain pw\u0001",
+  ])
+    expect(entry(text)).toBe(hidden);
+  // A harmless ACTION stays visible; "identify" in prose is not a command.
+  expect(entry("\u0001ACTION waves\u0001")).toBe(
+    "[dm] * jack waves (→ galactica-captain)",
+  );
+  expect(entry("please identify the failing test")).toBe(
+    "[dm] jack → galactica-captain: please identify the failing test",
+  );
+});

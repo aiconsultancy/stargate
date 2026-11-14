@@ -948,3 +948,28 @@ test("irc instructions: response policy, all-calls and crew routing via the capt
     }),
   ).toContain("This is an all-call");
 });
+
+test("irc all-call: a mention or a reply does not hide the all-call", () => {
+  // The all-call word is recorded even when a nick or a reply also admits.
+  expect(
+    route("#galactica", "galactica: all hands, status?")?.textMention,
+  ).toBe("all hands");
+  expect(
+    route("#galactica", "everyone, confirm", {
+      account: "jack",
+      "+draft/reply": "own-1",
+    })?.textMention,
+  ).toBe("everyone");
+  expect(
+    route(
+      "#galactica",
+      "galactica-chief: all hands",
+      { account: "jack" },
+      chief,
+    )?.textMention,
+  ).toBe("all hands");
+  // Without an all-call word, a mention records nothing, as before.
+  expect(
+    route("#galactica", "galactica: status?")?.textMention,
+  ).toBeUndefined();
+});

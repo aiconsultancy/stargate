@@ -61,15 +61,36 @@ const serviceLines = [
 ];
 
 /**
- * True when any line may carry a credential or services command; the
- * whole entry is then withheld, never a part of it.
+ * The lines a check reads: each line without control characters and IRC
+ * formatting, and each part that follows a CTCP delimiter (`\x01`), with
+ * and without its leading verb, so `\x01ACTION identify secret\x01` (or
+ * any other wrapper, anywhere in a line) cannot hide a command.
  */
-function sensitive(text: string) {
+function checkedLines(text: string) {
+  return text.split("\n").flatMap((line) => [
+    cleanText(line),
+    ...line
+      .split("\u0001")
+      .slice(1)
+      .flatMap((part) => {
+        const body = cleanText(part).trimStart();
+        const verb = /^[A-Za-z]+(?:\s+|$)/.exec(body)?.[0];
+        return verb ? [body, body.slice(verb.length)] : [body];
+      }),
+  ]);
+}
+
+/**
+ * True when any line, or any CTCP part of one, may carry a credential or
+ * services command; the whole entry is then withheld, never a part of it.
+ * Takes the raw text: callers never check text after unwrapping it.
+ */
+export function sensitive(text: string) {
+  const lines = checkedLines(text);
   return (
     containsCredential(text) ||
-    text
-      .split("\n")
-      .some((line) => serviceLines.some((pattern) => pattern.test(line)))
+    containsCredential(lines.join("\n")) ||
+    lines.some((line) => serviceLines.some((pattern) => pattern.test(line)))
   );
 }
 
@@ -96,7 +117,7 @@ export function auditLine(event: DmEvent): string | undefined {
   const text = command ? command.text : event.text;
   const clean = text.split("\n").map(cleanText).join("\n").trim();
   if (!clean) return;
-  const shown = sensitive(clean) ? withheld : clean;
+  const shown = sensitive(event.text) || sensitive(clean) ? withheld : clean;
   const peer = name(event.peer);
   const agent = cleanText(event.agent);
   const [from, to] = event.direction === "in" ? [peer, agent] : [agent, peer];
