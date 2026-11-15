@@ -26,10 +26,12 @@ import {
   type CommandRunner,
   processRunner,
 } from "../src/nightly/exec";
+import { readReady, writeReady } from "../src/nightly/ready";
 import {
   adoptRelease,
   githubHeaders,
   linkedRelease,
+  namedRelease,
   newerRelease,
   type PogoReleaseConfig,
   pruneReleases,
@@ -530,5 +532,75 @@ describe("Pogo release update", () => {
       adoptRelease(root, join(root, "releases", "old"), "0.1.0"),
     ).rejects.toThrow("already managed");
     expect((await lstat(join(root, "current"))).isSymbolicLink()).toBe(true);
+  });
+
+  test("a hand-made release directory is never switched to and has no ready version", async () => {
+    const root = await newRoot("hand-made");
+    // Unpacked by hand: the files are there, the release metadata is not.
+    const made = join(root, "releases", "0.9.0");
+    await mkdir(join(made, "src"), { recursive: true });
+    await writeFile(join(made, "package.json"), '{ "name": "pogo" }\n');
+    await writeFile(join(made, "src", "main.ts"), "");
+    await expect(switchCurrent(root, "0.9.0")).rejects.toThrow();
+    expect(await readlink(join(root, "current"))).toBe("releases/old");
+    // Invalid metadata is the same as none.
+    await writeFile(join(made, ".pogo-release.json"), '{"version":"0.9.0"}');
+    await expect(switchCurrent(root, "0.9.0")).rejects.toThrow();
+    const data = join(root, "data");
+    await mkdir(data);
+    expect(await writeReady(data, 1, made)).toBeNull();
+    expect((await readReady(data))?.version).toBeNull();
+    // Adopt is the supported way to mark an existing directory.
+    await rm(join(made, ".pogo-release.json"));
+    await adoptRelease(root, made, "0.9.0");
+    expect(await switchCurrent(root, "0.9.0")).toBe("old");
+    expect(await writeReady(data, 2, made)).toBe("0.9.0");
+    expect((await readReady(data))?.version).toBe("0.9.0");
+  });
+
+  test("a named release is looked up by its tag and must be published", async () => {
+    const releases: Record<string, object> = {
+      "v0.2.0": { tag_name: "v0.2.0", draft: false, prerelease: false },
+      "v0.3.0": { tag_name: "v0.3.0", draft: true, prerelease: false },
+      "v0.4.0": { tag_name: "v0.4.0", draft: false, prerelease: true },
+      // The API answers with another release than the one asked for.
+      "v0.5.0": { tag_name: "v0.6.0", draft: false, prerelease: false },
+    };
+    const seen: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request) {
+        const path = new URL(request.url).pathname;
+        seen.push(path);
+        const found =
+          releases[
+            path.replace("/repos/aiconsultancy/pogo/releases/tags/", "")
+          ];
+        return found
+          ? Response.json({
+              id: 1,
+              published_at: null,
+              author: null,
+              assets: [],
+              ...found,
+            })
+          : new Response(null, { status: 404 });
+      },
+    });
+    try {
+      const settings = {
+        ...config(await newRoot("named")),
+        apiURL: server.url.origin,
+      };
+      expect((await namedRelease(settings, {}, "0.2.0")).version).toBe("0.2.0");
+      expect(seen).toEqual(["/repos/aiconsultancy/pogo/releases/tags/v0.2.0"]);
+      for (const version of ["0.3.0", "0.4.0", "0.5.0", "0.9.0", "v0.2.0"])
+        await expect(namedRelease(settings, {}, version)).rejects.toMatchObject(
+          { reason: "not-found" },
+        );
+    } finally {
+      await server.stop(true);
+    }
   });
 });

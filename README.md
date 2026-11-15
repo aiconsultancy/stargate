@@ -557,6 +557,11 @@ with `pogo maintenance cleanup --plan`; configure literal roots/repositories
 before enabling it. Apply uses the maintenance window and idle gate; reports
 record each removed or retained item. See [cleanup guards](docs/maintenance.md#opt-in-cleanup).
 
+`pogo maintenance update --version X.Y.Z --now` installs one verified Pogo
+release immediately, without the window or the idle gate, as a transient user
+unit with automatic rollback; `--plan` shows what it would do. Never create a
+release directory by hand. See [update now](docs/maintenance.md#update-now).
+
 Optional and off by default. In a configured window (default 00:00–01:00
 Europe/London, with a stable per-install jitter) `pogo maintenance run`
 updates Pogo from verified GitHub releases, CLIProxyAPI and the agent CLIs

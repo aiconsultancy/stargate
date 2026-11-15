@@ -16,6 +16,7 @@ import {
 } from "../src/nightly/report";
 import {
   buildMaintenanceUnits,
+  buildUpdateCommand,
   startTimeoutMinutes,
 } from "../src/nightly/timer";
 import { occurrence } from "../src/nightly/window";
@@ -167,6 +168,52 @@ describe("gateway delivery of summaries", () => {
 });
 
 describe("systemd units", () => {
+  test("an update unit refuses paths that the service manager would rewrite", () => {
+    const input = {
+      unit: "pogo-update-0-2-0-1",
+      configPath: "/home/me/.config/pogo/pogo.json",
+      executable: "/usr/bin/bun",
+      entrypoint: "/home/me/.local/share/pogo/current/src/main.ts",
+      path: "/usr/bin:/bin",
+      version: "0.2.0",
+      retryFailed: false,
+      runMinutes: 100,
+      recoveryMinutes: 50,
+    };
+    const command = buildUpdateCommand(input);
+    // Waits until the command has started, so a failed start is an error.
+    expect(command.slice(0, 4)).toEqual([
+      "systemd-run",
+      "--user",
+      "--service-type=exec",
+      "--collect",
+    ]);
+    expect(command).not.toContain("--no-block");
+    expect(command).toContain("--property=TimeoutStopSec=50min");
+    // Everything after `--` is the command itself, one argument each.
+    expect(command.slice(command.indexOf("--") + 1)).toEqual([
+      "/usr/bin/bun",
+      "/home/me/.local/share/pogo/current/src/main.ts",
+      "maintenance",
+      "update",
+      "--version",
+      "0.2.0",
+      "--now",
+      "--foreground",
+      "--config",
+      "/home/me/.config/pogo/pogo.json",
+    ]);
+    for (const bad of [
+      { configPath: "pogo.json" },
+      { configPath: "/home/me/100%/pogo.json" },
+      { entrypoint: "/home/$USER/main.ts" },
+      { version: "0.2.0; reboot" },
+      { version: "v0.2.0" },
+      { unit: "bad unit" },
+    ])
+      expect(() => buildUpdateCommand({ ...input, ...bad })).toThrow();
+  });
+
   test("timer starts at the jittered local time; service is a bounded oneshot", () => {
     const units = buildMaintenanceUnits({
       name: "pogo-maintenance",

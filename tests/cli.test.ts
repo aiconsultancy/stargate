@@ -27,6 +27,45 @@ test("maintenance cleanup requires a dry-run flag and documents its scope", asyn
   }
 });
 
+test("maintenance update parses its flags and keeps them off other commands", async () => {
+  const output = spyOn(console, "log").mockImplementation(() => {});
+  try {
+    await runCli(["maintenance", "--help"]);
+    expect(output.mock.calls.flat().join(" ")).toContain(
+      "update          --version X.Y.Z with --plan or --now",
+    );
+    // The flags parse; the command then fails on the missing configuration.
+    for (const flags of [
+      ["--plan"],
+      ["--now"],
+      ["--now", "--retry-failed"],
+      ["--now", "--foreground"],
+    ])
+      await expect(
+        runCli([
+          "maintenance",
+          "update",
+          "--version",
+          "0.2.0",
+          ...flags,
+          "--config",
+          "/missing/config",
+        ]),
+      ).rejects.toThrow(/config/i);
+    for (const args of [
+      ["maintenance", "run", "--now"],
+      ["maintenance", "recover", "--retry-failed"],
+      ["maintenance", "plan", "--foreground"],
+      ["start", "--now"],
+    ])
+      await expect(
+        runCli([...args, "--config", "/missing/config"]),
+      ).rejects.toThrow("not supported");
+  } finally {
+    output.mockRestore();
+  }
+});
+
 test("cron help documents operations and never reads config", async () => {
   const output = spyOn(console, "log").mockImplementation(() => {});
   expect(

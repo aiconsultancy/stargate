@@ -142,3 +142,61 @@ WantedBy=timers.target
 `;
   return { service, timer };
 }
+
+/**
+ * `systemd-run` arguments for one operator update as a transient user
+ * unit. The unit is separate from the session that starts it, so the update
+ * continues when it restarts OpenCode. As for the nightly service, the
+ * unit's ExecStopPost finishes the journal of a run that was killed.
+ */
+export function buildUpdateCommand(input: {
+  unit: string;
+  configPath: string;
+  executable: string;
+  entrypoint: string;
+  path: string;
+  version: string;
+  retryFailed: boolean;
+  /** Last-resort limit of the run itself. */
+  runMinutes: number;
+  recoveryMinutes: number;
+}) {
+  for (const path of [input.configPath, input.executable, input.entrypoint]) {
+    if (!isAbsolute(path)) throw new Error("Unit paths must be absolute.");
+    // The service manager expands these in a transient unit's command.
+    if (/[%$]/.test(path)) throw new Error("Unit paths cannot contain % or $.");
+  }
+  if (!/^\d+\.\d+\.\d+$/.test(input.version))
+    throw new Error("Use a MAJOR.MINOR.PATCH version.");
+  const unit = timerName(input.unit);
+  const main = [quote(input.executable, true), quote(input.entrypoint, true)];
+  return [
+    "systemd-run",
+    "--user",
+    // systemd-run returns when the command has started; a command that
+    // cannot be executed is an error here, not a silent failed unit.
+    "--service-type=exec",
+    "--collect",
+    `--unit=${unit}`,
+    `--description=Pogo operator update to ${input.version}`,
+    `--working-directory=${dirname(input.configPath)}`,
+    `--property=EnvironmentFile=-${input.configPath}.env`,
+    "--property=UMask=0077",
+    `--property=RuntimeMaxSec=${input.runMinutes}min`,
+    `--property=TimeoutStopSec=${input.recoveryMinutes}min`,
+    `--property=ExecStopPost=${main.join(" ")} maintenance recover --after-run --config ${quote(input.configPath, true)}`,
+    `--setenv=PATH=${input.path}`,
+    "--",
+    input.executable,
+    input.entrypoint,
+    "maintenance",
+    "update",
+    "--version",
+    input.version,
+    "--now",
+    "--foreground",
+    "--config",
+    input.configPath,
+    ...(input.retryFailed ? ["--retry-failed"] : []),
+  ];
+}

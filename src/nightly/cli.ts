@@ -14,8 +14,14 @@ import { recoveryBudgetMs } from "./journal";
 import { packageDirectory } from "./ready";
 import { adoptRelease, layout } from "./release";
 import { reportSchema, summary } from "./report";
-import { acceptCurrent, recoverInterruptedRun, runMaintenance } from "./run";
+import {
+  acceptCurrent,
+  recoverInterruptedRun,
+  runMaintenance,
+  UpdateRefused,
+} from "./run";
 import { buildDroidUnits, buildMaintenanceUnits, timerName } from "./timer";
+import { maintenanceUpdate, updateUnit } from "./update";
 import {
   currentWindow,
   defaultInstallID,
@@ -34,6 +40,19 @@ Commands:
                   report and queues one Slack summary. Exit 1 and
                   maintenance/ALERT.json when an operator must look.
                   --outside-window runs now with the window's length.
+  update          --version X.Y.Z with --plan or --now. Operator-approved
+                  update to one Pogo release, now: no window, no idle gate,
+                  no cool-off. Stages and verifies the release (origin,
+                  checksum, tree), installs and tests it, switches, checks
+                  readiness and rolls back on failure. Restarts only the
+                  gateway when the crew plugin is unchanged, otherwise
+                  OpenCode and the gateway. --now starts a transient user
+                  unit and returns; the report says what happened. --now
+                  runs only from the installed, verified release
+                  (<root>/current/src/main.ts), never a checkout. --plan
+                  changes nothing. Refuses a downgrade, a leftover journal
+                  (run recover first) and a release that failed here before
+                  (--retry-failed allows that one).
   recover         Undo every change left in the maintenance journal
                   (sessions, configs, release, CLIs, proxy), restart what
                   they need and start the gateway. Takes the run lock (busy:
@@ -166,14 +185,22 @@ export async function maintenanceCli(
     afterRun?: boolean;
     acceptCurrent?: string;
     yes?: boolean;
+    now?: boolean;
+    foreground?: boolean;
+    retryFailed?: boolean;
   },
 ) {
+  if (
+    (options.now || options.foreground || options.retryFailed) &&
+    operation !== "update"
+  )
+    throw new Error("--now and --retry-failed apply only to update.");
   if (operation === "cleanup" && !options.plan)
     throw new Error(
       "Use maintenance cleanup --plan; cleanup applies only through maintenance run.",
     );
-  if (options.plan && operation !== "cleanup")
-    throw new Error("--plan applies only to cleanup.");
+  if (options.plan && operation !== "cleanup" && operation !== "update")
+    throw new Error("--plan applies only to cleanup and update.");
   if (
     (options.acceptCurrent !== undefined || options.yes) &&
     (operation !== "recover" ||
@@ -205,6 +232,44 @@ export async function maintenanceCli(
     });
     console.log(JSON.stringify(result, null, 2));
     return result.items.some((item) => item.status === "failed") ? 1 : 0;
+  }
+  if (operation === "update") {
+    const m = config.maintenance;
+    if (!m) throw new Error("No maintenance section in configuration.");
+    process.umask(0o077);
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    try {
+      return await maintenanceUpdate(
+        config,
+        {
+          configPath: resolve(options.configPath),
+          ...(options.version ? { version: options.version } : {}),
+          ...(options.plan ? { plan: true } : {}),
+          ...(options.now ? { now: true } : {}),
+          ...(options.foreground ? { foreground: true } : {}),
+          ...(options.retryFailed ? { retryFailed: true } : {}),
+          ...(options.json ? { json: true } : {}),
+        },
+        {
+          unit: updateUnit(),
+          launcher: processRunner,
+          print: (text) => console.log(text),
+          now: () => Date.now(),
+          signal: controller.signal,
+        },
+      );
+    } catch (error) {
+      // A refusal is an answer, not a crash; its text is fixed and safe.
+      if (!(error instanceof UpdateRefused)) throw error;
+      console.log(error.message);
+      return 1;
+    } finally {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    }
   }
   if (operation === "recover") {
     const result =

@@ -181,7 +181,7 @@ Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
 
 | Setting                                   | Default                                                             | Meaning                                                                                                         |
 | ----------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `enabled`                                 | `false`                                                             | `run` refuses to start when false. `plan` always works.                                                         |
+| `enabled`                                 | `false`                                                             | `run` refuses to start when false. `plan` and `update` always work.                                             |
 | `installID`                               | hash of host and config path                                        | Stable identity for jitter and reports.                                                                         |
 | `window.start`, `window.end`              | `00:00`, `01:00`                                                    | Local wall-clock times; the end can be after midnight.                                                          |
 | `window.timeZone`                         | `Europe/London`                                                     | IANA zone. Daylight saving time applies.                                                                        |
@@ -977,6 +977,8 @@ undo budget + 5 minutes. Reinstall it after you change the check times.
 ```sh
 pogo maintenance plan --config pogo.json [--json]   # read-only; no probes
 pogo maintenance run --config pogo.json             # used by the timer
+pogo maintenance update --config pogo.json --version X.Y.Z --plan
+pogo maintenance update --config pogo.json --version X.Y.Z --now [--retry-failed]
 pogo maintenance window --config pogo.json
 pogo maintenance instructions --config pogo.json
 pogo maintenance install-timer --config pogo.json [--name NAME] [--print]
@@ -994,8 +996,9 @@ lock in `<dataDirectory>/maintenance/run.sqlite`. Exit status is 1 for a
 `failed` outcome and whenever an alert is written (journal left, gateway not
 ready, aborted, report not written). `recover` exits 1 when a run holds the
 lock, the journal is corrupt or its undo is incomplete. `--after-run` (used by
-the timer) only finishes the journal of the run that this systemd invocation
-started. `--accept-current` is described in
+the timer and the update unit) only finishes the journal of the run that
+this systemd invocation started, and writes `ALERT.json` when a journal is
+left afterwards. `--accept-current` is described in
 [When recovery cannot proceed](#when-recovery-cannot-proceed).
 
 `install-timer` writes `<name>.timer` and `<name>.service` to
@@ -1016,6 +1019,122 @@ end; the timeouts are a last resort,
 the config companion as `EnvironmentFile`, and `PATH` from the installing
 shell with Bun's directory first. When `pogo.root` is set, `ExecStart` runs
 `<root>/current/src/main.ts`, so the timer follows release switches.
+
+## Update now
+
+`pogo maintenance update --version X.Y.Z --now` installs one Pogo release
+immediately. It is for an operator who accepts the interruption. It is the
+nightly run's own path for one named release, with three differences: it does
+not wait for the window, it does not check the idle gate and it does not apply
+the cool-off to the named version. It changes the Pogo release only;
+CLIProxyAPI, the agent CLIs and models stay with the nightly run. It works
+also when `maintenance.enabled` is false; `maintenance.pogo` must be
+configured.
+
+Run it with the installed Pogo, not from a checkout:
+
+```sh
+bun <pogo.root>/current/src/main.ts maintenance update --version X.Y.Z --now --config pogo.json
+```
+
+`--now` is refused unless the code that runs the command is a release that
+maintenance staged and verified: a real directory in `<pogo.root>/releases`
+whose `.pogo-release.json` has `"verification": "verified"`. That code makes
+the switch, the rollback and the recovery of the update unit. A development
+checkout, a link to one and an adopted release are refused; `--plan` works
+from anywhere. There is no override.
+
+The first use therefore needs an installed release that has this command.
+The nightly run installs one. On a host whose `current` release is older
+than the command, or is an adopted release, wait for the next nightly
+update, then use `update` for the releases after it.
+
+What it does, in order:
+
+1. **Checks, read-only.** `current` must be a managed release. The version
+   must be a published, non-draft release that is newer than `current`; it
+   is looked up by its tag `vX.Y.Z`, so an older release is found too.
+   These are refused, and nothing changes:
+   - a downgrade (to go back after a failed update, use `recover`);
+   - a journal that an earlier run left (run `pogo maintenance recover`
+     first; the update never undoes another run);
+   - a release that failed here after an earlier switch, unless
+     `--retry-failed` is given.
+2. **Starts a transient user unit** and returns when its command has
+   started (`systemd-run --user --service-type=exec`). The unit is named
+   `pogo-update-X-Y-Z-<epoch seconds>`; for version 1.2.3 that is, for
+   example, `pogo-update-1-2-3-1794665227`. The update can restart
+   OpenCode, which ends the session that asked for it; the unit continues.
+   The unit runs the entrypoint of the verified release that started it,
+   with the fixed `PATH`
+   `<Bun's directory>:/usr/local/bin:/usr/bin:/bin`, the gateway's
+   environment file, `UMask=0077` and the same
+   `ExecStopPost=... maintenance recover --after-run` as the nightly
+   service. If the unit cannot be started, the command says so and nothing
+   has changed.
+3. **Stages and verifies** the release as the nightly run does: origin,
+   checksum, archive checks, tree comparison, install and tests in its own
+   directory. A release that cannot be verified is not installed.
+4. **Stops the gateway, switches `current`, restarts.** OpenCode restarts
+   only when the crew plugin changed or its digest is unknown; see
+   [gateway-only update](#gateway-only-update). The switch is journalled.
+5. **Checks readiness.** The gateway must write `ready.json` with the new
+   version. If it does not, the run records the release as known-bad,
+   restores the previous release and restarts what the switch restarted,
+   without an idle check. If the unit itself is killed (timeout, `SIGKILL`),
+   its `ExecStopPost` makes the same undo, also without an idle check: an
+   operator update never leaves the new release switched in because the
+   host is busy. A journal stays only when that undo fails; `ALERT.json`
+   then exists.
+6. **Writes the private report** in `<dataDirectory>/maintenance/reports/`
+   and queues the Slack summary. The report has the step `operator-update`
+   and the summary says "Operator update of Pogo".
+   `ALERT.json` exists when an operator must look.
+
+`--plan` makes the checks of step 1, prints what would happen and which
+services would restart as far as is known before staging, and changes
+nothing. The unit runs `update --now --foreground`; do not use
+`--foreground` in a session that the update can end.
+
+### Runbook: install a release by hand
+
+Never create, copy or edit a directory under `<pogo.root>/releases`, and
+never move the `current` link by hand. A directory without a valid
+`.pogo-release.json` is not a release: `ready.json` then has `version: null`,
+the gateway logs a warning at start, a readiness check for a version never
+passes, and maintenance refuses to switch to that directory.
+
+1. Plan: `pogo maintenance update --config pogo.json --version X.Y.Z --plan`.
+2. Apply: the same command with `--now`. Note the unit name that it prints
+   (`pogo-update-X-Y-Z-<epoch seconds>`).
+3. Follow: `journalctl --user -u <unit>.service`.
+4. Verify:
+   - `<dataDirectory>/ready.json` has `"version": "X.Y.Z"`;
+   - `<pogo.root>/current` points to `releases/X.Y.Z`, and that directory
+     has `.pogo-release.json` with `"verification": "verified"`;
+   - the newest report in `maintenance/reports/` has `pogo: updated` and
+     lists the restarts; no `maintenance/ALERT.json` exists.
+5. If the update failed: it has normally rolled back by itself. The report
+   then has `pogo: rolled-back`, `current` points to the previous release
+   and `ready.json` names the previous version. Read the report before you
+   try again; `--retry-failed` is required for the same version.
+6. If `maintenance/ALERT.json` exists with `"journal": true`, the automatic
+   undo did not finish: run `pogo maintenance recover --config pogo.json`.
+   It restores the previous release and restarts what that needs. The
+   update refuses to start while a journal is left.
+
+What restarts when:
+
+| Change                                            | Gateway | OpenCode |
+| ------------------------------------------------- | ------- | -------- |
+| Release with the same crew plugin digest          | yes     | no       |
+| Release with another or an unknown plugin digest  | yes     | yes      |
+| Rollback of a gateway-only update                 | yes     | no       |
+| Rollback after OpenCode restarted with the update | yes     | yes      |
+
+To mark an existing, complete release directory as managed once, use
+`pogo maintenance adopt`. An adopted release has no plugin digest, so the
+next update restarts OpenCode.
 
 ## Captain and crew instructions
 

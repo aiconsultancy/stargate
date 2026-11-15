@@ -307,8 +307,11 @@ export function summary(report: Report, reportName: string) {
       .slice(0, max)
       .join("");
   const changed = report.components.filter((c) => c.status !== "unchanged");
+  const result = `${report.outcome}${report.reason ? ` (${labels[report.reason]})` : ""}.`;
   const parts = [
-    `Nightly maintenance ${report.window.localStart}–${report.window.localEnd} ${report.window.timeZone}: ${report.outcome}${report.reason ? ` (${labels[report.reason]})` : ""}.`,
+    report.steps.some((step) => step.name === "operator-update")
+      ? `Operator update of Pogo, outside the window and without the idle gate: ${result}`
+      : `Nightly maintenance ${report.window.localStart}–${report.window.localEnd} ${report.window.timeZone}: ${result}`,
   ];
   if (report.cleanup) {
     const items = report.cleanup.items;

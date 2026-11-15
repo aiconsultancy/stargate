@@ -126,6 +126,10 @@ SQLite, `bun:test`, and the existing Promise adapter contract.
 - Do not claim exactly-once external side effects or delivery.
 - Keep SQLite state and credential files private. Never delete state to fix
   an error without explicit authorization and an appropriate backup.
+- Never create or edit a directory under a managed `releases/` root and never
+  move `current` by hand. Install a release with `pogo maintenance update`
+  (or the nightly run); see the
+  [runbook](docs/maintenance.md#runbook-install-a-release-by-hand).
 - Do not install/start/stop user services, change global OpenCode configuration,
   or edit the separate CLIProxyAPI installation unless the user requests it.
 - Pi, Claude and Codex proxy routing require explicit provider endpoint and

@@ -15,6 +15,7 @@ import { z } from "zod";
 import { inspectArchive, verifyExtracted } from "./archive";
 import {
   type GitHubRelease,
+  githubReleaseSchema,
   githubReleases,
   selectGitHubRelease,
 } from "./cooloff";
@@ -27,7 +28,7 @@ import {
 } from "./exec";
 import { replaceLink } from "./files";
 import { writePluginDigest } from "./plugin-digest";
-import { compareVersions, parseVersion } from "./versions";
+import { compareVersions, normalizeVersion, parseVersion } from "./versions";
 
 /**
  * Install layout:
@@ -234,6 +235,40 @@ export async function newerRelease(
   return current && compareVersions(release.version, current) <= 0
     ? null
     : release;
+}
+
+/**
+ * The published release with exactly this version, for an operator update:
+ * no cool-off. Looked up by its tag `v<version>`, so its age does not
+ * matter. Drafts and prereleases never match. `not-found` otherwise.
+ */
+export async function namedRelease(
+  config: PogoReleaseConfig,
+  headers: Record<string, string>,
+  version: string,
+): Promise<ReleaseCandidate> {
+  if (normalizeVersion(version) !== version) throw new StepError("not-found");
+  const parsed = githubReleaseSchema.safeParse(
+    await fetchJSON(
+      `${config.apiURL.replace(/\/+$/, "")}/repos/${config.repository}/releases/tags/v${version}`,
+      {
+        headers: {
+          accept: "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
+          ...headers,
+        },
+      },
+    ),
+  );
+  if (!parsed.success) throw new StepError("network");
+  const found = parsed.data;
+  if (
+    found.draft ||
+    found.prerelease ||
+    normalizeVersion(found.tag_name) !== version
+  )
+    throw new StepError("not-found");
+  return { ...found, version };
 }
 
 const refSchema = z.object({

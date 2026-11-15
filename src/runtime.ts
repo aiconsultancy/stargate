@@ -666,8 +666,15 @@ export function serve(
       log.info("Pogo ready");
       // Readiness record for maintenance health checks; never fatal.
       yield* Effect.promise(() =>
-        writeReady(config.dataDirectory).catch(() =>
-          log.warn("Readiness record not written"),
+        writeReady(config.dataDirectory).then(
+          (version) => {
+            // Only matters where maintenance manages Pogo releases.
+            if (version === null && config.maintenance?.pogo)
+              log.warn(
+                "This Pogo directory has no valid .pogo-release.json; the readiness record has no version and maintenance cannot verify an update. Install releases with pogo maintenance update or adopt.",
+              );
+          },
+          () => log.warn("Readiness record not written"),
         ),
       );
       yield* Effect.raceFirst(

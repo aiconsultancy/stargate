@@ -209,12 +209,16 @@ function parseCli(args: string[]) {
     "after-run": { type: "boolean" },
     "accept-current": { type: "string" },
     yes: { type: "boolean" },
+    now: { type: "boolean" },
+    foreground: { type: "boolean" },
+    "retry-failed": { type: "boolean" },
   } as const;
   const input = { args, allowPositionals: true, strict: true } as const;
   try {
     return parseArgs({ ...input, options });
   } catch {
-    // Provisioning uses --plan PATH; cleanup alone has the boolean --plan.
+    // Provisioning uses --plan PATH; maintenance cleanup and update have the
+    // boolean --plan.
     // Retry parsing only for that exact command, including global options.
     try {
       const parsed = parseArgs({
@@ -223,7 +227,8 @@ function parseCli(args: string[]) {
       });
       if (
         parsed.positionals[0] === "maintenance" &&
-        parsed.positionals[1] === "cleanup"
+        (parsed.positionals[1] === "cleanup" ||
+          parsed.positionals[1] === "update")
       )
         return parsed;
     } catch {
@@ -290,6 +295,9 @@ export async function runCli(args: string[]): Promise<CliResult> {
             ? [
                 "json",
                 ...(p[1] === "cleanup" ? ["plan"] : []),
+                ...(p[1] === "update"
+                  ? ["plan", "now", "foreground", "retry-failed"]
+                  : []),
                 "name",
                 "print",
                 "release",
@@ -329,6 +337,9 @@ export async function runCli(args: string[]): Promise<CliResult> {
         ? { acceptCurrent: v["accept-current"] }
         : {}),
       ...(v.yes ? { yes: true } : {}),
+      ...(v.now ? { now: true } : {}),
+      ...(v.foreground ? { foreground: true } : {}),
+      ...(v["retry-failed"] ? { retryFailed: true } : {}),
     });
     if (code !== 0) process.exitCode = code;
     return { command: "exit" };

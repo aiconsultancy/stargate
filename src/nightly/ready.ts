@@ -25,17 +25,28 @@ export async function runningVersion(directory = packageDirectory) {
   return (await readMetadata(directory))?.version ?? null;
 }
 
-export async function writeReady(dataDirectory: string, now = Date.now()) {
+/**
+ * Record that this process is ready. Returns the release version that it
+ * runs, or null when its directory has no valid `.pogo-release.json`: then
+ * maintenance cannot match the record with a release, and a readiness check
+ * for a version never passes. The caller warns about null.
+ */
+export async function writeReady(
+  dataDirectory: string,
+  now = Date.now(),
+  directory = packageDirectory,
+) {
   const record: Ready = {
     schema: "pogo.ready.v1",
     pid: process.pid,
     readyAt: now,
-    version: await runningVersion(),
+    version: await runningVersion(directory),
   };
   const path = join(dataDirectory, "ready.json");
   const temp = `${path}.tmp-${process.pid}`;
   await writeFile(temp, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   await rename(temp, path);
+  return record.version;
 }
 
 export async function readReady(dataDirectory: string) {

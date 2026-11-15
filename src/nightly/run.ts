@@ -80,6 +80,7 @@ import {
   githubHeaders,
   githubToken,
   linkedRelease,
+  namedRelease,
   newerRelease,
   pruneReleases,
   stageRelease,
@@ -97,7 +98,7 @@ import {
   writeReport,
 } from "./report";
 import { readState, updateState } from "./state";
-import { compareVersions } from "./versions";
+import { compareVersions, normalizeVersion } from "./versions";
 import {
   currentWindow,
   defaultInstallID,
@@ -141,8 +142,27 @@ export type RunInput = {
   mode: "plan" | "run";
   /** Operator-started run outside the window, with the window's length. */
   outsideWindow?: boolean;
+  /**
+   * Operator-approved update to one Pogo release, now: no window, no idle
+   * gate and no cool-off. Only the Pogo release changes. Everything else is
+   * the run's own path: verified staging, journal, switch, readiness check
+   * and rollback. Refused while a journal is left over.
+   */
+  update?: {
+    version: string;
+    retryFailed?: boolean;
+    /** Installed code used by this unit and its ExecStopPost recovery. */
+    runnerRelease?: string;
+  };
   signal: AbortSignal;
 };
+
+/** The operator asked for something that an update never does. */
+export class UpdateRefused extends Error {}
+
+/** An operator update has this long: staging and tests, then the switch. */
+const updateWindowMs = 90 * 60_000;
+const updateReserveMs = 10 * 60_000;
 export type RunResult = {
   report: Report;
   reportPath?: string;
@@ -375,6 +395,8 @@ function undoContext(
 const lastRunSchema = z.strictObject({
   runID: z.string(),
   invocationID: z.string().nullable(),
+  /** An operator update: its undo never waits for an idle host. */
+  operator: z.boolean().optional(),
 });
 const lastRunPath = (dataDirectory: string) =>
   join(maintenanceDirectory(dataDirectory), "last-run.json");
@@ -615,6 +637,49 @@ export async function idleNow(
   });
 }
 
+/** `recover --after-run`: the caller holds the run lock. */
+async function afterRun(
+  config: Config,
+  deps: Dependencies,
+  found: Awaited<ReturnType<typeof Journal.read>>,
+): Promise<{ ok: boolean; message: string }> {
+  if (found.kind !== "ok") return recoverJournal(config, deps);
+  const invocation = deps.env["INVOCATION_ID"];
+  const last = await readOptional(lastRunPath(config.dataDirectory))
+    .then((text) => lastRunSchema.parse(JSON.parse(text ?? "")))
+    .catch(() => undefined);
+  if (
+    !invocation ||
+    last?.invocationID !== invocation ||
+    last.runID !== found.journal.runID
+  ) {
+    const started = await startStoppedGateway(config, deps, found.journal);
+    return {
+      ok: started !== false,
+      message: `The journal is not this run's; it waits for the next run's idle gate.${
+        started === undefined
+          ? ""
+          : started
+            ? " Started the stopped gateway."
+            : " The stopped gateway did not become ready."
+      }`,
+    };
+  }
+  // This run's own journal: undo with Slack ingress still stopped; the
+  // gateway is started last. If the run had already started the gateway
+  // again, ingress is open: the undo rechecks idle before each step,
+  // like leftover recovery, and a busy check keeps the journal. An
+  // operator update never waits: the operator accepted the interruption,
+  // and a busy host must not keep the new release switched in.
+  if (!last.operator && (await ingressMayBeOpen(config, deps.runner))) {
+    const check = (step: UndoStep) =>
+      idleNow(config, deps, AbortSignal.timeout(60_000), undoStepScope(step));
+    const result = await recoverJournal(config, deps, undefined, check);
+    return { ok: result.ok, message: result.message };
+  }
+  return recoverJournal(config, deps);
+}
+
 /**
  * Finish an interrupted run. Takes the run lock (busy: fails). Only a
  * missing journal means "nothing to do"; an unusable journal starts the
@@ -644,45 +709,30 @@ export async function recoverInterruptedRun(
   }
   try {
     const found = await Journal.read(config);
-    if (options.afterRun && found.kind === "ok") {
-      const invocation = deps.env["INVOCATION_ID"];
-      const last = await readOptional(lastRunPath(config.dataDirectory))
-        .then((text) => lastRunSchema.parse(JSON.parse(text ?? "")))
+    if (!options.afterRun) return await recoverJournal(config, deps);
+    const result = await afterRun(config, deps, found);
+    // A run that was killed wrote no alert. Never leave a journal silently.
+    const left = await Journal.read(config);
+    if (left.kind !== "none") {
+      const runID = left.kind === "ok" ? left.journal.runID : "unknown";
+      const known = await readOptional(
+        join(maintenanceDirectory(config.dataDirectory), "ALERT.json"),
+      )
+        .then((text) =>
+          z.object({ runID: z.string() }).parse(JSON.parse(text ?? "")),
+        )
         .catch(() => undefined);
-      if (
-        !invocation ||
-        last?.invocationID !== invocation ||
-        last.runID !== found.journal.runID
-      ) {
-        const started = await startStoppedGateway(config, deps, found.journal);
-        return {
-          ok: started !== false,
-          message: `The journal is not this run's; it waits for the next run's idle gate.${
-            started === undefined
-              ? ""
-              : started
-                ? " Started the stopped gateway."
-                : " The stopped gateway did not become ready."
-          }`,
-        };
-      }
-      // This run's own journal: undo with Slack ingress still stopped; the
-      // gateway is started last. If the run had already started the gateway
-      // again, ingress is open: the undo rechecks idle before each step,
-      // like leftover recovery, and a busy check keeps the journal.
-      if (await ingressMayBeOpen(config, deps.runner)) {
-        const check = (step: UndoStep) =>
-          idleNow(
-            config,
-            deps,
-            AbortSignal.timeout(60_000),
-            undoStepScope(step),
-          );
-        const result = await recoverJournal(config, deps, undefined, check);
-        return { ok: result.ok, message: result.message };
-      }
+      if (known?.runID !== runID)
+        await writeAlert(config.dataDirectory, {
+          runID,
+          at: new Date(deps.clock.now()).toISOString(),
+          outcome: "failed",
+          reason: "recovery-required",
+          report: null,
+          journal: true,
+        }).catch(() => {});
     }
-    return await recoverJournal(config, deps);
+    return result;
   } finally {
     held.close();
   }
@@ -695,15 +745,30 @@ export async function runMaintenance(
   const { config, mode, signal } = input;
   const m = config.maintenance;
   if (!m) throw new Error("No maintenance section in configuration.");
-  if (mode === "run" && !m.enabled)
+  const update = input.update;
+  if (mode === "run" && !m.enabled && !update)
     throw new Error(
       "Maintenance is disabled. Set maintenance.enabled to true.",
     );
+  if (update) {
+    if (!m.pogo)
+      throw new UpdateRefused("maintenance.pogo is required for an update.");
+    if (normalizeVersion(update.version) !== update.version)
+      throw new UpdateRefused("Use a MAJOR.MINOR.PATCH version.");
+  }
   const { clock } = deps;
   const installID = m.installID ?? defaultInstallID(resolve(input.configPath));
   const jitter = stableJitter(installID, m.window.jitterMinutes);
   const startedAt = clock.now();
   let current = currentWindow(startedAt, m.window, jitter);
+  if (update)
+    current = {
+      date: new Date(startedAt).toISOString().slice(0, 10),
+      opens: startedAt,
+      start: startedAt,
+      deadline: startedAt + updateWindowMs - updateReserveMs,
+      closes: startedAt + updateWindowMs,
+    };
   if (!current && mode === "run") {
     if (!input.outsideWindow)
       throw new Error("Outside the maintenance window. Nothing was changed.");
@@ -797,6 +862,13 @@ export async function runMaintenance(
   };
 
   try {
+    // An update never undoes an earlier run: the operator runs recover.
+    if (update && (await Journal.read(config)).kind !== "none")
+      throw new UpdateRefused(
+        "A maintenance journal is left over. Run `pogo maintenance recover` first. Nothing was changed.",
+      );
+    // Names the kind of run in the report and its summary.
+    if (update) rec.step("operator-update", "ok");
     // First, before anything can fail: `recover --after-run` finishes only
     // the journal of the run that this systemd invocation started.
     if (mode === "run")
@@ -805,6 +877,7 @@ export async function runMaintenance(
         `${JSON.stringify({
           runID,
           invocationID: deps.env["INVOCATION_ID"] ?? null,
+          ...(update ? { operator: true } : {}),
         })}\n`,
         0o600,
       );
@@ -827,7 +900,7 @@ export async function runMaintenance(
 
     // A journal left by an interrupted run is finished first, never
     // replaced, and only at an idle boundary: undo restarts services too.
-    if (mode === "run") {
+    if (mode === "run" && !update) {
       const unknown = { idle: false, reason: "idle-unknown" } as const;
       const leftover = await recoverAtIdle(config, deps, {
         idle: async (scope) =>
@@ -872,7 +945,7 @@ export async function runMaintenance(
       }
     }
 
-    if (m.cleanup?.enabled) {
+    if (m.cleanup?.enabled && !update) {
       if (crewsUnknown) {
         rec.component({
           id: "cleanup",
@@ -958,10 +1031,11 @@ export async function runMaintenance(
     }
 
     const state = await readState(config.dataDirectory);
-    const pogo = await discoverPogo(m, deps, rec, startedAt, state);
-    const proxy = await discoverProxy(m, rec, startedAt);
+    const pogo = await discoverPogo(m, deps, rec, startedAt, state, update);
+    // An operator update changes the Pogo release only.
+    const proxy = update ? undefined : await discoverProxy(m, rec, startedAt);
     const agentPlans =
-      m.components.agentClis && m.agentClis
+      !update && m.components.agentClis && m.agentClis
         ? await agentCliPlan(m.agentClis, startedAt)
         : [];
     for (const plan of agentPlans)
@@ -981,7 +1055,7 @@ export async function runMaintenance(
       });
     let inputs: ModelInputs | undefined;
     let work: ModelWork | undefined;
-    if (m.components.models && m.models && m.proxy) {
+    if (!update && m.components.models && m.models && m.proxy) {
       try {
         if (crewsUnknown) throw new StepError("idle-unknown");
         inputs = await readModelInputs({
@@ -1163,7 +1237,10 @@ export async function runMaintenance(
         .filter((entry) => journal.get(entry) !== undefined)
         .map((entry) => ({ entry, ids: componentsOf(entry) }));
       if (!journal.empty && deps.undoOnExit !== false)
-        await undoJournal(journal, gatewayReturned ? afterIngress : ctx);
+        await undoJournal(
+          journal,
+          gatewayReturned && !update ? afterIngress : ctx,
+        );
       for (const { entry, ids } of entries) {
         const restored = journal.get(entry) === undefined;
         for (const id of ids)
@@ -1210,6 +1287,8 @@ export async function runMaintenance(
     }
 
     async function gate(name: string) {
+      // The operator accepted the interruption.
+      if (update) return;
       if (crewsUnknown) throw new Defer("idle-unknown");
       const result = await checkIdle({
         ...idleInput(gateScope),
@@ -1241,20 +1320,23 @@ export async function runMaintenance(
 
     async function apply() {
       if (!m) return;
-      // Gate 1: wait for idle, at most until the deadline.
+      // Crew profiles that cannot be read: the plugin check cannot run.
       if (crewsUnknown) throw new Defer("idle-unknown");
-      const idle = await waitForIdle(
-        idleInput(gateScope),
-        window.deadline,
-        m.idle.pollSeconds * 1000,
-        clock,
-      );
-      rec.step(
-        "idle-gate",
-        idle.idle ? "ok" : "skipped",
-        idle.idle ? undefined : idle.reason,
-      );
-      if (!idle.idle) throw new Defer(idle.reason);
+      if (!update) {
+        // Gate 1: wait for idle, at most until the deadline.
+        const idle = await waitForIdle(
+          idleInput(gateScope),
+          window.deadline,
+          m.idle.pollSeconds * 1000,
+          clock,
+        );
+        rec.step(
+          "idle-gate",
+          idle.idle ? "ok" : "skipped",
+          idle.idle ? undefined : idle.reason,
+        );
+        if (!idle.idle) throw new Defer(idle.reason);
+      }
       if (remaining() <= 0) throw new Defer("deadline");
 
       // Agent CLIs: the long install happens before the final gates.
@@ -1553,8 +1635,10 @@ export async function runMaintenance(
         );
         if (!ready && journal.get("release") && staged) {
           await markFailedRelease(staged, "readiness-failed");
-          // The gateway is back: idle-gated, like leftover recovery.
-          const restored = await undoJournal(journal, afterIngress, [
+          // The gateway is back: idle-gated, like leftover recovery, unless
+          // the operator accepted the interruption.
+          const afterReturn = update ? ctx : afterIngress;
+          const restored = await undoJournal(journal, afterReturn, [
             "release",
             "openCode",
           ]);
@@ -1565,7 +1649,7 @@ export async function runMaintenance(
             after: linkRestored ? (pogo?.before ?? null) : null,
           });
           const idle = restored
-            ? await afterIngress.gate?.("gateway")
+            ? await afterReturn.gate?.("gateway")
             : undefined;
           if (idle && !idle.idle)
             rec.step("recover-before-gateway", "skipped", idle.reason);
@@ -1598,12 +1682,17 @@ export async function runMaintenance(
             s.openCodeRelease = loaded;
           });
         await journal.clear("release");
+        // A retried release that is ready is no longer known-bad.
+        if (update?.retryFailed && state.failedReleases[staged])
+          await updateState(config.dataDirectory, (s) => {
+            delete s.failedReleases[staged];
+          });
         rec.update("pogo", { status: "updated", after: staged });
-        await pruneReleases(
-          m.pogo.root,
-          m.pogo.keep,
-          loaded ? [loaded] : [],
-        ).catch(() => []);
+        await pruneReleases(m.pogo.root, m.pogo.keep, [
+          ...(loaded ? [loaded] : []),
+          // Recovery can still need this code until the journal is empty.
+          ...(update?.runnerRelease ? [update.runnerRelease] : []),
+        ]).catch(() => []);
       }
       await journal.clear("gateway");
       await journal.clear("openCode");
@@ -1644,6 +1733,7 @@ export async function runMaintenance(
       }).catch(() => {});
     }
   } catch (error) {
+    if (error instanceof UpdateRefused) throw error;
     rec.step("run", "failed", signal.aborted ? "aborted" : reasonOf(error));
     attention = true;
     return await finish("failed", signal.aborted ? "aborted" : reasonOf(error));
@@ -1672,8 +1762,9 @@ async function discoverPogo(
   rec: Recorder,
   now: number,
   state: Awaited<ReturnType<typeof readState>>,
+  update?: RunInput["update"],
 ) {
-  if (!m.components.pogo || !m.pogo) return undefined;
+  if ((!m.components.pogo && !update) || !m.pogo) return undefined;
   const current = await linkedRelease(m.pogo.root, "current");
   const before = current?.metadata.version ?? null;
   const base = { id: "pogo", before, after: before };
@@ -1699,13 +1790,27 @@ async function discoverPogo(
     const headers = githubHeaders(
       await githubToken(m.pogo.tokenEnv, deps.runner, deps.env),
     );
-    const candidate = await newerRelease(
-      m.pogo,
-      headers,
-      current.metadata.version,
-      now,
-    );
-    if (candidate && state.failedReleases[candidate.version]) {
+    if (update) {
+      // Same version: nothing to do. Lower: rollback is `recover`, never this.
+      const order = compareVersions(update.version, current.metadata.version);
+      if (order <= 0) {
+        rec.component({
+          ...base,
+          candidate: update.version,
+          status: order === 0 ? "unchanged" : "skipped",
+          ...(order === 0 ? {} : { reason: "version-mismatch" as const }),
+        });
+        return undefined;
+      }
+    }
+    const candidate = update
+      ? await namedRelease(m.pogo, headers, update.version)
+      : await newerRelease(m.pogo, headers, current.metadata.version, now);
+    if (
+      candidate &&
+      state.failedReleases[candidate.version] &&
+      !update?.retryFailed
+    ) {
       // Known bad here: wait for a newer release.
       rec.component({
         ...base,
@@ -1839,7 +1944,7 @@ async function pluginLoaded(
  * True when the staged release records the crew plugin digest that the
  * `current` release records. A missing record on either side is false.
  */
-async function samePlugin(root: string, staged: string) {
+export async function samePlugin(root: string, staged: string) {
   const current = await linkedRelease(root, "current");
   if (!current) return false;
   const [running, next] = await Promise.all([

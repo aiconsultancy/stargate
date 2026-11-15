@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -41,8 +41,14 @@ import {
   type Dependencies,
   recoverInterruptedRun,
   runMaintenance,
+  UpdateRefused,
 } from "../src/nightly/run";
 import { readState, updateState } from "../src/nightly/state";
+import {
+  maintenanceUpdate,
+  type UpdateOptions,
+  updateUnit,
+} from "../src/nightly/update";
 import type { ModelRef } from "../src/nightly/versions";
 import { botKey } from "../src/routing";
 import { Store } from "../src/store";
@@ -119,22 +125,24 @@ const api = Bun.serve({
       uploader: { login: "github-actions[bot]" },
       ...extra,
     });
+    const pogoRelease = () => ({
+      id: 1,
+      tag_name: "v0.2.0",
+      draft: false,
+      prerelease: false,
+      published_at: hoursAgo(1),
+      author: { login: "github-actions[bot]" },
+      assets: [
+        asset(1, "pogo-v0.2.0.tar.gz", archive.length),
+        asset(2, "pogo-v0.2.0.tar.gz.sha256", checksum.length),
+      ],
+    });
     switch (url.pathname) {
       case `${pogo}/releases`:
-        return Response.json([
-          {
-            id: 1,
-            tag_name: "v0.2.0",
-            draft: false,
-            prerelease: false,
-            published_at: hoursAgo(1),
-            author: { login: "github-actions[bot]" },
-            assets: [
-              asset(1, "pogo-v0.2.0.tar.gz", archive.length),
-              asset(2, "pogo-v0.2.0.tar.gz.sha256", checksum.length),
-            ],
-          },
-        ]);
+        return Response.json([pogoRelease()]);
+      // One release by its tag; any other tag is 404 below.
+      case `${pogo}/releases/tags/v0.2.0`:
+        return Response.json(pogoRelease());
       case `${pogo}/releases/assets/1`:
         return new Response(archive);
       case `${pogo}/releases/assets/2`:
@@ -1625,47 +1633,47 @@ const v2 = (fields: Record<string, unknown>) => ({
 });
 const teamPath = () => join(fixture.dir, "team.json");
 
-describe("gateway-only update", () => {
-  /** Only a Pogo release is due. */
-  async function pogoOnly(overrides: Record<string, unknown> = {}) {
-    const installed = await install(overrides);
-    if (!installed.config.maintenance) throw new Error("no maintenance");
-    installed.config.maintenance.components = {
-      pogo: true,
-      cliproxyapi: false,
-      agentClis: false,
-      models: false,
-    };
-    return installed;
-  }
-  /** The running release records a crew plugin: the release's, or another. */
-  async function runningPlugin(plugin = releaseFiles["src/crew/plugin.ts"]) {
-    const old = join(fixture.dir, "pogo", "releases", "old");
-    for (const [path, text] of Object.entries({
-      ...releaseFiles,
-      "src/crew/plugin.ts": plugin,
-    })) {
-      await mkdir(dirname(join(old, path)), { recursive: true });
-      await writeFile(join(old, path), text);
-    }
-    expect(await writePluginDigest(old)).toMatch(/^v1:/);
-  }
-  const queueJob = (config: Config) => {
-    const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
-    store.enqueue({
-      eventId: "E-busy",
-      botKey: "k",
-      conversation: '["k","C123","1.0"]',
-      channel: "C123",
-      thread: "1.0",
-      user: "U123",
-      text: "work",
-    });
-    store.close();
+/** Only a Pogo release is due. */
+async function pogoOnly(overrides: Record<string, unknown> = {}) {
+  const installed = await install(overrides);
+  if (!installed.config.maintenance) throw new Error("no maintenance");
+  installed.config.maintenance.components = {
+    pogo: true,
+    cliproxyapi: false,
+    agentClis: false,
+    models: false,
   };
-  const stepNames = (report: { steps: { name: string }[] }) =>
-    report.steps.map((step) => step.name);
+  return installed;
+}
+/** The running release records a crew plugin: the release's, or another. */
+async function runningPlugin(plugin = releaseFiles["src/crew/plugin.ts"]) {
+  const old = join(fixture.dir, "pogo", "releases", "old");
+  for (const [path, text] of Object.entries({
+    ...releaseFiles,
+    "src/crew/plugin.ts": plugin,
+  })) {
+    await mkdir(dirname(join(old, path)), { recursive: true });
+    await writeFile(join(old, path), text);
+  }
+  expect(await writePluginDigest(old)).toMatch(/^v1:/);
+}
+const queueJob = (config: Config) => {
+  const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
+  store.enqueue({
+    eventId: "E-busy",
+    botKey: "k",
+    conversation: '["k","C123","1.0"]',
+    channel: "C123",
+    thread: "1.0",
+    user: "U123",
+    text: "work",
+  });
+  store.close();
+};
+const stepNames = (report: { steps: { name: string }[] }) =>
+  report.steps.map((step) => step.name);
 
+describe("gateway-only update", () => {
   test("an unchanged crew plugin restarts the gateway only, also while the crew works", async () => {
     const { config, path } = await pogoOnly();
     await runningPlugin();
@@ -1840,6 +1848,647 @@ describe("gateway-only update", () => {
     expect((await readState(config.dataDirectory)).openCodeRelease).toBe(
       "loaded",
     );
+  });
+});
+
+describe("operator update", () => {
+  const noon = Date.parse("2026-11-12T12:00:00Z");
+  const update = (
+    config: Config,
+    path: string,
+    version: string,
+    options: { mode?: "plan" | "run"; retryFailed?: boolean } = {},
+    extra: Partial<Dependencies> = {},
+  ) =>
+    runMaintenance(
+      {
+        config,
+        configPath: path,
+        mode: options.mode ?? "run",
+        update: {
+          version,
+          ...(options.retryFailed ? { retryFailed: true } : {}),
+        },
+        signal: fixture.controller.signal,
+      },
+      deps(extra),
+    );
+  const reports = (config: Config) =>
+    readdir(join(config.dataDirectory, "maintenance", "reports")).catch(
+      () => [],
+    );
+
+  test("updates the Pogo release now: no window, no idle gate, no cool-off, nothing else", async () => {
+    // Every component is configured; tonight's run would update them all.
+    const { config, path } = await install();
+    if (!config.maintenance?.pogo) throw new Error("no maintenance");
+    config.maintenance.enabled = false;
+    config.maintenance.pogo.coolOffHours = 24;
+    // Outside the window, with a running captain turn and a queued request.
+    fixture.time = noon;
+    fixture.active = ["ses_captain"];
+    queueJob(config);
+    const { report, attention } = await update(config, path, "0.2.0");
+    expect(attention).toBe(false);
+    expect(report.outcome).toBe("completed");
+    expect(report.components).toMatchObject([
+      { id: "pogo", before: "0.1.0", after: "0.2.0", status: "updated" },
+    ]);
+    expect(report.models).toEqual([]);
+    expect(stepNames(report)).toEqual([
+      "operator-update",
+      "pogo-stage",
+      "gateway-stop",
+      "pogo-switch",
+      "opencode-restart",
+      "gateway-ready",
+    ]);
+    // The running release has no plugin digest: OpenCode restarts.
+    expect(report.restarts.map((restart) => restart.service)).toEqual([
+      "opencode",
+      "gateway",
+    ]);
+    expect(await live()).toMatchObject({
+      release: "releases/0.2.0",
+      proxy: expect.stringContaining("8.0.54"),
+      cli: "2.2.7",
+      team: "openai-proxy/gpt-6.1-sol#high",
+      gateway: "active",
+      journal: null,
+    });
+    expect(commands("npm")).toEqual([]);
+  });
+
+  test("an unchanged crew plugin restarts the gateway only", async () => {
+    const { config, path } = await install();
+    await runningPlugin();
+    fixture.time = noon;
+    const { report } = await update(config, path, "0.2.0");
+    expect(statusOf(report, "pogo")).toBe("updated");
+    expect(stepNames(report)).toContain("crew-plugin-unchanged");
+    expect(report.restarts.map((restart) => restart.service)).toEqual([
+      "gateway",
+    ]);
+    expect(fixture.openCodeRestarts).toBe(0);
+    expect((await readState(config.dataDirectory)).openCodeRelease).toBe("old");
+  });
+
+  test("--plan changes nothing", async () => {
+    const { config, path } = await install();
+    fixture.time = noon;
+    const { report, reportPath } = await update(config, path, "0.2.0", {
+      mode: "plan",
+    });
+    expect(reportPath).toBeUndefined();
+    expect(report.components).toMatchObject([
+      { id: "pogo", candidate: "0.2.0", status: "planned" },
+    ]);
+    expect(fixture.commands).toEqual([]);
+    expect(await reports(config)).toEqual([]);
+    expect(await readdir(join(fixture.dir, "pogo", "releases"))).toEqual([
+      "old",
+    ]);
+    expect(await live()).toMatchObject({
+      release: "releases/old",
+      journal: null,
+    });
+  });
+
+  test("refuses a downgrade, the current version and an unknown version", async () => {
+    const { config, path } = await install();
+    fixture.time = noon;
+    for (const [version, expected] of [
+      ["0.0.9", { status: "skipped", reason: "version-mismatch" }],
+      ["0.1.0", { status: "unchanged" }],
+      ["0.3.0", { status: "failed", reason: "not-found" }],
+    ] as const) {
+      const { report } = await update(config, path, version);
+      expect(report.components).toMatchObject([{ id: "pogo", ...expected }]);
+    }
+    await expect(update(config, path, "v0.2")).rejects.toThrow(UpdateRefused);
+    expect(commands("systemctl")).toEqual([]);
+    expect((await live()).release).toBe("releases/old");
+  });
+
+  test("a release that cannot be verified is not installed", async () => {
+    const { config, path } = await install();
+    if (!config.maintenance?.pogo) throw new Error("no maintenance");
+    // The tree comparison is required but no checkout is configured.
+    config.maintenance.pogo.requireTreeCheck = true;
+    fixture.time = noon;
+    const { report } = await update(config, path, "0.2.0");
+    expect(report.components).toMatchObject([
+      { id: "pogo", status: "failed", reason: "not-configured" },
+    ]);
+    expect(commands("systemctl")).toEqual([]);
+    expect((await live()).release).toBe("releases/old");
+  });
+
+  test("a release that failed here needs --retry-failed", async () => {
+    const { config, path } = await install();
+    fixture.time = noon;
+    await updateState(config.dataDirectory, (state) => {
+      state.failedReleases["0.2.0"] = {
+        reason: "readiness-failed",
+        at: new Date(noon).toISOString(),
+      };
+    });
+    const refused = await update(config, path, "0.2.0");
+    expect(refused.report.components).toMatchObject([
+      { id: "pogo", status: "skipped", reason: "known-bad" },
+    ]);
+    expect(commands("systemctl")).toEqual([]);
+    const retried = await update(config, path, "0.2.0", { retryFailed: true });
+    expect(statusOf(retried.report, "pogo")).toBe("updated");
+    expect(
+      (await readState(config.dataDirectory)).failedReleases["0.2.0"],
+    ).toBeUndefined();
+  });
+
+  test("a leftover journal is refused; recover is the operator's step", async () => {
+    const { config, path } = await install();
+    fixture.time = noon;
+    const journalPath = await writeJournal(
+      config,
+      v2({ gateway: { restartPending: true } }),
+    );
+    const before = await readFile(journalPath, "utf8");
+    for (const mode of ["plan", "run"] as const)
+      await expect(update(config, path, "0.2.0", { mode })).rejects.toThrow(
+        "pogo maintenance recover",
+      );
+    expect(await readFile(journalPath, "utf8")).toBe(before);
+    expect(fixture.commands).toEqual([]);
+    expect(await reports(config)).toEqual([]);
+  });
+
+  test("a gateway that is not ready goes back at once, also on a busy host", async () => {
+    const { config, path } = await install();
+    fixture.time = noon;
+    fixture.readyVersions = new Set(["0.1.0"]);
+    fixture.active = ["ses_captain"];
+    queueJob(config);
+    const { report } = await update(config, path, "0.2.0");
+    expect(statusOf(report, "pogo")).toBe("rolled-back");
+    expect(report.steps.map((step) => step.status)).not.toContain("skipped");
+    expect(await live()).toMatchObject({
+      release: "releases/old",
+      gateway: "active",
+      journal: null,
+    });
+    expect(
+      (await readState(config.dataDirectory)).failedReleases["0.2.0"]?.reason,
+    ).toBe("readiness-failed");
+  });
+
+  test("a killed update is undone by its ExecStopPost, also on a busy host; a killed nightly run is not", async () => {
+    for (const operator of [true, false]) {
+      const { config, path } = await install();
+      if (!config.maintenance) throw new Error("no maintenance");
+      config.maintenance.components = {
+        pogo: true,
+        cliproxyapi: false,
+        agentClis: false,
+        models: false,
+      };
+      fixture.active = [];
+      if (operator) await update(config, path, "0.2.0");
+      else await run(config, path);
+      // As a kill leaves it right after the gateway started on the new
+      // release: the switch is not committed.
+      const runID = crypto.randomUUID();
+      await writeJournal(config, {
+        ...v2({
+          gateway: { restartPending: false },
+          release: { previous: "old", version: "0.2.0" },
+        }),
+        runID,
+      });
+      await writeFile(
+        join(config.dataDirectory, "maintenance", "last-run.json"),
+        JSON.stringify({
+          runID,
+          invocationID: invocation.INVOCATION_ID,
+          ...(operator ? { operator: true } : {}),
+        }),
+      );
+      const alert = join(config.dataDirectory, "maintenance", "ALERT.json");
+      expect(await live()).toMatchObject({
+        release: "releases/0.2.0",
+        gateway: "active",
+      });
+      // A hard kill writes no alert, and work has arrived meanwhile.
+      await rm(alert, { force: true });
+      fixture.active = ["ses_captain"];
+      queueJob(config);
+      const after = await recoverInterruptedRun(
+        config,
+        deps({ env: invocation }),
+        { afterRun: true },
+      );
+      if (operator) {
+        // The operator accepted the interruption: no idle check.
+        expect(after.ok).toBe(true);
+        expect(await live()).toMatchObject({
+          release: "releases/old",
+          gateway: "active",
+          journal: null,
+        });
+        expect(await readFile(alert, "utf8").catch(() => null)).toBeNull();
+      } else {
+        // The nightly undo waits for an idle host, and says so.
+        // The gateway restart that the undo owes waits for an idle host.
+        expect(after.ok).toBe(false);
+        expect(
+          JSON.parse((await readJournalFile(config.dataDirectory)) ?? "{}"),
+        ).toMatchObject({ gateway: { restartPending: true } });
+        expect(JSON.parse(await readFile(alert, "utf8"))).toMatchObject({
+          schema: "pogo.maintenance.alert.v1",
+          runID,
+          outcome: "failed",
+          reason: "recovery-required",
+          journal: true,
+        });
+        // The alert of this journal is written once, not replaced.
+        const first = await readFile(alert, "utf8");
+        fixture.time += 60_000;
+        await recoverInterruptedRun(config, deps({ env: invocation }), {
+          afterRun: true,
+        });
+        expect(await readFile(alert, "utf8")).toBe(first);
+      }
+    }
+  });
+
+  describe("command", () => {
+    const unit = {
+      executable: "/opt/bun",
+      path: "/opt:/usr/local/bin:/usr/bin:/bin",
+    };
+    /** The installed Pogo that runs the command: a verified release. */
+    const installed = async (config: Config, name = "caller") => {
+      const root = config.maintenance?.pogo?.root;
+      if (!root) throw new Error("no release root");
+      const directory = join(root, "releases", name);
+      await mkdir(join(directory, "src"), { recursive: true });
+      await writeFile(join(directory, "src", "main.ts"), "");
+      await writeFile(
+        join(directory, ".pogo-release.json"),
+        JSON.stringify({
+          ...JSON.parse(
+            await readFile(
+              join(root, "releases", "old", ".pogo-release.json"),
+              "utf8",
+            ),
+          ),
+          verification: "verified",
+          tree: "equal",
+        }),
+      );
+      return join(directory, "src", "main.ts");
+    };
+    const command = async (
+      config: Config,
+      path: string,
+      options: Omit<UpdateOptions, "configPath">,
+      overrides: { entrypoint?: string } = {},
+    ) => {
+      const launched: string[][] = [];
+      const printed: string[] = [];
+      const entrypoint = overrides.entrypoint ?? (await installed(config));
+      const code = await maintenanceUpdate(
+        config,
+        { configPath: path, ...options },
+        {
+          unit: { ...unit, entrypoint },
+          launcher: {
+            async run(argv) {
+              launched.push([...argv]);
+              return { code: 0, stdout: "", stderr: "" };
+            },
+          },
+          run: deps(),
+          print: (text) => printed.push(text),
+          now: () => noon,
+          signal: fixture.controller.signal,
+        },
+      );
+      return { code, launched, text: printed.join("\n"), entrypoint };
+    };
+
+    test("--now starts a transient unit after the read-only checks and returns", async () => {
+      const { config, path } = await install();
+      fixture.time = noon;
+      const { code, launched, text, entrypoint } = await command(config, path, {
+        version: "0.2.0",
+        now: true,
+      });
+      expect(code).toBe(0);
+      const name = `pogo-update-0-2-0-${noon / 1000}`;
+      expect(launched).toEqual([
+        [
+          "systemd-run",
+          "--user",
+          "--service-type=exec",
+          "--collect",
+          `--unit=${name}`,
+          "--description=Pogo operator update to 0.2.0",
+          `--working-directory=${dirname(path)}`,
+          `--property=EnvironmentFile=-${path}.env`,
+          "--property=UMask=0077",
+          "--property=RuntimeMaxSec=100min",
+          expect.stringMatching(/^--property=TimeoutStopSec=\d+min$/),
+          `--property=ExecStopPost="/opt/bun" "${entrypoint}" maintenance recover --after-run --config "${path}"`,
+          "--setenv=PATH=/opt:/usr/local/bin:/usr/bin:/bin",
+          "--",
+          "/opt/bun",
+          entrypoint,
+          "maintenance",
+          "update",
+          "--version",
+          "0.2.0",
+          "--now",
+          "--foreground",
+          "--config",
+          path,
+        ],
+      ]);
+      expect(text).toContain(`Started ${name}.service: Pogo 0.1.0 → 0.2.0.`);
+      expect(text).toContain(join(config.dataDirectory, "maintenance/reports"));
+      expect(text).toContain("ready.json");
+      // The command itself changed nothing.
+      expect(fixture.commands).toEqual([]);
+      expect((await live()).release).toBe("releases/old");
+    });
+
+    test("the unit runs this release with a fixed PATH", () => {
+      const own = updateUnit();
+      expect(own.entrypoint).toBe(
+        join(import.meta.dir, "..", "src", "main.ts"),
+      );
+      expect(own.executable).toBe(process.execPath);
+      // Never the caller's PATH.
+      expect(own.path).toBe(
+        `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
+      );
+    });
+
+    test("only an installed, verified release makes the update; a checkout is refused", async () => {
+      const { config, path } = await install();
+      const root = config.maintenance?.pogo?.root;
+      if (!root) throw new Error("no release root");
+      fixture.time = noon;
+      await runningPlugin();
+      const outside = join(fixture.dir, "checkout", "src", "main.ts");
+      await mkdir(dirname(outside), { recursive: true });
+      await writeFile(outside, "");
+      // Verified metadata does not make a directory elsewhere a release.
+      await writeFile(
+        join(fixture.dir, "checkout", ".pogo-release.json"),
+        await readFile(
+          join(dirname(dirname(await installed(config))), ".pogo-release.json"),
+          "utf8",
+        ),
+      );
+      // A link into the releases directory is the checkout, not a release.
+      await symlink(
+        join(fixture.dir, "checkout"),
+        join(root, "releases", "linked"),
+      );
+      await mkdir(join(root, "releases", "bare", "src"), { recursive: true });
+      for (const entrypoint of [
+        // This checkout: the tests' own code.
+        join(import.meta.dir, "..", "src", "main.ts"),
+        outside,
+        join(root, "releases", "linked", "src", "main.ts"),
+        // A managed release that maintenance did not verify, or no release.
+        join(root, "releases", "old", "src", "main.ts"),
+        join(root, "releases", "bare", "src", "main.ts"),
+        join(root, "releases", "missing", "src", "main.ts"),
+      ])
+        for (const foreground of [false, true]) {
+          const attempt = command(
+            config,
+            path,
+            {
+              version: "0.2.0",
+              now: true,
+              ...(foreground ? { foreground } : {}),
+            },
+            { entrypoint },
+          );
+          await expect(attempt).rejects.toThrow(UpdateRefused);
+          await expect(attempt).rejects.toThrow("Run the installed pogo");
+        }
+      // Nothing ran: no unit, no stage, no switch.
+      expect(fixture.commands).toEqual([]);
+      expect((await live()).release).toBe("releases/old");
+      // The plan is read-only and works from anywhere.
+      const plan = await command(
+        config,
+        path,
+        { version: "0.2.0", plan: true },
+        { entrypoint: outside },
+      );
+      expect(plan.code).toBe(0);
+      expect(plan.launched).toEqual([]);
+    });
+
+    test("a unit that systemd could not start is reported; nothing changed", async () => {
+      const { config, path } = await install();
+      fixture.time = noon;
+      await expect(
+        maintenanceUpdate(
+          config,
+          { configPath: path, version: "0.2.0", now: true },
+          {
+            unit: { ...unit, entrypoint: await installed(config) },
+            launcher: {
+              async run() {
+                return { code: 1, stdout: "", stderr: "exec failed: secret" };
+              },
+            },
+            run: deps(),
+            print: () => {},
+            now: () => noon,
+            signal: fixture.controller.signal,
+          },
+        ),
+      ).rejects.toThrow("could not start the update unit");
+      expect((await live()).release).toBe("releases/old");
+    });
+
+    test("a refused update starts no unit", async () => {
+      const { config, path } = await install();
+      fixture.time = noon;
+      for (const [version, message] of [
+        ["0.0.9", "older than the current release 0.1.0"],
+        ["0.3.0", "no published release 0.3.0"],
+      ] as const) {
+        const { code, launched, text } = await command(config, path, {
+          version,
+          now: true,
+        });
+        expect([code, launched]).toEqual([1, []]);
+        expect(text).toContain(message);
+      }
+      await updateState(config.dataDirectory, (state) => {
+        state.failedReleases["0.2.0"] = {
+          reason: "readiness-failed",
+          at: new Date(noon).toISOString(),
+        };
+      });
+      const bad = await command(config, path, { version: "0.2.0", now: true });
+      expect([bad.code, bad.launched]).toEqual([1, []]);
+      expect(bad.text).toContain("--retry-failed");
+      const retry = await command(config, path, {
+        version: "0.2.0",
+        now: true,
+        retryFailed: true,
+      });
+      expect(retry.code).toBe(0);
+      expect(retry.launched[0]?.at(-1)).toBe("--retry-failed");
+      for (const options of [
+        { version: "0.2.0" },
+        { version: "0.2.0", plan: true, now: true },
+        { version: "0.2", now: true },
+        { now: true },
+        { version: "0.2.0", plan: true, foreground: true },
+      ])
+        await expect(command(config, path, options)).rejects.toThrow(
+          UpdateRefused,
+        );
+    });
+
+    test("--plan says what would happen and which services restart", async () => {
+      const { config, path } = await install();
+      fixture.time = noon;
+      const first = await command(config, path, {
+        version: "0.2.0",
+        plan: true,
+      });
+      expect([first.code, first.launched]).toEqual([0, []]);
+      expect(first.text).toContain("Pogo 0.1.0 → 0.2.0");
+      expect(first.text).toContain("Restart: decided after staging.");
+      expect(first.text).toContain("Nothing was changed.");
+      expect(fixture.commands).toEqual([]);
+    });
+
+    test("--plan names the restart once the release is staged", async () => {
+      for (const same of [true, false]) {
+        const { config, path } = await install();
+        if (same) await runningPlugin();
+        fixture.time = noon;
+        // Staged and verified, then rolled back: not the current release.
+        fixture.readyVersions = new Set(["0.1.0"]);
+        const failed = await update(config, path, "0.2.0");
+        expect(statusOf(failed.report, "pogo")).toBe("rolled-back");
+        fixture.commands = [];
+        const { code, text } = await command(config, path, {
+          version: "0.2.0",
+          plan: true,
+          retryFailed: true,
+        });
+        expect(code).toBe(0);
+        expect(text).toContain(
+          same
+            ? "Restart: the gateway only (the crew plugin is unchanged)."
+            : "Restart: OpenCode and the gateway (the crew plugin changed or is unknown).",
+        );
+        expect(fixture.commands).toEqual([]);
+      }
+    });
+
+    test("--foreground runs the update and reports its result", async () => {
+      const { config, path } = await install();
+      await runningPlugin();
+      fixture.time = noon;
+      const { code, launched, text } = await command(config, path, {
+        version: "0.2.0",
+        now: true,
+        foreground: true,
+      });
+      expect([code, launched]).toEqual([0, []]);
+      expect(text).toContain(
+        "Operator update of Pogo, outside the window and without the idle gate: completed.",
+      );
+      expect(text).toContain("pogo: updated 0.1.0 → 0.2.0");
+      expect((await live()).release).toBe("releases/0.2.0");
+      // Staged now: the plan knows which services a switch restarts.
+      const again = await command(config, path, {
+        version: "0.2.0",
+        plan: true,
+      });
+      expect(again.text).toContain("is the current release");
+    });
+
+    test("pruning keeps the older updater until its recovery journal is cleared", async () => {
+      const { config, path } = await install();
+      await runningPlugin();
+      fixture.time = noon;
+      const root = config.maintenance?.pogo?.root;
+      if (!root) throw new Error("no release root");
+      const entrypoint = await installed(config, "0.0.1");
+      for (const version of ["0.0.1", "0.0.2", "0.0.3", "0.0.4"]) {
+        const main = await installed(config, version);
+        const metadata = join(dirname(dirname(main)), ".pogo-release.json");
+        await writeFile(
+          metadata,
+          JSON.stringify({
+            ...JSON.parse(await readFile(metadata, "utf8")),
+            version,
+          }),
+        );
+      }
+      let atKill: { releases: string[]; journal: string | null } | undefined;
+      const clear = Journal.prototype.clear;
+      const stop = spyOn(Journal.prototype, "clear").mockImplementation(
+        async function (this: Journal, key) {
+          if (key === "gateway") {
+            atKill = {
+              releases: await readdir(join(root, "releases")),
+              journal: await readJournalFile(config.dataDirectory),
+            };
+            throw new Error("simulated kill after pruning");
+          }
+          return clear.call(this, key);
+        },
+      );
+      try {
+        await maintenanceUpdate(
+          config,
+          { configPath: path, version: "0.2.0", now: true, foreground: true },
+          {
+            unit: { ...unit, entrypoint },
+            launcher: runner,
+            run: deps({ undoOnExit: false, env: invocation }),
+            print: () => {},
+            now: () => noon,
+            signal: fixture.controller.signal,
+          },
+        );
+      } finally {
+        stop.mockRestore();
+      }
+      expect(atKill?.releases).toContain("0.0.1");
+      expect(atKill?.releases).toContain("old");
+      expect(atKill?.releases).toContain("0.2.0");
+      expect(atKill?.releases).not.toContain("0.0.2");
+      expect(atKill?.releases).not.toContain("0.0.3");
+      expect(atKill?.releases).not.toContain("0.0.4");
+      expect(JSON.parse(atKill?.journal ?? "{}")).toMatchObject({
+        gateway: { restartPending: false },
+      });
+      // ExecStopPost still has code to run, and can finish this journal.
+      expect(await readFile(entrypoint, "utf8")).toBe("");
+      const recovered = await recoverInterruptedRun(
+        config,
+        deps({ env: invocation }),
+        { afterRun: true },
+      );
+      expect(recovered.ok).toBe(true);
+      expect(await readJournalFile(config.dataDirectory)).toBeNull();
+    });
   });
 });
 
