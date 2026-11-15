@@ -612,12 +612,15 @@ test("irc audit: a failed or full mirror never blocks the DM reply", async () =>
 });
 
 test("irc audit: crew never join the audit channel; config keeps it apart", async () => {
-  const { fake, chief, captain } = await setup();
-  expect(
-    lineOf(fake.received(chiefAccount), "JOIN").flatMap((m) =>
-      (m.params[0] ?? "").split(","),
-    ),
-  ).toEqual(["#ship-galactica"]);
+  const { fake, chief, captain, logs } = await setup();
+  // A retry may send another JOIN before the server confirms the first one.
+  const crewJoinTargets = () =>
+    new Set(
+      lineOf(fake.received(chiefAccount), "JOIN").flatMap((m) =>
+        (m.params[0] ?? "").split(","),
+      ),
+    );
+  expect(crewJoinTargets()).toEqual(new Set(["#ship-galactica"]));
   expect(
     lineOf(fake.received(captainAccount), "JOIN").flatMap((m) =>
       (m.params[0] ?? "").split(","),
@@ -625,12 +628,15 @@ test("irc audit: crew never join the audit channel; config keeps it apart", asyn
   ).toEqual(expect.arrayContaining(["#ship-galactica", "#agent-dms"]));
   // An invite to the audit channel is ignored by crew.
   fake.sendTo(chiefAccount, `:jack!u@h INVITE ${chiefAccount} #agent-dms`);
-  await delay(150);
-  expect(
-    lineOf(fake.received(chiefAccount), "JOIN").some(
-      (m) => m.params[0] === "#agent-dms",
-    ),
-  ).toBe(false);
+  await until(
+    () =>
+      logs.some((line) =>
+        line.includes("Ignored IRC invite to an unlisted channel"),
+      ),
+    1000,
+    "crew rejected the audit channel invite",
+  );
+  expect(crewJoinTargets()).toEqual(new Set(["#ship-galactica"]));
   expect(chief.client.inChannel("#agent-dms")).toBe(false);
   expect(captain.client.inChannel("#agent-dms")).toBe(true);
 
