@@ -109,7 +109,7 @@ test("setting: off by default; channels are IDs, names are words", () => {
   expect(
     transcriptionSchema.parse({ provider }).spokenMentions,
   ).toBeUndefined();
-  const valid = { channels: ["C0EXAMPLE03", "G123"], names };
+  const valid = { channels: ["C0EXAMPLE04", "G123"], names };
   expect(
     transcriptionSchema.parse({ provider, spokenMentions: valid })
       .spokenMentions,

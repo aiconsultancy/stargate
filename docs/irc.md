@@ -166,7 +166,7 @@ For the TLS listeners, use the server's private CA:
 
 ```json
 "server": {
-  "host": "10.23.45.1",
+  "host": "irc.example.net",
   "port": 6697,
   "tls": true,
   "caFile": "/home/operator/.local/state/ergo/tls/ca.pem"

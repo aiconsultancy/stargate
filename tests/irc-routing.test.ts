@@ -477,7 +477,7 @@ test("irc config: strict server, crew and pin rules", () => {
     ircSchema.safeParse({ ...shipConfig(), ...overrides }).success;
   expect(parse({})).toBe(true);
   expect(
-    parse({ server: { host: "10.23.45.1", port: 6667, tls: false } }),
+    parse({ server: { host: "10.23.45.67", port: 6667, tls: false } }),
   ).toBe(false);
   expect(parse({ server: { host: "::1", port: 6667, tls: false } })).toBe(true);
   expect(
@@ -487,7 +487,7 @@ test("irc config: strict server, crew and pin rules", () => {
   ).toBe(false);
   expect(
     parse({
-      server: { host: "10.23.45.1", port: 6697, tls: true, caFile: "/ca.pem" },
+      server: { host: "10.23.45.67", port: 6697, tls: true, caFile: "/ca.pem" },
     }),
   ).toBe(true);
   expect(
@@ -606,7 +606,7 @@ test("irc config check: password references and caFile, values never printed", a
   expect(String(missing)).not.toContain("captain-secret");
   const withCa = shipConfig({
     server: {
-      host: "10.23.45.1",
+      host: "10.23.45.67",
       port: 6697,
       tls: true,
       caFile: join(directory, "missing-ca.pem"),

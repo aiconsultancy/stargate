@@ -48,7 +48,7 @@ channels:
 "transcription": {
   "provider": { "...": "..." },
   "spokenMentions": {
-    "channels": ["C0EXAMPLE03"],
+    "channels": ["C0EXAMPLE04"],
     "names": ["Galactica", "Adama", "captain"]
   }
 }

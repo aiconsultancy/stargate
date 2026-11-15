@@ -383,7 +383,7 @@ describe("configuration boundary", () => {
     const parse = (report: unknown) =>
       configSchema.safeParse({ bots: [bot], maintenance: { report } }).success;
     expect(parse({ bot: "helper", channel: "C1" })).toBe(true);
-    expect(parse({ bot: "helper", channel: "C0EXAMPLE04" })).toBe(false);
+    expect(parse({ bot: "helper", channel: "C0EXAMPLE05" })).toBe(false);
     expect(parse({ bot: "other", channel: "C1" })).toBe(false);
     expect(
       configSchema.safeParse({

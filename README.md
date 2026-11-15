@@ -39,6 +39,8 @@ to discover subscription models and install switchable model-named sub-agents.
 Review and approve its migration plan before changing global configuration.
 
 ```sh
+git clone https://github.com/aiconsultancy/stargate.git
+cd stargate
 mise install
 mise run deps
 mise run init
@@ -726,3 +728,9 @@ Live Slack and model verification still requires your credentials.
 
 PIPA was evaluated as a reference for Slack setup and thread behavior.
 Stargate is a standalone implementation, not a PIPA fork.
+
+## License and contributions
+
+Stargate is released under the [MIT License](LICENSE). The vendored Effect
+skills retain their [upstream license](.agents/vendor/effect-skills/LICENSE).
+See the [contribution guide](CONTRIBUTING.md) and [security policy](SECURITY.md).

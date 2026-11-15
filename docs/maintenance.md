@@ -131,7 +131,7 @@ report. No live cleanup or configuration change follows from installing Stargate
 ## Configuration
 
 Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
-`stargate config check --schema-only` validates it. Example (the Galactica install):
+`stargate config check --schema-only` validates it. Example for a captain installation (replace the sample IDs and paths):
 
 ```json
 "maintenance": {
@@ -149,9 +149,9 @@ Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
     "agentClis": true,
     "models": true
   },
-  "report": { "bot": "galactica-captain", "channel": "C0EXAMPLE04" },
+  "report": { "bot": "example-captain", "channel": "C0123456789" },
   "services": {
-    "gateway": "galactica-pogo.service",
+    "gateway": "example-pogo.service",
     "openCodeRestart": ["systemctl", "--user", "restart", "opencode2.service"]
   },
   "proxy": {
@@ -163,18 +163,18 @@ Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
     "checkout": "/home/operator/.local/share/pogo/source.git"
   },
   "cliproxyapi": {
-    "unit": "galactica-cliproxyapi.service",
+    "unit": "example-cliproxyapi.service",
     "link": "/home/operator/.local/share/cliproxyapi/cliproxyapi-current",
     "binary": "/home/operator/.local/share/cliproxyapi/{version}/cliproxyapi"
   },
   "agentClis": {
     "prefix": "/home/operator/.local",
-    "npm": ["/opt/node/bin/npm"],
+    "npm": ["/usr/bin/npm"],
     "lockFile": "/home/operator/.local/state/agent-updates/update.lock"
   },
   "models": {
     "agentProfiles": "/home/operator/.config/opencode/agent-profiles",
-    "teamFiles": ["/home/operator/.config/pogo/galactica-captain/team.json"]
+    "teamFiles": ["/home/operator/.config/pogo/example-captain/team.json"]
   }
 }
 ```
@@ -1267,7 +1267,7 @@ install.
 
     ```sh
     crontab -l > "$HOME/crontab.before-maintenance"
-    crontab -l | grep -v '/home/operator/.local/bin/update-agent-clis' | crontab -
+    crontab -l | grep -Fv -- "$HOME/.local/bin/update-agent-clis" | crontab -
     crontab -l   # confirm
     ```
 

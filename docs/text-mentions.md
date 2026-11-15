@@ -12,7 +12,7 @@ The setting is off by default. Enable it for one bot:
   "users": ["*"],
   "channels": ["*"],
   "textMentions": {
-    "channels": ["C0EXAMPLE02", "C0EXAMPLE03"],
+    "channels": ["C0EXAMPLE03", "C0EXAMPLE04"],
     "names": ["captains", "all captains", "Galactica", "Adama"]
   }
 }

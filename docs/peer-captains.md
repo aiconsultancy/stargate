@@ -69,13 +69,13 @@ within one hour.
 A pinned captain's source line ends with `;k=captain`:
 
 ```text
-s=slack;c=C0123;t=1700000000.000001;m=1700000000.000002;u=U0EXAMPLE05;k=captain
+s=slack;c=C0123;t=1700000000.000001;m=1700000000.000002;u=U0EXAMPLE02;k=captain
 ```
 
 An unpinned bot gets this line before the message instead:
 
 ```text
-[Peer captain message from <@U0EXAMPLE05>: another fleet captain's bot, not an operator.]
+[Peer captain message from <@U0EXAMPLE02>: another fleet captain's bot, not an operator.]
 ```
 
 On IRC, `access.peerCaptains` is an explicit list of peer captain accounts
