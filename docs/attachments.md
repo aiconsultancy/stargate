@@ -59,7 +59,14 @@ Linear Resources links do not cause downloads or uploads.
 The gateway and backend must share the local filesystem. Pogo refuses local-file
 publication from a non-loopback OpenCode endpoint. It rejects symlinks, special
 files, hidden/credential/state paths, empty files and files over the limits.
-It records size and SHA-256, then rechecks the file before uploading. MIME types
+Stage evidence under `join(os.tmpdir(), "opencode")`, evaluated in the gateway
+process at inspection and each upload read. Pogo and OpenCode services MUST
+share `TMPDIR`; for example, both can use `TMPDIR=$HOME/.cache/tmp` to publish
+from `$HOME/.cache/tmp/opencode`. Hidden ancestors of that scratch root are
+allowed, but hidden paths below it (including `.git` and `.ssh`) and credential
+files are still refused. Paths outside scratch keep the existing rules;
+unrelated files under `~/.cache` are not allowed.
+Pogo records size and SHA-256, then rechecks the file before uploading. MIME types
 come from extensions, not content inspection. These checks are not a sandbox:
 a trusted agent can explicitly publish other readable, non-denied files. Only
 publish evidence the user requested.

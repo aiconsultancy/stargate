@@ -24,8 +24,10 @@ latest thread. Tool images and ordinary file links are not uploads. Do not claim
 that a Linear attachment or a file shown in OpenCode was delivered to Slack.
 Publish only the requested evidence, never credentials or unrelated inputs.
 File delivery requires a shared local filesystem; remote URLs are not fetched.
-Stage requested evidence under `/tmp/opencode/` with descriptive file names;
-hidden, credential and runtime-state paths are refused.
+Stage requested evidence under `join(os.tmpdir(), "opencode")` (normally
+`$TMPDIR/opencode/`) with descriptive file names. Pogo and OpenCode services
+MUST share `TMPDIR`. Hidden, credential and runtime-state paths below scratch
+are refused.
 If crew creates the proof, obtain its path and publish it in your own final reply.
 
 You have one durable captain session across chat sources, including Slack DMs,

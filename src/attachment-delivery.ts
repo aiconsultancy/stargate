@@ -3,6 +3,7 @@ import {
   inspectAttachment,
   maxAttachments,
   maxAttachmentTotalBytes,
+  opencodeScratchDirectory,
   readPreparedAttachment,
   UploadRefused,
 } from "./attachments";
@@ -104,6 +105,12 @@ export function agentFilesLocal(backend: BackendConfig) {
   );
 }
 
+/** Only scratch descendants may bypass hidden ancestor segments. */
+function scratchRoot(path: string) {
+  const root = opencodeScratchDirectory();
+  return path.startsWith(`${root}/`) ? root : undefined;
+}
+
 /**
  * Publish the files of one stored reply, after its text. Each file moves
  * through `AttachmentDelivery.phase`; the phase is saved before the step
@@ -154,7 +161,11 @@ export async function deliverAttachments(
     for (const file of files) {
       if (file.phase || file.prepared) continue;
       try {
-        file.prepared = await inspectAttachment(file);
+        file.prepared = await inspectAttachment(
+          file,
+          undefined,
+          scratchRoot(file.path),
+        );
       } catch {
         file.phase = "unavailable";
       }
@@ -232,7 +243,11 @@ export async function deliverAttachments(
       if (!file.fileID) {
         let content: Attachment;
         try {
-          content = await readPreparedAttachment(file.prepared);
+          content = await readPreparedAttachment(
+            file.prepared,
+            undefined,
+            scratchRoot(file.prepared.path),
+          );
         } catch {
           file.phase = "unavailable";
           save();
@@ -270,7 +285,11 @@ export async function deliverAttachments(
     if (file.phase !== "uploaded") {
       let content: Attachment;
       try {
-        content = await readPreparedAttachment(file.prepared);
+        content = await readPreparedAttachment(
+          file.prepared,
+          undefined,
+          scratchRoot(file.prepared.path),
+        );
       } catch {
         file.phase = "unavailable";
         save();

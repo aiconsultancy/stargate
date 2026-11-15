@@ -7,7 +7,8 @@ import {
   realpath,
   stat,
 } from "node:fs/promises";
-import { basename } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { z } from "zod";
 
 /** Bound memory use at each media trust boundary, before admission or upload. */
@@ -333,6 +334,11 @@ export function parseAttachments(
 // ---------------------------------------------------------------------------
 // Local file inspection
 // ---------------------------------------------------------------------------
+
+/** Evaluate OpenCode's scratch rule in this process, not at module load. */
+export function opencodeScratchDirectory() {
+  return join(tmpdir(), "opencode");
+}
 
 const deniedRoots = new Set([
   "boot",
