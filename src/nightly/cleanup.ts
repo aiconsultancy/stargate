@@ -73,44 +73,199 @@ const sensitive = (name: string) =>
     ".env",
   ].includes(name) || name.startsWith(".env.");
 
-/** No file contents or process arguments are read. Inaccessible processes are unknown. */
+/** The process table and file owners; tests use a fake `/proc`. */
+export type ProcessView = {
+  root: string;
+  /** This process's user ID; undefined where the platform has none. */
+  uid: number | undefined;
+  stat(path: string): Promise<{ uid: number; mode: number }>;
+};
+const systemView: ProcessView = {
+  root: "/proc",
+  uid: process.getuid?.(),
+  stat: (path) => lstat(path),
+};
+
+/**
+ * True when a directory above `path` belongs to this user and gives no
+ * access to group or others: another user (not root) cannot reach `path`.
+ */
+async function privatePath(path: string, view: ProcessView) {
+  for (
+    let directory = dirname(path);
+    directory !== dirname(directory);
+    directory = dirname(directory)
+  ) {
+    const info = await view.stat(directory);
+    if (info.uid === view.uid && (info.mode & 0o077) === 0) return true;
+  }
+  return false;
+}
+
+/** Most characters of one `/proc/<pid>/maps` that are read. */
+const maxMaps = 16 * 1024 * 1024;
+
+/** Paths of the files that a process has mapped, from `/proc/<pid>/maps`. */
+function mappedPaths(maps: string): string[] {
+  const paths = new Set<string>();
+  for (const line of maps.split("\n")) {
+    // address perms offset dev inode pathname
+    const match = /^\S+ +\S+ +\S+ +\S+ +\S+ +(\/.*)$/.exec(line);
+    if (match?.[1]) paths.add(match[1]);
+  }
+  return [...paths];
+}
+
+/**
+ * Whether a process uses `path` or something inside it. For each process:
+ * its executable (`exe`) and mapped files (`maps`), and for each of its
+ * threads (`task/<tid>`) the working directory, the root directory and the
+ * open files. A thread can have its own working directory and file table.
+ * Only link targets and the path column of `maps` are read: no file
+ * contents, arguments or environment.
+ *
+ * A process that cannot be inspected makes the answer unknown, with one
+ * exception: when `path` is below a private directory of this user (see
+ * `privatePath`), the processes of other users are not inspected. Another
+ * user cannot reach the path. Root can, and is accepted as not using it:
+ * on a normal host root's processes can never be inspected, and no path
+ * would ever be removed.
+ */
 export async function cleanupPathUse(
   path: string,
   signal?: AbortSignal,
   deadline?: number,
+  view: ProcessView = systemView,
 ): Promise<"unused" | "in-use" | "unknown"> {
+  const gone = (error: unknown) =>
+    (error as NodeJS.ErrnoException).code === "ENOENT";
+  const uses = (target: string, candidate = path) => {
+    const name = target.replace(/ \(deleted\)$/, "");
+    return isAbsolute(name) && inside(resolve(name), candidate);
+  };
   try {
+    const stopped = () =>
+      signal?.aborted || (deadline !== undefined && Date.now() >= deadline);
+    const isolated = view.uid !== undefined && (await privatePath(path, view));
     let count = 0;
-    for (const pid of bounded(await readdir("/proc"))) {
-      if (signal?.aborted || (deadline !== undefined && Date.now() >= deadline))
-        return "unknown";
+    /** One link: true when it points into `path`; throws when unreadable. */
+    const link = async (name: string) => {
+      if (++count > 500_000 || stopped()) throw new Error("limit");
+      try {
+        return uses(await readlink(name));
+      } catch (error) {
+        // No such link: the process or thread exited, or a kernel thread.
+        if (gone(error)) return false;
+        throw error;
+      }
+    };
+    for (const pid of bounded(await readdir(view.root))) {
+      if (stopped()) return "unknown";
       if (!/^\d+$/.test(pid)) continue;
-      for (const link of [
-        join("/proc", pid, "cwd"),
-        ...bounded(await readdir(join("/proc", pid, "fd"))).map((fd) =>
-          join("/proc", pid, "fd", fd),
-        ),
-      ]) {
-        if (++count > 100_000) return "unknown";
-        if (
-          signal?.aborted ||
-          (deadline !== undefined && Date.now() >= deadline)
-        )
-          return "unknown";
+      const entry = join(view.root, pid);
+      if (isolated) {
+        let owner: number;
         try {
-          const target = (await readlink(link)).replace(/ \(deleted\)$/, "");
-          if (isAbsolute(target) && inside(resolve(target), path))
-            return "in-use";
+          owner = (await view.stat(entry)).uid;
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-            return "unknown";
+          // Exited meanwhile.
+          if (gone(error)) continue;
+          return "unknown";
         }
+        if (owner !== view.uid) continue;
+      }
+      let threads: string[];
+      try {
+        threads = bounded(await readdir(join(entry, "task")));
+      } catch (error) {
+        if (gone(error)) continue;
+        return "unknown";
+      }
+      if (await link(join(entry, "exe"))) return "in-use";
+      try {
+        const file = await open(join(entry, "maps"), constants.O_RDONLY);
+        try {
+          const maps = await file.readFile({ encoding: "utf8" });
+          if (maps.length > maxMaps) return "unknown";
+          // Linux escapes only newline as `\012`, not literal backslashes.
+          // Compare raw paths and fold ambiguous spellings on both sides,
+          // including names with both real newlines and literal `\012`.
+          if (
+            mappedPaths(maps).some(
+              (target) =>
+                uses(target) ||
+                uses(
+                  target.replaceAll("\\012", "\n"),
+                  path.replaceAll("\\012", "\n"),
+                ),
+            )
+          )
+            return "in-use";
+        } finally {
+          await file.close();
+        }
+      } catch (error) {
+        if (!gone(error)) return "unknown";
+      }
+      for (const tid of threads) {
+        if (!/^\d+$/.test(tid)) continue;
+        const thread = join(entry, "task", tid);
+        let descriptors: string[];
+        try {
+          descriptors = bounded(await readdir(join(thread, "fd")));
+        } catch (error) {
+          if (gone(error)) continue;
+          return "unknown";
+        }
+        for (const name of [
+          join(thread, "cwd"),
+          join(thread, "root"),
+          ...descriptors.map((fd) => join(thread, "fd", fd)),
+        ])
+          if (await link(name)) return "in-use";
       }
     }
     return "unused";
   } catch {
     return "unknown";
   }
+}
+
+/**
+ * The children of one scratch root that one run inspects. Up to `limit`
+ * children: all of them, by name. More: only those whose own modification
+ * time is before the cutoff (a directory changed later is not stale,
+ * whatever it holds), oldest first; when these are still more than `limit`,
+ * one window of `limit` per day, so that children which stay (in use, not
+ * pushed) cannot keep the others from their turn.
+ */
+export function scratchBatch(
+  children: readonly { name: string; mtimeMs: number }[],
+  now: number,
+  cutoff: number,
+  limit = maxItems,
+): { names: string[]; partial: boolean } {
+  if (children.length <= limit)
+    return {
+      names: children.map((child) => child.name).sort(),
+      partial: false,
+    };
+  if (limit <= 0) return { names: [], partial: true };
+  const old = children
+    .filter((child) => child.mtimeMs < cutoff)
+    .sort((a, b) =>
+      a.mtimeMs !== b.mtimeMs
+        ? a.mtimeMs - b.mtimeMs
+        : a.name < b.name
+          ? -1
+          : 1,
+    );
+  const windows = Math.max(1, Math.ceil(old.length / limit));
+  const start = (Math.floor(now / day) % windows) * limit;
+  return {
+    names: old.slice(start, start + limit).map((child) => child.name),
+    partial: true,
+  };
 }
 
 type Tree = {
@@ -572,8 +727,30 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       if (raw === sep || raw === home || fixed.some((p) => inside(raw, p)))
         refuse("protected");
       if (!scratchAllowed) refuse("git-unknown");
-      const names = bounded(await readdir(raw), maxItems);
-      for (const name of names.sort()) {
+      // More children than this run can still report: a batch now, the
+      // rest later. One report item is kept for the root itself, so every
+      // name of the batch has an item and the daily window loses no child.
+      const children: { name: string; mtimeMs: number }[] = [];
+      const listed = bounded(await readdir(raw));
+      const budget = maxItems - result.items.length;
+      if (listed.length <= budget)
+        children.push(...listed.map((name) => ({ name, mtimeMs: 0 })));
+      else
+        for (const name of listed) {
+          check();
+          const info = await lstat(join(raw, name)).catch(() => undefined);
+          // A plain file is never a candidate; it takes no place in a batch.
+          if (info && (info.isDirectory() || info.isSymbolicLink()))
+            children.push({ name, mtimeMs: info.mtimeMs });
+        }
+      const batch = scratchBatch(
+        children,
+        input.now,
+        input.now - input.settings.olderThanDays * day,
+        listed.length <= budget ? budget : Math.max(0, budget - 1),
+      );
+      if (batch.partial) await emit({ ...base, reason: "scan-limit" });
+      for (const name of batch.names) {
         if (!capacity()) break;
         const path = join(raw, name);
         if (hasControls(name) || path.length > 4096) {
@@ -595,7 +772,7 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
           await perform(
             item,
             async () => {
-              const names = bounded(await readdir(raw), maxItems);
+              const names = bounded(await readdir(raw));
               if (!names.includes(name)) refuse("changed");
               if (
                 (await treeSafe(path, "scratch")).fingerprint !==

@@ -57,13 +57,67 @@ rollback: only the guarded, explicitly configured paths are eligible.
 
 Scratch roots themselves, `slack-share`, `avondale-fixtures`, inspection files
 less than seven days old and relay JSON files written today are retained.
-Open files and process working directories are checked through Linux `/proc`;
-an unavailable or inaccessible use check fails closed. Runtime/configuration
-roots and known credential/state directories are protected automatically.
-Scanning, commands, report items and execution time are bounded. Unknown or
-over-limit results retain the item. Filesystem/process checks cannot provide
-an atomic lock against unrelated processes; do not configure shared writable
-scratch roots for automatic deletion.
+Use by a process is checked through Linux `/proc`: the executable
+(`exe`) and the mapped files (`maps`, the path column only) of each
+process, and the working directory, root directory and open files of each
+of its threads (`task/<tid>`). No file contents, arguments or environment
+are read. An unavailable or inaccessible use check fails closed
+(`use-unknown`).
+Runtime/configuration roots and known credential/state directories are
+protected automatically. Scanning, commands, report items and execution time
+are bounded. Unknown or over-limit results retain the item.
+Filesystem/process checks cannot provide an atomic lock against unrelated
+processes; do not configure shared writable scratch roots for automatic
+deletion.
+
+### Hosts with other users
+
+A user cannot read the open files of another user's process, and a normal
+host always has processes of root and of service accounts. The use check has
+one rule for them:
+
+- A path below a **private directory** (a directory above the path that
+  this user owns and that has no permission bit for group or others, for
+  example mode `0700`) is checked against this user's processes only.
+  Another user cannot reach the path, so the processes of other users are
+  not inspected.
+- Root can reach every path. Root's processes are accepted as not using a
+  private path. This is a deliberate trade-off: without it, cleanup removes
+  nothing on a normal host. Do not configure a scratch root or a worktree
+  location that root's services work in.
+- A path with no private directory above it keeps the strict rule: one
+  process that cannot be inspected gives `use-unknown`, and the item stays.
+- This user's own processes are always inspected, with every thread. One
+  entry of them that cannot be read gives `use-unknown`. A process of this
+  user that the kernel protects from inspection (a non-dumpable process,
+  for example `ssh-agent` or the `(sd-pam)` helper of a systemd user
+  session) therefore keeps every item.
+
+For cleanup to remove items on such a host, make the scratch root private:
+
+```sh
+chmod 700 /tmp/opencode
+```
+
+The mode of the candidate itself does not count; only a directory above it.
+
+### Large scratch roots
+
+One run reports at most 500 items, for all roots together. A scratch root
+with more children than the run can still report is not refused. The report
+has one `scan-limit` item for the root, which shows that the run inspected
+only a part, and then:
+
+- only child directories whose own modification time is older than
+  `olderThanDays` are inspected (a directory that changed later is not
+  stale), oldest first;
+- when these are still more than the remaining report items (499 for the
+  first root: one item is the root's own), each day takes the next window
+  of that size. Children that stay (in use, not pushed) therefore do not
+  keep the others from their turn. Each daily run removes what it can;
+  some runs later, every old child was inspected.
+
+A root with more than 20,000 children is refused whole (`scan-limit`).
 
 The private maintenance report has an optional `cleanup` object with bounded
 per-item `kind`, `path`, `status`, `reason`, `size`, `newestMtime`, and optional
