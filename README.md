@@ -189,6 +189,13 @@ Choose immediate delivery or quiet local results with one daily Slack digest
 (08:30 UTC by default).
 See [cron jobs](docs/cron.md) for app setup and execution limits.
 
+A captain can post as its own bot to another allowed channel or thread with
+the captain-only `pogo_post` tool, instead of asking an operator to relay.
+It is off until a bot sets `captainPost` with an explicit list of
+conversation IDs; inbound `*` never widens it. Access rules, denies and a
+per-bot hourly limit also apply. Retries never post twice.
+See [captain posts](docs/captain-post.md).
+
 Set `"dashboard": true` for a read-only fleet dashboard: ships, captain and
 crew status, Pogo bots, queue, cronjobs and session history with subagents
 for OpenCode and Pi Durable. Pogo serves it on a private Unix socket; an

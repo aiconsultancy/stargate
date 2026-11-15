@@ -111,7 +111,7 @@ ${slackInstructions}`,
 --mesij-command PATH   Absolute Mesij executable (default: resolved from PATH)
 --proxy-url URL        CLIProxyAPI endpoint (default: http://127.0.0.1:8317/v1)
 --proxy-key-file PATH  Reference an existing private key file; never a key value
---cron-config PATH     Bind cron tools to this explicit Pogo config path
+--cron-config PATH     Bind cron and pogo_post tools to this Pogo config path
 --cron-bot ID          Cron bot registration; requires --cron-config (and vice versa)
 --maintenance-config PATH  Render this Pogo config's nightly maintenance window
                        into captain and crew instructions (when enabled)

@@ -7,6 +7,7 @@ import {
   Error as ToolError,
 } from "@opencode/plugin/promise/tool";
 import { Effect } from "effect";
+import { postInputSchema } from "../captain-post";
 import { cronOperationSchema } from "../cron-control";
 import { resourceScope } from "../effect";
 import { MaintenanceRPC, maintenancePlanSchema } from "../maintenance";
@@ -23,6 +24,7 @@ import { CrewMaintenance } from "./maintenance";
 import { dmInputSchema } from "./messaging";
 import { CrewModels, modelInputSchema } from "./models";
 import { nativeWait } from "./native-wait";
+import { CrewPost } from "./post";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
 import { CrewError } from "./state";
@@ -70,6 +72,7 @@ const plugin = Plugin.define({
     );
     const waiting = new CrewWaiting(engine);
     const cron = new CrewCron(engine);
+    const post = new CrewPost(engine);
     // Released after the RPC registrations, before the engine closes.
     const maintenance = await resources.own(
       async () => new CrewMaintenance(engine),
@@ -210,6 +213,21 @@ const plugin = Plugin.define({
               String(input["op"]),
               "Cronjob operation unconfirmed; raw details withheld.",
               () => cron.run(input, context),
+            ),
+        });
+        editor.add({
+          name: "pogo_post",
+          description:
+            "Captain-only: post as this captain's own Slack bot to an allowed conversation, as a new top-level message or a reply with thread_ts. Use this instead of asking an operator to relay. Markdown text up to 3000 characters; <@U…> mentions pass through. Optional files: absolute paths inside the configured post directories, uploaded into the reply thread. reply_broadcast (default false) also shows a reply in the channel. Only conversation IDs listed in captainPost.channels that also pass access rules are allowed (denies win, DMs only when listed); otherwise nothing posts. Returns ts and permalink. The host tool-call ID is the default retry key: a retry returns the recorded outcome and never posts twice. uncertain means the message may exist; check the channel before a new call. Rate-limited per bot. Never post secrets or another thread's private content.",
+          input: postInputSchema,
+          options: { codemode: false, permission: "pogo_crew" },
+          execute: (input, context) =>
+            guard(
+              context,
+              "pogo_crew",
+              "post",
+              "Post outcome unconfirmed; raw details withheld.",
+              () => post.run(input, context),
             ),
         });
         editor.add({

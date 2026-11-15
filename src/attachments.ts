@@ -357,16 +357,31 @@ const deniedNames = [
 ];
 
 /** Common credential and machine-state locations. Not a sandbox. */
-function deniedPath(path: string) {
+/**
+ * `root`: a canonical operator-chosen directory containing `path`. Hidden
+ * segments are then checked only below it, so a root such as
+ * `~/.cache/tmp/opencode` works while `.git` or `.ssh` beneath it stays denied.
+ */
+function deniedPath(path: string, root?: string) {
   const segments = path.split("/").slice(1);
   if (deniedRoots.has(segments[0] ?? "")) return true;
-  if (segments.some((segment) => segment.startsWith("."))) return true;
+  const base = root?.replace(/\/+$/, "").split("/").slice(1).filter(Boolean);
+  if (
+    base &&
+    (base.length >= segments.length ||
+      base.some((segment, index) => segments[index] !== segment))
+  )
+    return true;
+  if (
+    segments.slice(base?.length ?? 0).some((segment) => segment.startsWith("."))
+  )
+    return true;
   const name = segments.at(-1) ?? "";
   return deniedNames.some((pattern) => pattern.test(name));
 }
 
 /** Absolute, already canonical text; no dot segments or empty components. */
-function checkedPath(path: string) {
+function checkedPath(path: string, root?: string) {
   if (
     path.length < 2 ||
     path.length > maxDestination ||
@@ -381,7 +396,7 @@ function checkedPath(path: string) {
     })
   )
     throw new AttachmentUnavailable("invalid");
-  if (deniedPath(path)) throw new AttachmentUnavailable("denied");
+  if (deniedPath(path, root)) throw new AttachmentUnavailable("denied");
   return path;
 }
 
@@ -494,8 +509,9 @@ async function readExact(
 export async function inspectAttachment(
   file: PublishedFile,
   signal?: AbortSignal,
+  root?: string,
 ): Promise<PreparedAttachment> {
-  const path = checkedPath(file.path);
+  const path = checkedPath(file.path, root);
   if (file.caption.length > maxCaption)
     throw new AttachmentUnavailable("invalid");
   try {
@@ -522,11 +538,12 @@ export async function inspectAttachment(
 export async function readPreparedAttachment(
   input: PreparedAttachment,
   signal?: AbortSignal,
+  root?: string,
 ): Promise<Attachment> {
   const parsed = preparedAttachmentSchema.safeParse(input);
   if (!parsed.success) throw new AttachmentUnavailable("invalid");
   const prepared = parsed.data;
-  const path = checkedPath(prepared.path);
+  const path = checkedPath(prepared.path, root);
   try {
     const { handle, size } = await openRegular(path, signal);
     try {

@@ -540,6 +540,14 @@ delivery retries retain the gateway's no-blind-replay rules.
 See [cron jobs](cron.md) for schedule syntax, timezone handling, restart
 behavior, and required Slack app configuration.
 
+## Captain posts
+
+The captain-only `pogo_post` tool runs in the crew plugin, not the gateway.
+It reads the bound `pogo.json` for each call, checks the bot's channel rules,
+records the post in a private `captain-post.sqlite`, then calls Slack with
+that bot's own token. Retries read the record and never resend. See
+[captain posts](captain-post.md).
+
 ## Initial ceilings
 
 The initial release supported text conversations, explicit allowlists, two

@@ -172,6 +172,9 @@ Pogo plugin options; preserve other options and the pinned captain session:
 "cron": { "configPath": "/srv/pogo/pogo.json", "bot": "helper" }
 ```
 
+The same binding enables the captain's `pogo_post` tool when the bot sets
+`captainPost`; see [captain posts](captain-post.md).
+
 Add the package's `templates/skills` directory to the profile's `skills`
 sources if absent. No global configuration change is required. The
 captain-only `pogo_cron` tool supports `list`, `add`, `run`, `remove` and

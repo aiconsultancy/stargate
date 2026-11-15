@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { crewActivitySchema } from "./activity";
+import { captainPostSchema } from "./captain-post-config";
 import { cronjobsSchema } from "./cronjob-config";
 import { fold, widestFold } from "./irc/protocol";
 import { isLoopbackAddress } from "./loopback";
@@ -295,6 +296,8 @@ export const botSchema = z.strictObject({
   }),
   backend: backendSchema,
   cronjobs: cronjobsSchema.optional(),
+  /** Captain `pogo_post` to allowed channels; absent is off. */
+  captainPost: captainPostSchema.optional(),
   pairing: pairingSchema.optional(),
   threadContext: z.boolean().default(false),
   /** Follow an untagged reply when Slack history proves this bot already replied. */
@@ -720,6 +723,13 @@ export const configSchema = z
               : "Quota report bot must exist and not deny the report channel",
         });
     }
+    for (const [index, bot] of bots.entries())
+      if (bot.captainPost && bot.backend.type !== "opencode")
+        context.addIssue({
+          code: "custom",
+          path: ["bots", index, "captainPost"],
+          message: "captainPost requires an OpenCode captain backend",
+        });
     const cronDirectories = bots.flatMap((bot) =>
       bot.cronjobs ? [resolve(bot.cronjobs.directory)] : [],
     );

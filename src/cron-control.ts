@@ -1,9 +1,7 @@
-import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { parseEnv } from "node:util";
-import { LogLevel, WebClient } from "@slack/web-api";
 import { z } from "zod";
-import { type BotConfig, loadConfig, secret } from "./config";
+import { botToken, botWebClient } from "./bot-web";
+import { type BotConfig, loadConfig } from "./config";
 import { CronStore } from "./cron-store";
 import { cronChannel, cronUser } from "./cronjob-config";
 import { cronjobNameSchema } from "./cronjob-files";
@@ -56,39 +54,7 @@ type Dependencies = {
 const defaults: Dependencies = {
   now: Date.now,
   async identity(bot, configPath, signal) {
-    let companion: NodeJS.ProcessEnv = {};
-    try {
-      companion = parseEnv(await readFile(`${configPath}.env`, "utf8"));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    const logger = {
-      debug() {},
-      info() {},
-      warn() {},
-      error() {},
-      setLevel() {},
-      setName() {},
-      getLevel() {
-        return LogLevel.ERROR;
-      },
-    };
-    const web = new WebClient(
-      secret(bot.slack.botTokenEnv, { ...companion, ...process.env }),
-      {
-        timeout: 10000,
-        retryConfig: { retries: 0 },
-        rejectRateLimitedCalls: true,
-        logger,
-        fetch: (url, init) =>
-          fetch(url, {
-            ...init,
-            signal: init?.signal
-              ? AbortSignal.any([signal, init.signal])
-              : signal,
-          }),
-      },
-    );
+    const web = botWebClient(await botToken(bot, configPath), signal);
     const auth = await web.auth.test();
     if (!auth.bot_id || !auth.team_id || !auth.user_id)
       throw new Error("Workspace bot required.");

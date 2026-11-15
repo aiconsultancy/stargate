@@ -68,6 +68,12 @@ asks to change it. This uses the existing `pogo_crew` permission and verifies
 the caller's real captain session. See [waiting responses](../waiting.md) for
 defaults, off versus zero, workspace persistence and plugin activation.
 
+Captains can post as their own bot to another allowed Slack channel or
+thread with `pogo_post`, instead of asking an operator to relay. It uses the
+`pogo_crew` permission and the captain's `cron` gateway binding, and is off
+until the bot sets `captainPost`. Crew cannot use it. See
+[captain posts](../captain-post.md).
+
 Copy [`team.example.json`](../../team.example.json), a portable Galactica team
 with captain `adama` and four workers, including researcher `gaeta` and ship
 maintenance worker `bosun`:
