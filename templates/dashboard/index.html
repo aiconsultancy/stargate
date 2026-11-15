@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Pogo fleet</title>
+    <title>Stargate fleet</title>
     <style>
       :root { color-scheme: light dark; --bg: #f5f6f8; --panel: #fff; --text: #18212c; --muted: #4c5969; --line: #c3cad3; --link: #064ea6; --error: #a51c24; }
       @media (prefers-color-scheme: dark) {
@@ -59,7 +59,7 @@
   <body>
     <a class="skip" href="#content">Skip to content</a>
     <header>
-      <strong>Pogo</strong>
+      <strong>Stargate</strong>
       <nav id="breadcrumbs" aria-label="Breadcrumb"><a href="#/">Fleet</a></nav>
       <button id="refresh" type="button">Refresh</button>
     </header>
@@ -214,7 +214,7 @@
         return node;
       }
       function renderFleet(data) {
-        document.title = "Pogo fleet";
+        document.title = "Stargate fleet";
         breadcrumbs.replaceChildren(link("Fleet", "#/"));
         const cards = el("div", undefined, "cards");
         for (const ship of data.ships) {
@@ -274,7 +274,7 @@
         return node;
       }
       function renderBot(bot) {
-        const node = section("Pogo bot", "bot");
+        const node = section("Stargate bot", "bot");
         node.append(fields([
           ["Bot ID", bot.id], ["Slack app", bot.slack.appId],
           ["Slack team", bot.slack.team], ["Slack user", bot.slack.user],
@@ -401,7 +401,7 @@
       }
       function renderShip(data) {
         const saved = viewState();
-        document.title = `${data.name} | Pogo`;
+        document.title = `${data.name} | Stargate`;
         breadcrumbs.replaceChildren(link("Fleet", "#/"), document.createTextNode(" / "), el("span", data.name));
         // Reuse session nodes so polling preserves loaded children and controls.
         const sessions = renderSessions(data);
@@ -434,7 +434,7 @@
         return node;
       }
       function transcriptShell() {
-        document.title = `Session ${route.session} | Pogo`;
+        document.title = `Session ${route.session} | Stargate`;
         breadcrumbs.replaceChildren(link("Fleet", "#/"), document.createTextNode(" / "),
           link(route.ship, shipHash(route.ship)), document.createTextNode(" / Session"));
         const toolbar = el("div", undefined, "toolbar");

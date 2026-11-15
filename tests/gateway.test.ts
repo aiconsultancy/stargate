@@ -579,7 +579,7 @@ test("context failures and unsupported delivery fail closed before creating a se
     expect(f.store.session(job.conversation)).toBeUndefined();
     expect(f.prompts).toEqual([]);
     expect(f.delivered).toEqual([
-      "Pogo could not load initial thread context. No agent turn was started. Check Slack history access and try again.",
+      "Stargate could not load initial thread context. No agent turn was started. Check Slack history access and try again.",
     ]);
   }
 });

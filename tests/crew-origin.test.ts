@@ -46,15 +46,38 @@ test("crew input ancestry anchors the exact assistant across descending pages", 
   expect(await readInputOrigin(api, "captain", "later", signal)).toBeNull();
 });
 
+test("message evidence keeps one stable pogoCrew key, not the active session key", () => {
+  const metadata = Object.freeze({
+    pogoCrew: Object.freeze({
+      originCaptainID: "captain",
+      originInputID: "original",
+    }),
+  });
+  const retained = message("wake", "synthetic", metadata);
+  const before = JSON.stringify(retained);
+  expect(inputBoundary(retained, "captain")).toBe("original");
+  expect(
+    inputBoundary(
+      message("wake", "synthetic", { stargateCrew: metadata.pogoCrew }),
+      "captain",
+    ),
+  ).toBeUndefined();
+  expect(JSON.stringify(retained)).toBe(before);
+});
+
 test("crew synthetic boundaries inherit only a proven same-captain origin", async () => {
   const signal = new AbortController().signal;
   for (const [metadata, expected] of [
     [
-      { pogoCrew: { originCaptainID: "captain", originInputID: "original" } },
+      {
+        pogoCrew: { originCaptainID: "captain", originInputID: "original" },
+      },
       "original",
     ],
     [
-      { pogoCrew: { originCaptainID: "foreign", originInputID: "original" } },
+      {
+        pogoCrew: { originCaptainID: "foreign", originInputID: "original" },
+      },
       null,
     ],
     [{ pogoCrew: { originCaptainID: "captain" } }, null],
@@ -222,7 +245,7 @@ test("crew ancestry bounds unique history pages without walking past the ceiling
 });
 
 test("crew queued origin survives restart and promotion without changing identity", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-origin-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-origin-");
   let state = await CrewState.open(directory, "origin", "identity");
   try {
     const peer = state.reservePeer("worker");
@@ -258,7 +281,7 @@ test("crew queued origin survives restart and promotion without changing identit
 });
 
 test("crew origin migration leaves original task and pending rows untagged", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-origin-migrate-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-origin-migrate-");
   let state = await CrewState.open(directory, "origin", "identity");
   try {
     const peer = state.reservePeer("worker");

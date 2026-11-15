@@ -61,7 +61,7 @@ const planSchema = z.strictObject({
 type Plan = z.infer<typeof planSchema>;
 type Part = Plan["units"][number]["lines"][number];
 
-/** draft/multiline bytes as Pogo counts them (see packBatches). */
+/** draft/multiline bytes as Stargate counts them (see packBatches). */
 function batchBytes(lines: readonly Part[]) {
   return lines.reduce(
     (sum, line, index) =>
@@ -185,7 +185,7 @@ export class IrcDelivery implements SlackDelivery {
     const budget = Math.min(
       limits.maxBytes,
       this.client.budget("PRIVMSG", target, {
-        batch: `pogo${"9".repeat(12)}`,
+        batch: `stargate${"9".repeat(12)}`,
         "draft/multiline-concat": "",
       }),
     );

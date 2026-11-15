@@ -183,7 +183,7 @@ describe("configuration rewrites", () => {
       agents: { "x-captain-adama": { model: "openai-proxy/gpt-6.1-sol" } },
       plugins: [
         {
-          package: "/srv/pogo/deployment-plugin",
+          package: "/srv/stargate/deployment-plugin",
           options: {
             team: {
               captain: { id: "adama", model: "openai-proxy/gpt-6.1-sol" },

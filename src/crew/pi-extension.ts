@@ -34,31 +34,31 @@ export function piCrewExtension(
 ) {
   const tools = [
     {
-      name: "pogo_quota",
+      name: "stargate_quota",
       schema: quotaInputSchema,
       description:
         "Read Claude/Codex subscription quota percentages, scopes, resets and timestamps, not token totals. Cached up to 60s. Missing/inactive limits and reset-passed observations do not prove model availability. No changes; no arguments or credentials.",
     },
     {
-      name: "pogo_crew",
+      name: "stargate_crew",
       schema: crewInputSchema,
       description:
         "Read configured roster or own task status; captain controls remain captain-only.",
     },
     {
-      name: "pogo_journal",
+      name: "stargate_journal",
       schema: journalInputSchema,
       description:
         "Append concise task milestones, checks, blockers and outcomes; read scoped journal by entry ID. No transcripts or secrets.",
     },
     {
-      name: "pogo_mail",
+      name: "stargate_mail",
       schema: mailInputSchema,
       description:
         "Store/read asynchronous peer mail. captain aliases the originating captain; all excludes self. Mail never wakes agents. Reply with replyTo; acknowledge pages with nextAfter as after.",
     },
     {
-      name: "pogo_dm",
+      name: "stargate_dm",
       schema: dmInputSchema,
       description:
         "Store peer mail and request steer or queue notification. Queued assignments do not block an idle member's roll-call reply. FIFO is default guidance, not a lock; active/uncertain work and ownership/controller guards remain. Native acceptance does not mean read or answered. Final answers remain task results; use replyTo for peer replies.",
@@ -116,5 +116,5 @@ export function piCrewExtension(
       outputLimits: { maxBytes: outputLimit, maxLines: 200 },
     }),
   );
-  return defineExtension({ name: "pogo.crew", tools });
+  return defineExtension({ name: "stargate.crew", tools });
 }

@@ -20,7 +20,7 @@ import { defaultTeam, teamSchema } from "../src/crew/team";
 import { Store } from "../src/store";
 
 async function fixture(safeReports = true) {
-  const directory = await mkdtemp("/tmp/opencode/pogo-reporting-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-reporting-");
   const team = teamSchema.parse({
     ...defaultTeam,
     crew: [
@@ -1219,8 +1219,8 @@ function completion(content: string, toolCall?: object) {
 }
 
 test("real Pi reporting uses fresh context and no tools; maintenance conversation stays unchanged", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-report-sdk-");
-  const apiKeyEnv = "POGO_REPORTING_PROXY_TEST_KEY";
+  const directory = await mkdtemp("/tmp/opencode/stargate-report-sdk-");
+  const apiKeyEnv = "STARGATE_REPORTING_PROXY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
   const requests: { body: Record<string, unknown>; session: string | null }[] =
@@ -1293,8 +1293,8 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
 });
 
 test("malicious report tool call cannot execute maintenance", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-report-tool-deny-");
-  const apiKeyEnv = "POGO_REPORTING_DENY_TEST_KEY";
+  const directory = await mkdtemp("/tmp/opencode/stargate-report-tool-deny-");
+  const apiKeyEnv = "STARGATE_REPORTING_DENY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
   const marker = join(directory, "must-not-exist");

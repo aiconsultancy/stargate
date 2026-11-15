@@ -146,7 +146,7 @@ test("Stop controls appear only on live posts and edits and disappear on final d
       expect(blocks.at(-1)).toEqual(stopBlock(42));
       expect(blocks.at(-1).elements[0]).toMatchObject({
         type: "button",
-        action_id: "pogo_stop",
+        action_id: "stargate_stop",
         value: "42",
         text: { type: "plain_text", text: "Stop" },
       });

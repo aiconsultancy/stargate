@@ -224,7 +224,7 @@ test("Pi clips non-BMP text within the wire bound without splitting characters",
 });
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/pogo-pi-history-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-pi-history-");
   const path = join(directory, "pi.sqlite");
   const harness = await Harness.open(
     await openNodeSqliteStorage(path),
@@ -381,7 +381,7 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
 });
 
 test("Pi history aborts without native reads or missing-database creation", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-pi-history-abort-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-pi-history-abort-");
   let reads = 0;
   const history = piSessionHistory({
     async conversation() {

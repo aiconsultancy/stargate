@@ -80,7 +80,7 @@ test("cron help documents operations and never reads config", async () => {
 
 test("crew cron binding requires both explicit options and documents them", async () => {
   for (const args of [
-    ["--cron-config", "/missing/pogo.json"],
+    ["--cron-config", "/missing/stargate.json"],
     ["--cron-bot", "helper"],
   ])
     await expect(runCli(["crew", "init", ...args])).rejects.toThrow(
@@ -114,7 +114,7 @@ test("cron rejects unsupported options and selectors before configuration or Sla
 });
 
 test("cron add bounds JSON input and never exposes file contents", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-cron-cli-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-cron-cli-"));
   try {
     const path = join(directory, "input.json");
     for (const text of [

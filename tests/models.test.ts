@@ -177,7 +177,7 @@ test("get fails closed on missing model, unauthorized caller, abort and API fail
   ).rejects.toThrow("cancelled");
   await expect(
     f.tool.run({ op: "get", target: "mario" }, f.caller),
-  ).rejects.toThrow("Invalid pogo_model");
+  ).rejects.toThrow("Invalid stargate_model");
   f.sessions.get = async () => ({});
   await expect(f.tool.run({ op: "get" }, f.caller)).rejects.toThrow(
     "Session has no selected model",

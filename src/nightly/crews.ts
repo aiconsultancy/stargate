@@ -6,7 +6,7 @@ import type { Config } from "../config";
 import { StepError } from "./exec";
 
 /**
- * One OpenCode location that loads the Pogo crew plugin: the captain
+ * One OpenCode location that loads the Stargate crew plugin: the captain
  * workspace or an OpenCode crew worktree. Discovered from the gateway's
  * OpenCode bots and their generated profile, so no second roster exists.
  */
@@ -80,14 +80,14 @@ export async function profilePath(directory: string) {
   return undefined;
 }
 
-const looksLikePogo = (options: unknown) =>
+const looksLikeStargate = (options: unknown) =>
   typeof options === "object" &&
   options !== null &&
   ["namespace", "stateDirectory", "worktrees", "captainDirectory"].some(
     (key) => key in options,
   );
 
-/** The Pogo crew plugin entry, or undefined when the profile has none. */
+/** The Stargate crew plugin entry, or undefined when the profile has none. */
 async function readPlugin(path: string) {
   let raw: unknown;
   try {
@@ -98,7 +98,7 @@ async function readPlugin(path: string) {
   const parsed = profile.safeParse(raw);
   if (!parsed.success) throw unknown();
   for (const plugin of parsed.data.plugins) {
-    if (!looksLikePogo(plugin.options)) continue;
+    if (!looksLikeStargate(plugin.options)) continue;
     const options = pluginOptions.safeParse(plugin.options);
     if (!options.success || !plugin.package) throw unknown();
     return { pluginPackage: plugin.package, options: options.data };

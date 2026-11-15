@@ -140,7 +140,7 @@ function git(
       else if (truncated)
         reject(
           new CrewError(
-            "Workspace changes exceed Pogo's bounded inspection; review them natively. No Git change made.",
+            "Workspace changes exceed Stargate's bounded inspection; review them natively. No Git change made.",
           ),
         );
       else if (failed || code !== 0) reject(new CrewError(options.failure));
@@ -216,7 +216,7 @@ async function untrackedHash(
   budget.bytes += info.size;
   if (budget.bytes > hashLimit)
     throw new CrewError(
-      "Untracked files exceed Pogo's bounded inspection; review them natively. No Git change made.",
+      "Untracked files exceed Stargate's bounded inspection; review them natively. No Git change made.",
     );
   return createHash("sha256")
     .update(await readFile(absolute))
@@ -436,7 +436,7 @@ export async function stashWorkspace(
   signal?: AbortSignal,
 ): Promise<WorkspaceCheckpoint> {
   await refuseObstructions(root, "stashed");
-  const message = `pogo stash ${crew} ${randomUUID()}`;
+  const message = `stargate stash ${crew} ${randomUUID()}`;
   let failed = false;
   await git(root, ["stash", "push", "--include-untracked", "-m", message], {
     signal,
@@ -448,7 +448,7 @@ export async function stashWorkspace(
   const oid = await findStash(root, message);
   if (!oid)
     throw new CrewError(
-      "git stash did not record a Pogo stash; inspect the worktree again.",
+      "git stash did not record a Stargate stash; inspect the worktree again.",
     );
   if (failed)
     throw new CrewError(
@@ -468,7 +468,7 @@ export async function resetWorkspace(
   signal?: AbortSignal,
 ): Promise<WorkspaceCheckpoint | null> {
   await refuseObstructions(root, "reset");
-  const message = `pogo reset checkpoint ${crew} ${randomUUID()}`;
+  const message = `stargate reset checkpoint ${crew} ${randomUUID()}`;
   const write = (args: string[], failure: string) =>
     git(root, args, { signal, failure, write: true }).then(({ text }) =>
       text.trim(),

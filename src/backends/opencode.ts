@@ -532,7 +532,7 @@ export class OpenCodeBackend implements AgentBackend {
   }
 
   async close() {
-    // Attached OpenCode service belongs to its operator, not Pogo.
+    // Attached OpenCode service belongs to its operator, not Stargate.
   }
 
   async interrupt(sessionId: string, signal: AbortSignal) {

@@ -430,7 +430,8 @@ export function prepareSlackReply(
   let text = source.trim() ? source : "Agent finished without a text reply.";
   const points = Array.from(text);
   if (!unbounded && points.length > 60_000)
-    text = points.slice(0, 60_000).join("") + "\n[Response truncated by Pogo.]";
+    text =
+      points.slice(0, 60_000).join("") + "\n[Response truncated by Stargate.]";
   // Ordinary replies keep main's native Markdown payload exactly. With no
   // Slack controls in the full source, no chunk can notify a mention.
   if (!slackControls.test(text))

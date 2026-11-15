@@ -17,7 +17,7 @@ const owner = z.strictObject({
   id: z.string().min(1).max(100),
 });
 export const CrewReporting = Rpc.define({
-  id: "pogo.crew.reporting",
+  id: "stargate.crew.reporting",
   events: {},
   methods: {
     quota: { input: quotaInputSchema, output: quotaSnapshotSchema },

@@ -26,7 +26,7 @@ const realMesij = test.skipIf(!mise);
 const signal = new AbortController().signal;
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/pogo-mesij-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-mesij-");
   await chmod(directory, 0o700);
   const projectDirectory = join(directory, "project");
   const dataDirectory = join(directory, "data");

@@ -11,13 +11,13 @@ import { maintenanceDirectory } from "./paths";
  * version. The report contains versions, reason codes and private local
  * paths; never raw errors, command output, prompts or credentials.
  */
-export const reportSchemaID = "pogo.maintenance.report.v1";
+export const reportSchemaID = "stargate.maintenance.report.v1";
 const iso = z.iso.datetime({ offset: true });
 const reason = z.enum(reasons);
 const version = z.string().max(100).nullable();
 
 export const componentSchema = z.strictObject({
-  /** `pogo`, `cliproxyapi`, or `npm:<package>`. */
+  /** `stargate`, `cliproxyapi`, or `npm:<package>`. */
   id: z.string().min(1).max(250),
   before: version,
   after: version,
@@ -158,7 +158,7 @@ export type Report = z.infer<typeof reportSchema>;
 export type ComponentReport = z.infer<typeof componentSchema>;
 export type ModelChange = z.infer<typeof modelChangeSchema>;
 
-export const noticeSchemaID = "pogo.maintenance.notice.v1";
+export const noticeSchemaID = "stargate.maintenance.notice.v1";
 export const noticeSchema = z.strictObject({
   schema: z.literal(noticeSchemaID),
   channel: z.string().regex(/^[CG][A-Z0-9]+$/),
@@ -251,7 +251,7 @@ export async function writeReport(dataDirectory: string, report: Report) {
  * cannot deliver a Slack summary: failed outcome, an unrecovered journal,
  * a gateway that did not become ready, or a report that could not be written.
  */
-export const alertSchemaID = "pogo.maintenance.alert.v1";
+export const alertSchemaID = "stargate.maintenance.alert.v1";
 export async function writeAlert(
   dataDirectory: string,
   alert: {
@@ -310,7 +310,7 @@ export function summary(report: Report, reportName: string) {
   const result = `${report.outcome}${report.reason ? ` (${labels[report.reason]})` : ""}.`;
   const parts = [
     report.steps.some((step) => step.name === "operator-update")
-      ? `Operator update of Pogo, outside the window and without the idle gate: ${result}`
+      ? `Operator update of Stargate, outside the window and without the idle gate: ${result}`
       : `Nightly maintenance ${report.window.localStart}–${report.window.localEnd} ${report.window.timeZone}: ${result}`,
   ];
   if (report.cleanup) {

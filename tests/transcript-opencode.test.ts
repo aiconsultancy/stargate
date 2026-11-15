@@ -216,9 +216,9 @@ test("OpenCode watch reports settled sessions and reconnects", async () => {
 });
 
 test("repairThread resolves the namespace and protects existing state", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-repair-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-repair-");
   const state = join(directory, "state");
-  const database = join(state, "pogo.sqlite");
+  const database = join(state, "stargate.sqlite");
   const modes: number[] = [];
   const server = Bun.serve({
     port: 0,
@@ -239,7 +239,7 @@ test("repairThread resolves the namespace and protects existing state", async ()
     const config = bot("captain");
     if (config.backend.type !== "opencode") throw new Error("Invalid fixture");
     config.backend.url = server.url.href;
-    const path = join(directory, "pogo.json");
+    const path = join(directory, "stargate.json");
     await Bun.write(
       path,
       JSON.stringify({
@@ -261,7 +261,7 @@ test("repairThread resolves the namespace and protects existing state", async ()
     const parsed = (await loadConfig(path)).bots[0];
     if (!parsed) throw new Error("Invalid fixture");
     await mkdir(join(directory, "state"));
-    const store = new Store(join(directory, "state", "pogo.sqlite"));
+    const store = new Store(join(directory, "state", "stargate.sqlite"));
     const key = botKey(parsed, identity);
     const conversation = conversationKey(key, "C123", "1.000");
     for (const [eventId, response] of [

@@ -27,12 +27,14 @@ releases through GitHub Actions.
    large as the change it reverts, and at least a patch. `(deps-dev)` updates
    only change development tools, so they do not release. Commits that do not
    release are included in the next release's notes.
-5. The workflow creates `pogo-vX.Y.Z.tar.gz` (a `git archive` of the commit)
+5. The workflow creates `stargate-vX.Y.Z.tar.gz` (a `git archive` of the commit)
    and its SHA-256 file, and publishes the tag and release with the commit
    subjects as notes. The workflow publishes checksums. The updater also
    compares the unpacked tree against the tagged commit by default. Archive
-   and checksum names, archive root prefixes, and `.pogo-release.json`
-   metadata stay compatible with existing updaters.
+   and checksum names, archive root prefixes, and `.stargate-release.json`
+   metadata use Stargate only. Old updaters cannot install this format; use
+   the explicit [one-time bootstrap](hard-cutover.md#release-bootstrap).
+   Historical v0.20.3/v0.20.4 assets keep their original `pogo-vVERSION` names.
 
 ## Release manually
 
@@ -56,19 +58,20 @@ Download the archive and matching checksum together from [GitHub Releases][relea
 Public assets are available without signing in. For example:
 
 ```sh
-release_url=https://github.com/aiconsultancy/stargate/releases/download/v0.20.3
-curl -fLO "$release_url/pogo-v0.20.3.tar.gz"
-curl -fLO "$release_url/pogo-v0.20.3.tar.gz.sha256"
-sha256sum -c pogo-v0.20.3.tar.gz.sha256
+VERSION=X.Y.Z # Choose a release with Stargate-format assets.
+release_url="https://github.com/aiconsultancy/stargate/releases/download/v$VERSION"
+curl -fLO "$release_url/stargate-v$VERSION.tar.gz"
+curl -fLO "$release_url/stargate-v$VERSION.tar.gz.sha256"
+sha256sum -c "stargate-v$VERSION.tar.gz.sha256"
 ```
 
-On macOS, use `shasum -a 256 -c pogo-v0.20.3.tar.gz.sha256`. To compare the
+On macOS, use `shasum -a 256 -c "stargate-v$VERSION.tar.gz.sha256"`. To compare the
 archive against the tagged source, fetch the same tag in a Stargate checkout
 and rebuild it:
 
 ```sh
-git fetch origin tag v0.20.3
-git archive --format=tar.gz --prefix=pogo-v0.20.3/ v0.20.3 | sha256sum
+git fetch origin tag "v$VERSION"
+git archive --format=tar.gz --prefix="stargate-v$VERSION/" "v$VERSION" | sha256sum
 ```
 
 Use `shasum -a 256` on macOS for the last command. The workflow does not publish

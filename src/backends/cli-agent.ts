@@ -11,7 +11,7 @@ import type { Attachment } from "../attachments";
 import { AttachmentInputUnavailable } from "../request-failure";
 
 /**
- * Non-secret variables an agent CLI inherits. Everything else in Pogo's
+ * Non-secret variables an agent CLI inherits. Everything else in Stargate's
  * environment, including Slack tokens and provider keys, is dropped.
  */
 export const inheritedEnvironment = [
@@ -74,7 +74,7 @@ export function textAttachment(file: Attachment) {
 /**
  * Every process of a turn inherits `variable` with a random `value`. Agent
  * CLIs run tool commands in their own sessions or sandboxes, outside any one
- * process group, so the marker is how Pogo finds what a turn left behind.
+ * process group, so the marker is how Stargate finds what a turn left behind.
  */
 export type TurnMarker = { variable: string; value: string };
 
@@ -132,7 +132,7 @@ function facts(stat: string, status: string) {
   return { start, group, uids };
 }
 
-/** Real, effective, saved and filesystem user IDs are all Pogo's own. */
+/** Real, effective, saved and filesystem user IDs are all Stargate's own. */
 function owned(table: ProcessTable, uids: readonly string[]) {
   return (
     table.uid !== undefined &&
@@ -162,7 +162,7 @@ function inspect(table: ProcessTable, pid: number) {
 }
 
 /**
- * Processes of Pogo's user that started at or after `since` and carry the
+ * Processes of Stargate's user that started at or after `since` and carry the
  * turn marker. Linux only: without `/proc` nothing is found.
  */
 export async function turnProcesses(
@@ -199,7 +199,7 @@ export async function turnProcesses(
 
 /**
  * Signal each process only while it is still the one that was found: the
- * same start time, all user IDs Pogo's, and the turn marker. Bun and Node
+ * same start time, all user IDs Stargate's, and the turn marker. Bun and Node
  * have no pidfd API, so the check and `kill` run synchronously, without
  * yielding; a PID could change owner only inside that window. Returns the
  * number signalled.
@@ -231,7 +231,7 @@ export function signalTurnProcesses(
 }
 
 /**
- * True while the recorded CLI still leads its group: same start time, Pogo's
+ * True while the recorded CLI still leads its group: same start time, Stargate's
  * user, the turn marker and the session ID in its arguments. While it lives,
  * its group ID cannot be reused.
  */

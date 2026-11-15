@@ -6,7 +6,7 @@ const commandName = z.object({
   text: z.string().optional(),
 });
 const pairingAction = z.union([
-  z.object({ view: z.object({ callback_id: z.literal("pogo_pair") }) }),
+  z.object({ view: z.object({ callback_id: z.literal("stargate_pair") }) }),
   z.object({
     actions: z
       .array(z.unknown())
@@ -14,7 +14,7 @@ const pairingAction = z.union([
         actions.some(
           (action) =>
             z
-              .object({ action_id: z.literal("pogo_pair_generate") })
+              .object({ action_id: z.literal("stargate_pair_generate") })
               .safeParse(action).success,
         ),
       ),
@@ -33,13 +33,13 @@ export function controlInteractions(
       const parsed = commandName.safeParse(body);
       if (
         parsed.success &&
-        parsed.data.command === "/pogo" &&
+        parsed.data.command === "/stargate" &&
         parsed.data.text === "pair"
       )
         await pairing.command(body, ack);
       else if (
         parsed.success &&
-        parsed.data.command === "/pogo" &&
+        parsed.data.command === "/stargate" &&
         /^(?:crew|usage)(?:\s|$)/.test(parsed.data.text ?? "") &&
         crew
       )
@@ -49,7 +49,7 @@ export function controlInteractions(
       else
         await ack({
           response_type: "ephemeral",
-          text: "Unknown Pogo command. Use /pogo pair, /pogo crew [member], /pogo usage, or /cron.",
+          text: "Unknown Stargate command. Use /stargate pair, /stargate crew [member], /stargate usage, or /cron.",
         });
     },
     async interactive(body, ack) {

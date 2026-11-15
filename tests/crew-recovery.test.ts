@@ -13,7 +13,7 @@ import type { ResultAPI, ResultMessage } from "../src/crew/result";
 import type { CrewTask } from "../src/crew/state";
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/pogo-recovery-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-recovery-");
   const options = {
     namespace: "recovery",
     stateDirectory: directory,
@@ -230,6 +230,38 @@ test("recovery reader accepts installed SDK message objects", () => {
   expect(compatible).toBeFunction();
 });
 
+test("cutover reads immutable historical pogoCrew result evidence without editing or replay", async () => {
+  const f = await fixture();
+  try {
+    const task = await f.dispatch();
+    const admitted = f.messages.find((message) => message.id === task.inputID);
+    if (!admitted?.text) throw new Error("Missing retained input");
+    expect(admitted.metadata).toEqual({
+      pogoCrew: { taskID: task.id, originCaptainID: task.originCaptainID },
+    });
+    admitted.text = admitted.text.replace(
+      "Stargate task envelope: ",
+      "Pogo task envelope: ",
+    );
+    admitted.metadata = {
+      pogoCrew: { taskID: task.id, originCaptainID: task.originCaptainID },
+    };
+    f.engine.state.uncertain(task.id);
+    f.finish(task);
+    const history = JSON.stringify(f.messages);
+    expect(
+      await f.engine.run({ op: "status", taskID: task.id }, f.captain),
+    ).toMatchObject({
+      status: "completed",
+      task: { result: "Implemented and tested." },
+    });
+    expect(JSON.stringify(f.messages)).toBe(history);
+    expect(f.counts()).toMatchObject({ prompts: 1, synthetics: 0 });
+  } finally {
+    await f.close();
+  }
+});
+
 test("mapped native profiles recover old-named uncertain answers and retain old session authority", async () => {
   const f = await fixture();
   let mapped: CrewEngine | undefined;
@@ -439,7 +471,9 @@ test("completion after the busy probe keeps admitted steer task-marked and never
     f.native.synthetic = async (input, request) => {
       f.finish(task);
       expect(input.resume).toBe(false);
-      expect(input.metadata).toMatchObject({ pogoCrew: { taskID: task.id } });
+      expect(input.metadata).toMatchObject({
+        pogoCrew: { taskID: task.id },
+      });
       return synthetic(input, request);
     };
     expect(

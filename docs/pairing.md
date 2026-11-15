@@ -1,6 +1,6 @@
 # OpenCode device pairing from Slack
 
-`/pogo pair` opens a private Slack modal. It does not run an agent prompt.
+`/stargate pair` opens a private Slack modal. It does not run an agent prompt.
 Only an explicitly configured operator can use it, in a normally allowed
 channel or DM. The modal warns that pairing grants **full OpenCode server
 access for 30 days**. It is not read-only or limited to the Slack conversation,
@@ -71,7 +71,7 @@ live operator merely to test the feature. Restart Stargate after config changes.
 Apply Stargate's regenerated Slack app manifest to the existing app. Pass its
 current display name with `stargate manifest --name NAME` to keep that name.
 The manifest registers
-`/pogo` and enables Socket Mode interactivity. It uses the existing `commands`
+`/stargate` and enables Socket Mode interactivity. It uses the existing `commands`
 bot scope and the same bot-token modal APIs as `/cron`; no new scope is added.
 Installing or updating Slack app settings remains an operator action. Editing
 a local manifest does not update an installed app. See [setup](setup.md).

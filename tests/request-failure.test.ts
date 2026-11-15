@@ -63,7 +63,7 @@ test("default turn timeout is thirty minutes, with explicit values and the one-h
 });
 
 test("failure delivery replaces a preview and retries durable cause without rerunning the backend", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-request-failure-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-request-failure-");
   const path = join(directory, "state.sqlite");
   let store = new Store(path);
   let turns = 0;
@@ -187,7 +187,7 @@ test("timeout, shutdown, and context failures have distinct durable causes and p
         expect(pending?.failure).toBe("interrupted");
         if (pending)
           await gateway.process(pending, new AbortController().signal);
-        expect(texts[0]).toContain("Pogo stopped");
+        expect(texts[0]).toContain("Stargate stopped");
       } else expect(texts).toEqual([failureText(cause)]);
       expect(turns).toBe(cause === "context" ? 0 : 1);
     } finally {
@@ -235,7 +235,7 @@ test("native Slack failure hook edits a preview without a Stop button, and repor
       );
       expect(fields.get("mrkdwn")).toBe("false");
       expect(fields.get("parse")).toBe("none");
-      expect(fields.get("blocks")).not.toContain("pogo_stop");
+      expect(fields.get("blocks")).not.toContain("stargate_stop");
     }
     expect(calls[2]?.fields.get("thread_ts")).toBe("1.000");
   } finally {
@@ -268,7 +268,7 @@ test("each backend failure category has one specific line and an honest work sta
     [
       new BackendFailure("network", { ran: false }),
       "Provider unreachable",
-      "Pogo could not reach the model provider or its proxy. An operator must check that it is running. Nothing ran. You can send the request again.",
+      "Stargate could not reach the model provider or its proxy. An operator must check that it is running. Nothing ran. You can send the request again.",
     ],
     [
       new BackendFailure("crash", { ran: true }),

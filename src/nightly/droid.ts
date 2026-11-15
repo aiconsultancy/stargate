@@ -30,8 +30,8 @@ import {
 } from "./run";
 
 /**
- * pogo-maintenance-droid: a Pi Durable agent that explains maintenance and
- * escalates through the report bot. Pogo decides when to check, collects the
+ * stargate-maintenance-droid: a Pi Durable agent that explains maintenance and
+ * escalates through the report bot. Stargate decides when to check, collects the
  * facts, computes the findings, enforces every precondition and limit, and
  * writes the post's actions, findings and operator commands itself; the
  * model only chooses among the tools and writes the explanation. Without a
@@ -85,7 +85,7 @@ async function audit(directory: string, entry: AuditEntry) {
 }
 
 const stateSchema = z.strictObject({
-  schema: z.literal("pogo.maintenance.droid.v1"),
+  schema: z.literal("stargate.maintenance.droid.v1"),
   lastReport: z.string().max(200).nullable(),
   /**
    * Recover requests per local day in the window's time zone, counted
@@ -126,7 +126,7 @@ async function updateDroidState(
 ) {
   const current = await readDroidState(directory);
   const state: DroidState = current ?? {
-    schema: "pogo.maintenance.droid.v1",
+    schema: "stargate.maintenance.droid.v1",
     lastReport: null,
     recovers: current === null ? { [today]: spent } : {},
   };
@@ -201,7 +201,7 @@ export function droidScrubber(config: Config, env: NodeJS.ProcessEnv) {
       return value && value.length >= 8 ? [value] : [];
     })
     .sort((a, b) => b.length - a.length);
-  // Defence in depth for text that was cut before it reached Pogo (the
+  // Defence in depth for text that was cut before it reached Stargate (the
   // report writer marks its cuts with "…"): a prefix of 12 or more
   // characters of a configured secret, at a cut (end of text or line, or
   // "…"), is removed too. Longest prefix first.
@@ -248,7 +248,7 @@ type Scrubber = ReturnType<typeof droidScrubber>;
 const busyUnit = (state: Awaited<ReturnType<typeof readUnit>>) =>
   runningUnit(state) || state === "activating" || state === "deactivating";
 
-/** The droid's two actions, with Pogo's preconditions, limits and audit. */
+/** The droid's two actions, with Stargate's preconditions, limits and audit. */
 class Actions {
   /** What happened, for the post: every request, refused ones too. */
   readonly done: string[] = [];
@@ -303,7 +303,7 @@ class Actions {
   private async refuse(action: "plan" | "recover", reason: string) {
     await this.log(action, "refused", reason);
     this.done.push(`${action} refused (${reason})`);
-    return `Refused by Pogo: ${reason}. Nothing was done. Do not ask again in this check.`;
+    return `Refused by Stargate: ${reason}. Nothing was done. Do not ask again in this check.`;
   }
 
   private runActive() {
@@ -336,7 +336,7 @@ class Actions {
     const journal = await Journal.read(config);
     const gateway = await readUnit(
       deps.runner,
-      config.maintenance?.services.gateway ?? "pogo.service",
+      config.maintenance?.services.gateway ?? "stargate.service",
     );
     if (
       journal.kind === "none" &&
@@ -455,7 +455,7 @@ function fallbackBody(trigger: Trigger, facts: DroidFacts, list: Finding[]) {
   if (trigger === "after-run" && newest) lines.push(describeReport(newest));
   for (const finding of list) lines.push(`- ${finding.text}`);
   if (!list.length) lines.push("No problems found.");
-  lines.push("(No model summary; this is Pogo's deterministic summary.)");
+  lines.push("(No model summary; this is Stargate's deterministic summary.)");
   return lines.join("\n");
 }
 
@@ -470,7 +470,7 @@ function prompt(input: {
   const newest = facts.reports[0];
   return [
     `Maintenance check ${input.checkID}: ${input.trigger === "after-run" ? "after the nightly run" : "daily health check"}, ${facts.now} (window ${facts.window.localStart}-${facts.window.localEnd} ${facts.window.timeZone}).`,
-    "Findings from Pogo's checks (authoritative; Pogo appends them with the operator commands):",
+    "Findings from Stargate's checks (authoritative; Stargate appends them with the operator commands):",
     ...(input.list.length
       ? input.list.map((finding) => `- ${finding.code}: ${finding.text}`)
       : ["- none"]),

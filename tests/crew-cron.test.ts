@@ -14,7 +14,7 @@ function fixture() {
   const authority = {
     options: {
       captainDirectory: "/captain",
-      cron: { configPath: "/private/pogo.json", bot: "captain-bot" },
+      cron: { configPath: "/private/stargate.json", bot: "captain-bot" },
     },
     async captain(caller: CrewCaller) {
       checks.push(caller);
@@ -56,7 +56,7 @@ test("cron uses only configured binding and forwards cancellation signal", async
     {
       raw: { op: "list", page: 0 },
       binding: {
-        configPath: "/private/pogo.json",
+        configPath: "/private/stargate.json",
         bot: "captain-bot",
         expectedDirectory: "/captain",
       },
@@ -64,13 +64,13 @@ test("cron uses only configured binding and forwards cancellation signal", async
     },
   ]);
   for (const injected of [
-    { configPath: "/other/pogo.json" },
+    { configPath: "/other/stargate.json" },
     { bot: "other" },
     { expectedDirectory: "/other" },
   ])
     await expect(
       cron.run({ op: "list", ...injected }, f.caller),
-    ).rejects.toThrow("Invalid pogo_cron input");
+    ).rejects.toThrow("Invalid stargate_cron input");
   expect(f.calls).toHaveLength(1);
 });
 

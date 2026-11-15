@@ -3,7 +3,7 @@ import { CrewMaintenance } from "../src/crew/maintenance";
 import { maintenanceWindowMs, TurnBudget } from "../src/maintenance";
 
 const plan = {
-  plan: "Restart Pogo",
+  plan: "Restart Stargate",
   impact: "Brief disconnect",
   rollback: "Restore release",
 };
@@ -79,7 +79,7 @@ test("maintenance requires confirmed notice delivery and the full opt-out window
   await gate.open(owner, signal);
   const task = gate.run(
     {
-      plan: "Restart Pogo",
+      plan: "Restart Stargate",
       impact: "Brief disconnect",
       rollback: "Restore release",
     },
@@ -87,7 +87,7 @@ test("maintenance requires confirmed notice delivery and the full opt-out window
   );
   await Promise.resolve();
   const notice = gate.read(owner);
-  expect(notice?.plan).toBe("Restart Pogo");
+  expect(notice?.plan).toBe("Restart Stargate");
   if (!notice) throw new Error("Notice missing");
   const advance = (ms: number) => {
     while (ms > 0) {

@@ -41,7 +41,7 @@ Commands:
                   maintenance/ALERT.json when an operator must look.
                   --outside-window runs now with the window's length.
   update          --version X.Y.Z with --plan or --now. Operator-approved
-                  update to one Pogo release, now: no window, no idle gate,
+                  update to one Stargate release, now: no window, no idle gate,
                   no cool-off. Stages and verifies the release (origin,
                   checksum, tree), installs and tests it, switches, checks
                   readiness and rolls back on failure. Restarts only the
@@ -75,20 +75,20 @@ Commands:
   window          Print the window, this install's jitter and next start.
   instructions    Print the captain/crew paragraph for the configured window.
   install-timer   Write ~/.config/systemd/user/<name>.timer and .service
-                  (--name NAME, default pogo-maintenance), then daemon-reload.
+                  (--name NAME, default stargate-maintenance), then daemon-reload.
                   Does not enable or start. --print shows units, writes none.
   install-droid-timer
                   Same for the droid (--name NAME, default
-                  pogo-maintenance-droid): checks at the window end plus
+                  stargate-maintenance-droid): checks at the window end plus
                   droid.afterRunMinutes and at droid.healthCheck.
   adopt           One-time migration: --release DIR [--version X.Y.Z] marks an
-                  existing release under <pogo.root>/releases as managed and
-                  creates <pogo.root>/current if absent.
-  schema          Print the JSON Schema of the report (pogo.maintenance.report.v1).
-Configuration: the top-level "maintenance" section of pogo.json; every
+                  existing release under <stargate.root>/releases as managed and
+                  creates <stargate.root>/current if absent.
+  schema          Print the JSON Schema of the report (stargate.maintenance.report.v1).
+Configuration: the top-level "maintenance" section of stargate.json; every
 component is off by default. See docs/maintenance.md.
 Enable the timer after review:
-  systemctl --user enable --now pogo-maintenance.timer
+  systemctl --user enable --now stargate-maintenance.timer
 Tokens are never accepted as arguments; use environment references.`;
 
 function windowText(config: Config, configPath: string) {
@@ -118,8 +118,8 @@ function unitCommand(m: MaintenanceConfig, configPath: string) {
   return {
     configPath,
     executable: process.execPath,
-    entrypoint: m.pogo
-      ? join(layout(m.pogo.root).current, "src", "main.ts")
+    entrypoint: m.stargate
+      ? join(layout(m.stargate.root).current, "src", "main.ts")
       : join(packageDirectory, "src", "main.ts"),
     path: [
       dirname(process.execPath),
@@ -293,8 +293,9 @@ export async function maintenanceCli(
     return 0;
   }
   if (operation === "adopt") {
-    const root = config.maintenance?.pogo?.root;
-    if (!root) throw new Error("maintenance.pogo.root is required for adopt.");
+    const root = config.maintenance?.stargate?.root;
+    if (!root)
+      throw new Error("maintenance.stargate.root is required for adopt.");
     if (!options.release) throw new Error("--release DIR is required.");
     const result = await adoptRelease(
       root,
@@ -327,7 +328,7 @@ export async function maintenanceCli(
     const droid = m.droid;
     if (!droid)
       throw new Error("No maintenance.droid section in configuration.");
-    const name = timerName(options.name ?? "pogo-maintenance-droid");
+    const name = timerName(options.name ?? "stargate-maintenance-droid");
     const units = buildDroidUnits({
       name,
       ...unitCommand(m, options.configPath),

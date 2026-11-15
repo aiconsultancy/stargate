@@ -28,7 +28,7 @@ make deps
 make check
 make format
 make stargate ARGS='--help'
-make config-check ARGS='--config pogo.example.json --schema-only'
+make config-check ARGS='--config stargate.example.json --schema-only'
 ```
 
 `make check` runs TypeScript, Biome, and Bun tests. Run the smallest relevant
@@ -103,7 +103,7 @@ SQLite, `bun:test`, and the existing Promise adapter contract.
 
 ## Safety and credentials
 
-- Never commit `pogo.json`, its `.env` companion, provider credentials, runtime
+- Never commit `stargate.json`, its `.env` companion, provider credentials, runtime
   databases, copied API responses, or installed machine-specific service files.
 - Never request tokens in chat or accept secret values as CLI arguments.
 - For the operator-approved Slack CLI login flow, a single-use challenge may
@@ -128,7 +128,7 @@ SQLite, `bun:test`, and the existing Promise adapter contract.
 - Keep SQLite state and credential files private. Never delete state to fix
   an error without explicit authorization and an appropriate backup.
 - Never create or edit a directory under a managed `releases/` root and never
-  move `current` by hand. Install a release with `pogo maintenance update`
+  move `current` by hand. Install a release with `stargate maintenance update`
   (or the nightly run); see the
   [runbook](docs/maintenance.md#runbook-install-a-release-by-hand).
 - Do not install/start/stop user services, change global OpenCode configuration,

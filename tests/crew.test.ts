@@ -193,7 +193,7 @@ test("conversation eval: exported plugin wires cancellable native wait through i
       [
         "editor.add",
         (tool: RegisteredTool) => {
-          if (tool.name === "pogo_crew") crewTool = tool;
+          if (tool.name === "stargate_crew") crewTool = tool;
         },
       ],
     ]);
@@ -1604,7 +1604,7 @@ test("broadcast returns partial receipts and Pi tools-none stores no unreadable 
 
 async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
   const definition = team ?? defaultTeam;
-  const directory = await mkdtemp("/tmp/opencode/pogo-crew-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-crew-");
   const options: CrewOptions = {
     namespace: "bowser-one",
     stateDirectory: directory,
@@ -1906,6 +1906,43 @@ function uncertainResult(
     reason: "Operator reviewed the retained task result and external outcome.",
   };
 }
+
+test("cutover reconciles immutable historical pogoCrew evidence with its original text hash", async () => {
+  const f = await fixture(customTeam);
+  try {
+    const task = await assignedTask(f);
+    const input = uncertainResult(f, task);
+    const messages = f.history.get(task.workerSessionID);
+    const admitted = messages?.find((message) => message.id === task.inputID);
+    if (!admitted?.text) throw new Error("Missing retained input");
+    admitted.text = admitted.text.replace(
+      "Stargate task envelope: ",
+      "Pogo task envelope: ",
+    );
+    admitted.metadata = {
+      pogoCrew: { taskID: task.id, originCaptainID: task.originCaptainID },
+    };
+    const originalHash = createHash("sha256")
+      .update(admitted.text)
+      .digest("hex");
+    const history = JSON.stringify(messages);
+    const nativeWrites = () =>
+      f.calls.filter(({ method }) =>
+        ["prompt", "synthetic", "create"].includes(method),
+      ).length;
+    const before = nativeWrites();
+    expect(await f.engine.run(input, f.captain())).toMatchObject({
+      status: "reconciled",
+    });
+    expect(f.engine.state.reconciliation(task.id)?.inputSha256).toBe(
+      originalHash,
+    );
+    expect(JSON.stringify(messages)).toBe(history);
+    expect(nativeWrites()).toBe(before);
+  } finally {
+    await f.close();
+  }
+});
 
 test("worker reads its own task status without captain mediation or execution", async () => {
   const f = await fixture({ ...defaultTeam, toolAccess: "direct" });
@@ -3264,7 +3301,7 @@ test.each([
     if (failure === "hash") input.resultSha256 = "0".repeat(64);
     if (failure === "message") input.resultMessageID = "msg_other_result";
     if (failure === "input") admitted.metadata = {};
-    if (failure === "envelope") admitted.text = "Pogo task envelope: {}";
+    if (failure === "envelope") admitted.text = "Stargate task envelope: {}";
     if (failure === "interleaved")
       messages.splice(1, 0, {
         id: "msg_other_input",
@@ -3483,7 +3520,7 @@ test("inspection/reconciliation fail closed on foreign peer metadata and changed
     if (!session) throw new Error("Missing peer fixture");
     const metadata = session.metadata;
     session.metadata = {
-      pogoCrew: { namespace: "foreign-team", crewID: "builder" },
+      stargateCrew: { namespace: "foreign-team", crewID: "builder" },
     };
     await expect(
       f.engine.run({ op: "inspect", crew: "builder" }, f.captain()),
@@ -3518,7 +3555,7 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
       if (request.headers.get("authorization") !== "Bearer fixture-only")
         return Response.json({ _tag: "UnauthorizedError" }, { status: 401 });
       const url = new URL(request.url);
-      expect(url.pathname).toBe("/api/rpc/pogo.crew.recovery/run");
+      expect(url.pathname).toBe("/api/rpc/stargate.crew.recovery/run");
       expect(url.searchParams.get("location[directory]")).toBe(
         f.options.captainDirectory,
       );
@@ -3606,7 +3643,7 @@ test("external worker activity blocks admission and controls always release", as
 });
 
 test("root plugin metadata resolves to the installed V2 definition", () => {
-  expect(plugin.id).toBe("pogo.crew");
+  expect(plugin.id).toBe("stargate.crew");
 });
 
 test("worker urgency cannot create an idle colleague's root session", async () => {
@@ -3758,7 +3795,9 @@ test("same-captain colleague urgency includes the recipient's exact task ID", as
       sessionID: luigi?.workerSessionID,
       delivery: "steer",
       resume: false,
-      metadata: { pogoCrew: { taskID: luigi?.id, sourceTaskID: mario?.id } },
+      metadata: {
+        pogoCrew: { taskID: luigi?.id, sourceTaskID: mario?.id },
+      },
     });
     expect(f.synthetics[0]?.text).toContain("Interface changed");
     await expect(

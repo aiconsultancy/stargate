@@ -112,7 +112,7 @@ test("irc client: CAP, SASL PLAIN, registration and allowed joins only", async (
   await delay(50);
   expect(lineOf(fake.received("galactica"), "JOIN")).toHaveLength(1);
   // A server-forced join to an unlisted channel is left at once.
-  fake.sendTo("galactica", ":galactica!u@pogo JOIN #forced");
+  fake.sendTo("galactica", ":galactica!u@stargate JOIN #forced");
   await until(
     () => fake.received("galactica").includes("PART #forced"),
     2000,
@@ -138,7 +138,7 @@ test("irc client: labeled sends confirm on echo and fail on errors", async () =>
   await client.privmsg("#galactica", "first line", { "+draft/reply": "m9" });
   const echoed = lineOf(fake.received("galactica"), "PRIVMSG")[0];
   expect(echoed?.tags.get("+draft/reply")).toBe("m9");
-  expect(echoed?.tags.get("label")).toMatch(/^pogo\d+$/);
+  expect(echoed?.tags.get("label")).toMatch(/^stargate\d+$/);
   // The labeled echo is a confirmation, not new input, and marks our msgid.
   expect(received).toHaveLength(0);
   expect(client.sent("m1")).toBe(true);
@@ -280,7 +280,7 @@ test("irc client: answers PING, replays history after reconnect, QUITs on abort"
   controller.abort();
   await running;
   await until(
-    () => fake.received("galactica").at(-1) === "QUIT :Pogo shutting down",
+    () => fake.received("galactica").at(-1) === "QUIT :Stargate shutting down",
     2000,
     "quit",
   );
@@ -299,7 +299,7 @@ test("irc client: silence past the timeout reconnects", async () => {
   await client.waitReady(2000);
   fake.mute("galactica");
   await until(
-    () => fake.received("galactica").includes("PING :pogo"),
+    () => fake.received("galactica").includes("PING :stargate"),
     3000,
     "keepalive ping",
   );
@@ -483,7 +483,7 @@ test("irc client: crew join only channels the captain also has, per CASEMAPPING"
   await until(() => client.inChannel("#galactica"), 2000, "ship channel");
   expect(client.channel("#ship{1}")).toBeUndefined();
   fake.sendTo("galactica", ":jack!u@h INVITE galactica #ship{1}");
-  fake.sendTo("galactica", ":galactica!u@pogo JOIN #ship{1}");
+  fake.sendTo("galactica", ":galactica!u@stargate JOIN #ship{1}");
   await until(
     () => fake.received("galactica").includes("PART #ship{1}"),
     2000,

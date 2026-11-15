@@ -8,7 +8,7 @@ import {
 } from "../src/nightly/archive";
 import { type TarEntry, tarball } from "./tar";
 
-const root = "pogo-v1.0.0";
+const root = "stargate-v1.0.0";
 const check = (entries: TarEntry[], withRoot = root) =>
   validateArchive(readArchive(tarball(entries)), withRoot);
 const loose = (entries: TarEntry[]) =>
@@ -59,7 +59,7 @@ describe("release archive validation", () => {
 
   test("requires the exact root directory entry", () => {
     expect(() => check(base.slice(1))).toThrow("archive-invalid");
-    expect(() => check(base, "pogo-v2.0.0")).toThrow("archive-invalid");
+    expect(() => check(base, "stargate-v2.0.0")).toThrow("archive-invalid");
     expect(() => check([...base, { path: "other/file", data: "x" }])).toThrow(
       "archive-invalid",
     );
@@ -191,7 +191,7 @@ describe("release archive validation", () => {
   });
 });
 
-const extracted = await mkdtemp("/tmp/opencode/pogo-extract-");
+const extracted = await mkdtemp("/tmp/opencode/stargate-extract-");
 afterAll(() => rm(extracted, { recursive: true, force: true }));
 
 describe("post-extraction check", () => {

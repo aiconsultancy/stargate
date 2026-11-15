@@ -1,5 +1,5 @@
 {
-  "dataDirectory": ".pogo",
+  "dataDirectory": ".stargate",
   "bots": [
     {
       "id": "code-helper",
@@ -8,8 +8,8 @@
       "waiting": { "delayMs": 5000, "intervalMs": 10000 },
       "slack": {
         "appId": "A123",
-        "appTokenEnv": "POGO_CODE_APP_TOKEN",
-        "botTokenEnv": "POGO_CODE_BOT_TOKEN"
+        "appTokenEnv": "STARGATE_CODE_APP_TOKEN",
+        "botTokenEnv": "STARGATE_CODE_BOT_TOKEN"
       },
       "access": { "users": ["U123"], "channels": ["C123"] },
       "backend": {
@@ -23,8 +23,8 @@
       "id": "pi-helper",
       "slack": {
         "appId": "A456",
-        "appTokenEnv": "POGO_PI_APP_TOKEN",
-        "botTokenEnv": "POGO_PI_BOT_TOKEN"
+        "appTokenEnv": "STARGATE_PI_APP_TOKEN",
+        "botTokenEnv": "STARGATE_PI_BOT_TOKEN"
       },
       "access": { "users": ["U123"], "channels": ["C123"] },
       "backend": {

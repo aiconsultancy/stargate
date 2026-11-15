@@ -15,7 +15,7 @@ import {
   writePluginDigest,
 } from "../src/nightly/plugin-digest";
 
-const base = await mkdtemp("/tmp/opencode/pogo-plugin-digest-");
+const base = await mkdtemp("/tmp/opencode/stargate-plugin-digest-");
 afterAll(() => rm(base, { recursive: true, force: true }));
 let count = 0;
 
@@ -24,7 +24,7 @@ async function release(files: Record<string, string> = {}) {
   const root = join(base, `release-${count++}`);
   const tree: Record<string, string> = {
     "package.json":
-      '{ "name": "pogo", "exports": { ".": "./src/crew/plugin.ts" } }\n',
+      '{ "name": "stargate", "exports": { ".": "./src/crew/plugin.ts" } }\n',
     "bun.lock": "lock 1\n",
     "src/crew/plugin.ts":
       'import { shared } from "../shared";\nimport type { Job } from "../store";\nexport const plugin = async () => (await import("./lazy")).lazy(shared);\n',
@@ -76,7 +76,7 @@ test("everything that the plugin can load changes the digest", async () => {
     { "src/crew/lazy.ts": "export const lazy = () => 2;\n" },
     {
       "package.json":
-        '{ "name": "pogo", "version": "2", "exports": { ".": "./src/crew/plugin.ts" } }\n',
+        '{ "name": "stargate", "version": "2", "exports": { ".": "./src/crew/plugin.ts" } }\n',
     },
     { "bun.lock": "lock 2\n" },
     { "tsconfig.json": "{}\n" },
@@ -94,7 +94,7 @@ test("everything that the plugin can load changes the digest", async () => {
 
 test("a tree that cannot be proven complete has no digest", async () => {
   for (const files of [
-    { "package.json": '{ "name": "pogo" }\n' },
+    { "package.json": '{ "name": "stargate" }\n' },
     { "package.json": '{ "exports": { ".": "../outside.ts" } }\n' },
     { "package.json": "not json" },
     { "src/crew/plugin.ts": 'import "./missing";\n' },
@@ -296,7 +296,7 @@ test("the recorded digest is computed here, never taken from the archive", async
   );
   // Unknown: no file is left, also not the one from the archive.
   const unknown = await release({
-    "package.json": '{ "name": "pogo" }\n',
+    "package.json": '{ "name": "stargate" }\n',
     [pluginDigestFile]: `v1:${"0".repeat(64)}\n`,
   });
   expect(await writePluginDigest(unknown)).toBeUndefined();

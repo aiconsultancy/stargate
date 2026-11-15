@@ -1,6 +1,6 @@
 # OpenCode session history
 
-Use `pogo_history` to find past conversations on the connected OpenCode V2
+Use `stargate_history` to find past conversations on the connected OpenCode V2
 server. This tool reads history; it does not prompt, fork or change sessions.
 It returns session summaries and user/assistant text, not reasoning or tool
 output. It does not store transcripts in Stargate state or logs.

@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 const accounts = { galactica: "captain-pass", jack: "jack-pass" };
-const env = { POGO_IRC_GALACTICA: "captain-pass" };
+const env = { STARGATE_IRC_GALACTICA: "captain-pass" };
 const backend = {
   type: "opencode",
   url: "http://localhost:4096",
@@ -40,7 +40,7 @@ function shipConfig(port: number, server: Record<string, unknown> = {}) {
     id: "galactica-irc",
     server: { host: "127.0.0.1", port, tls: false, ...server },
     account: "galactica",
-    passwordEnv: "POGO_IRC_GALACTICA",
+    passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     backend: { ...backend, sessionID: "ses_captain" },
   });
@@ -69,11 +69,11 @@ async function ship(
     ],
   }).start();
   cleanup.push(() => fake.stop());
-  // Published files must not sit under a hidden directory (Pogo refuses
+  // Published files must not sit under a hidden directory (Stargate refuses
   // those), and TMPDIR is hidden during a self-update's test run.
-  const directory = await mkdtemp("/tmp/opencode/pogo-irc-files-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-irc-files-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = ircSchema.parse({
     ...shipConfig(fake.port, options.server?.(host)),
@@ -108,7 +108,7 @@ async function ship(
       });
       return typeof options.answer === "function"
         ? options.answer(directory)
-        : (options.answer ?? "[[pogo:silent]]");
+        : (options.answer ?? "[[stargate:silent]]");
     },
     async close() {},
   };
@@ -350,7 +350,7 @@ const openssl =
 test.skipIf(!openssl)(
   "irc files in: HTTPS FILEHOST verified with the configured CA",
   async () => {
-    const directory = await mkdtemp(join(tmpdir(), "pogo-filehost-tls-"));
+    const directory = await mkdtemp(join(tmpdir(), "stargate-filehost-tls-"));
     cleanup.push(() => rm(directory, { recursive: true, force: true }));
     const run = (...args: string[]) => {
       if (
@@ -373,7 +373,7 @@ test.skipIf(!openssl)(
       "-days",
       "1",
       "-subj",
-      "/CN=Pogo Test CA",
+      "/CN=Stargate Test CA",
     );
     run(
       "req",
@@ -561,7 +561,7 @@ test("irc files out: an upload cut off by a crash is never repeated", async () =
     answer: () => answer,
   });
   answer = await published(directory);
-  // The FILEHOST stores the file, but Pogo stops before the answer.
+  // The FILEHOST stores the file, but Stargate stops before the answer.
   const stored = Promise.withResolvers<void>();
   const hold = Promise.withResolvers<void>();
   host.onUpload = () => {
@@ -578,7 +578,7 @@ test("irc files out: an upload cut off by a crash is never repeated", async () =
   hold.resolve();
   host.onUpload = undefined;
   await until(() => store.queueCounts(captain.key).done === 1, 8000, "done");
-  // Pogo cannot know whether the upload exists: no second upload, a notice.
+  // Stargate cannot know whether the upload exists: no second upload, a notice.
   expect(host.requests.filter((r) => r.method === "POST")).toHaveLength(1);
   expect(
     lineOf(fake.received("galactica"), "PRIVMSG").map((m) => m.params[1]),

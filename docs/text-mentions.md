@@ -50,7 +50,7 @@ Calling all captains: who has NET-9?
 
 Generated captain instructions contain a "Text mentions" paragraph: reply
 only when the content needs an answer, otherwise answer with
-`[[pogo:silent]]`, which posts nothing. A definition that was generated
+`[[stargate:silent]]`, which posts nothing. A definition that was generated
 before this feature does not contain that paragraph: add it, as for other
 instruction changes.
 

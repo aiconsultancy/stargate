@@ -37,10 +37,10 @@ updating a team. Updating a profile file alone does not rewrite stored session
 permissions. Preserve session IDs, selected models, task IDs, and histories.
 Keep the gateway backend permission configuration aligned for future sessions.
 
-Workers can read their own task with `pogo_crew` `status`; they need not ask the
+Workers can read their own task with `stargate_crew` `status`; they need not ask the
 captain to inspect a task they are already executing.
 They can also read their selected model and variant with
-`pogo_model({ "op": "get", "target": "self" })`, without waiting for an idle
+`stargate_model({ "op": "get", "target": "self" })`, without waiting for an idle
 worker or changing the model. Model switching remains a captain operation.
 
 ## Operating approach

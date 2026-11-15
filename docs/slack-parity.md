@@ -30,7 +30,7 @@ The linked documentation can change after this comparison.
 | Direct messages               | General ChatGPT/Claude offerings differ; earlier Claude Code is channel-only | Supported for allowed DMs.                                                                                                                                   |
 | Visible progress              | Claude Code progress; ChatGPT task-start messages                            | Streaming replies and named waiting feedback.                                                                                                                |
 | Scheduled prompts             | Claude Tag                                                                   | Supported through `/cron`; not evidence of every vendor's scheduling behavior.                                                                               |
-| Current model inspection      | Not established by these vendor pages                                        | `pogo_model` can read the current captain session, including its stored variant.                                                                             |
+| Current model inspection      | Not established by these vendor pages                                        | `stargate_model` can read the current captain session, including its stored variant.                                                                         |
 | Requester cancellation        | ChatGPT documents requester task controls                                    | Supported through a requester-only Stop button on live previews; see [limits](cancellation.md).                                                              |
 | Initial Slack context         | Claude Code documents gathering invocation context                           | Opt-in initial thread context imports bounded requester/bot text. No automatic channel context or other participants' text; see [limits](thread-context.md). |
 | Open the task/session         | Claude Code **View session**; ChatGPT **Follow along**                       | Gap: no backend-neutral task link in Slack.                                                                                                                  |
@@ -55,7 +55,7 @@ The linked documentation can change after this comparison.
    text is untrusted reference data. The current Slack method contract lists
    bot-token history scopes; membership and API errors still apply. This does
    not import channel history or establish per-user repository isolation.
-4. Device pairing: `/pogo pair` can privately issue standard OpenCode pairing
+4. Device pairing: `/stargate pair` can privately issue standard OpenCode pairing
    URLs to explicitly configured operators. It never enables remote access or
    a tunnel. After pairing, find the session by title in OpenCode. See
    [pairing](pairing.md) for full-server access, expiry and privacy limits.

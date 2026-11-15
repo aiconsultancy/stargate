@@ -31,7 +31,7 @@ test("history scope excludes other teams and requires explicit project access", 
   expect(
     historyVisible(project, null, {
       ...prior,
-      metadata: { pogoCrew: { namespace: "other" } },
+      metadata: { stargateCrew: { namespace: "other" } },
     }),
   ).toBe(false);
   expect(
@@ -50,7 +50,7 @@ test("history scope excludes other teams and requires explicit project access", 
     id: peer.sessionID,
     agent: "mario",
     location: { directory: "/crew/mario" },
-    metadata: { pogoCrew: { namespace: "one", crewID: "mario" } },
+    metadata: { stargateCrew: { namespace: "one", crewID: "mario" } },
   };
   expect(historyVisible(options, peer, worker)).toBe(true);
   const mapped = { ...options, team: profileTeam(defaultTeam, "ship") };
@@ -68,7 +68,7 @@ test("history scope excludes other teams and requires explicit project access", 
   expect(
     historyVisible(mapped, peer, {
       ...worker,
-      metadata: { pogoCrew: { namespace: "other", crewID: "mario" } },
+      metadata: { stargateCrew: { namespace: "other", crewID: "mario" } },
     }),
   ).toBe(false);
   expect(historyVisible(options, peer, { ...worker, agent: "bowser" })).toBe(
@@ -93,14 +93,16 @@ test("server history scope includes other namespaces, workers and projects", () 
       id: "other-team",
       agent: "other-captain",
       location: { directory: "/project" },
-      metadata: { pogoCrew: { namespace: "other" } },
+      metadata: { stargateCrew: { namespace: "other" } },
     },
     {
       id: "worker-child",
       parentID: "other-root",
       agent: "other-worker",
       location: { directory: "/crew/other-worker" },
-      metadata: { pogoCrew: { namespace: "other", crewID: "other-worker" } },
+      metadata: {
+        stargateCrew: { namespace: "other", crewID: "other-worker" },
+      },
     },
     {
       id: "other-project",
@@ -148,7 +150,7 @@ test("history uses authenticated API and rejects a server with a different calle
       return Response.json({ data: { ...session, location: { directory } } });
     },
   });
-  const envName = "POGO_HISTORY_FIXTURE_AUTH";
+  const envName = "STARGATE_HISTORY_FIXTURE_AUTH";
   const previous = process.env[envName];
   process.env[envName] = "Bearer fixture-only";
   try {

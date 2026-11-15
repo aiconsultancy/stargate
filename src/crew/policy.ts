@@ -35,11 +35,11 @@ export function crewPermissions(
       (action) => allow(action),
     ),
     allow("external_directory"),
-    allow("pogo_crew"),
-    allow("pogo_mail"),
-    allow("pogo_history"),
+    allow("stargate_crew"),
+    allow("stargate_mail"),
+    allow("stargate_history"),
   ];
-  rules.push(allow("pogo_model", profile === "captain" ? "*" : "get"));
+  rules.push(allow("stargate_model", profile === "captain" ? "*" : "get"));
   // Specialisms guide assignments, not host-tool access in this trusted profile.
   rules.push(
     allow("subagent"),

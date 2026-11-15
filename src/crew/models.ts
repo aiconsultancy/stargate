@@ -75,7 +75,8 @@ export class CrewModels {
 
   async run(raw: unknown, caller: CrewCaller) {
     const parsed = modelInputSchema.safeParse(raw);
-    if (!parsed.success) throw new CrewError("Invalid pogo_model operation.");
+    if (!parsed.success)
+      throw new CrewError("Invalid stargate_model operation.");
     const input = parsed.data;
     try {
       caller.signal.throwIfAborted();

@@ -5,8 +5,8 @@ import type { CrewCaller } from "./engine";
 import type { CrewMember } from "./team";
 
 export function managedPrompt(text: string) {
-  const start = "<!-- POGO:START -->";
-  const end = "<!-- POGO:END -->";
+  const start = "<!-- STARGATE:START -->";
+  const end = "<!-- STARGATE:END -->";
   if (text.includes(start) || text.includes(end)) {
     throw new Error("Instructions contain reserved managed-prompt markers.");
   }
@@ -83,12 +83,12 @@ export function piMemberDefinition(
   return managedPrompt(
     [
       `# ${member.name ?? member.id}`,
-      `Pogo address: ${member.id}\nDefinition: ${member.agent ?? member.id}\nRole: ${member.role}\nWorktree: ${directory}`,
+      `Stargate address: ${member.id}\nDefinition: ${member.agent ?? member.id}\nRole: ${member.role}\nWorktree: ${directory}`,
       `Use this one permanent worktree: ${directory}. Do not switch worktrees or move this durable session for a task. Create or switch task branches inside this worktree. Temporary work in tmp directories is allowed; use explicit command paths without changing the session's worktree. Report directory drift to the captain.`,
       `Before project work, read ${join(directory, "AGENTS.md")}, applicable nested project instructions, relevant guides and required skills. Follow the project's implementation, verification and delivery rules; ship coordination does not replace them.`,
-      "Child agents use their own standard tools, never Pogo tools or prefixed names; do not nest children.",
+      "Child agents use their own standard tools, never Stargate tools or prefixed names; do not nest children.",
       "Reply on IRC only when tagged, asked directly, or once per all-call.",
-      `Shared working agreement: ${join(captainDirectory, "WAYS_OF_WORKING.md")}. Read it initially and reread it when updated. Captain maintains it; propose edits by mail. Prefer Pogo coordination tools; use authenticated native APIs within your existing authority for gaps and record useful workarounds with pogo_journal. pi_history reads your own native history. Mail never wakes; only explicit DM does. Final answers remain task results, not peer replies.`,
+      `Shared working agreement: ${join(captainDirectory, "WAYS_OF_WORKING.md")}. Read it initially and reread it when updated. Captain maintains it; propose edits by mail. Prefer Stargate coordination tools; use authenticated native APIs within your existing authority for gaps and record useful workarounds with stargate_journal. pi_history reads your own native history. Mail never wakes; only explicit DM does. Final answers remain task results, not peer replies.`,
       nightly,
       member.instructions,
     ]

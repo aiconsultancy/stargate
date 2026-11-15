@@ -13,7 +13,7 @@ import { teamSchema } from "../src/crew/team";
 const pin = "ses_captainpin";
 
 async function fixture(options: { pinned?: boolean } = {}) {
-  const directory = await mkdtemp("/tmp/opencode/pogo-crew-irc-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-crew-irc-");
   const team = teamSchema.parse({
     captain: { id: "captain" },
     crew: [
@@ -35,7 +35,7 @@ async function fixture(options: { pinned?: boolean } = {}) {
     ...(options.pinned === false ? {} : { captainSessionID: pin }),
   };
   const worktree = (id: string) => crewOptions.worktrees[id] ?? "";
-  /** IRC sessions Pogo created: agent, directory and an optional parent. */
+  /** IRC sessions Stargate created: agent, directory and an optional parent. */
   const irc = new Map<
     string,
     { agent: string; directory: string; parentID?: string }
@@ -76,7 +76,10 @@ async function fixture(options: { pinned?: boolean } = {}) {
         agent: peer.crewID,
         location: { directory: worktree(peer.crewID) },
         metadata: {
-          pogoCrew: { namespace: crewOptions.namespace, crewID: peer.crewID },
+          stargateCrew: {
+            namespace: crewOptions.namespace,
+            crewID: peer.crewID,
+          },
         },
         time: { updated: 1, idle: 2 },
       };
@@ -201,7 +204,7 @@ test("crew irc: only a matching root crew session can be bound, once", async () 
   }
 });
 
-test("crew irc: a bound session sends pogo_dm only as its member", async () => {
+test("crew irc: a bound session sends stargate_dm only as its member", async () => {
   const f = await fixture();
   try {
     const worker = () => f.caller("ses_ircworker", "worker");
@@ -324,7 +327,7 @@ test("crew irc: a DM to another crew member uses the existing wake rules", async
   }
 });
 
-test("crew irc outbox: every stored pogo_dm is listed once, in order; mail is not", async () => {
+test("crew irc outbox: every stored stargate_dm is listed once, in order; mail is not", async () => {
   const f = await fixture();
   try {
     // A first read is a baseline: nothing older is replayed.
@@ -415,7 +418,7 @@ test("crew irc outbox: entries older than 24 hours are never listed", async () =
       to: { role: "crew" as const, id: "worker" },
       text: `message ${n}`,
     });
-    // Stored while fresh; Pogo then stays down for more than a day.
+    // Stored while fresh; Stargate then stays down for more than a day.
     outbox.enqueue(item(1), now - 25 * hour);
     outbox.enqueue(item(2), now - 23 * hour);
     const page = outbox.outbox({ after: 0, limit: 10 }, now);

@@ -40,13 +40,13 @@ type FixtureOptions = {
 async function fixture(initial: FixtureOptions = {}) {
   // Under TMPDIR (often ~/.cache/tmp): hidden segments above a post
   // directory are allowed; hidden segments below it stay denied.
-  const root = await realpath(await mkdtemp(join(tmpdir(), "pogo-post-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "stargate-post-")));
   directories.push(root);
   const captain = join(root, "captain");
   const files = join(root, "files");
   await mkdir(captain);
   await mkdir(files);
-  const configPath = join(root, "pogo.json");
+  const configPath = join(root, "stargate.json");
   const writeConfig = (options: FixtureOptions) =>
     writeFile(
       configPath,
@@ -217,7 +217,7 @@ test("posts top-level markdown as the bound bot and returns its permalink", asyn
   expect(sent?.params.get("blocks")).toContain("U0ABC");
   expect(f.audits).toEqual([
     {
-      event: "pogo_post",
+      event: "stargate_post",
       bot: "galactica",
       channel: "C123",
       thread: null,
@@ -246,7 +246,7 @@ test("replies in a thread and broadcasts only when asked", async () => {
   expect(loud?.params.get("reply_broadcast")).toBe("true");
   await expect(
     f.post({ channel: "C123", text: "x", reply_broadcast: true }),
-  ).rejects.toThrow("Invalid pogo_post input");
+  ).rejects.toThrow("Invalid stargate_post input");
 });
 
 test("posts need captainPost.channels and inbound access; denies override", async () => {
@@ -284,7 +284,7 @@ test("posts need captainPost.channels and inbound access; denies override", asyn
 test("disabled bots and mismatched bindings refuse before Slack", async () => {
   const off = await fixture({ captainPost: false });
   await expect(off.post({ channel: "C123", text: "x" })).rejects.toThrow(
-    "pogo_post is off",
+    "stargate_post is off",
   );
   const f = await fixture();
   for (const binding of [
@@ -471,7 +471,7 @@ function crew() {
     options: {
       captainDirectory: "/captain",
       captainSessionID: "ses_captain",
-      cron: { configPath: "/private/pogo.json", bot: "galactica" },
+      cron: { configPath: "/private/stargate.json", bot: "galactica" },
     },
     async captain(caller: CrewCaller) {
       if (caller.agent !== "adama") throw new CrewError("Captain only.");
@@ -501,7 +501,7 @@ test("crew members cannot post and binding fields cannot be injected", async () 
       { channel: "C123", text: "x", configPath: "/other.json" },
       c.caller,
     ),
-  ).rejects.toThrow("Invalid pogo_post input");
+  ).rejects.toThrow("Invalid stargate_post input");
   expect(c.calls).toHaveLength(0);
   await post.run({ channel: "C123", text: "x" }, c.caller);
   await post.run({ channel: "C123", text: "x", key: "explicit" }, c.caller);
@@ -515,7 +515,7 @@ test("crew members cannot post and binding fields cannot be injected", async () 
         key: "call_tool",
       },
       binding: {
-        configPath: "/private/pogo.json",
+        configPath: "/private/stargate.json",
         bot: "galactica",
         expectedDirectory: "/captain",
         captainSessionID: "ses_captain",
@@ -531,7 +531,7 @@ test("crew members cannot post and binding fields cannot be injected", async () 
   );
   await expect(
     unbound.run({ channel: "C123", text: "x" }, c.caller),
-  ).rejects.toThrow("pogo_post unavailable");
+  ).rejects.toThrow("stargate_post unavailable");
 });
 
 test("default file roots follow OpenCode's tmpdir rule at call time", async () => {

@@ -4,7 +4,7 @@ Shared ship log: {{shipLog}}
 Historical Markdown journal: {{journalPath}}
 Historical team journals: {{journalDirectory}}/<agent ID>.md
 Shared working agreement: {{waysOfWorking}}
-Native definition ID: {{nativeAgent}}. Pogo communication address: {{agentID}}.
+Native definition ID: {{nativeAgent}}. Stargate communication address: {{agentID}}.
 Project skill library: {{skillsDirectory}}/<name>/SKILL.md
 
 Read the shared working agreement initially and reread it when updated.
@@ -14,12 +14,12 @@ Follow its project-instruction, request/reply, liveness and task-boundary
 improvement procedures. Keep ship policy there, not in each assignment.
 Read relevant log entries and historical journals before related work. Write
 concise milestones at task boundaries, not every turn. Write checks, blockers
-and outcomes through pogo_journal, not every
+and outcomes through stargate_journal, not every
 tool call. Host supplies ID, timestamp, member and task. Distinguish verified
-facts from assumptions. Record Pogo limitations and useful authenticated native
+facts from assumptions. Record Stargate limitations and useful authenticated native
 workarounds as ordinary journal notes. Use the shared task-boundary improvement
 procedure; do not create a feedback tracker or automatic background loop.
-Prefer Pogo tools when adequate; native self-service stays within existing
+Prefer Stargate tools when adequate; native self-service stays within existing
 scope and authentication, without another storage owner or uncertain replay.
 Append reusable
 lessons and useful inspection findings to the shared ship log, with evidence

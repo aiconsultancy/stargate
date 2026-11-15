@@ -6,9 +6,9 @@ import { lockInstance } from "../src/runtime";
 import { JobTransitionRefused, Store } from "../src/store";
 
 test("state survives reopening and exclusive lock prevents two owners", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-test-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-test-");
   try {
-    const path = join(directory, "pogo.sqlite");
+    const path = join(directory, "stargate.sqlite");
     const lock = lockInstance(join(directory, "lock.sqlite"));
     try {
       expect(() => lockInstance(join(directory, "lock.sqlite"))).toThrow(
@@ -45,8 +45,8 @@ test("state survives reopening and exclusive lock prevents two owners", async ()
 });
 
 test("migration preserves old jobs and accepted Stop survives database reopen", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-cancel-");
-  const path = join(directory, "pogo.sqlite");
+  const directory = await mkdtemp("/tmp/opencode/stargate-cancel-");
+  const path = join(directory, "stargate.sqlite");
   try {
     const initial = new Store(path);
     initial.enqueue({

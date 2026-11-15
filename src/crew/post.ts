@@ -15,7 +15,7 @@ interface PostAuthority {
   captain(caller: CrewCaller): Promise<void>;
 }
 
-/** Captain-only `pogo_post`; crew and child sessions are refused. */
+/** Captain-only `stargate_post`; crew and child sessions are refused. */
 export class CrewPost {
   constructor(
     private readonly authority: PostAuthority,
@@ -26,7 +26,7 @@ export class CrewPost {
     const parsed = postInputSchema.safeParse(raw);
     if (!parsed.success)
       throw new CrewError(
-        "Invalid pogo_post input. Use the declared fields; nothing was posted.",
+        "Invalid stargate_post input. Use the declared fields; nothing was posted.",
       );
     const cancelled = () => {
       if (caller.signal.aborted)
@@ -47,7 +47,7 @@ export class CrewPost {
     const { captainDirectory, captainSessionID, cron } = this.authority.options;
     if (!cron)
       throw new CrewError(
-        "pogo_post unavailable: bind this captain to its gateway config and bot (plugin option cron: { configPath, bot }) first.",
+        "stargate_post unavailable: bind this captain to its gateway config and bot (plugin option cron: { configPath, bot }) first.",
       );
     // Stable host tool identity makes a retry read its recorded outcome.
     const input =

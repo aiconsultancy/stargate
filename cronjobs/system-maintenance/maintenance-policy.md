@@ -10,7 +10,7 @@
   logs. Require a verified idle window before replacing shared dependencies.
 - CLIProxyAPI: stage a verified release with the old binary retained.
   Activation needs a separately approved, idle maintenance window.
-- Pogo dependencies: use a feature branch, preserve aligned Pi versions and
+- Stargate dependencies: use a feature branch, preserve aligned Pi versions and
   the SDK-aligned Effect pin, update manifests and lockfile together, run
   `make check`, then request review and a separate deployment decision.
   Never mutate a managed release's live `node_modules`.

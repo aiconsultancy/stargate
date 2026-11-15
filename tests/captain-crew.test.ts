@@ -16,7 +16,7 @@ const legacy = "ses_rootLegacy";
 
 /** Fake native roots, workers and Mesij; no OpenCode, provider or Slack. */
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/pogo-captain-crew-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-captain-crew-");
   const team = teamSchema.parse({
     captain: { id: "captain" },
     crew: [
@@ -48,7 +48,7 @@ async function fixture() {
           agent: peer.crewID,
           location: { directory: options.worktrees[peer.crewID] ?? "" },
           metadata: {
-            pogoCrew: { namespace: options.namespace, crewID: peer.crewID },
+            stargateCrew: { namespace: options.namespace, crewID: peer.crewID },
           },
         };
       // Every ses_root* session is a real native captain root.
@@ -301,7 +301,9 @@ test("the pin keeps queued FIFO work, cancels it, and admits it with its raw ori
     expect(f.prompts).toMatchObject([
       {
         sessionID: f.peer.sessionID,
-        metadata: { pogoCrew: { taskID: second.id, originCaptainID: legacy } },
+        metadata: {
+          pogoCrew: { taskID: second.id, originCaptainID: legacy },
+        },
       },
     ]);
   } finally {

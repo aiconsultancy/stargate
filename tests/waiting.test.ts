@@ -57,7 +57,7 @@ test("100 varied waiting phrases use the actual agent name and wrap", () => {
 });
 
 test("captain waiting changes persist and apply without gateway restart", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-waiting-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-waiting-");
   try {
     const config = botSchema.parse({
       ...bot(),

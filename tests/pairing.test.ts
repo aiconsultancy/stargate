@@ -86,7 +86,7 @@ function fixture(deadline?: () => AbortSignal) {
 
 function command() {
   return {
-    command: "/pogo",
+    command: "/stargate",
     text: "pair",
     api_app_id: "A123",
     team_id: "T123",
@@ -105,7 +105,11 @@ function action(view: CronView) {
     container: { type: "view", view_id: "V123" },
     view: { ...view, id: "V123", hash: "hash-1" },
     actions: [
-      { type: "button", action_id: "pogo_pair_generate", value: "generate" },
+      {
+        type: "button",
+        action_id: "stargate_pair_generate",
+        value: "generate",
+      },
     ],
   };
 }
@@ -191,7 +195,7 @@ test("pairing guidance uses the friendly bot name and invoking conversation", as
 test("invalid, denied, bot, disabled, unsupported commands never mint", async () => {
   const variants = [
     { text: "pair https://attacker.test" },
-    { command: "/pogo-other" },
+    { command: "/stargate-other" },
     { api_app_id: "AOTHER" },
     { team_id: "TOTHER" },
     { user_id: "UOTHER" },
@@ -266,13 +270,13 @@ test("button reauthorizes operator and normal denies, app, team, human and chann
     if (change === "action")
       body.actions[0] = {
         type: "button",
-        action_id: "pogo_pair_other",
+        action_id: "stargate_pair_other",
         value: "generate",
       };
     if (change === "multi")
       body.actions.push({
         type: "button",
-        action_id: "pogo_pair_generate",
+        action_id: "stargate_pair_generate",
         value: "generate",
       });
     if (change === "expired") f.advance(300_001);

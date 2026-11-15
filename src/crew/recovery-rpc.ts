@@ -18,7 +18,7 @@ export const recoveryRequestSchema = z.strictObject({
   ]),
 });
 export const CrewRecovery = Rpc.define({
-  id: "pogo.crew.recovery",
+  id: "stargate.crew.recovery",
   events: {},
   methods: {
     run: { input: recoveryRequestSchema, output: z.string() },

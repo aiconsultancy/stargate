@@ -24,17 +24,19 @@ test("normal questions and concrete-item keywords do not trigger reactions", () 
 
 test("explicit first-line directives select supported emoji and strip only that line", () => {
   for (const name of reactionNames) {
-    expect(parseReactionReply(`[[pogo:react:${name}]]\nMy response.`)).toEqual({
+    expect(
+      parseReactionReply(`[[stargate:react:${name}]]\nMy response.`),
+    ).toEqual({
       text: "My response.",
       pending: false,
       reaction: name,
       silent: false,
     });
   }
-  expect(parseReactionReply("[[pogo:react:eyes]]\r\nReviewed.").text).toBe(
+  expect(parseReactionReply("[[stargate:react:eyes]]\r\nReviewed.").text).toBe(
     "Reviewed.",
   );
-  expect(parseReactionReply("[[pogo:react:thumbsup]]")).toEqual({
+  expect(parseReactionReply("[[stargate:react:thumbsup]]")).toEqual({
     text: "",
     pending: false,
     reaction: "thumbsup",
@@ -44,15 +46,15 @@ test("explicit first-line directives select supported emoji and strip only that 
 
 test("invalid, quoted, embedded, and target-bearing directives remain ordinary text", () => {
   for (const text of [
-    "[[pogo:react:unknown]]\nResponse",
-    "[[pogo:react:eyes channel=COTHER timestamp=123.456]]\nResponse",
-    " [[pogo:react:eyes]]\nResponse",
-    "\n[[pogo:react:eyes]]\nResponse",
-    "> [[pogo:react:eyes]]\nResponse",
-    "```\n[[pogo:react:eyes]]\n```",
-    "Example: [[pogo:react:thumbsup]]",
-    "[[pogo:react:eyes]] trailing prose",
-    "[[pogo:react:eyes",
+    "[[stargate:react:unknown]]\nResponse",
+    "[[stargate:react:eyes channel=COTHER timestamp=123.456]]\nResponse",
+    " [[stargate:react:eyes]]\nResponse",
+    "\n[[stargate:react:eyes]]\nResponse",
+    "> [[stargate:react:eyes]]\nResponse",
+    "```\n[[stargate:react:eyes]]\n```",
+    "Example: [[stargate:react:thumbsup]]",
+    "[[stargate:react:eyes]] trailing prose",
+    "[[stargate:react:eyes",
   ]) {
     expect(parseReactionReply(text)).toEqual({
       text,
@@ -64,7 +66,7 @@ test("invalid, quoted, embedded, and target-bearing directives remain ordinary t
 });
 
 test("streaming buffers only possible leading directives until the line completes", () => {
-  const directive = "[[pogo:react:eyes]]";
+  const directive = "[[stargate:react:eyes]]";
   for (let length = 0; length <= directive.length; length++) {
     expect(parseReactionReply(directive.slice(0, length), false)).toEqual({
       text: "",
@@ -80,8 +82,8 @@ test("streaming buffers only possible leading directives until the line complete
     reaction: "eyes",
     silent: false,
   });
-  expect(parseReactionReply("[[pogo:react:not-supported", false)).toEqual({
-    text: "[[pogo:react:not-supported",
+  expect(parseReactionReply("[[stargate:react:not-supported", false)).toEqual({
+    text: "[[stargate:react:not-supported",
     pending: false,
     reaction: undefined,
     silent: false,
@@ -91,10 +93,10 @@ test("streaming buffers only possible leading directives until the line complete
 
 test("a first-line silent directive removes all public text", () => {
   for (const text of [
-    "[[pogo:silent]]",
-    "[[pogo:silent]]\n",
-    "[[pogo:silent]]\r\nThat message is for another captain.",
-    "[[pogo:silent]]\n![proof](file:///tmp/proof.png)",
+    "[[stargate:silent]]",
+    "[[stargate:silent]]\n",
+    "[[stargate:silent]]\r\nThat message is for another captain.",
+    "[[stargate:silent]]\n![proof](file:///tmp/proof.png)",
   ]) {
     expect(parseReactionReply(text)).toEqual({
       text: "",
@@ -103,15 +105,15 @@ test("a first-line silent directive removes all public text", () => {
       silent: true,
     });
   }
-  expect(silentDirective).toBe("[[pogo:silent]]");
+  expect(silentDirective).toBe("[[stargate:silent]]");
   expect(reactionInstructions).toContain(silentDirective);
 });
 
 test("silent combines with one reaction in either order", () => {
   for (const text of [
-    "[[pogo:react:eyes]]\n[[pogo:silent]]",
-    "[[pogo:silent]]\n[[pogo:react:eyes]]",
-    "[[pogo:silent]]\r\n[[pogo:react:eyes]]\r\nNot posted.",
+    "[[stargate:react:eyes]]\n[[stargate:silent]]",
+    "[[stargate:silent]]\n[[stargate:react:eyes]]",
+    "[[stargate:silent]]\r\n[[stargate:react:eyes]]\r\nNot posted.",
   ]) {
     expect(parseReactionReply(text)).toEqual({
       text: "",
@@ -122,17 +124,19 @@ test("silent combines with one reaction in either order", () => {
   }
   // Each directive leads at most once; a repeat is ordinary text.
   expect(
-    parseReactionReply("[[pogo:react:eyes]]\n[[pogo:react:tada]]\nText"),
+    parseReactionReply(
+      "[[stargate:react:eyes]]\n[[stargate:react:tada]]\nText",
+    ),
   ).toEqual({
-    text: "[[pogo:react:tada]]\nText",
+    text: "[[stargate:react:tada]]\nText",
     pending: false,
     reaction: "eyes",
     silent: false,
   });
   expect(
-    parseReactionReply("[[pogo:react:eyes]]\nText\n[[pogo:silent]]"),
+    parseReactionReply("[[stargate:react:eyes]]\nText\n[[stargate:silent]]"),
   ).toEqual({
-    text: "Text\n[[pogo:silent]]",
+    text: "Text\n[[stargate:silent]]",
     pending: false,
     reaction: "eyes",
     silent: false,
@@ -141,16 +145,16 @@ test("silent combines with one reaction in either order", () => {
 
 test("quoted, embedded, late and altered silent directives remain ordinary text", () => {
   for (const text of [
-    " [[pogo:silent]]",
-    "\n[[pogo:silent]]",
-    "> [[pogo:silent]]",
-    "```\n[[pogo:silent]]\n```",
-    "Example: [[pogo:silent]]",
-    "[[pogo:silent]] trailing prose",
-    "[[pogo:silent:all]]",
-    "[[POGO:SILENT]]",
-    "[[pogo:silent",
-    "Answer first.\n[[pogo:silent]]",
+    " [[stargate:silent]]",
+    "\n[[stargate:silent]]",
+    "> [[stargate:silent]]",
+    "```\n[[stargate:silent]]\n```",
+    "Example: [[stargate:silent]]",
+    "[[stargate:silent]] trailing prose",
+    "[[stargate:silent:all]]",
+    "[[STARGATE:SILENT]]",
+    "[[stargate:silent",
+    "Answer first.\n[[stargate:silent]]",
   ]) {
     expect(parseReactionReply(text)).toEqual({
       text,
@@ -181,14 +185,16 @@ test("streaming holds a possible silent directive until its line completes", () 
     reaction: undefined,
     silent: true,
   });
-  expect(parseReactionReply("[[pogo:react:eyes]]\n[[pogo:sil", false)).toEqual({
+  expect(
+    parseReactionReply("[[stargate:react:eyes]]\n[[stargate:sil", false),
+  ).toEqual({
     text: "",
     pending: true,
     reaction: "eyes",
     silent: false,
   });
-  expect(parseReactionReply("[[pogo:silentish", false)).toEqual({
-    text: "[[pogo:silentish",
+  expect(parseReactionReply("[[stargate:silentish", false)).toEqual({
+    text: "[[stargate:silentish",
     pending: false,
     reaction: undefined,
     silent: false,

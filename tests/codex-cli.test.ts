@@ -32,10 +32,10 @@ afterAll(() => tools.remove());
  * configuration, skills and instructions that must never be used, and a
  * recording HTTP proxy shows any connection to anywhere else.
  */
-const canary = "POGOCANARY";
-const memory = "POGOPROJECTMEMORY";
-const skill = "POGOSKILLCANARY";
-const apiKeyEnv = "POGO_CODEX_CLI_TEST_KEY";
+const canary = "STARGATECANARY";
+const memory = "STARGATEPROJECTMEMORY";
+const skill = "STARGATESKILLCANARY";
+const apiKeyEnv = "STARGATE_CODEX_CLI_TEST_KEY";
 const key = "local-proxy-test-only";
 const saved = new Map<string, string | undefined>();
 const cleanup: (() => Promise<unknown>)[] = [];
@@ -247,14 +247,14 @@ const testStart = await bootTicks();
 async function processesOf(turn: string) {
   const found = await turnProcesses(
     systemProcesses,
-    { variable: "POGO_CODEX_TURN", value: turn },
+    { variable: "STARGATE_CODEX_TURN", value: turn },
     testStart,
   );
   return found.map(({ pid }) => pid);
 }
 
 async function setup(name: string) {
-  const root = await mkdtemp(join(tmpdir(), `pogo-codex-cli-${name}-`));
+  const root = await mkdtemp(join(tmpdir(), `stargate-codex-cli-${name}-`));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "home");
   const project = join(root, "project");
@@ -301,7 +301,7 @@ const session = (backend: CodexBackend) =>
  */
 async function sandboxWorks() {
   if (process.platform !== "linux") return false;
-  const home = await mkdtemp(join(tmpdir(), "pogo-codex-probe-"));
+  const home = await mkdtemp(join(tmpdir(), "stargate-codex-probe-"));
   try {
     const native = nativeCodex();
     const result = spawnSync(native.executable, ["sandbox", "--", "true"], {
@@ -325,7 +325,7 @@ const sandboxed = await sandboxWorks();
 test("real Codex CLI uses only the configured proxy, key and thread", async () => {
   const { root, home, project, data } = await setup("routing");
   await mkdir(join(home, ".codex"), { recursive: true });
-  await mkdir(join(home, ".agents", "skills", "pogo"), { recursive: true });
+  await mkdir(join(home, ".agents", "skills", "stargate"), { recursive: true });
   await mkdir(join(project, ".codex"), { recursive: true });
   await writeFile(
     join(home, ".codex", "auth.json"),
@@ -344,8 +344,8 @@ args = ["${join(root, "mcp")}"]
   await writeFile(join(home, ".codex", "config.toml"), redirect);
   await writeFile(join(project, ".codex", "config.toml"), redirect);
   await writeFile(
-    join(home, ".agents", "skills", "pogo", "SKILL.md"),
-    `---\nname: pogo\ndescription: ${skill}\n---\n${skill}\n`,
+    join(home, ".agents", "skills", "stargate", "SKILL.md"),
+    `---\nname: stargate\ndescription: ${skill}\n---\n${skill}\n`,
   );
   await writeFile(join(project, "AGENTS.md"), memory);
   for (const rc of [".zshrc", ".bashrc", ".profile", ".zprofile"])
@@ -369,7 +369,7 @@ args = ["${join(root, "mcp")}"]
   const id = await session(backend);
   const previews: string[] = [];
   expect(
-    await backend.prompt(id, "Say POGOFIRST", signal(), (text) =>
+    await backend.prompt(id, "Say STARGATEFIRST", signal(), (text) =>
       previews.push(text),
     ),
   ).toBe("Fixture reply");
@@ -384,7 +384,8 @@ args = ["${join(root, "mcp")}"]
   const turns = requests.filter(({ path }) => path === "/v1/responses");
 
   expect(turns.length).toBe(3);
-  for (const turn of turns.slice(1)) expect(turn.body).toContain("POGOFIRST");
+  for (const turn of turns.slice(1))
+    expect(turn.body).toContain("STARGATEFIRST");
   for (const turn of turns) {
     expect(turn.model).toBe("gpt-6.1-sol");
     expect(turn.memory).toBe(false);
@@ -415,7 +416,7 @@ args = ["${join(root, "mcp")}"]
     signal(),
   );
   expect(other).toBe("Fixture reply");
-  expect(requests.at(-1)?.body).not.toContain("POGOFIRST");
+  expect(requests.at(-1)?.body).not.toContain("STARGATEFIRST");
 
   // Project instructions load only when selected; the system prompt, effort
   // and image attachments reach the model.
@@ -425,7 +426,7 @@ args = ["${join(root, "mcp")}"]
     baseURL,
     {
       projectDocs: true,
-      systemPrompt: "POGOSYSTEMPROMPT",
+      systemPrompt: "STARGATESYSTEMPROMPT",
       reasoningEffort: "high",
     },
     runtime,
@@ -441,7 +442,7 @@ args = ["${join(root, "mcp")}"]
   ]);
   const last = requests.at(-1);
   expect(last?.memory).toBe(true);
-  expect(last?.body).toContain("POGOSYSTEMPROMPT");
+  expect(last?.body).toContain("STARGATESYSTEMPROMPT");
   expect(last?.body).toContain("input_image");
   expect(last?.body).toContain("Attachment: dot.png (image 1)");
   expect(
@@ -498,10 +499,10 @@ test.skipIf(!sandboxed)(
     const proxy = await recordingProxy();
     // Shell start-up files that would run in every tool command.
     for (const rc of [".zshenv", ".zshrc", ".bashrc", ".profile"])
-      await writeFile(join(home, rc), "export POGO_RC_RAN=1\n");
+      await writeFile(join(home, rc), "export STARGATE_RC_RAN=1\n");
     setEnv({ [apiKeyEnv]: key, HOME: home });
     // Shared /tmp is never a writable root.
-    const shared = `/tmp/pogo-codex-test-${crypto.randomUUID()}`;
+    const shared = `/tmp/stargate-codex-test-${crypto.randomUUID()}`;
     cleanup.push(() =>
       Promise.all(
         ["readonly", "workspace", "network"].map((name) =>
@@ -521,7 +522,7 @@ test.skipIf(!sandboxed)(
               // The marker, and a count of variables that must be absent;
               // the environment itself is never printed.
               tag: "ENV",
-              cmd: `printf 'turn=%s\\n' "$POGO_CODEX_TURN"; printf 'matches=%s\\n' "$(env | grep -c -F -e '${key}' -e POGO_CODEX_PROVIDER_KEY -e ${apiKeyEnv} -e POGO_RC_RAN)"`,
+              cmd: `printf 'turn=%s\\n' "$STARGATE_CODEX_TURN"; printf 'matches=%s\\n' "$(env | grep -c -F -e '${key}' -e STARGATE_CODEX_PROVIDER_KEY -e ${apiKeyEnv} -e STARGATE_RC_RAN)"`,
             },
             { tag: "RG", cmd: "command -v rg" },
             { tag: "WRITE", cmd: `touch ${join(project, name)}; echo rc=$?` },
@@ -549,16 +550,16 @@ test.skipIf(!sandboxed)(
       const output = (requests.at(-1)?.outputs ?? []).join("\n");
       expect(output).toContain("ENV:");
       expect(output).toContain("BG:");
-      expect(output).not.toContain("POGO_RC_RAN");
+      expect(output).not.toContain("STARGATE_RC_RAN");
       expect(/matches=(\d+)/.exec(output)?.[1]).toBe("0");
-      // The SDK's helper commands come first on PATH, as without Pogo.
+      // The SDK's helper commands come first on PATH, as without Stargate.
       expect(output).toMatch(/RG:[^\n]*codex-path\/rg/);
       const marker = /turn=([0-9a-f-]{36})/.exec(output)?.[1];
       expect(marker).toBeDefined();
       // Nothing of the turn is left running, in or outside the sandbox.
       expect(await noneLeft(marker ?? "")).toEqual([]);
       expect(output).not.toContain(key);
-      expect(output).not.toContain("POGO_CODEX_PROVIDER_KEY");
+      expect(output).not.toContain("STARGATE_CODEX_PROVIDER_KEY");
       expect(output).not.toContain(apiKeyEnv);
       return output;
     };
@@ -639,10 +640,10 @@ test.skipIf(!sandboxed)(
     }
     // A data directory inside the workspace is refused before any turn.
     await expect(
-      open(project, join(project, ".pogo"), baseURL, {
+      open(project, join(project, ".stargate"), baseURL, {
         sandbox: "workspace-write",
       }),
-    ).rejects.toThrow(/Pogo's data directory/);
+    ).rejects.toThrow(/Stargate's data directory/);
   },
   120_000,
 );

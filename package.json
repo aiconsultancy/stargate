@@ -12,8 +12,7 @@
     ".": "./src/crew/plugin.ts"
   },
   "bin": {
-    "stargate": "./src/main.ts",
-    "pogo": "./src/main.ts"
+    "stargate": "./src/main.ts"
   },
   "engines": {
     "bun": ">=1.4.4"

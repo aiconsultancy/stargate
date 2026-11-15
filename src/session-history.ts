@@ -17,7 +17,7 @@ export const historySessionSchema = z.strictObject({
   id,
   harness: z.enum(["opencode", "pi-durable"]),
   kind: z.enum(["captain", "crew", "subagent", "conversation"]),
-  /** Short Pogo member ID for captain and crew roots. */
+  /** Short Stargate member ID for captain and crew roots. */
   member: z.string().max(64).optional(),
   parentID: id.optional(),
   title: z.string().max(300).optional(),

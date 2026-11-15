@@ -20,9 +20,9 @@ afterEach(async () => {
   );
 });
 async function path() {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-setup-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-setup-"));
   temporary.push(directory);
-  return join(directory, "pogo.json");
+  return join(directory, "stargate.json");
 }
 function bot(id = "one") {
   return {
@@ -65,7 +65,7 @@ test("manifest prefill round-trips and grants only intended scopes/events", () =
   ]);
   expect(manifest.features.slash_commands).toEqual([
     {
-      command: "/pogo",
+      command: "/stargate",
       description: "View crew activity, usage or operator controls",
       usage_hint: "crew [member] | usage | pair",
       should_escape: true,

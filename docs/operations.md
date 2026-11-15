@@ -23,13 +23,13 @@ After verifying a foreground run, stop it and run these commands from the
 Stargate directory. Run them as the user who will own the service:
 
 ```sh
-bun run src/main.ts service install --config /absolute/path/to/pogo.json
-systemctl --user enable --now pogo.service
-systemctl --user status pogo.service
-journalctl --user -u pogo.service -f
+bun run src/main.ts service install --config /absolute/path/to/stargate.json
+systemctl --user enable --now stargate.service
+systemctl --user status stargate.service
+journalctl --user -u stargate.service -f
 ```
 
-No `sudo`. Installation writes `~/.config/systemd/user/pogo.service` and reloads
+No `sudo`. Installation writes `~/.config/systemd/user/stargate.service` and reloads
 systemd; it does **not** enable or start the service. The unit uses absolute
 Bun/entrypoint paths, config-directory working directory, private umask, and
 the optional config companion as `EnvironmentFile`. Keep the checkout and
@@ -50,7 +50,7 @@ stargate service status
 stargate service uninstall
 ```
 
-Use `--name other-pogo` for a separate unit. Separate instances need separate
+Use `--name other-stargate` for a separate unit. Separate instances need separate
 config/data directories **and separate Slack app registrations**. Do not run
 two Socket Mode listeners with the same credentials; Slack can distribute
 events between them. One data directory has one process owner, enforced by a
@@ -78,8 +78,8 @@ idle boundary, checks health after every change, rolls back automatically,
 and writes a versioned JSON report plus one Slack summary.
 
 ```sh
-stargate maintenance plan --config /absolute/path/to/pogo.json        # read-only
-stargate maintenance install-timer --config /absolute/path/to/pogo.json --print
+stargate maintenance plan --config /absolute/path/to/stargate.json        # read-only
+stargate maintenance install-timer --config /absolute/path/to/stargate.json --print
 ```
 
 An optional built-in maintenance droid (a Pi Durable agent) explains each

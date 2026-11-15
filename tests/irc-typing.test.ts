@@ -23,15 +23,15 @@ async function setup(
     ...(options.caps ? { caps: options.caps } : {}),
   }).start();
   cleanup.push(() => fake.stop());
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-typing-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-typing-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = ircSchema.parse({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_IRC_GALACTICA",
+    passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     ...(options.features ? { features: options.features } : {}),
     backend: {
@@ -42,7 +42,7 @@ async function setup(
     },
   });
   const ship = await IrcShip.create(config, store, pino({ level: "silent" }), {
-    env: { POGO_IRC_GALACTICA: "captain-pass" },
+    env: { STARGATE_IRC_GALACTICA: "captain-pass" },
     timing: { reconnectMinMs: 20, intervalMs: 5, burst: 50, typingMs: 100 },
     readyMs: 2000,
   });

@@ -271,7 +271,7 @@ export class IrcAudit {
       const budget = Math.min(
         limits.maxBytes,
         client.budget("PRIVMSG", channel, {
-          batch: `pogo${"9".repeat(12)}`,
+          batch: `stargate${"9".repeat(12)}`,
           "draft/multiline-concat": "",
         }),
       );

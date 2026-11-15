@@ -85,8 +85,8 @@ function fixture(path = ":memory:", pinned = false) {
     },
     async prompt(_session, text, _signal, onText, _onInput, _files, context) {
       prompts.push({ text, ...(context ? { context } : {}) });
-      onText?.("[[pogo:react:eyes]]\nPublic preview");
-      return "[[pogo:react:eyes]]\nPublic result\n![private file](file:///private/report.txt)";
+      onText?.("[[stargate:react:eyes]]\nPublic preview");
+      return "[[stargate:react:eyes]]\nPublic result\n![private file](file:///private/report.txt)";
     },
     async close() {},
   };
@@ -149,9 +149,9 @@ function fixture(path = ":memory:", pinned = false) {
 }
 
 async function databasePath() {
-  const directory = await mkdtemp("/tmp/opencode/pogo-deferred-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-deferred-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  return join(directory, "pogo.sqlite");
+  return join(directory, "stargate.sqlite");
 }
 
 test("deferred cron executes durably without any Slack call and survives restart", async () => {
@@ -167,7 +167,7 @@ test("deferred cron executes durably without any Slack call and survives restart
   const result = f.gateway.scheduledResult(id);
   expect(result).toMatchObject({ status: "done", failure: null });
   expect(result?.text).toContain("Public result");
-  expect(result?.text).not.toContain("pogo:react");
+  expect(result?.text).not.toContain("stargate:react");
   expect(result?.text).not.toContain("/private/report.txt");
   expect(result?.text).not.toContain("PRIVATE PROMPT");
   expect(f.calls).toEqual([]);
@@ -395,7 +395,7 @@ for (const pinned of [false, true]) {
     }
     history.add(
       "assistant",
-      "[[pogo:react:eyes]]\nLate deferred result",
+      "[[stargate:react:eyes]]\nLate deferred result",
       origin,
     );
     f.gateway.settle(pinned ? "captain" : "session-1");
@@ -406,7 +406,7 @@ for (const pinned of [false, true]) {
     expect(result?.text).toContain("Late deferred result");
     expect(result?.text).not.toContain("SECRET REASONING");
     expect(result?.text).not.toContain("immediate question");
-    expect(result?.text).not.toContain("pogo:react");
+    expect(result?.text).not.toContain("stargate:react");
     expect(
       f.store
         .transcriptRows(f.gateway.key, conversation)

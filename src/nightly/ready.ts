@@ -9,10 +9,10 @@ import { readMetadata } from "./release";
  * Maintenance waits for a record newer than its restart to confirm health.
  */
 export const readySchema = z.strictObject({
-  schema: z.literal("pogo.ready.v1"),
+  schema: z.literal("stargate.ready.v1"),
   pid: z.number().int().positive(),
   readyAt: z.number().int().positive(),
-  /** Release version from `.pogo-release.json`, or null for a checkout. */
+  /** Release version from `.stargate-release.json`, or null for a checkout. */
   version: z.string().nullable(),
 });
 export type Ready = z.infer<typeof readySchema>;
@@ -27,7 +27,7 @@ export async function runningVersion(directory = packageDirectory) {
 
 /**
  * Record that this process is ready. Returns the release version that it
- * runs, or null when its directory has no valid `.pogo-release.json`: then
+ * runs, or null when its directory has no valid `.stargate-release.json`: then
  * maintenance cannot match the record with a release, and a readiness check
  * for a version never passes. The caller warns about null.
  */
@@ -37,7 +37,7 @@ export async function writeReady(
   directory = packageDirectory,
 ) {
   const record: Ready = {
-    schema: "pogo.ready.v1",
+    schema: "stargate.ready.v1",
     pid: process.pid,
     readyAt: now,
     version: await runningVersion(directory),

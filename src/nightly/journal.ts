@@ -33,7 +33,7 @@ import { formatRef, type ModelRef, parseVersion } from "./versions";
  * Undo journal. Every live change is recorded here *before* it happens and
  * removed once it is verified and committed. A run that ends abnormally
  * (exception, SIGTERM, timeout, reboot) leaves the remaining entries, and
- * the run's own cleanup and `pogo maintenance recover` apply the same undo.
+ * the run's own cleanup and `stargate maintenance recover` apply the same undo.
  *
  * The journal is data, never instructions: unit names, commands, paths,
  * package lists and endpoints all come from the configuration. The journal
@@ -41,8 +41,8 @@ import { formatRef, type ModelRef, parseVersion } from "./versions";
  * names, session IDs and model references, and it must be a private file
  * owned by this user. Anything else is "corrupt" and nothing is undone.
  */
-export const journalSchemaID = "pogo.maintenance.journal.v2";
-const journalV1 = "pogo.maintenance.journal.v1";
+export const journalSchemaID = "stargate.maintenance.journal.v2";
+const journalV1 = "stargate.maintenance.journal.v1";
 
 const version = z
   .string()
@@ -270,17 +270,17 @@ function parseJournal(
     const marker = z
       .strictObject({
         unit: z.string(),
-        pogoRoot: z.string().nullable().optional(),
+        stargateRoot: z.string().nullable().optional(),
         previousRelease: releaseName.nullable().optional(),
       })
       .safeParse(raw);
     if (!marker.success || marker.data.unit !== m.services.gateway) return null;
-    const { pogoRoot, previousRelease } = marker.data;
-    if (pogoRoot != null && pogoRoot !== m.pogo?.root) return null;
+    const { stargateRoot, previousRelease } = marker.data;
+    if (stargateRoot != null && stargateRoot !== m.stargate?.root) return null;
     runID = "legacy";
     data.gateway = { restartPending: false };
     if (previousRelease) {
-      if (pogoRoot == null) return null;
+      if (stargateRoot == null) return null;
       data.release = { previous: previousRelease, version: "0.0.0" };
     }
   } else if ((raw as Record<string, unknown>)["schema"] === journalV1) {
@@ -323,7 +323,7 @@ function parseJournal(
     if (j.cliproxyapi)
       data.cliproxyapi = { previousVersion: j.cliproxyapi.version };
     if (j.release) {
-      if (j.release.root !== m.pogo?.root) return null;
+      if (j.release.root !== m.stargate?.root) return null;
       data.release = {
         previous: j.release.previous,
         version: j.release.version,
@@ -367,7 +367,7 @@ function parseJournal(
   }
   // Every entry must refer to configured components only.
   if (data.cliproxyapi && (!m.cliproxyapi || !m.proxy)) return null;
-  if (data.release && !m.pogo) return null;
+  if (data.release && !m.stargate) return null;
   if (data.files && runID === "legacy") return null;
   if (data.clis) {
     const allowed = new Set((m.agentClis?.packages ?? []).map((p) => p.name));
@@ -587,9 +587,9 @@ export async function describeEntry(
     }
     case "release": {
       const release = journal.get("release");
-      if (!release || !m?.pogo) return [];
+      if (!release || !m?.stargate) return [];
       return [
-        `${await link(join(m.pogo.root, "current"))}; recovery points it back to releases/${release.previous}`,
+        `${await link(join(m.stargate.root, "current"))}; recovery points it back to releases/${release.previous}`,
       ];
     }
     case "clis":
@@ -671,7 +671,7 @@ export type UndoStep =
 
 /** Only a gateway restart leaves crew work and OpenCode alone. */
 export const undoStepScope = (step: UndoStep): IdleScope =>
-  step === "gateway" ? "gateway" : "pogo";
+  step === "gateway" ? "gateway" : "stargate";
 
 /**
  * The idle scope before any undo of this journal. A journal that holds only
@@ -687,7 +687,7 @@ export function journalScope(journal: Journal): IdleScope {
     "openCode",
   ];
   return entries.some((entry) => journal.get(entry) !== undefined)
-    ? "pogo"
+    ? "stargate"
     : "gateway";
 }
 
@@ -730,9 +730,9 @@ export function recoveryBudgetMs(config: Config["maintenance"]) {
   );
 }
 
-/** The release version `current` points to, when Pogo releases are managed. */
+/** The release version `current` points to, when Stargate releases are managed. */
 export async function currentVersion(config: Config) {
-  const root = config.maintenance?.pogo?.root;
+  const root = config.maintenance?.stargate?.root;
   return root
     ? (await linkedRelease(root, "current"))?.metadata.version
     : undefined;
@@ -822,14 +822,14 @@ export async function undoJournal(
   }
 
   const release = wanted("release") ? journal.get("release") : undefined;
-  if (release && m?.pogo) {
+  if (release && m?.stargate) {
     let ok = true;
     try {
       const managed = await readMetadata(
-        join(m.pogo.root, "releases", release.previous),
+        join(m.stargate.root, "releases", release.previous),
       );
       if (!managed) throw new StepError("switch-failed");
-      await restoreCurrent(m.pogo.root, release.previous);
+      await restoreCurrent(m.stargate.root, release.previous);
       if (restarted) await oweOpenCode();
       await oweGateway();
       await journal.clear("release");
@@ -838,7 +838,7 @@ export async function undoJournal(
     }
     record({
       kind: "rollback",
-      component: "pogo",
+      component: "stargate",
       from: release.version,
       to: release.previous,
       ok,

@@ -7,7 +7,7 @@ import {
 } from "../src/crew/instructions";
 
 test("agreement changes produce one path-only notice per member/session and survive read failure", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-agreement-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-agreement-");
   const path = join(directory, "WAYS_OF_WORKING.md");
   try {
     await writeFile(path, "PRIVATE RULE VERSION ONE");
@@ -41,7 +41,7 @@ test("agreement changes produce one path-only notice per member/session and surv
 });
 
 test("OpenCode request hook advises reread only on change for an authorized current member", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-agreement-hook-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-agreement-hook-");
   const path = join(directory, "WAYS_OF_WORKING.md");
   try {
     await writeFile(path, "DO NOT INLINE ORIGINAL RULES");

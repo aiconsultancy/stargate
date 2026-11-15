@@ -173,7 +173,7 @@ export async function renderProfile(input: Options, role: string) {
             : {}),
           team: options.team,
           captainDirectory: options.directory,
-          stateDirectory: join(options.directory, ".local", "pogo-crew"),
+          stateDirectory: join(options.directory, ".local", "stargate-crew"),
           projectDirectory: options.projectDirectory,
           worktrees,
           mesijCommand: options.mesijCommand,
@@ -315,7 +315,7 @@ export async function initializeProfile(input: Options) {
     ]),
   );
   await mkdir(options.directory, { recursive: true, mode: 0o700 });
-  const state = join(options.directory, ".local", "pogo-crew");
+  const state = join(options.directory, ".local", "stargate-crew");
   await mkdir(state, { recursive: true, mode: 0o700 });
   if (((await lstat(state)).mode & 0o077) !== 0)
     throw new Error("Crew state directory must be private (0700).");

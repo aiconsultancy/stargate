@@ -14,5 +14,5 @@ export type NightlyWindow = z.infer<typeof nightlyWindowSchema>;
  */
 export function nightlyInstructions(window: NightlyWindow | undefined) {
   if (!window) return "";
-  return `Nightly maintenance: every night from ${window.start} to ${window.end} (${window.timeZone}), Pogo can update itself, the model proxy, the agent CLIs and agent models. At an idle moment in this window, the Slack gateway, the OpenCode server and your session can restart, and your model can change to a newer model of the same family. Before the window, checkpoint work in progress: commit or push branch work, write a journal note and report task state. Do not start long tasks in the window. After a restart, read your journal and continue from the last checkpoint.`;
+  return `Nightly maintenance: every night from ${window.start} to ${window.end} (${window.timeZone}), Stargate can update itself, the model proxy, the agent CLIs and agent models. At an idle moment in this window, the Slack gateway, the OpenCode server and your session can restart, and your model can change to a newer model of the same family. Before the window, checkpoint work in progress: commit or push branch work, write a journal note and report task state. Do not start long tasks in the window. After a restart, read your journal and continue from the last checkpoint.`;
 }

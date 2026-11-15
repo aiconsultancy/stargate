@@ -48,13 +48,15 @@ async function setup(
     ],
   }).start();
   cleanup.push(() => fake.stop());
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-multiline-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-multiline-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   // Failed delivery attempts so far: a test waits for an attempt to end
   // before it changes what the server accepts.
-  const db = new Database(join(directory, "pogo.sqlite"), { readonly: true });
+  const db = new Database(join(directory, "stargate.sqlite"), {
+    readonly: true,
+  });
   cleanup.push(() => db.close());
   const attempts = () =>
     db
@@ -66,7 +68,7 @@ async function setup(
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_IRC_GALACTICA",
+    passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     ...(options.features ? { features: options.features } : {}),
     backend: {
@@ -77,7 +79,7 @@ async function setup(
     },
   });
   const ship = await IrcShip.create(config, store, pino({ level: "silent" }), {
-    env: { POGO_IRC_GALACTICA: "captain-pass" },
+    env: { STARGATE_IRC_GALACTICA: "captain-pass" },
     timing: { reconnectMinMs: 20, intervalMs: 5, burst: 50 },
     readyMs: 2000,
   });
@@ -89,7 +91,7 @@ async function setup(
     },
     async prompt(_s, text) {
       prompts.push(text);
-      return options.answer?.(text) ?? "[[pogo:silent]]";
+      return options.answer?.(text) ?? "[[stargate:silent]]";
     },
     async close() {},
   };
@@ -145,7 +147,7 @@ test("irc multiline: one reply chunk is one batch, long lines concatenated", asy
   const [batch] = fake.batches;
   expect(batch?.target).toBe("#galactica");
   expect(batch?.tags.has("+draft/reply")).toBe(false);
-  expect(batch?.tags.get("label")).toMatch(/^pogo\d+$/);
+  expect(batch?.tags.get("label")).toMatch(/^stargate\d+$/);
   expect(batch?.lines.filter((line) => line.concat).length).toBeGreaterThan(0);
   expect(shown(batch?.lines ?? [])).toBe(`Status\n${long}\n- tanks: 40%`);
   for (const line of fake.received("galactica"))
@@ -248,7 +250,7 @@ test("irc multiline lost before a retry: plain-line progress is kept too", async
     if (++accepted === 2) fake.refuse.add("galactica #galactica");
   };
   fake.refuse.clear();
-  // The server stops offering draft/multiline; Pogo reconnects.
+  // The server stops offering draft/multiline; Stargate reconnects.
   fake.caps.splice(
     fake.caps.findIndex((cap) => cap.startsWith("draft/multiline")),
     1,

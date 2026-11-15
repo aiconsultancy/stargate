@@ -22,14 +22,14 @@ function config(port: number, extra: Record<string, unknown> = {}) {
     id: "galactica-irc",
     server: { host: "127.0.0.1", port, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_IRC_GALACTICA",
+    passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     access: { deniedAccounts: ["mallory"], peerCaptains: ["defiant"] },
     crew: [
       {
         id: "chief",
         account: "galactica-chief",
-        passwordEnv: "POGO_IRC_GALACTICA_CHIEF",
+        passwordEnv: "STARGATE_IRC_GALACTICA_CHIEF",
         channels: ["#galactica"],
         backend: {
           type: "opencode",
@@ -53,9 +53,9 @@ async function setup(extra: Record<string, unknown> = {}, answer = "Done.") {
     accounts: { galactica: "captain-pass", "galactica-chief": "chief-pass" },
   }).start();
   cleanup.push(() => fake.stop());
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-stop-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-stop-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const ship = await IrcShip.create(
     config(fake.port, extra),
@@ -63,8 +63,8 @@ async function setup(extra: Record<string, unknown> = {}, answer = "Done.") {
     pino({ level: "silent" }),
     {
       env: {
-        POGO_IRC_GALACTICA: "captain-pass",
-        POGO_IRC_GALACTICA_CHIEF: "chief-pass",
+        STARGATE_IRC_GALACTICA: "captain-pass",
+        STARGATE_IRC_GALACTICA_CHIEF: "chief-pass",
       },
       timing: { reconnectMinMs: 20, intervalMs: 5, burst: 50 },
       readyMs: 2000,

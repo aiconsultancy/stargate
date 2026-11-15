@@ -9,7 +9,7 @@ import {
 } from "../pi-model";
 import { cleanupSchema } from "./cleanup-config";
 
-/** Strict `maintenance` section of pogo.json. Every component is opt-in. */
+/** Strict `maintenance` section of stargate.json. Every component is opt-in. */
 const absolutePath = z
   .string()
   .max(4096)
@@ -115,13 +115,13 @@ export const maintenanceSchema = z
       }),
     components: z
       .strictObject({
-        pogo: z.boolean().default(false),
+        stargate: z.boolean().default(false),
         cliproxyapi: z.boolean().default(false),
         agentClis: z.boolean().default(false),
         models: z.boolean().default(false),
       })
       .default({
-        pogo: false,
+        stargate: false,
         cliproxyapi: false,
         agentClis: false,
         models: false,
@@ -135,7 +135,7 @@ export const maintenanceSchema = z
       .optional(),
     services: z
       .strictObject({
-        gateway: unitName.default("pogo.service"),
+        gateway: unitName.default("stargate.service"),
         /** Restarts the shared OpenCode server; runs only at an idle boundary. */
         openCodeRestart: command.default([
           "systemctl",
@@ -145,7 +145,7 @@ export const maintenanceSchema = z
         ]),
       })
       .default({
-        gateway: "pogo.service",
+        gateway: "stargate.service",
         openCodeRestart: [
           "systemctl",
           "--user",
@@ -175,7 +175,7 @@ export const maintenanceSchema = z
         clientKeyFile: absolutePath,
       })
       .optional(),
-    pogo: z
+    stargate: z
       .strictObject({
         /** Install root: `releases/<version>` and the `current` symlink. */
         root: absolutePath,
@@ -315,7 +315,7 @@ export const maintenanceSchema = z
         timer: z
           .string()
           .regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/)
-          .default("pogo-maintenance"),
+          .default("stargate-maintenance"),
         /** Upper bound of one model answer, tool calls included. */
         timeoutMinutes: z.number().int().min(1).max(30).default(5),
       })
@@ -372,7 +372,7 @@ export const maintenanceSchema = z
         path: ["droid", "backend"],
         message: `A provider requires model ${piProxyModels.join(" or ")}, and ${piProxyModel} requires a provider`,
       });
-    need("pogo", ["pogo"]);
+    need("stargate", ["stargate"]);
     need("cliproxyapi", ["cliproxyapi", "proxy"]);
     need("agentClis", ["agentClis"]);
     need("models", ["models", "proxy"]);

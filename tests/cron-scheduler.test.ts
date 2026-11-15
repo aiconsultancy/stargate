@@ -25,7 +25,7 @@ const directories: string[] = [];
 const signal = new AbortController().signal;
 
 function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "pogo-cron-scheduler-"));
+  const directory = mkdtempSync(join(tmpdir(), "stargate-cron-scheduler-"));
   directories.push(directory);
   const path = join(directory, "cron.sqlite");
   const config = bot();

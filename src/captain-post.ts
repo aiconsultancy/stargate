@@ -74,7 +74,7 @@ export type PostBinding = {
 
 /** One audit line: identifiers and sizes, never message text or paths. */
 export type PostAudit = {
-  event: "pogo_post";
+  event: "stargate_post";
   bot: string;
   channel: string;
   thread: string | null;
@@ -564,7 +564,9 @@ export async function runCaptainPost(
 ): Promise<unknown> {
   const parsed = postInputSchema.safeParse(raw);
   if (!parsed.success)
-    throw new CaptainPostError("Invalid pogo_post input; nothing was posted.");
+    throw new CaptainPostError(
+      "Invalid stargate_post input; nothing was posted.",
+    );
   const input = parsed.data;
   let admitted = false;
   let store: CaptainPostStore | undefined;
@@ -575,7 +577,7 @@ export async function runCaptainPost(
     const bot = config.bots.find((bot) => bot.id === binding.bot);
     if (!bot?.captainPost)
       throw new CaptainPostError(
-        "pogo_post is off for this bot; an operator must enable captainPost in its configuration.",
+        "stargate_post is off for this bot; an operator must enable captainPost in its configuration.",
       );
     if (
       bot.backend.type !== "opencode" ||
@@ -627,7 +629,7 @@ export async function runCaptainPost(
       .digest("hex");
     const audit = (row: PostRow, replay: boolean) =>
       dependencies.audit({
-        event: "pogo_post",
+        event: "stargate_post",
         bot: bot.id,
         channel: row.channel,
         thread: row.thread,
@@ -756,7 +758,7 @@ export async function runCaptainPost(
     throw new CaptainPostError(
       admitted
         ? "Post outcome unconfirmed; raw details withheld. Retry with the same key to read the recorded outcome."
-        : "pogo_post failed before admission; nothing was posted. Check configuration, token and access.",
+        : "stargate_post failed before admission; nothing was posted. Check configuration, token and access.",
     );
   } finally {
     try {

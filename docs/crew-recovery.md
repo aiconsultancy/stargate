@@ -1,7 +1,7 @@
 # Crew result recovery
 
 An OpenCode worker's successful final answer is enough to finish its task.
-The worker can still call `pogo_crew complete`, but a missed tool call does not
+The worker can still call `stargate_crew complete`, but a missed tool call does not
 require a human to supply message IDs, hashes or a copied result.
 
 The captain's `status`, `wait` and next `dispatch` check recover results from
@@ -84,7 +84,7 @@ stale, replaced and abandoned tasks cannot complete a new assignment.
 
 An unknown outcome is not proof of failure or success. It also must not require
 operator SQL to release a blocked crew slot. Captains use the existing
-`pogo_crew` tool; workers and foreign or child sessions cannot use these controls.
+`stargate_crew` tool; workers and foreign or child sessions cannot use these controls.
 
 1. Inspect the member and its exact task ownership. Local state remains readable
    when native execution is unknown.
@@ -96,9 +96,9 @@ operator SQL to release a blocked crew slot. Captains use the existing
    a task does not promote its FIFO queue or replay the assignment.
 
 ```js
-pogo_crew({ op: "inspect", crew: "bosun" });
-pogo_crew({ op: "workspace", crew: "bosun", patch: true });
-pogo_crew({
+stargate_crew({ op: "inspect", crew: "bosun" });
+stargate_crew({ op: "workspace", crew: "bosun", patch: true });
+stargate_crew({
   op: "abandon",
   taskID: "task_FROM_INSPECTION",
   expected: {
@@ -138,7 +138,7 @@ Stargate work. If native idle cannot be confirmed, the captain must explicitly s
 `acknowledgeUnconfirmedExecution: true`.
 
 ```js
-pogo_crew({
+stargate_crew({
   op: "stash",
   crew: "bosun",
   expected: {

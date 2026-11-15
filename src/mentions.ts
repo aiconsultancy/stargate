@@ -75,4 +75,4 @@ export const textMentionInstructions = `Text mentions:
 A message that starts with [Admitted by text mention: NAME] did not mention
 you with a Slack mention. Its text contained NAME, for example a call to all
 captains. Reply only if its content needs an answer from you. Otherwise
-answer with [[pogo:silent]].`;
+answer with [[stargate:silent]].`;

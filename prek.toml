@@ -29,7 +29,7 @@ pass_filenames = false
 always_run = true
 
 [[repos.hooks]]
-id = "pogo-check"
+id = "stargate-check"
 name = "Strict TypeScript, Biome, and tests"
 # Fixtures create other repositories; do not inherit this commit's Git state.
 entry = """

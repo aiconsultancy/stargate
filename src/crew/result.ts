@@ -4,6 +4,10 @@ import type {
   SessionMessageInfo,
 } from "@opencode/client";
 import { z } from "zod";
+import {
+  crewMessageMetadataKey,
+  taskEnvelopePayload,
+} from "./message-protocol";
 import { CrewError, type CrewTask } from "./state";
 
 type Request = NonNullable<Parameters<OpenCodeClient["message"]["list"]>[1]>;
@@ -46,7 +50,7 @@ const urgency = z.object({
 });
 
 function matchesUrgency(message: ResultMessage, task: CrewTask): boolean {
-  const notice = urgency.safeParse(message.metadata?.["pogoCrew"]);
+  const notice = urgency.safeParse(message.metadata?.[crewMessageMetadataKey]);
   return (
     notice.success &&
     !!(notice.data.sourceTaskID || notice.data.messageID) &&
@@ -56,12 +60,11 @@ function matchesUrgency(message: ResultMessage, task: CrewTask): boolean {
 }
 
 function matchesInput(message: ResultMessage, task: CrewTask): boolean {
-  const prefix = "Pogo task envelope: ";
-  const line = message.text?.split("\n", 1)[0];
-  if (!line?.startsWith(prefix)) return false;
+  const payload = taskEnvelopePayload(message.text);
+  if (payload === undefined) return false;
   try {
-    const value = envelope.parse(JSON.parse(line.slice(prefix.length)));
-    const metadata = message.metadata?.["pogoCrew"];
+    const value = envelope.parse(JSON.parse(payload));
+    const metadata = message.metadata?.[crewMessageMetadataKey];
     return (
       value.taskID === task.id &&
       value.crewID === task.crewID &&

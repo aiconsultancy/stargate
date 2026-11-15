@@ -1,12 +1,12 @@
 ---
 
-name: pogo-cronjobs
-description: Manage Pogo scheduled jobs when a user asks to create a job, list schedules, run a named job now, remove a job, or change immediate versus daily reporting. Use the captain-only pogo_cron tool, not OS cron or replacement services.
+name: stargate-cronjobs
+description: Manage Stargate scheduled jobs when a user asks to create a job, list schedules, run a named job now, remove a job, or change immediate versus daily reporting. Use the captain-only stargate_cron tool, not OS cron or replacement services.
 ---
 
-# Pogo cronjobs
+# Stargate cronjobs
 
-Load this skill before managing scheduled jobs. Use `pogo_cron` only from the
+Load this skill before managing scheduled jobs. Use `stargate_cron` only from the
 configured captain. The host binds the tool to one bot and configuration;
 never supply another configuration path, directory, or bot identity.
 If the tool reports unavailable, explain the missing operator configuration.
