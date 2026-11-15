@@ -165,7 +165,7 @@ const provider: Record<
   network: {
     title: "Provider unreachable",
     text: () =>
-      "Pogo could not reach the model provider or its proxy. An operator must check that it is running.",
+      "Stargate could not reach the model provider or its proxy. An operator must check that it is running.",
   },
   crash: {
     title: "Agent process stopped",
@@ -195,36 +195,36 @@ function describe(cause: RequestFailure): { title: string; text: string } {
 const failures = {
   timeout: {
     title: "Time limit reached",
-    text: "Pogo reached the request time limit and requested cancellation. Work may have run; it was not repeated. Check agent state before trying again. For longer work, increase turnTimeoutMs or split the request.",
+    text: "Stargate reached the request time limit and requested cancellation. Work may have run; it was not repeated. Check agent state before trying again. For longer work, increase turnTimeoutMs or split the request.",
   },
   cancelled: { title: "Stop requested", text: cancellationNotice },
   backend: {
     title: "Agent unavailable",
-    text: "Pogo could not finish this request because the backend failed or became unavailable. Work may have run; it was not repeated. Check agent state and backend availability before trying again.",
+    text: "Stargate could not finish this request because the backend failed or became unavailable. Work may have run; it was not repeated. Check agent state and backend availability before trying again.",
   },
   context: {
     title: "Thread context unavailable",
-    text: "Pogo could not load initial thread context. No agent turn was started. Check Slack history access and try again.",
+    text: "Stargate could not load initial thread context. No agent turn was started. Check Slack history access and try again.",
   },
   attachments: {
     title: "Attachments unavailable",
-    text: "Pogo could not pass these attachments to the agent. Check files:read access, channel sharing, supported file types and size limits. No agent turn was admitted; the files were not silently dropped.",
+    text: "Stargate could not pass these attachments to the agent. Check files:read access, channel sharing, supported file types and size limits. No agent turn was admitted; the files were not silently dropped.",
   },
   transcription: {
     title: "Voice message not transcribed: please type it",
-    text: "Pogo could not transcribe this audio or video message. No agent turn was started. Please type your message. Accepted formats are m4a, mp3, mp4, mpeg, mpga, wav and webm.",
+    text: "Stargate could not transcribe this audio or video message. No agent turn was started. Please type your message. Accepted formats are m4a, mp3, mp4, mpeg, mpga, wav and webm.",
   },
   interrupted: {
     title: "Gateway interrupted",
-    text: "Pogo stopped during this request. Work may have run; it was not repeated. Check agent state before sending another request.",
+    text: "Stargate stopped during this request. Work may have run; it was not repeated. Check agent state before sending another request.",
   },
   history: {
     title: "Reply delayed",
-    text: "The agent finished, but its reply was not yet readable in session history. Pogo will post it in this thread when it is. The request was not repeated. Check agent state if no reply appears.",
+    text: "The agent finished, but its reply was not yet readable in session history. Stargate will post it in this thread when it is. The request was not repeated. Check agent state if no reply appears.",
   },
   reaction: {
     title: "Reaction unavailable",
-    text: "Pogo could not add that reaction. The agent request was not repeated. Check Slack reaction permissions before trying again.",
+    text: "Stargate could not add that reaction. The agent request was not repeated. Check Slack reaction permissions before trying again.",
   },
 } satisfies Record<FixedFailure, { title: string; text: string }>;
 

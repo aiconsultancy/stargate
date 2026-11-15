@@ -1,4 +1,33 @@
+import { resolve } from "node:path";
 import { z } from "zod";
+import type { Team } from "./team";
+
+/** Shared with the explicit cutover planner; JSON ordering is persistent identity. */
+export function crewFingerprint(options: {
+  namespace: string;
+  projectDirectory: string;
+  captainDirectory: string;
+  worktrees: Record<string, string>;
+  team: Team;
+}) {
+  return JSON.stringify({
+    version: 2,
+    namespace: options.namespace,
+    projectDirectory: resolve(options.projectDirectory),
+    captain: {
+      id: options.team.captain.id,
+      directory: resolve(options.captainDirectory),
+    },
+    crew: options.team.crew
+      .map(({ id, permissionProfile, backend }) => ({
+        id,
+        permissionProfile,
+        directory: resolve(options.worktrees[id] ?? ""),
+        ...(backend ? { backend } : {}),
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  });
+}
 
 const identitySchema = z.strictObject({
   version: z.literal(2),

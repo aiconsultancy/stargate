@@ -27,7 +27,7 @@ import {
 
 /**
  * Read-only facts for the maintenance droid. Everything here is collected by
- * Pogo code, never by the model, and holds only states, versions, reason
+ * Stargate code, never by the model, and holds only states, versions, reason
  * codes, times and private local paths: no file contents beyond schema-checked
  * fields, no command output, no environment values and no credentials.
  */
@@ -222,7 +222,7 @@ export async function collectFacts(input: {
   const jitter = stableJitter(installID, m.window.jitterMinutes);
   const last = previousWindow(now, m.window, jitter);
   const next = nextWindow(now, m.window, jitter);
-  const timerName = droid?.timer ?? "pogo-maintenance";
+  const timerName = droid?.timer ?? "stargate-maintenance";
   const timerValues = await showUnit(runner, `${timerName}.timer`, [
     "LoadState",
     "ActiveState",
@@ -240,8 +240,9 @@ export async function collectFacts(input: {
   const crewQueue = await discoverCrews(config).then(queuedCrewTasks, () => []);
   const journal = await Journal.read(config);
   const state = await readState(data);
-  const current = m.pogo
-    ? ((await linkedRelease(m.pogo.root, "current"))?.metadata.version ?? null)
+  const current = m.stargate
+    ? ((await linkedRelease(m.stargate.root, "current"))?.metadata.version ??
+      null)
     : null;
   const alertText = await readFile(
     join(maintenanceDirectory(data), "ALERT.json"),
@@ -407,8 +408,8 @@ export function findings(
   settings: { configPath: string; failedNights: number },
 ): Finding[] {
   const list: Finding[] = [];
-  const pogo = (operation: string, extra = "") =>
-    `pogo maintenance ${operation} --config ${settings.configPath}${extra}`;
+  const stargate = (operation: string, extra = "") =>
+    `stargate maintenance ${operation} --config ${settings.configPath}${extra}`;
   const status = (unit: string) => `systemctl --user status ${unit}`;
   const logs = (unit: string) => `journalctl --user -u ${unit} -n 50`;
   const { timer } = facts;
@@ -420,7 +421,7 @@ export function findings(
         text: `The maintenance timer ${timer.name} is ${timer.state}; no nightly run will start.`,
         commands:
           timer.state === "not-found"
-            ? [pogo("install-timer", " --print")]
+            ? [stargate("install-timer", " --print")]
             : [
                 status(timer.name),
                 `systemctl --user enable --now ${timer.name}`,
@@ -457,13 +458,13 @@ export function findings(
     list.push({
       code: "journal",
       text: `An interrupted run left a journal (${facts.journal.entries.join(", ")}). The next run recovers it after its idle gate.`,
-      commands: [pogo("recover")],
+      commands: [stargate("recover")],
     });
   if (facts.journal.state === "corrupt")
     list.push({
       code: "journal-corrupt",
       text: "The maintenance journal is corrupt or not private. Runs refuse to proceed until an operator inspects it.",
-      commands: [pogo("recover", " --accept-current journal")],
+      commands: [stargate("recover", " --accept-current journal")],
     });
   const gateway = facts.units.gateway;
   if (!running && (!runningUnit(gateway.state) || !facts.ready?.alive))
@@ -499,12 +500,12 @@ export function findings(
     list.push({
       code: "runs-failing",
       text: `The last ${recent.length} run(s) ended ${recent.map((r) => `${r.outcome}${r.reason ? ` (${r.reason})` : ""}`).join(", ")}.`,
-      commands: [pogo("plan")],
+      commands: [stargate("plan")],
     });
   if (facts.release.knownBad.length)
     list.push({
       code: "known-bad",
-      text: `Known-bad Pogo release(s) newer than the current ${facts.release.current ?? "release"}: ${facts.release.knownBad.map((r) => `${r.version} (${r.reason})`).join(", ")}. Updates wait for a newer release.`,
+      text: `Known-bad Stargate release(s) newer than the current ${facts.release.current ?? "release"}: ${facts.release.knownBad.map((r) => `${r.version} (${r.reason})`).join(", ")}. Updates wait for a newer release.`,
       commands: [],
     });
   if (facts.unreadableReports)

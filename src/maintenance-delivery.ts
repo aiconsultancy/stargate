@@ -23,7 +23,7 @@ export async function startMaintenanceDelivery(input: Input) {
       AbortSignal.any([input.signal, AbortSignal.timeout(2000)]),
     )
     .catch(() => undefined);
-  // Ordinary bots may not have the Pogo plugin. The captain tool fails closed
+  // Ordinary bots may not have the Stargate plugin. The captain tool fails closed
   // without this registration; failed setup never becomes a timed permit.
   if (!watch) return;
   const stop = new AbortController();

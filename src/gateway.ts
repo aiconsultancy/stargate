@@ -92,7 +92,7 @@ const catchUpReadMs = 5 * 60 * 1000;
 const finalReadDelaysMs = [100, 200, 400];
 
 const gapNote =
-  "_Pogo could not find its last delivered message in session history; earlier replies may be missing. This reply starts at your request._";
+  "_Stargate could not find its last delivered message in session history; earlier replies may be missing. This reply starts at your request._";
 
 type FinalTranscript = Transcript & { gap?: true; anchored?: true };
 
@@ -525,7 +525,7 @@ export class Gateway {
    * Supervise this bot until the signal aborts. One scope owns the per-
    * conversation slots, the transcript watch and activity reporting. A failed
    * poll closes that scope, stops the watch and rejects, so the runtime can
-   * restart Pogo instead of leaving a silent, half-stopped worker.
+   * restart Stargate instead of leaving a silent, half-stopped worker.
    */
   async work(signal: AbortSignal) {
     await runAbortable(this.supervise(), signal).catch((error: unknown) => {
@@ -1098,7 +1098,7 @@ export class Gateway {
     };
     const statusText = (cause: RequestFailure) =>
       job.deferDelivery && cause === "history"
-        ? "The agent finished, but its public reply is not yet readable in session history. Pogo will retain it locally when it becomes readable. The request was not repeated."
+        ? "The agent finished, but its public reply is not yet readable in session history. Stargate will retain it locally when it becomes readable. The request was not repeated."
         : failureText(cause);
     let output: ReplyChunk[];
     let failure = job.failure ?? undefined;

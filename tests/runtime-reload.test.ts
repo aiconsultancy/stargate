@@ -35,9 +35,9 @@ async function running(
     failBackend?: string;
   } = {},
 ) {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-runtime-reload-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-runtime-reload-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const path = join(directory, "pogo.json");
+  const path = join(directory, "stargate.json");
   const config = configSchema.parse({
     dataDirectory: join(directory, "data"),
     bots: [bot()],
@@ -67,7 +67,7 @@ async function running(
       write(chunk, _encoding, done) {
         const text = String(chunk);
         logs.push(text);
-        if (text.includes('"msg":"Pogo ready"')) ready.resolve();
+        if (text.includes('"msg":"Stargate ready"')) ready.resolve();
         done();
       },
     }),
@@ -284,7 +284,7 @@ test("deny reload blocks a running turn's delivery without stopping its executio
   });
   expect((await f.reload.request()).status).toBe("applied");
   release.resolve();
-  const store = new Store(join(f.config.dataDirectory, "pogo.sqlite"));
+  const store = new Store(join(f.config.dataDirectory, "stargate.sqlite"));
   try {
     await until(
       () => {
@@ -368,7 +368,7 @@ test("IRC roster reload starts an added worker and retires only an idle removed 
   );
   await until(
     () => {
-      const store = new Store(join(f.config.dataDirectory, "pogo.sqlite"));
+      const store = new Store(join(f.config.dataDirectory, "stargate.sqlite"));
       try {
         const counts = store.queueCounts(key);
         return counts.queued + counts.running + counts.responding === 0;

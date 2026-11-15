@@ -5,7 +5,7 @@ import { PiDurableBackend, piModels } from "../src/backends/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
 import { teamSchema } from "../src/crew/team";
 
-const apiKeyEnv = "POGO_PI_CLAUDE_PROXY_TEST_KEY";
+const apiKeyEnv = "STARGATE_PI_CLAUDE_PROXY_TEST_KEY";
 const model = "anthropic/claude-haiku-5-5";
 const signal = () => new AbortController().signal;
 // Native credentials must never reach the proxy or select the native route.
@@ -134,7 +134,7 @@ test("Pi thinking level accepts only SDK levels the model supports", () => {
     });
   expect(team("low").crew[0]?.backend?.thinkingLevel).toBe("low");
   expect(() => team("#low")).toThrow();
-  // Haiku maps "minimal" to null; the SDK would clamp it, Pogo refuses it.
+  // Haiku maps "minimal" to null; the SDK would clamp it, Stargate refuses it.
   expect(() =>
     piModels(config(baseURL, "/workspace", { thinkingLevel: "minimal" })),
   ).toThrow("does not support thinking level minimal");
@@ -145,7 +145,7 @@ test("Pi thinking level accepts only SDK levels the model supports", () => {
 
 for (const thinkingLevel of [undefined, "low"] as const)
   test(`Pi Claude proxy sends thinking ${thinkingLevel ?? "default off"} to bot and report conversations`, async () => {
-    const directory = await mkdtemp("/tmp/opencode/pogo-pi-claude-level-");
+    const directory = await mkdtemp("/tmp/opencode/stargate-pi-claude-level-");
     const bodies: Record<string, unknown>[] = [];
     const server = Bun.serve({
       port: 0,
@@ -193,7 +193,7 @@ for (const thinkingLevel of [undefined, "low"] as const)
   });
 
 test("Pi Claude proxy sends Anthropic messages with only the proxy key", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-pi-claude-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-pi-claude-");
   const requests: {
     path: string;
     headers: Headers;

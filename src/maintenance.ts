@@ -21,7 +21,7 @@ const owner = z.strictObject({
   id: z.string().min(1).max(100),
 });
 export const MaintenanceRPC = Rpc.define({
-  id: "pogo.maintenance",
+  id: "stargate.maintenance",
   events: {},
   methods: {
     open: { input: owner, output: z.boolean() },

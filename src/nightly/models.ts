@@ -139,7 +139,7 @@ function upgradeTeamObject(
   });
 }
 
-/** team.json used by `pogo crew init`. */
+/** team.json used by `stargate crew init`. */
 export function upgradeTeamFile(
   text: string,
   upgrades: Upgrades,

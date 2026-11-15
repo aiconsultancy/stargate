@@ -31,7 +31,7 @@ function crew(id: string) {
   return {
     id,
     account: `galactica-${id}`,
-    passwordEnv: `POGO_IRC_GALACTICA_${id.toUpperCase()}`,
+    passwordEnv: `STARGATE_IRC_GALACTICA_${id.toUpperCase()}`,
     channels: ["#ship-galactica"],
     backend: { ...backend, agent: `galactica-crew-${id}` },
   };
@@ -51,15 +51,15 @@ async function setup(
     },
   }).start();
   cleanup.push(() => fake.stop());
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-allcall-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-allcall-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = ircSchema.parse({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica-captain",
-    passwordEnv: "POGO_IRC_GALACTICA_CAPTAIN",
+    passwordEnv: "STARGATE_IRC_GALACTICA_CAPTAIN",
     channels: ["#ship-galactica"],
     access,
     crew: [crew("chief"), crew("tyrol")],
@@ -68,9 +68,9 @@ async function setup(
   const log = pino({ level: "silent" });
   const ship = await IrcShip.create(config, store, log, {
     env: {
-      POGO_IRC_GALACTICA_CAPTAIN: "pass",
-      POGO_IRC_GALACTICA_CHIEF: "pass",
-      POGO_IRC_GALACTICA_TYROL: "pass",
+      STARGATE_IRC_GALACTICA_CAPTAIN: "pass",
+      STARGATE_IRC_GALACTICA_CHIEF: "pass",
+      STARGATE_IRC_GALACTICA_TYROL: "pass",
     },
     timing: { reconnectMinMs: 20, intervalMs: 5, burst: 20 },
     readyMs: 2000,
@@ -86,7 +86,7 @@ async function setup(
       },
       async prompt(_session, text) {
         prompts[name]?.push({ text, at: Date.now() });
-        return answers[name] ?? "[[pogo:silent]]";
+        return answers[name] ?? "[[stargate:silent]]";
       },
       async close() {},
     };
@@ -118,7 +118,9 @@ async function setup(
     if (!registration || !gateway) throw new Error(`missing ${account}`);
     return { registration, gateway };
   };
-  const db = new Database(join(directory, "pogo.sqlite"), { readonly: true });
+  const db = new Database(join(directory, "stargate.sqlite"), {
+    readonly: true,
+  });
   cleanup.push(() => db.close());
   ship.start(() => true);
   cleanup.push(async () => {
@@ -298,7 +300,7 @@ test("irc all-call: the note tells agents to take turns and stay silent on repea
     "Said in #ship-galactica since the all-call, oldest first",
   );
   expect(note).toContain("galactica-captain: Fuel at 40%.");
-  expect(note).toContain("[[pogo:silent]]");
+  expect(note).toContain("[[stargate:silent]]");
 });
 
 test(

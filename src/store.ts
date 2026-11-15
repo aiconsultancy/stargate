@@ -196,10 +196,10 @@ export class Store {
         botKey TEXT NOT NULL, target TEXT NOT NULL, time TEXT NOT NULL,
         PRIMARY KEY(botKey, target)
       );
-      CREATE TABLE IF NOT EXISTS irc_pogo_dm (
+      CREATE TABLE IF NOT EXISTS irc_stargate_dm (
         id TEXT PRIMARY KEY, sent INTEGER NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS irc_pogo_dm_cursor (
+      CREATE TABLE IF NOT EXISTS irc_stargate_dm_cursor (
         botKey TEXT PRIMARY KEY, sequence INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS delivery_units (
@@ -1090,41 +1090,41 @@ export class Store {
   }
 
   /**
-   * A pogo_dm receipt ID that this process copies to IRC: recorded before
+   * A stargate_dm receipt ID that this process copies to IRC: recorded before
    * the IRC copy is sent, so the recipient connection recognises it and
    * never admits it as a second turn. Kept 7 days.
    */
-  markPogoDmCopy(id: string, now = Date.now()) {
+  markStargateDmCopy(id: string, now = Date.now()) {
     this.db.transaction(() => {
       this.db
-        .query("INSERT OR IGNORE INTO irc_pogo_dm VALUES (?,?)")
+        .query("INSERT OR IGNORE INTO irc_stargate_dm VALUES (?,?)")
         .run(id, now);
       this.db
-        .query("DELETE FROM irc_pogo_dm WHERE sent<?")
+        .query("DELETE FROM irc_stargate_dm WHERE sent<?")
         .run(now - 7 * 24 * 60 * 60_000);
     })();
   }
 
-  pogoDmCopy(id: string) {
+  stargateDmCopy(id: string) {
     return (
-      this.db.query("SELECT 1 FROM irc_pogo_dm WHERE id=?").get(id) !== null
+      this.db.query("SELECT 1 FROM irc_stargate_dm WHERE id=?").get(id) !== null
     );
   }
 
   /** Last crew-plugin outbox sequence handled for one ship (its captain). */
-  pogoDmCursor(botKey: string): number | undefined {
+  stargateDmCursor(botKey: string): number | undefined {
     return (
       this.db
         .query<{ sequence: number }, [string]>(
-          "SELECT sequence FROM irc_pogo_dm_cursor WHERE botKey=?",
+          "SELECT sequence FROM irc_stargate_dm_cursor WHERE botKey=?",
         )
         .get(botKey)?.sequence ?? undefined
     );
   }
 
-  savePogoDmCursor(botKey: string, sequence: number) {
+  saveStargateDmCursor(botKey: string, sequence: number) {
     this.db
-      .query(`INSERT INTO irc_pogo_dm_cursor VALUES (?,?)
+      .query(`INSERT INTO irc_stargate_dm_cursor VALUES (?,?)
       ON CONFLICT(botKey) DO UPDATE SET sequence=excluded.sequence`)
       .run(botKey, sequence);
   }

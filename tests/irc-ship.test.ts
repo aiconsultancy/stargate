@@ -20,9 +20,9 @@ afterEach(async () => {
 });
 
 const passwords = {
-  POGO_IRC_GALACTICA: "captain-pass",
-  POGO_IRC_GALACTICA_CHIEF: "chief-pass",
-  POGO_IRC_GALACTICA_TYROL: "tyrol-pass",
+  STARGATE_IRC_GALACTICA: "captain-pass",
+  STARGATE_IRC_GALACTICA_CHIEF: "chief-pass",
+  STARGATE_IRC_GALACTICA_TYROL: "tyrol-pass",
 };
 const backend = {
   type: "opencode",
@@ -70,30 +70,30 @@ async function setup(
   cleanup.push(() => fake.stop());
   // The founder is never refused: grant the captain up front.
   fake.invited.add("galactica:#galactica");
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-ship-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-ship-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = ircSchema.parse({
     id: "galactica-irc",
     displayName: "Galactica",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_IRC_GALACTICA",
+    passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     access: { shipTurnsPerAgentPerHour: 1, ...access },
     crew: [
       {
         id: "chief",
         account: "galactica-chief",
-        passwordEnv: "POGO_IRC_GALACTICA_CHIEF",
+        passwordEnv: "STARGATE_IRC_GALACTICA_CHIEF",
         channels: ["#galactica"],
         backend: { ...backend, agent: "galactica-crew-chief" },
       },
       {
         id: "tyrol",
         account: "galactica-tyrol",
-        passwordEnv: "POGO_IRC_GALACTICA_TYROL",
+        passwordEnv: "STARGATE_IRC_GALACTICA_TYROL",
         channels: ["#galactica"],
         backend: { ...backend, agent: "galactica-crew-tyrol" },
       },
@@ -115,11 +115,11 @@ async function setup(
   });
   const backends = {
     captain: fakeBackend(
-      answers.captain ?? (() => "[[pogo:silent]]"),
+      answers.captain ?? (() => "[[stargate:silent]]"),
       "ses_captain",
     ),
-    chief: fakeBackend(answers.chief ?? (() => "[[pogo:silent]]")),
-    tyrol: fakeBackend(answers.tyrol ?? (() => "[[pogo:silent]]")),
+    chief: fakeBackend(answers.chief ?? (() => "[[stargate:silent]]")),
+    tyrol: fakeBackend(answers.tyrol ?? (() => "[[stargate:silent]]")),
   };
   const controller = new AbortController();
   const workers = ship.registrations.map((registration, index) => {
@@ -216,7 +216,8 @@ test("irc ship: a mention reaches the pinned captain and replies as plain IRC li
 
 test("irc ship: silent replies post nothing; DMs are per account", async () => {
   const { fake, backends, store, captain } = await setup({
-    captain: (text) => (text === "quiet" ? "[[pogo:silent]]" : "Hello Jack."),
+    captain: (text) =>
+      text === "quiet" ? "[[stargate:silent]]" : "Hello Jack.",
   });
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "galactica: quiet");
   fake.say({ nick: "jack", account: "jack" }, "galactica", "hi there");
@@ -239,7 +240,7 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
     captain: (text) =>
       text === "is CI green?"
         ? "galactica-chief: please check the CI run."
-        : "[[pogo:silent]]",
+        : "[[stargate:silent]]",
     chief: () => "galactica-tyrol: can you look at the flaky test?",
     tyrol: () => "galactica: done, the flake is fixed.",
   });
@@ -270,7 +271,7 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
   await delay(300);
   expect(backends.chief.prompts).toHaveLength(1);
   expect(backends.chief.prompts[0]?.text).toBe(
-    "[IRC #galactica, from account galactica, an account of this ship (captain or crew). Reply only if you are tagged and can add something useful, asked directly, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.]\n\nplease check the CI run.",
+    "[IRC #galactica, from account galactica, an account of this ship (captain or crew). Reply only if you are tagged and can add something useful, asked directly, or once to an all-call; otherwise answer [[stargate:silent]]. No acknowledgements or thanks. Plain text only.]\n\nplease check the CI run.",
   );
   expect(backends.tyrol.prompts[0]?.text).toContain(
     "can you look at the flaky test?",
@@ -318,13 +319,13 @@ test("irc runtime: an IRC-only config serves, answers and QUITs on shutdown", as
     accounts: { galactica: "captain-pass" },
   }).start();
   cleanup.push(() => fake.stop());
-  const dataDirectory = await mkdtemp(join(tmpdir(), "pogo-irc-runtime-"));
+  const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-irc-runtime-"));
   cleanup.push(() => rm(dataDirectory, { recursive: true, force: true }));
   const config = ircSchema.parse({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_IRC_GALACTICA",
+    passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     backend: { ...backend, sessionID: "ses_captain" },
   });
@@ -363,7 +364,7 @@ test("irc runtime: an IRC-only config serves, answers and QUITs on shutdown", as
   controller.abort();
   await running;
   await until(
-    () => fake.received("galactica").includes("QUIT :Pogo shutting down"),
+    () => fake.received("galactica").includes("QUIT :Stargate shutting down"),
     2000,
     "quit",
   );

@@ -13,7 +13,7 @@ bot rejection and task-origin routing unchanged when expanding development acces
 | `channels:history`, `groups:history`, `im:history` | Accepted messages and initial thread context in joined conversations. |
 | `chat:write`                                       | Replies, previews and status messages.                                |
 | `reactions:write`                                  | Explicit reaction replies.                                            |
-| `commands`                                         | `/pogo`, `/cron` and interactive controls.                            |
+| `commands`                                         | `/stargate`, `/cron` and interactive controls.                        |
 | `files:read`                                       | Resolve/download accepted files and confirm an upload's exact share.  |
 | `files:write`                                      | Upload requested evidence to the proven source thread.                |
 

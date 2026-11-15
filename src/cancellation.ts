@@ -3,7 +3,7 @@ import type { BotConfig } from "./config";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
 
 export const cancellationNotice =
-  "Pogo received your stop request. Work may have run; existing effects may remain. The request was not repeated. Check agent state before trying again.";
+  "Stargate received your stop request. Work may have run; existing effects may remain. The request was not repeated. Check agent state before trying again.";
 
 const timestamp = z.string().regex(/^\d+\.\d+$/);
 const actionSchema = z.object({
@@ -28,7 +28,7 @@ const actionSchema = z.object({
     .array(
       z.object({
         type: z.literal("button"),
-        action_id: z.literal("pogo_stop"),
+        action_id: z.literal("stargate_stop"),
         value: z
           .string()
           .regex(/^[1-9]\d{0,15}$/)
@@ -76,7 +76,7 @@ export function stopBlock(job: number) {
     elements: [
       {
         type: "button" as const,
-        action_id: "pogo_stop",
+        action_id: "stargate_stop",
         text: { type: "plain_text" as const, text: "Stop", emoji: false },
         accessibility_label: "Stop this request (requester only)",
         value: String(job),

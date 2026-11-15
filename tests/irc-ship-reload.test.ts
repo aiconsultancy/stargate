@@ -15,9 +15,9 @@ afterEach(async () => {
 });
 
 const env = {
-  POGO_IRC_GALACTICA: "captain-pass",
-  POGO_IRC_GALACTICA_CHIEF: "chief-pass",
-  POGO_IRC_GALACTICA_TYROL: "tyrol-pass",
+  STARGATE_IRC_GALACTICA: "captain-pass",
+  STARGATE_IRC_GALACTICA_CHIEF: "chief-pass",
+  STARGATE_IRC_GALACTICA_TYROL: "tyrol-pass",
 };
 const backend = {
   type: "opencode",
@@ -28,14 +28,14 @@ const crew = {
   chief: {
     id: "chief",
     account: "galactica-chief",
-    passwordEnv: "POGO_IRC_GALACTICA_CHIEF",
+    passwordEnv: "STARGATE_IRC_GALACTICA_CHIEF",
     channels: ["#galactica"],
     backend: { ...backend, agent: "galactica-crew-chief" },
   },
   tyrol: {
     id: "tyrol",
     account: "galactica-tyrol",
-    passwordEnv: "POGO_IRC_GALACTICA_TYROL",
+    passwordEnv: "STARGATE_IRC_GALACTICA_TYROL",
     channels: ["#galactica"],
     backend: { ...backend, agent: "galactica-crew-tyrol" },
   },
@@ -62,7 +62,7 @@ function shipConfig(
     displayName: "Galactica",
     server: { host: "127.0.0.1", port, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_IRC_GALACTICA",
+    passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     // One ship message per agent an hour: two agents give #galactica 2.
     access: { shipTurnsPerAgentPerHour: 1, ...access },
@@ -84,9 +84,9 @@ async function setup(members: CrewName[], { start = true } = {}) {
   cleanup.push(() => fake.stop());
   // The founder is never refused: grant the captain up front.
   fake.invited.add("galactica:#galactica");
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-reload-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-reload-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const ship = await IrcShip.create(
     shipConfig(fake.port, members),
@@ -152,7 +152,7 @@ function member(ship: IrcShip, index: number) {
   return registration;
 }
 
-const quit = "QUIT :Pogo shutting down";
+const quit = "QUIT :Stargate shutting down";
 
 /** The connection loop has ended; the server reads the QUIT a moment later. */
 async function quitted(fake: FakeIrcServer, registration: IrcRegistration) {
@@ -271,13 +271,13 @@ test("irc reload: a missing added credential or a changed connection throws and 
   const { fake, ship, captain, config, admitted, say } = await setup(["chief"]);
   const roster = [...ship.registrations];
   const transport = captain.transport;
-  const { POGO_IRC_GALACTICA_TYROL: _, ...partial } = env;
+  const { STARGATE_IRC_GALACTICA_TYROL: _, ...partial } = env;
   expect(() =>
     ship.prepareReload(
       config(["chief", "tyrol"], { deniedAccounts: ["jack"] }),
       partial,
     ),
-  ).toThrow("Missing environment variable: POGO_IRC_GALACTICA_TYROL");
+  ).toThrow("Missing environment variable: STARGATE_IRC_GALACTICA_TYROL");
   expect(() =>
     ship.prepareReload(config(["chief"], {}, { concurrency: 8 }), env),
   ).toThrow("IRC connection settings of galactica-irc changed");

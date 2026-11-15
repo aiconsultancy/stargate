@@ -34,7 +34,7 @@ IRC-only installation.
    directory. OpenCode defaults to `http://localhost:4096`. Use the actual
    server URL and leave the session ID blank for separate thread sessions.
    Enter both Slack tokens in the wizard's hidden prompts.
-5. Stargate writes `pogo.json` and a private `pogo.json.env` file. If using
+5. Stargate writes `stargate.json` and a private `stargate.json.env` file. If using
    Pi, add `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` to that same private file,
    according to the model you chose. If OpenCode needs an authorization header,
    map it with [`headersEnv`](configuration.md#opencode-v2). Keep credentials
@@ -209,8 +209,8 @@ or system packages:
 make cua-install
 make cua ARGS='--version'
 make cua ARGS='skills get core'
-make cua ARGS='--session pogo-slack-setup --headed open https://api.slack.com/apps'
-make cua ARGS='--session pogo-slack-setup stream disable'
+make cua ARGS='--session stargate-slack-setup --headed open https://api.slack.com/apps'
+make cua ARGS='--session stargate-slack-setup stream disable'
 ```
 
 On Linux, `agent-browser install --with-deps` also installs system libraries
@@ -231,7 +231,7 @@ Read the current [security](https://agent-browser.dev/security) and
   saved-state replay, or pre-existing CDP attachment.
 - Do not export login cookies/state into the checkout. Saved state can contain
   plaintext session tokens unless explicitly encrypted. Close this named
-  session when finished: `make cua ARGS='--session pogo-slack-setup close'`.
+  session when finished: `make cua ARGS='--session stargate-slack-setup close'`.
 
 ## Agent-assisted setup
 
@@ -243,7 +243,7 @@ Runtime credentials still go directly into private local storage.
 
 Ask the operator for:
 
-- Bot name and unique Stargate ID, such as `pogo-test`.
+- Bot name and unique Stargate ID, such as `stargate-test`.
 - Target Slack workspace. Prefer a sandbox or a workspace without real users
   for initial tests; confirm any installation into a production workspace.
 - Existing Slack App ID, if an app has already been created. Reuse that app
@@ -464,15 +464,15 @@ or automatically supply Stargate's app-level and bot tokens.
 Stargate's manifest enables Socket Mode and subscribes to `app_mention`,
 `message.channels`, `message.groups`, and `message.im`. Required bot scopes:
 
-| Scope               | Purpose                                |
-| ------------------- | -------------------------------------- |
-| `app_mentions:read` | Receive mentions                       |
-| `channels:history`  | Receive public-channel thread replies  |
-| `groups:history`    | Receive private-channel thread replies |
-| `im:history`        | Receive direct messages                |
-| `chat:write`        | Send replies                           |
-| `reactions:write`   | Add context-selected emoji reactions   |
-| `commands`          | Open `/cron` and `/pogo pair` modals   |
+| Scope               | Purpose                                  |
+| ------------------- | ---------------------------------------- |
+| `app_mentions:read` | Receive mentions                         |
+| `channels:history`  | Receive public-channel thread replies    |
+| `groups:history`    | Receive private-channel thread replies   |
+| `im:history`        | Receive direct messages                  |
+| `chat:write`        | Send replies                             |
+| `reactions:write`   | Add context-selected emoji reactions     |
+| `commands`          | Open `/cron` and `/stargate pair` modals |
 
 For `/cron`, apply the updated app manifest: it registers the command and
 enables interactivity over Socket Mode. No public request URL is needed.
@@ -480,8 +480,8 @@ Reinstall existing apps after adding `commands` or `reactions:write`.
 Editing a local manifest file alone does not change the installed app.
 See [recurring prompts](cron.md) for ownership and execution limits.
 
-The generated manifest also registers `/pogo` for the optional operator-only
-`/pogo pair` command. Pairing stays disabled until the bot has an explicit
+The generated manifest also registers `/stargate` for the optional operator-only
+`/stargate pair` command. Pairing stays disabled until the bot has an explicit
 `pairing.operators` list and `pairing.urls`. No extra scope is required.
 Read [pairing](pairing.md) before enabling it: a redeemed link grants full
 OpenCode server access for 30 days, not read-only conversation access.
@@ -511,7 +511,7 @@ apply. This helps a bot continue conversations after migrating to Stargate.
 #### Silent replies
 
 An agent posts nothing when the first line of its reply is exactly
-`[[pogo:silent]]`. The same instructions block that describes reactions
+`[[stargate:silent]]`. The same instructions block that describes reactions
 describes this directive. Rules:
 
 - Only the agent's own reply is read. The directive in a user message, a
@@ -544,7 +544,7 @@ Guide the operator through these human-controlled steps:
 
 Keep persistent tokens out of the agent conversation, command-line arguments,
 and tool output. The human can paste them into Stargate's hidden wizard prompts,
-or store them in the referenced private environment variables / `pogo.json.env`
+or store them in the referenced private environment variables / `stargate.json.env`
 with mode `0600`. Do not overwrite existing credentials or print that file.
 
 Member profile → **More → Copy member ID** gives the human user ID (`U…` or
@@ -565,7 +565,7 @@ The agent runs a noninteractive registration using references, not token values.
 Replace the example IDs, path and URL with settings for this installation:
 
 ```sh
-make stargate ARGS='bot add --id pogo-test --app-id A0123456789 --app-token-env POGO_TEST_APP_TOKEN --bot-token-env POGO_TEST_BOT_TOKEN --allowed-users U0123456789 --allowed-channels C0123456789 --backend opencode --directory /srv/project --url http://localhost:4096'
+make stargate ARGS='bot add --id stargate-test --app-id A0123456789 --app-token-env STARGATE_TEST_APP_TOKEN --bot-token-env STARGATE_TEST_BOT_TOKEN --allowed-users U0123456789 --allowed-channels C0123456789 --backend opencode --directory /srv/project --url http://localhost:4096'
 ```
 
 This uses the selected OpenCode server's default model. To select a specific
@@ -615,9 +615,9 @@ when switching from a foreground test to a user service.
 ### 9. Install the Stargate user service
 
 ```sh
-make service ARGS='install --config /absolute/path/to/pogo.json'
-systemctl --user enable --now pogo.service
-systemctl --user status pogo.service
+make service ARGS='install --config /absolute/path/to/stargate.json'
+systemctl --user enable --now stargate.service
+systemctl --user status stargate.service
 ```
 
 Installation alone does not enable or start the unit. Obtain permission before

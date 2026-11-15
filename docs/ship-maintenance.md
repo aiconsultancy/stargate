@@ -43,7 +43,7 @@ prompts, transcripts or credentials into these records. Include the ship
 directory in the team's private backup; it is not another task database.
 
 These Markdown journals are retained as history, not the new note-writing path.
-Write concise milestones, checks, blockers and outcomes with `pogo_journal`.
+Write concise milestones, checks, blockers and outcomes with `stargate_journal`.
 Stargate supplies IDs, time, identity and task context in the existing crew SQLite
 database. Notes remain when temporary Slack activity captures expire. Skip
 routine turns, empty updates and tool transcripts. Native-workaround feedback
@@ -139,7 +139,7 @@ completed external actions. Diagnose and repair recoverable issues within this
 maintenance scope; verify repairs and preserve unrelated changes. Coordinate
 Twiki's existing Pi maintenance/reporting through the captain when useful;
 use its existing coding-enabled coordination tools. Record useful findings
-through pogo_journal and reusable lessons in the ship log; improve a project skill
+through stargate_journal and reusable lessons in the ship log; improve a project skill
 with skill-creator only when justified. Collect the assigned task result and
 report findings, checks, actions, lessons and unresolved blockers here. State
 what was not inspected. If bosun is absent, report the configuration gap rather

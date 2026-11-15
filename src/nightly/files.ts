@@ -21,7 +21,10 @@ export async function atomicWrite(
 ) {
   const real = await realpath(path).catch(() => path);
   const current = await stat(real).catch(() => null);
-  const temp = join(dirname(real), `.${basename(real)}.pogo-${process.pid}`);
+  const temp = join(
+    dirname(real),
+    `.${basename(real)}.stargate-${process.pid}`,
+  );
   await writeFile(temp, content, {
     flag: "w",
     mode: mode ?? (current ? current.mode & 0o777 : 0o600),

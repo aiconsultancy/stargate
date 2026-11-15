@@ -68,22 +68,22 @@ const crashed = { ran: true } as const;
 /** Conversation and thread IDs are UUIDs: never options, paths or flags. */
 const idSchema = z.uuid();
 /** The turn marker variable of Codex children; see `TurnMarker`. */
-const turnVariable = "POGO_CODEX_TURN";
+const turnVariable = "STARGATE_CODEX_TURN";
 /** The proxy key's variable in the Codex process; tool commands never get it. */
-const keyVariable = "POGO_CODEX_PROVIDER_KEY";
+const keyVariable = "STARGATE_CODEX_PROVIDER_KEY";
 
 /** Private directories of one backend namespace under its data directory. */
 export function codexDirectories(data: string) {
   return {
     /** `CODEX_HOME`: threads, state and caches. */
     home: join(data, "codex"),
-    /** Pogo conversation → Codex thread. */
+    /** Stargate conversation → Codex thread. */
     threads: join(data, "codex-threads"),
     /** Records of running turns, for restart recovery. */
     records: join(data, "codex-runs"),
     /** An empty `ZDOTDIR`: zsh tool commands never read `~/.zshenv`. */
     shell: join(data, "codex-shell"),
-    /** Pogo's per-turn launchers; see `codexLauncher`. */
+    /** Stargate's per-turn launchers; see `codexLauncher`. */
     bin: join(data, "codex-bin"),
   };
 }
@@ -91,13 +91,13 @@ export function codexDirectories(data: string) {
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
 /**
- * Pogo's `codexPathOverride`. The SDK exposes neither the CLI process nor
+ * Stargate's `codexPathOverride`. The SDK exposes neither the CLI process nor
  * its output stream, and a process that the CLI starts can inherit that
  * output and keep it open. The launcher `exec`s the CLI, which stays the
  * SDK's child (its signals and exit status are unchanged), but sends the
  * CLI's output through an unlinked FIFO to `cat`. Only `cat` then holds
- * Pogo's stdout and stderr, and it carries the turn marker, so the turn
- * clean-up always closes them. The CLI's stderr is discarded; Pogo never
+ * Stargate's stdout and stderr, and it carries the turn marker, so the turn
+ * clean-up always closes them. The CLI's stderr is discarded; Stargate never
  * uses it.
  *
  * The launcher runs before the sandbox with the key in its environment, so
@@ -115,7 +115,7 @@ export function codexLauncher(
     `#!${utilities.sh}`,
     "set -eu",
     // The turn's private TMPDIR; `set -u` fails when it is unset.
-    'out="$TMPDIR/pogo-codex-output"',
+    'out="$TMPDIR/stargate-codex-output"',
     `${tool("mkfifo")} -m 600 "$out"`,
     `${tool("cat")} "$out" &`,
     // Returns once cat has opened the FIFO. Removing its path then keeps
@@ -129,8 +129,8 @@ export function codexLauncher(
 
 /**
  * Fails closed unless `path` is the launcher just written: a regular file
- * of Pogo's user with mode 0700 and exactly the `expected` content, in a
- * directory of Pogo's user with mode 0700, with no symbolic link anywhere on
+ * of Stargate's user with mode 0700 and exactly the `expected` content, in a
+ * directory of Stargate's user with mode 0700, with no symbolic link anywhere on
  * its path. Run immediately before a turn.
  */
 export async function verifyLauncher(path: string, expected: string) {
@@ -177,8 +177,8 @@ export async function writeLauncher(path: string, script: string) {
 /**
  * The CLI's environment: the shared non-secret allowlist, a private
  * `CODEX_HOME` for this namespace (so `~/.codex`, its login and its config
- * are never used) and the proxy key under a Pogo variable. The SDK passes
- * nothing else from Pogo's environment.
+ * are never used) and the proxy key under a Stargate variable. The SDK passes
+ * nothing else from Stargate's environment.
  */
 export function codexEnvironment(
   config: Config,
@@ -202,15 +202,15 @@ export function codexEnvironment(
  * `--config` overrides. Command-line overrides are Codex's highest layer
  * below managed policy, so `CODEX_HOME` or project configuration cannot
  * redirect the endpoint or key. The rest turns off what loads instructions
- * or code from outside Pogo's configuration (skills, AGENTS.md, plugins,
+ * or code from outside Stargate's configuration (skills, AGENTS.md, plugins,
  * shell start-up files), subagents, and optional network traffic.
  */
 export function codexConfig(config: Config): CodexConfig {
   return {
-    model_provider: "pogo",
+    model_provider: "stargate",
     model_providers: {
-      pogo: {
-        name: "Pogo proxy",
+      stargate: {
+        name: "Stargate proxy",
         base_url: config.provider.baseURL,
         env_key: keyVariable,
         wire_api: "responses",
@@ -224,7 +224,7 @@ export function codexConfig(config: Config): CodexConfig {
     skills: { include_instructions: false },
     agents: { enabled: false },
     features: {
-      // Code and instructions from outside Pogo's configuration.
+      // Code and instructions from outside Stargate's configuration.
       plugins: false,
       remote_plugin: false,
       apps: false,
@@ -461,7 +461,7 @@ export class CodexBackend implements AgentBackend {
   ) {
     // Fail at startup, not on the first turn, when the key is missing.
     secret(config.provider.apiKeyEnv);
-    // From here on Pogo uses only the canonical form of each path that it
+    // From here on Stargate uses only the canonical form of each path that it
     // writes, checks or runs, and refuses links that could change later.
     const write = config.sandbox === "workspace-write";
     const directory = write
@@ -508,7 +508,7 @@ export class CodexBackend implements AgentBackend {
   }: Parameters<AgentBackend["createSession"]>[0]) {
     signal.throwIfAborted();
     if (this.closed) throw new Error("Codex backend is closing");
-    // Codex assigns the thread ID on the first turn; Pogo maps to it.
+    // Codex assigns the thread ID on the first turn; Stargate maps to it.
     return crypto.randomUUID();
   }
 
@@ -596,7 +596,7 @@ export class CodexBackend implements AgentBackend {
     try {
       // Never resume a thread that an earlier process is still running.
       await this.stopOrphan(id, AbortSignal.timeout(5000));
-      temporary = await mkdtemp(join(tmpdir(), "pogo-codex-"));
+      temporary = await mkdtemp(join(tmpdir(), "stargate-codex-"));
       const roots = writableRoots(this.config);
       // Again for each turn, on canonical paths only.
       try {
@@ -753,8 +753,8 @@ export class CodexBackend implements AgentBackend {
   }
 
   /**
-   * Stop what a turn of an earlier Pogo process left running: processes of
-   * Pogo's user that carry its marker and started after it began, each
+   * Stop what a turn of an earlier Stargate process left running: processes of
+   * Stargate's user that carry its marker and started after it began, each
    * checked again immediately before its signal. Linux only.
    */
   private async stopOrphan(id: string, signal: AbortSignal) {

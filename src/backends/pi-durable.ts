@@ -148,7 +148,7 @@ function proxyProvider(config: PiModelSettings) {
       ...options,
       headers: {
         ...options.headers,
-        "User-Agent": "Pogo/0.1.0",
+        "User-Agent": "Stargate/0.1.0",
         "x-opencode-session": options.sessionId,
       },
       fetch: proxyFetch(options.sessionId),
@@ -156,7 +156,7 @@ function proxyProvider(config: PiModelSettings) {
   };
   return createProvider({
     id: "openai",
-    name: "Pogo CLIProxyAPI",
+    name: "Stargate CLIProxyAPI",
     baseUrl: proxy.baseURL,
     auth: proxyAuth(proxy),
     models: [
@@ -195,7 +195,7 @@ function claudeProxyProvider(proxy: PiProxy) {
   const api = anthropicMessagesApi();
   return createProvider({
     id: "anthropic",
-    name: "Pogo CLIProxyAPI",
+    name: "Stargate CLIProxyAPI",
     baseUrl,
     auth: proxyAuth(proxy),
     models: [{ ...source, baseUrl }],
@@ -349,7 +349,7 @@ export class PiDurableBackend implements AgentBackend {
       const notice = workingAgreementNotice(agreement.path);
       registry.install(
         defineExtension({
-          name: "pogo.working-agreement",
+          name: "stargate.working-agreement",
           hooks: [
             hook(GenerationTask, {
               async beforeRequest(request, api) {
@@ -424,7 +424,7 @@ export class PiDurableBackend implements AgentBackend {
       );
     const activeReports = new Set<ConversationId>();
     const reportGuard = defineExtension({
-      name: "pogo.capture-only-report",
+      name: "stargate.capture-only-report",
       hooks: [
         hook(GenerationTask, {
           async beforeRequest(_request, api, context) {

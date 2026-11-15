@@ -486,7 +486,7 @@ export class CrewMessaging {
         const receipt = await this.mailer.send(message, caller.signal);
         const storedRoute: MailRoute = { id: receipt.id, ...route };
         routes.save(storedRoute, message.key);
-        // A stored pogo_dm (never plain mail) can be copied to IRC by Pogo.
+        // A stored stargate_dm (never plain mail) can be copied to IRC by Stargate.
         if (direct)
           this.engine.state.ircSessions.enqueue({
             id: receipt.id,

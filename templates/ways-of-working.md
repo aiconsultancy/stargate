@@ -4,22 +4,22 @@ Captain maintains this file. Crew can propose edits by mail or journal notes.
 Read it initially and reread it when updated. These agreements do not override
 operator instructions, permissions, access controls or task isolation.
 
-- Use `pogo_crew` roster for configured names, roles and delivery support.
+- Use `stargate_crew` roster for configured names, roles and delivery support.
   `captain` aliases the configured captain ID. `all` excludes the sender.
 - Each crew member keeps one permanent worktree named after that member's ID.
   Create or switch task branches inside it; do not switch worktrees or move the
   durable crew session. Temporary work in tmp directories is allowed without
   changing the session's worktree. Report directory drift to the captain.
-- Use `pogo_mail` for asynchronous messages; it never wakes recipients.
-  Use `pogo_dm` explicitly for native steer or queue notification. Stored,
+- Use `stargate_mail` for asynchronous messages; it never wakes recipients.
+  Use `stargate_dm` explicitly for native steer or queue notification. Stored,
   accepted, read and answered are different states. Reply with `replyTo`;
   final answers remain task results, not peer replies.
 - Ask captain to coordinate broad updates when useful. Crew can broadcast
   directly; this is a working agreement, not a permission barrier.
-- Write concise milestones, checks, blockers and outcomes with `pogo_journal`.
+- Write concise milestones, checks, blockers and outcomes with `stargate_journal`.
   IDs, time, identity and task context come from the host. No tool transcripts,
   prompts, secrets or private reasoning. Existing Markdown journals are history.
-- Prefer Pogo tools when adequate. Use the existing authenticated native
+- Prefer Stargate tools when adequate. Use the existing authenticated native
   OpenCode/Pi runtime for recoverable gaps within your authority. Never open
   another storage owner, change credentials, bypass scope or replay uncertain
   tools. Record concrete deficiencies and useful workarounds as ordinary journal
@@ -59,7 +59,7 @@ invent project rules. Do not change a project's instructions for ship policy.
   a final answer does not substitute for a correlated DM reply. Captain records
   local checks, review, merge and verified deployment as separate milestones.
 - Before marking a task complete or returning its final answer, send one concise
-  `pogo_dm` to `captain` with task ID and verified outcome. Completion alone does
+  `stargate_dm` to `captain` with task ID and verified outcome. Completion alone does
   not wake the captain; a new send after completion cannot select that task's
   captain route. Keep the result even if notification is deferred or unavailable.
 - Captain wait has one 60-second observation window, including queued promotion.

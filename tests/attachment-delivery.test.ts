@@ -149,7 +149,9 @@ test("only an OpenCode server on another host has remote files", () => {
 });
 
 test("reply files from OpenCode's TMPDIR scratch are published; dot segments below it are not", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "pogo-scratch-")));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "stargate-scratch-")),
+  );
   const previous = process.env["TMPDIR"];
   // Galactica: TMPDIR=%h/.cache/tmp, so scratch is ~/.cache/tmp/opencode.
   const temporary = join(root, ".cache", "tmp");
@@ -209,7 +211,9 @@ test("reply files from OpenCode's TMPDIR scratch are published; dot segments bel
 test.each(["unchanged", "changed", "symlink", "TMPDIR"])(
   "scratch upload retry revalidates %s against current gateway scratch",
   async (change) => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), "pogo-retry-")));
+    const root = await realpath(
+      await mkdtemp(join(tmpdir(), "stargate-retry-")),
+    );
     const previous = process.env["TMPDIR"];
     const temporary = join(root, ".cache", "tmp");
     const scratch = join(temporary, "opencode");

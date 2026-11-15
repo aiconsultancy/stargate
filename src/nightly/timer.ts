@@ -7,9 +7,9 @@ import {
   windowMinutes,
 } from "./window";
 
-const marker = "# Managed by Pogo CLI";
+const marker = "# Managed by Stargate CLI";
 
-export function timerName(name = "pogo-maintenance") {
+export function timerName(name = "stargate-maintenance") {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name))
     throw new Error("Invalid timer name.");
   return name;
@@ -56,7 +56,7 @@ export function buildMaintenanceUnits(input: {
   );
   const service = `${marker}
 [Unit]
-Description=Pogo nightly maintenance (${window})
+Description=Stargate nightly maintenance (${window})
 After=network-online.target
 
 [Service]
@@ -72,7 +72,7 @@ TimeoutStopSec=${input.recoveryMinutes}min
 `;
   const timer = `${marker}
 [Unit]
-Description=Pogo nightly maintenance window (${window})
+Description=Stargate nightly maintenance window (${window})
 
 [Timer]
 OnCalendar=${timerCalendar(input.spec, input.jitter)}
@@ -115,7 +115,7 @@ export function buildDroidUnits(input: {
   ];
   const service = `${marker}
 [Unit]
-Description=Pogo maintenance droid (checks ${times.join(", ")} ${input.spec.timeZone})
+Description=Stargate maintenance droid (checks ${times.join(", ")} ${input.spec.timeZone})
 After=network-online.target
 
 [Service]
@@ -129,7 +129,7 @@ TimeoutStartSec=${input.timeoutMinutes}min
 `;
   const timer = `${marker}
 [Unit]
-Description=Pogo maintenance droid checks
+Description=Stargate maintenance droid checks
 
 [Timer]
 ${times.map((time) => `OnCalendar=*-*-* ${time}:00 ${input.spec.timeZone}`).join("\n")}
@@ -178,7 +178,7 @@ export function buildUpdateCommand(input: {
     "--service-type=exec",
     "--collect",
     `--unit=${unit}`,
-    `--description=Pogo operator update to ${input.version}`,
+    `--description=Stargate operator update to ${input.version}`,
     `--working-directory=${dirname(input.configPath)}`,
     `--property=EnvironmentFile=-${input.configPath}.env`,
     "--property=UMask=0077",

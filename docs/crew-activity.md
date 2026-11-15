@@ -6,10 +6,10 @@ The captain's streamed answer and final answer stay separate.
 
 ## Query a member
 
-Use the existing `/pogo` command in an allowed channel:
+Use the existing `/stargate` command in an allowed channel:
 
-- `/pogo crew`: show the configured crew roster and task summaries.
-- `/pogo crew twiki`: show Twiki's current stored task, queue, last stored
+- `/stargate crew`: show the configured crew roster and task summaries.
+- `/stargate crew twiki`: show Twiki's current stored task, queue, last stored
   outcome and recent task status. Replace `twiki` with another crew ID.
 
 The private modal opens before the backend read. This query calls no model,

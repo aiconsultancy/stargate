@@ -3,14 +3,14 @@ import { type BackendConfig, secret } from "../config";
 import { CrewIrc, type OutboxPage, outboxPageSchema } from "../crew/irc-rpc";
 
 /**
- * Pogo's IRC ship → its team's crew plugin, through the OpenCode server at
+ * Stargate's IRC ship → its team's crew plugin, through the OpenCode server at
  * the captain location (the plugin accepts these RPCs nowhere else).
  * Errors are generic: they never carry URLs, headers or plugin details.
  */
 export interface CrewLink {
-  /** Bind a crew IRC session to its member, for pogo_dm and pogo_mail. */
+  /** Bind a crew IRC session to its member, for stargate_dm and stargate_mail. */
   bind(sessionID: string, crewID: string, signal: AbortSignal): Promise<void>;
-  /** Stored pogo_dm sends after `after`; without it, only the latest. */
+  /** Stored stargate_dm sends after `after`; without it, only the latest. */
   outbox(
     input: { after?: number; limit: number },
     signal: AbortSignal,
@@ -69,7 +69,7 @@ class OpenCodeCrewLink implements CrewLink {
       );
     } catch {
       signal.throwIfAborted();
-      throw new Error("Crew pogo_dm outbox unavailable");
+      throw new Error("Crew stargate_dm outbox unavailable");
     }
   }
 }

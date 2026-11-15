@@ -21,6 +21,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { bootstrapRelease } from "../scripts/bootstrap-stargate";
 import { maintenanceSchema } from "../src/nightly/config";
 import {
   type CommandOptions,
@@ -34,10 +35,10 @@ import {
   linkedRelease,
   namedRelease,
   newerRelease,
-  type PogoReleaseConfig,
   pruneReleases,
   readMetadata,
   restoreCurrent,
+  type StargateReleaseConfig,
   stageRelease,
   switchCurrent,
 } from "../src/nightly/release";
@@ -79,18 +80,18 @@ const storage = Bun.serve({
     return new Response(new Uint8Array(state.archive ?? archive));
   },
 });
-const legacyRepository = "aiconsultancy/pogo";
+const redirectRepository = "fixture/redirected";
 const repositoryPath = "/repos/aiconsultancy/stargate";
-const repositoryIDPath = "/repositories/1447008811";
+const repositoryIDPath = "/repositories/1459142785";
 let apiPort = 0;
 const api = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   fetch(request): Response {
     const url = new URL(request.url);
-    const legacyPath = `/repos/${legacyRepository}/`;
-    if (url.pathname.startsWith(legacyPath)) {
-      const suffix = url.pathname.slice(legacyPath.length);
+    const redirectPath = `/repos/${redirectRepository}/`;
+    if (url.pathname.startsWith(redirectPath)) {
+      const suffix = url.pathname.slice(redirectPath.length);
       return new Response(null, {
         status: 301,
         headers: { location: `${repositoryIDPath}/${suffix}${url.search}` },
@@ -133,7 +134,7 @@ function list() {
       assets: [
         {
           id: 1,
-          name: "pogo-v0.2.0.tar.gz",
+          name: "stargate-v0.2.0.tar.gz",
           size: archive.length,
           url: `${base}${repo}/releases/assets/1`,
           created_at: at,
@@ -142,7 +143,7 @@ function list() {
         },
         {
           id: 2,
-          name: "pogo-v0.2.0.tar.gz.sha256",
+          name: "stargate-v0.2.0.tar.gz.sha256",
           size: 90,
           url: `${base}${repo}/releases/assets/2`,
           created_at: at,
@@ -172,8 +173,8 @@ const runner: CommandRunner = {
   },
 };
 
-function config(root: string, withCheckout = true): PogoReleaseConfig {
-  const release = maintenanceSchema.parse({ pogo: { root } }).pogo;
+function config(root: string, withCheckout = true): StargateReleaseConfig {
+  const release = maintenanceSchema.parse({ stargate: { root } }).stargate;
   if (!release) throw new Error("missing release configuration");
   return {
     root,
@@ -191,7 +192,7 @@ function config(root: string, withCheckout = true): PogoReleaseConfig {
 }
 
 beforeAll(async () => {
-  directory = await mkdtemp("/tmp/opencode/pogo-release-");
+  directory = await mkdtemp("/tmp/opencode/stargate-release-");
   source = join(directory, "source");
   await mkdir(join(source, "src"), { recursive: true });
   git(directory, "init", "-q", "-b", "main", source);
@@ -204,12 +205,12 @@ beforeAll(async () => {
   git(source, "commit", "-q", "-m", "feat: first");
   git(source, "tag", "v0.2.0");
   commit = git(source, "rev-parse", "HEAD");
-  const path = join(directory, "pogo-v0.2.0.tar.gz");
+  const path = join(directory, "stargate-v0.2.0.tar.gz");
   git(
     source,
     "archive",
     "--format=tar.gz",
-    "--prefix=pogo-v0.2.0/",
+    "--prefix=stargate-v0.2.0/",
     "-o",
     path,
     "v0.2.0",
@@ -226,7 +227,7 @@ afterAll(async () => {
 beforeEach(() => {
   state.compare = "ahead";
   state.author = "github-actions[bot]";
-  state.checksum = `${createHash("sha256").update(archive).digest("hex")}  pogo-v0.2.0.tar.gz\n`;
+  state.checksum = `${createHash("sha256").update(archive).digest("hex")}  stargate-v0.2.0.tar.gz\n`;
   state.storageAuthorization = [];
   state.uploader = true;
   state.archive = undefined;
@@ -241,7 +242,7 @@ async function newRoot(name: string) {
   await mkdir(join(root, "releases", "old"), { recursive: true });
   await writeFile(
     join(root, "releases", "old", "package.json"),
-    '{ "name": "pogo" }\n',
+    '{ "name": "stargate" }\n',
   );
   await mkdir(join(root, "releases", "old", "src"));
   await writeFile(join(root, "releases", "old", "src", "main.ts"), "");
@@ -272,7 +273,59 @@ async function stage(root: string, withCheckout = true, repository?: string) {
 }
 
 describe("Stargate release update", () => {
-  test("adopts a Stargate package with legacy metadata alongside a Pogo release", async () => {
+  test("bootstrap installs the pinned new-format release without an old updater", async () => {
+    const root = join(directory, "bootstrap");
+    const settings = config(root, true);
+    const headers = githubHeaders("secret-token");
+    const release = await newerRelease(
+      settings,
+      headers,
+      "0.1.0",
+      Date.parse("2026-11-12T00:00:00Z"),
+    );
+    if (!release) throw new Error("Fixture release missing");
+    const input = {
+      config: settings,
+      release,
+      headers,
+      commit,
+      runner,
+      runID: crypto.randomUUID(),
+      remaining: () => 3_600_000,
+      signal: AbortSignal.timeout(30_000),
+    };
+    await expect(
+      bootstrapRelease({ ...input, commit: "0".repeat(40) }),
+    ).rejects.toThrow("pinned commit");
+    expect(await linkedRelease(root, "current")).toBeNull();
+    const staged = await bootstrapRelease(input);
+    expect(staged.metadata).toMatchObject({
+      schema: "stargate.release.v1",
+      commit,
+      tree: "equal",
+      verification: "verified",
+    });
+    expect((await linkedRelease(root, "current"))?.metadata).toEqual(
+      staged.metadata,
+    );
+    await expect(
+      bootstrapRelease({ ...input, runID: crypto.randomUUID() }),
+    ).rejects.toThrow("without current");
+  });
+
+  test("adoption refuses an old-name package rather than registering an alias", async () => {
+    const root = join(directory, "refuse-old");
+    const path = join(root, "releases", "old");
+    await mkdir(join(path, "src"), { recursive: true });
+    await writeFile(join(path, "package.json"), '{"name":"pogo"}');
+    await writeFile(join(path, "src", "main.ts"), "");
+    await expect(adoptRelease(root, path, "0.1.0")).rejects.toThrow(
+      "not an unpacked Stargate",
+    );
+    expect(await readMetadata(path)).toBeNull();
+  });
+
+  test("adopts a Stargate package with Stargate metadata alongside a release", async () => {
     const root = await newRoot("adopt-stargate");
     const path = join(root, "releases", "0.2.0");
     await mkdir(join(path, "src"), { recursive: true });
@@ -283,7 +336,7 @@ describe("Stargate release update", () => {
       current: "unchanged",
     });
     expect(await readMetadata(path)).toMatchObject({
-      schema: "pogo.release.v1",
+      schema: "stargate.release.v1",
       version: "0.2.0",
       verification: "adopted",
     });
@@ -292,11 +345,11 @@ describe("Stargate release update", () => {
     );
   });
 
-  test("a legacy repository URL stages a Stargate release through same-origin redirects", async () => {
+  test("a repository URL stages a Stargate release through same-origin redirects", async () => {
     const root = await newRoot("redirected-stargate");
-    const result = await stage(root, true, legacyRepository);
+    const result = await stage(root, true, redirectRepository);
     expect(result.metadata).toMatchObject({
-      schema: "pogo.release.v1",
+      schema: "stargate.release.v1",
       version: "0.2.0",
       verification: "verified",
       tree: "equal",
@@ -342,14 +395,14 @@ describe("Stargate release update", () => {
       [
         "checksum",
         () => {
-          state.checksum = `${"0".repeat(64)}  pogo-v0.2.0.tar.gz\n`;
+          state.checksum = `${"0".repeat(64)}  stargate-v0.2.0.tar.gz\n`;
         },
         "checksum-mismatch",
       ],
       [
         "checksum-name",
         () => {
-          state.checksum = state.checksum.replace("pogo-v0.2.0", "other");
+          state.checksum = state.checksum.replace("stargate-v0.2.0", "other");
         },
         "checksum-mismatch",
       ],
@@ -381,7 +434,7 @@ describe("Stargate release update", () => {
       ).toEqual([]);
       state.compare = "ahead";
       state.author = "github-actions[bot]";
-      state.checksum = `${createHash("sha256").update(archive).digest("hex")}  pogo-v0.2.0.tar.gz\n`;
+      state.checksum = `${createHash("sha256").update(archive).digest("hex")}  stargate-v0.2.0.tar.gz\n`;
     }
   });
 
@@ -428,7 +481,7 @@ describe("Stargate release update", () => {
     for (const version of ["0.3.0", "0.4.0", "0.5.0", "0.6.0"]) {
       const path = join(root, "releases", version);
       await mkdir(join(path, "src"), { recursive: true });
-      await writeFile(join(path, "package.json"), '{ "name": "pogo" }\n');
+      await writeFile(join(path, "package.json"), '{ "name": "stargate" }\n');
       await writeFile(join(path, "src", "main.ts"), "");
       await adoptRelease(root, path, version);
     }
@@ -450,11 +503,11 @@ describe("Stargate release update", () => {
     const outside = join(directory, "outside");
     await mkdir(outside);
     state.archive = tarball([
-      // Listed as "pogo-v0.2.0/", so a name-only listing check accepts it.
-      { path: "pogo-v0.2.0/", type: "2", link: outside },
-      { path: "pogo-v0.2.0/package.json", data: "{}" },
+      // Listed as "stargate-v0.2.0/", so a name-only listing check accepts it.
+      { path: "stargate-v0.2.0/", type: "2", link: outside },
+      { path: "stargate-v0.2.0/package.json", data: "{}" },
     ]);
-    state.checksum = `${createHash("sha256").update(state.archive).digest("hex")}  pogo-v0.2.0.tar.gz\n`;
+    state.checksum = `${createHash("sha256").update(state.archive).digest("hex")}  stargate-v0.2.0.tar.gz\n`;
     await expect(stage(root, false)).rejects.toThrow("archive-invalid");
     expect(await readdir(outside)).toEqual([]);
     expect(bunCalls).toEqual([]);
@@ -468,11 +521,16 @@ describe("Stargate release update", () => {
     // create an executable link outside the release; the ustar header
     // alone looks harmless.
     state.archive = tarball([
-      { path: "pogo-v0.2.0/", type: "5", global: { linkpath: outside } },
-      { path: "pogo-v0.2.0/package.json", data: "{}" },
-      { path: "pogo-v0.2.0/bin", type: "2", link: "package.json", mode: 0o755 },
+      { path: "stargate-v0.2.0/", type: "5", global: { linkpath: outside } },
+      { path: "stargate-v0.2.0/package.json", data: "{}" },
+      {
+        path: "stargate-v0.2.0/bin",
+        type: "2",
+        link: "package.json",
+        mode: 0o755,
+      },
     ]);
-    state.checksum = `${createHash("sha256").update(state.archive).digest("hex")}  pogo-v0.2.0.tar.gz\n`;
+    state.checksum = `${createHash("sha256").update(state.archive).digest("hex")}  stargate-v0.2.0.tar.gz\n`;
     await expect(stage(root, false)).rejects.toThrow("archive-invalid");
     expect(await readdir(outside)).toEqual([]);
     expect(bunCalls).toEqual([]);
@@ -481,18 +539,18 @@ describe("Stargate release update", () => {
   test("a chain of contained-looking links that escapes is rejected after tar", async () => {
     const root = await newRoot("chain");
     state.archive = tarball([
-      { path: "pogo-v0.2.0/", type: "5", mode: 0o755 },
-      { path: "pogo-v0.2.0/package.json", data: "{}" },
-      { path: "pogo-v0.2.0/deep/", type: "5", mode: 0o755 },
-      { path: "pogo-v0.2.0/deep/back", type: "2", link: ".." },
+      { path: "stargate-v0.2.0/", type: "5", mode: 0o755 },
+      { path: "stargate-v0.2.0/package.json", data: "{}" },
+      { path: "stargate-v0.2.0/deep/", type: "5", mode: 0o755 },
+      { path: "stargate-v0.2.0/deep/back", type: "2", link: ".." },
       {
-        path: "pogo-v0.2.0/escape",
+        path: "stargate-v0.2.0/escape",
         type: "2",
-        // Lexically pogo-v0.2.0/outside; really <staging>/outside.
+        // Lexically stargate-v0.2.0/outside; really <staging>/outside.
         link: "deep/back/../../outside",
       },
     ]);
-    state.checksum = `${createHash("sha256").update(state.archive).digest("hex")}  pogo-v0.2.0.tar.gz\n`;
+    state.checksum = `${createHash("sha256").update(state.archive).digest("hex")}  stargate-v0.2.0.tar.gz\n`;
     await expect(stage(root, false)).rejects.toThrow("archive-invalid");
     expect(bunCalls).toEqual([]);
   });
@@ -524,7 +582,7 @@ describe("Stargate release update", () => {
   });
 
   test("release install and tests run with a minimal private environment", async () => {
-    process.env["POGO_TEST_SECRET"] = "never-inherited";
+    process.env["STARGATE_TEST_SECRET"] = "never-inherited";
     try {
       const root = await newRoot("env");
       await stage(root);
@@ -557,7 +615,7 @@ describe("Stargate release update", () => {
       });
       expect(child.stdout.trim()).toBe("PATH=/usr/bin:/bin");
     } finally {
-      delete process.env["POGO_TEST_SECRET"];
+      delete process.env["STARGATE_TEST_SECRET"];
     }
   });
 
@@ -590,19 +648,22 @@ describe("Stargate release update", () => {
     // Unpacked by hand: the files are there, the release metadata is not.
     const made = join(root, "releases", "0.9.0");
     await mkdir(join(made, "src"), { recursive: true });
-    await writeFile(join(made, "package.json"), '{ "name": "pogo" }\n');
+    await writeFile(join(made, "package.json"), '{ "name": "stargate" }\n');
     await writeFile(join(made, "src", "main.ts"), "");
     await expect(switchCurrent(root, "0.9.0")).rejects.toThrow();
     expect(await readlink(join(root, "current"))).toBe("releases/old");
     // Invalid metadata is the same as none.
-    await writeFile(join(made, ".pogo-release.json"), '{"version":"0.9.0"}');
+    await writeFile(
+      join(made, ".stargate-release.json"),
+      '{"version":"0.9.0"}',
+    );
     await expect(switchCurrent(root, "0.9.0")).rejects.toThrow();
     const data = join(root, "data");
     await mkdir(data);
     expect(await writeReady(data, 1, made)).toBeNull();
     expect((await readReady(data))?.version).toBeNull();
     // Adopt is the supported way to mark an existing directory.
-    await rm(join(made, ".pogo-release.json"));
+    await rm(join(made, ".stargate-release.json"));
     await adoptRelease(root, made, "0.9.0");
     expect(await switchCurrent(root, "0.9.0")).toBe("old");
     expect(await writeReady(data, 2, made)).toBe("0.9.0");

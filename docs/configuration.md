@@ -12,38 +12,38 @@ The examples use the linked `stargate` command. You can also substitute
 each registration. Replace the IDs, directory, and model with your own values.
 
 ```sh
-stargate bot add --config pogo.json \
+stargate bot add --config stargate.json \
   --id code-helper --app-id A123 \
-  --app-token-env POGO_CODE_APP_TOKEN --bot-token-env POGO_CODE_BOT_TOKEN \
+  --app-token-env STARGATE_CODE_APP_TOKEN --bot-token-env STARGATE_CODE_BOT_TOKEN \
   --allowed-users U123 --allowed-channels C123 \
   --backend opencode --directory /srv/project --url http://localhost:4096
 
-stargate bot add --config pogo.json \
+stargate bot add --config stargate.json \
   --id pi-helper --app-id A456 \
-  --app-token-env POGO_PI_APP_TOKEN --bot-token-env POGO_PI_BOT_TOKEN \
+  --app-token-env STARGATE_PI_APP_TOKEN --bot-token-env STARGATE_PI_BOT_TOKEN \
   --allowed-users U123 --allowed-channels C123 \
   --backend pi-durable --directory /srv/project --model openai/gpt-5
 
-stargate config check --config pogo.json --schema-only
-stargate config check --config pogo.json
-stargate start --config pogo.json
+stargate config check --config stargate.json --schema-only
+stargate config check --config stargate.json
+stargate start --config stargate.json
 ```
 
 Without bot-option flags, `bot add` starts the wizard. With flags, it never prompts. Token **values are
 not accepted as CLI arguments**: supply the referenced environment variables
-or create `pogo.json.env` privately. Do not paste secrets into an
+or create `stargate.json.env` privately. Do not paste secrets into an
 agent conversation, shell history, or a shared config file.
 
 Every command supports `--help`; invalid commands/configuration exit nonzero.
 `config check` checks schema and token presence/prefixes, not live Slack
 connectivity or provider credentials. `--schema-only` needs no credentials.
 
-See [`pogo.example.json`](../pogo.example.json) for two registrations.
+See [`stargate.example.json`](../stargate.example.json) for two registrations.
 Relative `dataDirectory` paths resolve beside the config file. Environment
 variables take precedence over companion-file values in foreground operation.
-Stargate defaults to `pogo.json` and loads a companion named
+Stargate defaults to `stargate.json` and loads a companion named
 `<config>.env` for any explicit config path. Keep the companion and the data
-directory private. The default data directory is `.pogo` beside the config.
+directory private. The default data directory is `.stargate` beside the config.
 
 Both Slack user and channel allowlists must be nonempty. A whole `*` allows
 all accessible entries on that list. `deniedUsers` and `deniedChannels` override
@@ -74,8 +74,8 @@ Validate the file, then signal the running gateway (replace the unit name if
 this installation uses another name):
 
 ```sh
-stargate config check --config pogo.json
-systemctl --user kill --signal=HUP pogo.service
+stargate config check --config stargate.json
+systemctl --user kill --signal=HUP stargate.service
 ```
 
 SIGHUP reads the same regular configuration file and credential companion as
@@ -119,7 +119,7 @@ Backend secret references must already exist in the process environment; adding
 backend secrets to the companion requires a restart. Repeated transcript-read
 failures keep removal busy until catch-up succeeds or the service is restarted.
 
-The reloadable roster is `pogo.json`'s IRC crew, not the separate OpenCode
+The reloadable roster is `stargate.json`'s IRC crew, not the separate OpenCode
 crew-plugin team. Reload preserves existing queue/session namespaces. Re-adding
 an IRC member resumes its retained cursor/history, as after a restart. This is
 configuration reload only; code updates and service handover still require their
@@ -137,7 +137,7 @@ and `model: { "providerID": "…", "id": "…" }` select the session agent/model
 For authentication, map HTTP header names to environment variable names:
 
 ```json
-"headersEnv": { "authorization": "POGO_OPENCODE_AUTHORIZATION" }
+"headersEnv": { "authorization": "STARGATE_OPENCODE_AUTHORIZATION" }
 ```
 
 Set that variable to the complete header value, such as `Bearer …`.

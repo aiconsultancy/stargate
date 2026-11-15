@@ -11,9 +11,9 @@ test("worker compaction uses the verified global API stream and waits until conn
     id: "ses_worker",
     agent: "mario",
     location: { directory: "/crew/mario" },
-    metadata: { pogoCrew: { namespace: "one", crewID: "mario" } },
+    metadata: { stargateCrew: { namespace: "one", crewID: "mario" } },
   };
-  const envName = "POGO_COMPACTION_FIXTURE_AUTH";
+  const envName = "STARGATE_COMPACTION_FIXTURE_AUTH";
   const previous = process.env[envName];
   process.env[envName] = "Bearer fixture-only";
   const encoder = new TextEncoder();

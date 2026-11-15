@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Store } from "../src/store";
 
 test("IRC reply parent migrates, survives reopen and stays scoped to the registration", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-thread-store-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-thread-store-");
   const path = join(directory, "store.sqlite");
   let store: Store | undefined;
   try {

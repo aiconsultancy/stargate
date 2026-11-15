@@ -18,7 +18,7 @@ export function historyVisible(
   session: HistorySession,
 ): boolean {
   if (options.team.historyScope === "server") return true;
-  const identity = session.metadata?.["pogoCrew"];
+  const identity = session.metadata?.["stargateCrew"];
   const metadata =
     typeof identity === "object" &&
     identity !== null &&
@@ -107,8 +107,8 @@ export async function connectHistoryAPI(
       observed.parentID !== caller.parentID ||
       resolve(observed.location.directory) !==
         resolve(caller.location.directory) ||
-      JSON.stringify(observed.metadata?.["pogoCrew"]) !==
-        JSON.stringify(caller.metadata?.["pogoCrew"])
+      JSON.stringify(observed.metadata?.["stargateCrew"]) !==
+        JSON.stringify(caller.metadata?.["stargateCrew"])
     )
       throw new CrewError(
         "History endpoint must address the same OpenCode server and caller session.",

@@ -25,10 +25,10 @@ const backend = {
   directory: "/project",
 };
 const secrets = {
-  POGO_RELOAD_ONE_APP: "xapp-secret-one-app",
-  POGO_RELOAD_ONE_BOT: "xoxb-secret-one-bot",
-  POGO_RELOAD_IRC: "irc-secret-captain",
-  POGO_RELOAD_CHIEF: "irc-secret-chief",
+  STARGATE_RELOAD_ONE_APP: "xapp-secret-one-app",
+  STARGATE_RELOAD_ONE_BOT: "xoxb-secret-one-bot",
+  STARGATE_RELOAD_IRC: "irc-secret-captain",
+  STARGATE_RELOAD_CHIEF: "irc-secret-chief",
 };
 const secretValues = [
   ...Object.values(secrets),
@@ -37,7 +37,7 @@ const secretValues = [
 ];
 
 function slackBot(id = "one", overrides: Record<string, unknown> = {}) {
-  const name = `POGO_RELOAD_${id.toUpperCase()}`;
+  const name = `STARGATE_RELOAD_${id.toUpperCase()}`;
   return {
     id,
     slack: {
@@ -53,14 +53,14 @@ function slackBot(id = "one", overrides: Record<string, unknown> = {}) {
 const chief = {
   id: "chief",
   account: "galactica-chief",
-  passwordEnv: "POGO_RELOAD_CHIEF",
+  passwordEnv: "STARGATE_RELOAD_CHIEF",
   channels: ["#galactica"],
   backend,
 };
 const helo = {
   id: "helo",
   account: "galactica-helo",
-  passwordEnv: "POGO_RELOAD_HELO",
+  passwordEnv: "STARGATE_RELOAD_HELO",
   channels: ["#galactica"],
   backend,
 };
@@ -69,7 +69,7 @@ function ship(overrides: Record<string, unknown> = {}) {
     id: "galactica",
     server: { host: "127.0.0.1", port: 6667, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_RELOAD_IRC",
+    passwordEnv: "STARGATE_RELOAD_IRC",
     channels: ["#galactica"],
     crew: [chief],
     backend,
@@ -94,9 +94,9 @@ async function files(
   config: Record<string, unknown> = configuration(),
   environment: Record<string, string> = secrets,
 ) {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-reload-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-reload-"));
   cleanup.push(directory);
-  const path = join(directory, "pogo.json");
+  const path = join(directory, "stargate.json");
   const write = {
     config: (value: Record<string, unknown>) =>
       writeFile(path, JSON.stringify(value)),
@@ -135,29 +135,29 @@ test("reload candidate: config check rules, absolute data directory, no process.
   const { directory, path, write } = await files(
     configuration({ dataDirectory: "state" }),
   );
-  const base: NodeJS.ProcessEnv = { POGO_RELOAD_MARKER: "kept" };
+  const base: NodeJS.ProcessEnv = { STARGATE_RELOAD_MARKER: "kept" };
   const before = { ...process.env };
   const loaded = await readReloadCandidate(path, base);
   expect(loaded.config.dataDirectory).toBe(join(directory, "state"));
-  expect(loaded.environment["POGO_RELOAD_ONE_BOT"]).toBe(
-    secrets.POGO_RELOAD_ONE_BOT,
+  expect(loaded.environment["STARGATE_RELOAD_ONE_BOT"]).toBe(
+    secrets.STARGATE_RELOAD_ONE_BOT,
   );
-  expect(loaded.environment["POGO_RELOAD_MARKER"]).toBe("kept");
-  expect(base).toEqual({ POGO_RELOAD_MARKER: "kept" });
+  expect(loaded.environment["STARGATE_RELOAD_MARKER"]).toBe("kept");
+  expect(base).toEqual({ STARGATE_RELOAD_MARKER: "kept" });
   expect(process.env).toEqual(before);
   // The base environment wins over the companion, as at startup.
   const override = await readReloadCandidate(path, {
-    POGO_RELOAD_ONE_BOT: "xoxb-from-environment",
+    STARGATE_RELOAD_ONE_BOT: "xoxb-from-environment",
   });
-  expect(override.environment["POGO_RELOAD_ONE_BOT"]).toBe(
+  expect(override.environment["STARGATE_RELOAD_ONE_BOT"]).toBe(
     "xoxb-from-environment",
   );
 
-  await write.env({ ...secrets, POGO_RELOAD_ONE_APP: "not-a-token" });
+  await write.env({ ...secrets, STARGATE_RELOAD_ONE_APP: "not-a-token" });
   await expect(readReloadCandidate(path, {})).rejects.toThrow(
     "Missing or invalid Slack token",
   );
-  const { POGO_RELOAD_CHIEF: _, ...withoutChief } = secrets;
+  const { STARGATE_RELOAD_CHIEF: _, ...withoutChief } = secrets;
   await write.env(withoutChief);
   await expect(readReloadCandidate(path, {})).rejects.toThrow(
     "Missing IRC password",
@@ -192,8 +192,8 @@ test("restart policy: access, transcription and crew membership are live; ids or
     configuration({ bots: [slackBot("one"), slackBot("two")] }),
     {
       ...secrets,
-      POGO_RELOAD_TWO_APP: "xapp-two",
-      POGO_RELOAD_TWO_BOT: "xoxb-two",
+      STARGATE_RELOAD_TWO_APP: "xapp-two",
+      STARGATE_RELOAD_TWO_BOT: "xoxb-two",
     },
   );
   const next = candidate(
@@ -234,7 +234,7 @@ test("restart policy: access, transcription and crew membership are live; ids or
     }),
     {
       ...current.environment,
-      POGO_RELOAD_HELO: "irc-secret-helo",
+      STARGATE_RELOAD_HELO: "irc-secret-helo",
     },
   );
   expect(restartRequired(current, next)).toEqual([]);
@@ -252,8 +252,8 @@ test("restart policy: reconnect and other fields are listed by path, without val
           access: { users: ["U999"], channels: ["C123"] },
           slack: {
             appId: "AONE",
-            appTokenEnv: "POGO_RELOAD_ONE_APP",
-            botTokenEnv: "POGO_RELOAD_ROTATED_BOT",
+            appTokenEnv: "STARGATE_RELOAD_ONE_APP",
+            botTokenEnv: "STARGATE_RELOAD_ROTATED_BOT",
           },
           backend: { ...backend, url: "http://localhost:4097" },
           concurrency: 8,
@@ -271,8 +271,8 @@ test("restart policy: reconnect and other fields are listed by path, without val
     }),
     {
       ...secrets,
-      POGO_RELOAD_ONE_BOT: "xoxb-secret-rotated",
-      POGO_RELOAD_ROTATED_BOT: "xoxb-secret-rotated",
+      STARGATE_RELOAD_ONE_BOT: "xoxb-secret-rotated",
+      STARGATE_RELOAD_ROTATED_BOT: "xoxb-secret-rotated",
     },
   );
   const paths = restartRequired(current, next);
@@ -284,7 +284,7 @@ test("restart policy: reconnect and other fields are listed by path, without val
     "bots[two]",
     "dashboard",
     "dataDirectory",
-    "environment.POGO_RELOAD_ONE_BOT",
+    "environment.STARGATE_RELOAD_ONE_BOT",
     "irc[galactica].channels",
     "irc[galactica].crew[chief].backend.agent",
     "irc[galactica].features.typing",
@@ -292,10 +292,10 @@ test("restart policy: reconnect and other fields are listed by path, without val
   ]);
   expectNoSecrets(JSON.stringify(paths));
   // Removing a transport or a deleted companion value is restart-only too.
-  const { POGO_RELOAD_CHIEF: _, ...withoutChief } = secrets;
+  const { STARGATE_RELOAD_CHIEF: _, ...withoutChief } = secrets;
   expect(
     restartRequired(current, candidate({ bots: [slackBot()] }, withoutChief)),
-  ).toEqual(["environment.POGO_RELOAD_CHIEF", "irc[galactica]"]);
+  ).toEqual(["environment.STARGATE_RELOAD_CHIEF", "irc[galactica]"]);
 });
 
 test("reload applies a valid live change; current advances only after apply resolves", async () => {
@@ -332,7 +332,7 @@ test("reload applies a valid live change; current advances only after apply reso
 });
 
 test("reload keeps the running config for invalid files, restart-only keys and changed credentials", async () => {
-  const kept = { ...secrets, POGO_RELOAD_UNUSED: "deleted-later" };
+  const kept = { ...secrets, STARGATE_RELOAD_UNUSED: "deleted-later" };
   const { path, write } = await files(configuration(), kept);
   const { lines, log } = logger();
   const before = { ...process.env };
@@ -355,7 +355,7 @@ test("reload keeps the running config for invalid files, restart-only keys and c
   );
   expect((await reload.request()).status).toBe("invalid");
   await write.config(configuration());
-  await write.env({ ...kept, POGO_RELOAD_ONE_BOT: "" });
+  await write.env({ ...kept, STARGATE_RELOAD_ONE_BOT: "" });
   expect((await reload.request()).status).toBe("invalid");
 
   // A live change mixed with reconnect keys is refused as a whole.
@@ -380,23 +380,23 @@ test("reload keeps the running config for invalid files, restart-only keys and c
 
   // A changed or deleted companion value is visible and restart-only.
   await write.config(configuration());
-  await write.env({ ...kept, POGO_RELOAD_ONE_BOT: "xoxb-secret-rotated" });
+  await write.env({ ...kept, STARGATE_RELOAD_ONE_BOT: "xoxb-secret-rotated" });
   expect(await reload.request()).toMatchObject({
     status: "restart-required",
-    paths: ["environment.POGO_RELOAD_ONE_BOT"],
+    paths: ["environment.STARGATE_RELOAD_ONE_BOT"],
   });
   await write.env(secrets);
   expect(await reload.request()).toMatchObject({
     status: "restart-required",
-    paths: ["environment.POGO_RELOAD_UNUSED"],
+    paths: ["environment.STARGATE_RELOAD_UNUSED"],
   });
 
   expect(applied).toEqual([]);
   expect(reload.current).toBe(initial);
   expect(process.env).toEqual(before);
   const text = lines.join("");
-  expect(text).toContain("Run pogo config check for details");
-  expect(text).toContain("environment.POGO_RELOAD_ONE_BOT");
+  expect(text).toContain("Run stargate config check for details");
+  expect(text).toContain("environment.STARGATE_RELOAD_ONE_BOT");
   expectNoSecrets(text);
   expect(text).not.toContain("not json");
 });
@@ -415,12 +415,12 @@ test("reload adds a crew member only once its new credential is present", async 
   });
   await write.config(configuration({ irc: [ship({ crew: [chief, helo] })] }));
   expect((await reload.request()).status).toBe("invalid");
-  await write.env({ ...secrets, POGO_RELOAD_HELO: "irc-secret-helo" });
+  await write.env({ ...secrets, STARGATE_RELOAD_HELO: "irc-secret-helo" });
   expect((await reload.request()).status).toBe("applied");
   expect(reload.current.config.irc[0]?.crew.map((member) => member.id)).toEqual(
     ["chief", "helo"],
   );
-  expect(reload.current.environment["POGO_RELOAD_HELO"]).toBe(
+  expect(reload.current.environment["STARGATE_RELOAD_HELO"]).toBe(
     "irc-secret-helo",
   );
   // Removal is live as well; the runtime decides whether the member is idle.
@@ -521,14 +521,14 @@ test("runtime rejections and unknown failures keep the current config and leak n
     status: "unavailable",
     message: new ReloadRejected("unavailable").message,
   });
-  failure = new Error(`socket failed with ${secrets.POGO_RELOAD_ONE_BOT}`);
+  failure = new Error(`socket failed with ${secrets.STARGATE_RELOAD_ONE_BOT}`);
   expect((await reload.request()).status).toBe("failed");
   expect(reload.current).toBe(initial);
 
   const raw = new ConfigReload(
     initial,
     async () => {
-      throw new Error(`provider said ${secrets.POGO_RELOAD_IRC}`);
+      throw new Error(`provider said ${secrets.STARGATE_RELOAD_IRC}`);
     },
     log,
   );

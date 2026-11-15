@@ -183,7 +183,7 @@ describe("routing", () => {
     expect(Array.from(result[0] ?? "")).toHaveLength(2800);
     expect(chunks("")).toEqual(["Agent finished without a text reply."]);
     expect(chunks("a".repeat(70_000)).join("")).toEndWith(
-      "[Response truncated by Pogo.]",
+      "[Response truncated by Stargate.]",
     );
   });
 });

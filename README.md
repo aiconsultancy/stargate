@@ -54,7 +54,7 @@ bun run src/main.ts start
 
 Follow the [Slack setup guide](docs/setup.md#configure-your-first-slack-bot) to
 install the app, supply credentials and verify a reply. The default
-configuration is `pogo.json`; its private companion is `pogo.json.env`. Use
+configuration is `stargate.json`; its private companion is `stargate.json.env`. Use
 `--config PATH` on each command to choose a different location.
 
 For IRC, follow the [single-bot IRC example](docs/irc.md#one-bot-with-no-slack-app) and
@@ -83,9 +83,10 @@ permissions control what the agent can do on the host.
   [contributing](CONTRIBUTING.md) to work on Stargate.
 
 Run `bun link` from the checkout for the `stargate` command. The linked command
-needs Bun on `PATH`. The `pogo` alias, `pogo.json`, `maintenance.pogo`, state
-paths and service names, the Slack `/pogo` command, and `pogo_*` tools retain
-their names for existing installations.
+needs Bun on `PATH`. This release completes a breaking product rename: there
+are no old command, config, tool, path or service aliases. Existing installations
+must follow the [offline migration and bootstrap](docs/hard-cutover.md) before
+starting the new release. Keep durable state and immutable message history.
 
 Stargate is available under the [MIT License](LICENSE). Report vulnerabilities
 through the [security policy](SECURITY.md). Vendored Effect skills retain

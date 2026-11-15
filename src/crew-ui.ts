@@ -18,7 +18,7 @@ export interface CrewUIApi {
 }
 const id = z.string().min(1).max(255);
 const commandSchema = z.object({
-  command: z.literal("/pogo"),
+  command: z.literal("/stargate"),
   text: z
     .string()
     .trim()
@@ -73,7 +73,7 @@ export function crewStatusView(
 ): CronView {
   const blocks = [
     section(
-      "Read-only snapshot. Stored running/ready state is not proof of live execution. No work is started, retried or repaired. Close and run /pogo crew [member] again to refresh. Times may be unknown for older tasks.",
+      "Read-only snapshot. Stored running/ready state is not proof of live execution. No work is started, retried or repaired. Close and run /stargate crew [member] again to refresh. Times may be unknown for older tasks.",
     ),
   ];
   for (const member of status.members) {
@@ -92,7 +92,7 @@ export function crewStatusView(
           member.lastOutcome
             ? `Last stored outcome\n${taskLine(member.lastOutcome)}`
             : "Last outcome: unknown (no recorded outcome).",
-          !detail ? `Details: /pogo crew ${member.id}` : "",
+          !detail ? `Details: /stargate crew ${member.id}` : "",
         ]
           .filter(Boolean)
           .join("\n"),
@@ -126,13 +126,13 @@ export function crewStatusView(
   if (!status.members.length)
     blocks.push(
       section(
-        "No configured crew member found. Use /pogo crew for the roster.",
+        "No configured crew member found. Use /stargate crew for the roster.",
       ),
     );
   if (status.truncated)
     blocks.push(
       section(
-        `Roster truncated: showing ${status.members.length} of ${status.total}. Query a member directly with /pogo crew <member-id>.`,
+        `Roster truncated: showing ${status.members.length} of ${status.total}. Query a member directly with /stargate crew <member-id>.`,
       ),
     );
   return { ...notice("Crew activity"), blocks };
@@ -156,7 +156,7 @@ export function quotaStatusView(
   if (text) blocks.push(section(text));
   blocks.push(
     section(
-      "Close and run /pogo usage again to refresh. No model is called; no account data is posted to the channel.",
+      "Close and run /stargate usage again to refresh. No model is called; no account data is posted to the channel.",
     ),
   );
   return { ...notice("Usage", "Provider usage"), blocks };
@@ -201,7 +201,7 @@ export class CrewUI {
     ) {
       await ack({
         response_type: "ephemeral",
-        text: "Status unavailable. Use /pogo crew [member] or /pogo usage in an allowed channel with a configured captain backend.",
+        text: "Status unavailable. Use /stargate crew [member] or /stargate usage in an allowed channel with a configured captain backend.",
       });
       return;
     }
@@ -250,7 +250,7 @@ export class CrewUI {
         : status;
       await this.api.update(viewID, crewStatusView(safe, !!member));
     } catch {
-      this.log.error("Could not read or display Pogo status");
+      this.log.error("Could not read or display Stargate status");
       if (!viewID || !this.allowed(data)) return;
       try {
         await this.api.update(

@@ -116,28 +116,28 @@ type ShipOptions = {
   auditQueue?: number;
   /** Crew plugin link; default from the captain backend, null for none. */
   crewLink?: CrewLink | null;
-  /** pogo_dm outbox poll interval (default 2000 ms). */
+  /** stargate_dm outbox poll interval (default 2000 ms). */
   copyPollMs?: number;
 };
 
-/** An IRC copy of a pogo_dm: its text limit, and how long it is retried. */
+/** An IRC copy of a stargate_dm: its text limit, and how long it is retried. */
 const copyBytes = 1800;
 const copyRetryMs = 10 * 60_000;
-/** Client-only tag of an IRC copy: the pogo_dm's Mesij receipt ID. */
-const copyTag = "+pogo/dm";
+/** Client-only tag of an IRC copy: the stargate_dm's Mesij receipt ID. */
+const copyTag = "+stargate/dm";
 
 /**
- * IRC text of a pogo_dm copy: marked `[pogo_dm]`, plain text, at most
+ * IRC text of a stargate_dm copy: marked `[stargate_dm]`, plain text, at most
  * `copyBytes`, and withheld entirely when it may carry a credential (the
  * server stores every DM).
  */
 export function copyText(item: { id: string; text: string }) {
   const clean = item.text.split("\n").map(cleanText).join("\n").trim();
   if (sensitive(item.text) || sensitive(clean))
-    return `[pogo_dm ${item.id}: not copied to IRC, it may contain credentials. Read it with pogo_mail.]`;
-  const marked = `[pogo_dm] ${clean}`;
+    return `[stargate_dm ${item.id}: not copied to IRC, it may contain credentials. Read it with stargate_mail.]`;
+  const marked = `[stargate_dm] ${clean}`;
   if (Buffer.byteLength(marked) <= copyBytes) return marked;
-  const suffix = " … (truncated; full text in pogo_mail)";
+  const suffix = " … (truncated; full text in stargate_mail)";
   let cut = marked;
   while (Buffer.byteLength(cut + suffix) > copyBytes)
     cut = [...cut].slice(0, -64).join("");
@@ -594,7 +594,7 @@ export class IrcShip {
         message: (message, replay) => {
           const strict = this.config.access.channelRequests === "nick-mention";
           if (detached() || (strict && replay)) return;
-          // Our own pogo_dm copy: delivered natively already, and mirrored
+          // Our own stargate_dm copy: delivered natively already, and mirrored
           // as the sender's outgoing DM. Never a turn, never mirrored twice.
           if (this.ownCopy(client, message)) {
             this.advance(identity, client, message);
@@ -832,7 +832,7 @@ export class IrcShip {
   }
 
   /**
-   * Copy each stored pogo_dm between two ship agents as an IRC DM from the
+   * Copy each stored stargate_dm between two ship agents as an IRC DM from the
    * sender's connection: poll the crew plugin's outbox from a stored cursor
    * (the first read only sets it), one item at a time and in order. An item
    * that cannot be sent yet (connection down, recipient not online) holds
@@ -845,7 +845,7 @@ export class IrcShip {
     let failing = false;
     while (!signal.aborted) {
       try {
-        const cursor = this.store.pogoDmCursor(captain.key);
+        const cursor = this.store.stargateDmCursor(captain.key);
         const page = await link.outbox(
           cursor === undefined ? { limit: 50 } : { after: cursor, limit: 50 },
           AbortSignal.any([signal, AbortSignal.timeout(bindMs)]),
@@ -857,7 +857,7 @@ export class IrcShip {
           cursor === undefined ||
           (!page.items.length && page.latest > cursor)
         )
-          this.store.savePogoDmCursor(captain.key, page.latest);
+          this.store.saveStargateDmCursor(captain.key, page.latest);
         for (const item of cursor === undefined ? [] : page.items) {
           if ((await this.copy(item)) === "retry") {
             const since = first.get(item.id) ?? Date.now();
@@ -865,18 +865,18 @@ export class IrcShip {
             if (Date.now() - since < copyRetryMs) break;
             this.log.warn(
               { irc: this.config.id },
-              "IRC pogo_dm copy not sent in time; skipped",
+              "IRC stargate_dm copy not sent in time; skipped",
             );
           }
           first.delete(item.id);
-          this.store.savePogoDmCursor(captain.key, item.sequence);
+          this.store.saveStargateDmCursor(captain.key, item.sequence);
         }
       } catch {
         if (signal.aborted) break;
         if (!failing)
           this.log.warn(
             { irc: this.config.id },
-            "Crew pogo_dm outbox unavailable; IRC copies wait",
+            "Crew stargate_dm outbox unavailable; IRC copies wait",
           );
         failing = true;
       }
@@ -916,7 +916,7 @@ export class IrcShip {
     if (!client.hasCap("message-tags")) return "skipped";
     try {
       const nick = await client.verifiedNick(recipient.account);
-      this.store.markPogoDmCopy(item.id);
+      this.store.markStargateDmCopy(item.id);
       const tags = { [copyTag]: item.id };
       const guard = () => client.holds(recipient.account, nick);
       for (const line of ircLines(
@@ -931,7 +931,7 @@ export class IrcShip {
   }
 
   /**
-   * A DM to this connection that is one of this ship's own pogo_dm copies:
+   * A DM to this connection that is one of this ship's own stargate_dm copies:
    * from a ship account, tagged with a receipt ID this process recorded.
    * An unknown ID is an ordinary ship DM.
    */
@@ -947,13 +947,13 @@ export class IrcShip {
       !client.isChannel(target) &&
       client.fold(target) === client.fold(client.nick) &&
       shipAccounts(this.config, client.fold).has(client.fold(account)) &&
-      this.store.pogoDmCopy(id)
+      this.store.stargateDmCopy(id)
     );
   }
 
   /**
    * Crew only: bind each IRC session to its crew member in the crew plugin
-   * before a turn, once per process, so pogo_dm and pogo_mail accept it.
+   * before a turn, once per process, so stargate_dm and stargate_mail accept it.
    * Needs an OpenCode crew backend on the captain's OpenCode server. A
    * failure is logged and retried next turn; the turn never waits on it
    * longer than `bindMs`.
@@ -987,7 +987,7 @@ export class IrcShip {
         if (!signal.aborted)
           this.log.warn(
             { irc: member.id },
-            "IRC crew session not bound; pogo_dm and pogo_mail stay unavailable there",
+            "IRC crew session not bound; stargate_dm and stargate_mail stay unavailable there",
           );
       }
     };

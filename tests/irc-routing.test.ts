@@ -41,7 +41,7 @@ function shipConfig(overrides: Record<string, unknown> = {}): IrcConfig {
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: 6667, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_IRC_GALACTICA",
+    passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     access: {
       deniedAccounts: ["mallory"],
@@ -53,7 +53,7 @@ function shipConfig(overrides: Record<string, unknown> = {}): IrcConfig {
       {
         id: "chief",
         account: "galactica-chief",
-        passwordEnv: "POGO_IRC_GALACTICA_CHIEF",
+        passwordEnv: "STARGATE_IRC_GALACTICA_CHIEF",
         channels: ["#galactica"],
         backend: { ...backend, agent: "galactica-crew-chief" },
       },
@@ -297,7 +297,7 @@ test("irc routing: direct messages are per account and captain-only", () => {
     fold: (value: string) => fold(value),
   };
   const first = routeIrcMessage(parsed, context);
-  expect(first?.thread).toMatch(/^pogo-[0-9a-f]{32}$/);
+  expect(first?.thread).toMatch(/^stargate-[0-9a-f]{32}$/);
   expect(routeIrcMessage(parsed, context)?.eventId).toBe(first?.eventId);
 });
 
@@ -399,9 +399,9 @@ test("irc routing: ship and peer senders are marked; access rechecks", () => {
   expect(ircAllowed(config, chief, "jack", "jack")).toBe(false);
   expect(
     ircNote({ channel: "#galactica", user: "galactica", sender: "crew" }),
-  ).toContain("[[pogo:silent]]");
+  ).toContain("[[stargate:silent]]");
   expect(ircNote({ channel: "jack", user: "jack", sender: null })).toBe(
-    "[IRC a direct message, from account jack. Reply only if you are tagged and can add something useful, asked directly, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.]",
+    "[IRC a direct message, from account jack. Reply only if you are tagged and can add something useful, asked directly, or once to an all-call; otherwise answer [[stargate:silent]]. No acknowledgements or thanks. Plain text only.]",
   );
   expect(
     sourceLine({
@@ -418,9 +418,9 @@ test("irc routing: ship and peer senders are marked; access rechecks", () => {
 });
 
 test("irc limits: peers per conversation, ship messages per channel", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const limits = {
     shipKeys: ["captain-key", "chief-key"],
@@ -511,7 +511,7 @@ test("irc config: strict server, crew and pin rules", () => {
   ).toBe(false);
   expect(parse({ crew: [{ ...crew, account: "Galactica" }] })).toBe(false);
   expect(
-    parse({ crew: [{ ...crew, passwordEnv: "POGO_IRC_GALACTICA" }] }),
+    parse({ crew: [{ ...crew, passwordEnv: "STARGATE_IRC_GALACTICA" }] }),
   ).toBe(false);
   expect(parse({ access: { peerCaptains: ["galactica-chief"] } })).toBe(false);
   expect(parse({ unknown: true })).toBe(false);
@@ -587,19 +587,19 @@ test("irc config: IRC-only configs, shared Slack pins and unique IDs", () => {
 });
 
 test("irc config check: password references and caFile, values never printed", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-check-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-check-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const path = join(directory, "pogo.json");
+  const path = join(directory, "stargate.json");
   const irc = shipConfig();
   const env = {
-    POGO_IRC_GALACTICA: "captain-secret",
-    POGO_IRC_GALACTICA_CHIEF: "chief-secret",
+    STARGATE_IRC_GALACTICA: "captain-secret",
+    STARGATE_IRC_GALACTICA_CHIEF: "chief-secret",
   };
   await checkCredentials(path, [], env, [irc]);
   const missing = await checkCredentials(
     path,
     [],
-    { POGO_IRC_GALACTICA: "captain-secret" },
+    { STARGATE_IRC_GALACTICA: "captain-secret" },
     [irc],
   ).catch((error: unknown) => error);
   expect(String(missing)).toContain("Missing IRC password");
@@ -640,9 +640,9 @@ test("irc casemapping: rfc1459 by default, ascii and strict per ISUPPORT", () =>
 });
 
 test("irc casemapping: one folded channel key for caps, routing and denies", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-fold-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-fold-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   // The crew spells the ship channel differently from the captain.
   const mixed = shipConfig({
@@ -731,8 +731,8 @@ test("irc namespace: host, port and network name select a new namespace", async 
       pino({ level: "silent" }),
       {
         env: {
-          POGO_IRC_GALACTICA: "x",
-          POGO_IRC_GALACTICA_CHIEF: "y",
+          STARGATE_IRC_GALACTICA: "x",
+          STARGATE_IRC_GALACTICA_CHIEF: "y",
         },
       },
     );
@@ -787,9 +787,9 @@ test("irc crew confinement: runtime checks use the negotiated CASEMAPPING", () =
 });
 
 test("irc ship cap: per agent, times the ship agents configured in the channel", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-cap-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-cap-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const [chiefConfig] = shipConfig().crew;
   if (!chiefConfig) throw new Error("missing crew fixture");
@@ -804,7 +804,7 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
         ...chiefConfig,
         id: "tyrol",
         account: "galactica-tyrol",
-        passwordEnv: "POGO_IRC_GALACTICA_TYROL",
+        passwordEnv: "STARGATE_IRC_GALACTICA_TYROL",
       },
     ],
   });
@@ -866,9 +866,9 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
 });
 
 test("irc ship cap: a crew → captain DM is capped at per agent × 2", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-dm-cap-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-dm-cap-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const limits = {
     shipKeys: [captain.key, chief.key],
@@ -940,7 +940,7 @@ test("irc all-call: reaches every ship agent in the channel, word-bounded", asyn
         ...chiefConfig,
         id: "tyrol",
         account: "galactica-tyrol",
-        passwordEnv: "POGO_IRC_GALACTICA_TYROL",
+        passwordEnv: "STARGATE_IRC_GALACTICA_TYROL",
         channels: ["#bridge"],
       },
     ],
@@ -1024,9 +1024,9 @@ test("irc all-call: reaches every ship agent in the channel, word-bounded", asyn
 });
 
 test("irc all-call: ship senders count against the channel cap, people do not", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-allcall-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-allcall-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   // 1 per agent × 2 agents (captain + chief) = 2 ship messages an hour.
   const config = shipConfig({ access: { shipTurnsPerAgentPerHour: 1 } });
@@ -1066,7 +1066,7 @@ test("irc all-call: ship senders count against the channel cap, people do not", 
 
 test("irc instructions: response policy, all-calls and crew routing via the captain", async () => {
   for (const text of [ircInstructions, ircCrewInstructions]) {
-    expect(text).toContain("[[pogo:silent]]");
+    expect(text).toContain("[[stargate:silent]]");
     expect(text).toContain("tagged");
     expect(text).toContain("asked directly");
     expect(text).toContain("all-call");
@@ -1074,16 +1074,16 @@ test("irc instructions: response policy, all-calls and crew routing via the capt
     expect(text).toContain("acknowledgements");
     expect(text).toContain("one message");
   }
-  // Crew speak to the captain. Crew-to-crew uses pogo_dm (reply needed now)
-  // or pogo_mail (otherwise); those refuse an IRC session, so there the
+  // Crew speak to the captain. Crew-to-crew uses stargate_dm (reply needed now)
+  // or stargate_mail (otherwise); those refuse an IRC session, so there the
   // crew member asks the captain to relay.
   expect(ircCrewInstructions).toContain("Speak to the captain");
-  expect(ircCrewInstructions).toContain("pogo_dm");
-  expect(ircCrewInstructions).toContain("pogo_mail");
+  expect(ircCrewInstructions).toContain("stargate_dm");
+  expect(ircCrewInstructions).toContain("stargate_mail");
   expect(ircCrewInstructions).toContain("ask the captain");
   expect(ircCrewInstructions).not.toContain("Mesij");
   expect(ircInstructions).toContain("You coordinate the crew");
-  expect(ircInstructions).toContain("pogo_dm");
+  expect(ircInstructions).toContain("stargate_dm");
   // Crew definitions carry the paragraph; every unpinned IRC turn a reminder.
   expect(
     await Bun.file(
@@ -1091,7 +1091,7 @@ test("irc instructions: response policy, all-calls and crew routing via the capt
     ).text(),
   ).toContain("{{ircCrewInstructions}}");
   const note = ircNote({ channel: "#galactica", user: "jack", sender: null });
-  expect(note).toContain("[[pogo:silent]]");
+  expect(note).toContain("[[stargate:silent]]");
   expect(note).toContain("all-call");
   expect(
     ircNote({

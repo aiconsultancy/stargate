@@ -31,7 +31,7 @@ const snapshot: QuotaSnapshot = {
   ],
 };
 const command = {
-  command: "/pogo",
+  command: "/stargate",
   text: "usage",
   api_app_id: "A123",
   team_id: "T123",
@@ -213,13 +213,13 @@ test("quota adapter uses only location-scoped authenticated RPC, no session or i
       });
     },
   });
-  process.env["POGO_QUOTA_TEST_AUTH"] = "Bearer fixture-only";
+  process.env["STARGATE_QUOTA_TEST_AUTH"] = "Bearer fixture-only";
   try {
     const config = backendSchema.parse({
       type: "opencode",
       url: server.url.href,
       directory: "/captain",
-      headersEnv: { Authorization: "POGO_QUOTA_TEST_AUTH" },
+      headersEnv: { Authorization: "STARGATE_QUOTA_TEST_AUTH" },
     });
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     const backend = new OpenCodeBackend(config);
@@ -229,12 +229,12 @@ test("quota adapter uses only location-scoped authenticated RPC, no session or i
       "Quota unavailable",
     );
     expect(requests).toEqual([
-      "/api/rpc/pogo.crew.reporting/quota",
-      "/api/rpc/pogo.crew.reporting/quota",
+      "/api/rpc/stargate.crew.reporting/quota",
+      "/api/rpc/stargate.crew.reporting/quota",
     ]);
     await backend.close();
   } finally {
-    delete process.env["POGO_QUOTA_TEST_AUTH"];
+    delete process.env["STARGATE_QUOTA_TEST_AUTH"];
     await server.stop(true);
   }
 });

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { CrewState, pendingTaskLimit } from "../src/crew/state";
 
 test("legacy state upgrades identity without replacing peers, results or cursors", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-crew-state-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-crew-state-");
   const namespace = "legacy";
   const path = join(
     directory,
@@ -69,7 +69,7 @@ test("legacy state upgrades identity without replacing peers, results or cursors
 });
 
 test("queue ceiling and durable controls remain hard guards; queued order is captain policy", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-crew-state-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-crew-state-");
   const state = await CrewState.open(directory, "custom", "identity-v2");
   const second = await CrewState.open(directory, "custom", "identity-v2");
   try {

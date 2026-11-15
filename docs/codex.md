@@ -40,7 +40,7 @@ A Slack bot:
 ```json
 "backend": {
   "type": "codex",
-  "directory": "/srv/pogo/codex-helper",
+  "directory": "/srv/stargate/codex-helper",
   "model": "gpt-6.1-sol",
   "provider": {
     "baseURL": "http://127.0.0.1:8317/v1",
@@ -59,7 +59,7 @@ registration; see [IRC transport](irc.md#crew-on-irc)). The ship channel is
 {
   "id": "athena",
   "account": "galactica-athena",
-  "passwordEnv": "POGO_IRC_GALACTICA_ATHENA_PASSWORD",
+  "passwordEnv": "STARGATE_IRC_GALACTICA_ATHENA_PASSWORD",
   "channels": ["#ship-galactica"],
   "backend": {
     "type": "codex",
@@ -67,7 +67,7 @@ registration; see [IRC transport](irc.md#crew-on-irc)). The ship channel is
     "model": "gpt-6.1-terra",
     "provider": {
       "baseURL": "http://127.0.0.1:8317/v1",
-      "apiKeyEnv": "POGO_CODEX_ATHENA_PROXY_KEY"
+      "apiKeyEnv": "STARGATE_CODEX_ATHENA_PROXY_KEY"
     },
     "reasoningEffort": "high",
     "sandbox": "workspace-write",
@@ -100,7 +100,7 @@ not configurable. A change to any backend field selects a new session
 namespace, as for other backends.
 
 `baseURL` is the same `/v1` endpoint as the OpenCode `openai-proxy` provider.
-Stargate defines it as the only Codex model provider (`model_provider = "pogo"`,
+Stargate defines it as the only Codex model provider (`model_provider = "stargate"`,
 `wire_api = "responses"`) through `--config` overrides. Command-line
 overrides are above every user and project configuration layer, so no
 `config.toml` can redirect the endpoint or the key. The key travels as a
@@ -198,7 +198,7 @@ Make root own those programs, or list directories that you trust in
 uses its bundled copy, which may not start where the system one does.
 
 `extraPath` is trusted operator input for user-installed programs, such as
-`["/home/pogo/.local/bin"]`. Start-up fails when an entry is reached
+`["/home/stargate/.local/bin"]`. Start-up fails when an entry is reached
 through a symbolic link that Stargate's user or the sandbox can change, is not
 an existing directory, lies inside `directory`, or holds a program whose
 link chain passes through a link inside `directory` or that runs from
@@ -270,9 +270,9 @@ Stargate then sets:
   interactive. The host's `~/.zshenv` therefore does not run. System files
   such as `/etc/zsh/zshenv` still run; other shells' non-interactive
   start-up files (for example fish's `config.fish`) are not controlled.
-- `POGO_CODEX_PROVIDER_KEY`: the value of `apiKeyEnv`, only in the
+- `STARGATE_CODEX_PROVIDER_KEY`: the value of `apiKeyEnv`, only in the
   environment, never in arguments.
-- `POGO_CODEX_TURN`: the turn marker; see [cancellation](#cancellation-and-recovery).
+- `STARGATE_CODEX_TURN`: the turn marker; see [cancellation](#cancellation-and-recovery).
 - `NO_PROXY=*`: no HTTP proxy.
 
 Every other variable, such as Slack tokens, `OPENAI_API_KEY`,
@@ -313,7 +313,7 @@ result is stopped the same way; the turn keeps its result.
 No process of a turn outlives it. The Codex CLI runs in Stargate's own process
 group, and its sandbox helpers and commands run in new sessions and PID
 namespaces, so there is no group to signal. Instead every process of a turn
-inherits a random `POGO_CODEX_TURN` value. Every process that carries the
+inherits a random `STARGATE_CODEX_TURN` value. Every process that carries the
 value gets `SIGTERM`, and whatever remains after five seconds gets
 `SIGKILL`. This includes the CLI itself, the sandbox helper and commands
 that ignore `SIGTERM`.
@@ -380,7 +380,7 @@ default `KillMode` also stops these processes when the service stops.
   start a Codex backend.
 - `workspace-write` refuses a `directory` that contains Stargate's data
   directory or installation, or the home directory. Move Stargate's
-  `dataDirectory` out of the workspace (its default `.pogo` is next to the
+  `dataDirectory` out of the workspace (its default `.stargate` is next to the
   configuration file).
 - Other files outside the sandbox that unsandboxed commands read, such as
   system configuration, are not checked. `danger-full-access` has no

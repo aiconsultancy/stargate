@@ -44,9 +44,9 @@ Generated captain and OpenCode crew definitions keep YAML frontmatter first.
 Their prompt bodies use one pair of valid HTML comments:
 
 ```markdown
-<!-- POGO:START -->
+<!-- STARGATE:START -->
 Stargate-generated role and ship instructions.
-<!-- POGO:END -->
+<!-- STARGATE:END -->
 ```
 
 Generated Pi worker definitions use the same markers, without frontmatter.
@@ -63,14 +63,14 @@ an approved migration, mark only that section and preserve all surrounding text.
 
 ## Configured teams
 
-Captains can persist a waiting-response delay with `pogo_waiting` when a user
-asks to change it. This uses the existing `pogo_crew` permission and verifies
+Captains can persist a waiting-response delay with `stargate_waiting` when a user
+asks to change it. This uses the existing `stargate_crew` permission and verifies
 the caller's real captain session. See [waiting responses](../waiting.md) for
 defaults, off versus zero, workspace persistence and plugin activation.
 
 Captains can post as their own bot to another allowed Slack channel or
-thread with `pogo_post`, instead of asking an operator to relay. It uses the
-`pogo_crew` permission and the captain's `cron` gateway binding, and is off
+thread with `stargate_post`, instead of asking an operator to relay. It uses the
+`stargate_crew` permission and the captain's `cron` gateway binding, and is off
 until the bot sets `captainPost`. Crew cannot use it. See
 [captain posts](../captain-post.md).
 
@@ -80,8 +80,8 @@ maintenance worker `bosun`:
 
 ```sh
 stargate crew init --team team.example.json --id galactica \
-  --directory /srv/pogo/galactica/captain --project /srv/project \
-  --worktrees /srv/pogo/galactica/crew --base origin/main
+  --directory /srv/stargate/galactica/captain --project /srv/project \
+  --worktrees /srv/stargate/galactica/crew --base origin/main
 ```
 
 See [ship maintenance](../ship-maintenance.md) for durable captain/crew journals,
@@ -104,7 +104,7 @@ separators as hyphens. Hidden legacy aliases are rejected: Chief is `chief`,
 not `mario`; Adama is `adama`, not `bowser`. Existing mismatched installations
 need an explicit backed-up identity migration; never delete session history.
 Optional `historyScope` is `team` (default), `project`, or `server`. Captain and
-crew use `pogo_history` to search OpenCode history through the API. Server scope
+crew use `stargate_history` to search OpenCode history through the API. Server scope
 includes all sessions on that OpenCode server, including other namespaces.
 Optional `toolAccess: "direct"` lets this trusted team use all registered tools
 and connectors without maintaining a per-tool list. Omit it for the existing
@@ -157,7 +157,7 @@ The IDs must match. For example, the gateway backend can contain:
 {
   "type": "opencode",
   "url": "http://127.0.0.1:4096",
-  "directory": "/srv/pogo/galactica/captain",
+  "directory": "/srv/stargate/galactica/captain",
   "agent": "galactica-captain-adama",
   "sessionID": "ses_existingCaptain"
 }
@@ -207,16 +207,16 @@ each a team JSON file and disjoint directories:
 
 ```sh
 stargate crew init --team galactica.json --id galactica \
-  --directory /srv/pogo/galactica/captain --project /srv/project \
-  --worktrees /srv/pogo/galactica/crew --base origin/main
+  --directory /srv/stargate/galactica/captain --project /srv/project \
+  --worktrees /srv/stargate/galactica/crew --base origin/main
 stargate crew init --team pegasus.json --id pegasus \
-  --directory /srv/pogo/pegasus/captain --project /srv/project \
-  --worktrees /srv/pogo/pegasus/crew --base origin/main
+  --directory /srv/stargate/pegasus/captain --project /srv/project \
+  --worktrees /srv/stargate/pegasus/crew --base origin/main
 ```
 
 Set both registrations' `backend.url` to that service, but use their own
 generated directory, captain agent and permission rules, and distinct Slack
-app registrations. State stays under each captain's `.local/pogo-crew`.
+app registrations. State stays under each captain's `.local/stargate-crew`.
 
 Do not silently rebind persisted identities to another roster, path or captain.
 Existing roster IDs/directories remain fixed once persisted, including legacy
@@ -261,7 +261,7 @@ For Claude, use `"model": "anthropic/claude-haiku-5-5"` with the same
 `provider` and `"thinkingLevel": "low"`; the proxy must publish
 `claude-haiku-5-5`. Pi model IDs take no `#variant` suffix. Without
 `thinkingLevel`, Pi's default `off` disables Haiku thinking. Set the level
-before `pogo_crew ensure`: an existing worker conversation keeps its level.
+before `stargate_crew ensure`: an existing worker conversation keeps its level.
 The key variable must exist in the **OpenCode plugin host's** environment,
 not only the Slack gateway's environment. No paid/native route is substituted.
 
@@ -270,14 +270,14 @@ at `<captainDirectory>/.local/ship/definitions/<native ID>.md`, not an OpenCode
 agent overlay. The Pi backend consumes that trusted definition when it opens;
 initialization preserves captain edits. Native request hooks advise a reread of
 the shared working agreement only after its content changes, without injecting
-the file contents. `pogo_crew ensure` creates one private Pi conversation, reused
+the file contents. `stargate_crew ensure` creates one private Pi conversation, reused
 across assignments and host restarts. Pi storage lives under the team's private
 state directory, separate from OpenCode sessions. Its peer ID is a Stargate handle,
 not an OpenCode session that can be opened with `opencode mini`.
 
 The captain uses the existing `dispatch`, `wait`, `status`, and `queue: true`
 operations. Final Pi text completes the assigned task automatically; Twiki does
-not call `pogo_crew complete`. Only the originating captain can collect it.
+not call `stargate_crew complete`. Only the originating captain can collect it.
 There is no extra Slack registration. Coding-enabled Pi members support Mesij
 mail, explicit DM and milestone journals through host-bound native tools. Only
 explicit DM can wake a captain. Self-only `pi_history` reads the current native
@@ -348,7 +348,7 @@ and one read-only call before any explicitly authorised write.
 5. Create the starter configuration and worktrees (or use `--team` above):
 
 ```sh
-make crew-init ARGS='--directory /srv/pogo/bowser --project /srv/projects/example --worktrees /srv/pogo/example-crew --id bowser --base origin/main'
+make crew-init ARGS='--directory /srv/stargate/bowser --project /srv/projects/example --worktrees /srv/stargate/example-crew --id bowser --base origin/main'
 ```
 
 The captain and crew directories must not be nested inside each other's
@@ -368,7 +368,7 @@ must exist in the **OpenCode service's** environment, not merely Stargate's shel
 Alternatively, reference an existing private key file without exposing it:
 
 ```sh
-make crew-init ARGS='--directory /srv/pogo/bowser --project /srv/projects/example --worktrees /srv/pogo/example-crew --proxy-key-file /srv/private/proxy-client.key'
+make crew-init ARGS='--directory /srv/stargate/bowser --project /srv/projects/example --worktrees /srv/stargate/example-crew --proxy-key-file /srv/private/proxy-client.key'
 ```
 
 Never pass a token value in `ARGS`. This command does not install/start a
@@ -416,16 +416,16 @@ tokens even when never applied. Native provider compaction does not use this
 background-summary mechanism. See [V2 compaction][compaction].
 
 The captain can read its current session model with
-`pogo_model({ "op": "get" })`. This uses the existing authenticated session
+`stargate_model({ "op": "get" })`. This uses the existing authenticated session
 connection and returns `sessionID` and `model: { providerID, id, variant }`.
 An absent variant returns `default/unspecified`, not an inferred reasoning level.
 If the session has no selected model, the tool reports an error instead of
 guessing. This operation supports only the caller's captain session. It does
 not query the model catalog, create sessions, change models, or restart anything.
-Existing sessions need permission for the `pogo_model` operation `get`.
+Existing sessions need permission for the `stargate_model` operation `get`.
 
 The captain can discover models and switch its own or a worker's session model
-with `pogo_model`. Load `agent-profiles` before selecting a route. Optional
+with `stargate_model`. Load `agent-profiles` before selecting a route. Optional
 `compactFirst` waits for worker compaction completion before switching workers.
 For a running captain, self-compaction is admitted for the next safe point;
 the tool cannot wait for its own running turn. Report admission separately from
@@ -447,7 +447,7 @@ For example, these are tool inputs, not shell commands:
 }
 ```
 
-Use `pogo_history` with `{"op":"search","query":"authentication migration"}`
+Use `stargate_history` with `{"op":"search","query":"authentication migration"}`
 to find prior user/assistant text. Follow its returned cursor while `partial`
 is true. Searches are bounded API scans, not a semantic index. They omit
 reasoning, system prompts and raw tool output, and return historical text as
@@ -469,15 +469,15 @@ an occupied task does not become a free-worker wake if collection races delivery
 Child agents use their own standard tools, never Stargate tools or prefixed names,
 and do not start children. Crew reply on IRC only when tagged, asked directly,
 or once per all-call.
-New tools reuse existing permission actions (`pogo_journal`: `pogo_crew`,
-`pogo_dm`: `pogo_mail`), without replacing stored session permissions.
+New tools reuse existing permission actions (`stargate_journal`: `stargate_crew`,
+`stargate_dm`: `stargate_mail`), without replacing stored session permissions.
 
 Captain maintains `<captainDirectory>/WAYS_OF_WORKING.md`. Initialization only
 creates it if absent. All definitions and Pi member instructions reference this
 same path and advise an initial read and a reread when updated. Contents are not
 repeatedly injected. Existing Markdown journals remain history; new milestones,
 checks, blockers, outcomes and useful native-workaround feedback go through
-`pogo_journal`. Working agreements never grant extra authority.
+`stargate_journal`. Working agreements never grant extra authority.
 
 Install namespaced native definitions and explicit `agent` mappings together.
 An operator can switch existing native sessions to those definitions without

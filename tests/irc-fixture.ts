@@ -48,7 +48,7 @@ const allCaps = [
 /**
  * A small IRCv3 server for tests: CAP 302, SASL PLAIN, labeled echo, channel
  * broadcast with account tags, invite-only channels and INVITE. Not a
- * complete server; it implements what Pogo's client uses.
+ * complete server; it implements what Stargate's client uses.
  */
 export class FakeIrcServer {
   readonly clients: Client[] = [];
@@ -259,7 +259,7 @@ export class FakeIrcServer {
           return;
         }
         if (client.registered) {
-          this.reply(client, `:${client.nick}!u@pogo NICK ${first}`);
+          this.reply(client, `:${client.nick}!u@stargate NICK ${first}`);
         }
         client.nick = first;
         return;
@@ -285,8 +285,8 @@ export class FakeIrcServer {
             this.reply(
               member,
               member.caps.has("extended-join")
-                ? `:${client.nick}!u@pogo JOIN ${channel} ${client.account ?? "*"} :Pogo`
-                : `:${client.nick}!u@pogo JOIN ${channel}`,
+                ? `:${client.nick}!u@stargate JOIN ${channel} ${client.account ?? "*"} :Stargate`
+                : `:${client.nick}!u@stargate JOIN ${channel}`,
             );
         }
         return;
@@ -300,7 +300,10 @@ export class FakeIrcServer {
           return;
         }
         this.invited.add(`${target.account}:${second}`);
-        this.reply(target, `:${client.nick}!u@pogo INVITE ${first} ${second}`);
+        this.reply(
+          target,
+          `:${client.nick}!u@stargate INVITE ${first} ${second}`,
+        );
         this.reply(
           client,
           labelled(`:fake 341 ${client.nick} ${first} ${second}`),
@@ -358,7 +361,7 @@ export class FakeIrcServer {
             ...(client.account ? { account: client.account } : {}),
           }).replace(
             /^(@\S+ )?/,
-            (prefix) => `${prefix}:${client.nick}!u@pogo `,
+            (prefix) => `${prefix}:${client.nick}!u@stargate `,
           );
         for (const other of this.recipients(target))
           if (other !== client) this.reply(other, out(false));
@@ -517,7 +520,7 @@ export class FakeIrcServer {
           msgid: id,
           ...(client.account ? { account: client.account } : {}),
         },
-      ).replace(/^(@\S+ )/, (prefix) => `${prefix}:${client.nick}!u@pogo `);
+      ).replace(/^(@\S+ )/, (prefix) => `${prefix}:${client.nick}!u@stargate `);
       this.reply(to, open);
       for (const line of lines)
         this.reply(
@@ -527,7 +530,7 @@ export class FakeIrcServer {
             ...(line.concat ? { "draft/multiline-concat": "" } : {}),
           }).replace(
             /^(@\S+ )/,
-            (prefix) => `${prefix}:${client.nick}!u@pogo `,
+            (prefix) => `${prefix}:${client.nick}!u@stargate `,
           ),
         );
       this.reply(to, `BATCH -${reference}`);

@@ -59,17 +59,17 @@ test("specialisms share broad tools without granting captain model controls", ()
     effect: "allow",
   });
   expect(research).toContainEqual({
-    action: "pogo_history",
+    action: "stargate_history",
     resource: "*",
     effect: "allow",
   });
   expect(research).not.toContainEqual({
-    action: "pogo_model",
+    action: "stargate_model",
     resource: "*",
     effect: "allow",
   });
   expect(crewPermissions("captain")).toContainEqual({
-    action: "pogo_model",
+    action: "stargate_model",
     resource: "*",
     effect: "allow",
   });

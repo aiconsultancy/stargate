@@ -19,11 +19,11 @@ Record these non-secret inputs before setup. Keep them unchanged on retries.
 | Target project       | `/srv/projects/example`                         | Existing Git repository; do not switch or clean it             |
 | Project base         | Full approved project commit                    | Fetch first; do not use a moving branch for reproducible setup |
 | Namespace and bot ID | `pegasus`                                       | Unique to this installation                                    |
-| Captain directory    | `/srv/pogo/pegasus/captain`                     | Outside all crew configuration trees                           |
-| Crew parent          | `/srv/pogo/pegasus/crew`                        | Separate worktree per configured ID                            |
-| Config               | `/srv/pogo/pegasus/config/pogo.json`            | Separate config directory and `.pogo` queue database           |
+| Captain directory    | `/srv/stargate/pegasus/captain`                 | Outside all crew configuration trees                           |
+| Crew parent          | `/srv/stargate/pegasus/crew`                    | Separate worktree per configured ID                            |
+| Config               | `/srv/stargate/pegasus/config/stargate.json`    | Separate config directory and `.stargate` queue database       |
 | Provisioning journal | Config directory's `.local/provision/bots.json` | Preserve on retries, including uncertain outcomes              |
-| Service name         | `pogo-pegasus`                                  | Never reuse another installation's unit                        |
+| Service name         | `stargate-pegasus`                              | Never reuse another installation's unit                        |
 | Slack workspace/app  | Explicit Team ID and new or unused App ID       | Only the captain needs a registration                          |
 | Slack access         | Human IDs and channel/DM IDs                    | Nonempty allowlists; no implicit wildcards                     |
 | OpenCode endpoint    | Operator-selected stable service URL            | Not the proxy URL; preserve authentication                     |
@@ -76,7 +76,7 @@ Set these non-secret inputs in the setup shell. Replace all placeholders:
 ```sh
 umask 077
 export INSTANCE=pegasus
-export ROOT=/srv/pogo/pegasus
+export ROOT=/srv/stargate/pegasus
 export PROJECT=/srv/projects/example
 export BASE_COMMIT=REPLACE_WITH_FULL_PROJECT_COMMIT
 export PROXY_URL=http://127.0.0.1:8317/v1
@@ -140,7 +140,7 @@ const profile = z.object({
     effect: z.enum(["allow", "deny"]),
   })),
 }).parse(JSON.parse(env.PROFILE_JSON));
-const prefix = `POGO_${env.INSTANCE.toUpperCase().replaceAll("-", "_")}`;
+const prefix = `STARGATE_${env.INSTANCE.toUpperCase().replaceAll("-", "_")}`;
 const bot = botSchema.omit({ slack: true }).parse({
   id: env.INSTANCE,
   displayName: profile.agent,
@@ -178,9 +178,9 @@ Plan, review, then apply after approval:
 
 ```sh
 mise exec -- bun run src/main.ts bot provision \
-  --plan "$ROOT/config/bots.json" --config "$ROOT/config/pogo.json" --json
+  --plan "$ROOT/config/bots.json" --config "$ROOT/config/stargate.json" --json
 mise exec -- bun run src/main.ts bot provision \
-  --plan "$ROOT/config/bots.json" --config "$ROOT/config/pogo.json" --apply --json
+  --plan "$ROOT/config/bots.json" --config "$ROOT/config/stargate.json" --apply --json
 ```
 
 Follow [Slack setup](setup.md#api-creation-or-browser-creation) for browser
@@ -190,16 +190,16 @@ Manifest API outcome stops automatic retries; never delete its journal.
 
 ## 4. Supply authentication in the correct process
 
-| Reference                                          | Process that needs the value                               |
-| -------------------------------------------------- | ---------------------------------------------------------- |
-| `POGO_PEGASUS_APP_TOKEN`, `POGO_PEGASUS_BOT_TOKEN` | New gateway only                                           |
-| `POGO_PEGASUS_OPENCODE_AUTHORIZATION`              | Gateway; actual authorization header value                 |
-| `{file:…/client.key}` in generated providers       | OpenCode service reads the private file                    |
-| Pi `backend.provider.apiKeyEnv`                    | OpenCode plugin host for crew; gateway for a direct Pi bot |
-| Linear OAuth                                       | OpenCode's credential store on this host                   |
+| Reference                                                  | Process that needs the value                               |
+| ---------------------------------------------------------- | ---------------------------------------------------------- |
+| `STARGATE_PEGASUS_APP_TOKEN`, `STARGATE_PEGASUS_BOT_TOKEN` | New gateway only                                           |
+| `STARGATE_PEGASUS_OPENCODE_AUTHORIZATION`                  | Gateway; actual authorization header value                 |
+| `{file:…/client.key}` in generated providers               | OpenCode service reads the private file                    |
+| Pi `backend.provider.apiKeyEnv`                            | OpenCode plugin host for crew; gateway for a direct Pi bot |
+| Linear OAuth                                               | OpenCode's credential store on this host                   |
 
 Store gateway values through a password manager or hidden-input terminal in
-`$ROOT/config/pogo.json.env`, mode `0600`, or its process environment. Never
+`$ROOT/config/stargate.json.env`, mode `0600`, or its process environment. Never
 request them in chat, pass them as arguments or print them. Do not source this
 file as shell code; Stargate and systemd load it as environment data.
 
@@ -217,15 +217,15 @@ Pi reporters are optional. To use one, add a named Pi member before profile
 initialization using the [Twiki configuration](agents/default-opencode.md#pi-durable-crew),
 then set the plan's `crewActivity` to `summary` or `detailed` with that member's
 ID as `reporter`. The default is `off`. Its proxy-key variable must exist in
-the plugin host, not merely in `pogo.json.env`. Reporting uses a tools-free
+the plugin host, not merely in `stargate.json.env`. Reporting uses a tools-free
 context even if maintenance has coding tools. Do not add a second Slack bot.
 
 ## 5. Validate, then start only the new instance
 
 ```sh
 mise exec -- bun run src/main.ts config check \
-  --config "$ROOT/config/pogo.json" --schema-only
-mise exec -- bun run src/main.ts config check --config "$ROOT/config/pogo.json"
+  --config "$ROOT/config/stargate.json" --schema-only
+mise exec -- bun run src/main.ts config check --config "$ROOT/config/stargate.json"
 ```
 
 Schema validation and token-prefix checks do not prove authentication or
@@ -238,17 +238,17 @@ After the operator approves a model smoke test and startup, run the new config
 in the foreground. Check one mention, a same-thread follow-up, and one bounded
 crew assignment. Confirm that the worker session's native OpenCode agent is
 its assigned ID. The captain should ensure the configured roster through
-`pogo_crew`; do not create duplicate root sessions manually. Verify a denied
+`stargate_crew`; do not create duplicate root sessions manually. Verify a denied
 request cannot trigger work and an existing installation still works.
 
 Only after foreground checks pass, and with service approval:
 
 ```sh
 mise exec -- bun run src/main.ts service install \
-  --config "$ROOT/config/pogo.json" --name "pogo-$INSTANCE"
+  --config "$ROOT/config/stargate.json" --name "stargate-$INSTANCE"
 mise exec -- bun run src/main.ts service start \
-  --config "$ROOT/config/pogo.json" --name "pogo-$INSTANCE"
-mise exec -- bun run src/main.ts service status --name "pogo-$INSTANCE"
+  --config "$ROOT/config/stargate.json" --name "stargate-$INSTANCE"
+mise exec -- bun run src/main.ts service status --name "stargate-$INSTANCE"
 ```
 
 Stop the foreground listener before service startup. The normal unit uses the
@@ -283,6 +283,6 @@ has not been created merely because these templates exist.
 ## Search readiness
 
 Follow [session, documentation and code search](knowledge-search.md). Verify
-`pogo_history` and stored permissions in each existing session. If the target
+`stargate_history` and stored permissions in each existing session. If the target
 project has a documentation index, follow its instructions in the project and
 each crew checkout. Verify that the agent host can query the correct index.

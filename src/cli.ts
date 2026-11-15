@@ -20,7 +20,7 @@ import {
   slackInstructions,
 } from "./setup";
 
-const common = `--config PATH  Configuration file (default: ./pogo.json)
+const common = `--config PATH  Configuration file (default: ./stargate.json)
 --help, -h     Show help. No command runs when help is requested.
 Tokens are NEVER accepted as CLI arguments. Use environment variable references.
 Wizard credentials go in <config>.env with mode 0600. Keep this file private.`;
@@ -28,7 +28,6 @@ Wizard credentials go in <config>.env with mode 0600. Keep this file private.`;
 const help: Record<string, string> = {
   root: `Stargate — Slack AI assistant
 Usage: stargate <command> [options]
-The pogo command is a compatibility alias.
 Commands:
   start             Run configured bots (also the default command)
   init              Interactive setup; append a bot safely
@@ -112,7 +111,7 @@ ${slackInstructions}`,
 --mesij-command PATH   Absolute Mesij executable (default: resolved from PATH)
 --proxy-url URL        CLIProxyAPI endpoint (default: http://127.0.0.1:8317/v1)
 --proxy-key-file PATH  Reference an existing private key file; never a key value
---cron-config PATH     Bind cron and pogo_post tools to this Stargate config path
+--cron-config PATH     Bind cron and stargate_post tools to this Stargate config path
 --cron-bot ID          Cron bot registration; requires --cron-config (and vice versa)
 --maintenance-config PATH  Render this Stargate config's nightly maintenance window
                        into captain and crew instructions (when enabled)
@@ -143,7 +142,7 @@ ${common}`,
 --help, -h   Show help
 ${slackInstructions}`,
   service: `Usage: stargate service <install|start|stop|status|uninstall> [options]
---name NAME  Unit basename (default: pogo; letters, digits, _ and -)
+--name NAME  Unit basename (default: stargate; letters, digits, _ and -)
 ${common}
 Linux systemd USER scope only. No sudo.
 install: write ~/.config/systemd/user/<name>.service, then daemon-reload.
@@ -151,11 +150,11 @@ Existing units are not overwritten. Install does not enable or start.
 start/stop: change running state only. status: print systemd unit properties.
 uninstall: disable and stop, remove Stargate-managed unit, then daemon-reload.
 Manual commands for the default name:
-  systemctl --user start pogo.service
-  systemctl --user enable pogo.service
-  systemctl --user enable --now pogo.service
-  journalctl --user -u pogo.service -f
-For --name NAME, replace pogo.service with NAME.service.
+  systemctl --user start stargate.service
+  systemctl --user enable stargate.service
+  systemctl --user enable --now stargate.service
+  journalctl --user -u stargate.service -f
+For --name NAME, replace stargate.service with NAME.service.
 WorkingDirectory is the config directory; EnvironmentFile is <config>.env.
 Requires an available systemd user session bus. Login starts enabled units.`,
 };
@@ -249,7 +248,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
     console.log(help[topic ?? "root"] ?? help["root"]);
     return { command: "exit" };
   }
-  const configPath = resolve(v.config ?? "pogo.json");
+  const configPath = resolve(v.config ?? "stargate.json");
   const botOptions = [
     "id",
     "app-id",

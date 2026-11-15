@@ -28,7 +28,7 @@ afterEach(async () => {
 });
 
 async function directory() {
-  const path = await mkdtemp("/tmp/opencode/pogo-attachments-");
+  const path = await mkdtemp("/tmp/opencode/stargate-attachments-");
   cleanup.push(path);
   return path;
 }
@@ -283,8 +283,8 @@ test("credential and machine-state paths are denied before any filesystem access
     "id_ed25519",
     "server.key",
     "cert.pem",
-    "pogo.json",
-    "pogo.json.env",
+    "stargate.json",
+    "stargate.json.env",
     "app.env",
     "state.sqlite",
     "state.sqlite-wal",

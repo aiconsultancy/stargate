@@ -37,8 +37,8 @@ function completion(
 }
 
 test("real Pi crew extension reads only native self history and deduplicates DM admission", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-pi-coordination-");
-  const apiKeyEnv = "POGO_COORDINATION_TEST_KEY";
+  const directory = await mkdtemp("/tmp/opencode/stargate-pi-coordination-");
+  const apiKeyEnv = "STARGATE_COORDINATION_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
   const requests: Record<string, unknown>[] = [];
@@ -88,8 +88,10 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
       "Fixture answer",
     );
     expect(authorized).toBe(1);
-    expect(JSON.stringify(requests[0]?.["tools"])).toContain("pogo_journal");
-    expect(JSON.stringify(requests[0]?.["tools"])).toContain("pogo_quota");
+    expect(JSON.stringify(requests[0]?.["tools"])).toContain(
+      "stargate_journal",
+    );
+    expect(JSON.stringify(requests[0]?.["tools"])).toContain("stargate_quota");
     expect(JSON.stringify(requests[1]?.["messages"])).toContain(
       "Read own history",
     );
@@ -142,9 +144,9 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
 
 for (const tools of ["coding", "none"] as const) {
   test(`Pi ${tools} request hook sends changed-file advice once; reports stay excluded`, async () => {
-    const directory = await mkdtemp("/tmp/opencode/pogo-pi-agreement-");
+    const directory = await mkdtemp("/tmp/opencode/stargate-pi-agreement-");
     const path = join(directory, "WAYS_OF_WORKING.md");
-    const apiKeyEnv = `POGO_AGREEMENT_${tools.toUpperCase()}_TEST_KEY`;
+    const apiKeyEnv = `STARGATE_AGREEMENT_${tools.toUpperCase()}_TEST_KEY`;
     const previous = process.env[apiKeyEnv];
     process.env[apiKeyEnv] = "fixture-only";
     const requests: Record<string, unknown>[] = [];
@@ -230,7 +232,7 @@ for (const tools of ["coding", "none"] as const) {
 for (const scenario of [
   {
     title: "journal page over 16 KB remains valid JSON",
-    name: "pogo_journal",
+    name: "stargate_journal",
     args: { op: "read", after: 0, limit: 20 },
     result: {
       entries: Array.from({ length: 20 }, () => ({ text: "x".repeat(1500) })),
@@ -240,7 +242,7 @@ for (const scenario of [
   },
   {
     title: "oversized journal returns a fixed error, not partial JSON",
-    name: "pogo_journal",
+    name: "stargate_journal",
     args: { op: "read", after: 0, limit: 40 },
     result: {
       entries: Array.from({ length: 40 }, () => ({ text: "x".repeat(1500) })),
@@ -250,22 +252,22 @@ for (const scenario of [
   },
   {
     title: "oversized inbox returns a fixed error, not partial JSON",
-    name: "pogo_mail",
+    name: "stargate_mail",
     args: { op: "inbox", limit: 20 },
     result: { messages: [{ text: "x".repeat(64000) }], nextAfter: 999 },
     error: "result too large, retry with a smaller limit",
   },
   {
     title: "safe crew errors remain actionable",
-    name: "pogo_mail",
+    name: "stargate_mail",
     args: { op: "inbox", limit: 20 },
     result: null,
     error: "Owned task context is required.",
   },
 ]) {
   test(`real Pi binding: ${scenario.title}`, async () => {
-    const directory = await mkdtemp("/tmp/opencode/pogo-pi-output-");
-    const apiKeyEnv = "POGO_OUTPUT_TEST_KEY";
+    const directory = await mkdtemp("/tmp/opencode/stargate-pi-output-");
+    const apiKeyEnv = "STARGATE_OUTPUT_TEST_KEY";
     const previous = process.env[apiKeyEnv];
     process.env[apiKeyEnv] = "fixture-only";
     const requests: Record<string, unknown>[] = [];
@@ -337,8 +339,8 @@ for (const scenario of [
 }
 
 test("native Pi history bounds visible text and retains the raw page cursor", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-pi-visible-history-");
-  const apiKeyEnv = "POGO_VISIBLE_HISTORY_TEST_KEY";
+  const directory = await mkdtemp("/tmp/opencode/stargate-pi-visible-history-");
+  const apiKeyEnv = "STARGATE_VISIBLE_HISTORY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
   const requests: Record<string, unknown>[] = [];

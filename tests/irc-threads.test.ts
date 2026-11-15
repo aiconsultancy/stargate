@@ -36,15 +36,15 @@ async function setup(
     caps: offered,
   }).start();
   cleanup.push(() => fake.stop());
-  const directory = await mkdtemp("/tmp/opencode/pogo-irc-threads-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-irc-threads-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = ircSchema.parse({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_IRC_PASSWORD",
+    passwordEnv: "STARGATE_IRC_PASSWORD",
     channels: ["#galactica"],
     // Isolate framing from the separately recorded pinned-delivery race.
     concurrency: 1,
@@ -58,7 +58,7 @@ async function setup(
   });
   const log = pino({ level: "silent" });
   const ship = await IrcShip.create(config, store, log, {
-    env: { POGO_IRC_PASSWORD: "fixture-password" },
+    env: { STARGATE_IRC_PASSWORD: "fixture-password" },
     timing: { reconnectMinMs: 20, intervalMs: 5, burst: 50 },
     readyMs: 2000,
   });

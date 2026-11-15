@@ -47,7 +47,7 @@ function git(directory: string, ...args: string[]) {
 }
 
 async function fixture(options: { repository?: boolean } = {}) {
-  const base = await mkdtemp("/tmp/opencode/pogo-admin-");
+  const base = await mkdtemp("/tmp/opencode/stargate-admin-");
   const project = join(base, "project");
   const worktrees = Object.fromEntries(
     crew.map((id) => [id, join(base, "worktrees", id)]),
@@ -480,7 +480,7 @@ test("abandon is idempotent, CAS-guarded and captain-only", async () => {
         { ...abandon(f, current), acknowledgeUnconfirmedStop: false },
         f.captain(),
       ),
-    ).rejects.toThrow("Invalid pogo_crew input");
+    ).rejects.toThrow("Invalid stargate_crew input");
     expect(f.engine.state.abandonment(task.id)).toBeNull();
     const first = await f.engine.run(abandon(f, current), f.captain());
     expect(await f.engine.run(abandon(f, current), f.captain())).toEqual(first);
@@ -710,7 +710,7 @@ test("lost receipt with own input queued runs without resubmission; cancel withd
     expect(f.engine.state.abandonment(task.id)).toMatchObject({
       stop: "confirmed",
       previousStatus: "cancelling",
-      operationKey: "pogo:cancel",
+      operationKey: "stargate:cancel",
     });
     expect(f.engine.state.task(task.id)).toMatchObject({
       status: "cancelled",
@@ -929,7 +929,7 @@ test("reset requires exact state and acknowledgement, and keeps a recoverable ch
     };
     await expect(
       f.engine.run({ op: "reset", crew: "bosun", expected }, f.captain()),
-    ).rejects.toThrow("Invalid pogo_crew input");
+    ).rejects.toThrow("Invalid stargate_crew input");
     await writeFile(join(root, "new.txt"), "changed after inspection\n");
     await expect(
       f.engine.run(
@@ -1004,7 +1004,7 @@ test("workspace mutation is blocked by active work, held controls, slot races an
     };
     const stash = { op: "stash" as const, crew: "bosun", expected };
     await expect(f.engine.run(stash, f.captain())).rejects.toThrow(
-      "Pogo-active work",
+      "Stargate-active work",
     );
     await f.engine.run(
       { op: "complete", taskID: running.id, result: "Done" },
@@ -1047,7 +1047,7 @@ test("workspace mutation is blocked by active work, held controls, slot races an
 });
 
 test("Pi status adopts only the bound committed answer after restart; abandoned tasks stay released", async () => {
-  const base = await mkdtemp("/tmp/opencode/pogo-admin-pi-");
+  const base = await mkdtemp("/tmp/opencode/stargate-admin-pi-");
   const answers = new Map<string, string>();
   const requests: string[] = [];
   const backend: PiWorkerBackend = {

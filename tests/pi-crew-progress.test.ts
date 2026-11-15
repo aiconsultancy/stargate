@@ -73,7 +73,7 @@ function assistant(
 }
 
 async function fixture(report = false) {
-  const directory = await mkdtemp("/tmp/opencode/pogo-pi-progress-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-pi-progress-");
   const state = await CrewState.open(directory, "progress", "identity");
   const clock = new Clock();
   const member = teamSchema.parse({

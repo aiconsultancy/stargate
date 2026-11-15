@@ -356,6 +356,7 @@ const deniedNames = [
   /\.(?:sqlite\d*|db)(?:-(?:wal|shm|journal))?$/i,
   /^credentials?(?:[._-]|$)/i,
   /^(?:secrets?|tokens?|passwords?)(?:[._-]|$)/i,
+  /^stargate\.json/i,
   /^pogo\.json/i,
   /^(?:auth|service)\.json$/i,
   /^kubeconfig/i,
@@ -510,7 +511,7 @@ async function readExact(
  * Validate one published file and record its durable identity. Reads only a
  * bounded regular file at the exact canonical path; denial happens before
  * any filesystem access. Trust ceiling: a published, non-denied file readable
- * by Pogo can be sent to the proven origin; this is not a sandbox.
+ * by Stargate can be sent to the proven origin; this is not a sandbox.
  */
 export async function inspectAttachment(
   file: PublishedFile,

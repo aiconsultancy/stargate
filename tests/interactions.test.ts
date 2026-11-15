@@ -24,16 +24,16 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
   const ack = async () => {
     calls.push("ack");
   };
-  await controls.command({ command: "/pogo", text: "pair" }, ack);
+  await controls.command({ command: "/stargate", text: "pair" }, ack);
   await controls.command({ command: "/cron", text: "list" }, ack);
-  await controls.command({ command: "/pogo", text: "crew" }, ack);
-  await controls.command({ command: "/pogo", text: "crew twiki" }, ack);
-  await controls.command({ command: "/pogo", text: "usage" }, ack);
+  await controls.command({ command: "/stargate", text: "crew" }, ack);
+  await controls.command({ command: "/stargate", text: "crew twiki" }, ack);
+  await controls.command({ command: "/stargate", text: "usage" }, ack);
   await controls.interactive(
-    { actions: [{ action_id: "pogo_pair_generate" }] },
+    { actions: [{ action_id: "stargate_pair_generate" }] },
     ack,
   );
-  await controls.interactive({ view: { callback_id: "pogo_pair" } }, ack);
+  await controls.interactive({ view: { callback_id: "stargate_pair" } }, ack);
   await controls.interactive("stop", ack);
   await controls.interactive({ actions: [{ action_id: "cron_add" }] }, ack);
   expect(calls).toEqual([
@@ -49,7 +49,12 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
     "cron-interactive",
   ]);
   const acks: (Record<string, unknown> | undefined)[] = [];
-  for (const command of ["/pair", "/pogo-other", "/cron-other", undefined]) {
+  for (const command of [
+    "/pair",
+    "/stargate-other",
+    "/cron-other",
+    undefined,
+  ]) {
     await controls.command({ command }, async (payload) => {
       acks.push(payload);
     });
@@ -65,7 +70,7 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
     "",
     undefined,
   ]) {
-    await controls.command({ command: "/pogo", text }, async (payload) => {
+    await controls.command({ command: "/stargate", text }, async (payload) => {
       expect(payload).toMatchObject({ response_type: "ephemeral" });
     });
   }

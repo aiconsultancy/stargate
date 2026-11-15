@@ -54,7 +54,7 @@ import { botKey } from "../src/routing";
 import { Store } from "../src/store";
 import { tarball } from "./tar";
 
-const base = await mkdtemp("/tmp/opencode/pogo-run-");
+const base = await mkdtemp("/tmp/opencode/stargate-run-");
 afterAll(async () => {
   api.stop(true);
   await rm(base, { recursive: true, force: true });
@@ -65,7 +65,7 @@ const repo = join(base, "repo");
 // The release has a crew plugin, so staging records its digest.
 const releaseFiles = {
   "package.json":
-    '{ "name": "pogo", "exports": { ".": "./src/crew/plugin.ts" } }\n',
+    '{ "name": "stargate", "exports": { ".": "./src/crew/plugin.ts" } }\n',
   "src/main.ts": "export {};\n",
   "src/crew/plugin.ts": "export const plugin = 2;\n",
 };
@@ -91,7 +91,7 @@ const commit = git("rev-parse", "HEAD");
 git(
   "archive",
   "--format=tar.gz",
-  "--prefix=pogo-v0.2.0/",
+  "--prefix=stargate-v0.2.0/",
   "-o",
   join(base, "a.tgz"),
   "HEAD",
@@ -99,7 +99,7 @@ git(
 const archive = new Uint8Array(await readFile(join(base, "a.tgz")));
 const sha = (data: Uint8Array) =>
   createHash("sha256").update(data).digest("hex");
-const checksum = `${sha(archive)}  pogo-v0.2.0.tar.gz\n`;
+const checksum = `${sha(archive)}  stargate-v0.2.0.tar.gz\n`;
 const proxyAsset = tarball([
   { path: "cli-proxy-api", data: "proxy-8.0.60", mode: 0o755 },
 ]);
@@ -114,18 +114,18 @@ const api = Bun.serve({
   async fetch(request): Promise<Response> {
     const url = new URL(request.url);
     const root = `http://127.0.0.1:${apiPort}`;
-    const pogo = "/repos/aiconsultancy/stargate";
+    const stargate = "/repos/aiconsultancy/stargate";
     const asset = (id: number, name: string, size: number, extra = {}) => ({
       id,
       name,
       size,
-      url: `${root}${pogo}/releases/assets/${id}`,
+      url: `${root}${stargate}/releases/assets/${id}`,
       created_at: hoursAgo(1),
       updated_at: hoursAgo(1),
       uploader: { login: "github-actions[bot]" },
       ...extra,
     });
-    const pogoRelease = () => ({
+    const stargateRelease = () => ({
       id: 1,
       tag_name: "v0.2.0",
       draft: false,
@@ -133,23 +133,23 @@ const api = Bun.serve({
       published_at: hoursAgo(1),
       author: { login: "github-actions[bot]" },
       assets: [
-        asset(1, "pogo-v0.2.0.tar.gz", archive.length),
-        asset(2, "pogo-v0.2.0.tar.gz.sha256", checksum.length),
+        asset(1, "stargate-v0.2.0.tar.gz", archive.length),
+        asset(2, "stargate-v0.2.0.tar.gz.sha256", checksum.length),
       ],
     });
     switch (url.pathname) {
-      case `${pogo}/releases`:
-        return Response.json([pogoRelease()]);
+      case `${stargate}/releases`:
+        return Response.json([stargateRelease()]);
       // One release by its tag; any other tag is 404 below.
-      case `${pogo}/releases/tags/v0.2.0`:
-        return Response.json(pogoRelease());
-      case `${pogo}/releases/assets/1`:
+      case `${stargate}/releases/tags/v0.2.0`:
+        return Response.json(stargateRelease());
+      case `${stargate}/releases/assets/1`:
         return new Response(archive);
-      case `${pogo}/releases/assets/2`:
+      case `${stargate}/releases/assets/2`:
         return new Response(checksum);
-      case `${pogo}/git/ref/tags/v0.2.0`:
+      case `${stargate}/git/ref/tags/v0.2.0`:
         return Response.json({ object: { type: "commit", sha: commit } });
-      case `${pogo}/compare/${commit}...main`:
+      case `${stargate}/compare/${commit}...main`:
         return Response.json({ status: "identical" });
       case "/repos/router-for-me/CLIProxyAPI/releases":
         return Response.json([
@@ -280,10 +280,10 @@ async function install(
   fixture.gateway = "active";
   fixture.time = now;
   fixture.openCodeRestarts = 0;
-  const root = join(dir, "pogo");
+  const root = join(dir, "stargate");
   const old = join(root, "releases", "old");
   await mkdir(join(old, "src"), { recursive: true });
-  await writeFile(join(old, "package.json"), '{ "name": "pogo" }\n');
+  await writeFile(join(old, "package.json"), '{ "name": "stargate" }\n');
   await writeFile(join(old, "src", "main.ts"), "");
   await adoptRelease(root, old, "0.1.0");
   const captain = join(dir, "captain");
@@ -295,7 +295,7 @@ async function install(
         package: join(root, "deployment-plugin"),
         options: {
           namespace: "ship",
-          stateDirectory: join(captain, ".local", "pogo-crew"),
+          stateDirectory: join(captain, ".local", "stargate-crew"),
           captainDirectory: captain,
           worktrees: {},
           team: {
@@ -355,19 +355,19 @@ async function install(
       enabled: true,
       installID: "test-install",
       report: { bot: "helper", channel: "C123" },
-      services: { gateway: "pogo.service" },
+      services: { gateway: "stargate.service" },
       components: {
-        pogo: true,
+        stargate: true,
         cliproxyapi: true,
         agentClis: true,
         models: true,
       },
       proxy: { url, clientKeyFile: join(dir, "client.key") },
       // Tree comparison is covered by the release tests; this fixture opts out.
-      pogo: {
+      stargate: {
         root,
         apiURL: url,
-        tokenEnv: "POGO_RELEASE_TOKEN",
+        tokenEnv: "STARGATE_RELEASE_TOKEN",
         requireTreeCheck: false,
       },
       cliproxyapi: {
@@ -385,11 +385,11 @@ async function install(
       ...overrides,
     },
   };
-  const path = join(dir, "pogo.json");
+  const path = join(dir, "stargate.json");
   await writeFile(path, `${JSON.stringify(raw, null, 2)}\n`);
   const config = configSchema.parse(raw);
   await mkdir(config.dataDirectory, { recursive: true });
-  const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
+  const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
   store.saveSession('["k","C123","1.0"]', "ses_captain");
   store.close();
   return { config, path };
@@ -434,7 +434,7 @@ const runner: CommandRunner = {
       const [, action, unit] = rest;
       if (unit === "opencode2.service" && action === "restart")
         fixture.openCodeRestarts++;
-      if (unit !== "pogo.service") return ok();
+      if (unit !== "stargate.service") return ok();
       if (action === "is-active") return ok(`${fixture.gateway}\n`);
       if (action === "stop") {
         if (fixture.stopFails) return { code: 1, stdout: "", stderr: "" };
@@ -443,7 +443,7 @@ const runner: CommandRunner = {
       if (action === "restart" || action === "start") {
         fixture.gateway = "active";
         const current = await linkedRelease(
-          join(fixture.dir, "pogo"),
+          join(fixture.dir, "stargate"),
           "current",
         );
         const version = current?.metadata.version ?? null;
@@ -451,7 +451,7 @@ const runner: CommandRunner = {
           await writeFile(
             join(fixture.dir, "data", "ready.json"),
             JSON.stringify({
-              schema: "pogo.ready.v1",
+              schema: "stargate.ready.v1",
               pid: process.pid,
               readyAt: fixture.time,
               version,
@@ -485,7 +485,7 @@ const opencode: OpenCodeControl = {
   ],
   plugins: async () => [
     {
-      path: join(fixture.dir, "pogo", "deployment-plugin"),
+      path: join(fixture.dir, "stargate", "deployment-plugin"),
       active: await fixture.pluginsOK(fixture),
     },
   ],
@@ -495,7 +495,7 @@ const opencode: OpenCodeControl = {
 
 /** One systemd invocation: the run and its ExecStopPost share the ID. */
 const invocation = {
-  POGO_RELEASE_TOKEN: "release-token",
+  STARGATE_RELEASE_TOKEN: "release-token",
   INVOCATION_ID: "0123456789abcdef0123456789abcdef",
 };
 const deps = (extra: Partial<Dependencies> = {}): Dependencies => ({
@@ -508,7 +508,7 @@ const deps = (extra: Partial<Dependencies> = {}): Dependencies => ({
     },
   },
   connect: async () => opencode,
-  env: { POGO_RELEASE_TOKEN: "release-token" },
+  env: { STARGATE_RELEASE_TOKEN: "release-token" },
   uuid: () => crypto.randomUUID(),
   ...extra,
 });
@@ -557,7 +557,7 @@ test("cleanup-only maintenance records results without stopping services", async
   const { config, path } = await install();
   if (!config.maintenance) throw new Error("fixture maintenance missing");
   config.maintenance.components = {
-    pogo: false,
+    stargate: false,
     cliproxyapi: false,
     agentClis: false,
     models: false,
@@ -589,7 +589,7 @@ test("cleanup fails closed when the shared OpenCode server has activity", async 
   const { config, path } = await install();
   if (!config.maintenance) throw new Error("fixture maintenance missing");
   config.maintenance.components = {
-    pogo: false,
+    stargate: false,
     cliproxyapi: false,
     agentClis: false,
     models: false,
@@ -613,7 +613,7 @@ test("cleanup checkpoints intent and result privately before one final notice", 
   const { config, path } = await install();
   if (!config.maintenance) throw new Error("fixture maintenance missing");
   config.maintenance.components = {
-    pogo: false,
+    stargate: false,
     cliproxyapi: false,
     agentClis: false,
     models: false,
@@ -663,7 +663,7 @@ test("cleanup checkpoints intent and result privately before one final notice", 
   expect(result.report.restarts).toEqual([]);
 });
 const live = async () => ({
-  release: await readlink(join(fixture.dir, "pogo", "current")),
+  release: await readlink(join(fixture.dir, "stargate", "current")),
   proxy: await readlink(join(fixture.dir, "cpa-current")),
   cli: JSON.parse(
     await readFile(
@@ -690,7 +690,9 @@ async function expectConsistent(report: {
   expect(state.journal).toBeNull();
   expect(state.gateway).toBe("active");
   expect(state.release).toBe(
-    statusOf(report, "pogo") === "updated" ? "releases/0.2.0" : "releases/old",
+    statusOf(report, "stargate") === "updated"
+      ? "releases/0.2.0"
+      : "releases/old",
   );
   expect(state.proxy).toContain(
     statusOf(report, "cliproxyapi") === "updated" ? "8.0.60" : "8.0.54",
@@ -717,7 +719,7 @@ describe("nightly maintenance run", () => {
     expect(
       Object.fromEntries(report.components.map((c) => [c.id, c.status])),
     ).toEqual({
-      pogo: "planned",
+      stargate: "planned",
       cliproxyapi: "planned",
       "npm:@opencode/cli": "planned",
       models: "planned",
@@ -731,7 +733,7 @@ describe("nightly maintenance run", () => {
   test("a queued crew assignment does not defer the run; the report names it", async () => {
     const { config, path } = await install();
     const state = await CrewState.open(
-      join(fixture.dir, "captain", ".local", "pogo-crew"),
+      join(fixture.dir, "captain", ".local", "stargate-crew"),
       "ship",
       "fingerprint",
     );
@@ -755,7 +757,7 @@ describe("nightly maintenance run", () => {
       originCaptain: "ses_e49d787old",
       originIsPin: false,
       report: false,
-      action: `Ask the captain to run pogo_crew status ${id}`,
+      action: `Ask the captain to run stargate_crew status ${id}`,
     };
     const planned = await run(config, path, "plan");
     expect(planned.report.notes).toEqual([note]);
@@ -775,7 +777,7 @@ describe("nightly maintenance run", () => {
       ),
     ).text as string;
     expect(summary).toContain(
-      `crew task ${id} for chief is queued (from an earlier captain session): ask the captain to run pogo_crew status ${id}`,
+      `crew task ${id} for chief is queued (from an earlier captain session): ask the captain to run stargate_crew status ${id}`,
     );
     await expectConsistent(report);
   });
@@ -827,13 +829,13 @@ describe("nightly maintenance run", () => {
         report.components.map((c) => [c.id, [c.before, c.after, c.status]]),
       ),
     ).toEqual({
-      pogo: ["0.1.0", "0.2.0", "updated"],
+      stargate: ["0.1.0", "0.2.0", "updated"],
       cliproxyapi: ["8.0.54", "8.0.60", "updated"],
       "npm:@opencode/cli": ["2.2.7", "2.2.9", "updated"],
       models: ["gpt-6.1-sol", "gpt-6.2-sol", "updated"],
     });
     await expectConsistent(report);
-    expect(await readlink(join(fixture.dir, "pogo", "previous"))).toBe(
+    expect(await readlink(join(fixture.dir, "stargate", "previous"))).toBe(
       "releases/old",
     );
     // L2: the dotfiles symlink stays a link; its target got the change.
@@ -843,7 +845,7 @@ describe("nightly maintenance run", () => {
     expect(
       await readFile(join(fixture.dir, "dotfiles", "team.json"), "utf8"),
     ).toContain("gpt-6.2-sol#high");
-    // H4: pogo.json is not rewritten, so the bot key and Slack mappings stay.
+    // H4: stargate.json is not rewritten, so the bot key and Slack mappings stay.
     const after = configSchema.parse(JSON.parse(await readFile(path, "utf8")))
       .bots[0];
     if (!after) throw new Error("bot");
@@ -884,14 +886,14 @@ describe("nightly maintenance run", () => {
         "utf8",
       ),
     );
-    expect(notice.text).toContain("pogo: updated 0.1.0 → 0.2.0");
+    expect(notice.text).toContain("stargate: updated 0.1.0 → 0.2.0");
   });
 
   test("readiness failure rolls the release back and marks it known-bad", async () => {
     const { config, path } = await install();
     fixture.readyVersions = new Set(["0.1.0"]);
     const { report } = await run(config, path);
-    expect(report.components.find((c) => c.id === "pogo")).toMatchObject({
+    expect(report.components.find((c) => c.id === "stargate")).toMatchObject({
       status: "rolled-back",
       reason: "readiness-failed",
       after: "0.1.0",
@@ -905,7 +907,9 @@ describe("nightly maintenance run", () => {
     fixture.time = now + 86_400_000;
     fixture.readyVersions = new Set(["0.1.0", "0.2.0"]);
     const next = await run(config, path);
-    expect(next.report.components.find((c) => c.id === "pogo")).toMatchObject({
+    expect(
+      next.report.components.find((c) => c.id === "stargate"),
+    ).toMatchObject({
       status: "skipped",
       reason: "known-bad",
     });
@@ -930,7 +934,7 @@ describe("nightly maintenance run", () => {
     // as the gateway is back, before readiness is decided.
     let started = false;
     fixture.onCommand = async (command) => {
-      if (command === "systemctl --user restart pogo.service" && !started) {
+      if (command === "systemctl --user restart stargate.service" && !started) {
         started = true;
         sql(
           `INSERT INTO cron_runs (id,scheduleId,dueAt) VALUES ('r1','s1',${now})`,
@@ -938,7 +942,7 @@ describe("nightly maintenance run", () => {
       }
     };
     const gatewayRestarts = () =>
-      commands("systemctl --user restart pogo.service").length;
+      commands("systemctl --user restart stargate.service").length;
     const { report, attention } = await run(config, path, "run", {
       env: invocation,
     });
@@ -995,7 +999,7 @@ describe("nightly maintenance run", () => {
       ),
     );
     expect(alert).toMatchObject({
-      schema: "pogo.maintenance.alert.v1",
+      schema: "stargate.maintenance.alert.v1",
       journal: true,
     });
     // Recovery keeps failing loudly until the gateway is ready.
@@ -1014,7 +1018,7 @@ describe("nightly maintenance run", () => {
     let result = await run(config, path);
     // Neither the new nor the old proxy answers: no release or model change.
     expect(statusOf(result.report, "cliproxyapi")).toBe("failed");
-    expect(statusOf(result.report, "pogo")).not.toBe("updated");
+    expect(statusOf(result.report, "stargate")).not.toBe("updated");
     expect(statusOf(result.report, "models")).not.toBe("updated");
     expect(result.attention).toBe(true);
     expect(await readlink(join(fixture.dir, "cpa-current"))).toContain(
@@ -1037,7 +1041,7 @@ describe("nightly maintenance run", () => {
       reason: "health-failed",
     });
     // The old proxy answers again, so the other components continue.
-    expect(statusOf(result.report, "pogo")).toBe("updated");
+    expect(statusOf(result.report, "stargate")).toBe("updated");
     await expectConsistent(result.report);
   });
 
@@ -1065,7 +1069,7 @@ describe("nightly maintenance run", () => {
   test("abort at any live phase leaves nothing half-applied", async () => {
     for (const trigger of [
       "npm install",
-      "systemctl --user stop pogo.service",
+      "systemctl --user stop stargate.service",
       "systemctl --user restart cpa.service",
       "systemctl --user restart opencode2.service",
       "switchModel",
@@ -1116,8 +1120,10 @@ describe("nightly maintenance run", () => {
     );
     expect(recovered.ok).toBe(true);
     expect(during).toEqual(["inactive"]);
-    expect(commands("systemctl --user start pogo.service")).toEqual([]);
-    expect(commands("systemctl --user restart pogo.service")).toHaveLength(1);
+    expect(commands("systemctl --user start stargate.service")).toEqual([]);
+    expect(commands("systemctl --user restart stargate.service")).toHaveLength(
+      1,
+    );
     const state = await live();
     expect(state).toMatchObject({
       release: "releases/old",
@@ -1143,8 +1149,8 @@ describe("nightly maintenance run", () => {
     await writeFile(
       join(config.dataDirectory, "maintenance", "gateway-stopped.json"),
       JSON.stringify({
-        unit: "pogo.service",
-        pogoRoot: null,
+        unit: "stargate.service",
+        stargateRoot: null,
         previousRelease: null,
       }),
       { mode: 0o600 },
@@ -1181,7 +1187,7 @@ describe("nightly maintenance run", () => {
     });
     expect(result.attention).toBe(true);
     expect(await readFile(journalPath, "utf8")).toBe("{ truncated");
-    expect(commands("systemctl --user start pogo.service")).toHaveLength(1);
+    expect(commands("systemctl --user start stargate.service")).toHaveLength(1);
     expect(commands("npm")).toEqual([]);
   });
 
@@ -1189,9 +1195,9 @@ describe("nightly maintenance run", () => {
     const { config, path } = await install();
     // The new release's plugin never loads; everything else is fine.
     fixture.pluginsOK = async (f) =>
-      (await readlink(join(f.dir, "pogo", "current"))) !== "releases/0.2.0";
+      (await readlink(join(f.dir, "stargate", "current"))) !== "releases/0.2.0";
     const { report } = await run(config, path);
-    expect(report.components.find((c) => c.id === "pogo")).toMatchObject({
+    expect(report.components.find((c) => c.id === "stargate")).toMatchObject({
       status: "rolled-back",
       reason: "plugins-failed",
     });
@@ -1300,7 +1306,7 @@ describe("nightly maintenance run", () => {
     );
     const { config, path } = await install({
       components: {
-        pogo: false,
+        stargate: false,
         cliproxyapi: false,
         agentClis: false,
         models: true,
@@ -1352,7 +1358,7 @@ describe("nightly maintenance run", () => {
     await symlink("01-blended", join(profiles, "current"));
     const { config, path } = await install({
       components: {
-        pogo: false,
+        stargate: false,
         cliproxyapi: false,
         agentClis: false,
         models: true,
@@ -1382,14 +1388,14 @@ describe("nightly maintenance run", () => {
     expect(commands("systemctl --user restart cpa.service")).toEqual([]);
     expect(commands("systemctl --user restart opencode2.service")).toEqual([]);
     expect(statusOf(report, "npm:@opencode/cli")).toBe("rolled-back");
-    expect(statusOf(report, "pogo")).toBe("deferred");
+    expect(statusOf(report, "stargate")).toBe("deferred");
     await expectConsistent(report);
   });
 
   test("a failed CLI update reinstalls the previous version with its recorded cutoff", async () => {
     const { config, path } = await install({
       components: {
-        pogo: false,
+        stargate: false,
         cliproxyapi: false,
         agentClis: true,
         models: false,
@@ -1426,7 +1432,7 @@ describe("nightly maintenance run", () => {
     const { config, path } = await install();
     fixture.onCommand = async (command) => {
       if (!command.startsWith("npm install")) return;
-      const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
+      const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
       store.enqueue({
         eventId: "E1",
         botKey: "k",
@@ -1467,7 +1473,7 @@ describe("nightly maintenance run", () => {
 
   test("hundreds of Slack-thread sessions neither block nor get switched", async () => {
     const { config, path } = await install();
-    const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
+    const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
     for (let i = 0; i < 200; i++) {
       store.saveSession(`["k","C123","t${i}.0"]`, `ses_thread${i}`);
       fixture.sessions.set(`ses_thread${i}`, {
@@ -1543,7 +1549,7 @@ describe("nightly maintenance run", () => {
   test("a starting (auto-restart) gateway is stopped like an active one", async () => {
     const { config, path } = await install({
       components: {
-        pogo: false,
+        stargate: false,
         cliproxyapi: false,
         agentClis: true,
         models: false,
@@ -1551,13 +1557,13 @@ describe("nightly maintenance run", () => {
     });
     fixture.gateway = "activating";
     await run(config, path);
-    expect(commands("systemctl --user stop pogo.service")).toHaveLength(1);
+    expect(commands("systemctl --user stop stargate.service")).toHaveLength(1);
   });
 
   test("a report that cannot be written does not hide the outcome", async () => {
     const { config, path } = await install({
       components: {
-        pogo: false,
+        stargate: false,
         cliproxyapi: false,
         agentClis: true,
         models: false,
@@ -1627,18 +1633,18 @@ const writeJournal = async (config: Config, journal: unknown) => {
   return path;
 };
 const v2 = (fields: Record<string, unknown>) => ({
-  schema: "pogo.maintenance.journal.v2",
+  schema: "stargate.maintenance.journal.v2",
   runID: crypto.randomUUID(),
   ...fields,
 });
 const teamPath = () => join(fixture.dir, "team.json");
 
-/** Only a Pogo release is due. */
-async function pogoOnly(overrides: Record<string, unknown> = {}) {
+/** Only a Stargate release is due. */
+async function stargateOnly(overrides: Record<string, unknown> = {}) {
   const installed = await install(overrides);
   if (!installed.config.maintenance) throw new Error("no maintenance");
   installed.config.maintenance.components = {
-    pogo: true,
+    stargate: true,
     cliproxyapi: false,
     agentClis: false,
     models: false,
@@ -1647,7 +1653,7 @@ async function pogoOnly(overrides: Record<string, unknown> = {}) {
 }
 /** The running release records a crew plugin: the release's, or another. */
 async function runningPlugin(plugin = releaseFiles["src/crew/plugin.ts"]) {
-  const old = join(fixture.dir, "pogo", "releases", "old");
+  const old = join(fixture.dir, "stargate", "releases", "old");
   for (const [path, text] of Object.entries({
     ...releaseFiles,
     "src/crew/plugin.ts": plugin,
@@ -1658,7 +1664,7 @@ async function runningPlugin(plugin = releaseFiles["src/crew/plugin.ts"]) {
   expect(await writePluginDigest(old)).toMatch(/^v1:/);
 }
 const queueJob = (config: Config) => {
-  const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
+  const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
   store.enqueue({
     eventId: "E-busy",
     botKey: "k",
@@ -1675,9 +1681,9 @@ const stepNames = (report: { steps: { name: string }[] }) =>
 
 describe("gateway-only update", () => {
   test("an unchanged crew plugin restarts the gateway only, also while the crew works", async () => {
-    const { config, path } = await pogoOnly();
+    const { config, path } = await stargateOnly();
     await runningPlugin();
-    // Pogo's own captain session runs, and OpenCode cannot be asked.
+    // Stargate's own captain session runs, and OpenCode cannot be asked.
     fixture.active = ["ses_captain"];
     const { report, attention } = await run(config, path, "run", {
       connect: async () => {
@@ -1686,15 +1692,15 @@ describe("gateway-only update", () => {
     });
     expect(attention).toBe(false);
     expect(report.outcome).toBe("completed");
-    expect(statusOf(report, "pogo")).toBe("updated");
+    expect(statusOf(report, "stargate")).toBe("updated");
     expect(stepNames(report)).toEqual([
-      "pogo-stage",
+      "stargate-stage",
       "crew-plugin-unchanged",
       "idle-gate",
       "idle-before-stop",
       "gateway-stop",
       "idle-after-stop",
-      "pogo-switch",
+      "stargate-switch",
       "gateway-ready",
     ]);
     expect(report.restarts.map((restart) => restart.service)).toEqual([
@@ -1711,7 +1717,7 @@ describe("gateway-only update", () => {
   });
 
   test("a gateway job defers it; nothing is stopped", async () => {
-    const { config, path } = await pogoOnly();
+    const { config, path } = await stargateOnly();
     await runningPlugin();
     queueJob(config);
     const { report } = await run(config, path);
@@ -1725,13 +1731,13 @@ describe("gateway-only update", () => {
 
   test("a changed or unknown crew plugin takes the full path", async () => {
     for (const plugin of ["export const plugin = 1;\n", undefined]) {
-      const { config, path } = await pogoOnly();
+      const { config, path } = await stargateOnly();
       // Undefined: the running release has no recorded digest.
       if (plugin) await runningPlugin(plugin);
       await updateState(config.dataDirectory, (state) => {
         state.openCodeRelease = "old";
       });
-      // The full path waits for Pogo's sessions.
+      // The full path waits for Stargate's sessions.
       fixture.active = ["ses_captain"];
       expect((await run(config, path)).report).toMatchObject({
         outcome: "deferred",
@@ -1740,7 +1746,7 @@ describe("gateway-only update", () => {
       fixture.active = [];
       fixture.time = now;
       const { report } = await run(config, path);
-      expect(statusOf(report, "pogo")).toBe("updated");
+      expect(statusOf(report, "stargate")).toBe("updated");
       expect(stepNames(report)).not.toContain("crew-plugin-unchanged");
       expect(stepNames(report)).toContain("opencode-restart");
       expect(fixture.openCodeRestarts).toBe(1);
@@ -1755,18 +1761,18 @@ describe("gateway-only update", () => {
     const { config, path } = await install();
     await runningPlugin();
     const { report } = await run(config, path);
-    expect(statusOf(report, "pogo")).toBe("updated");
+    expect(statusOf(report, "stargate")).toBe("updated");
     expect(stepNames(report)).not.toContain("crew-plugin-unchanged");
     expect(fixture.openCodeRestarts).toBe(1);
     await expectConsistent(report);
   });
 
   test("a gateway that is not ready goes back to the previous release without an OpenCode restart", async () => {
-    const { config, path } = await pogoOnly();
+    const { config, path } = await stargateOnly();
     await runningPlugin();
     fixture.readyVersions = new Set(["0.1.0"]);
     const { report } = await run(config, path);
-    expect(statusOf(report, "pogo")).toBe("rolled-back");
+    expect(statusOf(report, "stargate")).toBe("rolled-back");
     expect(report.reason).toBeUndefined();
     expect(fixture.openCodeRestarts).toBe(0);
     expect(await live()).toMatchObject({
@@ -1780,9 +1786,11 @@ describe("gateway-only update", () => {
   });
 
   test("an interrupted gateway-only update is undone while the crew works", async () => {
-    const { config, path } = await pogoOnly();
+    const { config, path } = await stargateOnly();
     await runningPlugin();
-    expect(statusOf((await run(config, path)).report, "pogo")).toBe("updated");
+    expect(statusOf((await run(config, path)).report, "stargate")).toBe(
+      "updated",
+    );
     // As a kill leaves it after the switch: the release is not committed
     // and the gateway is stopped. No OpenCode entry exists.
     await writeJournal(
@@ -1803,11 +1811,11 @@ describe("gateway-only update", () => {
       { name: "recover-previous-run", status: "ok" },
     ]);
     expect(next.report.rollbacks).toMatchObject([
-      { component: "pogo", to: "old", status: "ok" },
+      { component: "stargate", to: "old", status: "ok" },
     ]);
     expect(fixture.openCodeRestarts).toBe(0);
     // The same run then installs the release again, gateway only.
-    expect(statusOf(next.report, "pogo")).toBe("updated");
+    expect(statusOf(next.report, "stargate")).toBe("updated");
     expect(await live()).toMatchObject({
       release: "releases/0.2.0",
       gateway: "active",
@@ -1816,10 +1824,10 @@ describe("gateway-only update", () => {
   });
 
   test("the release that OpenCode still runs is not removed", async () => {
-    const { config, path } = await pogoOnly();
+    const { config, path } = await stargateOnly();
     await runningPlugin();
     // OpenCode loaded its plugin two gateway-only updates ago.
-    const root = join(fixture.dir, "pogo");
+    const root = join(fixture.dir, "stargate");
     for (const [name, version] of [
       ["loaded", "0.0.1"],
       ["unused", "0.0.2"],
@@ -1828,10 +1836,10 @@ describe("gateway-only update", () => {
       await mkdir(directory, { recursive: true });
       await writeFile(join(directory, "package.json"), "{}\n");
       await writeFile(
-        join(directory, ".pogo-release.json"),
+        join(directory, ".stargate-release.json"),
         (
           await readFile(
-            join(root, "releases", "old", ".pogo-release.json"),
+            join(root, "releases", "old", ".stargate-release.json"),
             "utf8",
           )
         ).replace('"0.1.0"', `"${version}"`),
@@ -1840,9 +1848,9 @@ describe("gateway-only update", () => {
     await updateState(config.dataDirectory, (state) => {
       state.openCodeRelease = "loaded";
     });
-    if (config.maintenance?.pogo) config.maintenance.pogo.keep = 2;
+    if (config.maintenance?.stargate) config.maintenance.stargate.keep = 2;
     const { report } = await run(config, path);
-    expect(statusOf(report, "pogo")).toBe("updated");
+    expect(statusOf(report, "stargate")).toBe("updated");
     const left = (await readdir(join(root, "releases"))).sort();
     expect(left).toEqual(["0.2.0", "loaded", "old"]);
     expect((await readState(config.dataDirectory)).openCodeRelease).toBe(
@@ -1878,12 +1886,12 @@ describe("operator update", () => {
       () => [],
     );
 
-  test("updates the Pogo release now: no window, no idle gate, no cool-off, nothing else", async () => {
+  test("updates the Stargate release now: no window, no idle gate, no cool-off, nothing else", async () => {
     // Every component is configured; tonight's run would update them all.
     const { config, path } = await install();
-    if (!config.maintenance?.pogo) throw new Error("no maintenance");
+    if (!config.maintenance?.stargate) throw new Error("no maintenance");
     config.maintenance.enabled = false;
-    config.maintenance.pogo.coolOffHours = 24;
+    config.maintenance.stargate.coolOffHours = 24;
     // Outside the window, with a running captain turn and a queued request.
     fixture.time = noon;
     fixture.active = ["ses_captain"];
@@ -1892,14 +1900,14 @@ describe("operator update", () => {
     expect(attention).toBe(false);
     expect(report.outcome).toBe("completed");
     expect(report.components).toMatchObject([
-      { id: "pogo", before: "0.1.0", after: "0.2.0", status: "updated" },
+      { id: "stargate", before: "0.1.0", after: "0.2.0", status: "updated" },
     ]);
     expect(report.models).toEqual([]);
     expect(stepNames(report)).toEqual([
       "operator-update",
-      "pogo-stage",
+      "stargate-stage",
       "gateway-stop",
-      "pogo-switch",
+      "stargate-switch",
       "opencode-restart",
       "gateway-ready",
     ]);
@@ -1924,7 +1932,7 @@ describe("operator update", () => {
     await runningPlugin();
     fixture.time = noon;
     const { report } = await update(config, path, "0.2.0");
-    expect(statusOf(report, "pogo")).toBe("updated");
+    expect(statusOf(report, "stargate")).toBe("updated");
     expect(stepNames(report)).toContain("crew-plugin-unchanged");
     expect(report.restarts.map((restart) => restart.service)).toEqual([
       "gateway",
@@ -1941,11 +1949,11 @@ describe("operator update", () => {
     });
     expect(reportPath).toBeUndefined();
     expect(report.components).toMatchObject([
-      { id: "pogo", candidate: "0.2.0", status: "planned" },
+      { id: "stargate", candidate: "0.2.0", status: "planned" },
     ]);
     expect(fixture.commands).toEqual([]);
     expect(await reports(config)).toEqual([]);
-    expect(await readdir(join(fixture.dir, "pogo", "releases"))).toEqual([
+    expect(await readdir(join(fixture.dir, "stargate", "releases"))).toEqual([
       "old",
     ]);
     expect(await live()).toMatchObject({
@@ -1963,7 +1971,9 @@ describe("operator update", () => {
       ["0.3.0", { status: "failed", reason: "not-found" }],
     ] as const) {
       const { report } = await update(config, path, version);
-      expect(report.components).toMatchObject([{ id: "pogo", ...expected }]);
+      expect(report.components).toMatchObject([
+        { id: "stargate", ...expected },
+      ]);
     }
     await expect(update(config, path, "v0.2")).rejects.toThrow(UpdateRefused);
     expect(commands("systemctl")).toEqual([]);
@@ -1972,13 +1982,13 @@ describe("operator update", () => {
 
   test("a release that cannot be verified is not installed", async () => {
     const { config, path } = await install();
-    if (!config.maintenance?.pogo) throw new Error("no maintenance");
+    if (!config.maintenance?.stargate) throw new Error("no maintenance");
     // The tree comparison is required but no checkout is configured.
-    config.maintenance.pogo.requireTreeCheck = true;
+    config.maintenance.stargate.requireTreeCheck = true;
     fixture.time = noon;
     const { report } = await update(config, path, "0.2.0");
     expect(report.components).toMatchObject([
-      { id: "pogo", status: "failed", reason: "not-configured" },
+      { id: "stargate", status: "failed", reason: "not-configured" },
     ]);
     expect(commands("systemctl")).toEqual([]);
     expect((await live()).release).toBe("releases/old");
@@ -1995,11 +2005,11 @@ describe("operator update", () => {
     });
     const refused = await update(config, path, "0.2.0");
     expect(refused.report.components).toMatchObject([
-      { id: "pogo", status: "skipped", reason: "known-bad" },
+      { id: "stargate", status: "skipped", reason: "known-bad" },
     ]);
     expect(commands("systemctl")).toEqual([]);
     const retried = await update(config, path, "0.2.0", { retryFailed: true });
-    expect(statusOf(retried.report, "pogo")).toBe("updated");
+    expect(statusOf(retried.report, "stargate")).toBe("updated");
     expect(
       (await readState(config.dataDirectory)).failedReleases["0.2.0"],
     ).toBeUndefined();
@@ -2015,7 +2025,7 @@ describe("operator update", () => {
     const before = await readFile(journalPath, "utf8");
     for (const mode of ["plan", "run"] as const)
       await expect(update(config, path, "0.2.0", { mode })).rejects.toThrow(
-        "pogo maintenance recover",
+        "stargate maintenance recover",
       );
     expect(await readFile(journalPath, "utf8")).toBe(before);
     expect(fixture.commands).toEqual([]);
@@ -2029,7 +2039,7 @@ describe("operator update", () => {
     fixture.active = ["ses_captain"];
     queueJob(config);
     const { report } = await update(config, path, "0.2.0");
-    expect(statusOf(report, "pogo")).toBe("rolled-back");
+    expect(statusOf(report, "stargate")).toBe("rolled-back");
     expect(report.steps.map((step) => step.status)).not.toContain("skipped");
     expect(await live()).toMatchObject({
       release: "releases/old",
@@ -2046,7 +2056,7 @@ describe("operator update", () => {
       const { config, path } = await install();
       if (!config.maintenance) throw new Error("no maintenance");
       config.maintenance.components = {
-        pogo: true,
+        stargate: true,
         cliproxyapi: false,
         agentClis: false,
         models: false,
@@ -2103,7 +2113,7 @@ describe("operator update", () => {
           JSON.parse((await readJournalFile(config.dataDirectory)) ?? "{}"),
         ).toMatchObject({ gateway: { restartPending: true } });
         expect(JSON.parse(await readFile(alert, "utf8"))).toMatchObject({
-          schema: "pogo.maintenance.alert.v1",
+          schema: "stargate.maintenance.alert.v1",
           runID,
           outcome: "failed",
           reason: "recovery-required",
@@ -2125,19 +2135,19 @@ describe("operator update", () => {
       executable: "/opt/bun",
       path: "/opt:/usr/local/bin:/usr/bin:/bin",
     };
-    /** The installed Pogo that runs the command: a verified release. */
+    /** The installed Stargate that runs the command: a verified release. */
     const installed = async (config: Config, name = "caller") => {
-      const root = config.maintenance?.pogo?.root;
+      const root = config.maintenance?.stargate?.root;
       if (!root) throw new Error("no release root");
       const directory = join(root, "releases", name);
       await mkdir(join(directory, "src"), { recursive: true });
       await writeFile(join(directory, "src", "main.ts"), "");
       await writeFile(
-        join(directory, ".pogo-release.json"),
+        join(directory, ".stargate-release.json"),
         JSON.stringify({
           ...JSON.parse(
             await readFile(
-              join(root, "releases", "old", ".pogo-release.json"),
+              join(root, "releases", "old", ".stargate-release.json"),
               "utf8",
             ),
           ),
@@ -2184,7 +2194,7 @@ describe("operator update", () => {
         now: true,
       });
       expect(code).toBe(0);
-      const name = `pogo-update-0-2-0-${noon / 1000}`;
+      const name = `stargate-update-0-2-0-${noon / 1000}`;
       expect(launched).toEqual([
         [
           "systemd-run",
@@ -2192,7 +2202,7 @@ describe("operator update", () => {
           "--service-type=exec",
           "--collect",
           `--unit=${name}`,
-          "--description=Pogo operator update to 0.2.0",
+          "--description=Stargate operator update to 0.2.0",
           `--working-directory=${dirname(path)}`,
           `--property=EnvironmentFile=-${path}.env`,
           "--property=UMask=0077",
@@ -2213,7 +2223,9 @@ describe("operator update", () => {
           path,
         ],
       ]);
-      expect(text).toContain(`Started ${name}.service: Pogo 0.1.0 → 0.2.0.`);
+      expect(text).toContain(
+        `Started ${name}.service: Stargate 0.1.0 → 0.2.0.`,
+      );
       expect(text).toContain(join(config.dataDirectory, "maintenance/reports"));
       expect(text).toContain("ready.json");
       // The command itself changed nothing.
@@ -2235,7 +2247,7 @@ describe("operator update", () => {
 
     test("only an installed, verified release makes the update; a checkout is refused", async () => {
       const { config, path } = await install();
-      const root = config.maintenance?.pogo?.root;
+      const root = config.maintenance?.stargate?.root;
       if (!root) throw new Error("no release root");
       fixture.time = noon;
       await runningPlugin();
@@ -2244,9 +2256,12 @@ describe("operator update", () => {
       await writeFile(outside, "");
       // Verified metadata does not make a directory elsewhere a release.
       await writeFile(
-        join(fixture.dir, "checkout", ".pogo-release.json"),
+        join(fixture.dir, "checkout", ".stargate-release.json"),
         await readFile(
-          join(dirname(dirname(await installed(config))), ".pogo-release.json"),
+          join(
+            dirname(dirname(await installed(config))),
+            ".stargate-release.json",
+          ),
           "utf8",
         ),
       );
@@ -2278,7 +2293,7 @@ describe("operator update", () => {
             { entrypoint },
           );
           await expect(attempt).rejects.toThrow(UpdateRefused);
-          await expect(attempt).rejects.toThrow("Run the installed pogo");
+          await expect(attempt).rejects.toThrow("Run the installed stargate");
         }
       // Nothing ran: no unit, no stage, no switch.
       expect(fixture.commands).toEqual([]);
@@ -2368,7 +2383,7 @@ describe("operator update", () => {
         plan: true,
       });
       expect([first.code, first.launched]).toEqual([0, []]);
-      expect(first.text).toContain("Pogo 0.1.0 → 0.2.0");
+      expect(first.text).toContain("Stargate 0.1.0 → 0.2.0");
       expect(first.text).toContain("Restart: decided after staging.");
       expect(first.text).toContain("Nothing was changed.");
       expect(fixture.commands).toEqual([]);
@@ -2382,7 +2397,7 @@ describe("operator update", () => {
         // Staged and verified, then rolled back: not the current release.
         fixture.readyVersions = new Set(["0.1.0"]);
         const failed = await update(config, path, "0.2.0");
-        expect(statusOf(failed.report, "pogo")).toBe("rolled-back");
+        expect(statusOf(failed.report, "stargate")).toBe("rolled-back");
         fixture.commands = [];
         const { code, text } = await command(config, path, {
           version: "0.2.0",
@@ -2410,9 +2425,9 @@ describe("operator update", () => {
       });
       expect([code, launched]).toEqual([0, []]);
       expect(text).toContain(
-        "Operator update of Pogo, outside the window and without the idle gate: completed.",
+        "Operator update of Stargate, outside the window and without the idle gate: completed.",
       );
-      expect(text).toContain("pogo: updated 0.1.0 → 0.2.0");
+      expect(text).toContain("stargate: updated 0.1.0 → 0.2.0");
       expect((await live()).release).toBe("releases/0.2.0");
       // Staged now: the plan knows which services a switch restarts.
       const again = await command(config, path, {
@@ -2426,12 +2441,12 @@ describe("operator update", () => {
       const { config, path } = await install();
       await runningPlugin();
       fixture.time = noon;
-      const root = config.maintenance?.pogo?.root;
+      const root = config.maintenance?.stargate?.root;
       if (!root) throw new Error("no release root");
       const entrypoint = await installed(config, "0.0.1");
       for (const version of ["0.0.1", "0.0.2", "0.0.3", "0.0.4"]) {
         const main = await installed(config, version);
-        const metadata = join(dirname(dirname(main)), ".pogo-release.json");
+        const metadata = join(dirname(dirname(main)), ".stargate-release.json");
         await writeFile(
           metadata,
           JSON.stringify({
@@ -2496,7 +2511,7 @@ describe("journal recovery", () => {
   test("a journal that names anything outside the configuration is refused", async () => {
     const cutoff = "2026-10-01T00:00:00.000Z";
     const v1 = {
-      schema: "pogo.maintenance.journal.v1",
+      schema: "stargate.maintenance.journal.v1",
       runID: crypto.randomUUID(),
     };
     for (const journal of [
@@ -2548,7 +2563,7 @@ describe("journal recovery", () => {
       expect(result.message).toContain("outside the configuration");
       // Only the configured gateway is started; nothing else runs.
       expect(fixture.commands).toEqual([
-        ["systemctl", "--user", "start", "pogo.service"],
+        ["systemctl", "--user", "start", "stargate.service"],
       ]);
       expect(await readFile(path, "utf8")).toBe(JSON.stringify(journal));
     }
@@ -2566,15 +2581,17 @@ describe("journal recovery", () => {
     await chmod(join(config.dataDirectory, "maintenance"), 0o700);
     fixture.commands = [];
     expect((await recoverInterruptedRun(config, deps())).ok).toBe(true);
-    expect(commands("systemctl --user restart pogo.service")).toHaveLength(1);
+    expect(commands("systemctl --user restart stargate.service")).toHaveLength(
+      1,
+    );
   });
 
   test("a first-round (v1) journal recovers with the configured commands", async () => {
     const { config } = await install();
     await writeJournal(config, {
-      schema: "pogo.maintenance.journal.v1",
+      schema: "stargate.maintenance.journal.v1",
       runID: crypto.randomUUID(),
-      gateway: { unit: "pogo.service" },
+      gateway: { unit: "stargate.service" },
       openCode: {
         restart: ["systemctl", "--user", "restart", "opencode2.service"],
         restarted: true,
@@ -2691,7 +2708,7 @@ describe("journal recovery", () => {
       writeFile(
         join(config.dataDirectory, "ready.json"),
         JSON.stringify({
-          schema: "pogo.ready.v1",
+          schema: "stargate.ready.v1",
           pid: process.pid,
           readyAt: now,
           version,
@@ -2701,7 +2718,9 @@ describe("journal recovery", () => {
     await ready("0.2.0");
     await writeJournal(config, v2({ gateway: { restartPending: false } }));
     expect((await recoverInterruptedRun(config, deps())).ok).toBe(true);
-    expect(commands("systemctl --user restart pogo.service")).toHaveLength(1);
+    expect(commands("systemctl --user restart stargate.service")).toHaveLength(
+      1,
+    );
     // The current release answering: no restart needed.
     await ready("0.1.0");
     await writeJournal(config, v2({ gateway: { restartPending: false } }));
@@ -2781,7 +2800,7 @@ describe("journal recovery", () => {
       opencode.active = original;
     }
     expect(fixture.openCodeRestarts).toBe(0);
-    expect(commands("systemctl --user restart pogo.service")).toEqual([]);
+    expect(commands("systemctl --user restart stargate.service")).toEqual([]);
     const left = JSON.parse(
       (await readJournalFile(config.dataDirectory)) ?? "{}",
     );
@@ -2823,7 +2842,7 @@ describe("journal recovery", () => {
     // Starting a stopped gateway interrupts nothing; Slack works again
     // while the undo waits for the next idle boundary.
     expect(fixture.gateway).toBe("active");
-    expect(commands("systemctl --user start pogo.service")).toHaveLength(1);
+    expect(commands("systemctl --user start stargate.service")).toHaveLength(1);
     expect(await readFile(journalPath, "utf8")).toContain('"gateway"');
   });
 
@@ -2844,7 +2863,7 @@ describe("journal recovery", () => {
     );
     fixture.gateway = "inactive";
     fixture.onCommand = async (command) => {
-      if (command === "systemctl --user start pogo.service")
+      if (command === "systemctl --user start stargate.service")
         sql(`UPDATE cron_schedules SET nextAt=${now + 86_400_000}`);
     };
     const { report } = await run(config, path);
@@ -2876,7 +2895,7 @@ describe("journal recovery", () => {
       { mode: 0o600 },
     );
     fixture.gateway = "inactive";
-    for (const env of [invocation, { POGO_RELEASE_TOKEN: "x" }]) {
+    for (const env of [invocation, { STARGATE_RELEASE_TOKEN: "x" }]) {
       fixture.commands = [];
       const result = await recoverInterruptedRun(config, deps({ env }), {
         afterRun: true,
@@ -2991,7 +3010,7 @@ describe("journal recovery", () => {
     fixture.gateway = "activating";
     // Once recovery restarts it and it is ready, it runs the schedule.
     fixture.onCommand = async (command) => {
-      if (command === "systemctl --user restart pogo.service") {
+      if (command === "systemctl --user restart stargate.service") {
         const db = new Database(join(config.dataDirectory, "cron.sqlite"));
         db.exec(`UPDATE cron_schedules SET nextAt=${now + 86_400_000}`);
         db.close();
@@ -3011,7 +3030,7 @@ describe("journal recovery", () => {
     await writeFile(
       join(config.dataDirectory, "ready.json"),
       JSON.stringify({
-        schema: "pogo.ready.v1",
+        schema: "stargate.ready.v1",
         pid: process.pid,
         readyAt: now,
         version: "0.1.0",
@@ -3019,7 +3038,7 @@ describe("journal recovery", () => {
     );
     const silent: CommandRunner = {
       async run(command, options) {
-        if (command.join(" ") === "systemctl --user is-active pogo.service")
+        if (command.join(" ") === "systemctl --user is-active stargate.service")
           return { code: 1, stdout: "", stderr: "" };
         return runner.run(command, options);
       },

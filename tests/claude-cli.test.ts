@@ -18,9 +18,9 @@ import { claudeBackendSchema } from "../src/config";
  * Messages fixture: no provider is contacted. A fake HOME holds canary
  * credentials, settings and memory that must never be used.
  */
-const canary = "POGOCANARY";
-const memory = "POGOPROJECTMEMORY";
-const apiKeyEnv = "POGO_CLAUDE_CLI_TEST_KEY";
+const canary = "STARGATECANARY";
+const memory = "STARGATEPROJECTMEMORY";
+const apiKeyEnv = "STARGATE_CLAUDE_CLI_TEST_KEY";
 const key = "local-proxy-test-only";
 const saved = new Map<string, string | undefined>();
 const cleanup: (() => Promise<unknown>)[] = [];
@@ -169,7 +169,7 @@ function fixture(script: Reply[] = []) {
 }
 
 test("real Claude Code CLI uses only the configured proxy and key", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-claude-cli-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-claude-cli-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "home");
   const project = join(root, "project");
@@ -295,14 +295,14 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
 }, 120_000);
 
 test("real Claude Code CLI runs only the allowed tool names", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-claude-cli-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-claude-cli-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, "project");
   const data = join(root, "data");
   await mkdir(join(project, "allowed"), { recursive: true });
   await mkdir(data);
-  await writeFile(join(project, "allowed", "ok.txt"), "POGOALLOWED");
-  await writeFile(join(project, "forbidden.txt"), "POGOFORBIDDEN");
+  await writeFile(join(project, "allowed", "ok.txt"), "STARGATEALLOWED");
+  await writeFile(join(project, "forbidden.txt"), "STARGATEFORBIDDEN");
   const { requests, baseURL } = fixture([
     {
       tools: [
@@ -338,7 +338,7 @@ test("real Claude Code CLI runs only the allowed tool names", async () => {
       { dataDirectory: data },
     );
   // A path scope would not bind the CLI: Read inside the working directory
-  // is always allowed. Pogo accepts bare tool names only.
+  // is always allowed. Stargate accepts bare tool names only.
   await expect(open(["Read(./allowed/**)"])).rejects.toThrow();
   const backend = await open(["Read"]);
   cleanup.push(() => backend.close());
@@ -350,7 +350,7 @@ test("real Claude Code CLI runs only the allowed tool names", async () => {
   );
   // The allowed tool name runs without a scope; others never run.
   expect(results.get("toolu_read")?.error).toBe(false);
-  expect(results.get("toolu_read")?.text).toContain("POGOFORBIDDEN");
+  expect(results.get("toolu_read")?.text).toContain("STARGATEFORBIDDEN");
   expect(results.get("toolu_write")?.error).toBe(true);
   expect(results.get("toolu_bash")?.error).toBe(true);
   expect(await readdir(root)).not.toContain("written");
@@ -358,7 +358,7 @@ test("real Claude Code CLI runs only the allowed tool names", async () => {
 }, 120_000);
 
 test("real Claude Code runs native HTTP and scoped stdio MCP without coding tools", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-claude-mcp-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-claude-mcp-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const dataDirectory = join(root, "data");
   await mkdir(dataDirectory);
@@ -496,7 +496,7 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
 }, 120_000);
 
 test("no Bash process of the real CLI outlives its turn", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-claude-cli-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-claude-cli-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, "project");
   const data = join(root, "data");

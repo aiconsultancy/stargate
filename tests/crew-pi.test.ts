@@ -41,7 +41,7 @@ function twikiTeam(): Team {
 }
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/pogo-pi-crew-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-pi-crew-");
   const team = twikiTeam();
   const options: CrewOptions = {
     namespace: "galactica",
@@ -290,7 +290,7 @@ test("oversized Pi mail is refused before storage and does not jam later inbox p
     if (!f.binding) throw new Error("Missing Pi binding");
     expect(
       await f.binding.run(
-        "pogo_mail",
+        "stargate_mail",
         { op: "inbox", limit: 1 },
         "17",
         "read-mail",
@@ -450,7 +450,7 @@ test("Pi coordination is host-bound and location plugins share one native storag
     if (!task || !f.binding) throw new Error("Missing Pi binding");
     expect(() => f.binding?.authorize("18")).toThrow("saved conversation");
     const note = await f.binding.run(
-      "pogo_journal",
+      "stargate_journal",
       { op: "append", text: "Pi milestone" },
       "17",
       "pi-call-1",
@@ -483,7 +483,7 @@ test("Pi coordination is host-bound and location plugins share one native storag
     expect(f.closes).toBe(0);
     expect(
       await f.binding.run(
-        "pogo_crew",
+        "stargate_crew",
         { op: "roster" },
         "17",
         "pi-call-2",

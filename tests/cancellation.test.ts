@@ -85,7 +85,7 @@ function fixture(channel = "C123") {
     },
     message: { user: "UBOT", ts: "2.000", thread_ts: "1.000" },
     actions: [
-      { type: "button", action_id: "pogo_stop", value: String(job.id) },
+      { type: "button", action_id: "stargate_stop", value: String(job.id) },
     ],
   });
   return {
@@ -147,7 +147,7 @@ test("maintenance notice uses the persisted requester-only Stop target", async (
   f.backend.prompt = async (_session, _text, signal) => {
     ready.resolve({
       id: "notice",
-      plan: "Restart Pogo",
+      plan: "Restart Stargate",
       impact: "Brief disconnect",
       rollback: "Restore release",
     });
@@ -354,7 +354,7 @@ test("a stale button cannot stop the next request in the same thread", async () 
   const forged = f.payload();
   forged.actions[0] = {
     type: "button",
-    action_id: "pogo_stop",
+    action_id: "stargate_stop",
     value: String(next.id),
   };
   expect(f.gateway.cancel(forged)).toBe(false);

@@ -22,11 +22,11 @@ import { until } from "./irc-fixture";
 /**
  * Local integration against a real Ergo server with a temporary config,
  * TLS from a throwaway CA and fresh accounts. Skipped when the Ergo binary
- * or openssl is absent (CI); set POGO_ERGO_BIN to use another binary.
+ * or openssl is absent (CI); set STARGATE_ERGO_BIN to use another binary.
  * Never touches the operator's server, config or accounts.
  */
 const binary =
-  process.env["POGO_ERGO_BIN"] ??
+  process.env["STARGATE_ERGO_BIN"] ??
   join(homedir(), ".local/share/ergo/current/ergo");
 const available =
   existsSync(binary) &&
@@ -122,7 +122,7 @@ async function raw(port: number) {
 test.skipIf(!available)(
   "irc ergo: TLS + SASL captain, invited crew and a plain-text reply",
   async () => {
-    const directory = await mkdtemp(join(tmpdir(), "pogo-ergo-"));
+    const directory = await mkdtemp(join(tmpdir(), "stargate-ergo-"));
     cleanup.push(() => rm(directory, { recursive: true, force: true }));
     openssl(
       directory,
@@ -140,7 +140,7 @@ test.skipIf(!available)(
       "-days",
       "1",
       "-subj",
-      "/CN=Pogo Test CA",
+      "/CN=Stargate Test CA",
     );
     openssl(
       directory,
@@ -211,11 +211,11 @@ test.skipIf(!available)(
 
     // Accounts and the invite-only ship channel, as the operator sets them up.
     const passwords = {
-      POGO_IRC_GALACTICA: "captain-password-1",
-      POGO_IRC_GALACTICA_CHIEF: "chief-password-1",
+      STARGATE_IRC_GALACTICA: "captain-password-1",
+      STARGATE_IRC_GALACTICA_CHIEF: "chief-password-1",
     };
     const founder = await raw(plain);
-    await founder.register("galactica", passwords.POGO_IRC_GALACTICA);
+    await founder.register("galactica", passwords.STARGATE_IRC_GALACTICA);
     founder.send("JOIN #galactica");
     founder.send("PRIVMSG ChanServ :REGISTER #galactica");
     await founder.wait(
@@ -229,7 +229,7 @@ test.skipIf(!available)(
     const chiefSetup = await raw(plain);
     await chiefSetup.register(
       "galactica-chief",
-      passwords.POGO_IRC_GALACTICA_CHIEF,
+      passwords.STARGATE_IRC_GALACTICA_CHIEF,
     );
     chiefSetup.close();
     const jack = await raw(plain);
@@ -237,7 +237,7 @@ test.skipIf(!available)(
     jack.send("JOIN #galactica");
     await jack.wait((m) => m.command === "JOIN", "jack joined");
 
-    const store = new Store(join(directory, "pogo.sqlite"));
+    const store = new Store(join(directory, "stargate.sqlite"));
     cleanup.push(() => store.close());
     const ship = await IrcShip.create(
       ircSchema.parse({
@@ -250,7 +250,7 @@ test.skipIf(!available)(
           network: "ErgoTest",
         },
         account: "galactica",
-        passwordEnv: "POGO_IRC_GALACTICA",
+        passwordEnv: "STARGATE_IRC_GALACTICA",
         channels: ["#galactica"],
         // One worker isolates wire framing from overlapping delivery polls.
         concurrency: 1,
@@ -260,7 +260,7 @@ test.skipIf(!available)(
           {
             id: "chief",
             account: "galactica-chief",
-            passwordEnv: "POGO_IRC_GALACTICA_CHIEF",
+            passwordEnv: "STARGATE_IRC_GALACTICA_CHIEF",
             channels: ["#galactica"],
             backend: {
               type: "opencode",
@@ -334,7 +334,7 @@ test.skipIf(!available)(
       port: secure,
       tls: true,
       account: "galactica",
-      password: passwords.POGO_IRC_GALACTICA,
+      password: passwords.STARGATE_IRC_GALACTICA,
       nick: "galactica",
       channels: [],
       log: pino({ level: "silent" }),

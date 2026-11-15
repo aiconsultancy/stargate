@@ -21,11 +21,11 @@ import {
 } from "../src/nightly/timer";
 import { occurrence } from "../src/nightly/window";
 
-const root = await mkdtemp("/tmp/opencode/pogo-report-");
+const root = await mkdtemp("/tmp/opencode/stargate-report-");
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 const report: Report = {
-  schema: "pogo.maintenance.report.v1",
+  schema: "stargate.maintenance.report.v1",
   runID: "4b7d1c3e-9a5f-4e2b-8c1d-2f3a4b5c6d7e",
   installID: "abc",
   mode: "run",
@@ -44,7 +44,7 @@ const report: Report = {
   finishedAt: "2026-11-12T00:12:00.000Z",
   components: [
     {
-      id: "pogo",
+      id: "stargate",
       before: "0.4.0",
       after: "0.4.0",
       candidate: "0.5.0",
@@ -83,7 +83,9 @@ const report: Report = {
     },
   ],
   steps: [{ name: "idle-gate", status: "ok", at: "2026-11-12T00:07:01.000Z" }],
-  rollbacks: [{ component: "pogo", from: "0.5.0", to: "0.4.0", status: "ok" }],
+  rollbacks: [
+    { component: "stargate", from: "0.5.0", to: "0.4.0", status: "ok" },
+  ],
   restarts: [
     { service: "gateway", status: "failed", at: "2026-11-12T00:10:00.000Z" },
   ],
@@ -96,7 +98,7 @@ describe("maintenance report", () => {
     expect(
       reportSchema.safeParse({
         ...report,
-        schema: "pogo.maintenance.report.v2",
+        schema: "stargate.maintenance.report.v2",
       }).success,
     ).toBe(false);
     expect(
@@ -117,14 +119,14 @@ describe("maintenance report", () => {
       "Nightly maintenance 00:00–01:00 Europe/London: partial.",
     );
     expect(text).toContain(
-      "- pogo: rolled-back 0.4.0 → 0.4.0 (readiness failed)",
+      "- stargate: rolled-back 0.4.0 → 0.4.0 (readiness failed)",
     );
     expect(text).toContain("- npm:@openai/codex: updated 0.167.2 → 0.168.0");
     expect(text).toContain("Unchanged: 1 component(s).");
     expect(text).toContain(
       "- model claude-proxy/claude-opus-5-5#high → claude-proxy/claude-opus-5-6#high: 2 applied",
     );
-    expect(text).toContain("Rollbacks: pogo ok.");
+    expect(text).toContain("Rollbacks: stargate ok.");
     expect(text).not.toContain("Injected");
     expect(text.length).toBeLessThanOrEqual(2800);
   });
@@ -135,7 +137,7 @@ describe("gateway delivery of summaries", () => {
     const data = await mkdtemp(join(root, "outbox-"));
     const notice = (name: string, channel: string) =>
       queueNotice(data, {
-        schema: "pogo.maintenance.notice.v1",
+        schema: "stargate.maintenance.notice.v1",
         channel,
         text: `summary ${name}`,
         report: `${name}.json`,
@@ -170,10 +172,10 @@ describe("gateway delivery of summaries", () => {
 describe("systemd units", () => {
   test("an update unit refuses paths that the service manager would rewrite", () => {
     const input = {
-      unit: "pogo-update-0-2-0-1",
-      configPath: "/home/me/.config/pogo/pogo.json",
+      unit: "stargate-update-0-2-0-1",
+      configPath: "/home/me/.config/stargate/stargate.json",
       executable: "/usr/bin/bun",
-      entrypoint: "/home/me/.local/share/pogo/current/src/main.ts",
+      entrypoint: "/home/me/.local/share/stargate/current/src/main.ts",
       path: "/usr/bin:/bin",
       version: "0.2.0",
       retryFailed: false,
@@ -193,7 +195,7 @@ describe("systemd units", () => {
     // Everything after `--` is the command itself, one argument each.
     expect(command.slice(command.indexOf("--") + 1)).toEqual([
       "/usr/bin/bun",
-      "/home/me/.local/share/pogo/current/src/main.ts",
+      "/home/me/.local/share/stargate/current/src/main.ts",
       "maintenance",
       "update",
       "--version",
@@ -201,11 +203,11 @@ describe("systemd units", () => {
       "--now",
       "--foreground",
       "--config",
-      "/home/me/.config/pogo/pogo.json",
+      "/home/me/.config/stargate/stargate.json",
     ]);
     for (const bad of [
-      { configPath: "pogo.json" },
-      { configPath: "/home/me/100%/pogo.json" },
+      { configPath: "stargate.json" },
+      { configPath: "/home/me/100%/stargate.json" },
       { entrypoint: "/home/$USER/main.ts" },
       { version: "0.2.0; reboot" },
       { version: "v0.2.0" },
@@ -216,10 +218,10 @@ describe("systemd units", () => {
 
   test("timer starts at the jittered local time; service is a bounded oneshot", () => {
     const units = buildMaintenanceUnits({
-      name: "pogo-maintenance",
-      configPath: "/home/me/.config/pogo/pogo.json",
+      name: "stargate-maintenance",
+      configPath: "/home/me/.config/stargate/stargate.json",
       executable: "/usr/bin/bun",
-      entrypoint: "/home/me/.local/share/pogo/current/src/main.ts",
+      entrypoint: "/home/me/.local/share/stargate/current/src/main.ts",
       path: "/usr/bin:/bin",
       spec: {
         start: "00:00",
@@ -233,17 +235,17 @@ describe("systemd units", () => {
     });
     expect(units.timer).toContain("OnCalendar=*-*-* 00:09:00 Europe/London");
     expect(units.timer).toContain("Persistent=false");
-    expect(units.timer).toContain("Unit=pogo-maintenance.service");
+    expect(units.timer).toContain("Unit=stargate-maintenance.service");
     expect(units.service).toContain("Type=oneshot");
     expect(units.service).toContain(
-      'ExecStart="/usr/bin/bun" "/home/me/.local/share/pogo/current/src/main.ts" maintenance run --config "/home/me/.config/pogo/pogo.json"',
+      'ExecStart="/usr/bin/bun" "/home/me/.local/share/stargate/current/src/main.ts" maintenance run --config "/home/me/.config/stargate/stargate.json"',
     );
     expect(units.service).toContain('Environment="PATH=/usr/bin:/bin"');
     // Window 60 + fall-back hour 60 - jitter 9 + recovery 50.
     expect(units.service).toContain("TimeoutStartSec=161min");
     expect(units.service).toContain("TimeoutStopSec=50min");
     expect(units.service).toContain(
-      'ExecStopPost="/usr/bin/bun" "/home/me/.local/share/pogo/current/src/main.ts" maintenance recover --after-run --config "/home/me/.config/pogo/pogo.json"',
+      'ExecStopPost="/usr/bin/bun" "/home/me/.local/share/stargate/current/src/main.ts" maintenance recover --after-run --config "/home/me/.config/stargate/stargate.json"',
     );
     expect(units.service).toContain("UMask=0077");
     expect(() =>
@@ -326,8 +328,8 @@ describe("undo budget", () => {
         undoBounds.gateway,
     );
     const units = buildMaintenanceUnits({
-      name: "pogo-maintenance",
-      configPath: "/c/pogo.json",
+      name: "stargate-maintenance",
+      configPath: "/c/stargate.json",
       executable: "/usr/bin/bun",
       entrypoint: "/r/current/src/main.ts",
       path: "/usr/bin",

@@ -225,7 +225,7 @@ export async function cliProxyPrepare(
         throw new StepError("checksum-mismatch");
     } else {
       await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-      const temp = `${target}.pogo-${process.pid}`;
+      const temp = `${target}.stargate-${process.pid}`;
       await copyFile(extracted, temp, constants.COPYFILE_EXCL);
       await chmod(temp, 0o700);
       await rename(temp, target);

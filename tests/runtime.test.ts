@@ -141,7 +141,7 @@ function status(path: string, key: string, id: number) {
 }
 
 async function directory() {
-  return mkdtemp(join(tmpdir(), "pogo-runtime-"));
+  return mkdtemp(join(tmpdir(), "stargate-runtime-"));
 }
 
 test("shutdown closes intake before workers drain and backends close", async () => {
@@ -193,7 +193,7 @@ test("a failed worker stops the process with a restartable failure", async () =>
   const dataDirectory = await directory();
   try {
     const helper = bot();
-    const store = new Store(join(dataDirectory, "pogo.sqlite"));
+    const store = new Store(join(dataDirectory, "stargate.sqlite"));
     const key = botKey(helper, identity);
     const conversation = conversationKey(key, "C123", "1.000");
     store.enqueue({
@@ -266,7 +266,7 @@ test("a failed Slack connection starts no queued turn", async () => {
   const dataDirectory = await directory();
   try {
     const helper = bot();
-    const path = join(dataDirectory, "pogo.sqlite");
+    const path = join(dataDirectory, "stargate.sqlite");
     const queued = seed(path, helper);
     const config = { dataDirectory, bots: [helper] };
     const f = harness();
@@ -307,7 +307,7 @@ test("shutdown closes every intake and stops every worker together", async () =>
         botTokenEnv: "OTHER_BOT_TOKEN",
       },
     });
-    const path = join(dataDirectory, "pogo.sqlite");
+    const path = join(dataDirectory, "stargate.sqlite");
     const busy = Promise.withResolvers<void>();
     let late: { key: string; id: number } | undefined;
     let draining: boolean[] = [];
@@ -375,12 +375,12 @@ test("the dashboard socket serves the fleet and is removed on shutdown", async (
     for (let attempt = 0; attempt < 200 && !(await present()); attempt++)
       await Bun.sleep(10);
     expect((await stat(socket)).mode & 0o777).toBe(0o600);
-    const fleet = await fetch("http://pogo/api/fleet", { unix: socket });
+    const fleet = await fetch("http://stargate/api/fleet", { unix: socket });
     expect(fleet.status).toBe(200);
     expect(await fleet.json()).toMatchObject({
       ships: [{ id: "helper", backend: "opencode", crew: null }],
     });
-    const page = await fetch("http://pogo/", { unix: socket });
+    const page = await fetch("http://stargate/", { unix: socket });
     expect(page.headers.get("Content-Security-Policy")).toContain(
       "default-src 'none'",
     );
@@ -421,7 +421,7 @@ test("gateway writes a readiness record and delivers maintenance summaries", asy
   const dataDirectory = await directory();
   try {
     await queueNotice(dataDirectory, {
-      schema: "pogo.maintenance.notice.v1",
+      schema: "stargate.maintenance.notice.v1",
       channel: "C123",
       text: "Nightly maintenance: completed.",
       report: "r.json",

@@ -11,7 +11,7 @@ const id = z.string().min(1).max(255);
 const userId = z.string().regex(/^[UW][A-Z0-9]+$/);
 const channelId = z.string().regex(/^[CGD][A-Z0-9]+$/);
 const commandSchema = z.object({
-  command: z.literal("/pogo"),
+  command: z.literal("/stargate"),
   text: z.literal("pair"),
   api_app_id: id,
   team_id: id,
@@ -37,14 +37,14 @@ const actionSchema = z.object({
   view: z.object({
     id,
     hash: id,
-    callback_id: z.literal("pogo_pair"),
+    callback_id: z.literal("stargate_pair"),
     private_metadata: z.uuid(),
   }),
   actions: z
     .array(
       z.object({
         type: z.literal("button"),
-        action_id: z.literal("pogo_pair_generate"),
+        action_id: z.literal("stargate_pair_generate"),
         value: z.literal("generate"),
         url: z.never().optional(),
       }),
@@ -135,7 +135,7 @@ export class PairingUI {
       ) {
         await once({
           response_type: "ephemeral",
-          text: "Pairing unavailable. Use /pogo pair with an authorized operator and channel.",
+          text: "Pairing unavailable. Use /stargate pair with an authorized operator and channel.",
         });
         return;
       }
@@ -161,7 +161,7 @@ export class PairingUI {
       await once();
       await this.api.open(data.trigger_id, {
         ...notice(warning),
-        callback_id: "pogo_pair",
+        callback_id: "stargate_pair",
         private_metadata: nonce,
         blocks: [
           section(warning),
@@ -170,7 +170,7 @@ export class PairingUI {
             elements: [
               {
                 type: "button",
-                action_id: "pogo_pair_generate",
+                action_id: "stargate_pair_generate",
                 value: "generate",
                 text: plain("Generate"),
                 style: "danger",
@@ -229,7 +229,7 @@ export class PairingUI {
           data.view.id,
           data.view.hash,
           notice(
-            "Pairing confirmation expired or access was removed. Close this modal and use /pogo pair again if authorized.",
+            "Pairing confirmation expired or access was removed. Close this modal and use /stargate pair again if authorized.",
           ),
         );
         return;

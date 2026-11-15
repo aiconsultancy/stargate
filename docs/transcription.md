@@ -11,7 +11,7 @@ mention.
 
 ## Enable
 
-Add `transcription` to the bot in `pogo.json`, then restart Stargate:
+Add `transcription` to the bot in `stargate.json`, then restart Stargate:
 
 ```json
 "transcription": {

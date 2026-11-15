@@ -304,7 +304,7 @@ function gatewayFixture(peerCaptains = true, pinned = true) {
     },
     async prompt(_session, text, _signal, _onText, _onInput, _files, context) {
       prompts.push({ text, ...(context ? { context } : {}) });
-      return "[[pogo:silent]]";
+      return "[[stargate:silent]]";
     },
     async close() {},
   };
@@ -592,6 +592,6 @@ test("Slack intake waits for the async check before ACK", async () => {
 test("captain instructions describe the marker, authority, silence and the cap", () => {
   expect(peerInstructions).toContain(";k=captain");
   expect(peerInstructions).toContain("no operator or Admiralty authority");
-  expect(peerInstructions).toContain("[[pogo:silent]]");
+  expect(peerInstructions).toContain("[[stargate:silent]]");
   expect(peerInstructions).toContain(`at most\n${peerTurnsPerHour} peer`);
 });

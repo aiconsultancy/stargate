@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type Config, configSchema } from "../src/config";
 import { discoverCrews } from "../src/nightly/crews";
 
-const root = await mkdtemp("/tmp/opencode/pogo-crews-");
+const root = await mkdtemp("/tmp/opencode/stargate-crews-");
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 async function setup(name: string) {
@@ -15,13 +15,13 @@ async function setup(name: string) {
     await mkdir(join(path, ".opencode"), { recursive: true });
   const options = {
     namespace: "ship",
-    stateDirectory: join(captain, ".local", "pogo-crew"),
+    stateDirectory: join(captain, ".local", "stargate-crew"),
     captainDirectory: captain,
     worktrees: { chief },
     team: { captain: { id: "adama" }, crew: [{ id: "chief" }] },
   };
   const profile = (extra = {}) =>
-    `${JSON.stringify({ plugins: [{ package: "/srv/pogo/plugin", options: { ...options, ...extra } }] }, null, 2)}\n`;
+    `${JSON.stringify({ plugins: [{ package: "/srv/stargate/plugin", options: { ...options, ...extra } }] }, null, 2)}\n`;
   const config: Config = configSchema.parse({
     dataDirectory: join(dir, "data"),
     bots: [

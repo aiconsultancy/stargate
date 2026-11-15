@@ -112,7 +112,7 @@ const tasksTable = (name: string) => `${name} (
           notifying INTEGER NOT NULL DEFAULT 0
         )`;
 /** Not a valid captain abandon key, so audits stay distinguishable. */
-export const withdrawKey = "pogo:cancel";
+export const withdrawKey = "stargate:cancel";
 const controlID = (token: string) =>
   createHash("sha256").update(token).digest("hex");
 
@@ -649,7 +649,7 @@ export class CrewState {
         if (held !== expected.controlID)
           throw new CrewError(
             held
-              ? "Worker control is reserved. Pass its inspected controlID only if no Pogo operation can still hold it. Nothing abandoned."
+              ? "Worker control is reserved. Pass its inspected controlID only if no Stargate operation can still hold it. Nothing abandoned."
               : "Expected worker control is gone; inspect again. Nothing abandoned.",
           );
         if (control && liveControls.has(`${this.path}\0${control.token}`))
@@ -754,7 +754,7 @@ export class CrewState {
   }
 
   /** Workspace changes share the dispatch slot. Uncertain or completed work
-   * may stay assigned; Pogo-active work must be stopped or abandoned first.
+   * may stay assigned; Stargate-active work must be stopped or abandoned first.
    */
   reserveWorkspace(crewID: string, expectedTaskID: string | null): string {
     return this.db
@@ -774,7 +774,7 @@ export class CrewState {
             active.notifying)
         )
           throw new CrewError(
-            "Worker has Pogo-active work; wait, or abandon it before changing the workspace. No Git change made.",
+            "Worker has Stargate-active work; wait, or abandon it before changing the workspace. No Git change made.",
           );
         return this.insertControl(crewID);
       })

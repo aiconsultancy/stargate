@@ -1101,7 +1101,7 @@ test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
 });
 
 test("real Pi Durable harness persists sessions under Bun SQLite", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-pi-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-pi-");
   const previous = process.env["OPENAI_API_KEY"];
   process.env["OPENAI_API_KEY"] = "local-test-not-sent";
   try {

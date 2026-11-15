@@ -251,9 +251,9 @@ test("conversation eval: production parser preserves a crew origin across cursor
 });
 
 test("conversation eval: crew origin survives restart and ordinary shell completion", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-origin-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-origin-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const path = join(directory, "pogo.sqlite");
+  const path = join(directory, "stargate.sqlite");
   const initial = new Store(path);
   const f = productionTranscriptFixture(initial, false);
   f.gateway.accept(source("D123", "private task A", "1.000"));
@@ -905,14 +905,14 @@ test("a silent captain turn in a shared channel posts nothing and is not replaye
   f.gateway.accept(source("D123", "first", "1.000"));
   await f.drain();
   f.setTurn(async () => {
-    f.add("assistant", "[[pogo:silent]]\nAddressed to another captain.");
-    return "[[pogo:silent]]\nAddressed to another captain.";
+    f.add("assistant", "[[stargate:silent]]\nAddressed to another captain.");
+    return "[[stargate:silent]]\nAddressed to another captain.";
   });
   f.gateway.accept(source("C456", "<@UBOT> is the terraform applied", "2.000"));
   await f.drain();
   // A crew wake that needs no post stays silent too.
   f.add("synthetic");
-  f.add("assistant", "[[pogo:silent]]");
+  f.add("assistant", "[[stargate:silent]]");
   await f.settle();
   await f.settle();
   expect(f.posts).toEqual([
@@ -941,9 +941,9 @@ test("a silent captain reply needs no delayed-reply notice when history is unrea
   const f = nativeFixture();
   f.setTurn(async () => {
     f.add("assistant"); // Tool-only step, as OpenCode joins it.
-    f.add("assistant", "[[pogo:silent]]");
+    f.add("assistant", "[[stargate:silent]]");
     f.breakReads(true);
-    return "\n\n[[pogo:silent]]";
+    return "\n\n[[stargate:silent]]";
   });
   f.gateway.accept(source("C456", "<@UBOT> not for you", "1.000"));
   await f.drain();
@@ -1152,9 +1152,9 @@ test("lost captain cursor re-anchors current ownership, not the previous source"
 });
 
 test("restart preserves source jobs, input ownership and the one delivery cursor", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-captain-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-captain-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const path = join(directory, "pogo.sqlite");
+  const path = join(directory, "stargate.sqlite");
   const first = new Store(path);
   const f = nativeFixture(first, false);
   f.gateway.accept(source("D123", "first", "1.000"));
@@ -1219,7 +1219,7 @@ test("Stop still requires the exact requester, source and preview", async () => 
     container: { type: "message", channel_id: "D123", message_ts: "100.000" },
     message: { user: "UBOT", ts: "100.000", thread_ts: "1.000" },
     actions: [
-      { type: "button", action_id: "pogo_stop", value: String(job.id) },
+      { type: "button", action_id: "stargate_stop", value: String(job.id) },
     ],
   };
   expect(f.gateway.cancel({ ...stop, user: { id: "UOTHER" } })).toBe(false);
@@ -1252,7 +1252,7 @@ test("recovery interrupts only the proven captain owner, never legacy or native 
     const input = f.add("input");
     f.store.saveInput(f.gateway.key, job.id, input, "original-captain");
     // A settled transcript stops here and hides the later raw UI input.
-    f.add("assistant", "Unmarked Pogo output", false);
+    f.add("assistant", "Unmarked Stargate output", false);
     if (uiOwns) f.add("input", "native UI instruction");
     const interrupted: string[] = [];
     f.backend.interrupt = async (session) => {

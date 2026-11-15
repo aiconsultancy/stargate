@@ -43,7 +43,7 @@ function account(
 }
 
 test("quota notices and launch policy track the two providers independently across restarts", async () => {
-  const path = await mkdtemp(join(tmpdir(), "pogo-quota-watch-"));
+  const path = await mkdtemp(join(tmpdir(), "stargate-quota-watch-"));
   const stateFile = join(path, "crew", "quota.json");
   const settings = quotaWatchSchema.parse({ ...config, stateFile });
   const messages: string[] = [];
@@ -119,7 +119,7 @@ test("quota notices and launch policy track the two providers independently acro
 });
 
 test("quota compares the tightest windows without adding account percentages", async () => {
-  const path = await mkdtemp(join(tmpdir(), "pogo-quota-watch-pool-"));
+  const path = await mkdtemp(join(tmpdir(), "stargate-quota-watch-pool-"));
   const stateFile = join(path, "quota.json");
   const settings = quotaWatchSchema.parse({
     ...config,
@@ -193,7 +193,7 @@ test("quota report config authorises one outbound destination without opening in
 });
 
 test("native Codex receipts override proxy accounts and only a valid fresh receipt clears the pause", async () => {
-  const path = await mkdtemp(join(tmpdir(), "pogo-native-quota-"));
+  const path = await mkdtemp(join(tmpdir(), "stargate-native-quota-"));
   const stateFile = join(path, "quota.json");
   const nativeCodexFile = join(path, "native.json");
   const settings = quotaWatchSchema.parse({

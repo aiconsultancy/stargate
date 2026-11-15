@@ -1,31 +1,31 @@
 # Captain posts
 
 A captain usually answers only in the Slack thread that started its turn.
-The captain-only `pogo_post` tool lets it post as its **own bot** to another
+The captain-only `stargate_post` tool lets it post as its **own bot** to another
 allowed channel or thread. Use it instead of asking an operator to relay a
 message.
 
-`pogo_post` is off by default. Enable it per bot.
+`stargate_post` is off by default. Enable it per bot.
 
 ## Enable
 
-1. Bind the captain to its gateway configuration and bot. `pogo_post` uses
-   the same non-secret Stargate plugin option as `pogo_cron`; see
+1. Bind the captain to its gateway configuration and bot. `stargate_post` uses
+   the same non-secret Stargate plugin option as `stargate_cron`; see
    [cron jobs](cron.md#opencode-tool-and-local-cli):
 
    ```json
-   "cron": { "configPath": "/srv/pogo/pogo.json", "bot": "galactica" }
+   "cron": { "configPath": "/srv/stargate/stargate.json", "bot": "galactica" }
    ```
 
    `stargate crew init --cron-config PATH --cron-bot ID` writes this binding.
    It does not require file-backed cronjobs.
 
-2. Add `captainPost` to that bot in `pogo.json`:
+2. Add `captainPost` to that bot in `stargate.json`:
 
    ```json
    "captainPost": {
      "channels": ["C0123456789", "C0EXAMPLE01"],
-     "fileDirectories": ["/srv/pogo/galactica/captain", "/srv/pogo/proofs"],
+     "fileDirectories": ["/srv/stargate/galactica/captain", "/srv/stargate/proofs"],
      "postsPerHour": 30
    }
    ```
@@ -52,7 +52,7 @@ message.
    `captainPost.channels` rejects `*`, names and an empty list.
 
 The bot token must be in the **OpenCode service's** environment or in
-`<config>.env`, as for `pogo_cron`. The plugin reads the configuration again
+`<config>.env`, as for `stargate_cron`. The plugin reads the configuration again
 for each post, so a change applies to the next call. It does not need a
 gateway restart.
 
@@ -156,7 +156,7 @@ Each call writes one JSON audit line to the OpenCode service's standard error:
 
 ```json
 {
-  "event": "pogo_post",
+  "event": "stargate_post",
   "bot": "galactica",
   "channel": "C0123456789",
   "thread": null,
@@ -178,5 +178,5 @@ Audit lines never contain message text, file names or paths.
   The gateway does not retry them.
 - A later human reply in a thread that the bot posted to follows the normal
   routing rules, including `resumeSlackThreads`.
-- Existing captain definitions are not overwritten. Add the `pogo_post`
+- Existing captain definitions are not overwritten. Add the `stargate_post`
   guidance from `templates/agents/captain.md` to customized definitions.

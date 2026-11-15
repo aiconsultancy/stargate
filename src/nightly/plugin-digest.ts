@@ -51,7 +51,7 @@ import { z } from "zod";
  * Unknown always means a full restart. Code that reads a file of the tree
  * by an absolute path and evaluates it is not detected.
  */
-export const pluginDigestFile = ".pogo-plugin-digest";
+export const pluginDigestFile = ".stargate-plugin-digest";
 const format = /^v1:[a-f0-9]{64}$/;
 const settings = [
   "package.json",
@@ -127,7 +127,7 @@ async function resolveImport(root: string, from: string, specifier: string) {
   return resolved;
 }
 
-const sentinel = "__pogo_plugin_digest_require__";
+const sentinel = "__stargate_plugin_digest_require__";
 const count = (text: string, pattern: RegExp) =>
   [...text.matchAll(pattern)].length;
 

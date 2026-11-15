@@ -6,7 +6,7 @@
  * `stubborn` first starts a tool process that ignores SIGTERM; `detached`
  * puts it in its own session. `deaf` makes the CLI itself ignore SIGTERM;
  * `hold` leaves its stdout open in a process without the turn marker.
- * `swap` retargets the link `POGO_TEST_LINK` to `POGO_TEST_TARGET`, as a
+ * `swap` retargets the link `STARGATE_TEST_LINK` to `STARGATE_TEST_TARGET`, as a
  * sandboxed agent could inside its workspace, then runs `git` from `PATH`.
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -73,9 +73,9 @@ process.stdin.on("end", async () => {
   write({ type: "turn.started" });
   if (prompt.includes("stubborn")) await stubborn(prompt.includes("detached"));
   if (prompt.includes("swap")) {
-    const link = process.env["POGO_TEST_LINK"] ?? "";
+    const link = process.env["STARGATE_TEST_LINK"] ?? "";
     rmSync(link);
-    symlinkSync(process.env["POGO_TEST_TARGET"] ?? "", link);
+    symlinkSync(process.env["STARGATE_TEST_TARGET"] ?? "", link);
     spawnSync("git", ["--version"], { stdio: "ignore" });
   }
   if (prompt.includes("hold")) {

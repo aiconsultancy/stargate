@@ -3,7 +3,7 @@
 MISE ?= mise
 ARGS ?=
 
-TASKS := deps stargate pogo init crew-init provision cua-install cua start \
+TASKS := deps stargate init crew-init provision cua-install cua start \
 	config-check manifest service check test test-release-env eval \
 	typecheck lint format \
 	hooks-install hooks workflow-check
@@ -23,7 +23,7 @@ help:
 	  '  make config-check  Validate config and token references' \
 	  '  make manifest      Generate the Slack app manifest' \
 	  '  make service ARGS="status"  Manage the user service' \
-	  '  make stargate ARGS="--help"  Run any CLI command (alias: make pogo)' \
+	  '  make stargate ARGS="--help"  Run any CLI command' \
 	  '  make check         Run typecheck, lint, and tests' \
 	  '  make eval          Run local conversation reliability evaluations' \
 	  '  make test | typecheck | lint | format' \
@@ -33,7 +33,7 @@ help:
 	  '  make workflow-check Validate GitHub Actions workflows' \
 	  '' \
 	  'Forward options with ARGS, e.g.:' \
-	  '  make config-check ARGS="--config pogo.example.json --schema-only"' \
+	  '  make config-check ARGS="--config stargate.example.json --schema-only"' \
 	  'Never pass secret values through ARGS; use the wizard or environment.'
 
 $(TASKS):

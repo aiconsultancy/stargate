@@ -7,8 +7,8 @@
       "name": "Project Helper",
       "app": { "mode": "reuse", "appId": "A0123456789" },
       "slack": {
-        "appTokenEnv": "POGO_PROJECT_HELPER_APP_TOKEN",
-        "botTokenEnv": "POGO_PROJECT_HELPER_BOT_TOKEN"
+        "appTokenEnv": "STARGATE_PROJECT_HELPER_APP_TOKEN",
+        "botTokenEnv": "STARGATE_PROJECT_HELPER_BOT_TOKEN"
       },
       "access": {
         "users": ["U0123456789"],
@@ -25,8 +25,8 @@
       "name": "Research Helper",
       "app": { "mode": "create" },
       "slack": {
-        "appTokenEnv": "POGO_RESEARCH_APP_TOKEN",
-        "botTokenEnv": "POGO_RESEARCH_BOT_TOKEN"
+        "appTokenEnv": "STARGATE_RESEARCH_APP_TOKEN",
+        "botTokenEnv": "STARGATE_RESEARCH_BOT_TOKEN"
       },
       "access": {
         "users": ["U0123456789"],

@@ -26,7 +26,7 @@ import {
 } from "../src/nightly/cleanup-config";
 import { type CommandRunner, processRunner } from "../src/nightly/exec";
 
-const root = await mkdtemp("/tmp/opencode/pogo-cleanup-");
+const root = await mkdtemp("/tmp/opencode/stargate-cleanup-");
 const now = Date.now();
 const day = 86_400_000;
 afterAll(() => rm(root, { recursive: true, force: true }));

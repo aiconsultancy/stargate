@@ -23,7 +23,9 @@ export class CrewCron {
   async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
     const parsed = cronOperationSchema.safeParse(raw);
     if (!parsed.success)
-      throw new CrewError("Invalid pogo_cron input. Use the declared fields.");
+      throw new CrewError(
+        "Invalid stargate_cron input. Use the declared fields.",
+      );
     const cancelled = () => {
       if (caller.signal.aborted)
         throw new CrewError(

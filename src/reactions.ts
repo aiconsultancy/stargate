@@ -14,15 +14,15 @@ export type ReactionName = (typeof reactionNames)[number];
 
 const directives = reactionNames.map((name) => ({
   name,
-  line: `[[pogo:react:${name}]]`,
+  line: `[[stargate:react:${name}]]`,
 }));
 
 /** A turn that deliberately posts nothing. Exact line; no arguments. */
-export const silentDirective = "[[pogo:silent]]";
+export const silentDirective = "[[stargate:silent]]";
 
 /** Persistent agent/system instructions, never a per-message user prefix. */
 export const reactionInstructions = `Slack reaction protocol (optional):
-You may start your response with one standalone line [[pogo:react:NAME]].
+You may start your response with one standalone line [[stargate:react:NAME]].
 Allowed NAME values: ${reactionNames.join(", ")}.
 The gateway applies it only to the current user's message; never specify a target.
 Use eyes when asked to inspect a concrete item, such as reviewing a PR or reading

@@ -10,7 +10,7 @@ import { isolatedEnvironment } from "../src/nightly/release";
 
 const cache = process.env["XDG_CACHE_HOME"] || join(homedir(), ".cache");
 await mkdir(cache, { recursive: true });
-const base = await mkdtemp(join(cache, "pogo-release-test-"));
+const base = await mkdtemp(join(cache, "stargate-release-test-"));
 try {
   const env = await isolatedEnvironment(join(base, ".staging-test"));
   const child = Bun.spawn(

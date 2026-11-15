@@ -19,7 +19,7 @@ export function cronjobPrompt(definition: CronjobDefinition, path: string) {
   const skills = definition.skills.length
     ? `Required agent skills: ${definition.skills.join(", ")}. Load these skills before doing the task; if unavailable, report the gap rather than inventing their instructions.\n`
     : "";
-  return `Cronjob: ${definition.name}\nDefinition: ${JSON.stringify(path)}\nSupporting files resolve relative to its directory. The accepted task body is below; do not substitute a newer definition for this run.\n${skills}Reporting: ${definition.report === "daily" ? "deferred to the daily Slack digest; do not post to Slack yourself" : "Pogo delivers the final answer to Slack"}. Return a concise verified result, failures and deferred work; never credentials, tool transcripts or private reasoning.\n\n${definition.prompt}`;
+  return `Cronjob: ${definition.name}\nDefinition: ${JSON.stringify(path)}\nSupporting files resolve relative to its directory. The accepted task body is below; do not substitute a newer definition for this run.\n${skills}Reporting: ${definition.report === "daily" ? "deferred to the daily Slack digest; do not post to Slack yourself" : "Stargate delivers the final answer to Slack"}. Return a concise verified result, failures and deferred work; never credentials, tool transcripts or private reasoning.\n\n${definition.prompt}`;
 }
 
 /** Files define tasks; SQLite owns admission, retries and execution state. */

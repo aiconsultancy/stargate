@@ -34,7 +34,7 @@ afterEach(async () => {
   }
 });
 async function fixture() {
-  const root = await mkdtemp("/tmp/opencode/pogo-profile-");
+  const root = await mkdtemp("/tmp/opencode/stargate-profile-");
   directories.push(root);
   const projectDirectory = join(root, "indra");
   execFileSync("git", ["init", "-b", "main", projectDirectory]);
@@ -116,7 +116,7 @@ test("specialisms retain broad host tools and session history", () => {
       "execute",
       "browser",
       "subagent",
-      "pogo_history",
+      "stargate_history",
     ])
       expect(rules).toContainEqual({ action, resource: "*", effect: "allow" });
     expect(rules).toContainEqual({
@@ -162,7 +162,7 @@ test("profile binds every crew location to the same existing captain session", a
 
 test("profile retains an explicit local cron control binding", async () => {
   const { options } = await fixture();
-  const cron = { configPath: "/srv/pogo/pogo.json", bot: "helper" };
+  const cron = { configPath: "/srv/stargate/stargate.json", bot: "helper" };
   const profile = await renderProfile({ ...options, cron }, "bowser");
   expect(profile.plugins[0]?.options.cron).toEqual(cron);
 });
@@ -177,10 +177,10 @@ test("reaction protocol belongs once in the captain definition, not crew definit
   );
   expect(captain).toContain(reactionInstructions);
   expect(captain).toStartWith("---\n");
-  expect(captain.split("<!-- POGO:START -->")).toHaveLength(2);
-  expect(captain.split("<!-- POGO:END -->")).toHaveLength(2);
-  expect(captain).toEndWith("<!-- POGO:END -->\n");
-  expect(captain.indexOf("<!-- POGO:START -->")).toBeGreaterThan(
+  expect(captain.split("<!-- STARGATE:START -->")).toHaveLength(2);
+  expect(captain.split("<!-- STARGATE:END -->")).toHaveLength(2);
+  expect(captain).toEndWith("<!-- STARGATE:END -->\n");
+  expect(captain.indexOf("<!-- STARGATE:START -->")).toBeGreaterThan(
     captain.indexOf("\n---\n"),
   );
   expect(captain.split("Slack reaction protocol (optional):")).toHaveLength(2);
@@ -202,8 +202,8 @@ test("reaction protocol belongs once in the captain definition, not crew definit
     expect(crew).not.toContain("Slack reaction protocol");
     expect(crew).not.toContain("Voice message transcripts:");
     expect(crew).not.toContain("Peer captain messages:");
-    expect(crew.split("<!-- POGO:START -->")).toHaveLength(2);
-    expect(crew).toEndWith("<!-- POGO:END -->\n");
+    expect(crew.split("<!-- STARGATE:START -->")).toHaveLength(2);
+    expect(crew).toEndWith("<!-- STARGATE:END -->\n");
   }
 });
 
@@ -246,7 +246,8 @@ test("profile init creates named feature worktrees, preserves source and reuses 
     ).toBe("");
   }
   expect(
-    (await stat(join(options.directory, ".local", "pogo-crew"))).mode & 0o777,
+    (await stat(join(options.directory, ".local", "stargate-crew"))).mode &
+      0o777,
   ).toBe(0o700);
   expect(await initializeProfile(options)).toEqual(result);
   const worker = result.worktrees["mario"];
@@ -448,9 +449,9 @@ test("Pi crew receives a worktree but no OpenCode agent or session profile", asy
     "bowser-crew-twiki.md",
   );
   const definition = await readFile(definitionPath, "utf8");
-  expect(definition).toStartWith("<!-- POGO:START -->\n");
-  expect(definition).toEndWith("<!-- POGO:END -->\n");
-  expect(definition).toContain("Pogo address: twiki");
+  expect(definition).toStartWith("<!-- STARGATE:START -->\n");
+  expect(definition).toEndWith("<!-- STARGATE:END -->\n");
+  expect(definition).toContain("Stargate address: twiki");
   expect(worktree).toBe(join(options.worktreeDirectory, "twiki"));
   expect(definition).toContain("Do not switch worktrees");
   expect(definition).toContain(join(worktree, "AGENTS.md"));
@@ -589,9 +590,9 @@ test("custom init creates only configured worktrees, generic prompts, and genera
   );
   expect(prompt).toContain("Protect the fleet.");
   expect(prompt).toContain("starbuck");
-  expect(prompt).toContain("pogo_crew");
-  expect(prompt).toContain("pogo_model");
-  expect(prompt).toContain("pogo_history");
+  expect(prompt).toContain("stargate_crew");
+  expect(prompt).toContain("stargate_model");
+  expect(prompt).toContain("stargate_history");
   expect(prompt).toContain("queue: true");
   expect(prompt).toContain("60-second observation window");
   expect(prompt).toContain("Do not repeat wait in the same turn");
@@ -620,10 +621,10 @@ test("custom init creates only configured worktrees, generic prompts, and genera
     );
     expect(worker).not.toContain("{{");
     expect(worker).toContain("IRC sessions:");
-    expect(worker).toContain("pogo_crew complete");
+    expect(worker).toContain("stargate_crew complete");
     expect(worker).toContain("Before marking the task complete");
-    expect(worker).toContain("pogo_dm");
-    expect(worker).toContain("pogo_history");
+    expect(worker).toContain("stargate_dm");
+    expect(worker).toContain("stargate_history");
     expect(worker).toContain("Never create");
     if (id === "gaeta") {
       expect(worker).toContain("research");
@@ -832,7 +833,7 @@ test("captain, crew and Pi instructions render the configured maintenance window
   );
   for (const text of [captain, crew, pi])
     expect(text.split(paragraph)).toHaveLength(2);
-  expect(captain).toEndWith("<!-- POGO:END -->\n");
+  expect(captain).toEndWith("<!-- STARGATE:END -->\n");
   expect(nightlyInstructions(undefined)).toBe("");
 });
 
