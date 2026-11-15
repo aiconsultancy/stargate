@@ -11,7 +11,7 @@ export interface ReloadCandidate {
 }
 
 /**
- * Reads and validates `path` with the `pogo config check` rules: schema,
+ * Reads and validates `path` with the `stargate config check` rules: schema,
  * Slack token presence/prefixes, IRC passwords and CA files. No provider is
  * called. `baseEnvironment` must be captured before the companion is loaded
  * into `process.env`, so changed and deleted companion values are visible.
@@ -143,7 +143,7 @@ const messages = {
   ...rejectedMessages,
   applied: "Configuration reloaded.",
   unchanged: "Configuration unchanged; nothing to reload.",
-  invalid: `Configuration reload rejected: invalid configuration or credentials. Run pogo config check for details. ${unchangedNote}`,
+  invalid: `Configuration reload rejected: invalid configuration or credentials. Run stargate config check for details. ${unchangedNote}`,
   failed: `Configuration reload failed. ${unchangedNote}`,
 } as const;
 

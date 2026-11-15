@@ -7,7 +7,7 @@ import { maintenanceDirectory } from "./paths";
 /**
  * Durable facts that outlive one run: the npm `--before` cutoff that
  * produced each installed agent CLI (so a rollback reinstalls the same
- * dependency set), pinned CLIProxyAPI digests, Pogo releases that failed
+ * dependency set), pinned CLIProxyAPI digests, Stargate releases that failed
  * after a switch (skipped until a newer release exists), and the release
  * whose crew plugin OpenCode loaded when a later update restarted only the
  * gateway (its directory must stay until OpenCode restarts).
@@ -80,7 +80,7 @@ export async function updateState(
   });
   await atomicWrite(
     statePath(dataDirectory),
-    `${JSON.stringify({ schema: "pogo.maintenance.state.v1", ...state }, null, 2)}\n`,
+    `${JSON.stringify({ schema: "stargate.maintenance.state.v1", ...state }, null, 2)}\n`,
     0o600,
   );
 }

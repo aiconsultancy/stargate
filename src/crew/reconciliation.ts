@@ -8,6 +8,10 @@ import type {
 } from "@opencode/client";
 import { z } from "zod";
 import type { CrewSession } from "./engine";
+import {
+  crewMessageMetadataKey,
+  taskEnvelopePayload,
+} from "./message-protocol";
 import { CrewError, type CrewTask } from "./state";
 import { agentIDSchema } from "./team";
 
@@ -207,7 +211,7 @@ async function* newest(
 
 /** Same rule as result recovery: steering marked for this task and captain. */
 function taskScoped(message: EvidenceMessage, task: PlacementTask): boolean {
-  const notice = message.metadata?.["pogoCrew"];
+  const notice = message.metadata?.[crewMessageMetadataKey];
   if (typeof notice !== "object" || notice === null) return false;
   const value = notice as Record<string, unknown>;
   return (
@@ -281,13 +285,10 @@ const envelopeSchema = z.strictObject({
 });
 function verifyInput(message: EvidenceMessage, task: CrewTask): string {
   try {
-    const prefix = "Pogo task envelope: ";
-    const line = message.text?.split("\n", 1)[0];
-    if (!line?.startsWith(prefix)) throw new Error();
-    const envelope = envelopeSchema.parse(
-      JSON.parse(line.slice(prefix.length)),
-    );
-    const metadata = message.metadata?.["pogoCrew"];
+    const payload = taskEnvelopePayload(message.text);
+    if (payload === undefined) throw new Error();
+    const envelope = envelopeSchema.parse(JSON.parse(payload));
+    const metadata = message.metadata?.[crewMessageMetadataKey];
     if (
       envelope.taskID !== task.id ||
       envelope.crewID !== task.crewID ||

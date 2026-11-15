@@ -154,7 +154,7 @@ function time(ms: number) {
 }
 
 /**
- * Operator helper: resolve one bot's exact thread namespace from Pogo config
+ * Operator helper: resolve one bot's exact thread namespace from Stargate config
  * and state, then run `repairTranscript`. Dry run unless `apply` is true.
  */
 export async function repairThread(input: {
@@ -174,7 +174,7 @@ export async function repairThread(input: {
   // Harden existing state before SQLite creates WAL/SHM. Never create a
   // replacement database or follow a database symlink during repair.
   await chmod(config.dataDirectory, 0o700);
-  const path = join(config.dataDirectory, "pogo.sqlite");
+  const path = join(config.dataDirectory, "stargate.sqlite");
   const file = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
   try {
     if (!(await file.stat()).isFile())

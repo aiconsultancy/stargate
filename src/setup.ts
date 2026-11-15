@@ -34,7 +34,7 @@ export function buildManifest(name = "Stargate") {
       },
       slash_commands: [
         {
-          command: "/pogo",
+          command: "/stargate",
           description: "View crew activity, usage or operator controls",
           usage_hint: "crew [member] | usage | pair",
           should_escape: true,
@@ -224,7 +224,7 @@ export async function addBot(
   try {
     const previous = (await exists(path))
       ? await readConfiguration(path)
-      : { bots: [], dataDirectory: ".pogo" };
+      : { bots: [], dataDirectory: ".stargate" };
     const next = configSchema.safeParse({
       ...previous,
       bots: [...previous.bots, bot],
@@ -382,7 +382,7 @@ export async function setupWizard(configPath: string) {
         "Pi defaults to chat only. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in the service environment or private .env companion. Optional tools=coding enables trusted read/write/edit/bash; it is not a sandbox.",
       );
     } else throw new Error("Unknown backend.");
-    const prefix = `POGO_${id.toUpperCase().replaceAll("-", "_")}`;
+    const prefix = `STARGATE_${id.toUpperCase().replaceAll("-", "_")}`;
     const bot = validBot({
       id,
       slack: {

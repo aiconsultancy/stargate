@@ -82,7 +82,7 @@ configuration is required. Remove this narrow bridge when the upstream Promise
 adapter forwards request signals and the same evaluations pass without it.
 
 The exported-plugin gate runs the real default plugin with the installed Promise
-adapter and a controlled Effect host. It invokes the registered `pogo_crew` wait
+adapter and a controlled Effect host. It invokes the registered `stargate_crew` wait
 tool, completes the original task through a second engine on the same temporary
 SQLite database, and checks that observation ends while the worker stays busy.
 This checks setup injection, not only the wait helper. Removing the exported

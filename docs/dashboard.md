@@ -14,7 +14,7 @@ It starts no model work and changes no session, queue, schedule or file.
 
 ## Enable
 
-Add one top-level setting to `pogo.json`, then restart Stargate:
+Add one top-level setting to `stargate.json`, then restart Stargate:
 
 ```json
 { "dashboard": true, "bots": [] }
@@ -34,16 +34,16 @@ stop the gateway.
 A browser cannot open a Unix socket. Put an authenticating reverse proxy in
 front of it. Stargate does not authenticate viewers: the proxy must do that.
 This Caddy example sits behind Tailscale Serve, admits one Tailscale user
-and serves the page below `/pogo/`:
+and serves the page below `/stargate/`:
 
 ```caddyfile
-@pogo path /pogo /pogo/*
-handle @pogo {
+@stargate path /stargate /stargate/*
+handle @stargate {
 	@not_owner not header Tailscale-User-Login operator@example.com
 	respond @not_owner "Tailscale owner identity required" 403
-	redir /pogo /pogo/ 308
-	uri strip_prefix /pogo
-	reverse_proxy unix//srv/pogo/.pogo/dashboard.sock
+	redir /stargate /stargate/ 308
+	uri strip_prefix /stargate
+	reverse_proxy unix//srv/stargate/.stargate/dashboard.sock
 }
 ```
 
@@ -55,7 +55,7 @@ through a proxy without authentication, and do not use Tailscale Funnel.
 To read the API without a browser:
 
 ```sh
-curl --unix-socket /srv/pogo/.pogo/dashboard.sock http://pogo/api/fleet
+curl --unix-socket /srv/stargate/.stargate/dashboard.sock http://stargate/api/fleet
 ```
 
 ## Session history
@@ -120,7 +120,7 @@ details, identifiers or transcript text.
 
 ## Limits
 
-- View only. Use Slack, `stargate cron` or `pogo_cron` to change state.
+- View only. Use Slack, `stargate cron` or `stargate_cron` to change state.
 - One Stargate process. Another installation needs its own socket and route.
 - Task and queue states are stored states. They do not prove that work is
   live. See [crew activity](crew-activity.md#query-a-member).

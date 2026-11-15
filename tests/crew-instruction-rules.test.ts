@@ -14,7 +14,7 @@ test("OpenCode and Pi crew definitions include the two short coordination rules"
   );
   for (const text of [template, pi]) {
     expect(text).toContain(
-      "Child agents use their own standard tools, never Pogo tools or prefixed names; do not nest children.",
+      "Child agents use their own standard tools, never Stargate tools or prefixed names; do not nest children.",
     );
     expect(text).toContain(
       "Reply on IRC only when tagged, asked directly, or once per all-call.",

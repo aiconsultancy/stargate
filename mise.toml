@@ -10,7 +10,6 @@ description = "Install dependencies from the lockfile"
 run = "bun install --frozen-lockfile"
 
 [tasks.stargate]
-alias = "pogo"
 description = "Run any Stargate CLI command"
 run = "bun run src/main.ts"
 raw = true

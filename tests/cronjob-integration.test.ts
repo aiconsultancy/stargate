@@ -31,7 +31,7 @@ test("bundled maintenance example is valid and never enabled by default", async 
     enabled: false,
     report: "daily",
     schedule: "15 3 * * *",
-    skills: ["pogo-cronjobs"],
+    skills: ["stargate-cronjobs"],
   });
 });
 afterEach(async () => {
@@ -40,7 +40,9 @@ afterEach(async () => {
     await rm(path, { recursive: true, force: true });
 });
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/pogo-cronjob-integration-");
+  const directory = await mkdtemp(
+    "/tmp/opencode/stargate-cronjob-integration-",
+  );
   directories.push(directory);
   const config = botSchema.parse({
     ...bot(),
@@ -62,7 +64,7 @@ async function fixture() {
     timezone: "UTC",
     prompt:
       "Read supporting policy. Update only idle tools. Return verified outcomes.",
-    skills: ["pogo-cronjobs"],
+    skills: ["stargate-cronjobs"],
     enabled: true,
     report: "daily",
   };
@@ -129,7 +131,9 @@ test("files run silently overnight and share one durable 08:30 UTC report", asyn
   expect(f.jobs.every((job) => job.deferDelivery && job.thread === "")).toBe(
     true,
   );
-  expect(f.jobs[0]?.prompt).toContain("Required agent skills: pogo-cronjobs");
+  expect(f.jobs[0]?.prompt).toContain(
+    "Required agent skills: stargate-cronjobs",
+  );
   expect(f.posts).toEqual([]);
   f.complete();
   await worker.tick(now + 4 * 3_600_000, signal);
@@ -194,7 +198,7 @@ test("uncertain daily report is not retried and revoked destinations receive not
 
 test("local control creates idempotent files, binds workspace and admits durable manual runs", async () => {
   const f = await fixture();
-  const configPath = join(f.directory, "pogo-test.json");
+  const configPath = join(f.directory, "stargate-test.json");
   await writeFile(
     configPath,
     JSON.stringify({ dataDirectory: f.directory, bots: [f.config] }),
@@ -218,7 +222,7 @@ test("local control creates idempotent files, binds workspace and admits durable
     prompt: f.definition.prompt,
     enabled: false,
     report: "daily",
-    skills: ["pogo-cronjobs"],
+    skills: ["stargate-cronjobs"],
   };
   await runCronOperation(add, binding, signal, dependencies);
   await runCronOperation(add, binding, signal, dependencies);

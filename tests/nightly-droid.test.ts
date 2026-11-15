@@ -30,7 +30,7 @@ import { buildDroidUnits } from "../src/nightly/timer";
 import { stableJitter } from "../src/nightly/window";
 import { Store } from "../src/store";
 
-const base = await mkdtemp("/tmp/opencode/pogo-droid-");
+const base = await mkdtemp("/tmp/opencode/stargate-droid-");
 afterAll(async () => {
   server.stop(true);
   await rm(base, { recursive: true, force: true });
@@ -45,12 +45,12 @@ const secrets = {
   appToken: "xapp-fixture-app-token-55",
 };
 const env = {
-  POGO_DROID_TEST_KEY: secrets.providerKey,
-  POGO_RELEASE_TOKEN: secrets.releaseToken,
+  STARGATE_DROID_TEST_KEY: secrets.providerKey,
+  STARGATE_RELEASE_TOKEN: secrets.releaseToken,
   BOT_TOKEN: secrets.botToken,
   APP_TOKEN: secrets.appToken,
 };
-process.env["POGO_DROID_TEST_KEY"] = secrets.providerKey;
+process.env["STARGATE_DROID_TEST_KEY"] = secrets.providerKey;
 
 // ---- Local proxy fixture: health and a scripted chat model ---------------
 type Chat = { headers: Headers; body: string };
@@ -157,7 +157,7 @@ const runner: CommandRunner = {
     if (action === "is-active") return ok(`${values["ActiveState"]}\n`);
     if (action === "restart" || action === "start") {
       host.units[unit] = { ...values, ActiveState: "active" };
-      if (unit === "pogo.service") await ready();
+      if (unit === "stargate.service") await ready();
       return ok();
     }
     return { code: 1, stdout: "", stderr: "" };
@@ -167,7 +167,7 @@ const ready = () =>
   writeFile(
     join(host.dir, "data", "ready.json"),
     JSON.stringify({
-      schema: "pogo.ready.v1",
+      schema: "stargate.ready.v1",
       pid: process.pid,
       readyAt: host.time,
       version: "0.2.0",
@@ -218,7 +218,7 @@ const deps = (
 });
 
 const healthyUnits = (): Units => ({
-  "pogo-maintenance.timer": {
+  "stargate-maintenance.timer": {
     LoadState: "loaded",
     ActiveState: "active",
     LastTriggerUSec: at(plannedStart),
@@ -226,8 +226,11 @@ const healthyUnits = (): Units => ({
     Result: "success",
     ActiveEnterTimestamp: at("2026-11-01T00:00:00Z"),
   },
-  "pogo-maintenance.service": { LoadState: "loaded", ActiveState: "inactive" },
-  "pogo.service": { LoadState: "loaded", ActiveState: "active" },
+  "stargate-maintenance.service": {
+    LoadState: "loaded",
+    ActiveState: "inactive",
+  },
+  "stargate.service": { LoadState: "loaded", ActiveState: "active" },
   "opencode2.service": { LoadState: "loaded", ActiveState: "active" },
   "cpa.service": { LoadState: "loaded", ActiveState: "active" },
 });
@@ -276,7 +279,7 @@ async function install(droid: Record<string, unknown> = {}) {
       installID: "test-install",
       report: { bot: "helper", channel: "C123" },
       services: {
-        gateway: "pogo.service",
+        gateway: "stargate.service",
         openCodeRestart: [
           "systemctl",
           "--user",
@@ -285,7 +288,10 @@ async function install(droid: Record<string, unknown> = {}) {
         ],
       },
       proxy: { url, clientKeyFile: join(dir, "client.key") },
-      pogo: { root: join(dir, "pogo"), tokenEnv: "POGO_RELEASE_TOKEN" },
+      stargate: {
+        root: join(dir, "stargate"),
+        tokenEnv: "STARGATE_RELEASE_TOKEN",
+      },
       cliproxyapi: {
         unit: "cpa.service",
         link: join(dir, "cpa-current"),
@@ -296,7 +302,7 @@ async function install(droid: Record<string, unknown> = {}) {
         backend: {
           provider: {
             baseURL: `${url}/v1`,
-            apiKeyEnv: "POGO_DROID_TEST_KEY",
+            apiKeyEnv: "STARGATE_DROID_TEST_KEY",
           },
         },
         ...droid,
@@ -305,11 +311,11 @@ async function install(droid: Record<string, unknown> = {}) {
   };
   const config: Config = configSchema.parse(raw);
   await ready();
-  // One Pogo-owned OpenCode session: the gateway's mapping of a thread.
-  const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
+  // One Stargate-owned OpenCode session: the gateway's mapping of a thread.
+  const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
   store.saveSession('["k","C123","1.0"]', "ses_captain");
   store.close();
-  return { config, path: join(dir, "pogo.json") };
+  return { config, path: join(dir, "stargate.json") };
 }
 
 function report(
@@ -318,7 +324,7 @@ function report(
   extra: Partial<Report> = {},
 ): Report {
   return {
-    schema: "pogo.maintenance.report.v1",
+    schema: "stargate.maintenance.report.v1",
     runID: crypto.randomUUID(),
     installID: "test-install",
     mode: "run",
@@ -337,7 +343,7 @@ function report(
     finishedAt: startedAt,
     components: [
       {
-        id: "pogo",
+        id: "stargate",
         before: "0.2.0",
         after: outcome === "completed" ? "0.2.1" : "0.2.0",
         candidate: "0.2.1",
@@ -356,7 +362,7 @@ const journal = (config: Config, fields: object) =>
   writeFile(
     join(config.dataDirectory, "maintenance", "journal.json"),
     JSON.stringify({
-      schema: "pogo.maintenance.journal.v2",
+      schema: "stargate.maintenance.journal.v2",
       runID: crypto.randomUUID(),
       ...fields,
     }),
@@ -412,7 +418,7 @@ describe("maintenance droid", () => {
       path,
       deps(
         scripted(
-          async () => "Pogo moved to 0.2.1 overnight. Nothing needs you.",
+          async () => "Stargate moved to 0.2.1 overnight. Nothing needs you.",
         ),
       ),
     );
@@ -424,11 +430,11 @@ describe("maintenance droid", () => {
     });
     const [post] = await posts(config);
     expect(post?.channel).toBe("C123");
-    expect(post?.text).toContain("Pogo moved to 0.2.1 overnight.");
+    expect(post?.text).toContain("Stargate moved to 0.2.1 overnight.");
     expect(post?.text).toContain("Droid actions: none.");
     expect(post?.text).toContain("Checks: all clear.");
     expect(agentPrompts[0]).toContain("after the nightly run");
-    expect(agentPrompts[0]).toContain("pogo updated 0.2.0 → 0.2.1");
+    expect(agentPrompts[0]).toContain("stargate updated 0.2.0 → 0.2.1");
     // The same report is explained once; a healthy noon check says nothing.
     const second = await check(config, path);
     expect(second).toMatchObject({ trigger: "health", posted: false });
@@ -457,7 +463,7 @@ describe("maintenance droid", () => {
       [
         "timer-inactive",
         async () => {
-          host.units["pogo-maintenance.timer"] = {
+          host.units["stargate-maintenance.timer"] = {
             LoadState: "loaded",
             ActiveState: "inactive",
           };
@@ -466,7 +472,7 @@ describe("maintenance droid", () => {
       [
         "timer-missed",
         async () => {
-          const timer = host.units["pogo-maintenance.timer"] ?? {};
+          const timer = host.units["stargate-maintenance.timer"] ?? {};
           timer["LastTriggerUSec"] = at("2026-11-11T00:05:00Z");
         },
       ],
@@ -500,7 +506,7 @@ describe("maintenance droid", () => {
       [
         "gateway-down",
         async () => {
-          host.units["pogo.service"] = {
+          host.units["stargate.service"] = {
             LoadState: "loaded",
             ActiveState: "failed",
           };
@@ -541,7 +547,7 @@ describe("maintenance droid", () => {
           await writeFile(
             join(droidDirectory(config.dataDirectory), "state.json"),
             JSON.stringify({
-              schema: "pogo.maintenance.droid.v1",
+              schema: "stargate.maintenance.droid.v1",
               lastReport: names.sort().at(-1),
             }),
           );
@@ -571,23 +577,29 @@ describe("maintenance droid", () => {
 
   test("a failed model call falls back to the deterministic summary", async () => {
     const { config, path } = await install();
-    host.units["pogo.service"] = { LoadState: "loaded", ActiveState: "failed" };
+    host.units["stargate.service"] = {
+      LoadState: "loaded",
+      ActiveState: "failed",
+    };
     const failing = scripted(async () => {
       throw new Error(`upstream said ${secrets.providerKey}`);
     });
     const result = await check(config, path, deps(failing));
     expect(result).toMatchObject({ posted: true, model: false });
     const [post] = await posts(config);
-    expect(post?.text).toContain("pogo.service is failed");
+    expect(post?.text).toContain("stargate.service is failed");
     expect(post?.text).toContain("deterministic summary");
-    expect(post?.text).toContain("systemctl --user status pogo.service");
+    expect(post?.text).toContain("systemctl --user status stargate.service");
     expect(post?.text).not.toContain(secrets.providerKey);
     expect(await auditLog(config)).toContainEqual(
       expect.objectContaining({ kind: "model", status: "fallback" }),
     );
     // An agent that cannot even open (missing key, bad config) also falls back.
     const second = await install();
-    host.units["pogo.service"] = { LoadState: "loaded", ActiveState: "failed" };
+    host.units["stargate.service"] = {
+      LoadState: "loaded",
+      ActiveState: "failed",
+    };
     const broken: DroidDependencies["openAgent"] = async () => {
       throw new Error("Missing environment variable");
     };
@@ -618,7 +630,7 @@ describe("maintenance droid", () => {
     // A stopped gateway without a journal: allowed, but recover has no
     // journal to finish; it never starts a gateway someone stopped.
     const stopped = await install();
-    host.units["pogo.service"] = {
+    host.units["stargate.service"] = {
       LoadState: "loaded",
       ActiveState: "inactive",
     };
@@ -634,7 +646,7 @@ describe("maintenance droid", () => {
     await check(left.config, left.path, deps(recoverTwice));
     expect(
       host.commands.filter(
-        (c) => c === "systemctl --user restart pogo.service",
+        (c) => c === "systemctl --user restart stargate.service",
       ),
     ).toHaveLength(1);
     [post] = await posts(left.config);
@@ -651,7 +663,7 @@ describe("maintenance droid", () => {
     // Busy host, active run, or a held run lock: refused or not run.
     for (const block of ["busy", "run", "lock"] as const) {
       const { config, path } = await install();
-      // An owed OpenCode restart: the undo needs Pogo's sessions idle.
+      // An owed OpenCode restart: the undo needs Stargate's sessions idle.
       await journal(config, {
         gateway: { restartPending: true },
         openCode: { restarted: true, restartPending: true },
@@ -664,7 +676,7 @@ describe("maintenance droid", () => {
       let held: Database | undefined;
       if (block === "busy") host.busy = ["ses_captain"];
       if (block === "run")
-        host.units["pogo-maintenance.service"] = {
+        host.units["stargate-maintenance.service"] = {
           LoadState: "loaded",
           ActiveState: "active",
         };
@@ -701,7 +713,7 @@ describe("maintenance droid", () => {
     }
     expect(
       host.commands.filter(
-        (c) => c === "systemctl --user restart pogo.service",
+        (c) => c === "systemctl --user restart stargate.service",
       ),
     ).toHaveLength(2);
     const log = await auditLog(config);
@@ -788,7 +800,7 @@ describe("maintenance droid", () => {
 describe("maintenance droid previews and timeouts", () => {
   test("--print shows the deterministic post and writes nothing", async () => {
     const { config, path } = await install();
-    host.units["pogo.service"] = {
+    host.units["stargate.service"] = {
       LoadState: "loaded",
       ActiveState: "inactive",
     };
@@ -819,7 +831,7 @@ describe("maintenance droid previews and timeouts", () => {
     });
     const slow: CommandRunner = {
       async run(command, options) {
-        if (command.join(" ") === "systemctl --user restart pogo.service")
+        if (command.join(" ") === "systemctl --user restart stargate.service")
           await gate;
         return runner.run(command, options);
       },
@@ -865,12 +877,12 @@ describe("maintenance droid on Pi Durable", () => {
     );
     expect(result).toMatchObject({ posted: true, model: true });
     expect(proxy.chats).toHaveLength(4);
-    // Only Pogo's own commands ran: unit reads and the one gateway restart.
+    // Only Stargate's own commands ran: unit reads and the one gateway restart.
     expect(
       host.commands.filter(
         (c) => !/^systemctl --user (show|is-active) /.test(c),
       ),
-    ).toEqual(["systemctl --user restart pogo.service"]);
+    ).toEqual(["systemctl --user restart stargate.service"]);
     const [post] = await posts(config);
     expect(post?.text).toContain(
       "Finished the leftover journal; the gateway is back.",
@@ -898,7 +910,10 @@ describe("maintenance droid on Pi Durable", () => {
 
   test("a provider failure falls back to the deterministic summary", async () => {
     const { config, path } = await install();
-    host.units["pogo.service"] = { LoadState: "loaded", ActiveState: "failed" };
+    host.units["stargate.service"] = {
+      LoadState: "loaded",
+      ActiveState: "failed",
+    };
     proxy.script = ["fail", "fail", "fail", "fail"];
     const result = await check(
       config,
@@ -981,10 +996,10 @@ describe("droid configuration and units", () => {
 
   test("the droid timer checks after the window and at the health time", () => {
     const units = buildDroidUnits({
-      name: "pogo-maintenance-droid",
-      configPath: "/home/me/.config/pogo/pogo.json",
+      name: "stargate-maintenance-droid",
+      configPath: "/home/me/.config/stargate/stargate.json",
       executable: "/usr/bin/bun",
-      entrypoint: "/home/me/.local/share/pogo/current/src/main.ts",
+      entrypoint: "/home/me/.local/share/stargate/current/src/main.ts",
       path: "/usr/bin:/bin",
       spec: {
         start: "00:00",
@@ -1000,9 +1015,9 @@ describe("droid configuration and units", () => {
     expect(units.timer).toContain("OnCalendar=*-*-* 01:15:00 Europe/London");
     expect(units.timer).toContain("OnCalendar=*-*-* 12:00:00 Europe/London");
     expect(units.timer).toContain("Persistent=false");
-    expect(units.timer).toContain("Unit=pogo-maintenance-droid.service");
+    expect(units.timer).toContain("Unit=stargate-maintenance-droid.service");
     expect(units.service).toContain(
-      'ExecStart="/usr/bin/bun" "/home/me/.local/share/pogo/current/src/main.ts" maintenance droid --config "/home/me/.config/pogo/pogo.json"',
+      'ExecStart="/usr/bin/bun" "/home/me/.local/share/stargate/current/src/main.ts" maintenance droid --config "/home/me/.config/stargate/stargate.json"',
     );
     expect(units.service).toContain("UMask=0077");
     expect(units.service).toContain("TimeoutStartSec=40min");
@@ -1093,7 +1108,7 @@ describe("droid recover safety", () => {
     await check(config, path, deps(recover));
     expect(
       host.commands.filter(
-        (c) => c === "systemctl --user restart pogo.service",
+        (c) => c === "systemctl --user restart stargate.service",
       ),
     ).toHaveLength(2);
     expect(
@@ -1174,7 +1189,7 @@ describe("droid recover safety", () => {
     await writeFile(
       join(config.dataDirectory, "maintenance", "ALERT.json"),
       JSON.stringify({
-        schema: "pogo.maintenance.alert.v1",
+        schema: "stargate.maintenance.alert.v1",
         runID: secrets.releaseToken,
         at: "2026-11-12T00:40:00.000Z",
         outcome: secrets.providerKey,
@@ -1213,7 +1228,7 @@ describe("droid recover safety", () => {
 describe("droid scrubbing and dates", () => {
   // A configured secret without any credential-looking pattern.
   const long = `fixture-long-release-${"7c3f9a1e".repeat(6)}-end`.slice(0, 64);
-  const longEnv = { ...env, POGO_RELEASE_TOKEN: long };
+  const longEnv = { ...env, STARGATE_RELEASE_TOKEN: long };
   const capture = async (config: Config, path: string) => {
     const seen: string[] = [];
     const d = deps(
@@ -1236,7 +1251,7 @@ describe("droid scrubbing and dates", () => {
       report("failed", "2026-11-12T00:05:00.000Z", {
         components: [
           {
-            id: "pogo",
+            id: "stargate",
             // Digests keep 40 characters of a version: the first 40 of the key.
             before: long,
             after: null,
@@ -1255,7 +1270,7 @@ describe("droid scrubbing and dates", () => {
       report("failed", "2026-11-12T00:05:00.000Z", {
         components: [
           {
-            id: "pogo",
+            id: "stargate",
             before: long,
             after: null,
             candidate: null,
@@ -1309,7 +1324,7 @@ describe("droid scrubbing and dates", () => {
     await writeFile(
       join(droidDirectory(config.dataDirectory), "state.json"),
       JSON.stringify({
-        schema: "pogo.maintenance.droid.v1",
+        schema: "stargate.maintenance.droid.v1",
         lastReport: null,
         recovers: { "2026-11-12": 1 },
       }),
@@ -1328,7 +1343,7 @@ describe("droid scrubbing and dates", () => {
     );
     expect(
       host.commands.filter(
-        (c) => c === "systemctl --user restart pogo.service",
+        (c) => c === "systemctl --user restart stargate.service",
       ),
     ).toHaveLength(1);
     const state = JSON.parse(
@@ -1345,7 +1360,7 @@ describe("droid crew queue notes", () => {
   test("the droid names queued crew tasks with the command to resolve them", async () => {
     const { config, path } = await install();
     const captain = join(host.dir, "captain");
-    const stateDirectory = join(captain, ".local", "pogo-crew");
+    const stateDirectory = join(captain, ".local", "stargate-crew");
     await mkdir(join(captain, ".opencode"), { recursive: true });
     await writeFile(
       join(captain, ".opencode", "opencode.json"),
@@ -1391,7 +1406,7 @@ describe("droid crew queue notes", () => {
     expect(status).toContain('"originIsPin":false');
     const [post] = await posts(config);
     expect(post?.text).toContain(
-      `Queued crew task ${id} (chief, from an earlier captain session): ask the captain to run pogo_crew status ${id}`,
+      `Queued crew task ${id} (chief, from an earlier captain session): ask the captain to run stargate_crew status ${id}`,
     );
     const everything = [...agentPrompts, status, post?.text ?? ""].join("\n");
     expect(everything).not.toContain("private task text");

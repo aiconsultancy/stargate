@@ -68,8 +68,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p dist
-          git archive --format=tar.gz --prefix="pogo-v$VERSION/" -o "dist/pogo-v$VERSION.tar.gz" "$HEAD_SHA"
-          (cd dist && sha256sum "pogo-v$VERSION.tar.gz" > "pogo-v$VERSION.tar.gz.sha256")
+          git archive --format=tar.gz --prefix="stargate-v$VERSION/" -o "dist/stargate-v$VERSION.tar.gz" "$HEAD_SHA"
+          (cd dist && sha256sum "stargate-v$VERSION.tar.gz" > "stargate-v$VERSION.tar.gz.sha256")
       - name: Create tag and release
         if: steps.version.outputs.version != ''
         env:
@@ -79,5 +79,5 @@ jobs:
           --target "$HEAD_SHA"
           --title "v$VERSION"
           --notes-file release-notes.md
-          "dist/pogo-v$VERSION.tar.gz"
-          "dist/pogo-v$VERSION.tar.gz.sha256"
+          "dist/stargate-v$VERSION.tar.gz"
+          "dist/stargate-v$VERSION.tar.gz.sha256"

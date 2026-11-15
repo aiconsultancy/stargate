@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
 
-const fixtureAuthEnv = "POGO_PAIR_FIXTURE_AUTH";
+const fixtureAuthEnv = "STARGATE_PAIR_FIXTURE_AUTH";
 
 function backend(url: string, headersEnv: Record<string, string> = {}) {
   const config = backendSchema.parse({

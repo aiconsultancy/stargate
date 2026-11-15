@@ -12,7 +12,7 @@ import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import { teamSchema } from "../src/crew/team";
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/pogo-mail-receipt-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-mail-receipt-");
   const team = teamSchema.parse({
     captain: { id: "captain" },
     crew: [{ id: "worker", role: "Builder", permissionProfile: "coding" }],
@@ -40,7 +40,9 @@ async function fixture() {
         },
         metadata: captain
           ? {}
-          : { pogoCrew: { namespace: options.namespace, crewID: "worker" } },
+          : {
+              stargateCrew: { namespace: options.namespace, crewID: "worker" },
+            },
       };
     },
     async create() {
@@ -614,7 +616,7 @@ test("lost reply receipts recover the original captain route without cross-capta
 });
 
 test("crew mail refuses a crew agent session that is not the member's session", async () => {
-  // A Pogo IRC session uses the crew agent but is a separate root session:
+  // A Stargate IRC session uses the crew agent but is a separate root session:
   // it cannot send Mesij mail as that member.
   const f = await fixture();
   try {

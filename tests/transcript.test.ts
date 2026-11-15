@@ -301,7 +301,7 @@ test("Stop keeps settled public text and later results without rerunning", async
       container: { type: "message", channel_id: "C123", message_ts: ts },
       message: { user: "UBOT", ts, thread_ts: "1.000" },
       actions: [
-        { type: "button", action_id: "pogo_stop", value: String(job.id) },
+        { type: "button", action_id: "stargate_stop", value: String(job.id) },
       ],
     }),
   ).toBe(true);
@@ -317,9 +317,9 @@ test("Stop keeps settled public text and later results without rerunning", async
 });
 
 test("restart resumes from the durable cursor without reposting", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-transcript-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-transcript-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const path = join(directory, "pogo.sqlite");
+  const path = join(directory, "stargate.sqlite");
   const native = nativeSession();
   const store = new Store(path);
   const first = fixture({ store, native });
@@ -331,21 +331,23 @@ test("restart resumes from the durable cursor without reposting", async () => {
   await first.drain();
   await first.gateway.close();
   store.close();
-  native.add("Build finished while Pogo was stopped.");
+  native.add("Build finished while Stargate was stopped.");
   const reopened = new Store(path);
   cleanup.push(() => reopened.close());
   const second = fixture({ store: reopened, native });
   await second.settle(); // Event stream (re)connected.
-  expect(second.texts()).toEqual(["Build finished while Pogo was stopped."]);
+  expect(second.texts()).toEqual([
+    "Build finished while Stargate was stopped.",
+  ]);
   await second.settle();
   expect(second.posts).toHaveLength(1);
   expect(first.prompts.length + second.prompts.length).toBe(1);
 });
 
 test("upgrade baselines existing threads without backfill, then follows them", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-transcript-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-transcript-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const path = join(directory, "pogo.sqlite");
+  const path = join(directory, "stargate.sqlite");
   const legacy = new Store(path);
   const f = fixture({ store: legacy });
   f.gateway.accept(event());
@@ -705,7 +707,9 @@ test("a lost cursor stops catch-up, then the next request re-anchors at its own 
   f.gateway.accept(followUp("next", "2.000"));
   await f.drain();
   const reply = f.texts().at(-1) ?? "";
-  expect(reply).toStartWith("_Pogo could not find its last delivered message");
+  expect(reply).toStartWith(
+    "_Stargate could not find its last delivered message",
+  );
   expect(reply).toEndWith(
     "Second answer.\n\nBackground reply after the answer.",
   );
@@ -771,9 +775,9 @@ test("an unsettled legacy reply shows delayed status after its input is anchored
 });
 
 test("a cursor moved by another writer rolls back the reply and defers instead of duplicating", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-transcript-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-transcript-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const path = join(directory, "pogo.sqlite");
+  const path = join(directory, "stargate.sqlite");
   const store = new Store(path);
   cleanup.push(() => store.close());
   const other = new Database(path);
@@ -811,7 +815,7 @@ test("reactions come only from the current request, not earlier continuations", 
   });
   f.gateway.accept(event());
   await f.drain();
-  f.native.add("[[pogo:react:tada]]\nEarlier continuation.");
+  f.native.add("[[stargate:react:tada]]\nEarlier continuation.");
   f.setTurn(async () => {
     f.native.add("Current answer.");
     return "Current answer.";
@@ -822,8 +826,8 @@ test("reactions come only from the current request, not earlier continuations", 
   expect(f.texts().at(-1)).toBe("Earlier continuation.\n\nCurrent answer.");
   // A reaction-only current turn still reacts and posts nothing.
   f.setTurn(async () => {
-    f.native.add("[[pogo:react:eyes]]");
-    return "[[pogo:react:eyes]]";
+    f.native.add("[[stargate:react:eyes]]");
+    return "[[stargate:react:eyes]]";
   });
   f.gateway.accept(followUp("look", "3.000"));
   await f.drain();
@@ -841,8 +845,8 @@ test("a silent turn posts nothing, advances the cursor and is never replayed", a
   await f.drain();
   f.setTurn(async () => {
     f.native.add(); // Tool-only step.
-    f.native.add("[[pogo:silent]]\nAddressed to another captain.");
-    return "[[pogo:silent]]\nAddressed to another captain.";
+    f.native.add("[[stargate:silent]]\nAddressed to another captain.");
+    return "[[stargate:silent]]\nAddressed to another captain.";
   });
   f.gateway.accept(followUp("for someone else", "2.000"));
   await f.drain();
@@ -867,8 +871,8 @@ test("silence covers one assistant message; other public text of the turn is kep
   const f = fixture();
   f.setTurn(async () => {
     f.native.add("Checked the thread.");
-    f.native.add("[[pogo:silent]]\n![private](file:///tmp/private.txt)");
-    return "Checked the thread.\n\n[[pogo:silent]]\n![private](file:///tmp/private.txt)";
+    f.native.add("[[stargate:silent]]\n![private](file:///tmp/private.txt)");
+    return "Checked the thread.\n\n[[stargate:silent]]\n![private](file:///tmp/private.txt)";
   });
   f.gateway.accept(event());
   const job = pending(f);
@@ -886,14 +890,14 @@ test("a silent background continuation and an unsettled follow-up cause no post 
   f.gateway.accept(event());
   await f.drain();
   f.native.add(); // Synthetic notification.
-  f.native.add("[[pogo:silent]]");
+  f.native.add("[[stargate:silent]]");
   await f.settle("session-1");
   expect(f.texts()).toEqual(["Queued CI."]);
   // The request's own reply is silent while later native work is unsettled.
   f.setTurn(async () => {
-    f.native.add("[[pogo:silent]]");
+    f.native.add("[[stargate:silent]]");
     f.native.add("Still streaming", false);
-    return "[[pogo:silent]]";
+    return "[[stargate:silent]]";
   });
   f.gateway.accept(followUp("not for you", "2.000"));
   await f.drain();

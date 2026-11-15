@@ -2,7 +2,7 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 
 /**
- * Opt-in `pogo_post`: the bot's captain may post to channels its access rules
+ * Opt-in `stargate_post`: the bot's captain may post to channels its access rules
  * allow. Absent is off. See docs/captain-post.md.
  */
 export const captainPostSchema = z.strictObject({

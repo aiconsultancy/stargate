@@ -53,13 +53,13 @@ function shipConfig(port: number, extra: Record<string, unknown> = {}) {
     displayName: "Galactica",
     server: { host: "127.0.0.1", port, tls: false },
     account: captainAccount,
-    passwordEnv: "POGO_IRC_GALACTICA_CAPTAIN",
+    passwordEnv: "STARGATE_IRC_GALACTICA_CAPTAIN",
     channels: ["#ship-galactica"],
     crew: [
       {
         id: "chief",
         account: chiefAccount,
-        passwordEnv: "POGO_IRC_GALACTICA_CHIEF",
+        passwordEnv: "STARGATE_IRC_GALACTICA_CHIEF",
         channels: ["#ship-galactica"],
         backend: { ...backend, agent: "galactica-crew-chief" },
       },
@@ -104,14 +104,14 @@ async function world(
   cleanup.push(() => fake.stop());
   if (options.captainInvited !== false)
     fake.invited.add(`${captainAccount}:#agent-dms`);
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-audit-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-audit-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   return { fake, store };
 }
 
-/** One Pogo lifetime: a ship with captain and chief, and their gateways. */
+/** One Stargate lifetime: a ship with captain and chief, and their gateways. */
 async function setup(
   options: {
     answer?: (text: string) => string;
@@ -129,8 +129,8 @@ async function setup(
   const { log, lines: logs } = capture();
   const ship = await IrcShip.create(config, store, log, {
     env: {
-      POGO_IRC_GALACTICA_CAPTAIN: "captain-pass",
-      POGO_IRC_GALACTICA_CHIEF: "chief-pass",
+      STARGATE_IRC_GALACTICA_CAPTAIN: "captain-pass",
+      STARGATE_IRC_GALACTICA_CHIEF: "chief-pass",
     },
     timing: {
       reconnectMinMs: 20,
@@ -152,7 +152,7 @@ async function setup(
     },
     async prompt(_session, text) {
       prompts.push(text);
-      return options.answer?.(text) ?? "[[pogo:silent]]";
+      return options.answer?.(text) ?? "[[stargate:silent]]";
     },
     async close() {},
   };
@@ -163,7 +163,7 @@ async function setup(
     },
     async prompt(_session, text) {
       crewPrompts.push(text);
-      return "[[pogo:silent]]";
+      return "[[stargate:silent]]";
     },
     async close() {},
   };
@@ -368,7 +368,8 @@ test("irc audit: any line of a multiline DM can withhold the whole entry", () =>
 
 test("irc audit: DMs to and from captain and crew are mirrored; typing is not", async () => {
   const { fake, captain } = await setup({
-    answer: (text) => (text === "hello" ? "Hello Jack." : "[[pogo:silent]]"),
+    answer: (text) =>
+      text === "hello" ? "Hello Jack." : "[[stargate:silent]]",
   });
   fake.say(jack, captainAccount, "hello");
   await mirrored(fake, "[dm] galactica-captain → jack: Hello Jack.");
@@ -410,7 +411,7 @@ test("irc audit: a DM that catch-up replays is mirrored once, with its time", as
   const { fake, store } = first;
   await first.close();
   await Bun.sleep(5);
-  // Pogo is stopped; the server keeps the DM.
+  // Stargate is stopped; the server keeps the DM.
   const time = new Date().toISOString();
   fake.say(jack, captainAccount, "while you were away", {
     time,
@@ -451,7 +452,7 @@ test("irc audit: services, credentials and CTCP other than ACTION are not mirror
   fake.say(jack, captainAccount, "\u0001ACTION waves\u0001");
   fake.say(jack, captainAccount, "\u0001VERSION\u0001");
   fake.say(jack, captainAccount, "\u0001PING 12345\u0001");
-  fake.say(jack, captainAccount, "\u0001VERSION Pogo\u0001", {}, "NOTICE");
+  fake.say(jack, captainAccount, "\u0001VERSION Stargate\u0001", {}, "NOTICE");
   fake.say(jack, captainAccount, "marker");
   await mirrored(fake, "[dm] jack → galactica-captain: marker");
   await delay(100);
@@ -660,7 +661,7 @@ test("irc audit: crew never join the audit channel; config keeps it apart", asyn
     ...shipConfig(6667),
     id: "pegasus-irc",
     account: "pegasus-captain",
-    passwordEnv: "POGO_IRC_PEGASUS_CAPTAIN",
+    passwordEnv: "STARGATE_IRC_PEGASUS_CAPTAIN",
     channels: ["#ship-pegasus", "#agent-dms"],
     crew: [],
     audit: undefined,
@@ -696,7 +697,7 @@ test("irc audit: the audit channel is no ship channel anywhere, under any foldin
     id: "pegasus-irc",
     server,
     account: "pegasus-captain",
-    passwordEnv: "POGO_IRC_PEGASUS_CAPTAIN",
+    passwordEnv: "STARGATE_IRC_PEGASUS_CAPTAIN",
     channels,
     crew: [],
     audit: undefined,
@@ -747,7 +748,7 @@ test("irc audit: names any runtime casemapping joins are refused by config", () 
     ...shipConfig(6667),
     id: "pegasus-irc",
     account: "pegasus-captain",
-    passwordEnv: "POGO_IRC_PEGASUS_CAPTAIN",
+    passwordEnv: "STARGATE_IRC_PEGASUS_CAPTAIN",
     channels: [channel],
     crew: [],
     audit: undefined,

@@ -46,12 +46,15 @@ their work, branches and session identity.
 ## Tools
 
 ```js
-pogo_crew({ op: "roster" });
-pogo_journal({ op: "append", text: "Focused tests passed; review remains." });
-pogo_journal({ op: "read", after: 42, limit: 20 });
-pogo_mail({ op: "send", to: "apollo", text: "Review when free." });
-pogo_mail({ op: "inbox", after: 123, limit: 20 });
-pogo_dm({
+stargate_crew({ op: "roster" });
+stargate_journal({
+  op: "append",
+  text: "Focused tests passed; review remains.",
+});
+stargate_journal({ op: "read", after: 42, limit: 20 });
+stargate_mail({ op: "send", to: "apollo", text: "Review when free." });
+stargate_mail({ op: "inbox", after: 123, limit: 20 });
+stargate_dm({
   op: "send",
   to: "captain",
   text: "Use interface X.",
@@ -107,7 +110,7 @@ Unprovisioned workers get only a reserved mailbox, not a new agent session.
 Native failure never changes task state or discards mail. Retry only the same
 admission identity: OpenCode `msg_<Mesij ID>`, Pi `requestId=<Mesij ID>`.
 Cancellation can withdraw Pi follow-ups; durable mail remains, without replay.
-`pogo_crew urgent` is a compatibility entry point to explicit DM.
+`stargate_crew urgent` is a compatibility entry point to explicit DM.
 
 Use mail/DM with `replyTo` for peer answers. A final answer remains the assigned
 task result. Native task-marked notices instruct a worker to restate that result
@@ -144,7 +147,7 @@ stop the underlying work. Gateway timeouts at or below 60 seconds can expire
 before this window; the default gateway timeout is 30 minutes. This bounds one
 wait, not the model's whole turn or another conversation's response latency.
 
-For an unsolicited completion report, send one concise `pogo_dm` to `captain`
+For an unsolicited completion report, send one concise `stargate_dm` to `captain`
 with the task ID and verified outcome **before** `complete` or the final answer.
 Completion alone does not wake the captain, and completed tasks cannot select
 a captain route for a new send. The captain may briefly see running while the
@@ -170,7 +173,7 @@ override queued order for priority work. `status` or `wait` selects a queued
 task for admission when the worker is idle; new dispatch can also pass queued
 work. Explain priority decisions and preserve unselected assignments.
 Read-only checks and roll calls do not wait behind queued work: use `inspect`
-for a no-wake snapshot, or `pogo_dm` for an actual member reply. An idle member
+for a no-wake snapshot, or `stargate_dm` for an actual member reply. An idle member
 can receive that DM without promoting or cancelling an older assignment.
 Tools-off summaries can also pass queued maintenance when their reporter is idle.
 Active or uncertain execution, ownership, controllers and the queue-size bound
@@ -190,9 +193,9 @@ roots or replay uncertain tools. Record concrete deficiencies and successful
 workarounds through ordinary journal notes. Escalate only a remaining blocker
 that needs operator authority or input.
 
-OpenCode retains scoped `pogo_history`. Pi exposes self-only `pi_history` through
+OpenCode retains scoped `stargate_history`. Pi exposes self-only `pi_history` through
 its current live conversation's native paginated `Conversation.entries`; this
-does not start work. There is no unified Pi `pogo_history` in this release.
+does not start work. There is no unified Pi `stargate_history` in this release.
 Pi history returns only bounded, redacted user/assistant text and preserves the
 raw page cursor. System/tool records and reasoning are excluded. Native tool
 results larger than 50 KiB return a fixed error, not partial JSON or cursors;

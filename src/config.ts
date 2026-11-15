@@ -1,4 +1,5 @@
-import { dirname, isAbsolute, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { crewActivitySchema } from "./activity";
 import { captainPostSchema } from "./captain-post-config";
@@ -296,7 +297,7 @@ export const botSchema = z.strictObject({
   }),
   backend: backendSchema,
   cronjobs: cronjobsSchema.optional(),
-  /** Captain `pogo_post` to allowed channels; absent is off. */
+  /** Captain `stargate_post` to allowed channels; absent is off. */
   captainPost: captainPostSchema.optional(),
   pairing: pairingSchema.optional(),
   threadContext: z.boolean().default(false),
@@ -342,7 +343,7 @@ const ircServerSchema = z
     /** PEM file of a private CA. Without it, system roots verify the server. */
     caFile: absolutePath.optional(),
     /**
-     * Expected ISUPPORT NETWORK name, for example `Fleet`. Pogo refuses a
+     * Expected ISUPPORT NETWORK name, for example `Fleet`. Stargate refuses a
      * server that announces another name. Part of the namespace, with host
      * and port.
      */
@@ -539,7 +540,7 @@ export const ircSchema = z
     /**
      * Crew messaging over IRC (OpenCode captain; opt-in). `sessions` binds
      * each crew IRC session to its crew member in the crew plugin, so
-     * pogo_dm and pogo_mail work there. `ircCopies` also sends each pogo_dm
+     * stargate_dm and stargate_mail work there. `ircCopies` also sends each stargate_dm
      * between two ship agents with IRC connections as an IRC DM from the
      * sender's account.
      */
@@ -639,7 +640,7 @@ export function pinnedSessionIDs(config: {
 
 export const configSchema = z
   .strictObject({
-    dataDirectory: z.string().default(".pogo"),
+    dataDirectory: z.string().default(".stargate"),
     /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
     dashboard: z.boolean().optional(),
     bots: z.array(botSchema).default([]),
@@ -781,8 +782,19 @@ export function secret(
 
 export async function loadConfig(path: string) {
   const config = configSchema.parse(await Bun.file(path).json());
+  const dataDirectory = resolve(dirname(resolve(path)), config.dataDirectory);
+  // Rejection, not a compatibility reader: never create a parallel empty store.
+  if (
+    existsSync(join(dataDirectory, "pogo.sqlite")) ||
+    (basename(dataDirectory) === ".stargate" &&
+      !existsSync(join(dataDirectory, "stargate.sqlite")) &&
+      existsSync(join(dirname(dataDirectory), ".pogo")))
+  )
+    throw new Error(
+      "Unconverted Pogo state detected. Stop and complete docs/hard-cutover.md before starting Stargate; do not delete state.",
+    );
   return {
     ...config,
-    dataDirectory: resolve(dirname(resolve(path)), config.dataDirectory),
+    dataDirectory,
   };
 }

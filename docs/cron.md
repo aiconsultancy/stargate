@@ -69,7 +69,7 @@ and [confirmation dialogs](https://docs.slack.dev/reference/block-kit/compositio
 
 ## File-backed jobs
 
-Opt in on one bot in `pogo.json`:
+Opt in on one bot in `stargate.json`:
 
 ```json
 "cronjobs": {
@@ -113,7 +113,7 @@ schedule: "15 3 * * *"
 timezone: UTC
 skills:
 
-- pogo-cronjobs
+- stargate-cronjobs
   enabled: false
   report: daily
   slack:
@@ -157,27 +157,27 @@ replaces a definition.
 
 ## OpenCode tool and local CLI
 
-Generated profiles expose the `pogo-cronjobs` skill. Bind the captain tool
+Generated profiles expose the `stargate-cronjobs` skill. Bind the captain tool
 to one existing gateway configuration and bot:
 
 ```sh
 stargate crew init --directory /srv/captain --project /srv/project \
-  --worktrees /srv/crew --cron-config /srv/pogo/pogo.json --cron-bot helper
+  --worktrees /srv/crew --cron-config /srv/stargate/stargate.json --cron-bot helper
 ```
 
 For an existing profile, merge this non-secret binding into the existing
 Stargate plugin options; preserve other options and the pinned captain session:
 
 ```json
-"cron": { "configPath": "/srv/pogo/pogo.json", "bot": "helper" }
+"cron": { "configPath": "/srv/stargate/stargate.json", "bot": "helper" }
 ```
 
-The same binding enables the captain's `pogo_post` tool when the bot sets
+The same binding enables the captain's `stargate_post` tool when the bot sets
 `captainPost`; see [captain posts](captain-post.md).
 
 Add the package's `templates/skills` directory to the profile's `skills`
 sources if absent. No global configuration change is required. The
-captain-only `pogo_cron` tool supports `list`, `add`, `run`, `remove` and
+captain-only `stargate_cron` tool supports `list`, `add`, `run`, `remove` and
 `report`. Its host binding cannot be changed through tool input. Both the
 native captain authority and configured backend directory are checked.
 Crew and child sessions cannot use it to schedule work as the captain.
@@ -189,11 +189,11 @@ Admission is not completion. Inspect status before retrying uncertain work.
 Local operator equivalents:
 
 ```sh
-stargate cron list --config /srv/pogo/pogo.json --bot helper
-stargate cron add --config /srv/pogo/pogo.json --bot helper --input job.json
-stargate cron run overnight-maintenance --config /srv/pogo/pogo.json --bot helper
-stargate cron remove JOB_UUID --config /srv/pogo/pogo.json --bot helper
-stargate cron report --config /srv/pogo/pogo.json --bot helper
+stargate cron list --config /srv/stargate/stargate.json --bot helper
+stargate cron add --config /srv/stargate/stargate.json --bot helper --input job.json
+stargate cron run overnight-maintenance --config /srv/stargate/stargate.json --bot helper
+stargate cron remove JOB_UUID --config /srv/stargate/stargate.json --bot helper
+stargate cron report --config /srv/stargate/stargate.json --bot helper
 ```
 
 `job.json` uses the tool's add fields: `name`, `description`, `schedule`,
@@ -215,7 +215,7 @@ it does not send a report or change settings.
   for this bot: job inventory, deferred outcomes and definition-error count.
   It calls no model. Up to ten jobs and ten result excerpts fit the message;
   each underlying query is bounded to 100 rows. Full public answers remain
-  in `<dataDirectory>/pogo.sqlite`; schedules, run status and report claims
+  in `<dataDirectory>/stargate.sqlite`; schedules, run status and report claims
   remain in `<dataDirectory>/cron.sqlite`. Keep both private and backed up.
 - Reports cover the previous cutoff to today's cutoff, plus older active
   runs and work completed in that window. A run still active at cutoff can

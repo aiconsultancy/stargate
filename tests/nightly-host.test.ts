@@ -21,7 +21,7 @@ import {
 import { restoreCutoff } from "../src/nightly/run";
 import { tarball } from "./tar";
 
-const root = await mkdtemp("/tmp/opencode/pogo-host-");
+const root = await mkdtemp("/tmp/opencode/stargate-host-");
 const now = Date.parse("2026-11-12T00:10:00Z");
 const old = new Date(now - 72 * 3_600_000).toISOString();
 const sha = (data: Uint8Array) =>

@@ -164,7 +164,8 @@ export function chunks(text: string): string[] {
   );
   const truncated = points.length > 60_000;
   const bounded = points.slice(0, 60_000);
-  if (truncated) bounded.push(...Array.from("\n[Response truncated by Pogo.]"));
+  if (truncated)
+    bounded.push(...Array.from("\n[Response truncated by Stargate.]"));
   return markdownChunks(bounded);
 }
 

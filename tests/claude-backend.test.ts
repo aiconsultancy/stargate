@@ -33,7 +33,7 @@ import {
 } from "../src/request-failure";
 import { backendFingerprint } from "../src/routing";
 
-const apiKeyEnv = "POGO_CLAUDE_TEST_PROXY_KEY";
+const apiKeyEnv = "STARGATE_CLAUDE_TEST_PROXY_KEY";
 const key = "local-proxy-test-only";
 const fixture = join(import.meta.dir, "claude-fixture.ts");
 // Host secrets that must never reach the Claude Code child.
@@ -45,7 +45,7 @@ const hostSecrets = {
   CLAUDE_CONFIG_DIR: "/host/.claude",
   OPENAI_API_KEY: "openai-must-not-be-sent",
   CLIPROXYAPI_API_KEY: "proxy-key-only-by-reference",
-  POGO_TEST_BOT_TOKEN: "xoxb-must-not-be-sent",
+  STARGATE_TEST_BOT_TOKEN: "xoxb-must-not-be-sent",
   HTTPS_PROXY: "http://127.0.0.1:2",
   NODE_OPTIONS: "--require /host/hook.js",
 };
@@ -88,7 +88,7 @@ const logEntry = z.union([
 ]);
 
 async function open(extra: Record<string, unknown> = {}) {
-  const root = await mkdtemp(join(tmpdir(), "pogo-claude-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-claude-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const executable = join(root, "claude");
   await writeFile(
@@ -116,7 +116,7 @@ async function open(extra: Record<string, unknown> = {}) {
 
 const signal = () => AbortSignal.timeout(20_000);
 const session = (backend: ClaudeBackend) =>
-  backend.createSession({ key: "k", title: "Pogo test", signal: signal() });
+  backend.createSession({ key: "k", title: "Stargate test", signal: signal() });
 
 function alive(pid: number) {
   try {
@@ -235,9 +235,9 @@ test("Claude child receives only a minimal, explicit environment", async () => {
   expect(env["ANTHROPIC_BASE_URL"]).toBe("http://127.0.0.1:8317");
   expect(env["CLAUDE_CONFIG_DIR"]).toBe(join(dataDirectory, "claude"));
   expect(env[apiKeyEnv]).toBeUndefined();
-  expect(env["POGO_CLAUDE_TURN"]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(env["STARGATE_CLAUDE_TURN"]).toMatch(/^[0-9a-f-]{36}$/);
   // Each turn gets a private temporary directory, removed after the turn.
-  expect(env["TMPDIR"]).toStartWith(join(tmpdir(), "pogo-claude-"));
+  expect(env["TMPDIR"]).toStartWith(join(tmpdir(), "stargate-claude-"));
   await expect(readdir(env["TMPDIR"] ?? "")).rejects.toThrow();
   const allowed = new Set([
     ...inheritedEnvironment,
@@ -246,10 +246,10 @@ test("Claude child receives only a minimal, explicit environment", async () => {
     "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_AGENT_SDK_VERSION",
     "CLAUDE_CODE_SDK_READS_SESSION_STATE",
-    // Set by the fixture's wrapper shell, not by Pogo.
+    // Set by the fixture's wrapper shell, not by Stargate.
     "PWD",
     // A random value per turn that finds the turn's processes.
-    "POGO_CLAUDE_TURN",
+    "STARGATE_CLAUDE_TURN",
   ]);
   expect(Object.keys(env).filter((name) => !allowed.has(name))).toEqual([]);
   expect(
@@ -257,7 +257,7 @@ test("Claude child receives only a minimal, explicit environment", async () => {
       claudeEnvironment(config(), "/private", {
         ...hostSecrets,
         PATH: "/bin",
-        HOME: "/home/pogo",
+        HOME: "/home/stargate",
         [apiKeyEnv]: key,
       }),
     ).sort(),
@@ -461,7 +461,7 @@ test.skipIf(process.platform !== "linux")(
     };
     const turn = (marker = crypto.randomUUID()) => ({
       marker,
-      env: { POGO_CLAUDE_TURN: marker },
+      env: { STARGATE_CLAUDE_TURN: marker },
     });
     // Neither the session ID nor the marker.
     const foreign = await sleeper("unrelated", turn().env);
@@ -609,7 +609,7 @@ test("Claude configuration is strict and fails closed", () => {
   ])
     expect(parse(extra)).toBe(false);
   expect(parse({ allowedTools: ["Read", "Bash", "WebFetch"] })).toBe(true);
-  // Every Pogo tool name still exists in the pinned SDK.
+  // Every Stargate tool name still exists in the pinned SDK.
   const builtin: readonly string[] = BUILTIN_TOOL_NAMES;
   expect(claudeToolNames.filter((name) => !builtin.includes(name))).toEqual([]);
   // IRC crew members accept the backend too.
@@ -635,7 +635,7 @@ test("Claude configuration is strict and fails closed", () => {
 });
 
 test("createBackend opens the Claude adapter on demand", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-claude-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-claude-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const backend = await createBackend(config(), { dataDirectory: root });
   cleanup.push(() => backend.close());
@@ -667,7 +667,7 @@ test("Claude maps what the CLI reports to one shared failure category", async ()
     ["fail:unknown:429", "provider:quota:429:idle"],
     // A tool ran before the provider refused the next call.
     ["tool fail:rate_limit:429", "provider:quota:429:ran"],
-    // No result: Pogo cannot know what the CLI did.
+    // No result: Stargate cannot know what the CLI did.
     ["crash", "provider:crash:0:ran"],
   ];
   for (const [prompt, cause] of cases)

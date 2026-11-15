@@ -22,14 +22,14 @@ async function world() {
     accounts: { galactica: "captain-pass", jack: "jack-pass" },
   }).start();
   cleanup.push(() => fake.stop());
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-catchup-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-catchup-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   return { fake, store };
 }
 
-/** One Pogo lifetime: a ship and its gateway on a shared store. */
+/** One Stargate lifetime: a ship and its gateway on a shared store. */
 async function run(
   fake: FakeIrcServer,
   store: Store,
@@ -39,7 +39,7 @@ async function run(
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica",
-    passwordEnv: "POGO_IRC_GALACTICA",
+    passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     backend: {
       type: "opencode",
@@ -50,7 +50,7 @@ async function run(
     ...extra,
   });
   const ship = await IrcShip.create(config, store, pino({ level: "silent" }), {
-    env: { POGO_IRC_GALACTICA: "captain-pass" },
+    env: { STARGATE_IRC_GALACTICA: "captain-pass" },
     timing: { reconnectMinMs: 20, intervalMs: 5, burst: 50 },
     readyMs: 2000,
   });
@@ -62,7 +62,7 @@ async function run(
     },
     async prompt(_s, text) {
       prompts.push(text);
-      return "[[pogo:silent]]";
+      return "[[stargate:silent]]";
     },
     async close() {},
   };
@@ -94,7 +94,7 @@ async function run(
   return { captain, prompts, close };
 }
 
-test("irc catch-up: messages sent while Pogo was stopped are admitted once", async () => {
+test("irc catch-up: messages sent while Stargate was stopped are admitted once", async () => {
   const { fake, store } = await world();
   const first = await run(fake, store);
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "just chatting");
@@ -104,7 +104,7 @@ test("irc catch-up: messages sent while Pogo was stopped are admitted once", asy
     "cursor",
   );
   await first.close();
-  // Pogo is down: a mention and a direct message arrive.
+  // Stargate is down: a mention and a direct message arrive.
   fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
@@ -140,7 +140,7 @@ test("irc catch-up: each direct-message partner keeps its own cursor", async () 
   fake.say({ nick: "bob", account: "bob" }, "galactica", "from bob while away");
   await Bun.sleep(5);
   // Second start: history is not answered yet when alice writes live, and
-  // Pogo stops before bob's messages are replayed.
+  // Stargate stops before bob's messages are replayed.
   fake.holdHistory = true;
   const second = await run(fake, store);
   fake.say({ nick: "alice", account: "alice" }, "galactica", "live from alice");
@@ -173,7 +173,7 @@ test("irc catch-up: bounded age, no backlog on a first start, switch off", async
   fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
-    "galactica: before Pogo existed",
+    "galactica: before Stargate existed",
     {
       time: recent,
       msgid: "pre-1",
@@ -214,7 +214,7 @@ test("irc catch-up: bounded age, no backlog on a first start, switch off", async
   await new Promise((resolve) => setTimeout(resolve, 200));
   // The window is the last 24 hours, whatever the cursor says.
   expect(second.prompts.sort()).toEqual([
-    "before Pogo existed",
+    "before Stargate existed",
     "recent enough",
   ]);
   await second.close();

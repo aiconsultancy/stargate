@@ -25,7 +25,7 @@ const png = Uint8Array.from(
 );
 
 async function fixture(pinned = false) {
-  const directory = await mkdtemp("/tmp/opencode/pogo-media-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-media-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const image = join(directory, "proof.png");
   await writeFile(image, png);
@@ -352,7 +352,10 @@ test("attachment eval: real OpenCode parser routes late private proof, not publi
     id: "wakeA",
     type: "synthetic",
     metadata: {
-      pogoCrew: { originCaptainID: "ses_captain", originInputID: "msg_input1" },
+      pogoCrew: {
+        originCaptainID: "ses_captain",
+        originInputID: "msg_input1",
+      },
     },
   });
   add({

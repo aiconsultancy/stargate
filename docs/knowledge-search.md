@@ -7,7 +7,7 @@ privacy and approval requirements still apply. This is not an OS sandbox.
 
 ## Prior conversations
 
-OpenCode captains and workers use `pogo_history`:
+OpenCode captains and workers use `stargate_history`:
 
 ```json
 { "op": "search", "query": "invitation authorisation", "limit": 10 }

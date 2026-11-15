@@ -14,7 +14,7 @@ channel and TLS setup belong to the server operator.
 Create a SASL account for the bot and make sure it can join a test channel.
 The example uses password authentication over TLS, an allowlist of IRC
 accounts, and a Pi Durable backend with a direct OpenAI API key. Save the
-configuration as `pogo.json` and replace the host, account, channel, and
+configuration as `stargate.json` and replace the host, account, channel, and
 working directory with your own values.
 
 ```json
@@ -39,7 +39,7 @@ working directory with your own values.
 ```
 
 Put `STARGATE_IRC_PASSWORD` and `OPENAI_API_KEY` in the private
-`pogo.json.env` file (mode `0600`). If the server uses a private CA, set
+`stargate.json.env` file (mode `0600`). If the server uses a private CA, set
 `server.caFile` to the CA certificate path. Validate and start from the
 [Stargate directory](../README.md#install):
 
@@ -60,7 +60,7 @@ channel requests and team behavior.
 2. Put each password in `<config>.env` (mode `0600`) under the variable
    named by its `passwordEnv`. A certificate-authenticated captain uses
    `clientPemFile` instead. Never put a password or a private key in
-   `pogo.json` or chat.
+   `stargate.json` or chat.
 3. Add the `irc` registration. For a captain that is also on Slack, copy
    the Slack bot's OpenCode `url`, `directory`, `agent` and `sessionID`;
    the pinned session must match that directory and agent.
@@ -124,7 +124,7 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
     "displayName": "Galactica",
     "server": { "host": "127.0.0.1", "port": 6667, "tls": false },
     "account": "galactica-captain",
-    "passwordEnv": "POGO_IRC_GALACTICA_CAPTAIN_PASSWORD",
+    "passwordEnv": "STARGATE_IRC_GALACTICA_CAPTAIN_PASSWORD",
     "channels": ["#ship-galactica"],
     "access": {
       "deniedAccounts": [],
@@ -139,7 +139,7 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
       {
         "id": "chief",
         "account": "galactica-chief",
-        "passwordEnv": "POGO_IRC_GALACTICA_CHIEF_PASSWORD",
+        "passwordEnv": "STARGATE_IRC_GALACTICA_CHIEF_PASSWORD",
         "channels": ["#ship-galactica"],
         "backend": {
           "type": "opencode",
@@ -162,28 +162,28 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
 ]
 ```
 
-| Field                          | Rule                                                                                                                                                                                                                            |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `server.host`, `server.port`   | IRC server address                                                                                                                                                                                                              |
-| `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                                                                                                                                                           |
-| `server.caFile`                | Absolute PEM path of a private CA; TLS only                                                                                                                                                                                     |
-| `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused                                                                                                                                                  |
-| `account`, `passwordEnv`       | Expected SASL account and, for PLAIN, the environment variable with its password                                                                                                                                                |
-| `clientPemFile`                | Absolute path to the captain’s private certificate and key PEM for SASL EXTERNAL; TLS only, in place of `passwordEnv`                                                                                                           |
-| `nick`                         | Optional; defaults to the account                                                                                                                                                                                               |
-| `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes                                                                                                                                           |
-| `access`                       | See [access](#access)                                                                                                                                                                                                           |
-| `crew`                         | See [crew](#crew-on-irc); at most 20                                                                                                                                                                                            |
-| `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                                                                                                                                                           |
-| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                                                                                                                                                                   |
-| `server.filehostOverride`      | Optional FILEHOST upload URL when the server does not advertise one ([files](#files))                                                                                                                                           |
-| `features`                     | Switches for [optional features](#optional-features); each defaults to `true`                                                                                                                                                   |
-| `stopReactions`                | Emoji that stop a turn ([Stop](#stop-by-reaction)); default `["✋", "🛑"]`, at most 10, `[]` is off                                                                                                                             |
-| `catchUpHours`                 | Longest [catch-up](#catch-up) window, 1–168 hours (default 24)                                                                                                                                                                  |
-| `transcription`                | Audio transcription for FILEHOST audio files, as for Slack bots ([files](#files))                                                                                                                                               |
-| `audit`                        | Optional `{ "channel": "#agent-dms" }`: mirror every agent DM to that channel ([DM audit](#dm-audit))                                                                                                                           |
-| `crewMessaging`                | `{ "sessions": false, "ircCopies": false }`: crew IRC sessions may use `pogo_dm`/`pogo_mail`; `pogo_dm` is also sent as an IRC DM ([crew sessions](#pogo_dm-and-pogo_mail-in-crew-irc-sessions), [copies](#pogo_dm-as-irc-dms)) |
-| `dmPolicy`                     | `agent` (default: the captain answers DMs) or `redirect` ([DM audit](#dm-audit))                                                                                                                                                |
+| Field                          | Rule                                                                                                                                                                                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server.host`, `server.port`   | IRC server address                                                                                                                                                                                                                                      |
+| `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                                                                                                                                                                                   |
+| `server.caFile`                | Absolute PEM path of a private CA; TLS only                                                                                                                                                                                                             |
+| `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused                                                                                                                                                                          |
+| `account`, `passwordEnv`       | Expected SASL account and, for PLAIN, the environment variable with its password                                                                                                                                                                        |
+| `clientPemFile`                | Absolute path to the captain’s private certificate and key PEM for SASL EXTERNAL; TLS only, in place of `passwordEnv`                                                                                                                                   |
+| `nick`                         | Optional; defaults to the account                                                                                                                                                                                                                       |
+| `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes                                                                                                                                                                   |
+| `access`                       | See [access](#access)                                                                                                                                                                                                                                   |
+| `crew`                         | See [crew](#crew-on-irc); at most 20                                                                                                                                                                                                                    |
+| `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                                                                                                                                                                                   |
+| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                                                                                                                                                                                           |
+| `server.filehostOverride`      | Optional FILEHOST upload URL when the server does not advertise one ([files](#files))                                                                                                                                                                   |
+| `features`                     | Switches for [optional features](#optional-features); each defaults to `true`                                                                                                                                                                           |
+| `stopReactions`                | Emoji that stop a turn ([Stop](#stop-by-reaction)); default `["✋", "🛑"]`, at most 10, `[]` is off                                                                                                                                                     |
+| `catchUpHours`                 | Longest [catch-up](#catch-up) window, 1–168 hours (default 24)                                                                                                                                                                                          |
+| `transcription`                | Audio transcription for FILEHOST audio files, as for Slack bots ([files](#files))                                                                                                                                                                       |
+| `audit`                        | Optional `{ "channel": "#agent-dms" }`: mirror every agent DM to that channel ([DM audit](#dm-audit))                                                                                                                                                   |
+| `crewMessaging`                | `{ "sessions": false, "ircCopies": false }`: crew IRC sessions may use `stargate_dm`/`stargate_mail`; `stargate_dm` is also sent as an IRC DM ([crew sessions](#stargate_dm-and-stargate_mail-in-crew-irc-sessions), [copies](#stargate_dm-as-irc-dms)) |
+| `dmPolicy`                     | `agent` (default: the captain answers DMs) or `redirect` ([DM audit](#dm-audit))                                                                                                                                                                        |
 
 ### Naming
 
@@ -400,7 +400,7 @@ thread history or trust the tag as sender identity. The authenticated
   `ACK`; a labeled error fails the delivery. A line that is still in the
   send queue at the confirmation deadline (20 seconds) is removed and never
   written later, so a delivery that already failed cannot send it twice.
-- `[[pogo:silent]]` posts nothing. `[[pogo:react:NAME]]` sends a
+- `[[stargate:silent]]` posts nothing. `[[stargate:react:NAME]]` sends a
   `+draft/react` TAGMSG to the request's message.
 - A reply is stored before delivery. A failed delivery retries the stored
   chunk later and never reruns the agent. Stargate stores how it split each
@@ -444,7 +444,7 @@ a Stop cannot be undone.
 - **Files without a FILEHOST.** Files move only through a FILEHOST (see
   [files](#files)); without one, a published file posts a short
   "attachment is unavailable" notice.
-- **Slash commands.** No `/cron`, `/pogo` commands or scheduled prompts.
+- **Slash commands.** No `/cron`, `/stargate` commands or scheduled prompts.
 
 ## Files
 
@@ -740,7 +740,7 @@ follows the task's input. An outside input after it makes the result
 unreadable ("A later input follows this task"). The crew plugin's DM path
 also cannot carry a reply back to IRC. Separate IRC sessions keep the task
 model intact and need no crew plugin change. To hand IRC work to a crew
-member's task session, the captain uses `pogo_crew` as usual.
+member's task session, the captain uses `stargate_crew` as usual.
 
 ### Crew-to-crew messages
 
@@ -751,7 +751,7 @@ crew) is a **ship message**:
 
 - the pinned captain sees `;k=crew`; crew sessions see a note that the
   sender is a ship account and that acknowledgements need
-  `[[pogo:silent]]`;
+  `[[stargate:silent]]`;
 - An all-call from a ship account counts once for each agent it reaches,
   like other ship messages; an all-call from a person is not limited by
   this cap.
@@ -792,7 +792,7 @@ agent replies on IRC only when:
    can see; or
 3. an all-call asks everyone to answer.
 
-Otherwise it answers `[[pogo:silent]]` and Stargate posts nothing. For an
+Otherwise it answers `[[stargate:silent]]` and Stargate posts nothing. For an
 all-call it answers once and briefly, and stays silent if another agent
 already said the same. No acknowledgements, thanks, agreement-only or status
 messages; one short, specific message, no repeats.
@@ -811,7 +811,7 @@ answers and stay silent instead of repeating them:
   turn can start later when its conversation is busy, never earlier.
 - When its turn starts, a crew member's note lists the channel messages
   its connection saw since the all-call, oldest first (at most 20, each at
-  most 300 characters), and tells it to answer `[[pogo:silent]]` if one
+  most 300 characters), and tells it to answer `[[stargate:silent]]` if one
   already says what it would say. The pinned captain answers first and has
   nothing to read.
 - The list comes from what the connection received while it was online;
@@ -826,23 +826,23 @@ answers and stay silent instead of repeating them:
 ### Who speaks to whom
 
 Crew speak to the captain, not to each other. The captain coordinates and
-gives crew work or information with `pogo_dm` (a reply is needed now),
-`pogo_mail` (no reply is needed now) or `pogo_crew`. A crew member reaches
-the captain in the ship channel, or with `pogo_dm` to `captain` from its
-task session, and reaches another crew member with `pogo_dm` or `pogo_mail`
+gives crew work or information with `stargate_dm` (a reply is needed now),
+`stargate_mail` (no reply is needed now) or `stargate_crew`. A crew member reaches
+the captain in the ship channel, or with `stargate_dm` to `captain` from its
+task session, and reaches another crew member with `stargate_dm` or `stargate_mail`
 from its task session. An agent tags another crew member on IRC only when a
 person or the captain asks for it in that channel, or to correct an error.
 The mention/reply mechanism and the ship message limit stay in force; this
 is guidance, not a hard block.
 
-#### pogo_dm and pogo_mail in crew IRC sessions
+#### stargate_dm and stargate_mail in crew IRC sessions
 
 With `"crewMessaging": { "sessions": true }` (default off), Stargate binds each
-crew IRC session to its crew member in the crew plugin, so `pogo_dm` and
-`pogo_mail` work there as that member:
+crew IRC session to its crew member in the crew plugin, so `stargate_dm` and
+`stargate_mail` work there as that member:
 
 - **Binding.** Before each turn of a crew IRC session, once per process,
-  Stargate calls the crew plugin's `pogo.crew.irc` `bind` RPC at the captain
+  Stargate calls the crew plugin's `stargate.crew.irc` `bind` RPC at the captain
   location (the plugin answers it nowhere else) with the session ID and
   the crew ID (`crew[].id`, which must equal the member's ID in the team).
   The plugin binds the session only if it is a root OpenCode session with
@@ -853,23 +853,23 @@ crew IRC session to its crew member in the crew plugin, so `pogo_dm` and
 - **Identity.** The member comes from the binding; the host's tool context
   (agent) must name the same member, so a session cannot send as another
   member and the model cannot choose an identity. Other crew tools
-  (`pogo_crew`, `pogo_journal`, …) still refuse IRC sessions.
+  (`stargate_crew`, `stargate_journal`, …) still refuse IRC sessions.
 - **No task.** An IRC session never has a task, not even its member's
   current one: `taskID` is refused, and its mail carries the pinned
   captain as its captain context. Self-sends to its own member are refused,
   so it never prompts that member's task session.
 - **Sending.** `to: captain` stores the mail and wakes the captain as any
-  `pogo_dm` does. `to: <crew>` goes to that member's task session under the
+  `stargate_dm` does. `to: <crew>` goes to that member's task session under the
   existing wake rules: a busy task keeps its result rule ("your final
   answer remains task X's result"), and a task for another captain defers.
 - **Replies and inbox.** A reply (`replyTo`) to a message an IRC session
   sent goes back to that IRC session's own inbox, never to the member's
   task session, and never wakes either (`notification: "inbox"`). The IRC
-  session reads it with `pogo_mail` `op: inbox` on its next turn. It reads
+  session reads it with `stargate_mail` `op: inbox` on its next turn. It reads
   only its own inbox; mail addressed to the member goes to the task
   session as before.
-- **Permissions.** Both tools need the `pogo_mail` permission: add
-  `{ "action": "pogo_mail", "resource": "*", "effect": "allow" }` after the
+- **Permissions.** Both tools need the `stargate_mail` permission: add
+  `{ "action": "stargate_mail", "resource": "*", "effect": "allow" }` after the
   deny rule in the crew registration's `backend.permissions`.
 - **Requirements.** An OpenCode captain and crew on the same OpenCode
   server (`backend.url`), a pinned captain session, and a crew IRC
@@ -878,41 +878,41 @@ crew IRC session to its crew member in the crew plugin, so `pogo_dm` and
   conversations run in the pinned captain session, which already has the
   captain's tools.
 
-#### pogo_dm as IRC DMs
+#### stargate_dm as IRC DMs
 
 With `"crewMessaging": { "ircCopies": true }` (default off), every
-`pogo_dm` between two members of this ship that both have IRC connections
+`stargate_dm` between two members of this ship that both have IRC connections
 here is also sent as a real IRC DM, so Ergo stores it with the other DMs
 and the [DM audit](#dm-audit) mirror shows it. The native delivery does
 not change; the IRC DM is a copy.
 
-- **Path.** The crew plugin records each stored `pogo_dm` (never plain
-  `pogo_mail`) in a bounded outbox (24 hours, 1000 entries). The ship polls
-  it every 2 seconds through the `pogo.crew.irc` `outbox` RPC at the
+- **Path.** The crew plugin records each stored `stargate_dm` (never plain
+  `stargate_mail`) in a bounded outbox (24 hours, 1000 entries). The ship polls
+  it every 2 seconds through the `stargate.crew.irc` `outbox` RPC at the
   captain location, from a cursor in Stargate's SQLite store; the first read
   only sets the cursor, so older messages are not copied. Items go out one
   at a time and in order. An entry older than 24 hours is never listed or
   sent, even after a longer Stargate downtime or retries.
-- **Delivery.** The sender's IRC connection sends `[pogo_dm] <text>` as
+- **Delivery.** The sender's IRC connection sends `[stargate_dm] <text>` as
   PRIVMSG to the nick that WHOIS shows holds the recipient's account (as
   for DM replies), rechecked at each socket write. Each line carries the
-  client tag `+pogo/dm=<receipt ID>`, the Mesij receipt ID, which is stable
+  client tag `+stargate/dm=<receipt ID>`, the Mesij receipt ID, which is stable
   across retries. A copy that cannot be sent yet (connection down,
   recipient offline) holds the cursor and is retried for 10 minutes, then
   skipped with a warning. A member without an IRC connection here, or a
   server without `message-tags`, gets no copy.
 - **Text.** Plain text, at most 1800 bytes, then `… (truncated; full text
-  in pogo_mail)`. Text that may carry a credential (the same rules as the
-  DM audit, CTCP parts included) is not copied: the copy reads `[pogo_dm <id>: not copied to
-  IRC, it may contain credentials. Read it with pogo_mail.]`.
+  in stargate_mail)`. Text that may carry a credential (the same rules as the
+  DM audit, CTCP parts included) is not copied: the copy reads `[stargate_dm <id>: not copied to
+  IRC, it may contain credentials. Read it with stargate_mail.]`.
 - **Dedupe.** Stargate records each receipt ID before it sends the copy
   (7 days). On the receiving connection, a DM from a ship account with a
-  recorded `+pogo/dm` ID is never admitted as a turn (the native delivery
+  recorded `+stargate/dm` ID is never admitted as a turn (the native delivery
   already reached the recipient), never answered by `dmPolicy: "redirect"`,
   and mirrored only once, as the sender's outgoing DM. A DM from a ship
   account with an unknown or no ID follows the existing ship-agent rules
   and caps.
-- **Peers.** `pogo_dm` addresses only this team's captain and crew, so
+- **Peers.** `stargate_dm` addresses only this team's captain and crew, so
   there are no copies to peer captains of other ships; their IRC DMs keep
   the peer rules.
 
@@ -962,5 +962,5 @@ model of their agent definition. Nightly model upgrades do not switch them.
 `tests/irc-*.test.ts` use a local fake IRCv3 server on a loopback socket.
 `tests/irc-ergo.test.ts` runs a temporary Ergo server with a throwaway CA,
 TLS, SASL accounts and an invite-only channel when
-`~/.local/share/ergo/current/ergo` (or `POGO_ERGO_BIN`) and `openssl` exist,
+`~/.local/share/ergo/current/ergo` (or `STARGATE_ERGO_BIN`) and `openssl` exist,
 and is skipped otherwise. It never uses the operator's server or accounts.

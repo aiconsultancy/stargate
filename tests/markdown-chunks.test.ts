@@ -88,10 +88,10 @@ describe("Markdown reply chunks", () => {
       const parts = chunks(text);
       expect(parts.length).toBeLessThan(40);
       expect(parts.every((part) => Array.from(part).length <= 2800)).toBe(true);
-      expect(parts.join("")).toContain("[Response truncated by Pogo.]");
+      expect(parts.join("")).toContain("[Response truncated by Stargate.]");
     }
     expect(chunks("a".repeat(70_000)).join("")).toBe(
-      `${"a".repeat(60_000)}\n[Response truncated by Pogo.]`,
+      `${"a".repeat(60_000)}\n[Response truncated by Stargate.]`,
     );
   });
 });

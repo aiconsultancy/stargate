@@ -111,10 +111,10 @@ Owners are `cron.ts`, `cron-store.ts`, `cron-ui.ts`, `provision.ts`,
 | Catch-up cursor        | No cursor → baseline → forward only                                                                  | Resume CHATHISTORY after the newest server time seen for the target. Only operator repair moves a cursor back.                             |
 | Line delivery          | Chunk planned → units confirmed one by one → chunk sent                                              | The first plan of a chunk wins. A retry sends only the units after the confirmed count.                                                    |
 | Stop reaction          | Active turn → Stop requested → settled                                                               | The transport checks who may stop. The gateway then settles the turn as for a Slack Stop.                                                  |
-| `pogo_dm` copy         | Receipt recorded → copy sent → recognised by the recipient connection                                | Record the receipt ID before the copy is sent, so the copy is never admitted as a second turn.                                             |
+| `stargate_dm` copy     | Receipt recorded → copy sent → recognised by the recipient connection                                | Record the receipt ID before the copy is sent, so the copy is never admitted as a second turn.                                             |
 
 Owners are `irc/client.ts`, `irc/ship.ts`, `irc/delivery.ts` and the
-`irc_cursors`, `delivery_units` and `irc_pogo_dm` tables in `store.ts`.
+`irc_cursors`, `delivery_units` and `irc_stargate_dm` tables in `store.ts`.
 
 ## Maintenance
 

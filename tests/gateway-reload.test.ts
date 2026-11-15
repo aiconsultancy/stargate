@@ -241,7 +241,7 @@ test("a deny reload blocks a Slack reaction from an active turn", async () => {
   const f = fixture(async () => {
     entered.resolve();
     await resume.promise;
-    return "[[pogo:react:eyes]]";
+    return "[[stargate:react:eyes]]";
   });
   let reactions = 0;
   f.slack.react = async () => {

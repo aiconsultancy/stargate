@@ -9,15 +9,15 @@ import { objectToolInput } from "../src/crew/tool-input";
 import { cronOperationSchema } from "../src/cron-control";
 
 const schemas = {
-  pogo_cron: cronOperationSchema,
-  pogo_crew: crewInputSchema,
-  pogo_history: historyInputSchema,
-  pogo_journal: journalInputSchema,
-  pogo_mail: mailInputSchema,
-  pogo_model: modelInputSchema,
+  stargate_cron: cronOperationSchema,
+  stargate_crew: crewInputSchema,
+  stargate_history: historyInputSchema,
+  stargate_journal: journalInputSchema,
+  stargate_mail: mailInputSchema,
+  stargate_model: modelInputSchema,
 };
 
-test("all Pogo union tools advertise an object root with their fields", () => {
+test("all Stargate union tools advertise an object root with their fields", () => {
   for (const schema of Object.values(schemas)) {
     const json = z.toJSONSchema(objectToolInput(schema));
     expect(json.type).toBe("object");

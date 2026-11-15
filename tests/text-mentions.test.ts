@@ -192,7 +192,7 @@ function fixture() {
   const store = new Store(":memory:");
   cleanup.push(() => store.close());
   const prompts: { text: string; context?: PromptSourceContext }[] = [];
-  let answer = "[[pogo:silent]]";
+  let answer = "[[stargate:silent]]";
   const backend: AgentBackend = {
     sessionID: "captain",
     async createSession() {
@@ -332,5 +332,5 @@ test("a peer captain's call to all captains is admitted and keeps the thread lim
 
 test("captain instructions explain the marker and the silent reply", () => {
   expect(textMentionInstructions).toContain("[Admitted by text mention: NAME]");
-  expect(textMentionInstructions).toContain("[[pogo:silent]]");
+  expect(textMentionInstructions).toContain("[[stargate:silent]]");
 });

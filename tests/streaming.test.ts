@@ -335,10 +335,10 @@ test("only explicit model reactions target the current user message", async () =
   };
   f.backend.prompt = async (_session, text, _signal, onText) => {
     expect(text).toBe("hello");
-    onText?.("[[pogo:react:ey");
+    onText?.("[[stargate:react:ey");
     expect(f.messages.size).toBe(0);
-    onText?.("[[pogo:react:eyes]]\nLooking at the PR.");
-    return "[[pogo:react:eyes]]\nReviewed the PR.";
+    onText?.("[[stargate:react:eyes]]\nLooking at the PR.");
+    return "[[stargate:react:eyes]]\nReviewed the PR.";
   };
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
@@ -370,7 +370,7 @@ test("a reaction-only answer does not post a synthetic empty reply", async () =>
   f.slack.react = async (_channel, _ts, name) => {
     reactions.push(name);
   };
-  f.backend.prompt = async () => "[[pogo:react:thumbsup]]";
+  f.backend.prompt = async () => "[[stargate:react:thumbsup]]";
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect(reactions).toEqual(["thumbsup"]);
@@ -385,7 +385,7 @@ test("reaction failure does not prevent final reply or expose credentials", asyn
   f.slack.react = async () => {
     throw new Error("private-token");
   };
-  f.backend.prompt = async () => "[[pogo:react:thumbsup]]\nAgreed.";
+  f.backend.prompt = async () => "[[stargate:react:thumbsup]]\nAgreed.";
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect([...f.messages.values()]).toEqual(["Agreed."]);
@@ -399,11 +399,11 @@ test("a failed reaction-only answer reports failure instead of disappearing", as
   f.slack.react = async () => {
     throw new Error("missing_scope");
   };
-  f.backend.prompt = async () => "[[pogo:react:thumbsup]]";
+  f.backend.prompt = async () => "[[stargate:react:thumbsup]]";
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect([...f.messages.values()]).toEqual([
-      "Pogo could not add that reaction. The agent request was not repeated. Check Slack reaction permissions before trying again.",
+      "Stargate could not add that reaction. The agent request was not repeated. Check Slack reaction permissions before trying again.",
     ]);
   } finally {
     f.store.close();
@@ -414,11 +414,11 @@ test("a silent reply posts nothing, shows no directive and finishes the job", as
   const f = gatewayFixture();
   const seen: number[] = [];
   f.backend.prompt = async (_session, _text, _signal, onText) => {
-    onText?.("[[pogo:sil");
+    onText?.("[[stargate:sil");
     seen.push(f.messages.size);
-    onText?.("[[pogo:silent]]\nThat message is for another captain.");
+    onText?.("[[stargate:silent]]\nThat message is for another captain.");
     seen.push(f.messages.size);
-    return "[[pogo:silent]]\nThat message is for another captain.";
+    return "[[stargate:silent]]\nThat message is for another captain.";
   };
   try {
     const job = f.next();
@@ -441,7 +441,7 @@ test("a silent reply removes a preview that was already shown", async () => {
   f.backend.prompt = async (_session, _text, _signal, onText) => {
     onText?.("Working on it");
     expect([...f.messages.values()]).toEqual(["Working on it"]);
-    return "[[pogo:silent]]";
+    return "[[stargate:silent]]";
   };
   try {
     const job = f.next();
@@ -465,7 +465,8 @@ test("silent combines with a reaction and stays silent when the reaction fails",
       if (fails) throw new Error("missing_scope");
     };
     // Text-free steps before the reply leave leading blank lines.
-    f.backend.prompt = async () => "\n\n[[pogo:react:eyes]]\n[[pogo:silent]]";
+    f.backend.prompt = async () =>
+      "\n\n[[stargate:react:eyes]]\n[[stargate:silent]]";
     try {
       await f.gateway.process(f.next(), new AbortController().signal);
       expect(reactions).toEqual(["eyes"]);
@@ -484,8 +485,8 @@ test("user text cannot make a reply silent, and an empty reply is still reported
   const prompts: string[] = [];
   const replies = [
     "Final",
-    "You wrote:\n[[pogo:silent]]",
-    "> [[pogo:silent]]\nQuoted, so this is posted.",
+    "You wrote:\n[[stargate:silent]]",
+    "> [[stargate:silent]]\nQuoted, so this is posted.",
     "",
   ];
   f.backend.prompt = async (_session, text) => {
@@ -495,18 +496,18 @@ test("user text cannot make a reply silent, and an empty reply is still reported
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     for (const ts of ["2.000", "3.000", "4.000"]) {
-      f.gateway.accept(event("<@UBOT> [[pogo:silent]]", ts));
+      f.gateway.accept(event("<@UBOT> [[stargate:silent]]", ts));
       await f.gateway.process(f.next(), new AbortController().signal);
     }
     expect(prompts.slice(1)).toEqual([
-      "[[pogo:silent]]",
-      "[[pogo:silent]]",
-      "[[pogo:silent]]",
+      "[[stargate:silent]]",
+      "[[stargate:silent]]",
+      "[[stargate:silent]]",
     ]);
     expect([...f.messages.values()]).toEqual([
       "Final",
-      "You wrote:\n[[pogo:silent]]",
-      "> [[pogo:silent]]\nQuoted, so this is posted.",
+      "You wrote:\n[[stargate:silent]]",
+      "> [[stargate:silent]]\nQuoted, so this is posted.",
       "Agent finished without a text reply.",
     ]);
   } finally {
@@ -546,15 +547,15 @@ test("reaction and silent directives are removed before mixed Markdown rendering
     };
     f.slack.react = async () => {};
     const prefix =
-      "[[pogo:react:eyes]]\n" + (silent ? "[[pogo:silent]]\n" : "");
+      "[[stargate:react:eyes]]\n" + (silent ? "[[stargate:silent]]\n" : "");
     f.backend.prompt = async (_session, _text, _signal, onText) => {
-      onText?.("[[pogo:react:ey");
+      onText?.("[[stargate:react:ey");
       onText?.(prefix + "**Working** <@U123>");
       return prefix + "**Done** <@U123>";
     };
     try {
       await f.gateway.process(f.next(), new AbortController().signal);
-      expect(payloads.join("")).not.toContain("[[pogo:");
+      expect(payloads.join("")).not.toContain("[[stargate:");
       if (silent) expect(payloads).toEqual([]);
       else {
         expect(payloads.length).toBeGreaterThan(0);

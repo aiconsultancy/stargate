@@ -23,7 +23,7 @@ test("maintenance cleanup is opt-in and strict at the real config boundary", () 
 
 test("cleanup protects configuration, runtime and every permanent crew directory", () => {
   const config = configSchema.parse({
-    dataDirectory: "/runtime/pogo",
+    dataDirectory: "/runtime/stargate",
     bots: [
       {
         id: "captain",
@@ -47,14 +47,14 @@ test("cleanup protects configuration, runtime and every permanent crew directory
       {
         directory: "/projects/captain",
         configPath: "/projects/captain/opencode.json",
-        pluginPackage: "pogo",
+        pluginPackage: "stargate",
       },
     ],
     worktreeDirectories: ["/projects/pi-worker", "/projects/code-worker"],
   };
-  expect(cleanupProtection(config, "/config/pogo.json", [crew])).toEqual([
+  expect(cleanupProtection(config, "/config/stargate.json", [crew])).toEqual([
     "/config",
-    "/runtime/pogo",
+    "/runtime/stargate",
     "/projects/captain",
     "/runtime/crew",
     "/projects/captain",

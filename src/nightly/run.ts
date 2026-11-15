@@ -143,8 +143,8 @@ export type RunInput = {
   /** Operator-started run outside the window, with the window's length. */
   outsideWindow?: boolean;
   /**
-   * Operator-approved update to one Pogo release, now: no window, no idle
-   * gate and no cool-off. Only the Pogo release changes. Everything else is
+   * Operator-approved update to one Stargate release, now: no window, no idle
+   * gate and no cool-off. Only the Stargate release changes. Everything else is
    * the run's own path: verified staging, journal, switch, readiness check
    * and rollback. Refused while a journal is left over.
    */
@@ -593,7 +593,7 @@ async function gatewayServing(config: Config, runner: CommandRunner) {
  * `failed`, including an unknown state (busy-safe).
  */
 async function ingressMayBeOpen(config: Config, runner: CommandRunner) {
-  const unit = config.maintenance?.services.gateway ?? "pogo.service";
+  const unit = config.maintenance?.services.gateway ?? "stargate.service";
   try {
     const state = (
       await runner.run(["systemctl", "--user", "is-active", unit], {
@@ -607,14 +607,14 @@ async function ingressMayBeOpen(config: Config, runner: CommandRunner) {
 }
 
 /**
- * One read-only idle check at `pogo` scope, as the run's gates make it,
+ * One read-only idle check at `stargate` scope, as the run's gates make it,
  * without waiting. For callers outside a run (the maintenance droid).
  */
 export async function idleNow(
   config: Config,
   deps: Dependencies,
   signal: AbortSignal,
-  scope: IdleScope = "pogo",
+  scope: IdleScope = "stargate",
 ): Promise<IdleResult> {
   let crews: Crew[];
   try {
@@ -751,8 +751,10 @@ export async function runMaintenance(
       "Maintenance is disabled. Set maintenance.enabled to true.",
     );
   if (update) {
-    if (!m.pogo)
-      throw new UpdateRefused("maintenance.pogo is required for an update.");
+    if (!m.stargate)
+      throw new UpdateRefused(
+        "maintenance.stargate is required for an update.",
+      );
     if (normalizeVersion(update.version) !== update.version)
       throw new UpdateRefused("Use a MAJOR.MINOR.PATCH version.");
   }
@@ -865,7 +867,7 @@ export async function runMaintenance(
     // An update never undoes an earlier run: the operator runs recover.
     if (update && (await Journal.read(config)).kind !== "none")
       throw new UpdateRefused(
-        "A maintenance journal is left over. Run `pogo maintenance recover` first. Nothing was changed.",
+        "A maintenance journal is left over. Run `stargate maintenance recover` first. Nothing was changed.",
       );
     // Names the kind of run in the report and its summary.
     if (update) rec.step("operator-update", "ok");
@@ -1031,8 +1033,15 @@ export async function runMaintenance(
     }
 
     const state = await readState(config.dataDirectory);
-    const pogo = await discoverPogo(m, deps, rec, startedAt, state, update);
-    // An operator update changes the Pogo release only.
+    const stargate = await discoverStargate(
+      m,
+      deps,
+      rec,
+      startedAt,
+      state,
+      update,
+    );
+    // An operator update changes the Stargate release only.
     const proxy = update ? undefined : await discoverProxy(m, rec, startedAt);
     const agentPlans =
       !update && m.components.agentClis && m.agentClis
@@ -1110,24 +1119,24 @@ export async function runMaintenance(
 
     // ---- Prepare: nothing live changes ---------------------------------
     let staged: string | undefined;
-    if (pogo && m.pogo) {
+    if (stargate && m.stargate) {
       try {
         staged = (
           await stageRelease({
-            config: m.pogo,
-            release: pogo.candidate,
-            headers: pogo.headers,
+            config: m.stargate,
+            release: stargate.candidate,
+            headers: stargate.headers,
             runner: run,
             runID,
             remaining,
             signal,
           })
         ).metadata.version;
-        rec.step("pogo-stage", "ok");
+        rec.step("stargate-stage", "ok");
       } catch (error) {
         signal.throwIfAborted();
-        rec.step("pogo-stage", "failed", reasonOf(error));
-        rec.update("pogo", { status: "failed", reason: reasonOf(error) });
+        rec.step("stargate-stage", "failed", reasonOf(error));
+        rec.update("stargate", { status: "failed", reason: reasonOf(error) });
       }
     }
     let proxyDigest: { asset: string; binary: string } | undefined;
@@ -1176,13 +1185,13 @@ export async function runMaintenance(
     // Any other change tonight, or an unknown plugin, takes the full path.
     const gatewayOnly =
       staged !== undefined &&
-      m.pogo !== undefined &&
+      m.stargate !== undefined &&
       !proxyDigest &&
       !agentUpdates.length &&
       !modelWork() &&
-      (await samePlugin(m.pogo.root, staged));
+      (await samePlugin(m.stargate.root, staged));
     if (gatewayOnly) rec.step("crew-plugin-unchanged", "ok");
-    const gateScope: IdleScope = gatewayOnly ? "gateway" : "pogo";
+    const gateScope: IdleScope = gatewayOnly ? "gateway" : "stargate";
     /** `current` before this run switched it. */
     let switchedFrom: string | undefined;
 
@@ -1281,7 +1290,7 @@ export async function runMaintenance(
         return (journal.get("clis")?.packages ?? agentUpdates).map(
           (p) => `npm:${p.name}`,
         );
-      if (entry === "release") return ["pogo"];
+      if (entry === "release") return ["stargate"];
       if (entry === "cliproxyapi") return ["cliproxyapi"];
       return ["models"];
     }
@@ -1302,7 +1311,7 @@ export async function runMaintenance(
       if (!result.idle) throw new Defer(result.reason);
     }
 
-    function idleInput(scope: IdleScope = "pogo") {
+    function idleInput(scope: IdleScope = "stargate") {
       return {
         dataDirectory: config.dataDirectory,
         crews,
@@ -1643,10 +1652,10 @@ export async function runMaintenance(
             "openCode",
           ]);
           const linkRestored = journal.get("release") === undefined;
-          rec.update("pogo", {
+          rec.update("stargate", {
             status: linkRestored ? "rolled-back" : "failed",
             reason: "readiness-failed",
-            after: linkRestored ? (pogo?.before ?? null) : null,
+            after: linkRestored ? (stargate?.before ?? null) : null,
           });
           const idle = restored
             ? await afterReturn.gate?.("gateway")
@@ -1670,7 +1679,7 @@ export async function runMaintenance(
       // between leaves only `gateway`, which a ready gateway satisfies. The
       // other order would leave `release`, and recovery would undo a verified
       // release without restarting the gateway that runs it.
-      if (journal.get("release") && staged && m.pogo) {
+      if (journal.get("release") && staged && m.stargate) {
         // After a gateway-only update OpenCode still runs the plugin from
         // an earlier release directory. Record it before the switch is
         // final, so that no later run removes that directory.
@@ -1687,8 +1696,8 @@ export async function runMaintenance(
           await updateState(config.dataDirectory, (s) => {
             delete s.failedReleases[staged];
           });
-        rec.update("pogo", { status: "updated", after: staged });
-        await pruneReleases(m.pogo.root, m.pogo.keep, [
+        rec.update("stargate", { status: "updated", after: staged });
+        await pruneReleases(m.stargate.root, m.stargate.keep, [
           ...(loaded ? [loaded] : []),
           // Recovery can still need this code until the journal is empty.
           ...(update?.runnerRelease ? [update.runnerRelease] : []),
@@ -1699,13 +1708,13 @@ export async function runMaintenance(
     }
 
     async function switchRelease() {
-      if (!staged || !m?.pogo) return;
-      const before = await linkedRelease(m.pogo.root, "current");
+      if (!staged || !m?.stargate) return;
+      const before = await linkedRelease(m.stargate.root, "current");
       if (!before) throw new StepError("switch-failed");
       await journal.set("release", { previous: before.name, version: staged });
-      await switchCurrent(m.pogo.root, staged);
+      await switchCurrent(m.stargate.root, staged);
       switchedFrom = before.name;
-      rec.step("pogo-switch", "ok");
+      rec.step("stargate-switch", "ok");
     }
 
     async function verifyAll(
@@ -1756,7 +1765,7 @@ export function restoreCutoff(
   throw new StepError("install-failed");
 }
 
-async function discoverPogo(
+async function discoverStargate(
   m: Maintenance,
   deps: Dependencies,
   rec: Recorder,
@@ -1764,10 +1773,10 @@ async function discoverPogo(
   state: Awaited<ReturnType<typeof readState>>,
   update?: RunInput["update"],
 ) {
-  if ((!m.components.pogo && !update) || !m.pogo) return undefined;
-  const current = await linkedRelease(m.pogo.root, "current");
+  if ((!m.components.stargate && !update) || !m.stargate) return undefined;
+  const current = await linkedRelease(m.stargate.root, "current");
   const before = current?.metadata.version ?? null;
-  const base = { id: "pogo", before, after: before };
+  const base = { id: "stargate", before, after: before };
   if (!current) {
     rec.component({
       ...base,
@@ -1777,7 +1786,7 @@ async function discoverPogo(
     });
     return undefined;
   }
-  if (m.pogo.requireTreeCheck && !m.pogo.checkout) {
+  if (m.stargate.requireTreeCheck && !m.stargate.checkout) {
     rec.component({
       ...base,
       candidate: null,
@@ -1788,7 +1797,7 @@ async function discoverPogo(
   }
   try {
     const headers = githubHeaders(
-      await githubToken(m.pogo.tokenEnv, deps.runner, deps.env),
+      await githubToken(m.stargate.tokenEnv, deps.runner, deps.env),
     );
     if (update) {
       // Same version: nothing to do. Lower: rollback is `recover`, never this.
@@ -1804,8 +1813,8 @@ async function discoverPogo(
       }
     }
     const candidate = update
-      ? await namedRelease(m.pogo, headers, update.version)
-      : await newerRelease(m.pogo, headers, current.metadata.version, now);
+      ? await namedRelease(m.stargate, headers, update.version)
+      : await newerRelease(m.stargate, headers, current.metadata.version, now);
     if (
       candidate &&
       state.failedReleases[candidate.version] &&
@@ -1954,7 +1963,7 @@ export async function samePlugin(root: string, staged: string) {
   return running !== undefined && running === next;
 }
 
-/** Restart, reconnect, and confirm every crew location loaded its Pogo plugin. */
+/** Restart, reconnect, and confirm every crew location loaded its Stargate plugin. */
 async function restartOpenCode(
   m: Maintenance,
   crews: readonly Crew[],
@@ -2114,7 +2123,7 @@ export async function acceptCurrent(
       ok: true,
       message: [
         ...lines,
-        `Dropped the ${name} entry${name === "files" ? `; the backup stays in ${backupDirectory(config.dataDirectory, journal.runID)}` : ""}. Run pogo maintenance recover to finish the rest.`,
+        `Dropped the ${name} entry${name === "files" ? `; the backup stays in ${backupDirectory(config.dataDirectory, journal.runID)}` : ""}. Run stargate maintenance recover to finish the rest.`,
       ].join("\n"),
     };
   } finally {

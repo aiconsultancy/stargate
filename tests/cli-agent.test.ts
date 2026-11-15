@@ -18,10 +18,10 @@ afterEach(async () => {
 
 test("a process whose identity changed is never signalled", async () => {
   // A fake /proc: PID reuse is simulated by changing the files of a PID.
-  const root = await mkdtemp(join(tmpdir(), "pogo-claude-proc-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-claude-proc-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const turn = crypto.randomUUID();
-  const marker = { variable: "POGO_TEST_TURN", value: turn };
+  const marker = { variable: "STARGATE_TEST_TURN", value: turn };
   const id = crypto.randomUUID();
   type Fake = {
     start: number;
@@ -45,7 +45,7 @@ test("a process whose identity changed is never signalled", async () => {
     await writeFile(join(directory, "status"), `Name:\tx\nUid:\t${uids}\n`);
     await writeFile(
       join(directory, "environ"),
-      `PATH=/bin\0POGO_TEST_TURN=${fake.marker ?? turn}\0HOME=/h\0`,
+      `PATH=/bin\0STARGATE_TEST_TURN=${fake.marker ?? turn}\0HOME=/h\0`,
     );
     await writeFile(
       join(directory, "cmdline"),
@@ -110,7 +110,7 @@ test("a process whose identity changed is never signalled", async () => {
 });
 
 test("a marker under another variable name or as a suffix never matches", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-cli-proc-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-cli-proc-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const value = crypto.randomUUID();
   const table: ProcessTable = { root, uid: 1000, kill: () => {} };
@@ -127,13 +127,13 @@ test("a marker under another variable name or as a suffix never matches", async 
     );
     await writeFile(join(directory, "environ"), environ);
   };
-  await write(10, `POGO_A_TURN=${value}\0`);
-  await write(11, `XPOGO_A_TURN=${value}\0`);
-  await write(12, `POGO_B_TURN=${value}\0`);
-  await write(13, `PATH=/bin\0POGO_A_TURN=${value}x\0`);
-  await write(14, `PATH=/bin\0POGO_A_TURN=${value}\0`);
+  await write(10, `STARGATE_A_TURN=${value}\0`);
+  await write(11, `XSTARGATE_A_TURN=${value}\0`);
+  await write(12, `STARGATE_B_TURN=${value}\0`);
+  await write(13, `PATH=/bin\0STARGATE_A_TURN=${value}x\0`);
+  await write(14, `PATH=/bin\0STARGATE_A_TURN=${value}\0`);
   expect(
-    await turnProcesses(table, { variable: "POGO_A_TURN", value }, 0),
+    await turnProcesses(table, { variable: "STARGATE_A_TURN", value }, 0),
   ).toEqual([
     { pid: 10, start: 500 },
     { pid: 14, start: 500 },
@@ -141,7 +141,7 @@ test("a marker under another variable name or as a suffix never matches", async 
 });
 
 test("turn start time is read from /proc/uptime in clock ticks", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-cli-proc-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-cli-proc-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const table: ProcessTable = { root, uid: 1000, kill: () => {} };
   expect(await bootTicks(table)).toBe(0);

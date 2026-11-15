@@ -12,14 +12,14 @@ import type { OpenCodeControl } from "./opencode";
  * `gateway`: no gateway job is unfinished and no cron run is active or due.
  * Enough for a restart of the gateway alone.
  *
- * `pogo`: additionally no crew or Pi task runs and no Pogo-owned OpenCode
+ * `stargate`: additionally no crew or Pi task runs and no Stargate-owned OpenCode
  * session has a running turn or a pending form or permission request.
- * Needed before OpenCode or the model proxy restarts. Pogo-owned: pinned
+ * Needed before OpenCode or the model proxy restarts. Stargate-owned: pinned
  * captain sessions (the gateway's and each crew plugin's), sessions in the
  * gateway's mappings, crew peers, crew IRC sessions, and their subagents. Other sessions on the shared server (the
  * operator's own work) never block maintenance; a restart interrupts them.
  */
-export type IdleScope = "gateway" | "pogo";
+export type IdleScope = "gateway" | "stargate";
 export type IdleResult = { idle: true } | { idle: false; reason: Reason };
 
 export type IdleInput = {
@@ -67,7 +67,7 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
   try {
     const sessions = new Set(input.pinnedSessions);
     read(
-      join(input.dataDirectory, "pogo.sqlite"),
+      join(input.dataDirectory, "stargate.sqlite"),
       (db) => {
         if (
           count(
@@ -201,7 +201,7 @@ export type QueuedCrewTask = {
 export function queuedTaskAction(task: QueuedCrewTask) {
   return task.report
     ? "Activity report: the gateway admits or cancels it; it blocks maintenance while queued"
-    : `Ask the captain to run pogo_crew status ${task.taskID}`;
+    : `Ask the captain to run stargate_crew status ${task.taskID}`;
 }
 
 /**

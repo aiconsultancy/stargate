@@ -181,7 +181,7 @@ UUID; the first turn's `thread.started` event stores the Codex thread ID,
 and later turns resume it. Previews and the answer are the completed agent
 messages of the turn; failures carry fixed causes, never CLI stderr. The
 CLI shares Stargate's process group and its sandbox uses new sessions and PID
-namespaces, so clean-up uses only the turn marker (`POGO_CODEX_TURN`) and
+namespaces, so clean-up uses only the turn marker (`STARGATE_CODEX_TURN`) and
 the same verified per-process signals as Claude, from the shared
 `backends/cli-agent.ts` module. Cancellation starts that clean-up at once,
 not after the SDK's stream ends, because the SDK only sends `SIGTERM` and
@@ -212,7 +212,7 @@ The gateway persists its Slack timestamp, capture ID, revision and done flag
 in `jobs.activity`. Post-response loops have a separate bound and survive
 restart without rerunning tools or final model summaries.
 
-`crewStatus` is an optional read-only adapter capability for `/pogo crew`.
+`crewStatus` is an optional read-only adapter capability for `/stargate crew`.
 OpenCode implements it through the authenticated captain-location reporting
 RPC, without a captain session ID. It reads crew state and in-process Pi
 execution observations, never the mutating crew-tool status/recovery path.
@@ -221,10 +221,10 @@ The Slack modal ACKs and opens before the read, and applies the bot's normal
 app, workspace, user and channel access rules. Stored task state is not a
 liveness guarantee. Backends without this capability remain compatible.
 
-`quota` is an optional read-only adapter capability for `/pogo usage`. It uses
+`quota` is an optional read-only adapter capability for `/stargate usage`. It uses
 the same location-authorized RPC and private modal as crew status. The crew
 plugin's opt-in `QuotaReader` supplies sanitized Claude/Codex subscription
-limits to this RPC and the authorized `pogo_quota` tool on both harnesses.
+limits to this RPC and the authorized `stargate_quota` tool on both harnesses.
 Proxy management credentials stay on the host. No model, session or queue
 operation is required; see [provider usage](usage.md).
 
@@ -426,7 +426,7 @@ Stargate accounted for in Slack. NULL means the mapping predates the cursor.
   delayed** and catch-up delivers from the moved cursor.
 - Reactions come only from the prompt's own reply to the current input.
   Directives in earlier continuations are removed and never applied.
-- A message whose first line is `[[pogo:silent]]` has no public text and no
+- A message whose first line is `[[stargate:silent]]` has no public text and no
   files, in a turn and in a continuation. A turn with no other public text
   commits an empty reply with its cursor and posts nothing. When the prompt's
   own reply is silent, unreadable or unsettled history queues catch-up without
@@ -513,7 +513,7 @@ The cursor moves to the repaired head even when it was earlier. Replies that
 ```sh
 bun -e 'import { repairThread } from "./src/transcript";
 console.log(JSON.stringify(await repairThread({
-  config: "pogo.json", bot: "captain", channel: "D123", thread: "1.000",
+  config: "stargate.json", bot: "captain", channel: "D123", thread: "1.000",
   since: "msg_INPUT_ID", apply: false,
 }), null, 2));'
 ```
@@ -521,7 +521,7 @@ console.log(JSON.stringify(await repairThread({
 Stargate's running worker delivers applied rows; the helper does not post to
 Slack. Only `apply: true` refuses a thread with a queued or running request;
 a dry run never queues replies or moves the cursor. Both modes first restrict
-the existing data directory to `0700` and `pogo.sqlite` to `0600`, before SQLite
+the existing data directory to `0700` and `stargate.sqlite` to `0600`, before SQLite
 creates WAL/SHM files. Repair refuses a missing database or a database symlink;
 it never creates replacement state.
 
@@ -542,8 +542,8 @@ behavior, and required Slack app configuration.
 
 ## Captain posts
 
-The captain-only `pogo_post` tool runs in the crew plugin, not the gateway.
-It reads the bound `pogo.json` for each call, checks the bot's channel rules,
+The captain-only `stargate_post` tool runs in the crew plugin, not the gateway.
+It reads the bound `stargate.json` for each call, checks the bot's channel rules,
 records the post in a private `captain-post.sqlite`, then calls Slack with
 that bot's own token. Retries read the record and never resend. See
 [captain posts](captain-post.md).

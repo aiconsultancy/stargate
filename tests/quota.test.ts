@@ -53,7 +53,7 @@ test("Claude quotas preserve used semantics, unknowns and inactive model scopes"
 });
 
 test("collector blocks redirects, oversized data, key symlinks and caller cancellation", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-quota-boundary-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-quota-boundary-");
   const key = join(directory, "management.key");
   const link = join(directory, "link.key");
   await writeFile(key, "fixture-only", { mode: 0o600 });
@@ -175,7 +175,7 @@ test("quota configuration permits loopback only and never accepts inline credent
 });
 
 test("collector uses fixed read endpoints, strips secrets, caches then fails closed per account", async () => {
-  const directory = await mkdtemp("/tmp/opencode/pogo-quota-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-quota-");
   const managementKeyFile = join(directory, "management.key");
   await writeFile(managementKeyFile, "fixture-management-key\n", {
     mode: 0o600,

@@ -101,6 +101,13 @@ describe("Europe/London window", () => {
 });
 
 describe("maintenance configuration", () => {
+  test("release source defaults to the canonical public repository", () => {
+    expect(
+      maintenanceSchema.parse({ stargate: { root: "/release-root" } }).stargate
+        ?.repository,
+    ).toBe("aiconsultancy/stargate");
+  });
+
   test("defaults are disabled, 00:00-01:00 Europe/London, all components off", () => {
     const parsed = maintenanceSchema.parse({});
     expect(parsed.enabled).toBe(false);
@@ -119,10 +126,10 @@ describe("maintenance configuration", () => {
       { window: { jitterMinutes: 55, reserveMinutes: 10 } },
       { window: { timeZone: "+01:00" } },
       { window: { timeZone: "Mars/Olympus" } },
-      { components: { pogo: true } },
+      { components: { stargate: true } },
       { components: { models: true }, models: {} },
       { proxy: { url: "http://example.com:8317", clientKeyFile: "/k" } },
-      { pogo: { root: "relative" } },
+      { stargate: { root: "relative" } },
       { services: { openCodeRestart: ["systemctl", "bad\narg"] } },
       { unknown: true },
     ];

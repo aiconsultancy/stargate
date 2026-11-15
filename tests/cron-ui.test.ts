@@ -415,7 +415,7 @@ test("report selector stores daily mode; missing selector retains immediate", as
 
 test("configured Add writes a definition, validates names, and retries safely", async () => {
   const f = fixture();
-  const directory = mkdtempSync(join(tmpdir(), "pogo-cron-ui-"));
+  const directory = mkdtempSync(join(tmpdir(), "stargate-cron-ui-"));
   directories.push(directory);
   f.config.cronjobs = {
     directory,

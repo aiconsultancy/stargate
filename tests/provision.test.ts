@@ -16,7 +16,7 @@ afterEach(async () => {
 function bot(id = "crew") {
   return {
     id,
-    name: `Pogo ${id}`,
+    name: `Stargate ${id}`,
     app: { mode: "create" },
     slack: {
       appTokenEnv: `${id.toUpperCase()}_APP`,
@@ -33,10 +33,10 @@ function bot(id = "crew") {
 }
 
 async function fixture(bots: unknown[] = [bot()]) {
-  const directory = await mkdtemp(join("/tmp/opencode", "pogo-provision-"));
+  const directory = await mkdtemp(join("/tmp/opencode", "stargate-provision-"));
   directories.push(directory);
   const planPath = join(directory, "bots.json");
-  const configPath = join(directory, "pogo.json");
+  const configPath = join(directory, "stargate.json");
   const journalPath = join(directory, "journal.json");
   await writeFile(
     planPath,
@@ -167,7 +167,7 @@ test("apply checkpoints and creates sequentially, resumes without duplication", 
     { ...options, apply: true },
     { fetch: create, environment: credentials },
   );
-  expect(requested).toEqual(["Pogo crew", "Pogo other"]);
+  expect(requested).toEqual(["Stargate crew", "Stargate other"]);
   expect(first.bots.map((entry) => entry.registration)).toEqual([
     "added",
     "added",

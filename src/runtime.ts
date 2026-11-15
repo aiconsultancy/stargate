@@ -61,11 +61,11 @@ export function lockInstance(path: string) {
     return lock;
   } catch {
     lock.close();
-    throw new Error("Pogo is already using this data directory");
+    throw new Error("Stargate is already using this data directory");
   }
 }
 
-/** Pogo failed after startup; the service manager should restart it. */
+/** Stargate failed after startup; the service manager should restart it. */
 export class RuntimeStopped extends Data.TaggedError("RuntimeStopped")<{
   readonly worker: "gateway" | "cron" | "runtime";
 }> {}
@@ -174,7 +174,9 @@ export function serve(
         (lock) => Effect.sync(() => lock.close()),
       );
       const store = yield* Effect.acquireRelease(
-        Effect.sync(() => new Store(join(config.dataDirectory, "pogo.sqlite"))),
+        Effect.sync(
+          () => new Store(join(config.dataDirectory, "stargate.sqlite")),
+        ),
         (store) => Effect.sync(() => store.close()),
       );
       const cronStore = yield* Effect.acquireRelease(
@@ -663,15 +665,15 @@ export function serve(
       // LIFO: close intake and abort reload preparation before workers drain.
       yield* Effect.addFinalizer(() => closeIntake());
       started = true;
-      log.info("Pogo ready");
+      log.info("Stargate ready");
       // Readiness record for maintenance health checks; never fatal.
       yield* Effect.promise(() =>
         writeReady(config.dataDirectory).then(
           (version) => {
-            // Only matters where maintenance manages Pogo releases.
-            if (version === null && config.maintenance?.pogo)
+            // Only matters where maintenance manages Stargate releases.
+            if (version === null && config.maintenance?.stargate)
               log.warn(
-                "This Pogo directory has no valid .pogo-release.json; the readiness record has no version and maintenance cannot verify an update. Install releases with pogo maintenance update or adopt.",
+                "This Stargate directory has no valid .stargate-release.json; the readiness record has no version and maintenance cannot verify an update. Install releases with stargate maintenance update or adopt.",
               );
           },
           () => log.warn("Readiness record not written"),

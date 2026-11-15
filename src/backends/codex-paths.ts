@@ -1,8 +1,8 @@
 /**
- * File-system trust of the Codex backend. Pogo's launcher and the Codex CLI
+ * File-system trust of the Codex backend. Stargate's launcher and the Codex CLI
  * run outside the Codex sandbox with the proxy key, so nothing that they run
  * or read may be writable from inside the sandbox. This module has no SDK
- * import, so `pogo config check` can use it.
+ * import, so `stargate config check` can use it.
  */
 import { constants, type Stats } from "node:fs";
 import {
@@ -57,7 +57,7 @@ export function nativeCodex() {
   };
 }
 
-/** Pogo's own installation: the directory that holds `src/`. */
+/** Stargate's own installation: the directory that holds `src/`. */
 const installation = resolve(import.meta.dir, "..", "..");
 
 /**
@@ -140,10 +140,10 @@ async function walk(
 }
 
 /**
- * The canonical form of the absolute `path`. Pogo then writes, checks and
+ * The canonical form of the absolute `path`. Stargate then writes, checks and
  * runs only this form, so no symbolic link is followed again later. Fails
  * closed when a symbolic link on the way could be changed afterwards: when
- * its directory is writable by Pogo's user or lies inside one of the
+ * its directory is writable by Stargate's user or lies inside one of the
  * canonical writable `roots`. Missing trailing components are kept.
  */
 export async function trustedPath(
@@ -157,7 +157,7 @@ export async function trustedPath(
         roots.some((root) => within(directory, root)))
     )
       throw new Error(
-        "Codex paths must not pass through a symbolic link that Pogo's user or the sandbox can change",
+        "Codex paths must not pass through a symbolic link that Stargate's user or the sandbox can change",
       );
   });
 }
@@ -208,8 +208,8 @@ export function writableRoots(config: CodexConfig, temporary?: string) {
 
 /**
  * Refuses a backend whose sandbox can write what runs or is read outside
- * it: Pogo's data directory (the launcher, `CODEX_HOME`, `ZDOTDIR`, thread
- * maps), Pogo's installation, the SDK and CLI packages, and the home
+ * it: Stargate's data directory (the launcher, `CODEX_HOME`, `ZDOTDIR`, thread
+ * maps), Stargate's installation, the SDK and CLI packages, and the home
  * directory (start-up files of unsandboxed commands such as git). A
  * writable root may neither contain nor lie inside the first four; it may
  * lie inside the home directory but not contain it. `temporary` is the
@@ -226,8 +226,8 @@ export async function checkCodexPaths(
   const directory = await realPath(config.directory);
   const turn = temporary ? await realPath(temporary) : undefined;
   const named: [string, string[]][] = [
-    ["Pogo's data directory", [data]],
-    ["Pogo's installation", [installation]],
+    ["Stargate's data directory", [data]],
+    ["Stargate's installation", [installation]],
     ["the Codex SDK and CLI", nativeCodex().packages],
   ];
   for (const [name, paths] of named)
@@ -246,7 +246,7 @@ export async function checkCodexPaths(
     );
 }
 
-/** Every Codex backend of a configuration, for `pogo config check`. */
+/** Every Codex backend of a configuration, for `stargate config check`. */
 export async function checkCodexConfiguration(config: Config, path: string) {
   const data = resolve(dirname(resolve(path)), config.dataDirectory);
   const backends = [
@@ -312,7 +312,7 @@ export async function systemDirectories(
 
 /**
  * An `extraPath` directory, in canonical form. It is trusted operator
- * input, but it must not be reached through a symbolic link that Pogo's
+ * input, but it must not be reached through a symbolic link that Stargate's
  * user or the sandbox can change, must not lie inside a writable root, and
  * no program in it may lead into a writable root: neither a link on its
  * chain nor the file it runs may lie inside one.

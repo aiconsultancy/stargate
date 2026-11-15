@@ -37,11 +37,11 @@ import { compareVersions, normalizeVersion, parseVersion } from "./versions";
  *   <root>/current -> releases/<version>   what launchers and plugins load
  *   <root>/previous -> releases/<version>  the rollback target
  *
- * Only directories with `.pogo-release.json` are managed releases.
+ * Only directories with `.stargate-release.json` are managed releases.
  */
-export const metadataFile = ".pogo-release.json";
+export const metadataFile = ".stargate-release.json";
 export const releaseMetadataSchema = z.strictObject({
-  schema: z.literal("pogo.release.v1"),
+  schema: z.literal("stargate.release.v1"),
   version: z.string().refine((value) => parseVersion(value) !== null),
   tag: z.string().max(100).nullable(),
   commit: z
@@ -147,14 +147,14 @@ export async function adoptRelease(
     !manifest ||
     typeof manifest !== "object" ||
     !("name" in manifest) ||
-    (manifest.name !== "pogo" && manifest.name !== "stargate") ||
+    manifest.name !== "stargate" ||
     !(await Bun.file(join(resolved, "src", "main.ts")).exists())
   )
     throw new Error("Directory is not an unpacked Stargate release.");
   if (await readMetadata(resolved))
     throw new Error("Release is already managed.");
   const metadata: ReleaseMetadata = {
-    schema: "pogo.release.v1",
+    schema: "stargate.release.v1",
     version: version.replace(/^v/, ""),
     tag: null,
     commit: null,
@@ -204,7 +204,7 @@ export function githubHeaders(
   };
 }
 
-export type PogoReleaseConfig = {
+export type StargateReleaseConfig = {
   root: string;
   repository: string;
   apiURL: string;
@@ -221,7 +221,7 @@ export type ReleaseCandidate = GitHubRelease & { version: string };
 
 /** Newest eligible release, or null when it is not newer than `current`. */
 export async function newerRelease(
-  config: PogoReleaseConfig,
+  config: StargateReleaseConfig,
   headers: Record<string, string>,
   current: string | null,
   now: number,
@@ -243,7 +243,7 @@ export async function newerRelease(
  * matter. Drafts and prereleases never match. `not-found` otherwise.
  */
 export async function namedRelease(
-  config: PogoReleaseConfig,
+  config: StargateReleaseConfig,
   headers: Record<string, string>,
   version: string,
 ): Promise<ReleaseCandidate> {
@@ -284,7 +284,7 @@ const refSchema = z.object({
  * Returns the tagged commit.
  */
 export async function verifyOrigin(
-  config: PogoReleaseConfig,
+  config: StargateReleaseConfig,
   release: ReleaseCandidate,
   headers: Record<string, string>,
 ) {
@@ -336,8 +336,12 @@ export async function verifyOrigin(
 }
 
 export function assetNames(version: string) {
-  const archive = `pogo-v${version}.tar.gz`;
-  return { prefix: `pogo-v${version}`, archive, checksum: `${archive}.sha256` };
+  const archive = `stargate-v${version}.tar.gz`;
+  return {
+    prefix: `stargate-v${version}`,
+    archive,
+    checksum: `${archive}.sha256`,
+  };
 }
 
 const maxArchiveBytes = 256 * 1024 * 1024;
@@ -437,7 +441,7 @@ export async function sameTree(left: string, right: string) {
 }
 
 export type StageInput = {
-  config: PogoReleaseConfig;
+  config: StargateReleaseConfig;
   release: ReleaseCandidate;
   headers: Record<string, string>;
   runner: CommandRunner;
@@ -595,7 +599,7 @@ export async function stageRelease(input: StageInput) {
     // What OpenCode would load from this tree, for gateway-only updates.
     await writePluginDigest(target);
     const metadata: ReleaseMetadata = {
-      schema: "pogo.release.v1",
+      schema: "stargate.release.v1",
       version: release.version,
       tag: release.tag_name,
       commit,

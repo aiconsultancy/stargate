@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { crewMessageMetadataKey } from "./crew/message-protocol";
 
 const crewOrigin = z.object({
   originCaptainID: z.string(),
@@ -14,10 +15,10 @@ export function inputBoundary(
   if (
     message.type !== "synthetic" ||
     !message.metadata ||
-    !Object.hasOwn(message.metadata, "pogoCrew")
+    !Object.hasOwn(message.metadata, crewMessageMetadataKey)
   )
     return;
-  const origin = crewOrigin.safeParse(message.metadata["pogoCrew"]);
+  const origin = crewOrigin.safeParse(message.metadata[crewMessageMetadataKey]);
   return origin.success && origin.data.originCaptainID === sessionID
     ? (origin.data.originInputID ?? message.id)
     : message.id;

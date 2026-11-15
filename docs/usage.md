@@ -1,12 +1,12 @@
 # Provider usage and quota
 
-`/pogo usage` opens a private provider-usage modal. It calls no model, creates
-no session and posts no account data to the channel. The existing `/pogo`
+`/stargate usage` opens a private provider-usage modal. It calls no model, creates
+no session and posts no account data to the channel. The existing `/stargate`
 registration and `commands` scope are sufficient; no new slash command or
 scope is required. Updated manifests add `usage` to the command hint.
 Use the command from the main message composer, not a thread composer.
 
-Captain and assigned crew can use `pogo_quota` with `{}`. This includes Pi
+Captain and assigned crew can use `stargate_quota` with `{}`. This includes Pi
 crew with coding tools enabled. It uses the existing crew permission and
 caller checks. Pi tools-off reporter turns stay tools-off. Slack reads use
 the authenticated captain-location RPC and normal app, workspace, user and
@@ -30,12 +30,12 @@ channel access rules, including denies. Other backends can omit this feature.
 - Reads cache for up to 60 seconds per plugin binding. Reopen the command to
   request another snapshot. An optional watcher polls separately for crew notices.
 - OpenCode Go and burn-rate estimates are not implemented. Adama can use
-  the data with existing `pogo_model` controls; reading quota does not
+  the data with existing `stargate_model` controls; reading quota does not
   itself switch models or change sessions.
 
 ## Configure the reader
 
-Quota collection is opt-in. Add `quota` to the existing `pogo.crew` plugin's
+Quota collection is opt-in. Add `quota` to the existing `stargate.crew` plugin's
 **options**, preserving its namespace, captain pin, paths, team and other
 settings. Use the same options for captain and OpenCode crew locations.
 No gateway backend setting or session identity needs to change.

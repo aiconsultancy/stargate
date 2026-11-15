@@ -25,7 +25,7 @@ export function cleanupProtection(
       ...crew.roots.map((root) => root.directory),
       ...(crew.worktreeDirectories ?? []),
     ]),
-    ...(m?.pogo ? [m.pogo.root] : []),
+    ...(m?.stargate ? [m.stargate.root] : []),
     ...(m?.cliproxyapi
       ? [dirname(m.cliproxyapi.link), dirname(m.cliproxyapi.binary)]
       : []),

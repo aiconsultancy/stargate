@@ -227,7 +227,7 @@ export async function provisionBots(
   dependencies: ProvisionDependencies = {},
 ) {
   const planPath = resolve(options.planPath);
-  const configPath = resolve(options.configPath ?? "pogo.json");
+  const configPath = resolve(options.configPath ?? "stargate.json");
   const journalPath = resolve(
     options.journalPath ??
       resolve(dirname(configPath), ".local/provision/bots.json"),

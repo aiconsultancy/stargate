@@ -16,7 +16,7 @@ import type { OpenCodeControl } from "../src/nightly/opencode";
 import { bounds } from "../src/nightly/run";
 import { jobStatuses, Store } from "../src/store";
 
-const root = await mkdtemp("/tmp/opencode/pogo-idle-");
+const root = await mkdtemp("/tmp/opencode/stargate-idle-");
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 const opencode = {
@@ -55,7 +55,7 @@ beforeEach(async () => {
   opencode.fail = false;
   data = join(root, `case-${count++}`);
   await mkdir(data, { recursive: true });
-  const store = new Store(join(data, "pogo.sqlite"));
+  const store = new Store(join(data, "stargate.sqlite"));
   store.saveSession('["key","C1","1.0"]', "ses_captain");
   store.close();
   new CronStore(join(data, "cron.sqlite")).close();
@@ -88,7 +88,7 @@ beforeEach(async () => {
   piDb.close();
 });
 
-const input = (scope: IdleInput["scope"] = "pogo"): IdleInput => ({
+const input = (scope: IdleInput["scope"] = "stargate"): IdleInput => ({
   dataDirectory: data,
   crews: [crew],
   pinnedSessions: [],
@@ -111,7 +111,7 @@ describe("idle gate", () => {
   });
 
   test("gateway jobs block", async () => {
-    const store = new Store(join(data, "pogo.sqlite"));
+    const store = new Store(join(data, "stargate.sqlite"));
     store.enqueue({
       eventId: "E1",
       botKey: "key",
@@ -129,7 +129,7 @@ describe("idle gate", () => {
   });
 
   test("every unfinished job status blocks; finished ones do not", async () => {
-    const store = new Store(join(data, "pogo.sqlite"));
+    const store = new Store(join(data, "stargate.sqlite"));
     store.enqueue({
       eventId: "E1",
       botKey: "key",
@@ -141,7 +141,7 @@ describe("idle gate", () => {
     });
     store.close();
     for (const status of jobStatuses) {
-      exec(join(data, "pogo.sqlite"), `UPDATE jobs SET status='${status}'`);
+      exec(join(data, "stargate.sqlite"), `UPDATE jobs SET status='${status}'`);
       expect((await checkIdle(input())).idle).toBe(
         status === "done" || status === "failed",
       );
@@ -248,7 +248,7 @@ describe("idle gate", () => {
       const first = state.enqueue(peer, "captain", "first");
       const second = state.enqueue(peer, "captain", "second");
       const gate = () => checkIdle({ ...input(), crews: [real] });
-      // An ordinary assignment starts only via pogo_crew status/wait, inside
+      // An ordinary assignment starts only via stargate_crew status/wait, inside
       // a captain turn, which the gate sees as an active session.
       expect(await gate()).toEqual({ idle: true });
       expect(state.cancelQueued(first.id, "captain")).toBe(true);
@@ -436,7 +436,7 @@ describe("idle gate", () => {
     expect(await checkIdle(input())).toEqual({ idle: true });
   });
 
-  test("every Pogo-owned OpenCode session blocks while it runs or waits for input", async () => {
+  test("every Stargate-owned OpenCode session blocks while it runs or waits for input", async () => {
     const busy = { idle: false, reason: "busy-opencode" } as const;
     // A gateway session mapping and a crew peer.
     for (const session of ["ses_captain", "ses_chief"]) {
@@ -457,11 +457,11 @@ describe("idle gate", () => {
     );
     opencode.active = ["ses_irc_chief"];
     expect(await checkIdle(input())).toEqual(busy);
-    // A subagent of a Pogo session, at any depth.
+    // A subagent of a Stargate session, at any depth.
     opencode.active = ["ses_grandchild"];
     opencode.parents = { ses_grandchild: "ses_child", ses_child: "ses_chief" };
     expect(await checkIdle(input())).toEqual(busy);
-    // A pending form or permission request of a Pogo session.
+    // A pending form or permission request of a Stargate session.
     opencode.active = [];
     opencode.pending = ["ses_child"];
     expect(await checkIdle(input())).toEqual({
@@ -472,9 +472,9 @@ describe("idle gate", () => {
     expect(await checkIdle(input())).toEqual({ idle: true });
   });
 
-  test("a captain pinned only in the crew plugin profile is Pogo-owned", async () => {
+  test("a captain pinned only in the crew plugin profile is Stargate-owned", async () => {
     // No gateway mapping, no backend pin and no peer row for this captain.
-    exec(join(data, "pogo.sqlite"), "DELETE FROM sessions");
+    exec(join(data, "stargate.sqlite"), "DELETE FROM sessions");
     exec(crewDatabase(crew), "DELETE FROM peers");
     const pinned = { ...crew, captainSessionID: "ses_plugin_captain" };
     opencode.active = ["ses_plugin_captain"];
@@ -507,7 +507,7 @@ describe("idle gate", () => {
   });
 
   test("gateway scope reads gateway jobs and cron only", async () => {
-    // Crew work, a running Pogo session and an unreachable OpenCode server.
+    // Crew work, a running Stargate session and an unreachable OpenCode server.
     exec(crewDatabase(crew), "UPDATE tasks SET status='running'");
     exec(piDatabase(crew, "twiki"), "UPDATE tasks SET status='running'");
     opencode.active = ["ses_chief"];
@@ -524,7 +524,7 @@ describe("idle gate", () => {
       reason: "busy-cron",
     });
     exec(join(data, "cron.sqlite"), "DELETE FROM cron_schedules");
-    const store = new Store(join(data, "pogo.sqlite"));
+    const store = new Store(join(data, "stargate.sqlite"));
     store.enqueue({
       eventId: "E1",
       botKey: "key",

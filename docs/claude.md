@@ -34,7 +34,7 @@ A Slack bot:
 ```json
 "backend": {
   "type": "claude",
-  "directory": "/srv/pogo/claude-helper",
+  "directory": "/srv/stargate/claude-helper",
   "model": "claude-sonnet-5-5",
   "provider": {
     "baseURL": "http://127.0.0.1:8317/v1",
@@ -51,7 +51,7 @@ the `irc[].crew` array; see [IRC transport](irc.md#crew-on-irc)):
 {
   "id": "helo",
   "account": "galactica-helo",
-  "passwordEnv": "POGO_IRC_GALACTICA_HELO_PASSWORD",
+  "passwordEnv": "STARGATE_IRC_GALACTICA_HELO_PASSWORD",
   "channels": ["#ship-galactica"],
   "backend": {
     "type": "claude",
@@ -200,7 +200,7 @@ The Claude Code child gets a new, minimal environment. It inherits only
 - `NO_PROXY=*`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `DISABLE_AUTOUPDATER=1`: no HTTP proxy, telemetry, error reports or
   update checks.
-- `CLAUDE_AGENT_SDK_CLIENT_APP=pogo`.
+- `CLAUDE_AGENT_SDK_CLIENT_APP=stargate`.
 
 Every other variable, such as Slack tokens, `ANTHROPIC_API_KEY`,
 `CLAUDE_CODE_OAUTH_TOKEN`, other provider keys, `HTTPS_PROXY` and
@@ -235,7 +235,7 @@ not undone.
 
 No process of a turn outlives it. Claude Code runs Bash commands in their own
 sessions, outside its process group, so every process of a turn inherits a
-random `POGO_CLAUDE_TURN` value. A CLI that has not exited five seconds after
+random `STARGATE_CLAUDE_TURN` value. A CLI that has not exited five seconds after
 its result or after `SIGTERM` gets `SIGTERM`, then `SIGKILL`, with its
 process group; Stargate signals that group only while the CLI is its own
 unreaped child, so the group ID cannot have been reused. After the CLI has

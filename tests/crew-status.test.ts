@@ -16,7 +16,7 @@ import type { CronView } from "../src/cron-ui";
 import { bot, identity } from "./fixtures";
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/pogo-member-status-");
+  const directory = await mkdtemp("/tmp/opencode/stargate-member-status-");
   const team = teamSchema.parse({
     captain: { id: "adama" },
     crew: [
@@ -309,7 +309,7 @@ test("durable status bounds recent metadata, retains outcomes and never returns 
 
 function command(text = "crew twiki") {
   return {
-    command: "/pogo",
+    command: "/stargate",
     text,
     api_app_id: "A123",
     team_id: "T123",

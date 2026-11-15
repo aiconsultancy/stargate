@@ -21,7 +21,7 @@ function open(path = ":memory:") {
   return store;
 }
 function databasePath() {
-  const directory = mkdtempSync(join(tmpdir(), "pogo-cron-"));
+  const directory = mkdtempSync(join(tmpdir(), "stargate-cron-"));
   directories.push(directory);
   return join(directory, "cron.sqlite");
 }

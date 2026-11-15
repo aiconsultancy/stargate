@@ -47,7 +47,7 @@ import {
 import { backendFingerprint } from "../src/routing";
 import { toolchain } from "./codex-toolchain";
 
-const apiKeyEnv = "POGO_CODEX_TEST_PROXY_KEY";
+const apiKeyEnv = "STARGATE_CODEX_TEST_PROXY_KEY";
 const key = "local-proxy-test-only";
 const fixture = join(import.meta.dir, "codex-fixture.ts");
 // Host secrets that must never reach the Codex child.
@@ -58,7 +58,7 @@ const hostSecrets = {
   CODEX_HOME: "/host/.codex",
   ANTHROPIC_API_KEY: "anthropic-must-not-be-sent",
   CLIPROXYAPI_API_KEY: "proxy-key-only-by-reference",
-  POGO_TEST_BOT_TOKEN: "xoxb-must-not-be-sent",
+  STARGATE_TEST_BOT_TOKEN: "xoxb-must-not-be-sent",
   HTTPS_PROXY: "http://127.0.0.1:2",
   NODE_OPTIONS: "--require /host/hook.js",
 };
@@ -106,7 +106,7 @@ const logEntry = z.union([
 ]);
 
 async function open(extra: Record<string, unknown> = {}, root?: string) {
-  root ??= await mkdtemp(join(tmpdir(), "pogo-codex-"));
+  root ??= await mkdtemp(join(tmpdir(), "stargate-codex-"));
   const base = root;
   cleanup.push(() => rm(base, { recursive: true, force: true }));
   const executable = join(root, "fake-codex");
@@ -117,7 +117,7 @@ async function open(extra: Record<string, unknown> = {}, root?: string) {
   );
   const dataDirectory = join(root, "data");
   await mkdir(dataDirectory, { recursive: true });
-  // The working directory never contains Pogo's data directory.
+  // The working directory never contains Stargate's data directory.
   await mkdir(join(root, "workspace"), { recursive: true });
   const backend = await CodexBackend.open(
     config(extra, join(root, "workspace")),
@@ -151,7 +151,7 @@ async function open(extra: Record<string, unknown> = {}, root?: string) {
 
 const signal = () => AbortSignal.timeout(20_000);
 const session = (backend: CodexBackend) =>
-  backend.createSession({ key: "k", title: "Pogo test", signal: signal() });
+  backend.createSession({ key: "k", title: "Stargate test", signal: signal() });
 
 function alive(pid: number) {
   try {
@@ -215,14 +215,14 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
   expect(map.get("approval_policy")).toBe('"never"');
   expect(map.get("sandbox_workspace_write.network_access")).toBe("false");
   expect(map.get("web_search")).toBe('"disabled"');
-  expect(map.get("model_provider")).toBe('"pogo"');
-  expect(map.get("model_providers.pogo.base_url")).toBe(
+  expect(map.get("model_provider")).toBe('"stargate"');
+  expect(map.get("model_providers.stargate.base_url")).toBe(
     '"http://127.0.0.1:8317/v1"',
   );
-  expect(map.get("model_providers.pogo.env_key")).toBe(
-    '"POGO_CODEX_PROVIDER_KEY"',
+  expect(map.get("model_providers.stargate.env_key")).toBe(
+    '"STARGATE_CODEX_PROVIDER_KEY"',
   );
-  expect(map.get("model_providers.pogo.wire_api")).toBe('"responses"');
+  expect(map.get("model_providers.stargate.wire_api")).toBe('"responses"');
   expect(map.get("project_doc_max_bytes")).toBe("0");
   expect(map.get("skills.include_instructions")).toBe("false");
   expect(map.get("agents.enabled")).toBe("false");
@@ -230,7 +230,7 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
   expect(map.get("features.shell_snapshot")).toBe("false");
   expect(map.get("analytics.enabled")).toBe("false");
   expect(map.get("shell_environment_policy.exclude")).toBe(
-    '["POGO_CODEX_PROVIDER_KEY"]',
+    '["STARGATE_CODEX_PROVIDER_KEY"]',
   );
   // The key travels only in the environment, never in arguments.
   for (const flag of argv) expect(flag).not.toContain(key);
@@ -262,26 +262,26 @@ test("Codex child receives only a minimal, explicit environment", async () => {
   const env = run?.env ?? {};
   for (const name of Object.keys(hostSecrets))
     if (name !== "CODEX_HOME") expect(env[name]).toBeUndefined();
-  expect(env["POGO_CODEX_PROVIDER_KEY"]).toBe(key);
+  expect(env["STARGATE_CODEX_PROVIDER_KEY"]).toBe(key);
   expect(env["CODEX_HOME"]).toBe(join(dataDirectory, "codex"));
   expect(env["ZDOTDIR"]).toBe(join(dataDirectory, "codex-shell"));
   expect(await readdir(env["ZDOTDIR"] ?? "")).toEqual([]);
   expect(env[apiKeyEnv]).toBeUndefined();
-  expect(env["POGO_CODEX_TURN"]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(env["STARGATE_CODEX_TURN"]).toMatch(/^[0-9a-f-]{36}$/);
   expect(env["NO_PROXY"]).toBe("*");
   // Each turn gets a private temporary directory, removed after the turn.
-  expect(env["TMPDIR"]).toStartWith(join(tmpdir(), "pogo-codex-"));
+  expect(env["TMPDIR"]).toStartWith(join(tmpdir(), "stargate-codex-"));
   await expect(readdir(env["TMPDIR"] ?? "")).rejects.toThrow();
   const allowed = new Set([
     ...inheritedEnvironment,
     "CODEX_HOME",
     "ZDOTDIR",
     "NO_PROXY",
-    "POGO_CODEX_PROVIDER_KEY",
-    "POGO_CODEX_TURN",
+    "STARGATE_CODEX_PROVIDER_KEY",
+    "STARGATE_CODEX_TURN",
     // Added by the SDK itself; it carries no credential.
     "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
-    // Set by the fixture's wrapper shell, not by Pogo.
+    // Set by the fixture's wrapper shell, not by Stargate.
     "PWD",
   ]);
   expect(Object.keys(env).filter((name) => !allowed.has(name))).toEqual([]);
@@ -290,7 +290,7 @@ test("Codex child receives only a minimal, explicit environment", async () => {
       codexEnvironment(config(), "/private", {
         ...hostSecrets,
         PATH: "/bin",
-        HOME: "/home/pogo",
+        HOME: "/home/stargate",
         [apiKeyEnv]: key,
       }),
     ).sort(),
@@ -301,7 +301,7 @@ test("Codex child receives only a minimal, explicit environment", async () => {
       "CODEX_HOME",
       "ZDOTDIR",
       "NO_PROXY",
-      "POGO_CODEX_PROVIDER_KEY",
+      "STARGATE_CODEX_PROVIDER_KEY",
     ].sort(),
   );
   delete process.env[apiKeyEnv];
@@ -465,7 +465,7 @@ test("a Codex CLI that ignores SIGTERM cannot keep a turn pending", async () => 
 });
 
 test.skipIf(process.platform !== "linux")(
-  "an abandoned Codex turn closes Pogo's pipes while its output is held",
+  "an abandoned Codex turn closes Stargate's pipes while its output is held",
   async () => {
     const { backend, runs, grandchildren } = await open();
     cleanup.push(async () => {
@@ -526,7 +526,7 @@ test("the launcher starts the CLI that the SDK would start", () => {
 });
 
 test("the launcher keeps arguments, input and exit status, and only cat holds its output", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-codex-launcher-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-launcher-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const odd = join(root, "it's a dir");
   await mkdir(odd);
@@ -556,7 +556,7 @@ test("the launcher keeps arguments, input and exit status, and only cat holds it
 });
 
 test("a writable Codex directory never holds what runs outside the sandbox", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-codex-paths-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-paths-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const write = (directory: string, extra: Record<string, unknown> = {}) =>
     config({ sandbox: "workspace-write", ...extra }, directory);
@@ -578,8 +578,8 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
   };
   // The data directory below the workspace, through a symbolic link, or
   // the workspace below the data directory.
-  await refused(join(root, "a"), join(root, "a", "data"), /Pogo's data/);
-  // Through a link that Pogo's user can change, the path is refused before
+  await refused(join(root, "a"), join(root, "a", "data"), /Stargate's data/);
+  // Through a link that Stargate's user can change, the path is refused before
   // the overlap is even compared.
   await mkdir(join(root, "b", "data"), { recursive: true });
   await symlink(join(root, "b"), join(root, "link"));
@@ -587,13 +587,13 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
   await refused(
     join(root, "c", "data", "codex-bin"),
     join(root, "c", "data"),
-    /Pogo's data/,
+    /Stargate's data/,
   );
-  // Pogo's installation, and a home directory with start-up files.
+  // Stargate's installation, and a home directory with start-up files.
   await refused(
     join(import.meta.dir, ".."),
     join(root, "d", "data"),
-    /Pogo's installation|Pogo's data/,
+    /Stargate's installation|Stargate's data/,
   );
   saved.set("HOME", process.env["HOME"]);
   process.env["HOME"] = join(root, "e", "home");
@@ -605,15 +605,15 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
     { dataDirectory: join(root, "data-e") },
   );
   await inside.close();
-  // `pogo config check` applies the same rule to the configured data root.
-  const path = join(root, "f", "pogo.json");
+  // `stargate config check` applies the same rule to the configured data root.
+  const path = join(root, "f", "stargate.json");
   await mkdir(join(root, "f"));
   const bot = (directory: string) => ({
     id: "codex-helper",
     slack: {
       appId: "A123",
-      appTokenEnv: "POGO_CODEX_TEST_APP",
-      botTokenEnv: "POGO_CODEX_TEST_BOT",
+      appTokenEnv: "STARGATE_CODEX_TEST_APP",
+      botTokenEnv: "STARGATE_CODEX_TEST_BOT",
     },
     access: { users: ["U123"], channels: ["C123"] },
     backend: {
@@ -625,14 +625,14 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
       extraPath: [tools.directory],
     },
   });
-  for (const name of ["POGO_CODEX_TEST_APP", "POGO_CODEX_TEST_BOT"])
+  for (const name of ["STARGATE_CODEX_TEST_APP", "STARGATE_CODEX_TEST_BOT"])
     saved.set(name, process.env[name]);
-  process.env["POGO_CODEX_TEST_APP"] = "xapp-test";
-  process.env["POGO_CODEX_TEST_BOT"] = "xoxb-test";
-  // The default data directory `.pogo` is next to the configuration file.
+  process.env["STARGATE_CODEX_TEST_APP"] = "xapp-test";
+  process.env["STARGATE_CODEX_TEST_BOT"] = "xoxb-test";
+  // The default data directory `.stargate` is next to the configuration file.
   await writeFile(path, JSON.stringify({ bots: [bot(join(root, "f"))] }));
   await expect(runCli(["config", "check", "--config", path])).rejects.toThrow(
-    /Pogo's data directory/,
+    /Stargate's data directory/,
   );
   await mkdir(join(root, "g"));
   await writeFile(path, JSON.stringify({ bots: [bot(join(root, "g"))] }));
@@ -658,13 +658,13 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
 });
 
 test("Codex uses canonical paths only and refuses links that can change", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-codex-links-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-links-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const write = (directory: string) =>
     config({ sandbox: "workspace-write" }, directory);
   await mkdir(join(root, "safe"));
   // A workspace, a data directory or a CLI behind a link in a directory
-  // that Pogo's user can write: refused, so no later retarget is followed.
+  // that Stargate's user can write: refused, so no later retarget is followed.
   await symlink(join(root, "safe"), join(root, "linked"));
   await expect(
     CodexBackend.open(write(join(root, "linked")), {
@@ -742,7 +742,7 @@ test("a Codex turn writes, verifies and runs only a fresh canonical launcher", a
 });
 
 test("the CLI's PATH holds only the helper and root-owned system directories", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-codex-shim-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-shim-"));
   const workspace = join(root, "workspace");
   const user = join(root, "user-bin");
   // Shims for the launcher's utilities and the CLI's commands, in the
@@ -808,13 +808,13 @@ test("the CLI's PATH holds only the helper and root-owned system directories", a
       config({ sandbox: "workspace-write" }, root),
       join(root, "data"),
     ),
-  ).rejects.toThrow(/Pogo's data/);
+  ).rejects.toThrow(/Stargate's data/);
 });
 
 test("without a root-controlled system directory, start-up fails clearly", async () => {
-  // A system directory that Pogo's user owns, as on hosted CI runners,
+  // A system directory that Stargate's user owns, as on hosted CI runners,
   // where some program in /usr/local/bin or /usr/bin is not root's.
-  const root = await mkdtemp(join(tmpdir(), "pogo-codex-system-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-system-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const system = join(root, "usr-bin");
   await mkdir(system);
@@ -888,7 +888,7 @@ test("without a root-controlled system directory, start-up fails clearly", async
 });
 
 test("extraPath adds only directories whose programs stay out of the workspace", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-codex-extra-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-extra-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, "workspace");
   await mkdir(join(workspace, "bin"), { recursive: true });
@@ -939,7 +939,7 @@ test("extraPath adds only directories whose programs stay out of the workspace",
 });
 
 test("a program link chain through the workspace is never followed", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-codex-chain-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-chain-"));
   const workspace = join(root, "workspace");
   const shims = join(workspace, "shims");
   await mkdir(shims, { recursive: true });
@@ -975,8 +975,8 @@ test("a program link chain through the workspace is never followed", async () =>
       graceMs: 200,
       // The intermediate link, retargeted to the shim during the turn.
       environment: {
-        POGO_TEST_LINK: hop,
-        POGO_TEST_TARGET: join(shims, "git"),
+        STARGATE_TEST_LINK: hop,
+        STARGATE_TEST_TARGET: join(shims, "git"),
       },
     },
   );
@@ -989,7 +989,7 @@ test("a program link chain through the workspace is never followed", async () =>
 });
 
 test("a PATH link retargeted during a turn is never followed", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-codex-swap-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-swap-"));
   const workspace = join(root, "workspace");
   const shims = join(workspace, "shims");
   await mkdir(shims, { recursive: true });
@@ -1019,14 +1019,14 @@ test("a PATH link retargeted during a turn is never followed", async () => {
     {
       executable,
       graceMs: 200,
-      environment: { POGO_TEST_LINK: link, POGO_TEST_TARGET: shims },
+      environment: { STARGATE_TEST_LINK: link, STARGATE_TEST_TARGET: shims },
     },
   );
   cleanup.push(async () => {
     await backend.close();
     await rm(root, { recursive: true, force: true });
   });
-  // The retarget happens after Pogo checked PATH, while the CLI runs.
+  // The retarget happens after Stargate checked PATH, while the CLI runs.
   await backend.prompt(await session(backend), "swap", signal());
   expect(await readdir(root)).not.toContain("ran-git");
 });
@@ -1083,11 +1083,11 @@ test.skipIf(process.platform !== "linux")(
     const record = join(dataDirectory, "codex-runs", `${id}.json`);
     // Another turn's marker, or an earlier start than the record: kept.
     const other = await sleeper("other", {
-      POGO_CODEX_TURN: crypto.randomUUID(),
+      STARGATE_CODEX_TURN: crypto.randomUUID(),
     });
-    const older = await sleeper("older", { POGO_CODEX_TURN: turn });
+    const older = await sleeper("older", { STARGATE_CODEX_TURN: turn });
     await delay(50);
-    const tool = await sleeper("tool", { POGO_CODEX_TURN: turn });
+    const tool = await sleeper("tool", { STARGATE_CODEX_TURN: turn });
     await writeFile(
       record,
       JSON.stringify({ turn, since: (await start(older)) + 1 }),
@@ -1194,7 +1194,7 @@ test("Codex configuration is strict and fails closed", () => {
     { projectDocs: true, reasoningEffort: "medium", systemPrompt: "Brief." },
   ])
     expect(parse(extra)).toBe(true);
-  // Code, instructions and tools from outside Pogo's configuration stay off.
+  // Code, instructions and tools from outside Stargate's configuration stay off.
   const features = codexConfig(config())["features"];
   expect(Object.values(features as object).every((on) => on === false)).toBe(
     true,
@@ -1224,7 +1224,7 @@ test("Codex configuration is strict and fails closed", () => {
 });
 
 test("createBackend opens the Codex adapter on demand", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pogo-codex-"));
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const backend = await createBackend(config(), { dataDirectory: root });
   cleanup.push(() => backend.close());
@@ -1284,7 +1284,7 @@ test("Codex maps what the CLI reports to one shared failure category", async () 
       "tool fail=unexpected status 429 Too Many Requests: later;",
       "provider:quota:429:ran",
     ],
-    // No result: Pogo cannot know what the CLI did.
+    // No result: Stargate cannot know what the CLI did.
     ["crash", "provider:crash:0:ran"],
   ];
   for (const [prompt, cause] of cases)

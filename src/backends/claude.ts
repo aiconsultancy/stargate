@@ -100,7 +100,7 @@ export function claudeEnvironment(
     ...claudeRouting(config),
     CLAUDE_CONFIG_DIR: configDirectory,
     ANTHROPIC_AUTH_TOKEN: secret(config.provider.apiKeyEnv, parent),
-    CLAUDE_AGENT_SDK_CLIENT_APP: "pogo",
+    CLAUDE_AGENT_SDK_CLIENT_APP: "stargate",
   };
 }
 
@@ -383,7 +383,7 @@ export class ClaudeTurn {
 }
 
 /** The turn marker variable of Claude Code children; see `TurnMarker`. */
-const turnVariable = "POGO_CLAUDE_TURN";
+const turnVariable = "STARGATE_CLAUDE_TURN";
 
 /** One spawned Claude Code CLI in its own process group. */
 class ClaudeProcess implements SpawnedProcess {
@@ -418,8 +418,8 @@ class ClaudeProcess implements SpawnedProcess {
     return this.child.exitCode === null && this.child.signalCode === null;
   }
   /**
-   * Signal the CLI's whole group while the CLI is Pogo's unreaped child: its
-   * PID, and so its group ID, cannot be reused before Pogo reaps it.
+   * Signal the CLI's whole group while the CLI is Stargate's unreaped child: its
+   * PID, and so its group ID, cannot be reused before Stargate reaps it.
    */
   kill(signal: NodeJS.Signals) {
     if (!this.running) return false;
@@ -609,7 +609,7 @@ export class ClaudeBackend implements AgentBackend {
       // Never resume a session that an earlier process is still running.
       await this.stopOrphan(id, AbortSignal.timeout(5000));
       // A private temporary directory per turn, removed after the CLI exits.
-      temporary = await mkdtemp(join(tmpdir(), "pogo-claude-"));
+      temporary = await mkdtemp(join(tmpdir(), "stargate-claude-"));
       env["TMPDIR"] = temporary;
       const resume = await this.started(id);
       signal.throwIfAborted();
@@ -793,7 +793,7 @@ export class ClaudeBackend implements AgentBackend {
   }
 
   /**
-   * Stop what a turn of an earlier Pogo process left running. Its group is
+   * Stop what a turn of an earlier Stargate process left running. Its group is
    * signalled only while the recorded CLI verifiably leads it; other
    * processes only while their start time, user and marker match. Linux
    * only; elsewhere nothing is signalled.

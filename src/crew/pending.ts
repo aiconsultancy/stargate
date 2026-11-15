@@ -15,7 +15,7 @@ export const queuedPendingTask = "status='queued'";
  * captain turn: the gateway's activity delivery admits them after a turn and
  * when it starts (`ReportingStore.advance` → `CrewEngine.progressReport`).
  * An ordinary queued assignment starts only through the captain's
- * `pogo_crew` status or wait.
+ * `stargate_crew` status or wait.
  */
 export const reportTask = (column: string) =>
   `EXISTS (SELECT 1 FROM activity_report_tasks r WHERE r.taskID=${column})`;

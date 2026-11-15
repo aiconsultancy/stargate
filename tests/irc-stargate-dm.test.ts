@@ -80,15 +80,15 @@ async function setup(
     accounts: { "galactica-captain": "pass", "galactica-chief": "pass" },
   }).start();
   cleanup.push(() => fake.stop());
-  const directory = await mkdtemp(join(tmpdir(), "pogo-irc-pogo-dm-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-stargate-dm-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "pogo.sqlite"));
+  const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = ircSchema.parse({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica-captain",
-    passwordEnv: "POGO_IRC_GALACTICA_CAPTAIN",
+    passwordEnv: "STARGATE_IRC_GALACTICA_CAPTAIN",
     channels: ["#ship-galactica"],
     access: { allCallStaggerMs: 0 },
     crewMessaging: options.crewMessaging ?? { sessions: true },
@@ -96,7 +96,7 @@ async function setup(
       {
         id: "chief",
         account: "galactica-chief",
-        passwordEnv: "POGO_IRC_GALACTICA_CHIEF",
+        passwordEnv: "STARGATE_IRC_GALACTICA_CHIEF",
         channels: ["#ship-galactica"],
         backend: opencode("/srv/galactica/crew/chief", {
           agent: "galactica-crew-chief",
@@ -111,8 +111,8 @@ async function setup(
   const link = options.link ?? new FakeLink();
   const ship = await IrcShip.create(config, store, log, {
     env: {
-      POGO_IRC_GALACTICA_CAPTAIN: "pass",
-      POGO_IRC_GALACTICA_CHIEF: "pass",
+      STARGATE_IRC_GALACTICA_CAPTAIN: "pass",
+      STARGATE_IRC_GALACTICA_CHIEF: "pass",
     },
     timing: { reconnectMinMs: 20, intervalMs: 5, burst: 20 },
     readyMs: 2000,
@@ -133,7 +133,7 @@ async function setup(
           session,
           text: `${link.binds.length}:${text}`,
         });
-        return "[[pogo:silent]]";
+        return "[[stargate:silent]]";
       },
       async close() {},
     };
@@ -229,7 +229,7 @@ function sentTo(fake: FakeIrcServer, from: string, to: string) {
 
 const copies = { sessions: true, ircCopies: true };
 
-test("irc pogo_dm copy: sent from the sender's account, once, never a second turn", async () => {
+test("irc stargate_dm copy: sent from the sender's account, once, never a second turn", async () => {
   const link = new FakeLink();
   const { fake, store, ship, prompts } = await setup({
     link,
@@ -252,8 +252,8 @@ test("irc pogo_dm copy: sent from the sender's account, once, never a second tur
     "IRC copy",
   );
   const [copy] = sentTo(fake, "galactica-chief", "galactica-captain");
-  expect(copy?.params[1]).toBe("[pogo_dm] Build is green.");
-  expect(copy?.tags.get("+pogo/dm")).toBe(id(1));
+  expect(copy?.params[1]).toBe("[stargate_dm] Build is green.");
+  expect(copy?.tags.get("+stargate/dm")).toBe(id(1));
   // The captain got the DM natively already: the copy is not a turn, and
   // the audit mirror shows it once (as the sender's outgoing DM).
   const mirrored = (text: string) =>
@@ -269,7 +269,9 @@ test("irc pogo_dm copy: sent from the sender's account, once, never a second tur
     lineOf(fake.received("galactica-captain"), "PRIVMSG").find((m) =>
       m.params[1]?.includes("Build is green."),
     )?.params[1],
-  ).toBe("[dm] galactica-chief → galactica-captain: [pogo_dm] Build is green.");
+  ).toBe(
+    "[dm] galactica-chief → galactica-captain: [stargate_dm] Build is green.",
+  );
   // A captain → crew copy goes from the captain's account.
   link.push({ id: id(2), from: captainMember, to: chiefMember, text: "Ack." });
   await until(
@@ -280,13 +282,13 @@ test("irc pogo_dm copy: sent from the sender's account, once, never a second tur
   // A DM from a ship account without a known copy ID follows the ship rules.
   const [, chief] = ship.registrations;
   await chief?.client.privmsg("galactica-captain", "direct question", {
-    "+pogo/dm": id(99),
+    "+stargate/dm": id(99),
   });
   await until(() => prompts["captain"]?.length === 1, 5000, "ship DM turn");
   expect(prompts["captain"]?.[0]?.text).toContain("direct question");
 });
 
-test("irc pogo_dm copy: baseline, members without IRC, credentials and length", async () => {
+test("irc stargate_dm copy: baseline, members without IRC, credentials and length", async () => {
   const link = new FakeLink();
   link.push({ id: id(1), from: chiefMember, to: captainMember, text: "old" });
   const { fake } = await setup({ link, crewMessaging: copies });
@@ -323,18 +325,18 @@ test("irc pogo_dm copy: baseline, members without IRC, credentials and length", 
   expect(lines.some((line) => line.includes("old"))).toBe(false);
   expect(lines.some((line) => line.includes("not on IRC"))).toBe(false);
   expect(lines[0]).toBe(
-    `[pogo_dm ${id(3)}: not copied to IRC, it may contain credentials. Read it with pogo_mail.]`,
+    `[stargate_dm ${id(3)}: not copied to IRC, it may contain credentials. Read it with stargate_mail.]`,
   );
   const long = lines.slice(1).join(" ");
-  expect(long.startsWith("[pogo_dm] long report")).toBe(true);
-  expect(long.endsWith("(truncated; full text in pogo_mail)")).toBe(true);
+  expect(long.startsWith("[stargate_dm] long report")).toBe(true);
+  expect(long.endsWith("(truncated; full text in stargate_mail)")).toBe(true);
   expect(Buffer.byteLength(long)).toBeLessThan(2200);
   for (const raw of fake.received("galactica-chief"))
     expect(Buffer.byteLength(raw) + 2).toBeLessThanOrEqual(512);
   expect(fake.received("galactica-chief").join("\n")).not.toContain("xoxb");
 });
 
-test("irc pogo_dm copy: never answered by a redirect, and off by default", async () => {
+test("irc stargate_dm copy: never answered by a redirect, and off by default", async () => {
   const link = new FakeLink();
   const { fake } = await setup({
     link,
@@ -360,7 +362,7 @@ test("irc pogo_dm copy: never answered by a redirect, and off by default", async
   expect(off.reads).toEqual([]);
 });
 
-test("irc pogo_dm copy: CTCP wrappers never hide a credential", () => {
+test("irc stargate_dm copy: CTCP wrappers never hide a credential", () => {
   for (const text of [
     "\u0001ACTION identify secret\u0001",
     "status\n\u0001ACTION set password hunter2\u0001",
@@ -369,16 +371,16 @@ test("irc pogo_dm copy: CTCP wrappers never hide a credential", () => {
   ]) {
     const copied = copyText({ id: id(7), text });
     expect(copied).toBe(
-      `[pogo_dm ${id(7)}: not copied to IRC, it may contain credentials. Read it with pogo_mail.]`,
+      `[stargate_dm ${id(7)}: not copied to IRC, it may contain credentials. Read it with stargate_mail.]`,
     );
     expect(copied).not.toContain("secret");
   }
   expect(copyText({ id: id(8), text: "\u0001ACTION waves\u0001" })).toBe(
-    "[pogo_dm] ACTION waves",
+    "[stargate_dm] ACTION waves",
   );
 });
 
-test("irc pogo_dm copy: an entry older than 24 hours is never sent", async () => {
+test("irc stargate_dm copy: an entry older than 24 hours is never sent", async () => {
   const link = new FakeLink();
   const { fake } = await setup({ link, crewMessaging: copies });
   await until(() => link.reads.includes(0), 5000, "baseline read");
@@ -400,5 +402,5 @@ test("irc pogo_dm copy: an entry older than 24 hours is never sent", async () =>
     sentTo(fake, "galactica-chief", "galactica-captain").map(
       (m) => m.params[1],
     ),
-  ).toEqual(["[pogo_dm] fresh"]);
+  ).toEqual(["[stargate_dm] fresh"]);
 });

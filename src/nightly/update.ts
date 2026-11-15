@@ -20,8 +20,8 @@ import { buildUpdateCommand } from "./timer";
 import { normalizeVersion } from "./versions";
 
 /**
- * `pogo maintenance update --version X.Y.Z (--plan | --now)`: an
- * operator-approved update of the Pogo release, outside the window and
+ * `stargate maintenance update --version X.Y.Z (--plan | --now)`: an
+ * operator-approved update of the Stargate release, outside the window and
  * without the idle gate or the cool-off. It is the nightly run's own path
  * for one named release: verified staging, install and tests, journal,
  * switch, readiness check and automatic rollback.
@@ -95,12 +95,12 @@ async function installedRelease(
 /** Last-resort limit of the unit: the update's own window, with margin. */
 const runMinutes = 100;
 
-const pogoOf = (report: Report) =>
-  report.components.find((component) => component.id === "pogo");
+const stargateOf = (report: Report) =>
+  report.components.find((component) => component.id === "stargate");
 
 /** Which services a switch to `version` restarts, as far as is known now. */
 async function restartText(config: Config, version: string) {
-  const root = config.maintenance?.pogo?.root;
+  const root = config.maintenance?.stargate?.root;
   if (!root) return "";
   const staged = await readMetadata(join(root, "releases", version));
   if (staged?.verification !== "verified")
@@ -111,17 +111,17 @@ async function restartText(config: Config, version: string) {
 }
 
 function refusal(report: Report, version: string) {
-  const pogo = pogoOf(report);
-  if (!pogo) return "No managed Pogo release is configured.";
-  if (pogo.status === "unchanged")
-    return `Pogo ${version} is the current release. Nothing to do.`;
-  if (pogo.reason === "version-mismatch")
-    return `Refused: ${version} is older than the current release ${pogo.before}. To go back after a failed update, use pogo maintenance recover.`;
-  if (pogo.reason === "known-bad")
+  const stargate = stargateOf(report);
+  if (!stargate) return "No managed Stargate release is configured.";
+  if (stargate.status === "unchanged")
+    return `Stargate ${version} is the current release. Nothing to do.`;
+  if (stargate.reason === "version-mismatch")
+    return `Refused: ${version} is older than the current release ${stargate.before}. To go back after a failed update, use stargate maintenance recover.`;
+  if (stargate.reason === "known-bad")
     return `Refused: ${version} failed here after an earlier switch. Use --retry-failed to try it again.`;
-  if (pogo.reason === "not-found")
+  if (stargate.reason === "not-found")
     return `Refused: no published release ${version} was found.`;
-  return `Refused: Pogo ${version} cannot be installed (${pogo.reason ?? pogo.status}).`;
+  return `Refused: Stargate ${version} cannot be installed (${stargate.reason ?? stargate.status}).`;
 }
 
 export async function maintenanceUpdate(
@@ -130,8 +130,8 @@ export async function maintenanceUpdate(
   deps: UpdateDependencies,
 ): Promise<number> {
   const m = config.maintenance;
-  if (!m?.pogo)
-    throw new UpdateRefused("maintenance.pogo is required for an update.");
+  if (!m?.stargate)
+    throw new UpdateRefused("maintenance.stargate is required for an update.");
   const version = options.version;
   if (!version || normalizeVersion(version) !== version)
     throw new UpdateRefused("--version MAJOR.MINOR.PATCH is required.");
@@ -141,11 +141,11 @@ export async function maintenanceUpdate(
     throw new UpdateRefused("--foreground applies only with --now.");
   // The code that switches, rolls back and recovers is this release's.
   const runnerRelease = options.now
-    ? await installedRelease(m.pogo.root, deps.unit)
+    ? await installedRelease(m.stargate.root, deps.unit)
     : null;
   if (options.now && !runnerRelease)
     throw new UpdateRefused(
-      `This Pogo is not an installed release: an update runs only from a verified release in ${layout(m.pogo.root).releases}. Run the installed pogo (${join(layout(m.pogo.root).current, "src", "main.ts")}). Nothing was changed.`,
+      `This Stargate is not an installed release: an update runs only from a verified release in ${layout(m.stargate.root).releases}. Run the installed stargate (${join(layout(m.stargate.root).current, "src", "main.ts")}). Nothing was changed.`,
     );
   const maintenance = deps.maintenance ?? runMaintenance;
   const input = (mode: "plan" | "run"): RunInput => ({
@@ -168,30 +168,30 @@ export async function maintenanceUpdate(
     else deps.print(summary(report, reportPath ?? "not written"));
     return report.outcome === "failed" ||
       attention ||
-      pogoOf(report)?.status !== "updated"
+      stargateOf(report)?.status !== "updated"
       ? 1
       : 0;
   }
 
   // Read-only: the same checks that the update makes first.
   const { report } = await run("plan");
-  const planned = pogoOf(report)?.status === "planned";
+  const planned = stargateOf(report)?.status === "planned";
   if (options.plan) {
     if (options.json) deps.print(JSON.stringify(report, null, 2));
     else if (planned) {
       deps.print(
-        `Pogo ${pogoOf(report)?.before} → ${version}: would stage, verify (origin, checksum, tree), install, test and switch now, without the window, the idle gate or the cool-off.`,
+        `Stargate ${stargateOf(report)?.before} → ${version}: would stage, verify (origin, checksum, tree), install, test and switch now, without the window, the idle gate or the cool-off.`,
       );
       deps.print(await restartText(config, version));
       deps.print("Nothing was changed.");
     } else deps.print(refusal(report, version));
-    return planned || pogoOf(report)?.status === "unchanged" ? 0 : 1;
+    return planned || stargateOf(report)?.status === "unchanged" ? 0 : 1;
   }
   if (!planned) {
     deps.print(refusal(report, version));
-    return pogoOf(report)?.status === "unchanged" ? 0 : 1;
+    return stargateOf(report)?.status === "unchanged" ? 0 : 1;
   }
-  const unit = `pogo-update-${version.replaceAll(".", "-")}-${Math.floor(deps.now() / 1000)}`;
+  const unit = `stargate-update-${version.replaceAll(".", "-")}-${Math.floor(deps.now() / 1000)}`;
   const started = await deps.launcher.run(
     buildUpdateCommand({
       unit,
@@ -211,7 +211,7 @@ export async function maintenanceUpdate(
   const directory = maintenanceDirectory(config.dataDirectory);
   deps.print(
     [
-      `Started ${unit}.service: Pogo ${pogoOf(report)?.before} → ${version}.`,
+      `Started ${unit}.service: Stargate ${stargateOf(report)?.before} → ${version}.`,
       await restartText(config, version),
       "The update continues if it restarts OpenCode and this session ends.",
       `Progress: journalctl --user -u ${unit}.service`,

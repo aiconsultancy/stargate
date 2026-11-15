@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 
 async function fixture(host: string, account?: string) {
-  const dir = await mkdtemp(join(tmpdir(), "pogo-external-"));
+  const dir = await mkdtemp(join(tmpdir(), "stargate-external-"));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   async function generate(name: string, dns?: string) {
     const result = spawnSync(

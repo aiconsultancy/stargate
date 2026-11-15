@@ -140,7 +140,7 @@ const optional = [
   "extended-join",
 ];
 const chathistoryCaps = ["draft/chathistory", "chathistory"];
-/** Smallest draft/multiline max-bytes that Pogo uses. */
+/** Smallest draft/multiline max-bytes that Stargate uses. */
 const minMultilineBytes = 64;
 
 type Pending = {
@@ -431,7 +431,7 @@ export class IrcClient {
     // greybeard: both are subtracted, so text fits either framing within
     // 512 bytes. An unknown user@host assumes 16 + 63 characters.
     const label = this.caps.has("labeled-response")
-      ? { label: `pogo${"9".repeat(12)}` }
+      ? { label: `stargate${"9".repeat(12)}` }
       : {};
     const source = `:${this.currentNick}!${this.userhost ?? `${"u".repeat(16)}@${"h".repeat(63)}`} `;
     return (
@@ -626,7 +626,7 @@ export class IrcClient {
   ): Promise<void> {
     if (!this.multiline)
       return Promise.reject(new Error("IRC multiline unavailable"));
-    const reference = `pogo${++this.label}`;
+    const reference = `stargate${++this.label}`;
     const text = lines
       .map((line, index) =>
         index && !line.concat ? `\n${line.text}` : line.text,
@@ -670,7 +670,7 @@ export class IrcClient {
     const result = Promise.withResolvers<void>();
     try {
       if (this.caps.has("labeled-response")) {
-        const label = `pogo${++this.label}`;
+        const label = `stargate${++this.label}`;
         const item: Queued = {
           lines: build(label),
           ...(guard ? { guard } : {}),
@@ -751,7 +751,7 @@ export class IrcClient {
     this.refuse = (message: string) => {
       outcome = "refused";
       this.options.log.error(message);
-      this.raw("QUIT :Pogo");
+      this.raw("QUIT :Stargate");
       this.socket?.end();
     };
     this.offered = new Map();
@@ -780,7 +780,7 @@ export class IrcClient {
           this.raw("CAP LS 302");
           this.raw(formatMessage("NICK", [this.options.nick]));
           this.raw(
-            formatMessage("USER", [this.options.account, "0", "*", "Pogo"]),
+            formatMessage("USER", [this.options.account, "0", "*", "Stargate"]),
           );
         },
         data: (_socket, data) => {
@@ -822,7 +822,7 @@ export class IrcClient {
     };
     const abort = () => {
       if (abandon()) return;
-      this.raw("QUIT :Pogo shutting down");
+      this.raw("QUIT :Stargate shutting down");
       const socket = this.socket;
       socket?.end();
       // A peer that never closes must not hold shutdown.
@@ -860,7 +860,7 @@ export class IrcClient {
       now - this.lastPing > this.timing.pingMs
     ) {
       this.lastPing = now;
-      this.raw("PING :pogo");
+      this.raw("PING :stargate");
     }
     if (!this.registeredNow || now - this.reclaimed < this.timing.reclaimMs)
       return;
@@ -1010,7 +1010,7 @@ export class IrcClient {
         this.raw(
           formatMessage(
             "PONG",
-            params.length ? [params.at(-1) ?? ""] : ["pogo"],
+            params.length ? [params.at(-1) ?? ""] : ["stargate"],
           ),
         );
         return;
@@ -1111,7 +1111,7 @@ export class IrcClient {
             return;
           }
           this.joinedChannels.add(allowed);
-          // The audit channel holds Pogo's own copies: nothing to catch up.
+          // The audit channel holds Stargate's own copies: nothing to catch up.
           if (!this.isAudit(allowed)) this.replay(allowed);
         } else if (params[1] !== undefined && this.caps.has("extended-join")) {
           if (params[1] === "*") this.unbindNick(nick);
@@ -1474,7 +1474,7 @@ export class IrcClient {
     const channels = this.joinable();
     const presence = this.options.presence;
     // Always-on keeps the account in its channels and stores direct
-    // messages while Pogo is away (Ergo draft/persistence).
+    // messages while Stargate is away (Ergo draft/persistence).
     if (presence?.alwaysOn !== false && this.caps.has("draft/persistence"))
       this.enqueue({ lines: [formatMessage("PERSISTENCE", ["SET", "ON"])] });
     if (presence?.botMode !== false && this.botMode)

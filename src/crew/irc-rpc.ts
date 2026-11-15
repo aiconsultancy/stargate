@@ -21,7 +21,7 @@ export const outboxPageSchema = z.strictObject({
       from: member,
       to: member,
       text: z.string().min(1).max(64000),
-      /** Time the pogo_dm was stored (ms). */
+      /** Time the stargate_dm was stored (ms). */
       created: z.number().int().safe().nonnegative(),
     }),
   ),
@@ -30,14 +30,14 @@ export const outboxPageSchema = z.strictObject({
 export type OutboxPage = z.infer<typeof outboxPageSchema>;
 
 /**
- * Pogo's IRC transport → crew plugin, at the captain location only. `bind`
- * ties a crew IRC session that Pogo created to its crew member, so pogo_dm
- * and pogo_mail accept that session as the member. `outbox` lists stored
- * pogo_dm sends after a sequence (none without `after`: a baseline), so
- * Pogo can copy those between ship accounts as IRC DMs (docs/irc.md).
+ * Stargate's IRC transport → crew plugin, at the captain location only. `bind`
+ * ties a crew IRC session that Stargate created to its crew member, so stargate_dm
+ * and stargate_mail accept that session as the member. `outbox` lists stored
+ * stargate_dm sends after a sequence (none without `after`: a baseline), so
+ * Stargate can copy those between ship accounts as IRC DMs (docs/irc.md).
  */
 export const CrewIrc = Rpc.define({
-  id: "pogo.crew.irc",
+  id: "stargate.crew.irc",
   events: {},
   methods: {
     bind: {

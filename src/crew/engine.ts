@@ -26,7 +26,9 @@ import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
 import { CrewHistoryRPC } from "./history-rpc";
+import { crewFingerprint } from "./identity";
 import { MesijClient, type MesijMessage } from "./mesij";
+import { crewMessageMetadataKey } from "./message-protocol";
 import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
 import { readInputOrigin } from "./origin";
 
@@ -319,7 +321,7 @@ async function physicalDirectory(path: string): Promise<string> {
 // rather than racing Pi's durable conversation-creation reservation.
 const reportAdmissions = new Map<string, Promise<void>>();
 const piIdentity = Symbol("host-bound Pi caller");
-const ircIdentity = Symbol("Pogo-bound IRC session");
+const ircIdentity = Symbol("Stargate-bound IRC session");
 // greybeard: cooperative 60s observation, not a turn/fairness guarantee. Native
 // admission/read calls can overrun; add turn-aware yielding only when required.
 const crewWaitWindowMs = 60_000;
@@ -384,10 +386,10 @@ export class CrewEngine {
               signal,
               [piIdentity]: true,
             };
-            if (name === "pogo_journal") return this.journal(input, caller);
-            if (name === "pogo_mail") return this.mail(input, caller);
-            if (name === "pogo_dm") return this.dm(input, caller);
-            if (name === "pogo_quota") return this.quota(input, caller);
+            if (name === "stargate_journal") return this.journal(input, caller);
+            if (name === "stargate_mail") return this.mail(input, caller);
+            if (name === "stargate_dm") return this.dm(input, caller);
+            if (name === "stargate_quota") return this.quota(input, caller);
             return this.run(input, caller);
           },
         };
@@ -485,23 +487,7 @@ export class CrewEngine {
         resolve(options.worktrees[id] ?? "/"),
       ),
     ]);
-    const fingerprint = JSON.stringify({
-      version: 2,
-      namespace: options.namespace,
-      projectDirectory: resolve(options.projectDirectory),
-      captain: {
-        id: options.team.captain.id,
-        directory: resolve(options.captainDirectory),
-      },
-      crew: options.team.crew
-        .map(({ id, permissionProfile, backend }) => ({
-          id,
-          permissionProfile,
-          directory: resolve(options.worktrees[id] ?? ""),
-          ...(backend ? { backend } : {}),
-        }))
-        .sort((a, b) => a.id.localeCompare(b.id)),
-    });
+    const fingerprint = crewFingerprint(options);
     const legacyCompatible =
       options.team.captain.id === defaultTeam.captain.id &&
       options.team.crew.length === defaultTeam.crew.length &&
@@ -552,7 +538,7 @@ export class CrewEngine {
     const namespace = createHash("sha256")
       .update(this.options.namespace)
       .digest("hex");
-    return `pogo:${namespace}:${role}`;
+    return `stargate:${namespace}:${role}`;
   }
 
   mailActor(sessionID: string) {
@@ -686,7 +672,7 @@ export class CrewEngine {
   async mail(raw: unknown, caller: CrewCaller) {
     caller = this.logicalCaller(caller);
     const input = mailInputSchema.safeParse(raw);
-    if (!input.success) throw new CrewError("Invalid pogo_mail input.");
+    if (!input.success) throw new CrewError("Invalid stargate_mail input.");
     const result = await this.message(raw, caller, false);
     if (input.data.op !== "inbox" || !input.data.taskID) return result;
     // Keep pre-upgrade task envelopes readable without rewriting Mesij history.
@@ -770,7 +756,7 @@ export class CrewEngine {
       return "inbox";
     if (busy && delivery === "queue" && !this.member(busy.crewID).backend)
       return "unsupported";
-    const framing = `Pogo DM ${route.id} from ${caller.agent}.\n${text}\n\nReply through pogo_mail or pogo_dm with replyTo=${route.id}; a final answer is not a peer reply.${busy ? ` Your final answer remains task ${busy.id}'s result; restate it if you had already finished.` : ""}`;
+    const framing = `Stargate DM ${route.id} from ${caller.agent}.\n${text}\n\nReply through stargate_mail or stargate_dm with replyTo=${route.id}; a final answer is not a peer reply.${busy ? ` Your final answer remains task ${busy.id}'s result; restate it if you had already finished.` : ""}`;
     let originInputID: string | null = null;
     if (!peer && route.sourceTaskID) {
       const source = this.state.task(route.sourceTaskID);
@@ -824,7 +810,7 @@ export class CrewEngine {
           text: framing,
           description: "Crew direct message",
           metadata: {
-            pogoCrew: {
+            [crewMessageMetadataKey]: {
               ...(busy ? { taskID: busy.id } : {}),
               ...(route.sourceTaskID
                 ? { sourceTaskID: route.sourceTaskID }
@@ -882,7 +868,7 @@ export class CrewEngine {
   async journal(raw: unknown, caller: CrewCaller) {
     caller = this.logicalCaller(caller);
     const input = journalInputSchema.safeParse(raw);
-    if (!input.success) throw new CrewError("Invalid pogo_journal input.");
+    if (!input.success) throw new CrewError("Invalid stargate_journal input.");
     await this.authorize(caller);
     const task = this.mailTask(caller);
     const captainID =
@@ -921,7 +907,7 @@ export class CrewEngine {
     const parsed = legacyMailInputSchema.safeParse(raw);
     if (!parsed.success)
       throw new CrewError(
-        "Invalid pogo_mail input. Supply a task ID and the operation's declared fields.",
+        "Invalid stargate_mail input. Supply a task ID and the operation's declared fields.",
       );
     const input = parsed.data;
     try {
@@ -1028,7 +1014,7 @@ export class CrewEngine {
     const parsed = crewInputSchema.safeParse(raw);
     if (!parsed.success)
       throw new CrewError(
-        "Invalid pogo_crew input. Use the operation's declared fields.",
+        "Invalid stargate_crew input. Use the operation's declared fields.",
       );
     const input = parsed.data;
     const deadline =
@@ -1163,7 +1149,7 @@ export class CrewEngine {
       );
   }
 
-  /** Stored pogo_dm sends for Pogo's IRC copies (CrewIrc outbox RPC). */
+  /** Stored stargate_dm sends for Stargate's IRC copies (CrewIrc outbox RPC). */
   ircOutbox(input: { after?: number | undefined; limit: number }) {
     return this.state.ircSessions.outbox(input);
   }
@@ -1174,7 +1160,7 @@ export class CrewEngine {
   }
 
   /**
-   * Bind a Pogo IRC session to a crew member. The session must be a root
+   * Bind a Stargate IRC session to a crew member. The session must be a root
    * OpenCode session with that member's agent in its configured worktree,
    * not the member's task session, and the team must pin its captain (IRC
    * mail uses that captain context). A binding never changes member.
@@ -1224,8 +1210,8 @@ export class CrewEngine {
   }
 
   /**
-   * pogo_dm and pogo_mail: the captain and assigned workers as before, plus
-   * Pogo-bound IRC sessions, which act only as their member. The member
+   * stargate_dm and stargate_mail: the captain and assigned workers as before, plus
+   * Stargate-bound IRC sessions, which act only as their member. The member
    * comes from the binding and must equal the host's agent for the call.
    */
   async authorizeMail(caller: CrewCaller): Promise<CrewCaller> {
@@ -1310,7 +1296,7 @@ export class CrewEngine {
 
   private validPeer(session: CrewSession, peer: Peer) {
     this.member(peer.crewID);
-    const metadata = session.metadata?.["pogoCrew"];
+    const metadata = session.metadata?.["stargateCrew"];
     if (
       session.id !== peer.sessionID ||
       session.parentID ||
@@ -1369,10 +1355,10 @@ export class CrewEngine {
           {
             id: peer.sessionID,
             agent: member.agent ?? crewID,
-            title: `Pogo ${crewID}`,
+            title: `Stargate ${crewID}`,
             location: { directory: worktree },
             metadata: {
-              pogoCrew: { namespace: this.options.namespace, crewID },
+              stargateCrew: { namespace: this.options.namespace, crewID },
             },
             permissions: crewPermissions(
               member.permissionProfile,
@@ -1531,7 +1517,7 @@ export class CrewEngine {
             sender: caller.sessionID,
             recipient: task.workerSessionID,
             statusRequestID: id,
-            text: `Status request for task ${task.id}. Reply using pogo_mail send to=captain with this message's id as replyTo. Report status/evidence only; do not resume or replay work.`,
+            text: `Status request for task ${task.id}. Reply using stargate_mail send to=captain with this message's id as replyTo. Report status/evidence only; do not resume or replay work.`,
           }),
         },
         caller.signal,
@@ -2151,13 +2137,13 @@ export class CrewEngine {
           sessionID: task.workerSessionID,
           id: task.inputID,
           text:
-            `Pogo task envelope: ${envelope}\n\n${text}\n\n` +
-            `Return a final answer for only this assignment. You may also use pogo_crew ` +
+            `Stargate task envelope: ${envelope}\n\n${text}\n\n` +
+            `Return a final answer for only this assignment. You may also use stargate_crew ` +
             `op=complete, taskID=${task.id}, result=<your result>. ` +
             "Do not create peer/root sessions or send prompts to captains. " +
-            "Use pogo_crew urgent for task-scoped urgent communication.",
+            "Use stargate_crew urgent for task-scoped urgent communication.",
           metadata: {
-            pogoCrew: {
+            [crewMessageMetadataKey]: {
               taskID: task.id,
               originCaptainID: task.originCaptainID,
             },

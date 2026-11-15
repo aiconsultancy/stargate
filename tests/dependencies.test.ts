@@ -122,19 +122,21 @@ test("Effect and native ID schema stay pinned to the OpenCode SDK release", asyn
   });
   const read = async (path: string) =>
     manifest.parse(await Bun.file(new URL(path, import.meta.url)).json());
-  const pogo = await read("../package.json");
+  const stargate = await read("../package.json");
   const plugin = await read("../node_modules/@opencode/plugin/package.json");
   const client = await read("../node_modules/@opencode/client/package.json");
   const schema = await read("../node_modules/@opencode/schema/package.json");
-  // One runtime copy: Pogo programs and the SDK share fiber/runtime types.
-  expect(pogo.dependencies["effect"]).toMatch(/^\d+\.\d+\.\d+$/);
-  expect(pogo.dependencies["effect"]).toBe(plugin.dependencies["effect"]);
-  expect(pogo.dependencies["effect"]).toBe(client.peerDependencies["effect"]);
-  expect(pogo.dependencies["effect"]).toBe(schema.dependencies["effect"]);
-  expect(pogo.dependencies["@opencode/schema"]).toBe(
+  // One runtime copy: Stargate programs and the SDK share fiber/runtime types.
+  expect(stargate.dependencies["effect"]).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(stargate.dependencies["effect"]).toBe(plugin.dependencies["effect"]);
+  expect(stargate.dependencies["effect"]).toBe(
+    client.peerDependencies["effect"],
+  );
+  expect(stargate.dependencies["effect"]).toBe(schema.dependencies["effect"]);
+  expect(stargate.dependencies["@opencode/schema"]).toBe(
     plugin.dependencies["@opencode/schema"],
   );
-  expect(pogo.dependencies["@opencode/schema"]).toBe(
+  expect(stargate.dependencies["@opencode/schema"]).toBe(
     client.dependencies["@opencode/schema"],
   );
 });

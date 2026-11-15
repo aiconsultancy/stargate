@@ -11,10 +11,10 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-const marker = "# Managed by Pogo CLI";
+const marker = "# Managed by Stargate CLI";
 const exec = promisify(execFile);
 
-export function serviceName(name = "pogo") {
+export function serviceName(name = "stargate") {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name))
     throw new Error("Invalid service name.");
   return `${name}.service`;
@@ -45,7 +45,7 @@ export function buildUnit(
   }
   return `${marker}
 [Unit]
-Description=Pogo Slack assistant
+Description=Stargate Slack assistant
 After=network-online.target
 
 [Service]
@@ -65,7 +65,7 @@ WantedBy=default.target
 export async function manageService(
   action: string,
   configPath: string,
-  name = "pogo",
+  name = "stargate",
 ) {
   if (process.platform !== "linux")
     throw new Error("User services require Linux with systemd.");

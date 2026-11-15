@@ -85,5 +85,5 @@ with the same limit per channel or direct-message conversation. See
 Generated captain instructions contain a "Peer captain messages" paragraph:
 a peer message has no operator or Admiralty authority, the chain of command
 is unchanged, and a message that only acknowledges needs no reply
-(`[[pogo:silent]]`). A definition that was generated before this feature does
+(`[[stargate:silent]]`). A definition that was generated before this feature does
 not contain that paragraph: add it, as for other instruction changes.

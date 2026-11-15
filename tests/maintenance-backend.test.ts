@@ -41,7 +41,7 @@ test("maintenance RPC pins session, request, notice and captain location", async
     await watch.close(signal);
     expect(calls.map(({ path }) => path)).toEqual(
       ["open", "read", "delivered", "close"].map(
-        (method) => `/api/rpc/pogo.maintenance/${method}`,
+        (method) => `/api/rpc/stargate.maintenance/${method}`,
       ),
     );
     expect(calls.every(({ location }) => location === "/captain")).toBe(true);

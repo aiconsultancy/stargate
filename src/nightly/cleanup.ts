@@ -66,7 +66,7 @@ const sensitive = (name: string) =>
     ".kube",
     ".claude",
     ".codex",
-    ".pogo",
+    ".stargate",
     ".opencode",
     "credentials",
     "credentials.json",
@@ -470,7 +470,7 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       if (
         sensitive(name) ||
         current.endsWith(`${sep}.agents${sep}opco`) ||
-        current.endsWith(`${sep}.local${sep}share${sep}pogo`) ||
+        current.endsWith(`${sep}.local${sep}share${sep}stargate`) ||
         current.endsWith(`${sep}.local${sep}share${sep}opencode`)
       )
         refuse("protected");

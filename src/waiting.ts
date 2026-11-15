@@ -20,7 +20,7 @@ const overrideSchema = z.strictObject({ delayMs: waitingDelaySchema });
 /** Shared captain workspace settings, isolated by configured agent identity. */
 export function waitingSettingsPath(directory: string, agent: string): string {
   const id = createHash("sha256").update(agent).digest("hex");
-  return join(directory, ".local", "pogo-waiting", `${id}.json`);
+  return join(directory, ".local", "stargate-waiting", `${id}.json`);
 }
 
 /** Cosmetic settings fail back to config; corrupt files never fail a turn. */
