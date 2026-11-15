@@ -29,8 +29,8 @@ test("conventional commit subjects select the bump", () => {
   expect(bumpFor("fix: mention BREAKING CHANGE: in prose")).toBe("patch");
 });
 
-test("the first release is v0.1.0; later releases follow the largest bump", () => {
-  expect(nextVersion(undefined, ["fix: a"])).toBe("0.1.0");
+test("the first public release is v0.20.3; later releases follow the largest bump", () => {
+  expect(nextVersion(undefined, ["fix: a"])).toBe("0.20.3");
   expect(nextVersion("v0.1.0", ["fix: a", "chore: b"])).toBe("0.1.1");
   expect(nextVersion("v0.1.4", ["fix: a", "feat: b"])).toBe("0.2.0");
   // Before 1.0.0, a breaking change bumps the minor version.
