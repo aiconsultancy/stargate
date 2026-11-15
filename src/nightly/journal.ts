@@ -21,7 +21,7 @@ import {
   binaryPath,
   proxyModels,
 } from "./host";
-import type { IdleResult } from "./idle";
+import type { IdleResult, IdleScope } from "./idle";
 import { agentFile, managedFolder } from "./models";
 import type { OpenCodeControl } from "./opencode";
 import { maintenanceDirectory } from "./paths";
@@ -668,6 +668,28 @@ export type UndoStep =
   | "cliproxyapi"
   | "opencode"
   | "gateway";
+
+/** Only a gateway restart leaves crew work and OpenCode alone. */
+export const undoStepScope = (step: UndoStep): IdleScope =>
+  step === "gateway" ? "gateway" : "pogo";
+
+/**
+ * The idle scope before any undo of this journal. A journal that holds only
+ * the release link and the gateway (a gateway-only update, or a full update
+ * that stopped before OpenCode restarted) never touches OpenCode.
+ */
+export function journalScope(journal: Journal): IdleScope {
+  const entries: JournalEntry[] = [
+    "clis",
+    "cliproxyapi",
+    "files",
+    "sessions",
+    "openCode",
+  ];
+  return entries.some((entry) => journal.get(entry) !== undefined)
+    ? "pogo"
+    : "gateway";
+}
 
 export type UndoContext = {
   config: Config;

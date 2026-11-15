@@ -1,8 +1,8 @@
-import { afterEach, expect, setSystemTime, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
@@ -12,9 +12,12 @@ import { IrcShip } from "../src/irc/ship";
 import { Store } from "../src/store";
 import { FakeIrcServer, until } from "./irc-fixture";
 
+// Liveness bounds only: no assertion depends on how fast a step is.
+const wait = 15_000;
+const limit = 30_000;
+
 const cleanup: (() => unknown)[] = [];
 afterEach(async () => {
-  setSystemTime();
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
@@ -90,7 +93,7 @@ async function setup(
     return agent;
   });
   const controller = new AbortController();
-  const workers = ship.registrations.map((registration, index) => {
+  const gateways = ship.registrations.map((registration, index) => {
     const selected = backends[index];
     if (!selected) throw new Error("missing backend");
     return new Gateway(
@@ -103,8 +106,20 @@ async function setup(
       undefined,
       undefined,
       registration.transport,
-    ).work(controller.signal);
+    );
   });
+  const workers = gateways.map((gateway) => gateway.work(controller.signal));
+  const member = (account: string) => {
+    const index = ship.registrations.findIndex(
+      (registration) => registration.account === account,
+    );
+    const registration = ship.registrations[index];
+    const gateway = gateways[index];
+    if (!registration || !gateway) throw new Error(`missing ${account}`);
+    return { registration, gateway };
+  };
+  const db = new Database(join(directory, "pogo.sqlite"), { readonly: true });
+  cleanup.push(() => db.close());
   ship.start(() => true);
   cleanup.push(async () => {
     controller.abort();
@@ -116,102 +131,155 @@ async function setup(
       ship.registrations.every((registration) =>
         registration.client.inChannel("#ship-galactica"),
       ),
-    5000,
+    wait,
     "every member joined",
   );
-  const done = (account: string) => {
-    const registration = ship.registrations.find(
-      (entry) => entry.account === account,
-    );
-    if (!registration) throw new Error(`missing registration for ${account}`);
-    return store.queueCounts(registration.key).done;
+  return {
+    fake,
+    prompts,
+    /** Hold or release the turns of one agent; intake continues. */
+    hold: (account: string, value = true) =>
+      member(account).gateway.pause(value),
+    /**
+     * True when the waiting turn of `account` would list `line`: its
+     * connection received that channel message after the all-call.
+     */
+    sees(account: string, line: string) {
+      const { registration } = member(account);
+      const [job] = store.ready(registration.key, Number.MAX_SAFE_INTEGER, 1);
+      return (
+        job !== undefined &&
+        (registration.transport.note(job) ?? "").includes(line)
+      );
+    },
+    /** Stored start of the newest job of `account`, in ms after its receipt. */
+    startDelay(account: string) {
+      const row = db
+        .query<{ start: number; received: number }, [string]>(
+          "SELECT retry_at AS start, received FROM jobs WHERE botKey=? ORDER BY id DESC LIMIT 1",
+        )
+        .get(member(account).registration.key);
+      if (!row) throw new Error(`no job of ${account}`);
+      return row.start === 0 ? 0 : row.start - row.received;
+    },
+    /** Every accepted job is delivered or failed. */
+    idle: () =>
+      until(
+        () =>
+          ship.registrations.every((registration) => {
+            const counts = store.queueCounts(registration.key);
+            return counts.queued + counts.running + counts.responding === 0;
+          }),
+        wait,
+        "idle",
+      ),
   };
-  return { fake, prompts, done };
 }
 
-test("irc all-call: agents answer in turn and see what was said since", async () => {
-  const { fake, prompts, done } = await setup(
-    {
-      "galactica-captain": "Fuel at 40%.",
-      "galactica-chief": "Reactor nominal.",
-    },
-    { allCallStaggerMs: 400 },
-  );
-  const sent = Date.now();
-  setSystemTime(sent);
-  fake.say(
-    { nick: "jack", account: "jack" },
-    "#ship-galactica",
-    "All hands, status?",
-  );
-  await until(() => done("galactica-captain") === 1, 5000, "captain reply");
-  expect(prompts["galactica-chief"]).toHaveLength(0);
-  expect(prompts["galactica-tyrol"]).toHaveLength(0);
-  setSystemTime(sent + 400);
-  await until(() => done("galactica-chief") === 1, 5000, "chief reply");
-  expect(prompts["galactica-tyrol"]).toHaveLength(0);
-  setSystemTime(sent + 800);
-  await until(
-    () => (prompts["galactica-tyrol"]?.length ?? 0) === 1,
-    5000,
-    "last crew turn",
-  );
-  const [captain] = prompts["galactica-captain"] ?? [];
-  const [chief] = prompts["galactica-chief"] ?? [];
-  const [tyrol] = prompts["galactica-tyrol"] ?? [];
-  if (!captain || !chief || !tyrol) throw new Error("missing prompt");
-  // Captain first, then crew in configuration order, one step apart.
-  expect(captain.at).toBe(sent);
-  expect(chief.at).toBe(sent + 400);
-  expect(tyrol.at).toBe(sent + 800);
-  // Each turn lists the channel messages since the all-call.
-  expect(chief.text).toContain("galactica-captain: Fuel at 40%.");
-  expect(chief.text).not.toContain("Reactor nominal.");
-  expect(tyrol.text).toContain("galactica-captain: Fuel at 40%.");
-  expect(tyrol.text).toContain("galactica-chief: Reactor nominal.");
-  expect(tyrol.text.indexOf("Fuel at 40%")).toBeLessThan(
-    tyrol.text.indexOf("Reactor nominal"),
-  );
-  // A mention is not an all-call: no delay, no list.
-  fake.say(
-    { nick: "jack", account: "jack" },
-    "#ship-galactica",
-    "galactica-tyrol: and you?",
-  );
-  const asked = Date.now();
-  await until(
-    () => (prompts["galactica-tyrol"]?.length ?? 0) === 2,
-    5000,
-    "mention",
-  );
-  const mention = prompts["galactica-tyrol"]?.[1];
-  expect(mention?.at).toBe(asked);
-  expect(mention?.text).not.toContain("since the all-call");
-});
+test(
+  "irc all-call: agents answer in turn and see what was said since",
+  async () => {
+    const { fake, prompts, hold, sees, startDelay } = await setup(
+      {
+        "galactica-captain": "Fuel at 40%.",
+        "galactica-chief": "Reactor nominal.",
+      },
+      { allCallStaggerMs: 400 },
+    );
+    // The stagger orders the starts. A crew turn is held here until its
+    // connection has the earlier answer, so the list never depends on speed.
+    hold("galactica-chief");
+    hold("galactica-tyrol");
+    const sent = Date.now();
+    fake.say(
+      { nick: "jack", account: "jack" },
+      "#ship-galactica",
+      "All hands, status?",
+    );
+    await until(
+      () => sees("galactica-chief", "galactica-captain: Fuel at 40%."),
+      wait,
+      "captain's answer at chief",
+    );
+    hold("galactica-chief", false);
+    await until(
+      () => sees("galactica-tyrol", "galactica-chief: Reactor nominal."),
+      wait,
+      "chief's answer at tyrol",
+    );
+    hold("galactica-tyrol", false);
+    await until(
+      () => (prompts["galactica-tyrol"]?.length ?? 0) === 1,
+      wait,
+      "last crew turn",
+    );
+    const [captain] = prompts["galactica-captain"] ?? [];
+    const [chief] = prompts["galactica-chief"] ?? [];
+    const [tyrol] = prompts["galactica-tyrol"] ?? [];
+    if (!captain || !chief || !tyrol) throw new Error("missing prompt");
+    // Captain first, then crew in configuration order, one step apart.
+    expect(startDelay("galactica-captain")).toBe(0);
+    expect(startDelay("galactica-chief")).toBe(400);
+    expect(startDelay("galactica-tyrol")).toBe(800);
+    // No turn starts before its stored time.
+    expect(chief.at - sent).toBeGreaterThanOrEqual(380);
+    expect(tyrol.at - sent).toBeGreaterThanOrEqual(780);
+    // Each turn lists the channel messages since the all-call.
+    expect(chief.text).toContain("galactica-captain: Fuel at 40%.");
+    expect(chief.text).not.toContain("Reactor nominal.");
+    expect(tyrol.text).toContain("galactica-captain: Fuel at 40%.");
+    expect(tyrol.text).toContain("galactica-chief: Reactor nominal.");
+    expect(tyrol.text.indexOf("Fuel at 40%")).toBeLessThan(
+      tyrol.text.indexOf("Reactor nominal"),
+    );
+    // A mention is not an all-call: no delay, no list.
+    fake.say(
+      { nick: "jack", account: "jack" },
+      "#ship-galactica",
+      "galactica-tyrol: and you?",
+    );
+    await until(
+      () => (prompts["galactica-tyrol"]?.length ?? 0) === 2,
+      wait,
+      "mention",
+    );
+    expect(startDelay("galactica-tyrol")).toBe(0);
+    expect(prompts["galactica-tyrol"]?.[1]?.text).not.toContain(
+      "since the all-call",
+    );
+  },
+  limit,
+);
 
-test("irc all-call: allCallStaggerMs 0 answers at once; config bounds", async () => {
-  const { fake, prompts } = await setup({}, { allCallStaggerMs: 0 });
-  const sent = Date.now();
-  setSystemTime(sent);
-  fake.say(
-    { nick: "jack", account: "jack" },
-    "#ship-galactica",
-    "everyone, ping",
-  );
-  await until(
-    () => (prompts["galactica-tyrol"]?.length ?? 0) === 1,
-    5000,
-    "crew turn",
-  );
-  expect(prompts["galactica-tyrol"]?.[0]?.at).toBe(sent);
-  await delay(50);
-  const parse = (value: unknown) =>
-    ircSchema.shape.access.safeParse({ allCallStaggerMs: value });
-  expect(parse(undefined).data?.allCallStaggerMs).toBe(4000);
-  expect(parse(-1).success).toBe(false);
-  expect(parse(30_001).success).toBe(false);
-  expect(parse(2.5).success).toBe(false);
-});
+test(
+  "irc all-call: allCallStaggerMs 0 answers at once; config bounds",
+  async () => {
+    const { fake, prompts, startDelay, idle } = await setup(
+      {},
+      { allCallStaggerMs: 0 },
+    );
+    fake.say(
+      { nick: "jack", account: "jack" },
+      "#ship-galactica",
+      "everyone, ping",
+    );
+    await until(
+      () => (prompts["galactica-tyrol"]?.length ?? 0) === 1,
+      wait,
+      "crew turn",
+    );
+    expect(startDelay("galactica-chief")).toBe(0);
+    expect(startDelay("galactica-tyrol")).toBe(0);
+    await idle();
+    const parse = (value: unknown) =>
+      ircSchema.shape.access.safeParse({ allCallStaggerMs: value });
+    expect(parse(undefined).data?.allCallStaggerMs).toBe(4000);
+    expect(parse(-1).success).toBe(false);
+    expect(parse(30_001).success).toBe(false);
+    expect(parse(2.5).success).toBe(false);
+  },
+  limit,
+);
 
 test("irc all-call: the note tells agents to take turns and stay silent on repeats", () => {
   const note = ircNote(
@@ -233,28 +301,38 @@ test("irc all-call: the note tells agents to take turns and stay silent on repea
   expect(note).toContain("[[pogo:silent]]");
 });
 
-test("irc all-call: a mention inside an all-call still staggers with context", async () => {
-  const { fake, prompts, done } = await setup(
-    { "galactica-captain": "Fuel at 40%." },
-    { allCallStaggerMs: 400 },
-  );
-  const sent = Date.now();
-  setSystemTime(sent);
-  fake.say(
-    { nick: "jack", account: "jack" },
-    "#ship-galactica",
-    "galactica-chief: all hands, status?",
-  );
-  await until(() => done("galactica-captain") === 1, 5000, "captain reply");
-  expect(prompts["galactica-chief"]).toHaveLength(0);
-  setSystemTime(sent + 400);
-  await until(
-    () => (prompts["galactica-chief"]?.length ?? 0) === 1,
-    5000,
-    "chief turn",
-  );
-  const [chief] = prompts["galactica-chief"] ?? [];
-  if (!chief) throw new Error("missing prompt");
-  expect(chief.at).toBe(sent + 400);
-  expect(chief.text).toContain("galactica-captain: Fuel at 40%.");
-});
+test(
+  "irc all-call: a mention inside an all-call still staggers with context",
+  async () => {
+    const { fake, prompts, hold, sees, startDelay } = await setup(
+      { "galactica-captain": "Fuel at 40%." },
+      { allCallStaggerMs: 400 },
+    );
+    hold("galactica-chief");
+    const sent = Date.now();
+    fake.say(
+      { nick: "jack", account: "jack" },
+      "#ship-galactica",
+      "galactica-chief: all hands, status?",
+    );
+    await until(
+      () => sees("galactica-chief", "galactica-captain: Fuel at 40%."),
+      wait,
+      "captain's answer at chief",
+    );
+    hold("galactica-chief", false);
+    await until(
+      () =>
+        (prompts["galactica-chief"]?.length ?? 0) === 1 &&
+        (prompts["galactica-tyrol"]?.length ?? 0) === 1,
+      wait,
+      "crew turns",
+    );
+    const [chief] = prompts["galactica-chief"] ?? [];
+    if (!chief) throw new Error("missing prompt");
+    expect(startDelay("galactica-chief")).toBe(400);
+    expect(chief.at - sent).toBeGreaterThanOrEqual(380);
+    expect(chief.text).toContain("galactica-captain: Fuel at 40%.");
+  },
+  limit,
+);

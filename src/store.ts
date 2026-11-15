@@ -35,9 +35,55 @@ export type Incoming = {
   notBefore?: number | null;
 };
 
+/**
+ * Job lifecycle. Each method below is one transition and its SQL guard is
+ * the check: a transition from any other status writes nothing.
+ *
+ * - queued → running: `running` (not after an accepted Stop).
+ * - queued → responding: an accepted Stop (`cancel`, `cancelTurn`).
+ * - running → responding: `respond` (throws `JobTransitionRefused` from
+ *   another status), or `recover` after a restart.
+ * - responding → done or failed: `finish`, after delivery or its last retry.
+ * - failed → responding: `appendTranscript` requeues a `transcript:*` row.
+ * - queued → failed: `finish`, when access was removed before the turn.
+ *
+ * While responding, `sent` moves the delivery cursor forward and `retry`
+ * delays the next attempt. `finish`, `sent` and `retry` return false when
+ * the status refused them.
+ *
+ * A row with `deferDelivery` has no delivery: it goes to `done` at once.
+ */
+export const jobStatuses = [
+  "queued",
+  "running",
+  "responding",
+  "done",
+  "failed",
+] as const;
+export type JobStatus = (typeof jobStatuses)[number];
+
+const sqlList = (statuses: readonly JobStatus[]) =>
+  statuses.map((status) => `'${status}'`).join(",");
+/** SQL list: no reply is stored yet; the backend may still run this job. */
+export const pendingJobs = sqlList(["queued", "running"]);
+/** SQL list: not delivered or failed yet; later jobs of the thread wait. */
+export const unfinishedJobs = sqlList(["queued", "running", "responding"]);
+
+/** Status of a stored reply: a deferred source needs no delivery. */
+const storedReplyStatus =
+  "CASE WHEN deferDelivery=1 THEN 'done' ELSE 'responding' END";
+/**
+ * An accepted Stop. A queued job settles at once with the notice (the one
+ * parameter); a running job keeps its status and its worker sees the flag.
+ */
+const stopJob = `UPDATE jobs SET cancel_requested=1,
+  response=CASE WHEN status='queued' THEN ? ELSE response END,
+  failure=CASE WHEN status='queued' THEN 'cancelled' ELSE failure END,
+  status=CASE WHEN status='queued' THEN 'responding' ELSE status END`;
+
 export type Job = Incoming & {
   id: number;
-  status: "queued" | "running" | "responding" | "done" | "failed";
+  status: JobStatus;
   response: string | null;
   sent: number;
   attempts: number;
@@ -91,6 +137,19 @@ const activityProgress = z.strictObject({
   done: z.boolean(),
 });
 export type ActivityProgress = z.infer<typeof activityProgress>;
+
+/**
+ * `respond` was called for a job that is not running. Nothing was written:
+ * a stored reply is never replaced, and a queued job has no reply.
+ */
+export class JobTransitionRefused extends Error {
+  constructor(
+    readonly job: number,
+    readonly status: JobStatus,
+  ) {
+    super(`Job ${job} is ${status}; a reply needs a running job`);
+  }
+}
 
 /** Another writer moved the transcript cursor or its outbox rows. */
 export class TranscriptConflict extends Error {
@@ -426,7 +485,7 @@ export class Store {
     return (
       this.db
         .query(`SELECT 1 FROM jobs WHERE botKey=?
-      AND status IN ('queued','running') LIMIT 1`)
+      AND status IN (${pendingJobs}) LIMIT 1`)
         .get(botKey) !== null
     );
   }
@@ -475,7 +534,7 @@ export class Store {
           .query(`INSERT OR IGNORE INTO jobs
         (eventId,botKey,conversation,channel,thread,replyParent,user,text,status,response,output_files,deferDelivery,sent)
         SELECT ?,botKey,conversation,channel,thread,replyParent,user,'',
-        CASE WHEN deferDelivery=1 THEN 'done' ELSE 'responding' END,?,?,deferDelivery,
+        ${storedReplyStatus},?,?,deferDelivery,
         CASE WHEN deferDelivery=1 THEN ? ELSE 0 END
         FROM jobs WHERE botKey=? AND id=?`)
           .run(
@@ -590,7 +649,7 @@ export class Store {
     return (
       this.db
         .query(`SELECT 1 FROM jobs WHERE conversation=?
-        AND status IN ('queued','running','responding') LIMIT 1`)
+        AND status IN (${unfinishedJobs}) LIMIT 1`)
         .get(conversation) !== null
     );
   }
@@ -619,7 +678,7 @@ export class Store {
   transcriptRows(botKey: string, conversation: string) {
     return this.db
       .query<
-        { eventId: string; status: Job["status"]; response: string | null },
+        { eventId: string; status: JobStatus; response: string | null },
         [string, string]
       >(`SELECT eventId, status, response FROM jobs WHERE botKey=?
       AND conversation=? AND eventId LIKE 'transcript:%' ORDER BY id`)
@@ -654,7 +713,7 @@ export class Store {
         !target ||
         this.db
           .query(`SELECT 1 FROM jobs WHERE conversation=?
-          AND status IN ('queued','running') LIMIT 1`)
+          AND status IN (${pendingJobs}) LIMIT 1`)
           .get(input.conversation) !== null ||
         this.db
           .query(
@@ -667,7 +726,7 @@ export class Store {
       let queued = 0;
       for (const eventId of input.requeue ?? [])
         queued += this.db
-          .query(`UPDATE jobs SET status=CASE WHEN deferDelivery=1 THEN 'done' ELSE 'responding' END,
+          .query(`UPDATE jobs SET status=${storedReplyStatus},
           sent=CASE WHEN deferDelivery=1 THEN COALESCE(json_array_length(response),0) ELSE sent END,
           attempts=0,retry_at=0
           WHERE botKey=? AND conversation=? AND eventId=? AND status='failed'`)
@@ -705,12 +764,12 @@ export class Store {
       WHERE botKey = ? AND status IN ('queued','responding') AND retry_at <= ?
       AND NOT EXISTS (SELECT 1 FROM jobs earlier
         WHERE earlier.conversation=j.conversation AND earlier.id < j.id
-         AND earlier.status IN ('queued','running','responding'))
+         AND earlier.status IN (${unfinishedJobs}))
       ${
         serial
           ? `AND (j.status!='queued' OR NOT EXISTS
         (SELECT 1 FROM jobs pending WHERE pending.botKey=j.botKey
-        AND pending.id<j.id AND pending.status IN ('queued','running')))`
+        AND pending.id<j.id AND pending.status IN (${pendingJobs})))`
           : ""
       }
       ORDER BY id LIMIT ?`)
@@ -747,12 +806,9 @@ export class Store {
     // Never infer a target from the conversation's most recent request.
     return (
       this.db
-        .query(`UPDATE jobs SET cancel_requested=1,
-      response=CASE WHEN status='queued' THEN ? ELSE response END,
-      failure=CASE WHEN status='queued' THEN 'cancelled' ELSE failure END,
-      status=CASE WHEN status='queued' THEN 'responding' ELSE status END
+        .query(`${stopJob}
       WHERE botKey=? AND id=? AND user=? AND channel=? AND thread=?
-      AND status IN ('queued','running') AND EXISTS (
+      AND status IN (${pendingJobs}) AND EXISTS (
         SELECT 1 FROM previews WHERE job=jobs.id AND part=0 AND ts=?)`)
         .run(
           JSON.stringify([cancellationNotice]),
@@ -780,15 +836,12 @@ export class Store {
       const row = this.db
         .query<{ id: number }, [string, string, string]>(`SELECT id FROM jobs
         WHERE botKey=? AND conversation=? AND thread=?
-        AND status IN ('queued','running') ORDER BY id DESC LIMIT 1`)
+        AND status IN (${pendingJobs}) ORDER BY id DESC LIMIT 1`)
         .get(botKey, conversation, thread);
       if (!row) return;
       this.db
-        .query(`UPDATE jobs SET cancel_requested=1,
-        response=CASE WHEN status='queued' THEN ? ELSE response END,
-        failure=CASE WHEN status='queued' THEN 'cancelled' ELSE failure END,
-        status=CASE WHEN status='queued' THEN 'responding' ELSE status END
-        WHERE id=? AND status IN ('queued','running')`)
+        .query(`${stopJob}
+        WHERE id=? AND status IN (${pendingJobs})`)
         .run(JSON.stringify([cancellationNotice]), row.id);
       return row.id;
     })();
@@ -796,7 +849,7 @@ export class Store {
 
   queuedJob(botKey: string, eventId: string) {
     return this.db
-      .query<{ id: number; status: Job["status"] }, [string, string]>(
+      .query<{ id: number; status: JobStatus }, [string, string]>(
         "SELECT id,status FROM jobs WHERE botKey=? AND eventId=?",
       )
       .get(botKey, eventId);
@@ -813,9 +866,9 @@ export class Store {
     );
   }
 
-  jobStatus(botKey: string, id: number): Job["status"] | undefined {
+  jobStatus(botKey: string, id: number): JobStatus | undefined {
     return this.db
-      .query<{ status: Job["status"] }, [string, number]>(
+      .query<{ status: JobStatus }, [string, number]>(
         "SELECT status FROM jobs WHERE botKey=? AND id=?",
       )
       .get(botKey, id)?.status;
@@ -828,14 +881,14 @@ export class Store {
   ):
     | {
         text: string;
-        status: Job["status"];
+        status: JobStatus;
         failure: RequestFailure | null;
       }
     | undefined {
     const job = this.db
       .query<
         {
-          status: Job["status"];
+          status: JobStatus;
           failure: RequestFailure | null;
           conversation: string;
           deferDelivery: number;
@@ -882,18 +935,21 @@ export class Store {
   ) {
     return this.db.transaction(() => {
       const job = this.db
-        .query<{ cancel_requested: number; conversation: string }, [number]>(
-          "SELECT cancel_requested, conversation FROM jobs WHERE id=?",
-        )
+        .query<
+          { cancel_requested: number; conversation: string; status: JobStatus },
+          [number]
+        >("SELECT cancel_requested, conversation, status FROM jobs WHERE id=?")
         .get(id);
       if (!job) throw new Error("Response job not found");
+      if (job.status !== "running")
+        throw new JobTransitionRefused(id, job.status);
       const cancelled = job.cancel_requested === 1;
       const response = cancelled
         ? [...chunks.slice(0, options.keep ?? 0), cancellationNotice]
         : chunks;
       this.db
         .query(
-          "UPDATE jobs SET started=CASE WHEN status='running' THEN 1 ELSE started END,status='responding',response=?,failure=?,sent=0,output_files=? WHERE id=?",
+          "UPDATE jobs SET started=1,status='responding',response=?,failure=?,sent=0,output_files=? WHERE id=? AND status='running'",
         )
         .run(
           JSON.stringify(response),
@@ -932,8 +988,14 @@ export class Store {
     );
   }
 
+  /** Chunks confirmed so far: forward only, within the stored reply. */
   sent(id: number, count: number) {
-    this.db.query("UPDATE jobs SET sent=? WHERE id=?").run(count, id);
+    return (
+      this.db
+        .query(`UPDATE jobs SET sent=? WHERE id=? AND status='responding'
+        AND ?>=sent AND ?<=json_array_length(response)`)
+        .run(count, id, count, count).changes > 0
+    );
   }
 
   previews(id: number): { part: number; ts: string }[] {
@@ -954,10 +1016,20 @@ export class Store {
     this.db.query("DELETE FROM previews WHERE job=? AND part=?").run(id, part);
   }
 
+  /**
+   * End a job whose reply is stored. A queued job has no reply, so it can
+   * only fail (access was removed before its turn).
+   */
   finish(id: number, status: "done" | "failed" = "done") {
-    this.db.transaction(() => {
-      this.db.query("UPDATE jobs SET status=? WHERE id=?").run(status, id);
-      this.db.query("DELETE FROM delivery_units WHERE job=?").run(id);
+    return this.db.transaction(() => {
+      const changed =
+        this.db
+          .query(`UPDATE jobs SET status=? WHERE id=?
+          AND (status='responding' OR (status='queued' AND ?='failed'))`)
+          .run(status, id, status).changes > 0;
+      if (changed)
+        this.db.query("DELETE FROM delivery_units WHERE job=?").run(id);
+      return changed;
     })();
   }
 
@@ -1063,10 +1135,15 @@ export class Store {
       .run(done, job, part);
   }
 
+  /** Count a failed delivery attempt and delay the next one. */
   retry(id: number, now: number) {
-    this.db
-      .query("UPDATE jobs SET attempts=attempts+1,retry_at=? WHERE id=?")
-      .run(now, id);
+    return (
+      this.db
+        .query(
+          "UPDATE jobs SET attempts=attempts+1,retry_at=? WHERE id=? AND status='responding'",
+        )
+        .run(now, id).changes > 0
+    );
   }
 
   recover(botKey: string) {
@@ -1095,10 +1172,10 @@ export class Store {
   }
 
   /** Operator view: per-status totals for one bot namespace. */
-  queueCounts(botKey: string): Record<Job["status"], number> {
+  queueCounts(botKey: string): Record<JobStatus, number> {
     const counts = { queued: 0, running: 0, responding: 0, done: 0, failed: 0 };
     for (const row of this.db
-      .query<{ status: Job["status"]; n: number }, [string]>(
+      .query<{ status: JobStatus; n: number }, [string]>(
         "SELECT status,COUNT(*) AS n FROM jobs WHERE botKey=? GROUP BY status",
       )
       .all(botKey))
@@ -1112,7 +1189,7 @@ export class Store {
       .query<
         {
           id: number;
-          status: Job["status"];
+          status: JobStatus;
           channel: string;
           thread: string;
           user: string;

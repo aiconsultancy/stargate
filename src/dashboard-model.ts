@@ -6,10 +6,10 @@ import type {
   HistorySession,
   HistorySessionPage,
 } from "./session-history";
-import type { Job } from "./store";
+import type { JobStatus } from "./store";
 
 /** JSON shapes served by the fleet dashboard. Additive changes only. */
-export type QueueCounts = Record<Job["status"], number>;
+export type QueueCounts = Record<JobStatus, number>;
 
 export type ShipSummary = {
   /** Configured bot ID; one bot registration is one ship. */
@@ -27,7 +27,7 @@ export type FleetView = { generatedAt: number; ships: ShipSummary[] };
 /** Prompt and reply text stay out of the queue view; open the session. */
 export type JobView = {
   id: number;
-  status: Job["status"];
+  status: JobStatus;
   channel: string;
   thread: string;
   user: string;

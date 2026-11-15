@@ -34,6 +34,12 @@ import {
   maintenanceNoticeSchema,
 } from "../maintenance";
 import { quotaSnapshotSchema } from "../quota";
+import {
+  BackendFailure,
+  type BackendFailureKind,
+  connectionFailure,
+  statusKind,
+} from "../request-failure";
 import { OpenCodeHistory } from "./opencode-history";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
@@ -64,6 +70,34 @@ function publicEntry(message: SessionMessageInfo): TranscriptEntry | undefined {
   return text
     ? { id: message.id, text, created: message.time.created }
     : undefined;
+}
+
+/** One assistant message of a turn: its public text and what else it did. */
+type Reply = {
+  text: string;
+  /** The message has a tool call: the turn did work. */
+  tools: boolean;
+  error?: { type: string; status?: number | undefined };
+};
+
+/**
+ * The shared category of a failed generation: from the provider's HTTP
+ * status, else from OpenCode's error type name. An interrupted or unknown
+ * failure has none.
+ */
+function generationFailureKind(error: {
+  type: string;
+  status?: number | undefined;
+}): BackendFailureKind | undefined {
+  if (error.status !== undefined) return statusKind(error.status);
+  if (/abort|interrupt|cancel/i.test(error.type)) return undefined;
+  if (/rate|quota|limit|billing/i.test(error.type)) return "quota";
+  if (/auth|credential|forbidden/i.test(error.type)) return "auth";
+  if (/timeout/i.test(error.type)) return "timeout";
+  if (/connect|network|unreachable/i.test(error.type)) return "network";
+  if (/model/i.test(error.type)) return "model";
+  if (/provider|api|server|overload/i.test(error.type)) return "provider";
+  return undefined;
 }
 
 export class OpenCodeBackend implements AgentBackend {
@@ -149,7 +183,18 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async createSession({
+  async createSession(input: Parameters<AgentBackend["createSession"]>[0]) {
+    try {
+      return await this.openSession(input);
+    } catch (error) {
+      // The server did not answer: no session and no work exist.
+      if (!input.signal.aborted && connectionFailure(error))
+        throw new BackendFailure("network", { ran: false });
+      throw error;
+    }
+  }
+
+  private async openSession({
     title,
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
@@ -218,6 +263,8 @@ export class OpenCodeBackend implements AgentBackend {
       | { type: "submitted"; input: string }
       | { type: "settled" };
     let phase: Phase = { type: "attaching" };
+    // Never reset: once the server accepted the input, the turn can have run.
+    let admitted = false;
     const currentPhase = (): Phase => phase;
     const messages = new Map<string, Map<number, string>>();
     const ownership = new Map<string, "checking" | "owned" | "foreign">();
@@ -330,6 +377,7 @@ export class OpenCodeBackend implements AgentBackend {
       );
       if (input.id !== id) throw new Error("OpenCode input identity changed");
       phase = { type: "submitted", input: id };
+      admitted = true;
       await this.client.experimental.session.wait(
         { sessionID: sessionId },
         { signal },
@@ -337,7 +385,7 @@ export class OpenCodeBackend implements AgentBackend {
       phase = { type: "settled" };
       // Read backwards to the submitted input; do not resend earlier replies.
       const history: (InputBoundaryRecord & {
-        reply?: { text: string; failed: boolean };
+        reply?: Reply;
       })[] = [];
       let cursor: string | undefined;
       const cursors = new Set<string>();
@@ -355,7 +403,16 @@ export class OpenCodeBackend implements AgentBackend {
             ...(message.type === "assistant"
               ? {
                   reply: {
-                    failed: message.error !== undefined,
+                    // Status and type only: the message can quote a provider.
+                    ...(message.error
+                      ? {
+                          error: {
+                            type: message.error.type,
+                            status: message.error.status,
+                          },
+                        }
+                      : {}),
+                    tools: message.content.some((part) => part.type === "tool"),
                     text: message.content
                       .filter((part) => part.type === "text")
                       .map((part) => part.text)
@@ -367,14 +424,22 @@ export class OpenCodeBackend implements AgentBackend {
           if (message.id === input.id) {
             const fold = new InputBoundaryFold();
             let owner: string | undefined;
-            const replies: { text: string; failed: boolean }[] = [];
+            const replies: Reply[] = [];
             for (const record of history.reverse()) {
               owner = fold.next(record) ?? owner;
               if (record.reply && owner === input.id)
                 replies.push(record.reply);
             }
-            if (replies.some((reply) => reply.failed))
-              throw new Error("OpenCode generation failed");
+            const failed = replies.find((reply) => reply.error)?.error;
+            if (failed) {
+              const kind = generationFailureKind(failed);
+              throw kind
+                ? new BackendFailure(kind, {
+                    status: failed.status,
+                    ran: replies.some((reply) => reply.tools),
+                  })
+                : new Error("OpenCode generation failed");
+            }
             return replies.map((reply) => reply.text).join("\n\n");
           }
         }
@@ -392,6 +457,16 @@ export class OpenCodeBackend implements AgentBackend {
         const cleanup = AbortSignal.timeout(5000);
         await this.interruptInput(sessionId, input, cleanup).catch(() => {});
       }
+      // The server went away. Nothing ran only when the input was never
+      // sent: before submission, or when the submission made no connection.
+      // After admission, also while history is read, work can have run.
+      const connection = signal.aborted ? undefined : connectionFailure(error);
+      if (connection)
+        throw new BackendFailure("network", {
+          ran:
+            admitted ||
+            (currentPhase().type === "submitting" && connection === "lost"),
+        });
       throw error;
     } finally {
       phase = { type: "settled" };

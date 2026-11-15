@@ -28,7 +28,12 @@ import {
   type TextSink,
 } from "../backend";
 import { type BackendConfig, secret } from "../config";
-import { AttachmentInputUnavailable } from "../request-failure";
+import {
+  AttachmentInputUnavailable,
+  BackendFailure,
+  type BackendFailureKind,
+  statusKind,
+} from "../request-failure";
 import {
   bootTicks,
   inherited,
@@ -55,6 +60,10 @@ type CodexConfig = NonNullable<CodexOptions["config"]>;
 
 /** Fixed, safe failure text produced by this adapter. */
 class CodexTurnError extends Error {}
+
+// A CLI that ends without a result proves nothing about its tools: frames
+// can be lost with the process. Never report that nothing ran.
+const crashed = { ran: true } as const;
 
 /** Conversation and thread IDs are UUIDs: never options, paths or flags. */
 const idSchema = z.uuid();
@@ -305,7 +314,45 @@ const itemEvent = z.object({
 });
 const endEvent = z.object({
   type: z.enum(["turn.completed", "turn.failed", "error"]),
+  // `error` carries `message`; `turn.failed` carries `error.message`.
+  message: z.string().optional(),
+  error: z.object({ message: z.string() }).optional(),
 });
+/** Items that mean the turn did work outside the model. */
+const workItems = new Set([
+  "command_execution",
+  "file_change",
+  "mcp_tool_call",
+  "web_search",
+]);
+
+/**
+ * The category and HTTP status that a Codex error message names. Only
+ * these two values are kept: the message can quote the provider.
+ */
+export function codexFailureKind(
+  message: string,
+): { kind: BackendFailureKind; status?: number } | undefined {
+  const status =
+    /\bstatus(?: code)?:? ([1-5]\d\d)\b/i.exec(message)?.[1] ??
+    /\b([45]\d\d) (?:Bad Request|Unauthorized|Payment Required|Forbidden|Not Found|Request Timeout|Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)\b/i.exec(
+      message,
+    )?.[1];
+  if (status)
+    return { kind: statusKind(Number(status)), status: Number(status) };
+  if (/usage limit|rate limit|quota|too many requests/i.test(message))
+    return { kind: "quota" };
+  if (/unauthorized|api key|authentication|access token/i.test(message))
+    return { kind: "auth" };
+  if (/timed out|timeout/i.test(message)) return { kind: "timeout" };
+  if (
+    /error sending request|connection (?:refused|reset|closed)|stream disconnected|dns error|network/i.test(
+      message,
+    )
+  )
+    return { kind: "network" };
+  return undefined;
+}
 
 /**
  * Visible text of one turn: agent messages only, never reasoning, commands,
@@ -315,6 +362,10 @@ export class CodexTurn {
   private readonly messages = new Map<string, string>();
   thread: string | undefined;
   result: { ok: boolean } | undefined;
+  /** A command, file change or tool call was seen. */
+  worked = false;
+  /** What the failure event named, without its text. */
+  failure: ReturnType<typeof codexFailureKind>;
 
   /** Returns true when the visible text may have changed. */
   add(raw: unknown): boolean {
@@ -326,13 +377,19 @@ export class CodexTurn {
     const item = itemEvent.safeParse(raw);
     if (item.success) {
       const { id, type, text } = item.data.item;
+      if (workItems.has(type)) this.worked = true;
       if (type !== "agent_message" || text === undefined) return false;
       if (this.messages.get(id) === text) return false;
       this.messages.set(id, text);
       return true;
     }
     const end = endEvent.safeParse(raw);
-    if (end.success) this.result = { ok: end.data.type === "turn.completed" };
+    if (end.success) {
+      this.result = { ok: end.data.type === "turn.completed" };
+      const message = end.data.error?.message ?? end.data.message;
+      if (!this.result.ok && message)
+        this.failure = codexFailureKind(message) ?? this.failure;
+    }
     return false;
   }
 
@@ -643,8 +700,9 @@ export class CodexBackend implements AgentBackend {
         }
       } catch (error) {
         // The result completes the turn; a later teardown error does not.
-        if (!turn.result || signal.aborted || error instanceof CodexTurnError)
-          throw error;
+        if (signal.aborted || error instanceof CodexTurnError) throw error;
+        // The CLI ended without a result; SDK errors carry its stderr.
+        if (!turn.result) throw new BackendFailure("crash", crashed);
       } finally {
         live = false;
         clearTimeout(settle);
@@ -652,9 +710,14 @@ export class CodexBackend implements AgentBackend {
         if (open) stream.return(undefined).catch(() => {});
       }
       signal.throwIfAborted();
-      if (!turn.result)
-        throw new CodexTurnError("Codex turn ended without a result");
-      if (!turn.result.ok) throw new CodexTurnError("Codex turn failed");
+      if (!turn.result) throw new BackendFailure("crash", crashed);
+      if (!turn.result.ok)
+        throw turn.failure
+          ? new BackendFailure(turn.failure.kind, {
+              status: turn.failure.status,
+              ran: turn.worked,
+            })
+          : new CodexTurnError("Codex turn failed");
       return turn.answer();
     } catch (error) {
       // The SDK SIGTERMs its CLI when the stream closes early; the marker
@@ -662,6 +725,7 @@ export class CodexBackend implements AgentBackend {
       signal.throwIfAborted();
       if (
         error instanceof AttachmentInputUnavailable ||
+        error instanceof BackendFailure ||
         error instanceof CodexTurnError
       )
         throw error;

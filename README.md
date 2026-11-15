@@ -137,6 +137,17 @@ shell completions, reach the same thread. See [session transcript](docs/design.m
 Delivery retries do not repeat agent work. Check agent state before retrying
 work whose outcome is uncertain.
 
+A failure of the model provider or the agent process has its own category in
+that box and in the gateway log: quota or rate limit, rejected credentials,
+unavailable model, provider timeout, unreachable provider or proxy, stopped
+agent process, or another provider error, with the provider's HTTP status
+when the backend saw one. All four backends report the same categories. The
+box says "Nothing ran" only when the backend can prove that the turn did no
+work (the provider refused the first model call); the request can then be
+sent again. Otherwise it says that work may have run and was not repeated.
+Provider messages, credential names, account IDs and URLs are never shown or
+logged. See [request failures](docs/design.md#request-failures).
+
 Use `make eval` for local conversation reliability evaluations: busy crew,
 cancelled observations, two sources, reply ownership and delivery recovery.
 These requests use fake native delivery and real SQLite, with no Slack posts or

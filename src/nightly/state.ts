@@ -7,8 +7,10 @@ import { maintenanceDirectory } from "./paths";
 /**
  * Durable facts that outlive one run: the npm `--before` cutoff that
  * produced each installed agent CLI (so a rollback reinstalls the same
- * dependency set), pinned CLIProxyAPI digests, and Pogo releases that failed
- * after a switch (skipped until a newer release exists).
+ * dependency set), pinned CLIProxyAPI digests, Pogo releases that failed
+ * after a switch (skipped until a newer release exists), and the release
+ * whose crew plugin OpenCode loaded when a later update restarted only the
+ * gateway (its directory must stay until OpenCode restarts).
  */
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 const sections = {
@@ -24,6 +26,11 @@ const sections = {
     z.string(),
     z.object({ reason: z.string(), at: z.iso.datetime({ offset: true }) }),
   ),
+  /** Null: OpenCode runs the plugin of the `current` release. */
+  openCodeRelease: z
+    .string()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
+    .nullable(),
 };
 export type State = {
   [K in keyof typeof sections]: z.infer<(typeof sections)[K]>;
@@ -34,7 +41,12 @@ const statePath = (dataDirectory: string) =>
 
 /** Tolerant: a damaged section is dropped, never the whole file's meaning. */
 export async function readState(dataDirectory: string): Promise<State> {
-  const state: State = { npm: {}, cliproxyapi: {}, failedReleases: {} };
+  const state: State = {
+    npm: {},
+    cliproxyapi: {},
+    failedReleases: {},
+    openCodeRelease: null,
+  };
   const text = await readOptional(statePath(dataDirectory)).catch(() => null);
   if (!text) return state;
   let raw: unknown;
@@ -51,6 +63,8 @@ export async function readState(dataDirectory: string): Promise<State> {
   if (proxy.success) state.cliproxyapi = proxy.data;
   const failed = sections.failedReleases.safeParse(record["failedReleases"]);
   if (failed.success) state.failedReleases = failed.data;
+  const loaded = sections.openCodeRelease.safeParse(record["openCodeRelease"]);
+  if (loaded.success) state.openCodeRelease = loaded.data;
   return state;
 }
 

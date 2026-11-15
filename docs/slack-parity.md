@@ -38,7 +38,7 @@ The linked documentation can change after this comparison.
 | Approval cards                | ChatGPT private **Allow**/**Deny**                                           | Gap: no Slack approval bridge for backend permissions. Deny-by-default remains required.                                                                     |
 | Create-PR control             | Claude Code **Create PR**                                                    | Gap in native UI. An authorized agent may use GitHub tools; that is not a Pogo PR button.                                                                    |
 | Per-user repository identity  | Claude individual accounts; ChatGPT account/environment access               | Architectural gap: Pogo uses a shared configured backend, not each Slack user's repository credentials.                                                      |
-| Files/artifact transport      | Not established by the compared coding pages                                 | Pogo does not provide a gateway attachment pipeline. Do not claim vendor equivalence.                                                                        |
+| Files/artifact transport      | Not established by the compared coding pages                                 | Supported for backends on the same host: images and files in both directions; see [attachments](attachments.md). Do not claim vendor equivalence.            |
 
 ## Incremental delivery order
 

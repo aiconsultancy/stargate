@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { isLocalhost } from "../loopback";
 import {
   piModelSchema,
   piProviderSchema,
@@ -50,9 +51,7 @@ const command = z.array(argument).min(1).max(64);
 const url = (loopbackOnly: boolean) =>
   z.url().refine((value) => {
     const parsed = new URL(value);
-    const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(
-      parsed.hostname,
-    );
+    const loopback = isLocalhost(parsed.hostname);
     return (
       !parsed.username &&
       !parsed.password &&

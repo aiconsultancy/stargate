@@ -3,6 +3,7 @@ import { z } from "zod";
 import { crewActivitySchema } from "./activity";
 import { cronjobsSchema } from "./cronjob-config";
 import { fold, widestFold } from "./irc/protocol";
+import { isLoopbackAddress } from "./loopback";
 import {
   mentionNameSchema,
   mentionNamesSchema,
@@ -362,8 +363,7 @@ const ircServerSchema = z
           !url.search &&
           !url.hash &&
           (url.protocol === "https:" ||
-            (url.protocol === "http:" &&
-              ["127.0.0.1", "[::1]"].includes(url.hostname)))
+            (url.protocol === "http:" && isLoopbackAddress(url.hostname)))
         );
       }, "Use an HTTPS URL (HTTP only on loopback) without credentials, query or fragment")
       .optional(),
@@ -602,7 +602,6 @@ export const ircSchema = z
   });
 
 export type IrcConfig = z.infer<typeof ircSchema>;
-export type IrcCrewConfig = IrcConfig["crew"][number];
 
 /** Registration IDs: Slack bots, IRC captains and `<irc id>-<crew id>`. */
 export function registrationIds(config: {

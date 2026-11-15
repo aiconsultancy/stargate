@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import type { ActivitySnapshot } from "../activity";
-import { credentialRules } from "../credentials";
+import { redactCredentials } from "../credentials";
 import type { CrewCaller, CrewEngine } from "./engine";
 import { JournalStore } from "./journal";
 import { reportTask } from "./pending";
@@ -30,20 +30,6 @@ type Capture = {
   endSeq: number | null;
   summarySeq: number;
 };
-
-/** Sanitize before persistence, truncation, inference, and publication. */
-export function redactActivity(text: string, limit = 1500): string {
-  return credentialRules
-    .reduce(
-      (redacted, [pattern, replacement]) =>
-        redacted.replace(pattern, replacement),
-      text.slice(0, 64000),
-    )
-    .replace(/\p{Cc}/gu, (character) =>
-      ["\n", "\r", "\t"].includes(character) ? character : "",
-    )
-    .slice(0, limit);
-}
 
 /** Private tables share crew identity, transaction, and file permissions. */
 export class ReportingStore {
@@ -98,7 +84,7 @@ export class ReportingStore {
     this.names = new Map(
       members.map(({ id, name }) => [
         id,
-        redactActivity(name ?? id, 100) || id,
+        redactCredentials(name ?? id, 100) || id,
       ]),
     );
   }
@@ -214,7 +200,7 @@ export class ReportingStore {
     this.db
       .query(`UPDATE activity_captures SET status=?,summary=?,revision=revision+1
       WHERE id=? AND status IN ('collecting','summarizing')`)
-      .run(status, redactActivity(summary, 3000), capture.id);
+      .run(status, redactCredentials(summary, 3000), capture.id);
   }
 
   isReport(taskID: string): boolean {

@@ -7,8 +7,10 @@ import type { ModelRef } from "./versions";
 export interface OpenCodeControl {
   /** IDs of sessions with a running turn. */
   active(signal: AbortSignal): Promise<string[]>;
-  /** True when any loaded location has a pending form or permission request. */
-  pendingInput(signal: AbortSignal): Promise<boolean>;
+  /** IDs of sessions with a pending form or permission request. */
+  pendingInput(signal: AbortSignal): Promise<string[]>;
+  /** The session that started this one as a subagent; undefined for a root. */
+  parent(sessionID: string, signal: AbortSignal): Promise<string | undefined>;
   sessionModel(
     sessionID: string,
     signal: AbortSignal,
@@ -89,6 +91,7 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
           undefined,
           ...locations.map((location) => location.directory),
         ]);
+        const waiting = new Set<string>();
         for (const directory of directories) {
           const [forms, permissions] = await Promise.all([
             client.form.list(at(directory), { signal: bounded(signal) }),
@@ -96,10 +99,17 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
               signal: bounded(signal),
             }),
           ]);
-          if (forms.data.length || permissions.data.length) return true;
+          for (const request of [...forms.data, ...permissions.data])
+            waiting.add(request.sessionID);
         }
-        return false;
+        return [...waiting];
       }),
+    parent: (sessionID, signal) =>
+      guard(
+        async () =>
+          (await client.session.get({ sessionID }, { signal: bounded(signal) }))
+            .parentID,
+      ),
     sessionModel: (sessionID, signal) =>
       guard(async () =>
         ref(

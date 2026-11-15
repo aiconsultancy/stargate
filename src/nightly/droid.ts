@@ -3,7 +3,7 @@ import { appendFile, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { Config } from "../config";
-import { redactActivity } from "../crew/reporting";
+import { redactCredentials } from "../credentials";
 import type { MaintenanceConfig } from "./config";
 import { type DroidAgent, type DroidTools, openPiDroid } from "./droid-agent";
 import {
@@ -218,7 +218,7 @@ export function droidScrubber(config: Config, env: NodeJS.ProcessEnv) {
   const text = (input: string) => {
     let clean = input;
     for (const value of values) clean = clean.replaceAll(value, "[REDACTED]");
-    clean = redactActivity(clean, 64_000);
+    clean = redactCredentials(clean, 64_000);
     for (const cut of cuts) clean = clean.replace(cut, "[REDACTED]");
     return clean;
   };

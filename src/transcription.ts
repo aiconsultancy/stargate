@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Attachment } from "./attachments";
+import { isLoopbackHost } from "./loopback";
 import { findMention, mentionRuleSchema } from "./mentions";
 
 /** One transcript block in a prompt; longer speech is cut and marked. */
@@ -7,10 +8,7 @@ export const maxTranscriptCharacters = 20_000;
 
 const endpoint = z.url().refine((value) => {
   const url = new URL(value);
-  const loopback =
-    url.hostname === "localhost" ||
-    url.hostname === "[::1]" ||
-    /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
+  const loopback = isLoopbackHost(url.hostname);
   return (
     (url.protocol === "https:" || (url.protocol === "http:" && loopback)) &&
     !url.username &&

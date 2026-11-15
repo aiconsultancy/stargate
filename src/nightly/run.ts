@@ -37,6 +37,7 @@ import {
 import {
   checkIdle,
   type IdleResult,
+  type IdleScope,
   queuedCrewTasks,
   queuedTaskAction,
   waitForIdle,
@@ -50,9 +51,12 @@ import {
   type JournalEntry,
   journalEntries,
   journalFiles,
+  journalScope,
   type UndoContext,
   type UndoEvent,
+  type UndoStep,
   undoJournal,
+  undoStepScope,
   unitRunning,
 } from "./journal";
 import {
@@ -70,6 +74,7 @@ import {
   openCodeCallMs,
 } from "./opencode";
 import { maintenanceDirectory } from "./paths";
+import { readPluginDigest } from "./plugin-digest";
 import { readReady, readyProcessAlive, waitReady } from "./ready";
 import {
   githubHeaders,
@@ -186,9 +191,9 @@ export function applyBudgetMs(plan: {
     bounds.start +
     bounds.ready +
     // A failed readiness check restores the release and tries once more.
+    // OpenCode restarts again only when it loaded the new release.
     (plan.release
-      ? bounds.openCodeRestart +
-        bounds.openCodeVerify +
+      ? (plan.restart ? bounds.openCodeRestart + bounds.openCodeVerify : 0) +
         bounds.start +
         bounds.ready
       : 0)
@@ -442,8 +447,9 @@ async function recoverAtIdle(
   config: Config,
   deps: Dependencies,
   input: {
-    idle: () => Promise<IdleResult>;
-    gate: () => Promise<IdleResult>;
+    /** The check before any undo, at the scope that this journal needs. */
+    idle: (scope: IdleScope) => Promise<IdleResult>;
+    gate: (step: UndoStep) => Promise<IdleResult>;
     record?: (event: UndoEvent) => void;
     onGatewayStart?: (started: boolean) => void;
   },
@@ -457,7 +463,7 @@ async function recoverAtIdle(
   if (found.kind === "ok") {
     const started = await startStoppedGateway(config, deps, found.journal);
     if (started !== undefined) input.onGatewayStart?.(started);
-    const idle = await input.idle();
+    const idle = await input.idle(journalScope(found.journal));
     if (!idle.idle)
       return {
         kind: "busy",
@@ -496,10 +502,9 @@ export async function recoverWhenIdle(
     };
   }
   try {
-    const check = () => idleNow(config, deps, signal);
     const result = await recoverAtIdle(config, deps, {
-      idle: check,
-      gate: check,
+      idle: (scope) => idleNow(config, deps, signal, scope),
+      gate: (step) => idleNow(config, deps, signal, undoStepScope(step)),
     });
     if (result.kind === "none") return { ok: true, message: nothingToRecover };
     if (result.kind === "busy")
@@ -580,13 +585,14 @@ async function ingressMayBeOpen(config: Config, runner: CommandRunner) {
 }
 
 /**
- * One read-only idle check at server scope, as the run's gates make it,
+ * One read-only idle check at `pogo` scope, as the run's gates make it,
  * without waiting. For callers outside a run (the maintenance droid).
  */
 export async function idleNow(
   config: Config,
   deps: Dependencies,
   signal: AbortSignal,
+  scope: IdleScope = "pogo",
 ): Promise<IdleResult> {
   let crews: Crew[];
   try {
@@ -602,7 +608,7 @@ export async function idleNow(
       (config.maintenance?.idle.cronHorizonMinutes ??
         defaultCronHorizonMinutes) * 60_000,
     now: deps.clock.now(),
-    scope: "server",
+    scope,
     connect: deps.connect,
     signal,
     gatewayRunning: () => gatewayServing(config, deps.runner),
@@ -665,7 +671,13 @@ export async function recoverInterruptedRun(
       // again, ingress is open: the undo rechecks idle before each step,
       // like leftover recovery, and a busy check keeps the journal.
       if (await ingressMayBeOpen(config, deps.runner)) {
-        const check = () => idleNow(config, deps, AbortSignal.timeout(60_000));
+        const check = (step: UndoStep) =>
+          idleNow(
+            config,
+            deps,
+            AbortSignal.timeout(60_000),
+            undoStepScope(step),
+          );
         const result = await recoverJournal(config, deps, undefined, check);
         return { ok: result.ok, message: result.message };
       }
@@ -818,19 +830,22 @@ export async function runMaintenance(
     if (mode === "run") {
       const unknown = { idle: false, reason: "idle-unknown" } as const;
       const leftover = await recoverAtIdle(config, deps, {
-        idle: async () =>
+        idle: async (scope) =>
           crewsUnknown
             ? unknown
             : waitForIdle(
-                idleInput(),
+                idleInput(scope),
                 window.deadline,
                 m.idle.pollSeconds * 1000,
                 clock,
               ),
-        gate: async () =>
+        gate: async (step) =>
           crewsUnknown
             ? unknown
-            : checkIdle({ ...idleInput(), now: clock.now() }),
+            : checkIdle({
+                ...idleInput(undoStepScope(step)),
+                now: clock.now(),
+              }),
         record: recordUndo(rec),
         onGatewayStart: (started) =>
           rec.step(
@@ -1082,6 +1097,21 @@ export async function runMaintenance(
     if (!staged && !proxyDigest && !agentUpdates.length && !modelWork())
       return await finish(outcome(rec), undefined);
 
+    // A release with the crew plugin that OpenCode already runs changes the
+    // gateway only: OpenCode is not restarted and crew work can continue.
+    // Any other change tonight, or an unknown plugin, takes the full path.
+    const gatewayOnly =
+      staged !== undefined &&
+      m.pogo !== undefined &&
+      !proxyDigest &&
+      !agentUpdates.length &&
+      !modelWork() &&
+      (await samePlugin(m.pogo.root, staged));
+    if (gatewayOnly) rec.step("crew-plugin-unchanged", "ok");
+    const gateScope: IdleScope = gatewayOnly ? "gateway" : "pogo";
+    /** `current` before this run switched it. */
+    let switchedFrom: string | undefined;
+
     const journal = Journal.create(config.dataDirectory, runID);
     const ctx = undoContext(config, deps, rec);
     /**
@@ -1095,12 +1125,12 @@ export async function runMaintenance(
     let gatewayReturned = false;
     const afterIngress: UndoContext = {
       ...ctx,
-      gate: async () => {
+      gate: async (step) => {
         if (!(await ingressMayBeOpen(config, deps.runner)))
           return { idle: true };
         if (crewsUnknown) return { idle: false, reason: "idle-unknown" };
         return checkIdle({
-          ...idleInput(),
+          ...idleInput(undoStepScope(step)),
           now: clock.now(),
           signal: AbortSignal.timeout(30_000),
         });
@@ -1181,7 +1211,10 @@ export async function runMaintenance(
 
     async function gate(name: string) {
       if (crewsUnknown) throw new Defer("idle-unknown");
-      const result = await checkIdle({ ...idleInput(), now: clock.now() });
+      const result = await checkIdle({
+        ...idleInput(gateScope),
+        now: clock.now(),
+      });
       rec.step(
         name,
         result.idle ? "ok" : "skipped",
@@ -1190,7 +1223,7 @@ export async function runMaintenance(
       if (!result.idle) throw new Defer(result.reason);
     }
 
-    function idleInput() {
+    function idleInput(scope: IdleScope = "pogo") {
       return {
         dataDirectory: config.dataDirectory,
         crews,
@@ -1199,7 +1232,7 @@ export async function runMaintenance(
           .map((s) => s.id),
         cronHorizonMs:
           (m?.idle.cronHorizonMinutes ?? defaultCronHorizonMinutes) * 60_000,
-        scope: "server" as const,
+        scope,
         connect: deps.connect,
         signal,
         gatewayRunning: () => gatewayServing(config, deps.runner),
@@ -1211,7 +1244,7 @@ export async function runMaintenance(
       // Gate 1: wait for idle, at most until the deadline.
       if (crewsUnknown) throw new Defer("idle-unknown");
       const idle = await waitForIdle(
-        idleInput(),
+        idleInput(gateScope),
         window.deadline,
         m.idle.pollSeconds * 1000,
         clock,
@@ -1290,7 +1323,8 @@ export async function runMaintenance(
       }
       signal.throwIfAborted();
 
-      const restartNeeded = cliChanged || !!staged || !!work?.files.length;
+      const restartNeeded =
+        !gatewayOnly && (cliChanged || !!staged || !!work?.files.length);
       const needed = applyBudgetMs({
         proxy: !!proxyDigest,
         restart: restartNeeded,
@@ -1375,18 +1409,13 @@ export async function runMaintenance(
       // OpenCode: gate, then switch, write and restart without delay.
       let control: OpenCodeControl | undefined;
       const files = work?.files.length ? work : undefined;
-      if (cliChanged || staged || files) {
+      if (gatewayOnly) {
+        // The gateway is stopped: the switch interrupts nothing. OpenCode
+        // keeps the plugin that it has loaded, which this release also has.
+        await switchRelease();
+      } else if (cliChanged || staged || files) {
         await gate("idle-before-opencode");
-        if (staged && m.pogo) {
-          const before = await linkedRelease(m.pogo.root, "current");
-          if (!before) throw new StepError("switch-failed");
-          await journal.set("release", {
-            previous: before.name,
-            version: staged,
-          });
-          await switchCurrent(m.pogo.root, staged);
-          rec.step("pogo-switch", "ok");
-        }
+        await switchRelease();
         if (files) {
           const backup = backupDirectory(config.dataDirectory, runID);
           await journal.set("files", {});
@@ -1450,6 +1479,11 @@ export async function runMaintenance(
           restarted: true,
           restartPending: false,
         });
+        // OpenCode now runs the plugin of `current` again.
+        if (state.openCodeRelease !== null)
+          await updateState(config.dataDirectory, (s) => {
+            s.openCodeRelease = null;
+          });
         signal.throwIfAborted();
         if (journal.get("clis")) {
           await journal.clear("clis");
@@ -1553,12 +1587,36 @@ export async function runMaintenance(
       // other order would leave `release`, and recovery would undo a verified
       // release without restarting the gateway that runs it.
       if (journal.get("release") && staged && m.pogo) {
+        // After a gateway-only update OpenCode still runs the plugin from
+        // an earlier release directory. Record it before the switch is
+        // final, so that no later run removes that directory.
+        const loaded = gatewayOnly
+          ? (state.openCodeRelease ?? switchedFrom ?? null)
+          : null;
+        if (gatewayOnly && loaded !== state.openCodeRelease)
+          await updateState(config.dataDirectory, (s) => {
+            s.openCodeRelease = loaded;
+          });
         await journal.clear("release");
         rec.update("pogo", { status: "updated", after: staged });
-        await pruneReleases(m.pogo.root, m.pogo.keep).catch(() => []);
+        await pruneReleases(
+          m.pogo.root,
+          m.pogo.keep,
+          loaded ? [loaded] : [],
+        ).catch(() => []);
       }
       await journal.clear("gateway");
       await journal.clear("openCode");
+    }
+
+    async function switchRelease() {
+      if (!staged || !m?.pogo) return;
+      const before = await linkedRelease(m.pogo.root, "current");
+      if (!before) throw new StepError("switch-failed");
+      await journal.set("release", { previous: before.name, version: staged });
+      await switchCurrent(m.pogo.root, staged);
+      switchedFrom = before.name;
+      rec.step("pogo-switch", "ok");
     }
 
     async function verifyAll(
@@ -1775,6 +1833,20 @@ async function pluginLoaded(
     )
       return true;
   return false;
+}
+
+/**
+ * True when the staged release records the crew plugin digest that the
+ * `current` release records. A missing record on either side is false.
+ */
+async function samePlugin(root: string, staged: string) {
+  const current = await linkedRelease(root, "current");
+  if (!current) return false;
+  const [running, next] = await Promise.all([
+    readPluginDigest(current.directory),
+    readPluginDigest(join(root, "releases", staged)),
+  ]);
+  return running !== undefined && running === next;
 }
 
 /** Restart, reconnect, and confirm every crew location loaded its Pogo plugin. */

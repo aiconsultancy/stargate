@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { isLoopbackAddress } from "./loopback";
 
 const accountEmails = z.array(z.email()).min(1).max(10);
 export const quotaInputSchema = z.strictObject({});
@@ -10,7 +11,7 @@ export const quotaConfigSchema = z.strictObject({
     const url = new URL(value);
     return (
       url.protocol === "http:" &&
-      ["127.0.0.1", "[::1]"].includes(url.hostname) &&
+      isLoopbackAddress(url.hostname) &&
       !url.username &&
       !url.password &&
       url.pathname === "/" &&

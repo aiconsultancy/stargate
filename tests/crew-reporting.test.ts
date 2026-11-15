@@ -8,6 +8,7 @@ import { ActivityDelivery } from "../src/activity-delivery";
 import type { AgentBackend, TextSink } from "../src/backend";
 import { PiDurableBackend } from "../src/backends/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
+import { redactCredentials } from "../src/credentials";
 import {
   CrewEngine,
   type CrewOptions,
@@ -15,7 +16,6 @@ import {
   type CrewSessions,
 } from "../src/crew/engine";
 import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
-import { redactActivity } from "../src/crew/reporting";
 import { defaultTeam, teamSchema } from "../src/crew/team";
 import { Store } from "../src/store";
 
@@ -1108,7 +1108,7 @@ test("abandoned capture expires; bounded windows and input redaction survive per
   } finally {
     await f.close();
   }
-  const redacted = redactActivity(
+  const redacted = redactCredentials(
     [
       "xoxb-111-slack xapp-111-app sk-proj-provider ghp_github",
       "Authorization: Bearer bearer-secret",

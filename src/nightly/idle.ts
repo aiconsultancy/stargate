@@ -2,17 +2,24 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { queuedPendingTask, reportTask } from "../crew/pending";
+import { activeRuns } from "../cron-store";
+import { unfinishedJobs } from "../store";
 import { type Crew, crewDatabase, piDatabase } from "./crews";
 import type { Reason } from "./exec";
 import type { OpenCodeControl } from "./opencode";
 
 /**
- * `pogo`: the gateway, its cron, crew and Pi work, and Pogo-owned OpenCode
- * sessions are idle. `server`: additionally no session on the shared OpenCode
- * server is running and no form or permission request is pending, because a
- * server restart interrupts every session.
+ * `gateway`: no gateway job is unfinished and no cron run is active or due.
+ * Enough for a restart of the gateway alone.
+ *
+ * `pogo`: additionally no crew or Pi task runs and no Pogo-owned OpenCode
+ * session has a running turn or a pending form or permission request.
+ * Needed before OpenCode or the model proxy restarts. Pogo-owned: pinned
+ * captain sessions (the gateway's and each crew plugin's), sessions in the
+ * gateway's mappings, crew peers, crew IRC sessions, and their subagents. Other sessions on the shared server (the
+ * operator's own work) never block maintenance; a restart interrupts them.
  */
-export type IdleScope = "pogo" | "server";
+export type IdleScope = "gateway" | "pogo";
 export type IdleResult = { idle: true } | { idle: false; reason: Reason };
 
 export type IdleInput = {
@@ -65,7 +72,7 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
         if (
           count(
             db,
-            "SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','running','responding')",
+            `SELECT COUNT(*) AS n FROM jobs WHERE status IN (${unfinishedJobs})`,
           )
         )
           throw new Busy("busy-gateway");
@@ -91,7 +98,7 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
         overdue: count(db, `${schedules} AND nextAt<?`, input.now),
         runs: count(
           db,
-          "SELECT COUNT(*) AS n FROM cron_runs WHERE status IN ('pending','announcing','announced','queued','blocked')",
+          `SELECT COUNT(*) AS n FROM cron_runs WHERE status IN (${activeRuns})`,
         ),
       }),
       { due: 0, overdue: 0, runs: 0 },
@@ -100,7 +107,11 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
     if (cron.overdue && input.gatewayRunning && !(await input.gatewayRunning()))
       due -= cron.overdue;
     if (due || cron.runs) throw new Busy("busy-cron");
+    if (input.scope === "gateway") return { idle: true };
     for (const crew of input.crews) {
+      // The captain is no peer row; its pin can exist in the plugin profile
+      // only, without a gateway pin or mapping.
+      if (crew.captainSessionID) sessions.add(crew.captainSessionID);
       read(
         crewDatabase(crew),
         (db) => {
@@ -120,8 +131,15 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
             count(db, "SELECT COUNT(*) AS n FROM worker_controls")
           )
             throw new Busy("busy-crew");
+          // Crew stores from before IRC have no `irc_sessions` table.
+          const ircSessions = count(
+            db,
+            "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='irc_sessions'",
+          );
           for (const row of db
-            .query<{ id: string }, []>("SELECT sessionID AS id FROM peers")
+            .query<{ id: string }, []>(
+              `SELECT sessionID AS id FROM peers${ircSessions ? " UNION SELECT sessionID FROM irc_sessions" : ""}`,
+            )
             .all())
             sessions.add(row.id);
         },
@@ -142,17 +160,26 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
           undefined,
         );
     }
-    if (input.scope === "pogo" && sessions.size === 0) return { idle: true };
+    if (sessions.size === 0) return { idle: true };
     const opencode = await input.connect();
-    const active = await opencode.active(input.signal);
-    if (
-      input.scope === "server"
-        ? active.length > 0
-        : active.some((id) => sessions.has(id))
-    )
-      return { idle: false, reason: "busy-opencode" };
-    if (input.scope === "server" && (await opencode.pendingInput(input.signal)))
-      return { idle: false, reason: "pending-input" };
+    // A subagent belongs to the session that started it, at any depth.
+    const parents = new Map<string, string | undefined>();
+    const owned = async (id: string) => {
+      let current: string | undefined = id;
+      for (let depth = 0; current !== undefined && depth < 16; depth++) {
+        if (sessions.has(current)) return true;
+        if (!parents.has(current))
+          parents.set(current, await opencode.parent(current, input.signal));
+        current = parents.get(current);
+      }
+      // Deeper than any real session tree: unknown is busy.
+      if (current !== undefined) throw new Error("Session ancestry too deep");
+      return false;
+    };
+    for (const id of await opencode.active(input.signal))
+      if (await owned(id)) return { idle: false, reason: "busy-opencode" };
+    for (const id of await opencode.pendingInput(input.signal))
+      if (await owned(id)) return { idle: false, reason: "pending-input" };
     return { idle: true };
   } catch (error) {
     if (error instanceof Busy) return { idle: false, reason: error.reason };

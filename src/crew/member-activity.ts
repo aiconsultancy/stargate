@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
+import { redactCredentials } from "../credentials";
 import type { CrewStatusTask } from "../crew-status";
-import { redactActivity } from "./reporting";
 import type { CrewTask } from "./state";
 
 type Activity = Omit<CrewStatusTask, "id" | "status">;
@@ -34,7 +34,7 @@ export class MemberActivityStore {
         task.id,
         task.crewID,
         report ? "report" : "assignment",
-        report ? "Prepare crew activity report" : redactActivity(text, 180),
+        report ? "Prepare crew activity report" : redactCredentials(text, 180),
         task.status,
         now,
         now,
@@ -75,7 +75,7 @@ export class MemberActivityStore {
   }
 
   progress(taskID: string, text: string) {
-    const safe = redactActivity(text, 64000).slice(-400);
+    const safe = redactCredentials(text, 64000).slice(-400);
     this.db
       .query(`UPDATE member_activity SET progress=?,updatedAt=?
       WHERE taskID=? AND progress<>?`)

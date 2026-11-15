@@ -23,6 +23,7 @@ import { piDurableBackendSchema } from "../src/config";
 import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
 import { CrewState, type CrewTask } from "../src/crew/state";
 import { teamSchema } from "../src/crew/team";
+import { BackendFailure } from "../src/request-failure";
 
 const apiKeyEnv = "POGO_PI_PROXY_TEST_KEY";
 const model = "openai/opencode-go/deepseek-v4.1-flash";
@@ -854,3 +855,109 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("Pi maps the proxy's answer to one shared failure category", async () => {
+  const directory = await mkdtemp("/tmp/opencode/pogo-pi-failure-");
+  const previous = process.env[apiKeyEnv];
+  process.env[apiKeyEnv] = "local-proxy-test-only";
+  // The next answers of the proxy: a status, "tool" for a tool call, or
+  // undefined for a completion.
+  let answers: (number | "tool" | undefined)[] = [];
+  const toolCall = () => {
+    const chunk = (delta: object, finish_reason: string | null = null) =>
+      `data: ${JSON.stringify({
+        id: "fixture",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "opencode-go/deepseek-v4.1-flash",
+        choices: [{ index: 0, delta, finish_reason }],
+      })}\n\n`;
+    return new Response(
+      chunk({
+        role: "assistant",
+        tool_calls: [
+          {
+            index: 0,
+            id: "call_1",
+            type: "function",
+            // Not a real tool: the harness answers with a tool error.
+            function: { name: "fixture_missing_tool", arguments: "{}" },
+          },
+        ],
+      }) +
+        chunk({}, "tool_calls") +
+        "data: [DONE]\n\n",
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  };
+  let calls = 0;
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch() {
+      calls++;
+      const status = answers.shift();
+      if (status === undefined) return completion();
+      if (status === "tool") return toolCall();
+      return Response.json(
+        {
+          error: {
+            message:
+              "auth unavailable: 2 of 2 candidate(s) for model x are in cooldown, reason=credential_quota sk-proxy-secret",
+            type: "provider_error",
+          },
+        },
+        // The client retries at once instead of backing off.
+        { status, headers: { "retry-after-ms": "0", "retry-after": "0" } },
+      );
+    },
+  });
+  let backend: PiDurableBackend | undefined;
+  try {
+    const settings = config(new URL("/v1", server.url).href, directory);
+    backend = await PiDurableBackend.open(settings, {
+      dataDirectory: directory,
+    });
+    const pi = backend;
+    const failure = async (statuses: (number | "tool")[]) => {
+      const session = await pi.createSession({
+        key: crypto.randomUUID(),
+        title: "failure",
+        signal: signal(),
+      });
+      // The client may retry: every call of this turn gets the same answer.
+      answers = Array.from(
+        { length: 20 },
+        (_, index) => statuses[index] ?? statuses.at(-1),
+      );
+      return pi.prompt(session, "hello", AbortSignal.timeout(20_000)).then(
+        () => undefined,
+        (error: unknown) =>
+          error instanceof BackendFailure ? error.failure : String(error),
+      );
+    };
+    const cases: [status: number, cause: string][] = [
+      [429, "provider:quota:429:idle"],
+      [402, "provider:quota:402:idle"],
+      [401, "provider:auth:401:idle"],
+      [403, "provider:auth:403:idle"],
+      [404, "provider:model:404:idle"],
+      // The harness retries 429 and 5xx with a backoff of about 14 s, so
+      // one retried status is enough here; `statusKind` covers the rest.
+    ];
+    for (const [status, cause] of cases)
+      expect([status, await failure([status])]).toEqual([status, cause]);
+    expect(calls).toBeGreaterThanOrEqual(cases.length);
+    // The model called a tool; the proxy refused the next call.
+    expect(await failure(["tool", 429])).toBe("provider:quota:429:ran");
+    // A proxy that cannot be reached: nothing ran.
+    await server.stop(true);
+    expect(await failure([])).toBe("provider:network:0:idle");
+  } finally {
+    await backend?.close();
+    await server.stop(true);
+    if (previous === undefined) delete process.env[apiKeyEnv];
+    else process.env[apiKeyEnv] = previous;
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);

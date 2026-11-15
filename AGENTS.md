@@ -52,6 +52,8 @@ Pass non-secret CLI options through `ARGS`, or `mise run TASK -- OPTIONS`.
   See `docs/irc.md`; it must not depend on Slack.
 - `src/routing.ts`: event validation, access rules, conversation identity.
 - `src/gateway.ts`: per-thread ordering, backend execution, reply delivery.
+- `src/attachment-delivery.ts`: publication of reply files through an upload
+  or link transport; each file's stored phase makes a retry resume.
 - `src/store.ts`: SQLite queue, session mappings, delivery progress.
 - `src/backend.ts`, `src/backends/`: backend contract and implementations.
 - `src/runtime.ts`: process ownership, startup, cancellation, cleanup.
@@ -59,7 +61,8 @@ Pass non-secret CLI options through `ARGS`, or `mise run TASK -- OPTIONS`.
   read-only operator dashboard on a private Unix socket. The source owns
   session scope; backends only answer metadata and transcript pages.
 - `src/nightly/`: nightly maintenance (window, idle gate, release, host and
-  model updates, reports). Every external command goes through the injectable
+  model updates, reports). A release with an unchanged crew plugin digest
+  restarts the gateway only (`plugin-digest.ts`). Every external command goes through the injectable
   `CommandRunner`; tests never call real providers. See `docs/maintenance.md`.
 - `src/effect.ts`: Effect/Promise interop. Effect owns lifetimes and
   concurrency in runtime, gateway workers and plugin setup; keep pure logic,

@@ -350,6 +350,8 @@ test("irc reload: removing a busy crew member is refused before any change", asy
   // Once the work has finished, the same plan commits.
   const job = store.queuedJob(tyrol.key, `#galactica:${work}`);
   if (!job) throw new Error("missing job");
+  store.running(job.id);
+  store.respond(job.id, []);
   store.finish(job.id);
   reload.commit(idle);
   await reload.retire();

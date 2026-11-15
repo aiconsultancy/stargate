@@ -41,12 +41,18 @@ const write = (frame: unknown) =>
   process.stdout.write(`${JSON.stringify(frame)}\n`);
 const base = () => ({ session_id: session, uuid: crypto.randomUUID() });
 
-function result(subtype: string, isError: boolean, text?: string) {
+function result(
+  subtype: string,
+  isError: boolean,
+  text?: string,
+  status?: number,
+) {
   write({
     type: "result",
     subtype,
     is_error: isError,
     ...(text === undefined ? {} : { result: text }),
+    ...(status === undefined ? {} : { api_error_status: status }),
     duration_ms: 1,
     duration_api_ms: 1,
     num_turns: 1,
@@ -132,13 +138,27 @@ async function answer(text: string) {
     return;
   }
   if (text.includes("crash")) process.exit(3);
-  if (text.includes("fail")) {
+  // "fail", "fail:<cause>" or "fail:<cause>:<status>"; "tool" runs one first.
+  const failure = /fail(?::(\w+))?(?::(\d+))?/.exec(text);
+  if (failure) {
+    if (text.includes("tool"))
+      assistant("msg_tool", {
+        type: "tool_use",
+        id: "toolu_1",
+        name: "Bash",
+        input: { command: "deploy" },
+      });
     assistant(
       "msg_fail",
-      { type: "text", text: "API Error: raw upstream detail" },
-      "rate_limit",
+      { type: "text", text: "API Error: raw upstream detail sk-ant-secret" },
+      failure[1] ?? "rate_limit",
     );
-    return result("success", true, "API Error: raw upstream detail");
+    return result(
+      "success",
+      true,
+      "API Error: raw upstream detail sk-ant-secret",
+      failure[2] ? Number(failure[2]) : undefined,
+    );
   }
   stream({ type: "message_start", message: { id: "msg_1" } });
   stream({

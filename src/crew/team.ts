@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { piDurableBackendSchema } from "../config";
+import { isLocalhost } from "../loopback";
 
 export const agentIDSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
 export function agentIDForName(name: string): string {
@@ -34,8 +35,7 @@ const historyAPISchema = z.strictObject({
       !url.search &&
       !url.hash &&
       (url.protocol === "https:" ||
-        (url.protocol === "http:" &&
-          ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))
+        (url.protocol === "http:" && isLocalhost(url.hostname)))
     );
   }),
   headersEnv: z

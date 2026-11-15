@@ -11,6 +11,7 @@ import {
   isAllowedChannel,
   isAllowedUser,
 } from "./routing";
+import type { JobStatus } from "./store";
 
 const inputSchema = z.strictObject({
   name: z.string().trim().min(1).max(80),
@@ -74,13 +75,11 @@ export interface SchedulerGateway {
    * repeated after a crash. Undefined means policy rejected the request.
    */
   enqueueScheduled(input: ScheduledInput): number | undefined;
-  scheduledStatus(
-    jobId: number,
-  ): "queued" | "running" | "responding" | "done" | "failed" | undefined;
+  scheduledStatus(jobId: number): JobStatus | undefined;
   scheduledResult?(jobId: number):
     | {
         text: string;
-        status: "queued" | "running" | "responding" | "done" | "failed";
+        status: JobStatus;
         failure?: unknown;
       }
     | undefined;

@@ -1,10 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import type {
-  AttachmentTransport,
-  DeliveryUnit,
-  SlackDelivery,
-} from "../gateway";
+import type { AttachmentTransport } from "../attachment-delivery";
+import type { DeliveryUnit, SlackDelivery } from "../gateway";
 import type { ReactionName } from "../reactions";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";

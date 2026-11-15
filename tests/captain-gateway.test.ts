@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import pino from "pino";
 import {
   type AgentBackend,
@@ -453,6 +454,45 @@ test("conversation eval: concurrent sources keep one captain execution slot", as
   stop.abort();
   await work;
   expect(maximum).toBe(1);
+});
+
+test("a captain reply that is still being delivered is not started again by the next poll", async () => {
+  const f = fixture();
+  // Each worker poll reads the ready jobs once.
+  let polls = 0;
+  const ready = f.store.ready.bind(f.store);
+  f.store.ready = (...input) => {
+    polls++;
+    return ready(...input);
+  };
+  const polled = async (count: number) => {
+    const target = polls + count;
+    while (polls < target) await delay(10);
+  };
+  let started = 0;
+  const release = Promise.withResolvers<void>();
+  f.slack.post = async (channel, thread, text) => {
+    started++;
+    await release.promise;
+    f.posts.push({ channel, thread, text });
+  };
+  f.gateway.accept(source("D123", "report", "1.000"));
+  const stop = new AbortController();
+  const work = f.gateway.work(stop.signal);
+  try {
+    while (started === 0) await delay(10);
+    // The job is `responding` now. Later polls must leave it to its worker.
+    await polled(2);
+    expect(started).toBe(1);
+    release.resolve();
+    while (f.store.queueCounts(f.gateway.key).done !== 1) await delay(10);
+    await polled(1);
+  } finally {
+    release.resolve();
+    stop.abort();
+    await work;
+  }
+  expect(f.posts.map(({ text }) => text)).toEqual(["answer: report"]);
 });
 
 test("pinned reply keeps its source IDs without resending history after an unseen native wake", async () => {
@@ -1005,6 +1045,7 @@ test("legacy mappings never broadcast; matching original cursor retains one owne
     f.gateway.accept(source(channel, "<@UBOT> old", thread));
     const other = f.next();
     f.store.saveSession(other.conversation, session, "old-cursor");
+    f.store.running(other.id);
     f.store.respond(other.id, ["Old channel answer"]);
     f.store.finish(other.id);
   }

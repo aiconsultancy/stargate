@@ -279,6 +279,7 @@ test("repairThread resolves the namespace and protects existing state", async ()
       });
       const job = store.queuedJob(key, eventId);
       if (!job) throw new Error("Missing job");
+      store.running(job.id);
       store.respond(job.id, [...response]);
       store.finish(job.id);
     }

@@ -1,3 +1,5 @@
+import { isLocalhost } from "../loopback";
+
 /**
  * Every external command in maintenance goes through this runner, so tests
  * can replace it. Output is returned to the caller only; never log stderr:
@@ -135,8 +137,7 @@ export type RequestOptions = {
 };
 
 const loopback = (url: URL) =>
-  url.protocol === "http:" &&
-  ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+  url.protocol === "http:" && isLocalhost(url.hostname);
 
 /**
  * HTTP with manual redirects. Credentials (`authorization`, `x-api-key`)

@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { CrewState } from "../src/crew/state";
-import { CronStore } from "../src/cron-store";
+import { type CronRun, CronStore } from "../src/cron-store";
 import { maintenanceSchema } from "../src/nightly/config";
 import { type Crew, crewDatabase, piDatabase } from "../src/nightly/crews";
 import {
@@ -14,19 +14,28 @@ import {
 } from "../src/nightly/idle";
 import type { OpenCodeControl } from "../src/nightly/opencode";
 import { bounds } from "../src/nightly/run";
-import { Store } from "../src/store";
+import { jobStatuses, Store } from "../src/store";
 
 const root = await mkdtemp("/tmp/opencode/pogo-idle-");
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 const opencode = {
   active: [] as string[],
-  pending: false,
+  /** Sessions with a pending form or permission request. */
+  pending: [] as string[],
+  /** Child session → parent session. */
+  parents: {} as Record<string, string>,
+  /** Sessions whose parent cannot be read. */
+  unreadable: [] as string[],
   fail: false,
 };
 const control = {
   active: async () => opencode.active,
   pendingInput: async () => opencode.pending,
+  parent: async (id: string) => {
+    if (opencode.unreadable.includes(id)) throw new Error("unreadable");
+    return opencode.parents[id];
+  },
 } as unknown as OpenCodeControl;
 const connect = async () => {
   if (opencode.fail) throw new Error("down");
@@ -40,7 +49,9 @@ const now = Date.parse("2026-11-12T00:05:00Z");
 
 beforeEach(async () => {
   opencode.active = [];
-  opencode.pending = false;
+  opencode.pending = [];
+  opencode.parents = {};
+  opencode.unreadable = [];
   opencode.fail = false;
   data = join(root, `case-${count++}`);
   await mkdir(data, { recursive: true });
@@ -77,7 +88,7 @@ beforeEach(async () => {
   piDb.close();
 });
 
-const input = (scope: "pogo" | "server" = "pogo"): IdleInput => ({
+const input = (scope: IdleInput["scope"] = "pogo"): IdleInput => ({
   dataDirectory: data,
   crews: [crew],
   pinnedSessions: [],
@@ -96,7 +107,7 @@ const exec = (path: string, sql: string) => {
 describe("idle gate", () => {
   test("idle when no work is queued, due or running", async () => {
     expect(await checkIdle(input())).toEqual({ idle: true });
-    expect(await checkIdle(input("server"))).toEqual({ idle: true });
+    expect(await checkIdle(input("gateway"))).toEqual({ idle: true });
   });
 
   test("gateway jobs block", async () => {
@@ -115,6 +126,52 @@ describe("idle gate", () => {
       idle: false,
       reason: "busy-gateway",
     });
+  });
+
+  test("every unfinished job status blocks; finished ones do not", async () => {
+    const store = new Store(join(data, "pogo.sqlite"));
+    store.enqueue({
+      eventId: "E1",
+      botKey: "key",
+      conversation: '["key","C1","1.0"]',
+      channel: "C1",
+      thread: "1.0",
+      user: "U1",
+      text: "hello",
+    });
+    store.close();
+    for (const status of jobStatuses) {
+      exec(join(data, "pogo.sqlite"), `UPDATE jobs SET status='${status}'`);
+      expect((await checkIdle(input())).idle).toBe(
+        status === "done" || status === "failed",
+      );
+    }
+  });
+
+  test("every active cron run status blocks; finished ones do not", async () => {
+    exec(
+      join(data, "cron.sqlite"),
+      `INSERT INTO cron_schedules (id,botKey,channel,user,name,expression,timezone,prompt,nextAt,createdAt)
+       VALUES ('s','k','C1','U1','n','0 2 * * *','UTC','p',${now + 86_400_000},0);
+       INSERT INTO cron_runs (id,scheduleId,dueAt) VALUES ('r','s',${now})`,
+    );
+    const statuses: Record<CronRun["status"], boolean> = {
+      pending: false,
+      announcing: false,
+      announced: false,
+      queued: false,
+      blocked: false,
+      done: true,
+      failed: true,
+      canceled: true,
+    };
+    for (const [status, idle] of Object.entries(statuses)) {
+      exec(
+        join(data, "cron.sqlite"),
+        `UPDATE cron_runs SET status='${status}'`,
+      );
+      expect((await checkIdle(input())).idle).toBe(idle);
+    }
   });
 
   test("cron work blocks only within the horizon", async () => {
@@ -226,7 +283,7 @@ describe("idle gate", () => {
         expect(state.cancelQueued(row.id, "ses_e49d787old")).toBe(true);
       const queued = rows[4];
       if (!queued) throw new Error("no queued task");
-      expect(await checkIdle({ ...input("server"), crews: [real] })).toEqual({
+      expect(await checkIdle({ ...input(), crews: [real] })).toEqual({
         idle: true,
       });
       const listed = queuedCrewTasks([real]);
@@ -248,7 +305,13 @@ describe("idle gate", () => {
       });
       // A captain turn is what starts it, and that turn is busy.
       opencode.active = ["ses_pinned"];
-      expect(await checkIdle({ ...input("server"), crews: [real] })).toEqual({
+      expect(
+        await checkIdle({
+          ...input(),
+          crews: [real],
+          pinnedSessions: ["ses_pinned"],
+        }),
+      ).toEqual({
         idle: false,
         reason: "busy-opencode",
       });
@@ -280,7 +343,7 @@ describe("idle gate", () => {
         capture.id,
       );
       expect(state.reporting.isReport(report.id)).toBe(true);
-      expect(await checkIdle({ ...input("server"), crews: [real] })).toEqual({
+      expect(await checkIdle({ ...input(), crews: [real] })).toEqual({
         idle: false,
         reason: "busy-crew",
       });
@@ -365,23 +428,116 @@ describe("idle gate", () => {
     });
   });
 
-  test("OpenCode activity: Pogo sessions for pogo scope, any session for server scope", async () => {
+  test("another user's OpenCode session never blocks", async () => {
+    // The operator's own session on the shared server, with a pending form.
     opencode.active = ["ses_operator"];
-    expect((await checkIdle(input("pogo"))).idle).toBe(true);
-    expect(await checkIdle(input("server"))).toEqual({
-      idle: false,
-      reason: "busy-opencode",
-    });
-    opencode.active = ["ses_chief"];
-    expect(await checkIdle(input("pogo"))).toEqual({
-      idle: false,
-      reason: "busy-opencode",
-    });
+    opencode.pending = ["ses_operator"];
+    opencode.parents = { ses_operator: "ses_operator_root" };
+    expect(await checkIdle(input())).toEqual({ idle: true });
+  });
+
+  test("every Pogo-owned OpenCode session blocks while it runs or waits for input", async () => {
+    const busy = { idle: false, reason: "busy-opencode" } as const;
+    // A gateway session mapping and a crew peer.
+    for (const session of ["ses_captain", "ses_chief"]) {
+      opencode.active = [session];
+      expect(await checkIdle(input())).toEqual(busy);
+    }
+    // An operator-pinned captain session.
+    opencode.active = ["ses_pinned"];
+    expect((await checkIdle(input())).idle).toBe(true);
+    expect(
+      await checkIdle({ ...input(), pinnedSessions: ["ses_pinned"] }),
+    ).toEqual(busy);
+    // A crew IRC session bound in the crew store.
+    exec(
+      crewDatabase(crew),
+      `CREATE TABLE irc_sessions (sessionID TEXT PRIMARY KEY, crewID TEXT NOT NULL);
+       INSERT INTO irc_sessions VALUES ('ses_irc_chief','chief')`,
+    );
+    opencode.active = ["ses_irc_chief"];
+    expect(await checkIdle(input())).toEqual(busy);
+    // A subagent of a Pogo session, at any depth.
+    opencode.active = ["ses_grandchild"];
+    opencode.parents = { ses_grandchild: "ses_child", ses_child: "ses_chief" };
+    expect(await checkIdle(input())).toEqual(busy);
+    // A pending form or permission request of a Pogo session.
     opencode.active = [];
-    opencode.pending = true;
-    expect(await checkIdle(input("server"))).toEqual({
+    opencode.pending = ["ses_child"];
+    expect(await checkIdle(input())).toEqual({
       idle: false,
       reason: "pending-input",
+    });
+    opencode.pending = [];
+    expect(await checkIdle(input())).toEqual({ idle: true });
+  });
+
+  test("a captain pinned only in the crew plugin profile is Pogo-owned", async () => {
+    // No gateway mapping, no backend pin and no peer row for this captain.
+    exec(join(data, "pogo.sqlite"), "DELETE FROM sessions");
+    exec(crewDatabase(crew), "DELETE FROM peers");
+    const pinned = { ...crew, captainSessionID: "ses_plugin_captain" };
+    opencode.active = ["ses_plugin_captain"];
+    expect(await checkIdle(input())).toEqual({ idle: true });
+    expect(await checkIdle({ ...input(), crews: [pinned] })).toEqual({
+      idle: false,
+      reason: "busy-opencode",
+    });
+    // A pending request of one of its subagents.
+    opencode.active = [];
+    opencode.pending = ["ses_sub"];
+    opencode.parents = { ses_sub: "ses_plugin_captain" };
+    expect(await checkIdle({ ...input(), crews: [pinned] })).toEqual({
+      idle: false,
+      reason: "pending-input",
+    });
+    opencode.pending = [];
+    expect(await checkIdle({ ...input(), crews: [pinned] })).toEqual({
+      idle: true,
+    });
+  });
+
+  test("a session whose owner cannot be read is busy", async () => {
+    opencode.active = ["ses_unknown"];
+    opencode.unreadable = ["ses_unknown"];
+    expect(await checkIdle(input())).toEqual({
+      idle: false,
+      reason: "idle-unknown",
+    });
+  });
+
+  test("gateway scope reads gateway jobs and cron only", async () => {
+    // Crew work, a running Pogo session and an unreachable OpenCode server.
+    exec(crewDatabase(crew), "UPDATE tasks SET status='running'");
+    exec(piDatabase(crew, "twiki"), "UPDATE tasks SET status='running'");
+    opencode.active = ["ses_chief"];
+    opencode.fail = true;
+    expect((await checkIdle(input())).idle).toBe(false);
+    expect(await checkIdle(input("gateway"))).toEqual({ idle: true });
+    exec(
+      join(data, "cron.sqlite"),
+      `INSERT INTO cron_schedules (id,botKey,channel,user,name,expression,timezone,prompt,nextAt,createdAt)
+       VALUES ('soon','k','C1','U1','n','0 2 * * *','UTC','p',${now + 60_000},0)`,
+    );
+    expect(await checkIdle(input("gateway"))).toEqual({
+      idle: false,
+      reason: "busy-cron",
+    });
+    exec(join(data, "cron.sqlite"), "DELETE FROM cron_schedules");
+    const store = new Store(join(data, "pogo.sqlite"));
+    store.enqueue({
+      eventId: "E1",
+      botKey: "key",
+      conversation: '["key","C1","1.0"]',
+      channel: "C1",
+      thread: "1.0",
+      user: "U1",
+      text: "hello",
+    });
+    store.close();
+    expect(await checkIdle(input("gateway"))).toEqual({
+      idle: false,
+      reason: "busy-gateway",
     });
   });
 

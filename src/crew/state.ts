@@ -2,12 +2,13 @@ import { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
+import { redactCredentials } from "../credentials";
 import { canExpandCrew } from "./identity";
 import { IrcSessions } from "./irc";
 import { MemberActivityStore } from "./member-activity";
 import { MailRoutes } from "./messaging";
 import { queuedPendingTask, reportTask } from "./pending";
-import { ReportingStore, redactActivity } from "./reporting";
+import { ReportingStore } from "./reporting";
 export type CrewID = string;
 export type Peer = {
   crewID: CrewID;
@@ -1148,7 +1149,7 @@ export class CrewState {
   }
 
   complete(id: string, workerSessionID: string, result: string) {
-    if (this.reporting.isReport(id)) result = redactActivity(result, 3000);
+    if (this.reporting.isReport(id)) result = redactCredentials(result, 3000);
     return this.db
       .transaction(() => {
         const task = this.task(id);
@@ -1185,7 +1186,7 @@ export class CrewState {
 
   recoverResult(expected: CrewTask, result: string): CrewTask {
     if (this.reporting.isReport(expected.id))
-      result = redactActivity(result, 3000);
+      result = redactCredentials(result, 3000);
     return this.db
       .transaction(() => {
         const changed = this.db

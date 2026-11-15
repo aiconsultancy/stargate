@@ -26,6 +26,7 @@ import {
   StepError,
 } from "./exec";
 import { replaceLink } from "./files";
+import { writePluginDigest } from "./plugin-digest";
 import { compareVersions, parseVersion } from "./versions";
 
 /**
@@ -556,6 +557,8 @@ export async function stageRelease(input: StageInput) {
       },
       "tests-failed",
     );
+    // What OpenCode would load from this tree, for gateway-only updates.
+    await writePluginDigest(target);
     const metadata: ReleaseMetadata = {
       schema: "pogo.release.v1",
       version: release.version,
@@ -669,7 +672,12 @@ async function compareWithCheckout(
  * Keep `current`, `previous` and the newest managed releases up to `keep`.
  * Deletes only managed releases and this tool's own staging/failed folders.
  */
-export async function pruneReleases(root: string, keep: number) {
+export async function pruneReleases(
+  root: string,
+  keep: number,
+  /** More releases to keep, for example one that OpenCode still runs. */
+  inUse: readonly string[] = [],
+) {
   const paths = layout(root);
   const current = await linkedRelease(root, "current");
   const previous = await linkedRelease(root, "previous");
@@ -689,7 +697,7 @@ export async function pruneReleases(root: string, keep: number) {
     if (metadata) managed.push({ name: entry.name, version: metadata.version });
   }
   const protectedNames = new Set(
-    [current?.name, previous?.name].filter(Boolean),
+    [current?.name, previous?.name, ...inUse].filter(Boolean),
   );
   const ordered = managed.sort((a, b) => compareVersions(b.version, a.version));
   let kept = protectedNames.size;

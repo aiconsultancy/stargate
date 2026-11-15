@@ -95,11 +95,16 @@ test("captain response, cursor and explicit previous-source outbox commit atomic
     user: "U123",
     conversation: "D123",
   });
+  // A later turn that commits from the same, now stale, cursor writes nothing.
+  store.finish(current.id);
+  const stale = enqueue("stale", "C123");
+  store.running(stale.id);
   expect(() =>
-    store.respond(current.id, ["must roll back"], undefined, {
+    store.respond(stale.id, ["must roll back"], undefined, {
       captain: commit,
     }),
   ).toThrow(TranscriptConflict);
+  expect(store.jobStatus("bot", stale.id)).toBe("running");
   expect(store.replies("bot", "C123")).toEqual([["current answer"]]);
   expect(store.captainCursor("bot", "pin")).toEqual({
     cursor: "head",
@@ -155,6 +160,7 @@ test("serial ready selection keeps FIFO across sources during delivery backoff",
   }
   const first = store.ready("bot", Date.now(), 1)[0];
   if (!first) throw new Error("Missing job");
+  store.running(first.id);
   store.respond(first.id, ["reply"]);
   store.retry(first.id, Date.now() + 60_000);
   expect(store.ready("bot", Date.now(), 10, true)).toEqual([]);

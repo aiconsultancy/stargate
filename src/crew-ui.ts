@@ -2,7 +2,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 import type { AgentBackend } from "./backend";
 import type { BotConfig } from "./config";
-import { redactActivity } from "./crew/reporting";
+import { redactCredentials } from "./credentials";
 import {
   type CrewStatus,
   type CrewStatusTask,
@@ -40,7 +40,7 @@ const plain = (text: string) => ({
 });
 const section = (text: string) => ({
   type: "section" as const,
-  text: plain(redactActivity(text, 3000)),
+  text: plain(redactCredentials(text, 3000)),
 });
 function notice(text: string, title = "Crew activity"): CronView {
   return {

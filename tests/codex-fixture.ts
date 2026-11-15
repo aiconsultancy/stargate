@@ -104,12 +104,29 @@ process.stdin.on("end", async () => {
     process.stderr.write("raw stderr detail: upstream said no\n");
     process.exit(3);
   }
+  // "fail", or "fail=<provider message>;". "tool" runs a command first;
+  // "fatal" reports through the stream's `error` event instead.
   if (prompt.includes("fail")) {
+    const message = /fail=([^;]*);/.exec(prompt)?.[1] ?? "raw upstream detail";
+    if (prompt.includes("tool"))
+      write({
+        type: "item.completed",
+        item: {
+          id: "item_c",
+          type: "command_execution",
+          command: "deploy",
+          aggregated_output: "",
+        },
+      });
     write({
       type: "item.completed",
-      item: { id: "item_e", type: "error", message: "raw upstream detail" },
+      item: { id: "item_e", type: "error", message },
     });
-    write({ type: "turn.failed", error: { message: "raw upstream detail" } });
+    write(
+      prompt.includes("fatal")
+        ? { type: "error", message }
+        : { type: "turn.failed", error: { message } },
+    );
     process.stderr.write("raw stderr detail\n");
     process.exit(1);
   }

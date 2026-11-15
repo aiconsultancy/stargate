@@ -351,6 +351,7 @@ test("upgrade baselines existing threads without backfill, then follows them", a
   f.gateway.accept(event());
   const job = pending(f);
   legacy.saveSession(job.conversation, "session-1");
+  legacy.running(job.id);
   legacy.respond(job.id, ["Old answer"]);
   legacy.finish(job.id);
   legacy.close();

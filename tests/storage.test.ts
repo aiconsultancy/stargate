@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { lockInstance } from "../src/runtime";
-import { Store } from "../src/store";
+import { JobTransitionRefused, Store } from "../src/store";
 
 test("state survives reopening and exclusive lock prevents two owners", async () => {
   const directory = await mkdtemp("/tmp/opencode/pogo-test-");
@@ -93,5 +93,90 @@ test("migration preserves old jobs and accepted Stop survives database reopen", 
     }
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+function queued(store: Store, eventId = "event") {
+  store.enqueue({
+    eventId,
+    botKey: "bot",
+    conversation: `thread-${eventId}`,
+    channel: "C123",
+    thread: "1.000",
+    user: "U123",
+    text: "hello",
+  });
+  const job = store.queuedJob("bot", eventId);
+  if (!job) throw new Error("missing job");
+  return job.id;
+}
+
+test("a reply is stored only for a running job", () => {
+  const store = new Store(":memory:");
+  try {
+    const id = queued(store);
+    expect(() => store.respond(id, ["early"])).toThrow(JobTransitionRefused);
+    expect(store.jobStatus("bot", id)).toBe("queued");
+    expect(store.running(id)).toBe(true);
+    expect(store.respond(id, ["reply"])).toEqual(["reply"]);
+    // A second reply cannot replace a stored one, also after delivery.
+    expect(() => store.respond(id, ["again"])).toThrow(JobTransitionRefused);
+    expect(store.finish(id)).toBe(true);
+    expect(() => store.respond(id, ["late"])).toThrow(JobTransitionRefused);
+    expect(store.jobStatus("bot", id)).toBe("done");
+    expect(store.replies("bot", "thread-event")).toEqual([["reply"]]);
+  } finally {
+    store.close();
+  }
+});
+
+test("only a stored reply is finished; a queued job can only fail", () => {
+  const store = new Store(":memory:");
+  try {
+    const id = queued(store);
+    expect(store.finish(id)).toBe(false);
+    expect(store.jobStatus("bot", id)).toBe("queued");
+    store.running(id);
+    expect(store.finish(id)).toBe(false);
+    expect(store.finish(id, "failed")).toBe(false);
+    expect(store.jobStatus("bot", id)).toBe("running");
+    store.respond(id, ["reply"]);
+    expect(store.finish(id)).toBe(true);
+    // Finished is final for `finish`.
+    expect(store.finish(id, "failed")).toBe(false);
+    expect(store.jobStatus("bot", id)).toBe("done");
+    // Access removed before the turn: the queued request fails.
+    const refused = queued(store, "refused");
+    expect(store.finish(refused, "failed")).toBe(true);
+    expect(store.jobStatus("bot", refused)).toBe("failed");
+  } finally {
+    store.close();
+  }
+});
+
+test("the delivery cursor and retry apply only to a stored reply", () => {
+  const store = new Store(":memory:");
+  try {
+    const id = queued(store);
+    const row = () => store.ready("bot", Number.MAX_SAFE_INTEGER, 1)[0];
+    expect(store.sent(id, 1)).toBe(false);
+    expect(store.retry(id, 5)).toBe(false);
+    store.running(id);
+    expect(store.sent(id, 1)).toBe(false);
+    expect(store.retry(id, 5)).toBe(false);
+    store.respond(id, ["one", "two"]);
+    // Past the last chunk is refused; the cursor never moves back.
+    expect(store.sent(id, 3)).toBe(false);
+    expect(store.sent(id, 1)).toBe(true);
+    expect(store.sent(id, 0)).toBe(false);
+    expect(row()).toMatchObject({ sent: 1, attempts: 0 });
+    expect(store.retry(id, 5)).toBe(true);
+    expect(row()).toMatchObject({ sent: 1, attempts: 1 });
+    expect(store.sent(id, 2)).toBe(true);
+    store.finish(id);
+    expect(store.sent(id, 2)).toBe(false);
+    expect(store.retry(id, 5)).toBe(false);
+  } finally {
+    store.close();
   }
 });

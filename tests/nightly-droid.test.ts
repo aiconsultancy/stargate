@@ -28,6 +28,7 @@ import { type Report, writeAlert, writeReport } from "../src/nightly/report";
 import { updateState } from "../src/nightly/state";
 import { buildDroidUnits } from "../src/nightly/timer";
 import { stableJitter } from "../src/nightly/window";
+import { Store } from "../src/store";
 
 const base = await mkdtemp("/tmp/opencode/pogo-droid-");
 afterAll(async () => {
@@ -177,7 +178,8 @@ const opencode = {
     host.activeCalls++;
     return host.arrive?.(host.activeCalls) ?? host.busy;
   },
-  pendingInput: async () => false,
+  pendingInput: async () => [],
+  parent: async () => undefined,
 } as unknown as OpenCodeControl;
 
 let agentPrompts: string[] = [];
@@ -303,6 +305,10 @@ async function install(droid: Record<string, unknown> = {}) {
   };
   const config: Config = configSchema.parse(raw);
   await ready();
+  // One Pogo-owned OpenCode session: the gateway's mapping of a thread.
+  const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
+  store.saveSession('["k","C123","1.0"]', "ses_captain");
+  store.close();
   return { config, path: join(dir, "pogo.json") };
 }
 
@@ -645,14 +651,18 @@ describe("maintenance droid", () => {
     // Busy host, active run, or a held run lock: refused or not run.
     for (const block of ["busy", "run", "lock"] as const) {
       const { config, path } = await install();
-      await journal(config, { gateway: { restartPending: true } });
+      // An owed OpenCode restart: the undo needs Pogo's sessions idle.
+      await journal(config, {
+        gateway: { restartPending: true },
+        openCode: { restarted: true, restartPending: true },
+      });
       // A fresh report makes this a post-run check, which always posts.
       await writeReport(
         config.dataDirectory,
         report("failed", "2026-11-12T00:05:00.000Z"),
       );
       let held: Database | undefined;
-      if (block === "busy") host.busy = ["ses_operator"];
+      if (block === "busy") host.busy = ["ses_captain"];
       if (block === "run")
         host.units["pogo-maintenance.service"] = {
           LoadState: "loaded",
@@ -1040,7 +1050,7 @@ describe("droid recover safety", () => {
       report("failed", "2026-11-12T00:05:00.000Z"),
     );
     // Idle at the first check; a session starts before the OpenCode restart.
-    host.arrive = (call) => (call >= 2 ? ["ses_new"] : []);
+    host.arrive = (call) => (call >= 2 ? ["ses_captain"] : []);
     await check(config, path, deps(scripted(async (tools) => tools.recover())));
     expect(host.commands.filter((c) => c.includes(" restart "))).toEqual([]);
     const left = JSON.parse(

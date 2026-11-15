@@ -1,9 +1,9 @@
 /**
  * Text patterns that carry credentials: private keys, provider tokens,
  * authorization headers and `name=value` secrets. One list for redaction
- * (crew activity) and for withholding text (IRC DM audit).
+ * (`redactCredentials`) and for withholding text (`containsCredential`).
  */
-export const credentialRules: readonly [RegExp, string][] = [
+const credentialRules: readonly [RegExp, string][] = [
   [
     /-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-\r\n]*PRIVATE KEY-----|$)/gi,
     "[REDACTED PRIVATE KEY]",
@@ -24,4 +24,22 @@ export function containsCredential(text: string) {
   return credentialRules.some(([pattern]) =>
     new RegExp(pattern.source, pattern.flags.replace("g", "")).test(text),
   );
+}
+
+/**
+ * `text` without credentials and control characters (newline, carriage
+ * return and tab stay), cut to `limit`. Apply it before persistence,
+ * truncation, inference and publication. At most 64,000 characters are read.
+ */
+export function redactCredentials(text: string, limit = 1500): string {
+  return credentialRules
+    .reduce(
+      (redacted, [pattern, replacement]) =>
+        redacted.replace(pattern, replacement),
+      text.slice(0, 64000),
+    )
+    .replace(/\p{Cc}/gu, (character) =>
+      ["\n", "\r", "\t"].includes(character) ? character : "",
+    )
+    .slice(0, limit);
 }

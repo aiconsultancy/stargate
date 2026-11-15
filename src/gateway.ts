@@ -4,15 +4,15 @@ import type { Logger } from "pino";
 import type { ActivityView } from "./activity";
 import { ActivityDelivery, type ActivityHandle } from "./activity-delivery";
 import {
+  type AttachmentTransport,
+  agentFilesLocal,
+  deliverAttachments,
+} from "./attachment-delivery";
+import {
   type Attachment,
   checkAttachments,
-  inspectAttachment,
-  maxAttachments,
-  maxAttachmentTotalBytes,
   type PublishedFile,
   parseAttachments,
-  readPreparedAttachment,
-  UploadRefused,
 } from "./attachments";
 import {
   type AgentBackend,
@@ -40,7 +40,9 @@ import {
 import { parseReactionReply, type ReactionName } from "./reactions";
 import {
   AttachmentInputUnavailable,
+  BackendFailure,
   failureText,
+  providerFailure,
   type RequestFailure,
 } from "./request-failure";
 import {
@@ -59,6 +61,7 @@ import {
   type CaptainTranscript,
   type Incoming,
   type Job,
+  type JobStatus,
   type Store,
   TranscriptConflict,
 } from "./store";
@@ -123,90 +126,6 @@ export function transcriptAttachments(entries: readonly TranscriptEntry[]) {
         .map((file) => [file.path, file]),
     ).values(),
   ];
-}
-
-/** Slack-style three-step upload: reserve, put, then complete in a thread. */
-export interface UploadTransport {
-  reserveUpload(
-    name: string,
-    length: number,
-    signal: AbortSignal,
-  ): Promise<{ fileID: string; url: string }>;
-  putUpload(url: string, data: Uint8Array, signal: AbortSignal): Promise<void>;
-  completeUpload(
-    channel: string,
-    thread: string,
-    fileID: string,
-    title: string,
-    signal: AbortSignal,
-  ): Promise<void>;
-  sharedIn(
-    fileID: string,
-    channel: string,
-    thread: string,
-    signal: AbortSignal,
-  ): Promise<boolean>;
-}
-
-/**
- * One-step upload (IRC FILEHOST): a durable URL, then a link in the thread.
- * "uploading" is stored before the upload and the URL before the link is
- * posted, so a retry never uploads a file again: an upload that may have
- * run (crash, lost answer, timeout) makes the file unavailable with a
- * notice. Only `UploadRefused` (the host certainly stored nothing, for
- * example a 401 or 413 from a FILEHOST) allows another upload. A crash
- * between post and record can repeat the link.
- */
-export interface LinkTransport {
-  upload(file: Attachment, signal: AbortSignal): Promise<string>;
-  link(
-    channel: string,
-    thread: string,
-    url: string,
-    title: string,
-    signal: AbortSignal,
-    allowed?: () => boolean,
-  ): Promise<void>;
-}
-
-/** Input downloads, plus uploads when the transport can publish files. */
-export interface AttachmentTransport
-  extends Partial<UploadTransport>,
-    Partial<LinkTransport> {
-  download(
-    ids: readonly string[],
-    channel: string,
-    signal: AbortSignal,
-  ): Promise<Attachment[]>;
-}
-
-/** The transport's link-style upload half, if it has one. */
-function links(
-  transport: AttachmentTransport | undefined,
-): LinkTransport | undefined {
-  if (!transport?.upload || !transport.link) return;
-  const { upload, link } = transport;
-  return { upload: upload.bind(transport), link: link.bind(transport) };
-}
-
-/** The transport's upload half, or undefined for a download-only one. */
-function uploads(
-  transport: AttachmentTransport | undefined,
-): UploadTransport | undefined {
-  if (
-    !transport?.reserveUpload ||
-    !transport.putUpload ||
-    !transport.completeUpload ||
-    !transport.sharedIn
-  )
-    return;
-  const { reserveUpload, putUpload, completeUpload, sharedIn } = transport;
-  return {
-    reserveUpload: reserveUpload.bind(transport),
-    putUpload: putUpload.bind(transport),
-    completeUpload: completeUpload.bind(transport),
-    sharedIn: sharedIn.bind(transport),
-  };
 }
 
 /** One stored reply chunk of one job. */
@@ -314,6 +233,15 @@ export interface GatewayTransport {
   sessionReady?(sessionID: string, signal: AbortSignal): Promise<void>;
 }
 
+/** The failure a thrown error names when no signal ended the turn. */
+function errorFailure(error: unknown): RequestFailure {
+  if (error instanceof BackendFailure) return error.failure;
+  if (error instanceof ThreadContextUnavailable) return "context";
+  if (error instanceof AttachmentInputUnavailable) return "attachments";
+  if (error instanceof TranscriptionUnavailable) return "transcription";
+  return "backend";
+}
+
 /** Slack rules: bot/app/workspace namespace and Slack message timestamps. */
 export function slackTransport(
   config: BotConfig,
@@ -359,6 +287,7 @@ export class Gateway {
   private transport: GatewayTransport;
   private paused = false;
   private active = 0;
+  /** Every job a worker holds, with the transport rules of its start. */
   private readonly turnPolicies = new Map<number, GatewayTransport>();
   readonly key: string;
   constructor(
@@ -585,7 +514,7 @@ export class Gateway {
   scheduledResult(jobId: number):
     | {
         text: string;
-        status: Job["status"];
+        status: JobStatus;
         failure?: RequestFailure | null;
       }
     | undefined {
@@ -690,6 +619,10 @@ export class Gateway {
       );
       for (const job of jobs) {
         if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
+        // One worker per job. A pinned turn holds the bot slot while it
+        // delivers; its `responding` row must not start again in the
+        // conversation slot, or every chunk and file is sent twice.
+        if (gateway.turnPolicies.has(job.id)) continue;
         const slot =
           gateway.backend.sessionID && job.status === "queued"
             ? gateway.key
@@ -728,6 +661,11 @@ export class Gateway {
     for (const conversation of this.store.transcripts(this.key, session))
       if (!this.unavailable.has(conversation))
         this.queueTranscript(conversation);
+  }
+
+  /** Catch-up state has one key per pinned session, else per conversation. */
+  private catchUpKey(conversation: string) {
+    return this.backend.sessionID ? this.key : conversation;
   }
 
   /** New work is eligible now; failed reads keep their backoff count. */
@@ -1130,7 +1068,8 @@ export class Gateway {
     // Recheck policy for queued inputs and pending delivery after a restart.
     if (!allowed(held)) {
       if (held.gate === "spoken") this.store.discard(held.id);
-      else this.store.finish(held.id, "failed");
+      else if (!this.store.finish(held.id, "failed"))
+        this.refused(held, "finish");
       return;
     }
     // A transcript held only in this call; a restart transcribes again.
@@ -1301,7 +1240,7 @@ export class Gateway {
           if (!pinned && transport.sessionReady)
             await transport.sessionReady(session, signal).catch(() => {});
           signal.throwIfAborted();
-          this.unavailable.delete(pinned ? this.key : job.conversation);
+          this.unavailable.delete(this.catchUpKey(job.conversation));
           if (pinned) {
             captain = this.store.captainCursor(this.key, pinned);
             from = captain.cursor;
@@ -1473,7 +1412,7 @@ export class Gateway {
             : from !== undefined ||
               (pinned !== undefined && this.backend.transcript !== undefined);
           if (unread || transcript?.pending)
-            this.queueTranscript(pinned ? this.key : job.conversation);
+            this.queueTranscript(this.catchUpKey(job.conversation));
           // This request's own reply is silent: there is no text to wait for.
           const deferred = unread && !ownReply.silent;
           activity?.finish();
@@ -1492,7 +1431,6 @@ export class Gateway {
           if (cancellation.signal.aborted || maintenanceFailure.signal.aborted)
             activity?.cancel();
           else if (!shutdown.aborted) activity?.finish();
-          this.log.warn({ job: job.id }, "Agent request failed or timed out");
           silent = false;
           failure = cancellation.signal.aborted
             ? "cancelled"
@@ -1500,22 +1438,26 @@ export class Gateway {
               ? "interrupted"
               : budget.controller.signal.aborted
                 ? "timeout"
-                : error instanceof ThreadContextUnavailable
-                  ? "context"
-                  : error instanceof AttachmentInputUnavailable
-                    ? "attachments"
-                    : error instanceof TranscriptionUnavailable
-                      ? "transcription"
-                      : "backend";
+                : errorFailure(error);
+          // Category, provider status and backend only: never error text.
+          const detail = providerFailure(failure);
+          this.log.warn(
+            {
+              job: job.id,
+              backend: config.backend.type,
+              failure: detail?.kind ?? failure,
+              ...(detail?.status ? { status: detail.status } : {}),
+              ...(detail ? { ran: detail.ran } : {}),
+            },
+            "Agent request failed or timed out",
+          );
           output = [statusText(failure)];
           transcript = undefined;
           // A request refused before admission submitted no input and owns no
           // text: reading history for it could assign another source's reply
           // to this thread. Earlier continuations stay with catch-up.
           if (this.backend.transcript && session && !admitted)
-            this.queueTranscript(
-              this.backend.sessionID ? this.key : job.conversation,
-            );
+            this.queueTranscript(this.catchUpKey(job.conversation));
           // Keep public text that settled before the failure; shutdown recovers later.
           if (
             this.backend.transcript &&
@@ -1529,9 +1471,7 @@ export class Gateway {
               AbortSignal.any([shutdown, AbortSignal.timeout(10_000)]),
             );
             if (transcript ? transcript.pending : from !== undefined)
-              this.queueTranscript(
-                this.backend.sessionID ? this.key : job.conversation,
-              );
+              this.queueTranscript(this.catchUpKey(job.conversation));
             const owned =
               transcript && captain
                 ? this.captainTranscript(session, captain, transcript, job.id)
@@ -1570,9 +1510,7 @@ export class Gateway {
           // Another writer moved the cursor: catch-up delivers from there.
           failure = "history";
           output = this.store.respond(job.id, [statusText(failure)], failure);
-          this.queueTranscript(
-            this.backend.sessionID ? this.key : job.conversation,
-          );
+          this.queueTranscript(this.catchUpKey(job.conversation));
         }
         failure = this.store.failure(job.id);
       } finally {
@@ -1587,9 +1525,34 @@ export class Gateway {
     } else {
       output = JSON.parse(job.response ?? "[]") as ReplyChunk[];
     }
+    await this.deliver(job, output, failure, shutdown, allowed, readReceipt);
+  }
+
+  /** The store refused a transition: the job is not in the expected status. */
+  private refused(job: Job, transition: "finish" | "sent" | "retry") {
+    this.log.error(
+      { job: job.id, transition },
+      "Job transition refused; nothing was written",
+    );
+  }
+
+  /**
+   * Deliver a stored reply from its cursor: remove surplus previews, post or
+   * update each chunk, then publish files. Never calls the backend. A
+   * failure retries delivery only; the last retry fails the job.
+   */
+  private async deliver(
+    job: Job,
+    output: ReplyChunk[],
+    failure: RequestFailure | undefined,
+    shutdown: AbortSignal,
+    allowed: (job: Job) => boolean,
+    /** Slack: mark the request as read (`false`: after its last chunk). */
+    readReceipt: (active: boolean) => Promise<void>,
+  ) {
     if (job.deferDelivery) {
-      this.store.sent(job.id, output.length);
-      this.store.finish(job.id);
+      if (!this.store.sent(job.id, output.length) || !this.store.finish(job.id))
+        this.refused(job, "finish");
       return;
     }
     try {
@@ -1655,11 +1618,24 @@ export class Gateway {
             content,
           );
         }
-        this.store.sent(job.id, i + 1);
+        if (!this.store.sent(job.id, i + 1)) return this.refused(job, "sent");
       }
-      await this.deliverAttachments(job, shutdown, allowed);
+      await deliverAttachments(
+        job,
+        {
+          store: this.store,
+          transport: this.slack.files,
+          local: agentFilesLocal(this.config.backend),
+          notify: (text) =>
+            this.slack.post(job.channel, job.thread, text, undefined, {
+              allowed: () => allowed(job),
+            }),
+          allowed: () => allowed(job),
+        },
+        shutdown,
+      );
       if (output.length > 0) await readReceipt(false);
-      this.store.finish(job.id);
+      if (!this.store.finish(job.id)) this.refused(job, "finish");
     } catch {
       this.log.warn({ job: job.id }, "Slack delivery failed");
       if (job.attempts >= 7) {
@@ -1676,189 +1652,14 @@ export class Gateway {
               { allowed: () => allowed(job) },
             )
             .catch(() => {});
-        this.store.finish(job.id, "failed");
-      } else
-        this.store.retry(
+        if (!this.store.finish(job.id, "failed")) this.refused(job, "finish");
+      } else if (
+        !this.store.retry(
           job.id,
           Date.now() + Math.min(60_000, 1000 * 2 ** job.attempts),
-        );
-    }
-  }
-
-  private async deliverAttachments(
-    job: Job,
-    shutdown: AbortSignal,
-    allowed = (job: Job) => this.allowed(job),
-  ) {
-    const files = this.store.attachments(job.id);
-    if (!files.length) return;
-    const save = () => this.store.saveAttachments(job.id, files);
-    const local =
-      this.config.backend.type !== "opencode" ||
-      ["localhost", "127.0.0.1", "[::1]"].includes(
-        new URL(this.config.backend.url).hostname,
-      );
-    const linked = links(this.slack.files);
-    const transport = linked ? undefined : uploads(this.slack.files);
-    if (!local || files.length > maxAttachments || !(transport || linked)) {
-      for (const file of files) file.phase = "unavailable";
-      save();
-    } else {
-      for (const file of files) {
-        if (file.phase || file.prepared) continue;
-        try {
-          file.prepared = await inspectAttachment(file);
-        } catch {
-          file.phase = "unavailable";
-        }
-        save();
-      }
-      if (
-        files.reduce((sum, file) => sum + (file.prepared?.size ?? 0), 0) >
-        maxAttachmentTotalBytes
-      ) {
-        for (const file of files)
-          if (file.phase !== "shared") file.phase = "unavailable";
-        save();
-      }
-    }
-    for (const file of files) {
-      shutdown.throwIfAborted();
-      if (!allowed(job)) throw new Error("Attachment delivery access denied");
-      if (file.phase === "shared") continue;
-      if (file.prepared && !file.title) {
-        file.title =
-          [...(file.caption || file.prepared.name)]
-            .map((char) =>
-              char === "/" ||
-              char === "\\" ||
-              char.charCodeAt(0) < 32 ||
-              char.charCodeAt(0) === 127
-                ? " "
-                : char,
-            )
-            .join("")
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 255)
-            .trim() || file.prepared.name;
-        save();
-      }
-      const signal = AbortSignal.any([shutdown, AbortSignal.timeout(30_000)]);
-      if (file.phase === "completing" && file.fileID && transport) {
-        if (
-          await transport.sharedIn(file.fileID, job.channel, job.thread, signal)
-        ) {
-          file.phase = "shared";
-          save();
-          continue;
-        }
-        // Completion is one-shot. Absence of a share is not proof it never ran.
-        file.phase = "unavailable";
-        save();
-      }
-      if (file.phase === "uploading" && !file.fileID) {
-        // The last upload attempt had no certain outcome: never repeat it.
-        file.phase = "unavailable";
-        save();
-      }
-      if (
-        file.phase === "unavailable" ||
-        !file.prepared ||
-        !(transport || linked)
-      ) {
-        if (!file.noticeSent) {
-          if (!allowed(job))
-            throw new Error("Attachment delivery access denied");
-          if (!files.some((item) => item.noticeSent))
-            await this.slack.post(
-              job.channel,
-              job.thread,
-              "An attachment is unavailable or its upload is unconfirmed. The agent work was not rerun.",
-              undefined,
-              { allowed: () => allowed(job) },
-            );
-          file.noticeSent = true;
-          save();
-        }
-        continue;
-      }
-      if (linked) {
-        // Record the hosted URL first: a retry posts it, never re-uploads.
-        if (!file.fileID) {
-          let content: Attachment;
-          try {
-            content = await readPreparedAttachment(file.prepared);
-          } catch {
-            file.phase = "unavailable";
-            save();
-            throw new Error(
-              "Published attachment changed or became unavailable",
-            );
-          }
-          file.phase = "uploading";
-          save();
-          try {
-            file.fileID = await linked.upload(content, signal);
-          } catch (error) {
-            if (error instanceof UploadRefused) {
-              delete file.phase;
-              save();
-            }
-            throw error;
-          }
-          file.phase = "uploaded";
-          save();
-        }
-        if (!allowed(job)) throw new Error("Attachment delivery access denied");
-        await linked.link(
-          job.channel,
-          job.thread,
-          file.fileID,
-          file.title ?? file.prepared.name,
-          signal,
-          () => allowed(job),
-        );
-        file.phase = "shared";
-        save();
-        continue;
-      }
-      if (!transport) continue;
-      if (file.phase !== "uploaded") {
-        let content: Attachment;
-        try {
-          content = await readPreparedAttachment(file.prepared);
-        } catch {
-          file.phase = "unavailable";
-          save();
-          throw new Error("Published attachment changed or became unavailable");
-        }
-        // A retry may abandon an unshared reservation, never complete both IDs.
-        const reserved = await transport.reserveUpload(
-          content.name,
-          content.data.byteLength,
-          signal,
-        );
-        file.fileID = reserved.fileID;
-        file.phase = "reserved";
-        save();
-        await transport.putUpload(reserved.url, content.data, signal);
-        file.phase = "uploaded";
-        save();
-      }
-      if (!file.fileID) throw new Error("Attachment upload identity missing");
-      if (!allowed(job)) throw new Error("Attachment delivery access denied");
-      file.phase = "completing";
-      save();
-      await transport.completeUpload(
-        job.channel,
-        job.thread,
-        file.fileID,
-        file.title ?? file.prepared.name,
-        signal,
-      );
-      file.phase = "shared";
-      save();
+        )
+      )
+        this.refused(job, "retry");
     }
   }
 

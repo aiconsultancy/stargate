@@ -69,6 +69,13 @@ export type CronDailyResult = Pick<
   | "manual"
 >;
 
+/**
+ * SQL list: runs that are not done, failed or canceled. One schedule has at
+ * most one (the `cron_active` index); the maintenance idle gate counts them.
+ */
+export const activeRuns =
+  "'pending','announcing','announced','queued','blocked'";
+
 const botKeySchema = z.string().min(1).max(2048);
 const scopeSchema = z.strictObject({
   botKey: botKeySchema,
@@ -190,7 +197,7 @@ export class CronStore {
         thread TEXT, jobId INTEGER, UNIQUE(scheduleId, dueAt)
       );
       CREATE UNIQUE INDEX IF NOT EXISTS cron_active ON cron_runs(scheduleId)
-        WHERE status IN ('pending','announcing','announced','queued','blocked');
+        WHERE status IN (${activeRuns});
     `);
     // Additive and atomic: old runs keep NULL snapshots and their join fallback.
     this.db
@@ -411,7 +418,7 @@ export class CronStore {
         if (
           this.db
             .query(`SELECT 1 FROM cron_runs WHERE scheduleId=?
-        AND status IN ('pending','announcing','announced','queued','blocked')`)
+        AND status IN (${activeRuns})`)
             .get(schedule.id)
         )
           return undefined;
@@ -620,7 +627,7 @@ export class CronStore {
       .query<RunRow, [string, number, number, number, number]>(`${runSelect}
       WHERE s.botKey=? AND r.dueAt<? AND (
         r.dueAt>=? OR (r.finishedAt>=? AND r.finishedAt<?)
-        OR r.status IN ('pending','announcing','announced','queued','blocked'))
+        OR r.status IN (${activeRuns}))
         AND COALESCE(json_extract(r.snapshot,'$.report'),s.report)='daily'
       ORDER BY r.dueAt,r.id LIMIT 100`)
       .all(botKey, until, since, since, until)
@@ -730,7 +737,7 @@ export class CronStore {
       throw new Error("Invalid cron run status.");
     this.db
       .query(`UPDATE cron_runs SET status=?,finishedAt=? WHERE id=?
-        AND status IN ('pending','announcing','announced','queued','blocked')`)
+        AND status IN (${activeRuns})`)
       .run(status, now, id);
   }
 

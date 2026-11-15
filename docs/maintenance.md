@@ -259,6 +259,40 @@ the window, the jitter and the next start.
     writes an alert.
 12. **Prune** old releases and write the report.
 
+### Gateway-only update
+
+A Pogo release that does not change the crew plugin needs no OpenCode
+restart. When a release is staged, maintenance records a digest of the crew
+plugin in `<release>/.pogo-plugin-digest`: the plugin entry and every file
+that it imports, `package.json`, the lockfile, the Bun and TypeScript
+settings and `templates/`. Gateway source outside that set, tests and
+documentation do not change the digest.
+
+The run takes the gateway-only path when all of these are true:
+
+- the staged release and the `current` release record the same digest;
+- the run has no CLIProxyAPI, agent CLI or model change.
+
+Then steps 5, 8, 9 and 10 do not run. The idle gate needs only the gateway
+idle (no unfinished gateway job, no cron run active or due): crew tasks and
+OpenCode sessions continue. The run stops the gateway, switches `current`,
+starts the gateway and waits for readiness. A failed readiness check
+restores the previous release and restarts the gateway only. The report has
+the step `crew-plugin-unchanged` and one restart, of the gateway.
+
+The import closure is read from the source with Bun's own resolver. A tree
+has no digest when that cannot be complete: an import with a computed path,
+`require` used as a value, `import.meta` in a plugin file, a symbolic link,
+or an import that does not resolve inside the tree.
+
+A missing or unreadable digest on either side takes the full path. This
+includes the first update after this feature is installed and every adopted
+release. A digest that came inside a release archive is never used.
+
+After a gateway-only update OpenCode still runs the plugin from the earlier
+release directory. `state.json` records that release (`openCodeRelease`)
+and pruning keeps it until a later run restarts OpenCode.
+
 Every abnormal end (exception, `SIGTERM`, timeout) applies the same journal
 undo as `pogo maintenance recover`.
 
@@ -348,7 +382,9 @@ Files that need an operator:
   reason and report. Delete it after review. The
   [maintenance droid](#maintenance-droid) reads it with the reports.
 - `maintenance/state.json`: the npm cutoff that produced each installed CLI,
-  pinned CLIProxyAPI digests, and releases that failed after a switch.
+  pinned CLIProxyAPI digests, releases that failed after a switch, and the
+  release whose crew plugin OpenCode still runs after a
+  [gateway-only update](#gateway-only-update).
 
 ### When recovery cannot proceed
 
@@ -447,6 +483,7 @@ downgrades.
 ```text
 <root>/releases/<version>/      unpacked, installed and tested release
 <root>/releases/<name>/.pogo-release.json   marks a managed release
+<root>/releases/<name>/.pogo-plugin-digest  crew plugin digest, when known
 <root>/current -> releases/<version>        launchers and plugins load this
 <root>/previous -> releases/<version>       rollback target
 <root>/deployment-plugin/index.ts           optional install-specific wrapper
@@ -455,7 +492,8 @@ downgrades.
 Launchers, the gateway unit and every captain/crew `opencode.json` plugin
 `package` reference `current` (directly or through the wrapper). OpenCode
 loads a plugin once per process, so a release switch restarts the shared
-OpenCode server. `.staging-*` and `.failed-*` directories are this tool's own
+OpenCode server, unless the crew plugin is unchanged (see
+[gateway-only update](#gateway-only-update)). `.staging-*` and `.failed-*` directories are this tool's own
 temporary folders; pruning removes them.
 
 The gateway writes `<dataDirectory>/ready.json` after every bot connected. The
@@ -560,6 +598,11 @@ real target receives the change.
 
 ## Idle gate
 
+The gate has two scopes. The gateway scope is the first two conditions
+below; it is enough for a restart of the gateway alone. Every other step
+(CLIProxyAPI, agent CLIs, model files, sessions, OpenCode) needs all of
+them.
+
 All of these must be true, observed read-only:
 
 - no gateway job is `queued`, `running` or `responding`;
@@ -586,11 +629,16 @@ All of these must be true, observed read-only:
   them; for an ordinary assignment, for example a forgotten one from an
   earlier captain session: ask the captain to run `pogo_crew status
   <taskID>`;
-- no OpenCode session on the shared server is running (`session.active`), and
-  no form or permission request is pending at any loaded location.
+- no Pogo-owned OpenCode session is running (`session.active`) or has a
+  pending form or permission request. Pogo-owned sessions are the pinned
+  captain sessions (a gateway bot's pin and each crew plugin's own pin),
+  every session in the gateway's thread mappings, the crew
+  sessions (peers and crew IRC sessions) and their subagents at any depth.
 
-The OpenCode condition covers the whole server because a server restart
-interrupts every session, including interactive ones. An unreadable source is
+The OpenCode condition covers Pogo's own sessions only. Other sessions on the
+shared server, for example the operator's own work, never block maintenance;
+an OpenCode restart interrupts them. A session whose parent cannot be read is
+busy (`idle-unknown`). An unreadable source is
 busy (`idle-unknown`): this includes a captain or crew profile that exists but
 cannot be read or parsed, a dangling profile link, unparsable Pogo plugin
 options and a configured OpenCode member without a profile. Symlinked profiles
@@ -600,7 +648,9 @@ The gate runs again immediately before each disruptive action: the gateway
 stop, the proxy restart and the OpenCode restart (and once after the stop).
 The same recheck runs before every restart in an undo once the gateway is
 back (readiness rollback, `recover --after-run`, leftover recovery, the
-droid). So the cron horizon only has to cover the longest single step after a gate,
+droid). An undo step that only restarts the gateway uses the gateway scope,
+and a leftover journal that holds only the release link and the gateway
+waits for the gateway scope. So the cron horizon only has to cover the longest single step after a gate,
 the OpenCode restart and plugin check (4 minutes); the default of 10
 minutes adds margin. A schedule that comes due while the gateway is stopped
 runs once, late, when the gateway is back. A horizon of an hour or more
@@ -1055,8 +1105,9 @@ desktop keyring), create a fine-grained, read-only token for
 
 ## Limits
 
-- Restarting the shared OpenCode server interrupts every session on it, so the
-  gate needs the whole server idle. A busy operator session defers maintenance.
+- Restarting the shared OpenCode server interrupts every session on it. The
+  gate waits only for Pogo-owned sessions: a session that Pogo does not own,
+  for example the operator's own, is interrupted by the restart.
 - While the gateway is stopped, Slack keeps retrying undelivered Socket Mode
   events only for a short time. The stop covers only the restarts.
 - Pi workers' models (`backend.model`) are not upgraded: they are part of the

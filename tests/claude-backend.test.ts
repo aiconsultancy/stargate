@@ -27,7 +27,10 @@ import {
   claudeToolNames,
   ircSchema,
 } from "../src/config";
-import { AttachmentInputUnavailable } from "../src/request-failure";
+import {
+  AttachmentInputUnavailable,
+  BackendFailure,
+} from "../src/request-failure";
 import { backendFingerprint } from "../src/routing";
 
 const apiKeyEnv = "POGO_CLAUDE_TEST_PROXY_KEY";
@@ -364,7 +367,7 @@ test("no tool process outlives its Claude turn, even one ignoring SIGTERM", asyn
     );
     await expect(
       backend.prompt(id, `${placement}stubborn crash`, signal()),
-    ).rejects.toThrow("Claude turn failed");
+    ).rejects.toThrow("Backend failure: crash");
     const before = (await grandchildren()).length;
     const controller = new AbortController();
     const turn = backend.prompt(
@@ -398,7 +401,7 @@ test("Claude failures carry fixed causes, never CLI or provider text", async () 
   const failed = backend.prompt(id, "fail", signal(), (text) =>
     previews.push(text),
   );
-  await expect(failed).rejects.toThrow("Claude turn failed: rate_limit");
+  await expect(failed).rejects.toThrow("Backend failure: quota");
   await failed.catch((error: Error) =>
     expect(error.message).not.toContain("raw upstream"),
   );
@@ -414,7 +417,7 @@ test("Claude failures carry fixed causes, never CLI or provider text", async () 
   expect(errored.visible()).toBe("");
   expect(errored.answer()).toBe("");
   await expect(backend.prompt(id, "crash", signal())).rejects.toThrow(
-    /^Claude turn (failed|ended without a result)$/,
+    "Backend failure: crash",
   );
   const turn = new ClaudeTurn();
   turn.add({ type: "result", subtype: "mystery", is_error: true });
@@ -638,4 +641,39 @@ test("createBackend opens the Claude adapter on demand", async () => {
   cleanup.push(() => backend.close());
   expect(backend).toBeInstanceOf(ClaudeBackend);
   expect(backend.supportsAttachments).toBe(true);
+});
+
+test("Claude maps what the CLI reports to one shared failure category", async () => {
+  const { backend } = await open();
+  const id = await session(backend);
+  const failure = (prompt: string) =>
+    backend.prompt(id, prompt, signal()).then(
+      () => undefined,
+      (error: unknown) =>
+        error instanceof BackendFailure ? error.failure : String(error),
+    );
+  // The SDK's cause, the provider's HTTP status, and whether a tool ran.
+  const cases: [prompt: string, cause: string][] = [
+    ["fail:rate_limit:429", "provider:quota:429:idle"],
+    ["fail:billing_error:402", "provider:quota:402:idle"],
+    ["fail:rate_limit", "provider:quota:0:idle"],
+    ["fail:authentication_failed:401", "provider:auth:401:idle"],
+    ["fail:account_on_hold:403", "provider:auth:403:idle"],
+    ["fail:model_not_found:404", "provider:model:404:idle"],
+    ["fail:server_error:504", "provider:timeout:504:idle"],
+    ["fail:overloaded:529", "provider:provider:529:idle"],
+    ["fail:server_error:500", "provider:provider:500:idle"],
+    // The proxy's cooldown answer: the SDK names no cause, only the status.
+    ["fail:unknown:429", "provider:quota:429:idle"],
+    // A tool ran before the provider refused the next call.
+    ["tool fail:rate_limit:429", "provider:quota:429:ran"],
+    // No result: Pogo cannot know what the CLI did.
+    ["crash", "provider:crash:0:ran"],
+  ];
+  for (const [prompt, cause] of cases)
+    expect([prompt, await failure(prompt)]).toEqual([prompt, cause]);
+  // Not a provider failure: the generic failure stays.
+  expect(await failure("fail:error_max_turns")).toBe(
+    "Error: Claude turn failed: error_max_turns",
+  );
 });

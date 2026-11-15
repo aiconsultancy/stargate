@@ -10,7 +10,7 @@ machine framework. The existing owners must keep each transition valid.
 | ------------------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `routing.ts`, `Gateway.accept` | Unknown thread → accepted mention or DM → followed thread                | Validate app, workspace, user, and channel before admission. Reject bot messages.                                                         |
 | `store.ts`, `Gateway.process`  | Queued → running → responding → done or failed                           | Persist before ACK. Run only the first unfinished job per conversation.                                                                   |
-| `Gateway.work`                 | Available slot → active conversation → released slot                     | One fiber per conversation in a scoped `FiberMap`; turns and catch-ups share the bot concurrency limit.                                   |
+| `Gateway.work`                 | Available slot → active conversation → released slot                     | One fiber per conversation in a scoped `FiberMap`, and one worker per job; turns and catch-ups share the bot concurrency limit.           |
 | Session mapping                | Missing → created → persisted → reused                                   | Reuse only within the full bot/backend/channel/thread namespace.                                                                          |
 | Delivery cursor                | Unsent → confirmed chunk → next chunk; failure → delayed retry or failed | Delivery retries do not call the backend again. Advance only after Slack confirms a write.                                                |
 | Restart recovery               | Running → interrupt attempt → responding with uncertainty notice         | Do not replay a turn whose tool outcomes are unknown.                                                                                     |
@@ -19,11 +19,32 @@ machine framework. The existing owners must keep each transition valid.
 | `ActivityDelivery`             | Capturing → finishing → settled; read or delivery failure → settled      | Settled state is absorbing. Retained handles cannot restart timers or backend work, including while cleanup drains.                       |
 | Maintenance notice             | Read → publish → acknowledge → consent wait                              | Give read and acknowledgement separate deadlines. Owner cancellation stops both; publication alone does not start the consent window.     |
 | Reaction reply                 | No reaction → requested → delivered or failed                            | Target the triggering message. A failed reaction-only reply must not disappear.                                                           |
+| File upload (Slack)            | (none) → reserved → uploaded → completing → shared; or unavailable       | A retry before `uploaded` reserves a new ID and uploads again: nothing is public yet. Never repeat a completion with an unknown outcome.  |
+| File link (IRC FILEHOST)       | (none) → uploading → uploaded → shared; or unavailable                   | The upload stores the file: never repeat one with an unknown outcome. Only a certain refusal allows another. Post a recorded URL.         |
 | `runtime.ts`                   | Locked → connected → serving → intake closed → drained → closed          | Hold one data-directory lock. Start workers after all bots connect. Close all intake, drain all workers, then resources. Failure exits 1. |
 
 An accepted Slack post can precede its SQLite confirmation. That crash window
 can produce a duplicate. These transitions do not provide exactly-once external
 effects or delivery.
+
+`store.ts` defines the job statuses once (`jobStatuses`) with the method that
+makes each transition, and the two sets that queries use: `pendingJobs` (no
+reply is stored yet) and `unfinishedJobs` (not delivered or failed yet).
+`cron-store.ts` defines `activeRuns` in the same way. Other modules import
+these sets; they do not repeat the status names.
+
+Every job transition checks the status that it starts from. `respond` needs
+a running job and throws `JobTransitionRefused` otherwise. `finish`, `sent`
+and `retry` need a stored reply (`finish` can also fail a queued job) and
+return false otherwise; the gateway logs the refusal and writes nothing.
+
+A failed turn stores one fixed cause. A provider or process failure adds its
+category, HTTP status and whether work can have run; see
+[request failures](../design.md#request-failures).
+
+`attachment-delivery.ts` owns both file rows. It saves the phase before the
+step that the phase names and posts one notice for files that become
+unavailable.
 
 ## Backends and Slack
 
@@ -81,6 +102,32 @@ Cancel the wait or reconcile the task; do not release or replay it automatically
 
 Owners are `cron.ts`, `cron-store.ts`, `cron-ui.ts`, `provision.ts`,
 `setup.ts`, `service.ts`, and `cli.ts`.
+
+## IRC
+
+| Owner                  | States and transitions                                                                               | Required invariant                                                                                                                         |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `IrcClient` connection | Closed → connected → capabilities → (SASL) → welcomed → registered; any → closed → delayed reconnect | Reset every per-connection field in one place. A callback of an earlier socket changes nothing. A refused login waits its own fixed delay. |
+| Catch-up cursor        | No cursor → baseline → forward only                                                                  | Resume CHATHISTORY after the newest server time seen for the target. Only operator repair moves a cursor back.                             |
+| Line delivery          | Chunk planned → units confirmed one by one → chunk sent                                              | The first plan of a chunk wins. A retry sends only the units after the confirmed count.                                                    |
+| Stop reaction          | Active turn → Stop requested → settled                                                               | The transport checks who may stop. The gateway then settles the turn as for a Slack Stop.                                                  |
+| `pogo_dm` copy         | Receipt recorded → copy sent → recognised by the recipient connection                                | Record the receipt ID before the copy is sent, so the copy is never admitted as a second turn.                                             |
+
+Owners are `irc/client.ts`, `irc/ship.ts`, `irc/delivery.ts` and the
+`irc_cursors`, `delivery_units` and `irc_pogo_dm` tables in `store.ts`.
+
+## Maintenance
+
+| Owner          | States and transitions                                                                                                                   | Required invariant                                                                                                              |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Run            | Recover → discover → prepare → idle gate → agent CLIs → stop gateway → proxy → OpenCode restart → live sessions → start gateway → commit | Check idle again immediately before each step that changes live state. Busy or out of time: undo this run's changes and defer.  |
+| Undo journal   | No entry → entry written before its change → entry cleared after verification                                                            | An entry means that an undo is owed. A corrupt journal is never undone. Commit the release before the gateway entry is cleared. |
+| Idle gate      | Busy or unknown → idle, at gateway scope or Pogo scope                                                                                   | Read-only. Unknown is busy. Gateway scope for a gateway restart; Pogo scope for all else. Sessions of others never block.       |
+| Gateway update | Same plugin digest → gateway idle → stop gateway → switch → start gateway → commit                                                       | Only when no other change is due. Unknown digest: full run. Keep the release that OpenCode still runs.                          |
+| Summary outbox | `.json` → `.claimed` → `.sent`, `.failed` or `.refused`                                                                                  | Claim by rename before the post. A claimed summary is never posted again, also after a crash.                                   |
+
+Owners are `nightly/run.ts`, `nightly/journal.ts`, `nightly/idle.ts`,
+`nightly/plugin-digest.ts` and `nightly/outbox.ts`. See [maintenance](../maintenance.md).
 
 ## Transition regressions
 

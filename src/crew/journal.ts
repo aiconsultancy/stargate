@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { redactActivity } from "./reporting";
+import { redactCredentials } from "../credentials";
 
 export const journalInputSchema = z.discriminatedUnion("op", [
   z.strictObject({
@@ -51,7 +51,7 @@ export class JournalStore {
         input.captainID,
         input.taskID,
         input.kind,
-        redactActivity(input.text),
+        redactCredentials(input.text),
         replayKey,
       );
     const entry = this.db

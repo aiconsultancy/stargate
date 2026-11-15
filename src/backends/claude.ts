@@ -33,7 +33,12 @@ import {
   type TextSink,
 } from "../backend";
 import { type BackendConfig, secret } from "../config";
-import { AttachmentInputUnavailable } from "../request-failure";
+import {
+  AttachmentInputUnavailable,
+  BackendFailure,
+  type BackendFailureKind,
+  statusKind,
+} from "../request-failure";
 import {
   inherited,
   isTextAttachment,
@@ -49,6 +54,10 @@ type UserContent = Exclude<SDKUserMessage["message"]["content"], string>;
 
 /** Fixed, safe failure text produced by this adapter. */
 class ClaudeTurnError extends Error {}
+
+// A CLI that ends without a result proves nothing about its tools: frames
+// can be lost with the process. Never report that nothing ran.
+const crashed = { ran: true } as const;
 
 /** Claude session IDs are UUIDs; anything else never reaches the filesystem. */
 const sessionIDSchema = z.uuid();
@@ -188,11 +197,28 @@ const resultFrame = z.object({
   subtype: z.string(),
   is_error: z.boolean(),
   result: z.string().optional(),
+  api_error_status: z.number().nullable().optional(),
 });
+// Any frame of a tool call: this turn did work.
+const toolFrame = z.union([
+  z.object({ parent_tool_use_id: z.string() }),
+  z.object({
+    type: z.literal("assistant"),
+    message: z.object({
+      content: z
+        .array(z.object({ type: z.string() }))
+        .refine((blocks) => blocks.some((block) => block.type === "tool_use")),
+    }),
+  }),
+]);
 
 /** Fixed causes only; raw SDK, CLI and provider text never leaves here. */
 const knownCauses = new Set([
   "authentication_failed",
+  "oauth_org_not_allowed",
+  "account_on_hold",
+  "verification_required",
+  "cloud_credential_error",
   "billing_error",
   "rate_limit",
   "overloaded",
@@ -204,6 +230,37 @@ const knownCauses = new Set([
   "error_max_turns",
   "error_max_budget_usd",
 ]);
+
+/** The SDK's fixed provider causes and their shared category. */
+const causeKinds: Record<string, BackendFailureKind> = {
+  authentication_failed: "auth",
+  oauth_org_not_allowed: "auth",
+  account_on_hold: "auth",
+  verification_required: "auth",
+  cloud_credential_error: "auth",
+  billing_error: "quota",
+  rate_limit: "quota",
+  model_not_found: "model",
+  overloaded: "provider",
+  server_error: "provider",
+  invalid_request: "provider",
+};
+
+/**
+ * The shared category of a failed turn, or undefined when the CLI reported
+ * no provider failure (for example a turn limit). A specific HTTP status
+ * (429, 401, 404, 504) wins over the SDK's cause.
+ */
+export function claudeFailure(turn: ClaudeTurn): BackendFailure | undefined {
+  if (!turn.result || turn.result.ok) return undefined;
+  const { cause, status } = turn.result;
+  const byStatus = status === undefined ? undefined : statusKind(status);
+  const kind =
+    byStatus && byStatus !== "provider"
+      ? byStatus
+      : (causeKinds[cause] ?? byStatus);
+  return kind && new BackendFailure(kind, { status, ran: turn.worked });
+}
 
 /**
  * Visible text of one turn: main-thread assistant text blocks only, never
@@ -217,10 +274,16 @@ export class ClaudeTurn {
   private streaming: string | undefined;
   private failure: string | undefined;
   session: string | undefined;
-  result: { ok: true; text: string } | { ok: false; cause: string } | undefined;
+  /** A tool call was seen: the turn may have changed something. */
+  worked = false;
+  result:
+    | { ok: true; text: string }
+    | { ok: false; cause: string; status?: number }
+    | undefined;
 
   /** Returns true when the visible text may have changed. */
   add(raw: unknown): boolean {
+    if (toolFrame.safeParse(raw).success) this.worked = true;
     const init = initFrame.safeParse(raw);
     if (init.success) {
       this.session = init.data.session_id;
@@ -278,9 +341,11 @@ export class ClaudeTurn {
         this.result = { ok: true, text: result.data.result ?? "" };
       else {
         const cause = this.failure ?? subtype;
+        const status = result.data.api_error_status;
         this.result = {
           ok: false,
           cause: knownCauses.has(cause) ? cause : "error",
+          ...(typeof status === "number" ? { status } : {}),
         };
       }
     }
@@ -628,16 +693,20 @@ export class ClaudeBackend implements AgentBackend {
         }
       } catch (error) {
         // The result completes the turn; a later teardown error does not.
-        if (!turn.result || signal.aborted) throw error;
+        if (signal.aborted) throw error;
+        // The CLI ended without a result. SDK errors can carry CLI output.
+        if (!turn.result) throw new BackendFailure("crash", crashed);
       } finally {
         clearTimeout(settle);
         answered.resolve();
       }
       signal.throwIfAborted();
-      if (!turn.result)
-        throw new ClaudeTurnError("Claude turn ended without a result");
+      if (!turn.result) throw new BackendFailure("crash", crashed);
       if (!turn.result.ok)
-        throw new ClaudeTurnError(`Claude turn failed: ${turn.result.cause}`);
+        throw (
+          claudeFailure(turn) ??
+          new ClaudeTurnError(`Claude turn failed: ${turn.result.cause}`)
+        );
       return turn.answer();
     } catch (error) {
       // A failed turn must not leave its CLI running.
@@ -645,6 +714,7 @@ export class ClaudeBackend implements AgentBackend {
       signal.throwIfAborted();
       if (
         error instanceof AttachmentInputUnavailable ||
+        error instanceof BackendFailure ||
         error instanceof ClaudeTurnError
       )
         throw error;

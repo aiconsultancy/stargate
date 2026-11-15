@@ -209,7 +209,9 @@ test("removing wildcard blocks pending delivery to a formerly allowed user", asy
   const f = fixture();
   f.config.access.users = ["*"];
   f.gateway.accept({ ...event(), event: { ...event().event, user: "U999" } });
-  f.store.respond(f.next().id, ["private reply"]);
+  const waiting = f.next();
+  f.store.running(waiting.id);
+  f.store.respond(waiting.id, ["private reply"]);
   f.config.access.users = ["U123"];
   await f.gateway.process(f.next(), new AbortController().signal);
   expect(f.delivered).toEqual([]);
@@ -235,7 +237,11 @@ test("denies block queued execution and already-persisted replies", async () => 
       f.config.access.users = ["*"];
       f.config.access.channels = ["*"];
       expect(f.gateway.accept(event())).toBe(true);
-      if (responding) f.store.respond(f.next().id, ["private reply"]);
+      if (responding) {
+        const waiting = f.next();
+        f.store.running(waiting.id);
+        f.store.respond(waiting.id, ["private reply"]);
+      }
       f.config.access[field] = [field === "deniedUsers" ? "U123" : "C123"];
       await f.gateway.process(f.next(), new AbortController().signal);
       expect(f.prompts).toEqual([]);
@@ -654,4 +660,45 @@ test("shutdown lets a running turn record its interruption before resolving", as
   const job = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
   expect(job?.status).toBe("responding");
   expect(job?.failure).toBe("interrupted");
+});
+
+test("a job that another writer finished during delivery is left as it is", async () => {
+  const store = new Store(":memory:");
+  stores.push(store);
+  const lines: string[] = [];
+  const posts: string[] = [];
+  let job = 0;
+  const gateway = new Gateway(
+    bot(),
+    identity,
+    store,
+    {
+      async createSession() {
+        return "session";
+      },
+      async prompt() {
+        return "reply";
+      },
+      async close() {},
+    },
+    {
+      async post(_channel, _thread, text) {
+        posts.push(text);
+        // Not a gateway path: the row ends while its chunk is in flight.
+        expect(store.finish(job, "failed")).toBe(true);
+      },
+    },
+    pino({ level: "error" }, { write: (line: string) => lines.push(line) }),
+  );
+  expect(gateway.accept(event())).toBe(true);
+  const [queued] = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1);
+  if (!queued) throw new Error("Expected a job");
+  job = queued.id;
+  await gateway.process(queued, new AbortController().signal);
+  // The cursor write was refused and logged; the status was not overwritten.
+  expect(posts).toEqual(["reply"]);
+  expect(store.jobStatus(gateway.key, job)).toBe("failed");
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain('"transition":"sent"');
+  expect(lines[0]).toContain("Job transition refused; nothing was written");
 });

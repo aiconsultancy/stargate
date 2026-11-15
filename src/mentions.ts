@@ -22,7 +22,6 @@ export const mentionRuleSchema = z.strictObject({
   channels: mentionChannelsSchema,
   names: mentionNamesSchema,
 });
-export type MentionRule = z.infer<typeof mentionRuleSchema>;
 
 const pattern = (name: string) =>
   new RegExp(

@@ -32,6 +32,7 @@ import { readInputOrigin } from "./origin";
 
 export { mailInputSchema } from "./messaging";
 
+import { redactCredentials } from "../credentials";
 import { journalInputSchema } from "./journal";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
@@ -51,7 +52,7 @@ import {
   sha256,
   verifyResult,
 } from "./reconciliation";
-import { CrewReporter, redactActivity } from "./reporting";
+import { CrewReporter } from "./reporting";
 import { type ResultAPI, readTaskResult } from "./result";
 import {
   type AbandonableStatus,
@@ -415,7 +416,7 @@ export class CrewEngine {
         const current = task && task.status !== "completed" ? task : null;
         return {
           id: member.id,
-          name: redactActivity(member.name ?? member.id, 100),
+          name: redactCredentials(member.name ?? member.id, 100),
           backend: member.backend ? "pi-durable" : "opencode",
           provisioned: peer?.status ?? "unprovisioned",
           observed: !!current && !!member.backend && this.pi.observed(current),

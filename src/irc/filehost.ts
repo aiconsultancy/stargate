@@ -6,6 +6,7 @@ import {
   maxAttachmentTotalBytes,
   UploadRefused,
 } from "../attachments";
+import { isLoopbackAddress } from "../loopback";
 
 /**
  * soju.im/FILEHOST (draft/FILEHOST): an HTTPS upload URL that the IRC server
@@ -13,8 +14,6 @@ import {
  * answer 201 with a Location; files are read with GET.
  * https://github.com/emersion/soju/blob/master/doc/ext/filehost.md
  */
-
-const loopback = new Set(["127.0.0.1", "[::1]"]);
 
 /**
  * A usable FILEHOST URL, or undefined. HTTPS always; plain HTTP only on
@@ -26,7 +25,7 @@ export function filehostURL(value: string, tlsIrc: boolean) {
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash) return;
   if (url.protocol === "https:") return url;
-  if (url.protocol === "http:" && !tlsIrc && loopback.has(url.hostname))
+  if (url.protocol === "http:" && !tlsIrc && isLoopbackAddress(url.hostname))
     return url;
   return;
 }

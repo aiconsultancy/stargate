@@ -24,7 +24,8 @@ interactive and scripted operation. `service.ts` produces Linux user units.
 
 `slack.ts` owns one outbound connection and API client per registration.
 `routing.ts` validates Slack payloads, checks identity and access, and builds
-conversation keys. `gateway.ts` runs independent workers. `store.ts` owns
+conversation keys. `gateway.ts` runs independent workers.
+`attachment-delivery.ts` publishes the files of a stored reply. `store.ts` owns
 the queue, delivery cursor, and session mappings. `runtime.ts` owns startup,
 the exclusive process lock, cancellation, and resource cleanup.
 
@@ -547,3 +548,42 @@ setup, and user services. It does not
 add file transfer, tool-event streaming, interactive approvals, OAuth SaaS
 installation, clustering, or a plugin discovery/package system. Those require
 specific use cases before extending these boundaries.
+
+## Request failures
+
+A request that cannot finish stores one fixed cause in `jobs.failure`. The
+card and the plain-text notice come from that cause only
+(`request-failure.ts`); no error text crosses the queue.
+
+A backend reports a provider or process failure as `BackendFailure` with a
+category, the provider's HTTP status when it saw one, and `ran`: whether the
+turn can have done work. The stored cause is
+`provider:<category>:<status or 0>:<ran or idle>`.
+
+| Category   | Meaning                                           | Evidence                          |
+| ---------- | ------------------------------------------------- | --------------------------------- |
+| `quota`    | Quota, rate limit, billing or credential cooldown | HTTP 402 or 429, or a named cause |
+| `auth`     | Credentials or account rejected                   | HTTP 401 or 403, or a named cause |
+| `model`    | Model missing or not allowed                      | HTTP 404, or a named cause        |
+| `timeout`  | Provider did not answer in time                   | HTTP 408 or 504                   |
+| `network`  | Provider, proxy or agent server not reached       | Socket error code                 |
+| `crash`    | Agent process ended without a result              | CLI exit without a result         |
+| `provider` | Any other provider error                          | Any other HTTP status or cause    |
+
+What each backend can see:
+
+| Backend    | Source                                                                                 | `ran` is true when                       |
+| ---------- | -------------------------------------------------------------------------------------- | ---------------------------------------- |
+| OpenCode   | `status` and `type` of the failed assistant message; socket errors to the server       | a message of the turn has a tool call    |
+| Pi Durable | HTTP status of each call to the configured proxy; socket errors (proxy providers only) | the proxy accepted an earlier call       |
+| Claude     | the SDK's fixed error cause and `api_error_status`; a CLI that exits without a result  | a tool call was seen, or the CLI crashed |
+| Codex      | the HTTP status or failure words in the CLI's error event; a CLI that exits early      | a work item was seen, or the CLI crashed |
+
+`ran` is false only on positive evidence: the provider refused a model call
+and the turn had made no tool call before it. A CLI that ends without a
+result is always reported as "may have run".
+
+The gateway's own causes stay as before: `timeout` (turn budget),
+`cancelled` (Stop), `interrupted` (shutdown) and `backend` (a failure that
+no backend could classify). The gateway logs `failure`, `status`, `ran` and
+`backend` at warning level and never logs error text.

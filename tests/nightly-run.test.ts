@@ -14,7 +14,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type Config, configSchema } from "../src/config";
 import { CrewState } from "../src/crew/state";
 import { CronStore } from "../src/cron-store";
@@ -32,6 +32,7 @@ import {
 } from "../src/nightly/journal";
 import { applyLiveModels } from "../src/nightly/model-step";
 import type { OpenCodeControl } from "../src/nightly/opencode";
+import { writePluginDigest } from "../src/nightly/plugin-digest";
 import { adoptRelease, linkedRelease } from "../src/nightly/release";
 import { reportSchema } from "../src/nightly/report";
 import {
@@ -41,7 +42,7 @@ import {
   recoverInterruptedRun,
   runMaintenance,
 } from "../src/nightly/run";
-import { readState } from "../src/nightly/state";
+import { readState, updateState } from "../src/nightly/state";
 import type { ModelRef } from "../src/nightly/versions";
 import { botKey } from "../src/routing";
 import { Store } from "../src/store";
@@ -55,9 +56,17 @@ afterAll(async () => {
 
 // ---- Release archive built from a tiny repository ----------------------
 const repo = join(base, "repo");
-await mkdir(join(repo, "src"), { recursive: true });
-await writeFile(join(repo, "package.json"), '{ "name": "pogo" }\n');
-await writeFile(join(repo, "src", "main.ts"), "export {};\n");
+// The release has a crew plugin, so staging records its digest.
+const releaseFiles = {
+  "package.json":
+    '{ "name": "pogo", "exports": { ".": "./src/crew/plugin.ts" } }\n',
+  "src/main.ts": "export {};\n",
+  "src/crew/plugin.ts": "export const plugin = 2;\n",
+};
+for (const [path, text] of Object.entries(releaseFiles)) {
+  await mkdir(dirname(join(repo, path)), { recursive: true });
+  await writeFile(join(repo, path), text);
+}
 const git = (...args: string[]) =>
   execFileSync("git", ["-C", repo, ...args], {
     encoding: "utf8",
@@ -449,7 +458,8 @@ const runner: CommandRunner = {
 
 const opencode: OpenCodeControl = {
   active: async () => fixture.active,
-  pendingInput: async () => false,
+  pendingInput: async () => [],
+  parent: async () => undefined,
   sessionModel: async (id) => {
     return fixture.sessions.get(id) ?? null;
   },
@@ -583,7 +593,7 @@ test("cleanup fails closed when the shared OpenCode server has activity", async 
     repositories: [],
     protectedPaths: [],
   };
-  fixture.active = ["ses_busy"];
+  fixture.active = ["ses_captain"];
   const result = await run(config, path);
   expect(result.report.cleanup).toBeUndefined();
   expect(
@@ -762,9 +772,20 @@ describe("nightly maintenance run", () => {
     await expectConsistent(report);
   });
 
+  test("another user's session on the shared OpenCode server does not defer", async () => {
+    const { config, path } = await install();
+    // The operator's own session: not pinned, not mapped, not a crew peer.
+    fixture.active = ["ses_operator"];
+    const { report } = await run(config, path);
+    expect(report.outcome).toBe("completed");
+    expect(
+      report.steps.find((step) => step.name === "idle-gate"),
+    ).toMatchObject({ status: "ok" });
+  });
+
   test("busy work defers everything to the next window", async () => {
     const { config, path } = await install();
-    fixture.active = ["ses_operator"];
+    fixture.active = ["ses_captain"];
     const { report, reportPath } = await run(config, path);
     expect(report.outcome).toBe("deferred");
     expect(report.reason).toBe("busy-opencode");
@@ -1604,6 +1625,224 @@ const v2 = (fields: Record<string, unknown>) => ({
 });
 const teamPath = () => join(fixture.dir, "team.json");
 
+describe("gateway-only update", () => {
+  /** Only a Pogo release is due. */
+  async function pogoOnly(overrides: Record<string, unknown> = {}) {
+    const installed = await install(overrides);
+    if (!installed.config.maintenance) throw new Error("no maintenance");
+    installed.config.maintenance.components = {
+      pogo: true,
+      cliproxyapi: false,
+      agentClis: false,
+      models: false,
+    };
+    return installed;
+  }
+  /** The running release records a crew plugin: the release's, or another. */
+  async function runningPlugin(plugin = releaseFiles["src/crew/plugin.ts"]) {
+    const old = join(fixture.dir, "pogo", "releases", "old");
+    for (const [path, text] of Object.entries({
+      ...releaseFiles,
+      "src/crew/plugin.ts": plugin,
+    })) {
+      await mkdir(dirname(join(old, path)), { recursive: true });
+      await writeFile(join(old, path), text);
+    }
+    expect(await writePluginDigest(old)).toMatch(/^v1:/);
+  }
+  const queueJob = (config: Config) => {
+    const store = new Store(join(config.dataDirectory, "pogo.sqlite"));
+    store.enqueue({
+      eventId: "E-busy",
+      botKey: "k",
+      conversation: '["k","C123","1.0"]',
+      channel: "C123",
+      thread: "1.0",
+      user: "U123",
+      text: "work",
+    });
+    store.close();
+  };
+  const stepNames = (report: { steps: { name: string }[] }) =>
+    report.steps.map((step) => step.name);
+
+  test("an unchanged crew plugin restarts the gateway only, also while the crew works", async () => {
+    const { config, path } = await pogoOnly();
+    await runningPlugin();
+    // Pogo's own captain session runs, and OpenCode cannot be asked.
+    fixture.active = ["ses_captain"];
+    const { report, attention } = await run(config, path, "run", {
+      connect: async () => {
+        throw new Error("OpenCode must not be consulted");
+      },
+    });
+    expect(attention).toBe(false);
+    expect(report.outcome).toBe("completed");
+    expect(statusOf(report, "pogo")).toBe("updated");
+    expect(stepNames(report)).toEqual([
+      "pogo-stage",
+      "crew-plugin-unchanged",
+      "idle-gate",
+      "idle-before-stop",
+      "gateway-stop",
+      "idle-after-stop",
+      "pogo-switch",
+      "gateway-ready",
+    ]);
+    expect(report.restarts.map((restart) => restart.service)).toEqual([
+      "gateway",
+    ]);
+    expect(fixture.openCodeRestarts).toBe(0);
+    expect(await live()).toMatchObject({
+      release: "releases/0.2.0",
+      gateway: "active",
+      journal: null,
+    });
+    // OpenCode still runs the plugin from the earlier release directory.
+    expect((await readState(config.dataDirectory)).openCodeRelease).toBe("old");
+  });
+
+  test("a gateway job defers it; nothing is stopped", async () => {
+    const { config, path } = await pogoOnly();
+    await runningPlugin();
+    queueJob(config);
+    const { report } = await run(config, path);
+    expect(report).toMatchObject({
+      outcome: "deferred",
+      reason: "busy-gateway",
+    });
+    expect(commands("systemctl --user stop")).toEqual([]);
+    expect((await live()).release).toBe("releases/old");
+  });
+
+  test("a changed or unknown crew plugin takes the full path", async () => {
+    for (const plugin of ["export const plugin = 1;\n", undefined]) {
+      const { config, path } = await pogoOnly();
+      // Undefined: the running release has no recorded digest.
+      if (plugin) await runningPlugin(plugin);
+      await updateState(config.dataDirectory, (state) => {
+        state.openCodeRelease = "old";
+      });
+      // The full path waits for Pogo's sessions.
+      fixture.active = ["ses_captain"];
+      expect((await run(config, path)).report).toMatchObject({
+        outcome: "deferred",
+        reason: "busy-opencode",
+      });
+      fixture.active = [];
+      fixture.time = now;
+      const { report } = await run(config, path);
+      expect(statusOf(report, "pogo")).toBe("updated");
+      expect(stepNames(report)).not.toContain("crew-plugin-unchanged");
+      expect(stepNames(report)).toContain("opencode-restart");
+      expect(fixture.openCodeRestarts).toBe(1);
+      // OpenCode runs the plugin of `current` again.
+      expect(
+        (await readState(config.dataDirectory)).openCodeRelease,
+      ).toBeNull();
+    }
+  });
+
+  test("other updates in the same run take the full path", async () => {
+    const { config, path } = await install();
+    await runningPlugin();
+    const { report } = await run(config, path);
+    expect(statusOf(report, "pogo")).toBe("updated");
+    expect(stepNames(report)).not.toContain("crew-plugin-unchanged");
+    expect(fixture.openCodeRestarts).toBe(1);
+    await expectConsistent(report);
+  });
+
+  test("a gateway that is not ready goes back to the previous release without an OpenCode restart", async () => {
+    const { config, path } = await pogoOnly();
+    await runningPlugin();
+    fixture.readyVersions = new Set(["0.1.0"]);
+    const { report } = await run(config, path);
+    expect(statusOf(report, "pogo")).toBe("rolled-back");
+    expect(report.reason).toBeUndefined();
+    expect(fixture.openCodeRestarts).toBe(0);
+    expect(await live()).toMatchObject({
+      release: "releases/old",
+      gateway: "active",
+      journal: null,
+    });
+    const state = await readState(config.dataDirectory);
+    expect(state.failedReleases["0.2.0"]?.reason).toBe("readiness-failed");
+    expect(state.openCodeRelease).toBeNull();
+  });
+
+  test("an interrupted gateway-only update is undone while the crew works", async () => {
+    const { config, path } = await pogoOnly();
+    await runningPlugin();
+    expect(statusOf((await run(config, path)).report, "pogo")).toBe("updated");
+    // As a kill leaves it after the switch: the release is not committed
+    // and the gateway is stopped. No OpenCode entry exists.
+    await writeJournal(
+      config,
+      v2({
+        gateway: { restartPending: false },
+        release: { previous: "old", version: "0.2.0" },
+      }),
+    );
+    fixture.gateway = "inactive";
+    fixture.time = now;
+    fixture.commands = [];
+    // The next run undoes it with the gateway idle only.
+    fixture.active = ["ses_captain"];
+    const next = await run(config, path);
+    expect(next.report.steps.slice(0, 2)).toMatchObject([
+      { name: "start-stopped-gateway", status: "ok" },
+      { name: "recover-previous-run", status: "ok" },
+    ]);
+    expect(next.report.rollbacks).toMatchObject([
+      { component: "pogo", to: "old", status: "ok" },
+    ]);
+    expect(fixture.openCodeRestarts).toBe(0);
+    // The same run then installs the release again, gateway only.
+    expect(statusOf(next.report, "pogo")).toBe("updated");
+    expect(await live()).toMatchObject({
+      release: "releases/0.2.0",
+      gateway: "active",
+      journal: null,
+    });
+  });
+
+  test("the release that OpenCode still runs is not removed", async () => {
+    const { config, path } = await pogoOnly();
+    await runningPlugin();
+    // OpenCode loaded its plugin two gateway-only updates ago.
+    const root = join(fixture.dir, "pogo");
+    for (const [name, version] of [
+      ["loaded", "0.0.1"],
+      ["unused", "0.0.2"],
+    ] as const) {
+      const directory = join(root, "releases", name);
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, "package.json"), "{}\n");
+      await writeFile(
+        join(directory, ".pogo-release.json"),
+        (
+          await readFile(
+            join(root, "releases", "old", ".pogo-release.json"),
+            "utf8",
+          )
+        ).replace('"0.1.0"', `"${version}"`),
+      );
+    }
+    await updateState(config.dataDirectory, (state) => {
+      state.openCodeRelease = "loaded";
+    });
+    if (config.maintenance?.pogo) config.maintenance.pogo.keep = 2;
+    const { report } = await run(config, path);
+    expect(statusOf(report, "pogo")).toBe("updated");
+    const left = (await readdir(join(root, "releases"))).sort();
+    expect(left).toEqual(["0.2.0", "loaded", "old"]);
+    expect((await readState(config.dataDirectory)).openCodeRelease).toBe(
+      "loaded",
+    );
+  });
+});
+
 describe("journal recovery", () => {
   test("a journal that names anything outside the configuration is refused", async () => {
     const cutoff = "2026-10-01T00:00:00.000Z";
@@ -1837,10 +2076,13 @@ describe("journal recovery", () => {
     const { config, path } = await install();
     const journalPath = await writeJournal(
       config,
-      v2({ gateway: { restartPending: true } }),
+      v2({
+        gateway: { restartPending: true },
+        openCode: { restarted: true, restartPending: true },
+      }),
     );
     const before = await readFile(journalPath, "utf8");
-    fixture.active = ["ses_operator"];
+    fixture.active = ["ses_captain"];
     const { report, attention } = await run(config, path, "run", {
       env: invocation,
     });
@@ -1878,7 +2120,7 @@ describe("journal recovery", () => {
     const original = opencode.active;
     let calls = 0;
     // Idle at the run's first gate; a session starts during the undo.
-    opencode.active = async () => (++calls >= 2 ? ["ses_new"] : []);
+    opencode.active = async () => (++calls >= 2 ? ["ses_captain"] : []);
     try {
       const { report, attention } = await run(config, path);
       expect(report).toMatchObject({
@@ -1920,10 +2162,13 @@ describe("journal recovery", () => {
     const { config, path } = await install();
     const journalPath = await writeJournal(
       config,
-      v2({ gateway: { restartPending: false } }),
+      v2({
+        gateway: { restartPending: false },
+        openCode: { restarted: true, restartPending: true },
+      }),
     );
     fixture.gateway = "inactive";
-    fixture.active = ["ses_operator"];
+    fixture.active = ["ses_captain"];
     const { report } = await run(config, path);
     expect(report.outcome).toBe("deferred");
     // Starting a stopped gateway interrupts nothing; Slack works again

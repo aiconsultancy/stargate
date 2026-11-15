@@ -40,7 +40,10 @@ import {
 } from "../src/backends/codex-paths";
 import { runCli } from "../src/cli";
 import { backendSchema, codexBackendSchema, ircSchema } from "../src/config";
-import { AttachmentInputUnavailable } from "../src/request-failure";
+import {
+  AttachmentInputUnavailable,
+  BackendFailure,
+} from "../src/request-failure";
 import { backendFingerprint } from "../src/routing";
 import { toolchain } from "./codex-toolchain";
 
@@ -384,7 +387,7 @@ test("no tool process outlives its Codex turn, even one ignoring SIGTERM", async
     );
     await expect(
       backend.prompt(id, `${placement}stubborn crash`, signal()),
-    ).rejects.toThrow("Codex turn failed");
+    ).rejects.toThrow("Backend failure: crash");
     expect(
       await backend.prompt(id, `${placement}stubborn linger`, signal()),
     ).toBe("Hello world\n\nDone.");
@@ -1032,11 +1035,14 @@ test("Codex failures carry a fixed cause, never CLI or provider text", async () 
   const { backend } = await open();
   const id = await session(backend);
   const previews: string[] = [];
-  for (const prompt of ["fail", "crash"]) {
+  for (const [prompt, message] of [
+    ["fail", /^Codex turn failed$/],
+    ["crash", /^Backend failure: crash$/],
+  ] as const) {
     const failed = backend.prompt(id, prompt, signal(), (text) =>
       previews.push(text),
     );
-    await expect(failed).rejects.toThrow(/^Codex turn failed$/);
+    await expect(failed).rejects.toThrow(message);
   }
   expect(previews.join("\n")).not.toContain("raw");
   const turn = new CodexTurn();
@@ -1224,4 +1230,65 @@ test("createBackend opens the Codex adapter on demand", async () => {
   cleanup.push(() => backend.close());
   expect(backend).toBeInstanceOf(CodexBackend);
   expect(backend.supportsAttachments).toBe(true);
+});
+
+test("Codex maps what the CLI reports to one shared failure category", async () => {
+  const { backend } = await open();
+  const id = await session(backend);
+  const failure = (prompt: string) =>
+    backend.prompt(id, prompt, signal()).then(
+      () => undefined,
+      (error: unknown) =>
+        error instanceof BackendFailure ? error.failure : String(error),
+    );
+  // Messages as the Codex CLI writes them; the provider body follows a colon.
+  const secret = '{"error":"acct_42 sk-proj-secret in cooldown"}';
+  const cases: [prompt: string, cause: string][] = [
+    [
+      `fail=unexpected status 429 Too Many Requests: ${secret};`,
+      "provider:quota:429:idle",
+    ],
+    [
+      "fail=exceeded retry limit, last status: 429 Too Many Requests;",
+      "provider:quota:429:idle",
+    ],
+    ["fail=You have hit your usage limit.;", "provider:quota:0:idle"],
+    [
+      `fail=unexpected status 401 Unauthorized: ${secret};`,
+      "provider:auth:401:idle",
+    ],
+    ["fail=unexpected status 403 Forbidden: no;", "provider:auth:403:idle"],
+    [
+      "fail=unexpected status 404 Not Found: no such model;",
+      "provider:model:404:idle",
+    ],
+    [
+      "fail=unexpected status 504 Gateway Timeout: slow;",
+      "provider:timeout:504:idle",
+    ],
+    ["fail=request timed out;", "provider:timeout:0:idle"],
+    [
+      "fail=unexpected status 503 Service Unavailable: down;",
+      "provider:provider:503:idle",
+    ],
+    [
+      "fail=error sending request for url (http://127.0.0.1:8317/v1/responses);",
+      "provider:network:0:idle",
+    ],
+    [
+      "fatal fail=stream disconnected before completion: reset;",
+      "provider:network:0:idle",
+    ],
+    // A command ran before the provider refused the next call.
+    [
+      "tool fail=unexpected status 429 Too Many Requests: later;",
+      "provider:quota:429:ran",
+    ],
+    // No result: Pogo cannot know what the CLI did.
+    ["crash", "provider:crash:0:ran"],
+  ];
+  for (const [prompt, cause] of cases)
+    expect([prompt, await failure(prompt)]).toEqual([prompt, cause]);
+  // A message that names no provider failure keeps the generic failure.
+  expect(await failure("fail")).toBe("Error: Codex turn failed");
 });

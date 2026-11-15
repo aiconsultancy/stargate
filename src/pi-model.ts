@@ -1,5 +1,6 @@
 import { MODEL_THINKING_LEVELS } from "@earendil-works/pi-ai/providers/model-schema";
 import { z } from "zod";
+import { isLoopbackHost } from "./loopback";
 
 /**
  * Pi Durable model selection, shared by Pi bot backends, Pi crew workers and
@@ -19,10 +20,7 @@ const envName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 
 export const secureLocalOrHttpsURL = z.url().refine((value) => {
   const url = new URL(value);
-  const loopback =
-    url.hostname === "localhost" ||
-    url.hostname === "[::1]" ||
-    /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
+  const loopback = isLoopbackHost(url.hostname);
   return (
     (url.protocol === "https:" || (url.protocol === "http:" && loopback)) &&
     !url.username &&

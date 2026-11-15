@@ -4,10 +4,10 @@ import { join, resolve } from "node:path";
 import type { Attachment } from "../attachments";
 import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import type { BackendConfig } from "../config";
+import { redactCredentials } from "../credentials";
 import type { SessionHistory } from "../session-history";
 import { piDefinitionPath, piMemberDefinition } from "./instructions";
 import type { PiCrewBinding } from "./pi-extension";
-import { redactActivity } from "./reporting";
 import { CrewError, type CrewState, type CrewTask, type Peer } from "./state";
 import type { CrewMember } from "./team";
 
@@ -554,7 +554,7 @@ export class PiCrewWorkers {
       const onText: TextSink = (text) => {
         if (!observing || signal.aborted || this.closed) return;
         // Bound and redact before buffering, not just at the SQLite boundary.
-        pendingProgress = redactActivity(text, 64000).slice(-400);
+        pendingProgress = redactCredentials(text, 64000).slice(-400);
         if (cancelProgress) return;
         flushProgress();
         scheduleProgress();

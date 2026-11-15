@@ -3,15 +3,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import pino from "pino";
+import type { AttachmentTransport } from "../src/attachment-delivery";
 import type { Attachment } from "../src/attachments";
 import type { AgentBackend } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
-import {
-  type AttachmentTransport,
-  Gateway,
-  type SlackDelivery,
-} from "../src/gateway";
+import { Gateway, type SlackDelivery } from "../src/gateway";
 import { routeEvent } from "../src/routing";
 import { Store } from "../src/store";
 import { bot, event, identity } from "./fixtures";
