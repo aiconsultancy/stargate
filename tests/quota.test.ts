@@ -284,6 +284,37 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
       accounts: [],
     });
     expect(calls).toHaveLength(6);
+    // A reserved Claude login never becomes the crew login by list position.
+    await chmod(managementKeyFile, 0o600);
+    const selected = await new QuotaReader(
+      {
+        baseURL: server.url.origin,
+        managementKeyFile,
+        accounts: { claude: ["crew@example.com"] },
+      },
+      () => clock,
+    ).read(new AbortController().signal);
+    expect(
+      selected.accounts.find((row) => row.provider === "claude"),
+    ).toMatchObject({
+      account: "claude-1",
+      status: "unavailable",
+      windows: [],
+    });
+    expect(calls.slice(6)).toHaveLength(2);
+    expect(calls[7]?.body).toMatchObject({ auth_index: "private-codex" });
+    expect(JSON.stringify(selected)).not.toContain("crew@example");
+    const claudeOnly = await new QuotaReader(
+      { baseURL: server.url.origin, managementKeyFile },
+      () => clock,
+      ["claude"],
+    ).read(new AbortController().signal);
+    expect(claudeOnly.status).toBe("ok");
+    expect(claudeOnly.accounts.map(({ account }) => account)).toEqual([
+      "claude-1",
+    ]);
+    expect(calls.slice(8)).toHaveLength(2);
+    expect(calls[9]?.body).toMatchObject({ auth_index: "private-claude" });
     const controller = new AbortController();
     controller.abort();
     await expect(reader.read(controller.signal)).rejects.toThrow();

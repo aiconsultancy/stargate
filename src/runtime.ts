@@ -38,6 +38,8 @@ import { MaintenanceOutbox } from "./nightly/outbox";
 import { writeReady } from "./nightly/ready";
 import { PairingUI } from "./pairing";
 import { PeerDirectory } from "./peers";
+import { QuotaReader } from "./quota";
+import { QuotaWatch } from "./quota-watch";
 import { botKey, type Identity, isAllowedChannel } from "./routing";
 import { SlackConnection, type SlackInteractions } from "./slack";
 import { Store } from "./store";
@@ -304,6 +306,26 @@ export function serve(
             work: abortable((signal) => outbox.work(signal)).pipe(
               Effect.catchCause(() => Effect.void),
             ),
+          });
+        }
+        const quota = config.quotaWatch;
+        if (quota?.report.bot === bot.id) {
+          const watcher = new QuotaWatch(
+            quota,
+            new QuotaReader(quota.proxy, Date.now, quota.providers),
+            async (text, signal) => {
+              if (
+                !currentBot.access.deniedChannels.some(
+                  (rule) => rule === "*" || rule === quota.report.channel,
+                )
+              )
+                await slack.announce(quota.report.channel, text, signal);
+            },
+            botLog,
+          );
+          workers.push({
+            key: `quota:${bot.id}`,
+            work: abortable((signal) => watcher.work(signal)),
           });
         }
         let closing: Promise<void> | undefined;

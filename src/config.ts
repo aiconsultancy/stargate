@@ -15,6 +15,7 @@ import {
   piThinkingLevelSchema,
   secureLocalOrHttpsURL,
 } from "./pi-model";
+import { quotaWatchSchema } from "./quota-watch";
 import { transcriptionSchema } from "./transcription";
 import { waitingSchema } from "./waiting";
 
@@ -644,8 +645,10 @@ export const configSchema = z
     irc: z.array(ircSchema).default([]),
     /** Nightly self-update and host maintenance; see docs/maintenance.md. */
     maintenance: maintenanceSchema.optional(),
+    /** Read subscription quota and announce changes to crew availability. */
+    quotaWatch: quotaWatchSchema.optional(),
   })
-  .superRefine(({ bots, irc, maintenance }, context) => {
+  .superRefine(({ bots, irc, maintenance, quotaWatch }, context) => {
     if (bots.length + irc.length === 0)
       context.addIssue({
         code: "custom",
@@ -696,21 +699,26 @@ export const configSchema = z
         code: "custom",
         message: "Each IRC account needs its own passwordEnv",
       });
-    const report = maintenance?.report;
-    if (report) {
+    for (const [feature, report] of [
+      ["maintenance", maintenance?.report],
+      ["quotaWatch", quotaWatch?.report],
+    ] as const) {
+      if (!report) continue;
       const bot = bots.find((item) => item.id === report.bot);
-      const allowed = (rules: readonly string[]) =>
+      const matches = (rules: readonly string[]) =>
         rules.includes("*") || rules.includes(report.channel);
       if (
         !bot ||
-        !allowed(bot.access.channels) ||
-        allowed(bot.access.deniedChannels)
+        matches(bot.access.deniedChannels) ||
+        (feature === "maintenance" && !matches(bot.access.channels))
       )
         context.addIssue({
           code: "custom",
-          path: ["maintenance", "report"],
+          path: [feature, "report"],
           message:
-            "Maintenance report bot must exist and allow the report channel",
+            feature === "maintenance"
+              ? "Maintenance report bot must exist and allow the report channel"
+              : "Quota report bot must exist and not deny the report channel",
         });
     }
     const cronDirectories = bots.flatMap((bot) =>

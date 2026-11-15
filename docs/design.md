@@ -227,6 +227,11 @@ limits to this RPC and the authorized `pogo_quota` tool on both harnesses.
 Proxy management credentials stay on the host. No model, session or queue
 operation is required; see [provider usage](usage.md).
 
+The optional gateway `quotaWatch` uses the same reader without a backend
+turn. It publishes a small crew-launch policy and posts transition notices
+through an allowed Slack channel. The launch supervisor owns worker admission
+and the captain can still respond while a worker is paused.
+
 `history` is an optional read-only adapter capability for the
 [fleet dashboard](dashboard.md). It returns session metadata, child sessions
 and transcript pages in one harness-independent shape

@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 
+const accountEmails = z.array(z.email()).min(1).max(10);
 export const quotaInputSchema = z.strictObject({});
 export const quotaConfigSchema = z.strictObject({
   baseURL: z.url().refine((value) => {
@@ -18,12 +19,19 @@ export const quotaConfigSchema = z.strictObject({
       !/[?#\\\s]/.test(value)
     );
   }, "Use a loopback HTTP origin without credentials, path, query or fragment"),
+  accounts: z
+    .strictObject({
+      claude: accountEmails.optional(),
+      codex: accountEmails.optional(),
+    })
+    .optional(),
   managementKeyFile: z
     .string()
     .refine((value) => isAbsolute(value) && !value.includes("\0")),
 });
 const providerSchema = z.enum(["claude", "codex"]);
 type Provider = z.infer<typeof providerSchema>;
+const providers: readonly Provider[] = ["claude", "codex"];
 const percent = z.number().finite().min(0).max(1_000_000);
 const timestamp = z.number().int().min(0).max(8_640_000_000_000_000);
 const scopeSchema = z.enum([
@@ -184,6 +192,7 @@ const credentialsSchema = z.object({
           .union([z.string().min(1).max(256), z.number().int().nonnegative()])
           .optional(),
         disabled: z.boolean().optional(),
+        email: z.string().optional(),
         account_id: z.string().min(1).max(256).optional(),
         chatgpt_account_id: z.string().min(1).max(256).optional(),
       }),
@@ -203,6 +212,7 @@ export class QuotaReader {
   constructor(
     config?: z.input<typeof quotaConfigSchema>,
     private readonly now = Date.now,
+    private readonly monitoredProviders = providers,
   ) {
     this.config =
       config === undefined ? undefined : quotaConfigSchema.parse(config);
@@ -237,16 +247,40 @@ export class QuotaReader {
       const credentials = credentialsSchema.parse(
         await this.request("/v8/management/credentials", key, signal),
       );
-      const active = credentials.files.filter(
-        (file) =>
-          !file.disabled &&
-          providerSchema.safeParse(file.provider ?? file.type).success,
-      );
-      const missing = ["claude", "codex"].filter(
-        (provider) =>
-          !active.some((file) => (file.provider ?? file.type) === provider),
-      ).length;
-      if (active.length + missing > 10)
+      const selected = this.config.accounts;
+      const active = credentials.files.filter((file) => {
+        const provider = providerSchema.safeParse(file.provider ?? file.type);
+        if (
+          file.disabled ||
+          !provider.success ||
+          !this.monitoredProviders.includes(provider.data)
+        )
+          return false;
+        const emails = selected?.[provider.data];
+        return (
+          !emails ||
+          emails.some(
+            (email) => email.toLowerCase() === file.email?.toLowerCase(),
+          )
+        );
+      });
+      const missing = this.monitoredProviders.map((provider) => {
+        const files = active.filter(
+          (file) => (file.provider ?? file.type) === provider,
+        );
+        const count =
+          selected?.[provider]?.filter(
+            (email) =>
+              !files.some(
+                (file) => file.email?.toLowerCase() === email.toLowerCase(),
+              ),
+          ).length ?? (files.length ? 0 : 1);
+        return { provider, count };
+      });
+      if (
+        active.length + missing.reduce((sum, item) => sum + item.count, 0) >
+        10
+      )
         throw new Error("Too many quota accounts");
       const counts = { claude: 0, codex: 0 };
       // Sequential, bounded reads avoid bursting subscription status endpoints.
@@ -305,11 +339,11 @@ export class QuotaReader {
           signal.throwIfAborted();
         }
       }
-      for (const provider of ["claude", "codex"] as const) {
-        if (!counts[provider])
+      for (const { provider, count } of missing) {
+        for (let skipped = 0; skipped < count; skipped++)
           snapshot.accounts.push({
             provider,
-            account: `${provider}-1`,
+            account: `${provider}-${++counts[provider]}`,
             status: "unavailable",
             observedAt: null,
             windows: [],

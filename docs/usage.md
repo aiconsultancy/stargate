@@ -28,10 +28,10 @@ channel access rules, including denies. Other backends can omit this feature.
 - A reset time that has passed makes the current allowance unknown. A reset
   does not prove that an account is now full.
 - Reads cache for up to 60 seconds per plugin binding. Reopen the command to
-  request another snapshot; there is no background polling or forced refresh.
-- OpenCode Go, burn-rate estimates and automatic recommendations are not
-  implemented. Adama can use the data with existing `pogo_model` controls;
-  reading quota does not itself switch models or change sessions.
+  request another snapshot. An optional watcher polls separately for crew notices.
+- OpenCode Go and burn-rate estimates are not implemented. Adama can use
+  the data with existing `pogo_model` controls; reading quota does not
+  itself switch models or change sessions.
 
 ## Configure the reader
 
@@ -61,6 +61,64 @@ Redirects fail closed. Response reads have an eight-second overall deadline
 and a one-MiB limit per response. The reader supports at most ten account rows
 and sixteen recognized windows per account; larger inventories fail closed
 rather than silently omit accounts.
+
+## Crew quota notices
+
+A gateway can poll the same quota reader every two minutes and post changes
+to a configured Slack channel. It publishes a separate JSON policy for crew
+launchers and never runs inference to check allowance.
+
+Add this to the gateway configuration and restart it. Only one gateway
+should own the file and post the notices.
+
+```json
+{
+  "quotaWatch": {
+    "proxy": {
+      "baseURL": "http://127.0.0.1:8317",
+      "managementKeyFile": "/absolute/private/path/management.key",
+      "accounts": { "claude": ["crew@example.com"] }
+    },
+    "report": { "bot": "captain", "channel": "C123456" },
+    "stateFile": "/absolute/private/path/quota.json",
+    "providers": ["claude", "codex"]
+  }
+}
+```
+
+Choose a channel the reporting bot can post to and the affected captains
+watch. This grants outbound delivery to that channel without permitting
+incoming conversations there. Explicit channel denies still apply.
+The example account selector is optional. With dedicated
+captain and crew logins, list the crew login emails for each applicable
+provider so reserved balances cannot clear a crew pause. Those selectors
+are kept in the gateway configuration and never appear in snapshots,
+policy files or Slack notices. A missing selected login is unknown.
+The default provider list is Claude and Codex; set it to `["claude"]` if
+the Codex workers use a local login outside this proxy. A proxy observation
+only applies to workers using the same provider account.
+
+For each account, the watcher uses the lowest remaining percentage of its
+active subscription limits. It uses the highest of those per-account
+balances within a provider pool, without adding them. Missing, expired or
+stale readings preserve the last verified mode and its original timestamp.
+A fresh balance above 25% is required to announce normal allowance after a
+restriction.
+
+- At 25% remaining or less, permit one crew worker of that type per captain.
+- At 15% or less, hold new launches and resumes of that type. Active runs
+  should checkpoint at a safe point and retain their claims.
+
+The watcher writes the last verified mode atomically as
+`{"claude":{"mode":"limited","observedAt":1794744000}}`. The timestamp is
+epoch seconds. Codex uses the same fields under `codex`. Mode is
+`normal`, `limited` or `paused`. A launcher may impose a tighter local
+limit and owns the decision to checkpoint, hold or resume.
+
+The watcher records the transition before sending its notice. Repeated
+observations and gateway restarts do not repeat it. Delivery failures log
+a fixed warning and the crew policy remains available. Captains and their
+conversation backends do not consume or enforce this crew policy.
 
 ## Credential boundary
 
