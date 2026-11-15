@@ -17,9 +17,12 @@ concurrency:
 jobs:
   release:
     name: Tag and publish release
+    # Allow an operator to prepare the first release before the canonical URL
+    # switches to this repository. Automatic releases use the canonical URL.
     if: >-
-      github.repository == 'aiconsultancy/stargate' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.repository_id == '1459142785' &&
+      ((github.repository == 'aiconsultancy/stargate' && github.event_name == 'push') ||
+       github.event_name == 'workflow_dispatch') &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
