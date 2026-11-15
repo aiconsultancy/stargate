@@ -136,18 +136,29 @@ SQLite, `bun:test`, and the existing Promise adapter contract.
 
 ## Git
 
-Work on a feature branch, not `main`. Preserve unrelated user changes. Use
-Conventional Commits, for example `feat: add backend endpoint configuration`
-or `fix: preserve reply progress after delivery failure`. Stage only intended
+Use trunk-based development. Never commit directly to `main`. Branch from the latest `main`, keep each PR to
+one small change, and merge it as soon as its review is clean and Quality
+checks pass on the exact head. Do not stack PRs or keep long-lived branches;
+split a large feature into several PRs that each leave `main` working.
+Merge or rebase the latest `main` before review. If `main` moves, update the
+branch and re-run checks; re-review only when the PR's own diff changed.
+Preserve unrelated user changes. Use Conventional Commits, for example
+`feat: add backend endpoint configuration` or
+`fix: preserve reply progress after delivery failure`. Stage only intended
 project files and inspect the staged diff for credentials before committing.
 
-Every merge to `main` that passes Quality checks becomes a GitHub release.
-The squash-merge subject (the PR title) sets the version bump, so the PR title
-must also be a Conventional Commit:
+PRs are squash-merged (the repository allows nothing else) and the PR title
+always becomes the commit subject, so it must be a Conventional Commit. Not every merge releases. Release automation reads the
+subjects since the last tag:
 
-- `feat:` → minor; `fix:`, `perf:`, `chore:`, `docs:` and others → patch;
+- `feat:` → minor; `fix:`, `perf:`, `revert:` or GitHub's `Revert "…"` and
+  the `(deps)` scope → patch (`(deps-dev)` does not release);
 - `!` after the type, or a `BREAKING CHANGE:` footer → major (minor before
-  1.0.0).
+  1.0.0);
+- `docs:`, `test:`, `refactor:`, `chore:`, `ci:` and others → no release;
+  they ship with the next release.
 
+To cut a release when only non-releasing changes are waiting, run the Release
+workflow manually on `main` (`gh workflow run release.yml --ref main`).
 Do not edit the version in `package.json` or create tags by hand. See
 `docs/releases.md`.

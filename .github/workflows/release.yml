@@ -1,10 +1,12 @@
 name: Release
 
-# Every merge to main that passes Quality checks is released. Called by Checks
-# after the quality job on a push to main. The version comes from Conventional
-# Commit subjects since the last tag (scripts/release-version.ts).
+# Called by Checks after the quality job on a push to main. Releases only when
+# a commit since the last tag needs one (scripts/release-version.ts). A manual
+# run on main releases the current head (at least a patch) once its Quality
+# checks have passed.
 on:
   workflow_call:
+  workflow_dispatch:
 
 permissions: {}
 
@@ -17,12 +19,13 @@ jobs:
     name: Tag and publish release
     if: >-
       github.repository == 'aiconsultancy/pogo' &&
-      github.event_name == 'push' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
+      checks: read
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -44,9 +47,17 @@ jobs:
         run: |
           current=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
           echo "current=$([ "$current" = "$HEAD_SHA" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Require passed Quality checks for a manual release
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          passed=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/check-runs?check_name=Quality%20checks&app_id=15368" \
+            --jq '[.check_runs[] | select(.conclusion == "success")] | length')
+          [ "$passed" -gt 0 ] || { echo "Quality checks have not passed for $HEAD_SHA"; exit 1; }
       - name: Compute version
         id: version
         if: steps.head.outputs.current == 'true'
+        env:
+          FORCE_RELEASE: ${{ github.event_name == 'workflow_dispatch' }}
         run: bun scripts/release-version.ts >> "$GITHUB_OUTPUT"
       - name: Build source archive and checksum
         if: steps.version.outputs.version != ''

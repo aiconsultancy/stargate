@@ -1,31 +1,51 @@
 /**
  * Next release version from Conventional Commit subjects since the last tag.
- * Every merge to main is released. Before 1.0.0 a breaking change bumps the
- * minor version, as SemVer allows for initial development.
+ * Only user-facing changes release: `feat`, `fix`, `perf`, `revert`, breaking
+ * changes, reverts and runtime dependency updates (exactly the `(deps)`
+ * scope; `(deps-dev)` does not release). Other commits wait for the
+ * next release, unless a manual run forces one. Before 1.0.0 a breaking
+ * change bumps the minor version, as SemVer allows for initial development.
  */
 export const firstVersion = "0.1.0";
 
-type Bump = "major" | "minor" | "patch";
-const order: Record<Bump, number> = { patch: 0, minor: 1, major: 2 };
+type Bump = "none" | "major" | "minor" | "patch";
+const order: Record<Bump, number> = { none: 0, patch: 1, minor: 2, major: 3 };
+const patchTypes = new Set(["fix", "perf", "revert"]);
 
-const subject = /^(?<type>[a-z]+)(?:\([^()\r\n]*\))?(?<breaking>!)?: \S/;
+const subject =
+  /^(?<type>[a-z]+)(?:\((?<scope>[^()\r\n]*)\))?(?<breaking>!)?: \S/;
 
 export function bumpFor(message: string): Bump {
   const [first = "", ...body] = message.split("\n");
+  // GitHub's default revert title: `Revert "feat: x (#1)"`. Undoing a change
+  // is at least a patch, and as large as the change it reverts.
+  const reverted = /^Revert "(?<inner>.+)"/.exec(first)?.groups?.["inner"];
+  if (reverted !== undefined) {
+    const inner = bumpFor(reverted);
+    return inner === "none" ? "patch" : inner;
+  }
   const parsed = subject.exec(first);
   if (
     parsed?.groups?.["breaking"] ||
     body.some((line) => /^BREAKING[ -]CHANGE: /.test(line))
   )
     return "major";
-  if (parsed?.groups?.["type"] === "feat") return "minor";
-  return "patch";
+  const type = parsed?.groups?.["type"];
+  if (type === "feat") return "minor";
+  if (type && patchTypes.has(type)) return "patch";
+  if (parsed?.groups?.["scope"] === "deps") return "patch";
+  return "none";
 }
 
+/**
+ * Next version, or undefined when nothing since `last` needs a release.
+ * `force` releases at least a patch, for an operator-requested release.
+ */
 export function nextVersion(
   last: string | undefined,
   messages: readonly string[],
-): string {
+  force = false,
+): string | undefined {
   if (last === undefined) return firstVersion;
   const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(last);
   if (!match) throw new Error("Last release tag is not vMAJOR.MINOR.PATCH");
@@ -34,9 +54,13 @@ export function nextVersion(
     number,
     number,
   ];
-  const bump = messages
+  let bump = messages
     .map(bumpFor)
-    .reduce<Bump>((a, b) => (order[b] > order[a] ? b : a), "patch");
+    .reduce<Bump>((a, b) => (order[b] > order[a] ? b : a), "none");
+  if (bump === "none") {
+    if (!force || messages.length === 0) return undefined;
+    bump = "patch";
+  }
   if (bump === "major" && major > 0) return `${major + 1}.0.0`;
   if (bump === "major" || bump === "minor") return `${major}.${minor + 1}.0`;
   patch += 1;
@@ -67,11 +91,12 @@ if (import.meta.main) {
     .split("\0")
     .map((message) => message.trim())
     .filter(Boolean);
-  if (last && messages.length === 0) {
-    console.log("version=");
-  } else {
-    const version = nextVersion(last, messages);
-    console.log(`version=${version}`);
+  const version = nextVersion(
+    last,
+    messages,
+    process.env["FORCE_RELEASE"] === "true",
+  );
+  console.log(`version=${version ?? ""}`);
+  if (version)
     await Bun.write("release-notes.md", `${releaseNotes(messages)}\n`);
-  }
 }

@@ -59,4 +59,5 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
+      checks: read
     uses: ./.github/workflows/release.yml

@@ -424,7 +424,8 @@ run lock and refuses while a run holds it.
 
 ## Pogo releases
 
-Each merge to `main` publishes `vX.Y.Z` with `pogo-vX.Y.Z.tar.gz` (a
+A merge to `main` with a user-facing change publishes `vX.Y.Z` (see
+[releases](releases.md); other changes reach hosts with the next release) with `pogo-vX.Y.Z.tar.gz` (a
 `git archive --prefix=pogo-vX.Y.Z/`) and `pogo-vX.Y.Z.tar.gz.sha256`. GitHub
 artifact attestations are not available for the organization, so Pogo does
 not use `gh attestation verify`. The tree comparison against a local clone
