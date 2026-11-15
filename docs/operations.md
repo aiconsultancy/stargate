@@ -32,13 +32,16 @@ journalctl --user -u pogo.service -f
 No `sudo`. Installation writes `~/.config/systemd/user/pogo.service` and reloads
 systemd; it does **not** enable or start the service. The unit uses absolute
 Bun/entrypoint paths, config-directory working directory, private umask, and
-the optional config companion as `EnvironmentFile`. The Bun executable must be on `PATH` when
-you install the unit. Keep the project and installed Bun version in place. Reinstall the unit after moving either.
+the optional config companion as `EnvironmentFile`. Keep the checkout and
+the Bun executable in place. Reinstall the unit after moving either.
 
 User services normally start at login. For operation after logout or before
 login, ask your administrator about `loginctl enable-linger "$USER"`.
 Do not assume your shell's exported variables reach systemd: use the private
 companion file or configure the user-service environment explicitly.
+
+The remaining examples use the linked `stargate` command. You can substitute
+`bun run src/main.ts` from the checkout.
 
 ```sh
 stargate service stop

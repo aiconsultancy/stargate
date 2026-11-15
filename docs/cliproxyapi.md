@@ -3,10 +3,10 @@
 ## Portable bootstrap
 
 Set up CLIProxyAPI when you want an explicit model endpoint for one or more
-backends. Run these commands from the Stargate checkout. It requires mise, the repository's pinned Bun, and installed
-dependencies (`mise install`, then `make deps`). It creates a separate local
-proxy, not a Slack bot runtime. No global OpenCode config, service, timer, or
-existing proxy installation is changed by the bootstrap.
+backends. Run these commands from the Stargate checkout with mise, the
+repository's pinned Bun, and installed dependencies (`mise install`, then
+`make deps`). The bootstrap creates a local proxy under `.local/cliproxyapi/`
+for the chosen backends. It leaves existing OpenCode and proxy services alone.
 
 Use the official [v8.0.54 release][release] and its [pinned configuration
 example][v8-example]. Do not copy legacy top-level `host`, `auth-dir`, or
@@ -166,7 +166,9 @@ No service installation, login persistence, or updater is implied.
    separate from subscription names. The saved list is a public-catalog
    snapshot, not runtime discovery; update mappings deliberately when needed.
    Read [Go's coding-use and privacy requirements][go] before selecting models.
-   The caller must supply its own identifying `User-Agent` and a stable
+   To enable Go during setup, supply `CLIPROXYAPI_GO_KEY_FILE` in
+   [private configuration](#create-private-local-configuration). The caller
+   must supply its own identifying `User-Agent` and a stable
    `x-opencode-session` **per conversation**. The `$…` header values above copy
    incoming headers; they do not invent a missing session or use one global ID.
 4. Follow [Slack setup](setup.md) to register a bot with private token

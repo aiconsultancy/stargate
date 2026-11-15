@@ -29,10 +29,11 @@ IRC-only installation.
    approve the install. Reinstall the app after changing its scopes.
 4. Give the wizard your member ID and the test channel ID. Slack's member
    profile menu has **Copy member ID**; the channel details show its ID.
-   Invite the installed bot with `/invite @your-bot`. Pick the backend and set
-   its working directory. For OpenCode, leave the session ID blank to create
-   separate sessions per conversation. Enter both Slack tokens in the wizard's
-   hidden prompts.
+   Invite the installed bot with `/invite @your-bot`. Leave the deny prompts
+   blank unless you need exclusions. Pick a backend and set its working
+   directory. OpenCode defaults to `http://localhost:4096`. Use the actual
+   server URL and leave the session ID blank for separate thread sessions.
+   Enter both Slack tokens in the wizard's hidden prompts.
 5. Stargate writes `pogo.json` and a private `pogo.json.env` file. If using
    Pi, add `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` to that same private file,
    according to the model you chose. If OpenCode needs an authorization header,
@@ -60,7 +61,7 @@ noninteractive setup or to configure another backend. Stop any foreground
 listener before starting a [Linux user service](operations.md#linux-user-service)
 for the same app.
 
-## Quick batch setup on another machine
+## Batch provisioning
 
 Batch provisioning can plan creation or reuse of multiple Slack apps. Install
 the pinned Bun version from the [install guide](../README.md#install), install
@@ -86,8 +87,9 @@ They contain no tokens or provider credentials. There are no shared defaults.
 - `app: { "mode": "create" }` requests a new registration.
 - The example reuses an existing app for `project-helper`. Supply its App ID,
   or use `create` and remove `appId` if you need a new app.
-- Existing matching local registrations stay in place. Conflicting settings
-  fail before any app is created. An OpenCode backend with no `model` override
+- The provisioner checks the full plan against known registrations before
+  requesting app creation. Matching registrations are reused and conflicts
+  stop the request. An OpenCode backend with no `model` override
   uses the server's default model.
 - Tool permissions remain deny-all unless explicitly configured. Do not enable
   tools merely to make provisioning or a connectivity test pass.
@@ -280,8 +282,6 @@ This installs or updates the user-level skills, including `slack-cli`,
 `slack-api`, `slack-docs`, and `create-slack-app`. Read the current hosted
 instructions in this session; do not wait for a new session:
 
-[manifest]: https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests/#creating-apps-using-manifests
-- [Slack Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode/)
 - [Slack agent setup](https://docs.slack.dev/agent-setup/prompt.md)
 - [Slack CLI skill](https://docs.slack.dev/.well-known/skills/slack-cli/SKILL.md)
 - [Slack API skill](https://docs.slack.dev/.well-known/skills/slack-api/SKILL.md)

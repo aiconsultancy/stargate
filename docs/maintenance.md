@@ -55,8 +55,8 @@ rollback: only the guarded, explicitly configured paths are eligible.
   (including Pi workers) are always retained. Add any other permanent paths to
   `protectedPaths`.
 
-Scratch roots, built-in protected names, inspection files less than seven days
-old, and relay JSON files written today are retained. Use `protectedPaths` for
+Scratch roots, [built-in protected names](../src/nightly/cleanup.ts), inspection
+files less than seven days old, and relay JSON files written today are retained. Use `protectedPaths` for
 other directories you want to retain.
 Use by a process is checked through Linux `/proc`: the executable
 (`exe`) and the mapped files (`maps`, the path column only) of each
@@ -486,7 +486,8 @@ Stargate publishes `vX.Y.Z` on [GitHub Releases](releases.md) with
 `pogo-vX.Y.Z.tar.gz` (a `git archive --prefix=pogo-vX.Y.Z/`) and
 `pogo-vX.Y.Z.tar.gz.sha256`. The release workflow does not publish artifact
 attestations. The updater verifies the checksum and compares the unpacked
-tree against a local clone by default. A release must pass these checks:
+tree against a local clone by default. A failure blocks installation of the
+candidate. A release must pass these checks:
 
 - the SHA-256 of the archive equals the published `.sha256` line for exactly
   that file name;

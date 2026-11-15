@@ -52,6 +52,20 @@ on that list. Partial globs are unsupported. Slack still enforces app
 installation, channel membership and its own permissions. Start with specific
 IDs and keep agent tools off for the first test.
 
+Set `bots[].access.mentionOnly` to require an explicit or configured mention
+on each Slack turn. By default, an allowed user can continue an active
+thread or send a direct message without another mention.
+
+Stargate names new Slack sessions `<bot name> (slack <conversation ID>)`.
+The bot name comes from `displayName`, then the configured OpenCode agent name,
+then the bot ID. Existing session titles keep their name. A pinned OpenCode
+captain uses its existing session across allowed chat sources.
+
+`turnTimeoutMs` defaults to 30 minutes per bot and can be set up to one hour.
+The per-bot `concurrency` setting defaults to four. Ordinary thread turns run
+in order within a thread. Pinned captains handle turns in arrival order
+across all their sources.
+
 Use SIGHUP for the live changes below. Other changes require a restart.
 
 ## Reload configuration without restarting
@@ -68,21 +82,20 @@ SIGHUP reads the same regular configuration file and credential companion as
 `config check`. Requests are serialised. Stargate validates the complete candidate
 before publishing any setting. Invalid input, missing credentials, a busy crew
 removal or any restart-only change refuses the whole candidate; the current
-configuration and connections stay in place. Startup now uses these same checks:
-configuration and CA files must be regular files, not symlinks, and
-Slack token prefixes must be valid. Run `config check` before upgrading a service.
-Foreground SIGHUP now reloads instead of terminating the process on terminal
-hangup; use SIGINT or SIGTERM to stop it. Logs name the outcome and, for
+configuration and connections stay in place. Startup uses the same checks.
+Configuration and CA files must be regular files, and Slack token prefixes
+must be valid. Run `config check` before upgrading a service.
+For a foreground process, use SIGHUP to reload and SIGINT or SIGTERM to stop it. Logs name the outcome and, for
 `restart required`, the changed field paths. They do not contain secret values.
 There is no automatic file watcher.
 
-| Live-safe fields                              | Effect                                                                          |
-| --------------------------------------------- | ------------------------------------------------------------------------------- |
-| `bots[].access`                               | Users/channels, denies, mention-only/text mentions, peer captains and their cap |
-| `irc[].access`                                | Denied accounts/channels, text mentions, all-calls, peer captains and turn caps |
-| `bots[].transcription`, `irc[].transcription` | Provider/settings for future turns; spoken mentions are Slack-only              |
-| `irc[].crew` additions                        | Validate credentials and stage the backend/worker before connecting             |
-| `irc[].crew` removals                         | Refuse while any removed member has queued, running or responding work          |
+| Live-safe fields                              | Effect                                                                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `bots[].access`                               | Users/channels, denies, mention-only/text mentions, peer captains and their cap                                           |
+| `irc[].access`                                | Allowed accounts, denied accounts/channels, channel request policy, text mentions, all-calls, peer captains and turn caps |
+| `bots[].transcription`, `irc[].transcription` | Provider/settings for future turns; spoken mentions are Slack-only                                                        |
+| `irc[].crew` additions                        | Validate credentials and stage the backend/worker before connecting                                                       |
+| `irc[].crew` removals                         | Refuse while any removed member has queued, running or responding work                                                    |
 
 `access.peerTurnsPerHour` is optional on Slack and IRC registrations. It defaults
 to 5; the range is 0–600, where 0 refuses peer turns. IRC's existing

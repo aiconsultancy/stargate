@@ -1,7 +1,8 @@
 # Development
 
-From a source checkout, install the pinned tools and dependencies and run the
-same checks used on GitHub:
+Development requires Git, jq, and mise on `PATH`. From a source checkout,
+install the pinned tools and dependencies, then run the same checks used on
+GitHub.
 
 ```sh
 mise install
@@ -41,7 +42,7 @@ The migration skill is available for future upgrades; this project already uses
 Effect 4. Skill examples that install `latest` do not override the SDK pin.
 Biome leaves these two upstream skill files unformatted to preserve their hashes.
 
-### Dependency updates
+## Dependency updates
 
 Dependabot checks Bun dependencies and pinned GitHub Actions daily.
 Pi runtime packages have their own group. All `@opencode/*` packages and
@@ -58,7 +59,7 @@ Do not remove those protections while dependency auto-merge is enabled.
 The required quality gate checks every commit and page against signed Dependabot
 authorship, the full commit count, and the current PR head. This also blocks
 auto-merge after a maintainer adds commits to a previously eligible PR. Put those
-edits in a human-authored PR instead. Development requires Git and jq on `PATH`.
+edits in a human-authored PR instead.
 Like other PR checks, this gate trusts repository writers not to remove or weaken
 the workflow and its tests. It is not a boundary against malicious maintainers.
 
@@ -74,7 +75,7 @@ test coverage; failed checks and unresolved review threads require a maintainer.
 
 Dependabot does not update the tool pins in `mise.toml`; update them separately.
 
-### Test coverage
+## Test coverage
 
 Tests cover routing, multi-bot isolation,
 access denial, SQLite persistence/locking, queue ordering, retries, interrupted
@@ -83,3 +84,5 @@ Pi Durable session/store reopen, and the Claude Agent SDK with a fake CLI and
 the pinned real CLI against a loopback fixture. No Slack or paid provider
 calls run in tests.
 Live Slack and model verification still requires your credentials.
+
+Run `mise run eval` for the [conversation reliability evaluations](evaluation.md).

@@ -13,9 +13,9 @@ public HTTP endpoint. IRC can run on its own or alongside Slack.
 ## Install
 
 You need Git and [Bun](https://bun.com/) 1.4.4, the version pinned for this
-project. Install Bun directly or use `mise install bun` from the checkout
-with [mise](https://mise.jdx.dev/). When using mise without shell activation,
-run Bun commands as `mise exec bun -- bun …`.
+project. If you use [mise](https://mise.jdx.dev/), run `mise install bun` once
+you are inside the checkout. Without shell activation, use
+`mise exec -- bun …` for the Bun commands.
 
 ```sh
 git clone https://github.com/aiconsultancy/stargate.git
