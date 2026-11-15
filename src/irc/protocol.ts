@@ -17,6 +17,11 @@ export const lineBytes = 510;
 /** Received lines are refused above this size: 8191 tag bytes + 512. */
 export const maxReceivedBytes = 8703;
 
+/** Message IDs used in tags and event IDs: printable ASCII, bounded. */
+export function validMsgid(value: string | undefined): value is string {
+  return value !== undefined && /^[!-~]{1,128}$/.test(value);
+}
+
 const tagKey = /^\+?(?:[A-Za-z0-9.-]+\/)?[A-Za-z0-9-]+$/;
 const unsafe = (value: string) =>
   value.includes("\0") || value.includes("\r") || value.includes("\n");

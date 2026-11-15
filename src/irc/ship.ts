@@ -10,7 +10,13 @@ import { IrcClient, type IrcTiming, Recent } from "./client";
 import { type CrewLink, crewLink } from "./crew-link";
 import { IrcDelivery } from "./delivery";
 import { Filehost, filehostURL } from "./filehost";
-import { cleanText, fold, type IrcMessage, sourceNick } from "./protocol";
+import {
+  cleanText,
+  fold,
+  type IrcMessage,
+  sourceNick,
+  validMsgid,
+} from "./protocol";
 import {
   agentTurn,
   type Fold,
@@ -248,6 +254,9 @@ function shipTransport(
       channel: job.channel,
       thread: job.thread,
       message: job.eventId.slice(job.channel.length + 1),
+      ...(job.replyParent && validMsgid(job.replyParent)
+        ? { replyParent: job.replyParent }
+        : {}),
       user: job.user,
       ...(job.sender ? { sender: job.sender } : {}),
     }),
@@ -632,6 +641,7 @@ export class IrcShip {
           typing: config.features.typing,
           reactions: config.features.reactions,
         },
+        (thread) => this.store.ircReplyParent(key, thread),
       ),
       filehost,
       client,
@@ -728,6 +738,7 @@ export class IrcShip {
       member,
       currentNick: client.nick,
       sent: (msgid) => client.sent(msgid),
+      anchor: (msgid) => client.anchor(msgid),
       now: Date.now,
       fold: client.fold,
       filehost: this.config.features.filesIn ? filehost() : undefined,
@@ -1136,7 +1147,7 @@ export class IrcShip {
       member: registration,
       currentNick: client.nick,
       fold: client.fold,
-      anchor: (msgid) => client.anchor(msgid),
+      anchor: (msgid) => client.requestAnchor(msgid),
     });
     if (!stop) return;
     if (registration.stopTurn?.(stop.conversation, stop.thread))

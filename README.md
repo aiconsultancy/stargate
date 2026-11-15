@@ -66,6 +66,12 @@ Captains and their crew can also be reached over IRCv3 (SASL accounts,
 TLS with a private CA, plain-text replies), beside or without Slack. Add an
 `irc` registration; see [IRC transport](docs/irc.md).
 
+IRC answers stay in an incoming one-level thread using `+draft/reply` on
+every line or multiline BATCH opener. Main-room messages receive main-room
+answers. Without `message-tags`, replies remain plain. See
+[reply routing](docs/irc.md#replies). Gateway owners install releases separately;
+publishing a release does not restart or update a running gateway.
+
 New sessions use `<bot name> (slack <conversation ID>)` as their title, for
 example `Galactica Captain (slack D123)`. Set `displayName` on the bot to choose
 its name; otherwise Pogo uses the OpenCode agent name, then the bot ID.

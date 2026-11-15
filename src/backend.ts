@@ -6,6 +6,7 @@ import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
+import { validMsgid } from "./irc/protocol";
 import type { MaintenanceWatch } from "./maintenance";
 import type { QuotaSnapshot } from "./quota";
 import type { SessionHistory } from "./session-history";
@@ -18,16 +19,18 @@ export type PromptSourceContext = {
     channel: string;
     thread: string;
     message: string;
+    /** IRC thread root only; separate from this request's message identity. */
+    replyParent?: string;
     user: string;
     /** `captain`: a verified peer captain; `crew`: this ship's IRC account. */
     sender?: "captain" | "crew";
   };
 };
 
-/** Compact source line: `s=slack;c=…;t=…;m=…;u=…[;k=…]`. */
+/** Compact source identity; IRC optionally adds `;r=<encoded thread root>`. */
 export function sourceLine({ source }: PromptSourceContext) {
   const value = encodeURIComponent;
-  return `s=${source.transport ?? "slack"};c=${value(source.channel)};t=${value(source.thread)};m=${value(source.message)};u=${value(source.user)}${source.sender ? `;k=${source.sender}` : ""}`;
+  return `s=${source.transport ?? "slack"};c=${value(source.channel)};t=${value(source.thread)};m=${value(source.message)};u=${value(source.user)}${source.sender ? `;k=${source.sender}` : ""}${source.transport === "irc" && validMsgid(source.replyParent) ? `;r=${value(source.replyParent)}` : ""}`;
 }
 
 /** Latest complete visible text for this turn, not reasoning or tool output. */

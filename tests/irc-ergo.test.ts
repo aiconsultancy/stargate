@@ -6,11 +6,15 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import pino from "pino";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway";
 import { IrcClient } from "../src/irc/client";
-import { type IrcMessage, parseMessage } from "../src/irc/protocol";
+import {
+  formatMessage,
+  type IrcMessage,
+  parseMessage,
+} from "../src/irc/protocol";
 import { IrcShip } from "../src/irc/ship";
 import { Store } from "../src/store";
 import { until } from "./irc-fixture";
@@ -248,6 +252,10 @@ test.skipIf(!available)(
         account: "galactica",
         passwordEnv: "POGO_IRC_GALACTICA",
         channels: ["#galactica"],
+        // One worker isolates wire framing from overlapping delivery polls.
+        concurrency: 1,
+        // Exercise plain-line tags here; fake-wire tests cover BATCH tags.
+        features: { multiline: false },
         crew: [
           {
             id: "chief",
@@ -273,13 +281,23 @@ test.skipIf(!available)(
       { env: passwords, timing: { reclaimMs: 500 } },
     );
     const prompts: string[] = [];
+    const contexts: (PromptSourceContext | undefined)[] = [];
     const backend: AgentBackend = {
       sessionID: "ses_captain",
       async createSession() {
         return "ses_captain";
       },
-      async prompt(_session, text) {
+      async prompt(
+        _session,
+        text,
+        _signal,
+        _onText,
+        _onInput,
+        _files,
+        context,
+      ) {
         prompts.push(text);
+        contexts.push(context);
         return `## Status\n\nAll **green**. ${"Details follow. ".repeat(40)}`;
       },
       async close() {},
@@ -349,7 +367,9 @@ test.skipIf(!available)(
     );
     expect(reply[0]?.params[1]).toBe("Status");
     expect(reply[0]?.tags.get("account")).toBe("galactica");
-    expect(reply[0]?.tags.has("+draft/reply")).toBe(true);
+    expect(reply.every((message) => !message.tags.has("+draft/reply"))).toBe(
+      true,
+    );
     expect(reply[1]?.params[1]?.startsWith("All green. Details follow.")).toBe(
       true,
     );
@@ -357,6 +377,48 @@ test.skipIf(!available)(
       () => store.queueCounts(captain.key).done === 1,
       15_000,
       "delivery confirmed",
+    );
+    // A real earlier message is the root; every relayed answer line stays
+    // in that one-level thread, not in a thread under the new request.
+    const root = reply[0]?.tags.get("msgid");
+    if (!root) throw new Error("captain root has no server msgid");
+    // The delivery ACK is on another socket. A round trip on Jack's socket
+    // consumes all earlier lines before the second request's boundary.
+    jack.send("PING :thread-boundary");
+    await jack.wait(
+      (message) =>
+        message.command === "PONG" &&
+        message.params.at(-1) === "thread-boundary",
+      "main reply read boundary",
+    );
+    const offset = jack.lines.length;
+    jack.send(
+      formatMessage("PRIVMSG", ["#galactica", "galactica: threaded status?"], {
+        "+draft/reply": root,
+      }),
+    );
+    await until(
+      () => store.queueCounts(captain.key).done === 2,
+      15_000,
+      "thread delivery confirmed",
+    );
+    const threaded = jack.lines
+      .slice(offset)
+      .filter(
+        (message) =>
+          message.command === "PRIVMSG" &&
+          message.source?.startsWith("galactica!"),
+      );
+    expect(threaded.length).toBeGreaterThanOrEqual(2);
+    expect(threaded.map((message) => message.tags.get("+draft/reply"))).toEqual(
+      threaded.map(() => root),
+    );
+    expect(contexts[1]?.source.replyParent).toBe(root);
+    const answerID = threaded[0]?.tags.get("msgid");
+    if (!answerID) throw new Error("thread answer has no server msgid");
+    expect(captain.client.anchor(answerID)).toBe(root);
+    expect(captain.client.requestAnchor(answerID)).toBe(
+      contexts[1]?.source.message,
     );
     // A direct message: WHOIS proves the nick holds jack's account first.
     jack.send("PRIVMSG galactica :private status?");
@@ -371,7 +433,7 @@ test.skipIf(!available)(
       15_000,
       "direct reply",
     );
-    expect(prompts).toEqual(["status?", "private status?"]);
+    expect(prompts).toEqual(["status?", "threaded status?", "private status?"]);
     jack.close();
   },
   60_000,

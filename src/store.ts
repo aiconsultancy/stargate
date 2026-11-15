@@ -11,6 +11,8 @@ export type Incoming = {
   conversation: string;
   channel: string;
   thread: string;
+  /** IRC thread root; null/absent means an ordinary main-channel request. */
+  replyParent?: string | null;
   user: string;
   text: string;
   files?: readonly string[];
@@ -170,6 +172,7 @@ export class Store {
     column("jobs", "gate", "TEXT");
     column("jobs", "textMention", "TEXT");
     column("jobs", "received", "INTEGER");
+    column("jobs", "replyParent", "TEXT");
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS jobs_received ON jobs(sender,received) WHERE received IS NOT NULL",
     );
@@ -197,14 +200,15 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt)`)
+      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
           $conversation: input.conversation,
           $channel: input.channel,
           $thread: input.thread,
+          $replyParent: input.replyParent ?? null,
           $user: input.user,
           $text: input.text,
           $files: input.files?.length ? JSON.stringify(input.files) : null,
@@ -469,8 +473,8 @@ export class Store {
       if (
         this.db
           .query(`INSERT OR IGNORE INTO jobs
-        (eventId,botKey,conversation,channel,thread,user,text,status,response,output_files,deferDelivery,sent)
-        SELECT ?,botKey,conversation,channel,thread,user,'',
+        (eventId,botKey,conversation,channel,thread,replyParent,user,text,status,response,output_files,deferDelivery,sent)
+        SELECT ?,botKey,conversation,channel,thread,replyParent,user,'',
         CASE WHEN deferDelivery=1 THEN 'done' ELSE 'responding' END,?,?,deferDelivery,
         CASE WHEN deferDelivery=1 THEN ? ELSE 0 END
         FROM jobs WHERE botKey=? AND id=?`)
@@ -563,11 +567,12 @@ export class Store {
           cursor: string | null;
           channel: string;
           thread: string;
+          replyParent: string | null;
           user: string;
           deferDelivery: number;
         },
         [string, string]
-      >(`SELECT s.session_id AS session, s.cursor, j.channel, j.thread, j.user,j.deferDelivery
+      >(`SELECT s.session_id AS session, s.cursor, j.channel, j.thread, j.replyParent, j.user,j.deferDelivery
       FROM sessions s JOIN jobs j ON j.conversation=s.conversation
       WHERE j.botKey=? AND s.conversation=? AND (j.gate IS NULL OR j.gate='admitted')
       ORDER BY j.id DESC LIMIT 1`)
@@ -670,14 +675,15 @@ export class Store {
       for (const reply of input.replies) {
         queued += this.db
           .query(`INSERT OR IGNORE INTO jobs
-          (eventId,botKey,conversation,channel,thread,user,text,status,response,output_files,deferDelivery,sent)
-          VALUES (?,?,?,?,?,?,'',?,?,?,?,?)`)
+          (eventId,botKey,conversation,channel,thread,replyParent,user,text,status,response,output_files,deferDelivery,sent)
+          VALUES (?,?,?,?,?,?,?,'',?,?,?,?,?)`)
           .run(
             reply.eventId,
             input.botKey,
             input.conversation,
             target.channel,
             target.thread,
+            target.replyParent,
             target.user,
             target.deferDelivery ? "done" : "responding",
             JSON.stringify(reply.chunks),
@@ -794,6 +800,17 @@ export class Store {
         "SELECT id,status FROM jobs WHERE botKey=? AND eventId=?",
       )
       .get(botKey, eventId);
+  }
+
+  /** Outbound IRC root of this registration's request; legacy rows stay plain. */
+  ircReplyParent(botKey: string, thread: string): string | undefined {
+    return (
+      this.db
+        .query<{ replyParent: string | null }, [string, string]>(
+          "SELECT replyParent FROM jobs WHERE botKey=? AND thread=? ORDER BY id LIMIT 1",
+        )
+        .get(botKey, thread)?.replyParent ?? undefined
+    );
   }
 
   jobStatus(botKey: string, id: number): Job["status"] | undefined {

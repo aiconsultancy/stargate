@@ -204,8 +204,7 @@ test("irc ship: a mention reaches the pinned captain and replies as plain IRC li
   });
   const lines = lineOf(fake.received("galactica"), "PRIVMSG");
   expect(lines[0]?.params).toEqual(["#galactica", "Report"]);
-  expect(lines[0]?.tags.get("+draft/reply")).toBe(msgid);
-  expect(lines[1]?.tags.has("+draft/reply")).toBe(false);
+  expect(lines.every((line) => !line.tags.has("+draft/reply"))).toBe(true);
   expect(lines[1]?.params[1]?.startsWith("Status: all systems")).toBe(true);
   for (const line of fake.received("galactica"))
     expect(utf8Bytes(line) + 2).toBeLessThanOrEqual(512);
@@ -249,19 +248,24 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
     "#galactica",
     "galactica: is CI green?",
   );
-  // jack → captain; captain → chief (1); chief → tyrol by mention (2) and
-  // → captain by reply (3); tyrol → captain would be the 4th ship message in
-  // this hour and exceeds 1 per agent × 3 agents.
+  // jack → captain; captain → chief (1); chief → tyrol (2); tyrol → captain
+  // (3). Main-channel answers carry no reply tag, so the chief's answer
+  // does not also trigger the captain. A fourth ship mention is refused.
   await until(() => backends.tyrol.prompts.length === 1, 5000, "tyrol prompt");
   await until(
     () => backends.captain.prompts.length === 2,
     5000,
-    "captain hears chief",
+    "captain hears tyrol",
   );
   await until(
     () => lineOf(fake.received("galactica-tyrol"), "PRIVMSG").length === 1,
     5000,
     "tyrol answer",
+  );
+  fake.say(
+    { nick: "galactica-chief", account: "galactica-chief" },
+    "#galactica",
+    "galactica: fourth ship turn is over the limit",
   );
   await delay(300);
   expect(backends.chief.prompts).toHaveLength(1);
@@ -273,9 +277,7 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
   );
   // The pinned captain gets a source line instead of the note.
   expect(backends.captain.prompts[1]?.context?.source.sender).toBe("crew");
-  expect(backends.captain.prompts[1]?.text).toBe(
-    "galactica-tyrol: can you look at the flaky test?",
-  );
+  expect(backends.captain.prompts[1]?.text).toBe("done, the flake is fixed.");
   expect(backends.captain.prompts).toHaveLength(2);
   const keys = ship.registrations.map((registration) => registration.key);
   expect(

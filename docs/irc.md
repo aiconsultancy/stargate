@@ -261,7 +261,7 @@ A pinned captain uses its one session for all of them. Each turn carries a
 source line:
 
 ```text
-s=irc;c=%23ship-galactica;t=<msgid>;m=<msgid>;u=jack[;k=crew|captain]
+s=irc;c=%23ship-galactica;t=<msgid>;m=<msgid>;u=jack[;k=crew|captain][;r=<thread-root-msgid>]
 ```
 
 Unpinned sessions (crew, Pi Durable) get a one-line note instead, for
@@ -270,6 +270,15 @@ New sessions use the title `<name> (irc <channel>)`.
 
 Turns in one conversation run in order. IRC message IDs deduplicate a
 message that arrives twice, for example from a history replay.
+
+`t` and `m` identify the incoming request, including when it is a thread
+reply. Optional `r` identifies its reply parent, which is the first message
+of a one-level thread. Values are percent-encoded. The gateway reads the
+IRCv3 `+draft/reply` tag (`+reply` remains accepted for compatibility). If
+the parent names one of this connection's recent threaded answers, the
+gateway uses that answer's known root instead. It does not fetch arbitrary
+thread history or trust the tag as sender identity. The authenticated
+`account` tag and existing access checks still govern admission.
 
 ## Replies
 
@@ -289,7 +298,22 @@ message that arrives twice, for example from a history replay.
   clients show it as two messages. The server delivers a batch atomically.
   A `max-bytes` below 64 is not used. Without multiline, lines are sent
   one by one.
-- The first line (or batch) carries `+draft/reply` to the request's message.
+- A channel message in the main room receives an answer in the main room,
+  without `+draft/reply`. A channel message already in a thread receives an
+  answer in the same one-level thread, with `+draft/reply` set to its root,
+  not to the new request's own message ID. Every plain-text reply line and
+  every multiline BATCH opener carries the root tag. Ergo 2.19.1 takes
+  client-only tags from the opening BATCH line, so tags on its inner lines
+  are not a substitute. The protocol formatter escapes tag values.
+- Reply routing metadata is stored with each admitted request. Retries and
+  transcript catch-up retain it without rerunning the agent. Reactions and
+  Stop still target the request message, not the thread root. Missing
+  `message-tags` capability means plain replies, as before; SASL and
+  `account-tag` remain required. Pogo already requests `message-tags` and
+  `echo-message` when offered; no new configuration switch is needed.
+- A threaded direct message also receives replies tagged with its thread
+  root. An ordinary direct message keeps the existing behaviour: replies
+  tag the request's own message ID.
 - A direct reply goes only to a nick that WHOIS (`330`) shows is logged in
   to the requester's account at that moment: the last nick seen for the
   account, then the account name. A nick with another account, or none,

@@ -131,7 +131,7 @@ test("irc multiline: one reply chunk is one batch, long lines concatenated", asy
   const { fake, store, captain } = await setup({
     answer: () => `# Status\n\n${long}\n\n- tanks: 40%`,
   });
-  const msgid = fake.say(
+  fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "galactica: status",
@@ -144,7 +144,7 @@ test("irc multiline: one reply chunk is one batch, long lines concatenated", asy
   expect(fake.batches).toHaveLength(1);
   const [batch] = fake.batches;
   expect(batch?.target).toBe("#galactica");
-  expect(batch?.tags.get("+draft/reply")).toBe(msgid);
+  expect(batch?.tags.has("+draft/reply")).toBe(false);
   expect(batch?.tags.get("label")).toMatch(/^pogo\d+$/);
   expect(batch?.lines.filter((line) => line.concat).length).toBeGreaterThan(0);
   expect(shown(batch?.lines ?? [])).toBe(`Status\n${long}\n- tanks: 40%`);

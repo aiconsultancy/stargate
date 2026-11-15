@@ -108,8 +108,8 @@ export function packBatches(
 
 /**
  * Gateway delivery over one IRC connection. A stored reply chunk becomes
- * plain-text lines that fit 512 bytes (or multiline batches); the first
- * line replies to the request's message ID. Each unit waits for the
+ * plain-text lines that fit 512 bytes (or multiline batches); every unit
+ * replies to the stored thread root, if any. Each unit waits for the
  * server's labeled echo when labeled-response is available. A failure
  * throws, so the gateway retries the chunk later without rerunning the
  * agent. IRC cannot edit or delete, so there are no previews, streaming
@@ -132,6 +132,8 @@ export class IrcDelivery implements SlackDelivery {
     private readonly hosted?: IrcFiles,
     private readonly progress?: IrcProgress,
     private readonly presence: IrcPresence = { typing: false },
+    /** Thread roots resolve separately from their request/Stop identity. */
+    private readonly replyParent?: (request: string) => string | undefined,
   ) {
     // Without reactions the gateway never asks for one.
     if (presence.reactions !== false)
@@ -239,7 +241,7 @@ export class IrcDelivery implements SlackDelivery {
     if (!host || !URL.canParse(url) || !safeFileURL(new URL(url), host))
       throw new Error("IRC file link is not a plain FILEHOST URL");
     const target = await this.target(channel);
-    const reply = this.reply(thread);
+    const reply = this.reply(thread, channel);
     const budget = this.client.budget("PRIVMSG", target, reply);
     const room = budget - utf8Bytes(`: ${url}`);
     let name = cleanText(title).trim() || "File";
@@ -252,6 +254,8 @@ export class IrcDelivery implements SlackDelivery {
       `${name}: ${url}`,
       reply,
       this.guard(channel, target, allowed),
+      "normal",
+      thread,
     );
   }
 
@@ -276,9 +280,14 @@ export class IrcDelivery implements SlackDelivery {
     return () => this.client.holds(channel, target) && (allowed?.() ?? true);
   }
 
-  private reply(thread: string): Record<string, string> {
-    return this.client.hasCap("message-tags") && validMsgid(thread)
-      ? { "+draft/reply": thread }
+  private reply(thread: string, channel?: string): Record<string, string> {
+    const parent =
+      channel !== undefined && this.replyParent
+        ? (this.replyParent(thread) ??
+          (isIrcChannel(channel) ? undefined : thread))
+        : thread;
+    return this.client.hasCap("message-tags") && validMsgid(parent)
+      ? { "+draft/reply": parent }
       : {};
   }
 
@@ -299,7 +308,7 @@ export class IrcDelivery implements SlackDelivery {
     if (unit?.allowed && !unit.allowed())
       throw new Error("IRC delivery access denied");
     const target = await this.target(channel);
-    const reply = this.reply(thread);
+    const reply = this.reply(thread, channel);
     const tracked = unit && "job" in unit ? unit : undefined;
     let plan: Plan = this.plan(channel, text, reply);
     let done = 0;
@@ -334,15 +343,24 @@ export class IrcDelivery implements SlackDelivery {
     const guard = () => (recipient?.() ?? true) && (unit?.allowed?.() ?? true);
     for (let index = done; index < plan.units.length; index++) {
       const lines = plan.units[index]?.lines ?? [];
-      const tags = index === 0 ? reply : {};
-      if (plan.batched) await this.client.sendBatch(target, lines, tags, guard);
+      if (plan.batched)
+        await this.client.sendBatch(
+          target,
+          lines,
+          reply,
+          guard,
+          "normal",
+          thread,
+        );
       else
-        for (const [position, line] of lines.entries())
+        for (const line of lines)
           await this.client.privmsg(
             target,
             line.text,
-            position === 0 ? tags : {},
+            reply,
             guard,
+            "normal",
+            thread,
           );
       if (tracked && this.progress) this.progress.done(tracked, index + 1);
     }

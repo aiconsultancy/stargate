@@ -15,6 +15,7 @@ import {
   sourceNick,
   tagBytes,
   utf8Bytes,
+  validMsgid,
 } from "./protocol";
 
 export type IrcTiming = {
@@ -228,8 +229,17 @@ export class IrcClient {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
-  /** Own message ID → the +draft/reply it carried (the request it answers). */
-  private readonly own = new Recent<string | true>(1024);
+  /** Own message ID → wire thread root and, separately, answered request. */
+  private readonly own = new Recent<{ root?: string; request?: string }>(1024);
+  /** Local echo correlation only; never changes tags or admission identity. */
+  private readonly echoes = new Recent<{
+    target: string;
+    text: string;
+    root: string | undefined;
+    label: string | undefined;
+    request: string;
+  }>(1024);
+  private echoID = 0;
   private readonly lastSeen = new Map<string, string>();
   private readonly labels = new Map<string, Pending>();
   private readonly labelBatches = new Map<string, string>();
@@ -323,10 +333,14 @@ export class IrcClient {
   sent(msgid: string) {
     return this.own.has(msgid);
   }
-  /** The request message that one of our messages replied to. */
+  /** The wire thread root that one of our messages replied to. */
   anchor(msgid: string) {
-    const value = this.own.get(msgid);
-    return typeof value === "string" ? value : undefined;
+    return this.own.get(msgid)?.root;
+  }
+  /** Stop targets the answered request, not its visible thread root. */
+  requestAnchor(msgid: string) {
+    const own = this.own.get(msgid);
+    return own?.request ?? own?.root;
   }
   /** The account last seen for a nick (a hint; WHOIS proves it), if any. */
   knownAccount(nick: string) {
@@ -441,8 +455,9 @@ export class IrcClient {
     tags: Record<string, string> = {},
     guard?: () => boolean,
     priority: SendPriority = "normal",
+    request?: string,
   ) {
-    return this.send("PRIVMSG", [target, text], tags, guard, priority);
+    return this.send("PRIVMSG", [target, text], tags, guard, priority, request);
   }
 
   tagmsg(target: string, tags: Record<string, string>, guard?: () => boolean) {
@@ -512,21 +527,56 @@ export class IrcClient {
     tags: Record<string, string> = {},
     guard?: () => boolean,
     priority: SendPriority = "normal",
+    request?: string,
   ): Promise<void> {
+    let echo: string | undefined;
     const result = this.transmit(
-      (label) => [
-        formatMessage(command, params, {
-          ...(label === undefined ? {} : { label }),
-          ...tags,
-        }),
-      ],
+      (label) => {
+        if (command === "PRIVMSG" && params[0] !== undefined)
+          echo = this.rememberEcho(
+            params[0],
+            params[1] ?? "",
+            tags,
+            label,
+            request,
+          );
+        return [
+          formatMessage(command, params, {
+            ...(label === undefined ? {} : { label }),
+            ...tags,
+          }),
+        ];
+      },
       guard,
       priority,
     );
     const [target, text = ""] = params;
     if ((command === "PRIVMSG" || command === "NOTICE") && target !== undefined)
       this.whenSent(result, command, target, text);
-    return result;
+    return result.catch((error: unknown) => {
+      if (echo !== undefined) this.echoes.delete(echo);
+      throw error;
+    });
+  }
+
+  /** Bounded, in-process match for a send's own echo, labeled when possible. */
+  private rememberEcho(
+    target: string,
+    text: string,
+    tags: Record<string, string>,
+    label: string | undefined,
+    request: string | undefined,
+  ) {
+    if (!validMsgid(request) || !this.hasCap("echo-message")) return;
+    const id = String(++this.echoID);
+    this.echoes.set(id, {
+      target: this.fold(target),
+      text,
+      root: tags["+draft/reply"],
+      label,
+      request,
+    });
+    return id;
   }
 
   /** Report a confirmed message to a nick (`events.sent`); never throws. */
@@ -561,38 +611,42 @@ export class IrcClient {
     tags: Record<string, string> = {},
     guard?: () => boolean,
     priority: SendPriority = "normal",
+    request?: string,
   ): Promise<void> {
     if (!this.multiline)
       return Promise.reject(new Error("IRC multiline unavailable"));
     const reference = `pogo${++this.label}`;
+    const text = lines
+      .map((line, index) =>
+        index && !line.concat ? `\n${line.text}` : line.text,
+      )
+      .join("");
+    let echo: string | undefined;
     const result = this.transmit(
-      (label) => [
-        formatMessage("BATCH", [`+${reference}`, "draft/multiline", target], {
-          ...(label === undefined ? {} : { label }),
-          ...tags,
-        }),
-        ...lines.map((line) =>
-          formatMessage("PRIVMSG", [target, line.text], {
-            batch: reference,
-            ...(line.concat ? { "draft/multiline-concat": "" } : {}),
+      (label) => {
+        echo = this.rememberEcho(target, text, tags, label, request);
+        return [
+          formatMessage("BATCH", [`+${reference}`, "draft/multiline", target], {
+            ...(label === undefined ? {} : { label }),
+            ...tags,
           }),
-        ),
-        formatMessage("BATCH", [`-${reference}`]),
-      ],
+          ...lines.map((line) =>
+            formatMessage("PRIVMSG", [target, line.text], {
+              batch: reference,
+              ...(line.concat ? { "draft/multiline-concat": "" } : {}),
+            }),
+          ),
+          formatMessage("BATCH", [`-${reference}`]),
+        ];
+      },
       guard,
       priority,
     );
-    this.whenSent(
-      result,
-      "PRIVMSG",
-      target,
-      lines
-        .map((line, index) =>
-          index && !line.concat ? `\n${line.text}` : line.text,
-        )
-        .join(""),
-    );
-    return result;
+    this.whenSent(result, "PRIVMSG", target, text);
+    return result.catch((error: unknown) => {
+      if (echo !== undefined) this.echoes.delete(echo);
+      throw error;
+    });
   }
 
   private transmit(
@@ -837,6 +891,7 @@ export class IrcClient {
     this.labelBatches.clear();
     this.replayBatches.clear();
     this.multilineIn.clear();
+    this.echoes.clear();
     if (this.pumpTimer) clearTimeout(this.pumpTimer);
     this.pumpTimer = undefined;
     const error = new IrcUnavailable();
@@ -1122,6 +1177,7 @@ export class IrcClient {
     label: string | undefined,
     replay: boolean,
   ) {
+    label ??= this.labelBatches.get(message.tags.get("batch") ?? "");
     const nick = sourceNick(message.source);
     const account = message.tags.get("account");
     const target = message.params[0] ?? "";
@@ -1136,11 +1192,22 @@ export class IrcClient {
       if (!seen || time > seen) this.lastSeen.set(this.fold(target), time);
     }
     const msgid = message.tags.get("msgid");
-    if (msgid && this.fold(nick) === this.fold(this.currentNick))
-      this.own.set(
-        msgid,
-        message.tags.get("+draft/reply") ?? message.tags.get("+reply") ?? true,
+    if (validMsgid(msgid) && this.fold(nick) === this.fold(this.currentNick)) {
+      const root =
+        message.tags.get("+draft/reply") ?? message.tags.get("+reply");
+      const echo = [...this.echoes].find(
+        ([, sent]) =>
+          sent.target === this.fold(target) &&
+          sent.text === message.params[1] &&
+          sent.root === root &&
+          sent.label === label,
       );
+      if (echo) this.echoes.delete(echo[0]);
+      this.own.set(msgid, {
+        ...(validMsgid(root) ? { root } : {}),
+        ...(echo ? { request: echo[1].request } : {}),
+      });
+    }
     // A labeled echo confirms our own send; it is not new input.
     if (label === undefined) this.events.message?.(message, replay);
   }
@@ -1184,7 +1251,12 @@ export class IrcClient {
       if (type === "chathistory" || type === "draft/chathistory")
         this.replayBatches.add(id);
       if (type === "draft/multiline")
-        this.multilineIn.set(id, { open: message, label, parts: [] });
+        this.multilineIn.set(id, {
+          open: message,
+          label:
+            label ?? this.labelBatches.get(message.tags.get("batch") ?? ""),
+          parts: [],
+        });
       return;
     }
     if (!reference.startsWith("-")) return;

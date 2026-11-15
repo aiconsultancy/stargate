@@ -222,6 +222,81 @@ test("irc routing: direct messages are per account and captain-only", () => {
   expect(routeIrcMessage(parsed, context)?.eventId).toBe(first?.eventId);
 });
 
+test("irc reply context preserves request identity and ignores invalid parents", () => {
+  const root = "root;with\\slash=equals";
+  for (const tag of ["+draft/reply", "+reply"]) {
+    const admission = route("#galactica", "galactica: check", {
+      account: "jack",
+      [tag]: root,
+    });
+    expect(admission).toMatchObject({ thread: "abc123", replyParent: root });
+    expect(admission?.eventId).toBe("#galactica:abc123");
+    expect(admission?.conversation).toBe(
+      JSON.stringify(["captain-key", "#galactica"]),
+    );
+  }
+  for (const parent of ["", "has space", "bad\nline", "a".repeat(129)]) {
+    expect(
+      route("#galactica", "galactica: check", {
+        account: "jack",
+        "+draft/reply": parent,
+      })?.replyParent,
+    ).toBeUndefined();
+  }
+  const source = {
+    transport: "irc" as const,
+    channel: "#galactica",
+    thread: "request",
+    message: "request",
+    user: "jack",
+    replyParent: root,
+  };
+  expect(sourceLine({ source })).toBe(
+    `s=irc;c=%23galactica;t=request;m=request;u=jack;r=${encodeURIComponent(root)}`,
+  );
+  expect(
+    sourceLine({ source: { ...source, replyParent: "bad\nline" } }),
+  ).not.toContain(";r=");
+  const { transport: _transport, ...slackSource } = source;
+  expect(sourceLine({ source: slackSource })).not.toContain(";r=");
+});
+
+test("irc reply context flattens only known own answers, without changing admission", () => {
+  const context = {
+    config,
+    member: captain,
+    currentNick: captain.nick,
+    sent: (id: string) => id === "own-1",
+    now: () => 0,
+    fold: (value: string) => fold(value),
+    anchor: (id: string) => (id === "own-1" ? "root" : undefined),
+  };
+  const incoming = message("#galactica", "continue", {
+    account: "jack",
+    "+draft/reply": "own-1",
+  });
+  expect(routeIrcMessage(incoming, context)).toMatchObject({
+    thread: "abc123",
+    replyParent: "root",
+    text: "continue",
+  });
+  expect(
+    routeIrcMessage(
+      { ...incoming, tags: new Map([["+draft/reply", "own-1"]]) },
+      context,
+    ),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", {
+        account: "jack",
+        "+draft/reply": "someone-else",
+      }),
+      context,
+    ),
+  ).toBeUndefined();
+});
+
 test("irc routing: ship and peer senders are marked; access rechecks", () => {
   expect(
     route("#galactica", "galactica: done", { account: "galactica-chief" })

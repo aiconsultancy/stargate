@@ -178,6 +178,41 @@ test("irc client: unlabeled servers resolve on write; throttle spaces lines", as
   expect(lines.every((m) => !m.tags.has("label"))).toBe(true);
 });
 
+test("irc echoes keep the wire root separate from the answered request", async () => {
+  for (const labeled of [true, false]) {
+    const fake = server({
+      caps: [
+        "sasl=PLAIN",
+        "account-tag",
+        "message-tags",
+        "echo-message",
+        "batch",
+        "draft/multiline=max-bytes=4096,max-lines=100",
+        ...(labeled ? ["labeled-response"] : []),
+      ],
+    });
+    const { client } = start(fake);
+    await client.waitReady(2000);
+    await until(() => client.inChannel("#galactica"), 2000, "join");
+    const delivery = new IrcDelivery(
+      client,
+      2000,
+      undefined,
+      undefined,
+      undefined,
+      (request) => (request === "thread-request" ? "root" : undefined),
+    );
+    await delivery.post("#galactica", "thread-request", "thread answer");
+    await until(() => client.sent("m1"), 2000, "thread echo");
+    expect(client.anchor("m1")).toBe("root");
+    expect(client.requestAnchor("m1")).toBe("thread-request");
+    await delivery.post("#galactica", "room-request", "room answer");
+    await until(() => client.sent("m2"), 2000, "room echo");
+    expect(client.anchor("m2")).toBeUndefined();
+    expect(client.requestAnchor("m2")).toBe("room-request");
+  }
+});
+
 test("irc client: refused SASL and missing account-tag never register", async () => {
   const wrong = server({ accounts: { galactica: "other" } });
   const first = start(wrong);

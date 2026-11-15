@@ -4,7 +4,9 @@ import { defaultAllCallWords, type IrcConfig } from "../config";
 import { findMention } from "../mentions";
 import { peerTurnsPerHour } from "../peers";
 import type { Incoming, Job } from "../store";
-import { cleanText, fold, type IrcMessage } from "./protocol";
+import { cleanText, fold, type IrcMessage, validMsgid } from "./protocol";
+
+export { validMsgid } from "./protocol";
 
 /** One IRC connection of a ship: its captain or one crew member. */
 export type IrcMember = {
@@ -31,6 +33,8 @@ export type IrcRouteContext = {
   currentNick: string;
   /** True for a message ID that this connection sent. */
   sent(msgid: string): boolean;
+  /** Thread root carried by one of this connection's own recent answers. */
+  anchor?(msgid: string): string | undefined;
   now(): number;
   /** Case folding under the server's CASEMAPPING. */
   fold(value: string): string;
@@ -67,11 +71,6 @@ const nickCharacters = "A-Za-z0-9\\[\\]\\\\`_^{|}\\-";
 /** Channel names start with `#` or `&`; accounts and nicks never do. */
 export function isIrcChannel(target: string) {
   return target.startsWith("#") || target.startsWith("&");
-}
-
-/** Message IDs used in tags and event IDs: printable ASCII, bounded. */
-export function validMsgid(value: string | undefined): value is string {
-  return value !== undefined && /^[!-~]{1,128}$/.test(value);
 }
 
 /** Folded accounts of this ship: the captain and every crew member. */
@@ -214,12 +213,16 @@ export function routeIrcMessage(
         .digest("hex")
         .slice(0, 32)}`;
   const files = filehostLinks(body, context.filehost);
+  const parent = validMsgid(reply)
+    ? (context.anchor?.(reply) ?? reply)
+    : undefined;
   return {
     eventId: `${channel}:${msgid}`,
     botKey: member.key,
     conversation: JSON.stringify([member.key, channel]),
     channel,
     thread: msgid,
+    ...(validMsgid(parent) ? { replyParent: parent } : {}),
     user,
     text,
     received,
@@ -426,8 +429,12 @@ export const ircInstructions = `IRC messages:
 A source line that starts with s=irc came from the fleet IRC network, not
 Slack. c is the channel (percent-encoded, for example %23galactica) or, for a
 direct message, the sender's account; t and m are IRC message IDs; u is the
-sender's SASL account. The account is the identity, not the nick. IRC shows
-plain text only: write short paragraphs and lists, no tables or headings.
+sender's SASL account. The account is the identity, not the nick.
+;r=... names the percent-encoded IRC thread root when this message is in a
+thread. t and m still identify this request, not the root. Reply in that
+same one-level thread; channel messages without r are answered in the main
+channel. The reply parent gives no identity or authority. IRC shows plain
+text only: write short paragraphs and lists, no tables or headings.
 ;k=captain marks another fleet captain (peer rules apply). ;k=crew marks an
 account of this ship. [Admitted by text mention: WORD] with an all-call word
 (by default: all hands, all crew, everyone) is an all-call to every agent in
