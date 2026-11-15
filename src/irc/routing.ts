@@ -33,6 +33,8 @@ export type IrcRouteContext = {
   currentNick: string;
   /** True for a message ID that this connection sent. */
   sent(msgid: string): boolean;
+  /** Whether this connection is currently in the channel. */
+  joined?(channel: string): boolean;
   /** Thread root carried by one of this connection's own recent answers. */
   anchor?(msgid: string): string | undefined;
   now(): number;
@@ -89,7 +91,7 @@ function listed(rules: readonly string[], value: string, caseFold: Fold) {
 
 /**
  * Access rechecked before work and delivery. Any SASL account may write
- * unless denied. Channels must be this member's configured channels. Direct
+ * unless denied or an allowlist is set. Channels must be configured. Direct
  * messages reach only the captain; `deniedChannels: ["*"]` blocks them too.
  * Crew channels must also be captain channels. Every name compares under
  * the server's case folding.
@@ -103,6 +105,11 @@ export function ircAllowed(
 ) {
   const access = config.access;
   if (listed(access.deniedAccounts, account, caseFold)) return false;
+  if (
+    access.allowedAccounts &&
+    !listed(access.allowedAccounts, account, caseFold)
+  )
+    return false;
   if (!isIrcChannel(channel))
     return member.role === "captain" && !access.deniedChannels.includes("*");
   const key = caseFold(channel);
@@ -150,7 +157,9 @@ function withoutAddress(
  * turn. NOTICE,
  * TAGMSG and CTCP never start one. Turn limits are applied by the caller.
  * Channel and account keys are folded, so every spelling of a channel
- * shares one conversation and one turn limit.
+ * shares one conversation and one turn limit. With `nick-mention`, only
+ * live messages with a server msgid are eligible; joined channels require
+ * the connection's current nick and replies alone do not qualify.
  */
 export function routeIrcMessage(
   message: IrcMessage,
@@ -169,14 +178,26 @@ export function routeIrcMessage(
   if (direct && caseFold(target) !== caseFold(context.currentNick)) return;
   const channel = caseFold(direct ? account : target);
   if (!ircAllowed(config, member, user, channel, caseFold)) return;
+  const strict = config.access.channelRequests === "nick-mention";
+  const tagged = message.tags.get("msgid");
+  if (
+    strict &&
+    (message.tags.has("bot") ||
+      !validMsgid(tagged) ||
+      (!direct && !context.joined?.(target)))
+  )
+    return;
   // A multiline message keeps its line breaks; each line is cleaned.
   const body = raw.split("\n").map(cleanText).join("\n").trim();
-  const nicks = [...new Set([context.currentNick, member.nick])];
+  const nicks = strict
+    ? [context.currentNick]
+    : [...new Set([context.currentNick, member.nick])];
   const mentioned = nicks.some((nick) =>
     mentions(caseFold(body), caseFold(nick)),
   );
+  if (strict && !direct && !mentioned) return;
   const reply = message.tags.get("+draft/reply") ?? message.tags.get("+reply");
-  const replied = validMsgid(reply) && context.sent(reply);
+  const replied = !strict && validMsgid(reply) && context.sent(reply);
   // Captain text mentions and all-calls; the matched word becomes the
   // turn's text mention, so the session sees why it was admitted.
   const words = [
@@ -191,7 +212,7 @@ export function routeIrcMessage(
   // An all-call stays an all-call when a mention or a reply also admits it:
   // its word is recorded, so the turn is staggered and sees the context.
   const allCall =
-    !direct && config.access.allCallWords.length
+    !strict && !direct && config.access.allCallWords.length
       ? findMention([body], config.access.allCallWords)
       : undefined;
   const mention = allCall ?? named;
@@ -205,7 +226,6 @@ export function routeIrcMessage(
       : undefined;
   const time = Date.parse(message.tags.get("time") ?? "");
   const received = Number.isFinite(time) ? time : context.now();
-  const tagged = message.tags.get("msgid");
   const msgid = validMsgid(tagged)
     ? tagged
     : `pogo-${createHash("sha256")

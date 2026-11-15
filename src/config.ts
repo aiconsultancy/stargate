@@ -439,15 +439,21 @@ export const ircSchema = z
     id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
     displayName: z.string().trim().min(1).max(100).optional(),
     server: ircServerSchema,
-    /** SASL PLAIN account of the captain bot. */
+    /** Expected SASL account of the captain bot. */
     account: ircAccount,
-    passwordEnv: envName,
+    passwordEnv: envName.optional(),
+    /** Owner-only PEM bundle used for SASL EXTERNAL instead of a password. */
+    clientPemFile: absolutePath.optional(),
     /** Defaults to the account. */
     nick: ircAccount.optional(),
     /** The only channels the captain joins; the first is the ship channel. */
     channels: z.array(ircChannel).min(1).max(20),
     access: z
       .strictObject({
+        /** When set, only these exact SASL accounts may start a turn. */
+        allowedAccounts: z.array(ircAccount).min(1).max(50).optional(),
+        /** Require an exact current nick mention in joined channels and a real msgid. */
+        channelRequests: z.literal("nick-mention").optional(),
         /** Any SASL account may write unless denied; `*` denies everyone. */
         deniedAccounts: z
           .array(z.union([z.literal("*"), ircAccount]))
@@ -561,7 +567,16 @@ export const ircSchema = z
     ];
     if (new Set(nicks.map(lower)).size !== nicks.length)
       issue("Captain and crew need distinct IRC nicks");
-    const secrets = [irc.passwordEnv, ...irc.crew.map((m) => m.passwordEnv)];
+    if (Boolean(irc.passwordEnv) === Boolean(irc.clientPemFile))
+      issue(
+        "Set exactly one of passwordEnv (PLAIN) or clientPemFile (EXTERNAL)",
+      );
+    if (irc.clientPemFile && !irc.server.tls)
+      issue("IRC clientPemFile requires TLS");
+    const secrets = [
+      ...(irc.passwordEnv ? [irc.passwordEnv] : []),
+      ...irc.crew.map((m) => m.passwordEnv),
+    ];
     if (new Set(secrets).size !== secrets.length)
       issue("Captain and crew need separate passwordEnv variables");
     if (new Set(irc.crew.map((member) => member.id)).size !== irc.crew.length)
@@ -673,7 +688,7 @@ export const configSchema = z
         });
     }
     const ircSecrets = irc.flatMap((registration) => [
-      registration.passwordEnv,
+      ...(registration.passwordEnv ? [registration.passwordEnv] : []),
       ...registration.crew.map((member) => member.passwordEnv),
     ]);
     if (new Set(ircSecrets).size !== ircSecrets.length)

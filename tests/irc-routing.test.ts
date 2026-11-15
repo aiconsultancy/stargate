@@ -116,6 +116,85 @@ function route(
   });
 }
 
+test("irc nick-mention access requires a live joined target, exact nick, and an allowlisted account with a msgid", () => {
+  const restricted = shipConfig({
+    access: {
+      allowedAccounts: ["jack", "jac"],
+      channelRequests: "nick-mention",
+      textMentions: ["all captains"],
+      deniedAccounts: ["jac"],
+    },
+  });
+  const context = {
+    config: restricted,
+    member: captain,
+    currentNick: "galactica-2",
+    joined: (target: string) => target === "#galactica",
+    sent: (id: string) => own.has(id),
+    now: () => 0,
+    fold: (value: string) => fold(value),
+  };
+  const admit = (m: ReturnType<typeof message>) => routeIrcMessage(m, context);
+  expect(
+    admit(message("#galactica", "Galactica-2: status?", { account: "JACK" })),
+  ).toMatchObject({
+    text: "status?",
+    user: "jack",
+    channel: "#galactica",
+    thread: "abc123",
+  });
+  expect(
+    admit(message("galactica-2", "status?", { account: "jack" })),
+  ).toMatchObject({ channel: "jack", eventId: "jack:abc123" });
+  for (const m of [
+    message("#galactica", "galactica-2: status?", { account: "impostor" }),
+    message("#galactica", "galactica-2: status?", { account: "jac" }),
+    message("#galactica", "galactica-2: status?", { account: "jack", bot: "" }),
+    message("#galactica", "galactica-2: status?", {
+      account: "jack",
+      msgid: "",
+    }),
+    message("#galactica", "galactica-2: status?"),
+    message("#galactica", "galactica: status?", { account: "jack" }),
+    message("#galactica", "galactica-22: status?", { account: "jack" }),
+    message("#galactica", "all captains", { account: "jack" }),
+    message("#galactica", "everyone", { account: "jack" }),
+    message("#galactica", "reply only", {
+      account: "jack",
+      "+draft/reply": "own-1",
+    }),
+    message("#other", "galactica-2: status?", { account: "jack" }),
+  ])
+    expect(admit(m)).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "galactica-2: status?", { account: "jack" }),
+      { ...context, joined: () => false },
+    ),
+  ).toBeUndefined();
+});
+
+test("irc config requires one credential and TLS for client PEM", () => {
+  const certificate = {
+    ...config,
+    passwordEnv: undefined,
+    clientPemFile: "/private/client.pem",
+  };
+  expect(ircSchema.safeParse(certificate).success).toBe(false);
+  const secure = { ...certificate, server: { ...config.server, tls: true } };
+  expect(ircSchema.safeParse(secure).success).toBe(true);
+  expect(
+    ircSchema.safeParse({ ...secure, passwordEnv: "IRC_PASSWORD" }).success,
+  ).toBe(false);
+  expect(
+    ircSchema.safeParse({ ...secure, clientPemFile: undefined }).success,
+  ).toBe(false);
+  expect(
+    ircSchema.safeParse({ ...secure, access: { allowedAccounts: ["*"] } })
+      .success,
+  ).toBe(false);
+});
+
 test("irc routing: account tag is identity; own and denied accounts never admit", () => {
   expect(route("#galactica", "galactica: hi", {})).toBeUndefined();
   expect(

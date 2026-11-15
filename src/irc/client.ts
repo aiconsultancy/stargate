@@ -61,7 +61,9 @@ export type IrcClientOptions = {
   /** PEM of a private CA; system roots otherwise. */
   ca?: string;
   account: string;
-  password: string;
+  password?: string;
+  /** Explicit TLS cert and private key for SASL EXTERNAL. */
+  clientCertificate?: { cert: string; key: string };
   nick: string;
   /** The only channels this connection may ever join. */
   channels: readonly string[];
@@ -193,7 +195,7 @@ export class Recent<V = true> extends Map<string, V> {
 
 /**
  * One IRCv3 client connection with reconnect. Owns CAP negotiation, SASL
- * PLAIN, keepalive, nick reclaim, the channel allowlist, send throttling and
+ * PLAIN or EXTERNAL, keepalive, channel joins, send throttling and
  * labeled-response delivery confirmation. Never logs message text or
  * credentials.
  */
@@ -207,6 +209,8 @@ export class IrcClient {
   private registeredNow = false;
   /** 001 seen; readiness waits for the end of the registration burst. */
   private welcomed = false;
+  /** EXTERNAL must prove the actual account bound to the certificate. */
+  private externalAccountVerified = false;
   private networkName: string | undefined;
   /** FILEHOST advertised in this connection's ISUPPORT, then since ready. */
   private advertisedFilehost: string | undefined;
@@ -266,6 +270,13 @@ export class IrcClient {
     private readonly options: IrcClientOptions,
     private readonly events: IrcEvents = {},
   ) {
+    if (
+      Boolean(options.clientCertificate) === Boolean(options.password) ||
+      (options.clientCertificate && !options.tls)
+    )
+      throw new Error(
+        "IRC requires either a password or a TLS client certificate",
+      );
     this.timing = { ...defaultTiming, ...options.timing };
     this.tokens = this.timing.burst;
     this.currentNick = options.nick;
@@ -745,13 +756,14 @@ export class IrcClient {
     };
     this.offered = new Map();
     this.requested = 0;
-    const { host, port, tls, ca } = this.options;
+    const { host, port, tls, ca, clientCertificate } = this.options;
     const opened = Bun.connect({
       hostname: host,
       port,
       tls: tls
         ? {
             ...(ca ? { ca } : {}),
+            ...(clientCertificate ?? {}),
             ...(isIP(host) ? {} : { serverName: host }),
             rejectUnauthorized: true,
           }
@@ -874,6 +886,7 @@ export class IrcClient {
     this.socket = undefined;
     this.registeredNow = false;
     this.welcomed = false;
+    this.externalAccountVerified = false;
     this.networkName = undefined;
     this.advertisedFilehost = undefined;
     this.botMode = undefined;
@@ -1006,8 +1019,30 @@ export class IrcClient {
       case "AUTHENTICATE":
         if (params[0] === "+") this.authenticate();
         return;
+      case "900":
+        if (this.options.clientCertificate) {
+          this.externalAccountVerified =
+            this.fold(params[2] ?? "") === this.fold(this.options.account);
+          if (!this.externalAccountVerified)
+            this.refuse(
+              "IRC client certificate authenticated a different account",
+            );
+        }
+        return;
+      case "901":
+        if (this.options.clientCertificate)
+          this.refuse(
+            "IRC client certificate account is no longer authenticated",
+          );
+        return;
       case "903":
       case "907":
+        if (this.options.clientCertificate && !this.externalAccountVerified) {
+          this.refuse(
+            "IRC server did not confirm the client certificate account",
+          );
+          return;
+        }
         this.raw("CAP END");
         return;
       case "902":
@@ -1327,11 +1362,12 @@ export class IrcClient {
       const offered = this.offered;
       this.offered = new Map();
       const sasl = offered.get("sasl");
+      const mechanism = this.options.clientCertificate ? "EXTERNAL" : "PLAIN";
       if (
         !required.every((cap) => offered.has(cap)) ||
-        (sasl && !sasl.split(",").includes("PLAIN"))
+        (sasl && !sasl.split(",").includes(mechanism))
       ) {
-        this.refuse("IRC server lacks SASL PLAIN or account-tag");
+        this.refuse(`IRC server lacks SASL ${mechanism} or account-tag`);
         return;
       }
       const history =
@@ -1389,7 +1425,8 @@ export class IrcClient {
         else this.caps.add(name);
       }
       if (this.welcomed || --this.requested > 0) return;
-      this.raw("AUTHENTICATE PLAIN");
+      const mechanism = this.options.clientCertificate ? "EXTERNAL" : "PLAIN";
+      this.raw(`AUTHENTICATE ${mechanism}`);
       return;
     }
     if (sub === "DEL")
@@ -1402,6 +1439,10 @@ export class IrcClient {
   private refuse: (message: string) => void = () => {};
 
   private authenticate() {
+    if (this.options.clientCertificate) {
+      this.raw("AUTHENTICATE +");
+      return;
+    }
     const payload = Buffer.from(
       `\0${this.options.account}\0${this.options.password}`,
       "utf8",
@@ -1414,6 +1455,10 @@ export class IrcClient {
   /** Ready only on the configured network; joins follow. */
   private welcome() {
     if (this.registeredNow || !this.welcomed) return;
+    if (this.options.clientCertificate && !this.externalAccountVerified) {
+      this.refuse("IRC server did not confirm the client certificate account");
+      return;
+    }
     const expected = this.options.network;
     if (
       expected !== undefined &&

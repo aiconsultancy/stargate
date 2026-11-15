@@ -6,7 +6,13 @@ import type { GatewayConfig, GatewayTransport } from "../gateway";
 import { backendFingerprint, type Identity } from "../routing";
 import type { Store } from "../store";
 import { ctcp, IrcAudit, sensitive, serviceNick } from "./audit";
-import { IrcClient, type IrcTiming, Recent } from "./client";
+import {
+  IrcClient,
+  type IrcClientOptions,
+  type IrcTiming,
+  Recent,
+} from "./client";
+import { clientPem } from "./client-pem";
 import { type CrewLink, crewLink } from "./crew-link";
 import { IrcDelivery } from "./delivery";
 import { Filehost, filehostURL } from "./filehost";
@@ -19,7 +25,6 @@ import {
 } from "./protocol";
 import {
   agentTurn,
-  type Fold,
   type IrcMember,
   ircAllowed,
   ircNote,
@@ -154,7 +159,8 @@ type ShipMember = {
   account: string;
   nick: string;
   channels: readonly string[];
-  passwordEnv: string;
+  passwordEnv: string | undefined;
+  clientPemFile?: string | undefined;
   backend: BackendConfig;
   displayName: string | undefined;
   concurrency: number;
@@ -172,6 +178,7 @@ function shipMembers(config: IrcConfig): ShipMember[] {
       nick: config.nick ?? config.account,
       channels: config.channels,
       passwordEnv: config.passwordEnv,
+      clientPemFile: config.clientPemFile,
       backend: config.backend,
       displayName: config.displayName,
       concurrency: config.concurrency,
@@ -239,7 +246,7 @@ const sinceChars = 300;
 function shipTransport(
   config: IrcConfig,
   member: IrcMember,
-  caseFold: Fold,
+  client: Pick<IrcClient, "fold" | "inChannel" | "isChannel">,
   said: (channel: string, after: number, except: string) => string[] = () => [],
   sessionReady?: GatewayTransport["sessionReady"],
 ): GatewayTransport {
@@ -248,7 +255,10 @@ function shipTransport(
     name: "irc",
     key: member.key,
     allowed: (user, channel) =>
-      ircAllowed(config, member, user, channel, caseFold),
+      ircAllowed(config, member, user, channel, client.fold) &&
+      (config.access.channelRequests !== "nick-mention" ||
+        !client.isChannel(channel) ||
+        client.inChannel(channel)),
     source: (job) => ({
       transport: "irc",
       channel: job.channel,
@@ -322,6 +332,7 @@ export class IrcShip {
     private readonly store: Store,
     private readonly log: Logger,
     private readonly ca: string | undefined,
+    private readonly certificate: IrcClientOptions["clientCertificate"],
     private readonly options: ShipOptions,
   ) {
     const env = options.env ?? process.env;
@@ -347,7 +358,7 @@ export class IrcShip {
         : undefined;
   }
 
-  /** Reads the CA file and password references; never logs them. */
+  /** Reads the CA and client credentials without logging them. */
   static async create(
     config: IrcConfig,
     store: Store,
@@ -357,7 +368,10 @@ export class IrcShip {
     const ca = config.server.caFile
       ? await Bun.file(config.server.caFile).text()
       : undefined;
-    return new IrcShip(config, store, log, ca, options);
+    const certificate = config.clientPemFile
+      ? await clientPem(config.clientPemFile)
+      : undefined;
+    return new IrcShip(config, store, log, ca, certificate, options);
   }
 
   /** Captain first, then crew in configuration order. */
@@ -462,7 +476,7 @@ export class IrcShip {
           slot.kept.transport = shipTransport(
             next,
             slot.kept,
-            slot.kept.client.fold,
+            slot.kept.client,
             this.saidSince(slot.kept, slot.kept.client),
             this.sessionReady(next, slot.member),
           );
@@ -509,7 +523,7 @@ export class IrcShip {
   }
 
   /**
-   * One connection and its gateway parts for `config`. Reads the password
+   * One connection and its gateway parts for `config`. Checks credentials
    * first, so a missing reference throws before anything is built. Starts
    * nothing.
    */
@@ -518,7 +532,12 @@ export class IrcShip {
     config: IrcConfig,
     env: NodeJS.ProcessEnv,
   ): Built {
-    const password = secret(member.passwordEnv, env);
+    const credential = member.passwordEnv
+      ? { password: secret(member.passwordEnv, env) }
+      : this.certificate
+        ? { clientCertificate: this.certificate }
+        : undefined;
+    if (!credential) throw new Error("Missing IRC registration credential");
     const key = ircKey(
       member.id,
       config.server,
@@ -546,7 +565,7 @@ export class IrcShip {
         ...(ca ? { ca } : {}),
         ...(config.server.network ? { network: config.server.network } : {}),
         account: member.account,
-        password,
+        ...credential,
         nick: member.nick,
         channels: member.channels,
         ...(member.role === "crew" ? { captainChannels: config.channels } : {}),
@@ -573,7 +592,8 @@ export class IrcShip {
       {
         // Chathistory replays use the same rules; event IDs deduplicate.
         message: (message, replay) => {
-          if (detached()) return;
+          const strict = this.config.access.channelRequests === "nick-mention";
+          if (detached() || (strict && replay)) return;
           // Our own pogo_dm copy: delivered natively already, and mirrored
           // as the sender's outgoing DM. Never a turn, never mirrored twice.
           if (this.ownCopy(client, message)) {
@@ -583,10 +603,10 @@ export class IrcShip {
           this.mirrorIncoming(identity, client, message, replay);
           // The audit channel is never a conversation: no turn, no Stop.
           if (this.isAuditChannel(client, message.params[0] ?? "")) return;
-          if (!replay) this.remember(identity, client, message);
+          if (!replay && !strict) this.remember(identity, client, message);
           // A replayed reaction is old intent: it never stops a turn.
           if (message.command === "TAGMSG") {
-            if (!replay) this.stop(registration, message);
+            if (!replay && !strict) this.stop(registration, message);
           } else this.receive(identity, client, message, filehost, replay);
         },
         sent: (sent) => {
@@ -602,12 +622,15 @@ export class IrcShip {
         },
       },
     );
-    const filehost = () => this.filehost(client);
-    const files = new Filehost(filehost, {
-      account: member.account,
-      password,
-      ...(ca ? { ca } : {}),
-    });
+    const filehost = () =>
+      credential.password ? this.filehost(client) : undefined;
+    const files = credential.password
+      ? new Filehost(filehost, {
+          account: member.account,
+          password: credential.password,
+          ...(ca ? { ca } : {}),
+        })
+      : undefined;
     const registration: IrcRegistration = {
       ...identity,
       settings: gatewaySettings(config, member),
@@ -616,19 +639,21 @@ export class IrcShip {
       transport: shipTransport(
         config,
         identity,
-        client.fold,
+        client,
         this.saidSince(identity, client),
         this.sessionReady(config, member),
       ),
       delivery: new IrcDelivery(
         client,
         this.options.readyMs,
-        {
-          files,
-          filehost,
-          download: config.features.filesIn,
-          upload: config.features.filesOut,
-        },
+        files
+          ? {
+              files,
+              filehost,
+              download: config.features.filesIn,
+              upload: config.features.filesOut,
+            }
+          : undefined,
         {
           plan: (unit, plan) =>
             this.store.deliveryPlan(unit.job, unit.part, plan),
@@ -738,6 +763,7 @@ export class IrcShip {
       member,
       currentNick: client.nick,
       sent: (msgid) => client.sent(msgid),
+      joined: (channel) => client.inChannel(channel),
       anchor: (msgid) => client.anchor(msgid),
       now: Date.now,
       fold: client.fold,

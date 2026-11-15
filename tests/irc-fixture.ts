@@ -596,9 +596,9 @@ export async function until(
   timeoutMs = 3000,
   message = "condition",
 ) {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = performance.now() + timeoutMs;
   while (!check()) {
-    if (Date.now() > deadline)
+    if (performance.now() > deadline)
       throw new Error(`Timed out waiting for ${message}`);
     await delay(10);
   }

@@ -15,7 +15,9 @@ channel and TLS setup belong to the server operator.
    crew member (Ergo: `/NICKSERV SAREGISTER <name> <password>` as an
    operator). Register the ship channel with the captain as founder.
 2. Put each password in `<config>.env` (mode `0600`) under the variable
-   named by its `passwordEnv`. Never put it in `pogo.json` or chat.
+   named by its `passwordEnv`. A certificate-authenticated captain uses
+   `clientPemFile` instead. Never put a password or a private key in
+   `pogo.json` or chat.
 3. Add the `irc` registration. For a captain that is also on Slack, copy
    the Slack bot's OpenCode `url`, `directory`, `agent` and `sessionID`;
    the pinned session must match that directory and agent.
@@ -35,7 +37,7 @@ works if it offers these capabilities:
 
 | Capability                        | Need        | Use                                              |
 | --------------------------------- | ----------- | ------------------------------------------------ |
-| `sasl` (PLAIN)                    | required    | Log in to the configured account                 |
+| `sasl` (PLAIN or EXTERNAL)        | required    | Log in to the configured account                 |
 | `account-tag`                     | required    | Identify every sender by account                 |
 | `message-tags`, `server-time`     | recommended | Message IDs, reply tags, times                   |
 | `batch`, `labeled-response`       | recommended | Confirm each sent line                           |
@@ -43,7 +45,7 @@ works if it offers these capabilities:
 | `account-notify`, `extended-join` | optional    | Nick hints for direct replies; WHOIS confirms    |
 | `draft/chathistory`               | optional    | Fetch channel messages missed during a reconnect |
 
-Without `sasl` PLAIN or `account-tag`, Pogo refuses the server and retries
+Without the configured SASL mechanism or `account-tag`, Pogo refuses the server and retries
 after five minutes. Without `labeled-response`, a line counts as sent when
 it is written to the socket.
 
@@ -123,7 +125,8 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
 | `server.tls`                   | `false` only for `127.0.0.1` or `::1`                                                                                                                                                                                           |
 | `server.caFile`                | Absolute PEM path of a private CA; TLS only                                                                                                                                                                                     |
 | `server.network`               | Optional ISUPPORT `NETWORK` name, for example `Fleet`; another name is refused                                                                                                                                                  |
-| `account`, `passwordEnv`       | SASL PLAIN account and the environment variable with its password                                                                                                                                                               |
+| `account`, `passwordEnv`       | Expected SASL account and, for PLAIN, the environment variable with its password                                                                                                                                                |
+| `clientPemFile`                | Absolute path to the captain’s private certificate and key PEM for SASL EXTERNAL; TLS only, in place of `passwordEnv`                                                                                                           |
 | `nick`                         | Optional; defaults to the account                                                                                                                                                                                               |
 | `channels`                     | The only channels the captain joins and answers in; at most 20, each at most 50 bytes                                                                                                                                           |
 | `access`                       | See [access](#access)                                                                                                                                                                                                           |
@@ -172,6 +175,16 @@ For the TLS listeners, use the server's private CA:
 
 Pogo verifies the certificate against that CA and the host name or IP.
 
+For a captain using SASL EXTERNAL, link the client certificate to the
+captain's account on the server and set `clientPemFile` instead of
+`passwordEnv`. Use a regular file owned by the Pogo service user with mode
+`0600` (or `0400`) and put the leaf certificate first if it has a chain.
+`pogo config check` verifies ownership, private permissions and that the key
+matches the certificate. Pogo requires the server to attest the configured
+account during SASL and has no password fallback. Restart after rotating the
+PEM. EXTERNAL does not supply the password that FILEHOST expects, so this
+captain cannot send or receive FILEHOST attachments. Crew still use PLAIN.
+
 The namespace of each IRC connection includes the server host, port and
 `network` name, the registration ID, the account and the backend settings.
 Moving a registration to another host, port or network therefore starts new
@@ -203,7 +216,16 @@ settings and `shipTurnsPerAgentPerHour`.
 - The sender's identity is the IRCv3 `account` tag, never the nick. A
   message without an account tag is ignored.
 - Any logged-in account may write to the captain, unless
-  `deniedAccounts` lists it. `*` denies everyone.
+  `deniedAccounts` lists it. `*` denies everyone. Set
+  `access.allowedAccounts` to permit only those exact accounts. Denies
+  still take precedence.
+- Set `access.channelRequests: "nick-mention"` to require the current nick
+  as an exact mention in a channel the connection has joined. A reply,
+  text mention or all-call alone cannot start a turn in this mode. Both
+  DMs and channel requests must have a server message ID, which is used
+  for durable deduplication. Bot-tagged messages, history replays and stop
+  reactions are ignored in this mode. Enable only the channels this
+  registration is authorised to join.
 - Channel messages count only in the registration's `channels` and not in
   `deniedChannels`. `deniedChannels: ["*"]` also blocks direct messages.
 - Denies are checked again before work and before each delivery, including

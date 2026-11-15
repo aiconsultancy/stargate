@@ -230,3 +230,40 @@ test("irc catch-up: bounded age, no backlog on a first start, switch off", async
   expect(off.prompts).toEqual([]);
   expect(fake.historyRequests.length).toBe(requests);
 });
+
+test("IRC nick-mention mode drops reconnect and unsolicited history, and deduplicates live msgids", async () => {
+  const { fake, store } = await world();
+  const options = {
+    access: { allowedAccounts: ["jack"], channelRequests: "nick-mention" },
+  };
+  const sender = { nick: "jack", account: "jack" };
+  const first = await run(fake, store, options);
+  fake.say(sender, "#galactica", "galactica: live one");
+  await until(() => first.prompts.length === 1, 5000, "first live request");
+  await first.close();
+  fake.say(sender, "#galactica", "galactica: missed channel");
+  fake.say(sender, "galactica", "missed DM");
+
+  const second = await run(fake, store, options);
+  await until(
+    () => fake.historyRequests.some(([type]) => type === "AFTER"),
+    5000,
+    "history",
+  );
+  fake.sendTo("galactica", ":fake BATCH +autoplay chathistory #galactica");
+  fake.sendTo(
+    "galactica",
+    "@batch=autoplay;account=jack;msgid=autoplay-1 :jack!u@h PRIVMSG #galactica :galactica: unsolicited replay",
+  );
+  fake.sendTo("galactica", ":fake BATCH -autoplay");
+  fake.say({ nick: "jack", account: "impostor" }, "galactica", "untrusted DM");
+  const id = fake.say(sender, "galactica", "live two");
+  fake.say(sender, "galactica", "live two", { msgid: id });
+  await until(() => second.prompts.length === 1, 5000, "second live request");
+  await until(
+    () => store.queueCounts(second.captain.key).done === 2,
+    5000,
+    "two requests completed",
+  );
+  expect(second.prompts).toEqual(["live two"]);
+});

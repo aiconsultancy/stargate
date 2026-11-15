@@ -35,7 +35,7 @@ Commands:
   bot provision     Plan or resume a batch of Slack registrations
   crew init         Install an OpenCode captain/crew profile
   cron              List, add, run, remove, or report cronjobs
-  config check      Validate config, Slack token and IRC password references
+  config check      Validate config, Slack token and IRC credential references
   maintenance       Nightly self-update and host maintenance (plan/run/timer)
   manifest          Print Slack manifest JSON and prefilled creation URL
   service install   Install Linux systemd user unit; does not enable/start
@@ -121,8 +121,8 @@ are started. Crew sessions are created lazily by the captain and then reused.
 The trusted crew profile enables implementation tools; it is not a sandbox.
 Default model: openai-proxy/gpt-6.1-sol. Global authentication is unchanged.`,
   config: `Usage: pogo config check [--config PATH] [--schema-only]\n${common}
-Checks JSON/schema, Slack token references and IRC password references
-(presence only) using environment and <config>.env, and that IRC caFile exists.
+Checks JSON/schema, Slack tokens and IRC password references from the
+environment and <config>.env, IRC caFile, and private IRC client PEM files.
 --schema-only  Check JSON/schema without requiring any credentials
 Does not contact Slack or IRC, or check provider credentials.`,
   cron: `Usage: pogo cron <list|add|run|remove|report> --bot ID [options]

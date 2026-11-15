@@ -19,6 +19,7 @@ import {
   configSchema,
   type IrcConfig,
 } from "./config";
+import { clientPem } from "./irc/client-pem";
 
 export function buildManifest(name = "Pogo") {
   if (!name.trim() || name.length > 80)
@@ -131,13 +132,14 @@ export async function checkCredentials(
   // Presence only: values are never printed or sent anywhere.
   for (const registration of irc) {
     for (const name of [
-      registration.passwordEnv,
+      ...(registration.passwordEnv ? [registration.passwordEnv] : []),
       ...registration.crew.map((member) => member.passwordEnv),
     ])
       if (!env[name]?.trim())
         throw new Error(
           "Missing IRC password environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
         );
+    if (registration.clientPemFile) await clientPem(registration.clientPemFile);
     const ca = registration.server.caFile;
     if (ca && !(await lstat(ca).catch(() => undefined))?.isFile())
       throw new Error("IRC caFile is not a readable file.");

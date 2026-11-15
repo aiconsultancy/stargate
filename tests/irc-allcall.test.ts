@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import { FakeIrcServer, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
 afterEach(async () => {
+  setSystemTime();
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
@@ -118,11 +119,18 @@ async function setup(
     5000,
     "every member joined",
   );
-  return { fake, prompts };
+  const done = (account: string) => {
+    const registration = ship.registrations.find(
+      (entry) => entry.account === account,
+    );
+    if (!registration) throw new Error(`missing registration for ${account}`);
+    return store.queueCounts(registration.key).done;
+  };
+  return { fake, prompts, done };
 }
 
 test("irc all-call: agents answer in turn and see what was said since", async () => {
-  const { fake, prompts } = await setup(
+  const { fake, prompts, done } = await setup(
     {
       "galactica-captain": "Fuel at 40%.",
       "galactica-chief": "Reactor nominal.",
@@ -130,11 +138,19 @@ test("irc all-call: agents answer in turn and see what was said since", async ()
     { allCallStaggerMs: 400 },
   );
   const sent = Date.now();
+  setSystemTime(sent);
   fake.say(
     { nick: "jack", account: "jack" },
     "#ship-galactica",
     "All hands, status?",
   );
+  await until(() => done("galactica-captain") === 1, 5000, "captain reply");
+  expect(prompts["galactica-chief"]).toHaveLength(0);
+  expect(prompts["galactica-tyrol"]).toHaveLength(0);
+  setSystemTime(sent + 400);
+  await until(() => done("galactica-chief") === 1, 5000, "chief reply");
+  expect(prompts["galactica-tyrol"]).toHaveLength(0);
+  setSystemTime(sent + 800);
   await until(
     () => (prompts["galactica-tyrol"]?.length ?? 0) === 1,
     5000,
@@ -145,9 +161,9 @@ test("irc all-call: agents answer in turn and see what was said since", async ()
   const [tyrol] = prompts["galactica-tyrol"] ?? [];
   if (!captain || !chief || !tyrol) throw new Error("missing prompt");
   // Captain first, then crew in configuration order, one step apart.
-  expect(captain.at - sent).toBeLessThan(350);
-  expect(chief.at - sent).toBeGreaterThanOrEqual(380);
-  expect(tyrol.at - sent).toBeGreaterThanOrEqual(780);
+  expect(captain.at).toBe(sent);
+  expect(chief.at).toBe(sent + 400);
+  expect(tyrol.at).toBe(sent + 800);
   // Each turn lists the channel messages since the all-call.
   expect(chief.text).toContain("galactica-captain: Fuel at 40%.");
   expect(chief.text).not.toContain("Reactor nominal.");
@@ -169,13 +185,14 @@ test("irc all-call: agents answer in turn and see what was said since", async ()
     "mention",
   );
   const mention = prompts["galactica-tyrol"]?.[1];
-  expect((mention?.at ?? 0) - asked).toBeLessThan(350);
+  expect(mention?.at).toBe(asked);
   expect(mention?.text).not.toContain("since the all-call");
 });
 
 test("irc all-call: allCallStaggerMs 0 answers at once; config bounds", async () => {
   const { fake, prompts } = await setup({}, { allCallStaggerMs: 0 });
   const sent = Date.now();
+  setSystemTime(sent);
   fake.say(
     { nick: "jack", account: "jack" },
     "#ship-galactica",
@@ -186,7 +203,7 @@ test("irc all-call: allCallStaggerMs 0 answers at once; config bounds", async ()
     5000,
     "crew turn",
   );
-  expect((prompts["galactica-tyrol"]?.[0]?.at ?? 0) - sent).toBeLessThan(350);
+  expect(prompts["galactica-tyrol"]?.[0]?.at).toBe(sent);
   await delay(50);
   const parse = (value: unknown) =>
     ircSchema.shape.access.safeParse({ allCallStaggerMs: value });
@@ -217,23 +234,27 @@ test("irc all-call: the note tells agents to take turns and stay silent on repea
 });
 
 test("irc all-call: a mention inside an all-call still staggers with context", async () => {
-  const { fake, prompts } = await setup(
+  const { fake, prompts, done } = await setup(
     { "galactica-captain": "Fuel at 40%." },
     { allCallStaggerMs: 400 },
   );
   const sent = Date.now();
+  setSystemTime(sent);
   fake.say(
     { nick: "jack", account: "jack" },
     "#ship-galactica",
     "galactica-chief: all hands, status?",
   );
+  await until(() => done("galactica-captain") === 1, 5000, "captain reply");
+  expect(prompts["galactica-chief"]).toHaveLength(0);
+  setSystemTime(sent + 400);
   await until(
-    () => (prompts["galactica-tyrol"]?.length ?? 0) === 1,
+    () => (prompts["galactica-chief"]?.length ?? 0) === 1,
     5000,
-    "last crew turn",
+    "chief turn",
   );
   const [chief] = prompts["galactica-chief"] ?? [];
   if (!chief) throw new Error("missing prompt");
-  expect(chief.at - sent).toBeGreaterThanOrEqual(380);
+  expect(chief.at).toBe(sent + 400);
   expect(chief.text).toContain("galactica-captain: Fuel at 40%.");
 });
