@@ -22,6 +22,11 @@ Slack-hosted private downloads use authentication only for `files.slack.com`;
 external files, redirects and inaccessible files fail closed. File failures are
 reported before agent admission instead of silently dropping attachments.
 
+Pasted Slack snippets, including long Markdown, are accepted as UTF-8 text.
+Slack's generic download content type is accepted only for Slack-hosted
+snippets identified as text. Invalid UTF-8, binary control bytes and HTML
+download pages are refused.
+
 - OpenCode receives native inline file data with name and MIME type. Whether a
   particular model can interpret a format remains a backend/model constraint.
 - Pi 1.5 supports PNG, JPEG, GIF and WebP on vision-capable models, and valid

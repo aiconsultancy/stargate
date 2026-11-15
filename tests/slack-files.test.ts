@@ -5,6 +5,8 @@ import {
   maxAttachmentBytes,
   maxAttachmentTotalBytes,
 } from "../src/attachments";
+import { claudeInputContent } from "../src/backends/claude";
+import { codexInput } from "../src/backends/codex";
 import { SlackFiles, type SlackFilesFetch } from "../src/slack-files";
 
 const cleanup: (() => Promise<unknown>)[] = [];
@@ -171,6 +173,86 @@ test("Slack file download resolves IDs, checks channel membership and returns PN
     "F1",
     "F2",
   ]);
+});
+
+test("Slack pasted Markdown reaches Claude and Codex as the complete UTF-8 snippet", async () => {
+  const f = fixture();
+  const encoder = new TextEncoder();
+  const prefix = `${Array.from(
+    { length: 602 },
+    (_, index) => `- Item ${index + 1}: **café** \`code\``,
+  ).join("\n")}\n## End: `;
+  const markdown =
+    prefix + "x".repeat(33_340 - encoder.encode(prefix).byteLength);
+  const bytes = encoder.encode(markdown);
+  expect(bytes.byteLength).toBe(33_340);
+  expect(markdown.split("\n")).toHaveLength(603);
+  f.info.set("F1", {
+    ...f.file("F1", bytes, "text/plain", "pasted.md"),
+    mode: "snippet",
+  });
+  f.download(async (_url, init) => {
+    expect(init?.redirect).toBe("error");
+    expect(new Headers(init?.headers).get("authorization")).toBe(
+      "Bearer xoxb-fixture",
+    );
+    return new Response(bytes, {
+      headers: { "content-type": "application/force-download" },
+    });
+  });
+
+  await expect(f.files.download(["F1"], "C2", signal())).rejects.toThrow(
+    "Slack file",
+  );
+  expect(f.transfers).toHaveLength(0);
+
+  const files = await f.files.download(["F1"], "C1", signal());
+  expect(files).toEqual([
+    {
+      name: "pasted.md",
+      mime: "text/plain",
+      data: bytes,
+      source: { id: "F1" },
+    },
+  ]);
+  const text = `Attachment: pasted.md\n${markdown}`;
+  expect(claudeInputContent("Read this", files)).toEqual([
+    { type: "text", text: "Read this" },
+    { type: "text", text },
+  ]);
+  expect(codexInput("Read this", files)).toEqual({
+    text: `Read this\n\n${text}`,
+    images: [],
+  });
+});
+
+test("Slack force-download is limited to verified text snippets", async () => {
+  const f = fixture();
+  const encoder = new TextEncoder();
+  const cases = [
+    { mode: "hosted", mime: "text/plain", data: encoder.encode("plain text") },
+    { mode: "hosted", mime: "application/force-download", data: png },
+    { mode: "snippet", mime: "image/png", data: png },
+    { mode: "snippet", mime: "text/plain", data: new Uint8Array([0xc3, 0x28]) },
+    { mode: "snippet", mime: "text/plain", data: encoder.encode("binary\0") },
+    {
+      mode: "snippet",
+      mime: "text/plain",
+      data: encoder.encode("<!doctype html><html>Sign in</html>"),
+    },
+  ];
+  for (const { mode, mime, data } of cases) {
+    f.info.set("F1", { ...f.file("F1", data, mime, "pasted.md"), mode });
+    f.download(
+      async () =>
+        new Response(data, {
+          headers: { "content-type": "application/force-download" },
+        }),
+    );
+    await expect(f.files.download(["F1"], "C1", signal())).rejects.toThrow(
+      "Slack file",
+    );
+  }
 });
 
 test("Slack clip facts: only a finished, untruncated transcript is returned", async () => {

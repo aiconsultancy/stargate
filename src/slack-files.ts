@@ -1,3 +1,4 @@
+import { isUtf8 } from "node:buffer";
 import type { WebClient } from "@slack/web-api";
 import { z } from "zod";
 import {
@@ -42,12 +43,12 @@ const shares = z.strictObject({
   public: z.record(z.string(), z.array(share)).optional(),
   private: z.record(z.string(), z.array(share)).optional(),
 });
-const hostedFile = z.object({
+const slackFile = z.object({
   id: fileID,
   name: filename,
   mimetype: mime,
   size,
-  mode: z.literal("hosted"),
+  mode: z.enum(["hosted", "snippet"]),
   is_external: z.literal(false),
   channels: z.array(z.string()).optional(),
   groups: z.array(z.string()).optional(),
@@ -70,7 +71,7 @@ const hostedFile = z.object({
 });
 
 /** Only a finished, untruncated transcript replaces a provider request. */
-function slackTranscript(file: z.infer<typeof hostedFile>) {
+function slackTranscript(file: z.infer<typeof slackFile>) {
   const preview = file.transcription?.preview;
   return file.transcription?.status === "complete" &&
     preview &&
@@ -79,7 +80,7 @@ function slackTranscript(file: z.infer<typeof hostedFile>) {
     ? preview.content
     : undefined;
 }
-const downloadResponse = z.object({ ok: z.literal(true), file: hostedFile });
+const downloadResponse = z.object({ ok: z.literal(true), file: slackFile });
 const shareResponse = z.object({
   ok: z.literal(true),
   file: z.object({ id: fileID, shares }),
@@ -106,10 +107,7 @@ function slackFileURL(value: string): string {
   return url.href;
 }
 
-function hasChannel(
-  file: z.infer<typeof hostedFile>,
-  channel: string,
-): boolean {
+function hasChannel(file: z.infer<typeof slackFile>, channel: string): boolean {
   return (
     file.channel === channel ||
     [file.channels, file.groups, file.ims].some((channels) =>
@@ -207,10 +205,12 @@ export class SlackFiles {
         const { file } = downloadResponse.parse(
           await this.web(stop).files.info({ file: id }),
         );
+        const snippet = file.mode === "snippet";
         if (
           file.id !== id ||
           !hasChannel(file, channel) ||
           isHTML(file.mimetype) ||
+          (snippet && !file.mimetype.startsWith("text/")) ||
           total + file.size > maxAttachmentTotalBytes
         )
           throw new Error(
@@ -234,8 +234,10 @@ export class SlackFiles {
           if (
             !contentType ||
             isHTML(contentType) ||
-            (contentType !== file.mimetype &&
-              contentType !== "application/octet-stream")
+            (contentType === "application/force-download"
+              ? !snippet
+              : contentType !== file.mimetype &&
+                contentType !== "application/octet-stream")
           )
             throw new Error("Slack file MIME mismatch");
           const declared = response.headers.get("content-length");
@@ -245,6 +247,18 @@ export class SlackFiles {
           )
             throw new Error("Slack file length mismatch");
           const data = await readBounded(response, file.size, stop);
+          // Slack sends pasted text as force-download. Keep the verified text
+          // MIME, and refuse mislabeled binary data before it reaches an agent.
+          if (
+            snippet &&
+            (!isUtf8(data) ||
+              data.some(
+                (byte) =>
+                  byte === 127 ||
+                  (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13),
+              ))
+          )
+            throw new Error("Slack snippet must be UTF-8 text");
           const transcript = slackTranscript(file);
           files.push({
             name: file.name,
