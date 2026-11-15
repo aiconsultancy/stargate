@@ -1,8 +1,8 @@
 # Releases
 
 `main` is the trunk: small PRs merge often, and a merge creates a GitHub
-release only when it contains a user-facing change. The first release is
-`v0.1.0`.
+release only when it contains a user-facing change. The first public release is
+`v0.20.3`. Historical private tags are kept with the original repository.
 
 ## How a release is made
 
@@ -53,10 +53,10 @@ The version lives in the tag, not in `package.json`. CI never commits to
 ## Verify a release
 
 ```sh
-gh release download v0.1.0 --repo aiconsultancy/stargate
-sha256sum -c pogo-v0.1.0.tar.gz.sha256
+gh release download v0.20.3 --repo aiconsultancy/stargate
+sha256sum -c pogo-v0.20.3.tar.gz.sha256
 # Strongest check without attestations: rebuild the archive from the tag.
-git archive --format=tar.gz --prefix=pogo-v0.1.0/ v0.1.0 | sha256sum
+git archive --format=tar.gz --prefix=pogo-v0.20.3/ v0.20.3 | sha256sum
 ```
 
 `git archive` output is reproducible for one git version; compare the

@@ -6,7 +6,7 @@
  * next release, unless a manual run forces one. Before 1.0.0 a breaking
  * change bumps the minor version, as SemVer allows for initial development.
  */
-export const firstVersion = "0.1.0";
+export const firstVersion = "0.20.3";
 
 type Bump = "none" | "major" | "minor" | "patch";
 const order: Record<Bump, number> = { none: 0, patch: 1, minor: 2, major: 3 };
@@ -97,6 +97,10 @@ if (import.meta.main) {
     process.env["FORCE_RELEASE"] === "true",
   );
   console.log(`version=${version ?? ""}`);
-  if (version)
-    await Bun.write("release-notes.md", `${releaseNotes(messages)}\n`);
+  if (version) {
+    const notes = last
+      ? releaseNotes(messages)
+      : "First public release of Stargate under the MIT License.";
+    await Bun.write("release-notes.md", `${notes}\n`);
+  }
 }
