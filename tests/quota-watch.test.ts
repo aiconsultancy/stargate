@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configSchema } from "../src/config";
@@ -190,4 +190,75 @@ test("quota report config authorises one outbound destination without opening in
       },
     }).success,
   ).toBe(false);
+});
+
+test("native Codex receipts override proxy accounts and only a valid fresh receipt clears the pause", async () => {
+  const path = await mkdtemp(join(tmpdir(), "pogo-native-quota-"));
+  const stateFile = join(path, "quota.json");
+  const nativeCodexFile = join(path, "native.json");
+  const settings = quotaWatchSchema.parse({
+    ...config,
+    stateFile,
+    nativeCodexFile,
+  });
+  const messages: string[] = [];
+  let now = start;
+  const watcher = new QuotaWatch(
+    settings,
+    {
+      read: async () => ({
+        status: "ok",
+        observedAt: now,
+        cached: false,
+        accounts: [account("claude", 20, now), account("codex", 99, now)],
+      }),
+    },
+    async (text) => {
+      messages.push(text);
+    },
+    { warn: () => {} },
+    () => now,
+  );
+  const write = (remainingPercent: number, resetAt: number | null = null) =>
+    writeFile(
+      nativeCodexFile,
+      JSON.stringify({ remainingPercent, observedAt: now / 1000, resetAt }),
+      { mode: 0o600 },
+    );
+  const signal = new AbortController().signal;
+  const state = async (): Promise<unknown> =>
+    JSON.parse(await readFile(stateFile, "utf8"));
+  try {
+    await write(8);
+    await watcher.tick(signal);
+    expect(messages[0]).toContain("Codex crew quota: 15% or less");
+    expect(await state()).toMatchObject({
+      claude: { mode: "limited", observedAt: start / 1000 },
+      codex: { mode: "paused", observedAt: start / 1000 },
+    });
+
+    now += 30_000;
+    await write(95, now / 1000 - 1);
+    await watcher.tick(signal);
+    await write(95);
+    await chmod(nativeCodexFile, 0o644);
+    await watcher.tick(signal);
+    await chmod(nativeCodexFile, 0o600);
+    now += 120_000;
+    await watcher.tick(signal);
+    expect(messages).toHaveLength(1);
+    expect(await state()).toMatchObject({
+      codex: { mode: "paused", observedAt: start / 1000 },
+    });
+
+    await write(95);
+    await watcher.tick(signal);
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toContain("Codex crew quota: Quota restored");
+    expect(await state()).toMatchObject({
+      codex: { mode: "normal", observedAt: now / 1000 },
+    });
+  } finally {
+    await rm(path, { recursive: true, force: true });
+  }
 });

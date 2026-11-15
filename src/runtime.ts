@@ -310,9 +310,16 @@ export function serve(
         }
         const quota = config.quotaWatch;
         if (quota?.report.bot === bot.id) {
+          const viaProxy = quota.providers.filter(
+            (provider) => provider !== "codex" || !quota.nativeCodexFile,
+          );
           const watcher = new QuotaWatch(
             quota,
-            new QuotaReader(quota.proxy, Date.now, quota.providers),
+            new QuotaReader(
+              viaProxy.length ? quota.proxy : undefined,
+              Date.now,
+              viaProxy,
+            ),
             async (text, signal) => {
               if (
                 !currentBot.access.deniedChannels.some(

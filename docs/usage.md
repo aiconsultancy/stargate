@@ -96,7 +96,20 @@ are kept in the gateway configuration and never appear in snapshots,
 policy files or Slack notices. A missing selected login is unknown.
 The default provider list is Claude and Codex; set it to `["claude"]` if
 the Codex workers use a local login outside this proxy. A proxy observation
-only applies to workers using the same provider account.
+only applies to workers using the same provider account. To watch a native
+Codex login alongside proxy-based Claude, set `nativeCodexFile` to the
+absolute path of its trusted local quota receipt and include `"codex"` in
+`providers`. Pogo will use only that receipt for Codex and will skip Codex
+proxy calls.
+
+The host should publish the minimum remaining percentage from the native
+Codex account's quota windows as
+`{"remainingPercent":7,"observedAt":1794744000,"resetAt":null}`. Both
+timestamps are epoch seconds. Use the earliest measured reset time when
+available and refresh the file more often than every two minutes. Write it
+atomically as a private file owned by the gateway user, without any account
+identifiers or authentication material. An invalid, absent, stale or
+expired receipt does not clear the last verified policy.
 
 For each account, the watcher uses the lowest remaining percentage of its
 active subscription limits. It uses the highest of those per-account

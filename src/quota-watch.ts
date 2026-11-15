@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
@@ -12,11 +13,13 @@ import {
 
 const providers = ["claude", "codex"] as const;
 const providerSchema = z.enum(providers);
+const absolutePath = z
+  .string()
+  .refine((path) => isAbsolute(path) && !path.includes("\0"));
 export const quotaWatchSchema = z.strictObject({
   proxy: quotaConfigSchema,
-  stateFile: z
-    .string()
-    .refine((path) => isAbsolute(path) && !path.includes("\0")),
+  stateFile: absolutePath,
+  nativeCodexFile: absolutePath.optional(),
   providers: z
     .array(providerSchema)
     .min(1)
@@ -41,6 +44,57 @@ const policySchema = z.strictObject({
 type Observation = z.infer<typeof observation>;
 
 const pollMs = 120_000;
+const epochSeconds = z.number().int().positive();
+const nativeQuotaSchema = z.strictObject({
+  remainingPercent: z.number().finite().min(0).max(100),
+  observedAt: epochSeconds,
+  resetAt: epochSeconds.nullable(),
+});
+
+function fresh(observedAt: number, now: number) {
+  return observedAt <= now && now - observedAt < pollMs;
+}
+
+function policy(remaining: number, observedAt: number): Observation {
+  return {
+    mode: remaining <= 15 ? "paused" : remaining <= 25 ? "limited" : "normal",
+    observedAt: Math.floor(observedAt / 1000),
+  };
+}
+
+async function nativeCodexPolicy(path: string, now: number) {
+  try {
+    const file = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    try {
+      const stat = await file.stat();
+      if (
+        !stat.isFile() ||
+        (stat.mode & 0o077) !== 0 ||
+        stat.uid !== process.getuid?.() ||
+        stat.size > 256
+      )
+        return;
+      const native = nativeQuotaSchema.parse(
+        JSON.parse(await file.readFile("utf8")),
+      );
+      const seen = native.observedAt * 1000;
+      if (
+        !fresh(seen, now) ||
+        (native.resetAt !== null && native.resetAt * 1000 <= now)
+      )
+        return;
+      return policy(native.remainingPercent, seen);
+    } finally {
+      await file.close();
+    }
+  } catch {
+    // A missing or invalid receipt is unknown; never use a proxy login instead.
+    return undefined;
+  }
+}
 
 function currentPolicy(
   snapshot: QuotaSnapshot,
@@ -53,13 +107,7 @@ function currentPolicy(
   let observedAt = now;
   for (const account of accounts) {
     const seen = account.observedAt;
-    if (
-      account.status !== "ok" ||
-      seen === null ||
-      seen > now ||
-      now - seen >= pollMs
-    )
-      return;
+    if (account.status !== "ok" || seen === null || !fresh(seen, now)) return;
     const windows = account.windows.filter(
       (window) => window.scope === "subscription" && window.active !== false,
     );
@@ -73,10 +121,7 @@ function currentPolicy(
     remaining = Math.max(remaining, usable);
     observedAt = Math.min(observedAt, seen);
   }
-  return {
-    mode: remaining <= 15 ? "paused" : remaining <= 25 ? "limited" : "normal",
-    observedAt: Math.floor(observedAt / 1000),
-  };
+  return policy(remaining, observedAt);
 }
 
 const message = {
@@ -116,7 +161,10 @@ export class QuotaWatch {
     let updated = false;
     const now = this.now();
     for (const provider of this.config.providers) {
-      const current = currentPolicy(snapshot, provider, now);
+      const current =
+        provider === "codex" && this.config.nativeCodexFile
+          ? await nativeCodexPolicy(this.config.nativeCodexFile, now)
+          : currentPolicy(snapshot, provider, now);
       const previous = before[provider];
       if (!current || (previous && current.observedAt <= previous.observedAt))
         continue;
