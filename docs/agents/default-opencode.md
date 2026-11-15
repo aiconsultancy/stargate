@@ -1,6 +1,6 @@
 # OpenCode captain/crew profiles
 
-Pogo's **opt-in OpenCode agent profile** uses CLIProxyAPI and a Slack-facing
+Stargate's **opt-in OpenCode agent profile** uses CLIProxyAPI and a Slack-facing
 captain. Without `--team`, the starter captain is Bowser. It does not change
 the gateway's fail-closed permission defaults. Use this profile only for
 trusted Slack users: the coding
@@ -45,7 +45,7 @@ Their prompt bodies use one pair of valid HTML comments:
 
 ```markdown
 <!-- POGO:START -->
-Pogo-generated role and ship instructions.
+Stargate-generated role and ship instructions.
 <!-- POGO:END -->
 ```
 
@@ -58,7 +58,7 @@ Existing customized or unmarked files need an explicit, backed-up migration;
 initialization does not infer their boundaries or rewrite them.
 
 Project `AGENTS.md`, the captain-maintained `WAYS_OF_WORKING.md`, ship logs and
-journals remain unchanged. If Pogo instructions are added to a shared file in
+journals remain unchanged. If Stargate instructions are added to a shared file in
 an approved migration, mark only that section and preserve all surrounding text.
 
 ## Configured teams
@@ -79,7 +79,7 @@ with captain `adama` and four workers, including researcher `gaeta` and ship
 maintenance worker `bosun`:
 
 ```sh
-pogo crew init --team team.example.json --id galactica \
+stargate crew init --team team.example.json --id galactica \
   --directory /srv/pogo/galactica/captain --project /srv/project \
   --worktrees /srv/pogo/galactica/crew --base origin/main
 ```
@@ -93,7 +93,7 @@ nonempty `crew` array. Each worker has the same identity fields plus `role`
 and `permissionProfile` (`coding` or `research`). IDs use lowercase letters,
 digits, `_` and `-`, at most 64 characters. IDs must be unique and distinct
 from the captain. `captain` and `all` are reserved crew-message aliases.
-Pogo IDs remain short addresses such as `adama` and `apollo`. Optional `agent`
+Stargate IDs remain short addresses such as `adama` and `apollo`. Optional `agent`
 maps an address to its native OpenCode definition. Generated profiles set native
 IDs and filenames to `<namespace>-captain-<name>.md` or
 `<namespace>-crew-<name>.md`, for example `galactica-crew-apollo.md` and
@@ -130,7 +130,7 @@ endpoint to team JSON, for example:
 
 Remote endpoints require HTTPS; loopback may use HTTP. URL credentials are
 invalid. Header environment references must exist in the **OpenCode service's**
-environment, not just Pogo's shell. Never put header values in team JSON.
+environment, not just Stargate's shell. Never put header values in team JSON.
 Without a verified endpoint, history is unavailable; there is no DB fallback.
 
 Permissions follow the explicit profile, never a name. Models use
@@ -149,7 +149,7 @@ Bind one existing native root session before starting the captain gateway.
 Set its ID in two places:
 
 - Gateway registration: OpenCode `backend.sessionID`.
-- Every team location's Pogo plugin options: `captainSessionID`.
+- Every team location's Stargate plugin options: `captainSessionID`.
 
 The IDs must match. For example, the gateway backend can contain:
 
@@ -165,7 +165,7 @@ The IDs must match. For example, the gateway backend can contain:
 
 This fragment omits permissions. Keep the trusted profile's explicit rules.
 A pinned session keeps its stored model and permissions; binding does not
-replace them. Pogo validates the session ID, root identity, agent and directory.
+replace them. Stargate validates the session ID, root identity, agent and directory.
 Missing or incompatible sessions fail instead of creating replacement roots.
 Use the same session in OpenCode's native interfaces.
 
@@ -178,7 +178,7 @@ gateway. `bot add --session-id` sets the gateway pin. Existing conflicting
 profile files are not overwritten; update existing pins explicitly.
 
 Only one bot registration and one gateway process may own that pinned session.
-Pogo rejects duplicate pins within one configuration. Separate processes cannot
+Stargate rejects duplicate pins within one configuration. Separate processes cannot
 detect each other's pins, so cross-process sharing is unsupported.
 
 When migrating, retain the original captain and archive duplicate roots only
@@ -192,7 +192,7 @@ Check its retained receipt before retrying.
 
 OpenCode's plugin API has no session-create hook. An operator can still create
 another native root manually, but the pinned crew plugin refuses it captain
-authority. Pogo neither creates nor wakes replacement captain roots.
+authority. Stargate neither creates nor wakes replacement captain roots.
 
 The namespace defaults to the captain ID (`adama` here); `--id` overrides it.
 Worktrees use member IDs and branches `crew/<namespace>-<member ID>`.
@@ -206,10 +206,10 @@ For example, keep Galactica (`adama`, namespace `galactica`) and Pegasus
 each a team JSON file and disjoint directories:
 
 ```sh
-pogo crew init --team galactica.json --id galactica \
+stargate crew init --team galactica.json --id galactica \
   --directory /srv/pogo/galactica/captain --project /srv/project \
   --worktrees /srv/pogo/galactica/crew --base origin/main
-pogo crew init --team pegasus.json --id pegasus \
+stargate crew init --team pegasus.json --id pegasus \
   --directory /srv/pogo/pegasus/captain --project /srv/project \
   --worktrees /srv/pogo/pegasus/crew --base origin/main
 ```
@@ -272,7 +272,7 @@ initialization preserves captain edits. Native request hooks advise a reread of
 the shared working agreement only after its content changes, without injecting
 the file contents. `pogo_crew ensure` creates one private Pi conversation, reused
 across assignments and host restarts. Pi storage lives under the team's private
-state directory, separate from OpenCode sessions. Its peer ID is a Pogo handle,
+state directory, separate from OpenCode sessions. Its peer ID is a Stargate handle,
 not an OpenCode session that can be opened with `opencode mini`.
 
 The captain uses the existing `dispatch`, `wait`, `status`, and `queue: true`
@@ -293,7 +293,7 @@ Unconfirmed conversation creation is not repeated. Never delete state to clear
 a reservation. Plugin shutdown cancels and closes Pi work.
 
 For an existing roster, an approved append-only rollout may set
-`allowCrewExpansion: true` in **each generated Pogo plugin's options**. Supply
+`allowCrewExpansion: true` in **each generated Stargate plugin's options**. Supply
 the same updated team and add each new member's path to `worktrees`. This accepts
 new OpenCode or Pi members, preserving every existing worker's ID, permission profile,
 directory, session, tasks and results. It rejects removal or rebinding. Clear
@@ -339,7 +339,7 @@ and one read-only call before any explicitly authorised write.
 
 ## Fresh-machine setup
 
-1. Check out Pogo and the target project. Install mise and OpenCode V2.
+1. Check out Stargate and the target project. Install mise and OpenCode V2.
 2. Run `mise install` and `make deps`. This includes the pinned Mesij CLI.
 3. Follow [CLIProxyAPI bootstrap](../cliproxyapi.md). Provider subscription
    sign-in and private credentials are separate from Slack authentication.
@@ -364,7 +364,7 @@ directory and requires `.opencode` to be its compatibility symlink. Otherwise
 it uses `.opencode/agents/` and `.opencode/opencode.json`.
 
 The default provider key reference is `{env:CLIPROXYAPI_API_KEY}`. That variable
-must exist in the **OpenCode service's** environment, not merely Pogo's shell.
+must exist in the **OpenCode service's** environment, not merely Stargate's shell.
 Alternatively, reference an existing private key file without exposing it:
 
 ```sh
@@ -376,7 +376,7 @@ service, create Slack apps, start model work, or change global authentication.
 OpenCode reloads local configuration after a save.
 
 6. Use [batch Slack provisioning](../setup.md) to create or reuse bot apps.
-   Register only the captain, not workers, with Pogo. Use the setup output's
+   Register only the captain, not workers, with Stargate. Use the setup output's
    `directory` and `agent` for `backend.directory` and `backend.agent`
    (`bowser-captain-bowser` for the starter,
    `galactica-captain-adama` for the example).
@@ -466,7 +466,7 @@ without appending native input. This leaves the exact retained task answer
 recoverable through `status` or `wait`. Idle is not proof of success: those
 operations still verify the original task turn. Active workers retain DM steer;
 an occupied task does not become a free-worker wake if collection races delivery.
-Child agents use their own standard tools, never Pogo tools or prefixed names,
+Child agents use their own standard tools, never Stargate tools or prefixed names,
 and do not start children. Crew reply on IRC only when tagged, asked directly,
 or once per all-call.
 New tools reuse existing permission actions (`pogo_journal`: `pogo_crew`,
@@ -481,7 +481,7 @@ checks, blockers, outcomes and useful native-workaround feedback go through
 
 Install namespaced native definitions and explicit `agent` mappings together.
 An operator can switch existing native sessions to those definitions without
-resetting Pogo member IDs or deleting history. Backend agent settings select
+resetting Stargate member IDs or deleting history. Backend agent settings select
 the captain's native ID. Existing physical worktree paths can remain. This
 feature does not perform automatic live session migration or service changes.
 
@@ -505,10 +505,10 @@ background scheduler: a queue left without polling stays pending.
 
 ### Persistent sessions and tasks
 
-OpenCode stores session transcripts and selected models. Pogo's separate crew
+OpenCode stores session transcripts and selected models. Stargate's separate crew
 SQLite database stores the configured member-to-session registry, task IDs,
 originating captain session IDs, status, results, notices and mail cursors.
-Queued tasks also retain their input text. Pogo's gateway database separately
+Queued tasks also retain their input text. Stargate's gateway database separately
 tracks Slack requests and reply delivery; these are not interchangeable stores.
 
 1. `ensure` reserves a stable session ID before calling OpenCode. An uncertain
@@ -518,7 +518,7 @@ tracks Slack requests and reply delivery; these are not interchangeable stores.
    then submits a uniquely identified input to that worker's existing session.
    An explicit queued assignment remains unsubmitted until promoted.
 3. A successful final worker answer completes the task when the captain checks
-   `status`, `wait`, or the next `dispatch`. Pogo verifies the existing session,
+   `status`, `wait`, or the next `dispatch`. Stargate verifies the existing session,
    task boundary and native outcome before recovering its visible answer. The
    worker may also call `complete` explicitly. Only the originating captain
    session can collect that task's result through the crew tool. See
@@ -555,7 +555,7 @@ Agent rules and tool ownership checks are not OS isolation. Trusted coding
 agents with shell access can bypass a cooperative session-creation rule. Use
 separate OS identities/containers if that must become a security boundary.
 Human viewing is supported through OpenCode's session selector or
-`opencode mini --session SESSION_ID`; do not type into a session while Pogo or
+`opencode mini --session SESSION_ID`; do not type into a session while Stargate or
 its crew owns an active task. Never use `--standalone` to find these sessions.
 
 [compaction]: https://opencode.ai/v2/docs/compaction

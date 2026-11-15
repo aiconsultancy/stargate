@@ -21,7 +21,7 @@ import {
 } from "./config";
 import { clientPem } from "./irc/client-pem";
 
-export function buildManifest(name = "Pogo") {
+export function buildManifest(name = "Stargate") {
   if (!name.trim() || name.length > 80)
     throw new Error("App name must be 1–80 characters.");
   return {
@@ -77,7 +77,7 @@ export function buildManifest(name = "Pogo") {
   };
 }
 
-export function manifestUrl(name = "Pogo") {
+export function manifestUrl(name?: string) {
   return `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(JSON.stringify(buildManifest(name)))}`;
 }
 

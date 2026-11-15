@@ -3,7 +3,7 @@
 MISE ?= mise
 ARGS ?=
 
-TASKS := deps pogo init crew-init provision cua-install cua start \
+TASKS := deps stargate pogo init crew-init provision cua-install cua start \
 	config-check manifest service check test test-release-env eval \
 	typecheck lint format \
 	hooks-install hooks workflow-check
@@ -12,7 +12,7 @@ TASKS := deps pogo init crew-init provision cua-install cua start \
 
 help:
 	@printf '%s\n' \
-	  'Pogo commands (Make delegates to mise):' \
+	  'Stargate commands (Make delegates to mise):' \
 	  '  make deps          Install locked dependencies' \
 	  '  make init          Start the Slack setup wizard' \
 	  '  make crew-init     Install the default OpenCode captain/crew profile' \
@@ -23,7 +23,7 @@ help:
 	  '  make config-check  Validate config and token references' \
 	  '  make manifest      Generate the Slack app manifest' \
 	  '  make service ARGS="status"  Manage the user service' \
-	  '  make pogo ARGS="--help"    Run any CLI command' \
+	  '  make stargate ARGS="--help"  Run any CLI command (alias: make pogo)' \
 	  '  make check         Run typecheck, lint, and tests' \
 	  '  make eval          Run local conversation reliability evaluations' \
 	  '  make test | typecheck | lint | format' \

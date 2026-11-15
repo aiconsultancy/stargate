@@ -1,6 +1,6 @@
 # Repeatable captain/crew instances
 
-Use this procedure to prepare another Pogo installation with a different
+Use this procedure to prepare another Stargate installation with a different
 captain and crew. It does not copy an existing installation or its credentials.
 The example selects Cain, Shaw and Fisk. Names and normalized agent IDs must
 match. Do not retain hidden Mario, Luigi, Daisy, Toad or Bowser aliases.
@@ -15,7 +15,7 @@ Record these non-secret inputs before setup. Keep them unchanged on retries.
 
 | Input                | Example                                         | Rule                                                           |
 | -------------------- | ----------------------------------------------- | -------------------------------------------------------------- |
-| Pogo release         | Full approved Git commit                        | Pin a clean checkout; retain it while its service uses it      |
+| Stargate release     | Full approved Git commit                        | Pin a clean checkout; retain it while its service uses it      |
 | Target project       | `/srv/projects/example`                         | Existing Git repository; do not switch or clean it             |
 | Project base         | Full approved project commit                    | Fetch first; do not use a moving branch for reproducible setup |
 | Namespace and bot ID | `pegasus`                                       | Unique to this installation                                    |
@@ -38,7 +38,7 @@ agent ID differently in two locations does not merge their sessions.
 
 ## 1. Pin prerequisites
 
-Start in the approved Pogo checkout, not a dirty development tree:
+Start in the approved Stargate checkout, not a dirty development tree:
 
 ```sh
 git rev-parse HEAD
@@ -106,7 +106,7 @@ inputs reuses matching files/worktrees; conflicts fail instead of overwriting
 custom instructions. Initial branch names are `crew/<namespace>-<member ID>`.
 Existing worktrees must remain on feature branches, not `main` or `master`.
 
-Generated OpenCode configuration points at this Pogo checkout. Do not move it
+Generated OpenCode configuration points at this Stargate checkout. Do not move it
 or edit its source under a running installation. If `.agents/opco` exists,
 initialization uses it and requires `.opencode` as its compatibility symlink.
 
@@ -153,7 +153,7 @@ const bot = botSchema.omit({ slack: true }).parse({
   },
 });
 const plan = { version: 1, teamId: env.SLACK_TEAM_ID, bots: [{
-  ...bot, name: `Pogo ${profile.agent}`, app: { mode: "create" },
+  ...bot, name: `Stargate ${profile.agent}`, app: { mode: "create" },
   slack: { appTokenEnv: `${prefix}_APP_TOKEN`, botTokenEnv: `${prefix}_BOT_TOKEN` },
 }] };
 const directory = join(env.ROOT, "config");
@@ -201,16 +201,16 @@ Manifest API outcome stops automatic retries; never delete its journal.
 Store gateway values through a password manager or hidden-input terminal in
 `$ROOT/config/pogo.json.env`, mode `0600`, or its process environment. Never
 request them in chat, pass them as arguments or print them. Do not source this
-file as shell code; Pogo and systemd load it as environment data.
+file as shell code; Stargate and systemd load it as environment data.
 
 Managed OpenCode authentication requires `Service.discover()` and
 `Service.headers(endpoint)` from the installed `@opencode/client/service` in a
 local launcher, or another operator-approved private header source. Do not
 guess its authorization value, disable authentication, or copy another host's
-credentials. `opencode api` uses this discovery automatically; Pogo's normal
+credentials. `opencode api` uses this discovery automatically; Stargate's normal
 service unit does not. Arrange that launcher or a stable authenticated endpoint
 before service installation. A discovered port can change after a service
-restart. Changing `backend.url` changes Pogo's backend namespace and therefore
+restart. Changing `backend.url` changes Stargate's backend namespace and therefore
 selects new thread mappings; do not rewrite it silently on a live installation.
 
 Pi reporters are optional. To use one, add a named Pi member before profile
@@ -229,7 +229,7 @@ mise exec -- bun run src/main.ts config check --config "$ROOT/config/pogo.json"
 ```
 
 Schema validation and token-prefix checks do not prove authentication or
-inference. Verify native agent IDs, provider models and Pogo plugin tools in
+inference. Verify native agent IDs, provider models and Stargate plugin tools in
 each generated OpenCode location. A config save reloads OpenCode; do not
 restart a shared healthy service to apply profiles. Read-only Linear discovery
 is separate from write permission and OAuth sign-in.

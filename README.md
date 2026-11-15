@@ -1,8 +1,8 @@
-# Pogo
+# Stargate
 
 One Slack gateway. Multiple bot registrations. Pluggable agent backends.
 
-Pogo connects Slack to **OpenCode V2** over its TypeScript client, embeds
+Stargate connects Slack to **OpenCode V2** over its TypeScript client, embeds
 **Pi Durable** directly, or runs **Claude Code** through the Claude Agent SDK
 or the **Codex CLI** through the Codex SDK.
 Each bot has separate Slack credentials, access rules, agent settings, and
@@ -15,14 +15,14 @@ Requires [mise](https://mise.jdx.dev/). Bun **1.4.4** is pinned in `mise.toml`.
 
 For agent-led app registration, CLI authentication, human approvals, and live
 verification, follow the [setup guide](docs/setup.md). It provisions Slack apps
-for Pogo without scaffolding a separate Bolt application.
+for Stargate without scaffolding a separate Bolt application.
 
 For trusted project work, use the [OpenCode captain/crew profile](docs/agents/default-opencode.md).
 Without `--team`, Bowser coordinates the four-member starter crew through
-CLIProxyAPI and Mesij. `pogo crew init --team team.example.json` selects a
+CLIProxyAPI and Mesij. `stargate crew init --team team.example.json` selects a
 configured captain and variable roster; the portable example uses Galactica.
 Native definition IDs and filenames use `<ship>-<role>-<name>`; `--id`
-selects the ship namespace. Pogo member addresses stay short within that ship.
+selects the ship namespace. Stargate member addresses stay short within that ship.
 Captain and crew reference one captain-maintained
 `WAYS_OF_WORKING.md` by path, not repeated content injection. See
 [crew coordination](docs/crew-coordination.md) for journal, mail and DM tools.
@@ -74,20 +74,20 @@ publishing a release does not restart or update a running gateway.
 
 New sessions use `<bot name> (slack <conversation ID>)` as their title, for
 example `Galactica Captain (slack D123)`. Set `displayName` on the bot to choose
-its name; otherwise Pogo uses the OpenCode agent name, then the bot ID.
+its name; otherwise Stargate uses the OpenCode agent name, then the bot ID.
 Existing titles stay unchanged. Ordinary bots keep separate thread sessions
 even when their titles match. A captain instead uses its configured existing
 session for DMs, channels, threads and scheduled requests.
 
 For a captain, set OpenCode `backend.sessionID` to that native root session's ID
-and set the same `captainSessionID` in every crew plugin's options. Pogo never
+and set the same `captainSessionID` in every crew plugin's options. Stargate never
 creates a replacement when a pinned session is unavailable or incompatible.
 Use the same session in OpenCode's native interfaces. See
 [captain session binding](docs/agents/default-opencode.md#one-captain-session).
 
 Built-in backends stream visible response text through coalesced Slack message
 updates. Ordinary replies with no Slack controls keep native Markdown blocks
-unchanged. For control-containing replies, Pogo parses the full reply or
+unchanged. For control-containing replies, Stargate parses the full reply or
 cumulative preview once, then splits already-classified rich text into messages. Code classification survives
 message boundaries and delivery retries. Complete user/channel mentions and safe
 links render alongside formatted text; broadcasts, unsupported controls and
@@ -96,17 +96,17 @@ tables become readable rows and images become literal alt text plus URL.
 Unterminated or uncertain Markdown in a control-containing reply falls back
 to plain text for the whole reply.
 Old stored string chunks and repair output without classification also stay
-literal. Pogo never infers code state from a continuation chunk.
+literal. Stargate never infers code state from a continuation chunk.
 Slow responses show named, rotating feedback after five seconds; the
 same message becomes the answer when text arrives. See [waiting settings](docs/waiting.md)
 for configurable delays, disabling feedback, and captain-managed changes.
 Existing module backends can still return a final answer without streaming.
 
 An agent can decline to post. When the first line of its reply is
-`[[pogo:silent]]`, Pogo posts no message for that reply, removes waiting
+`[[pogo:silent]]`, Stargate posts no message for that reply, removes waiting
 feedback that is already shown, and records the request as delivered. Use it
 in shared channels for messages addressed to someone else. A reply with no
-text and no directive is different: Pogo still posts "Agent finished without a
+text and no directive is different: Stargate still posts "Agent finished without a
 text reply.", because an accidental empty answer must stay visible. See
 [silent replies](docs/setup.md#silent-replies).
 
@@ -115,7 +115,7 @@ local evidence into the proven source thread. See [attachments](docs/attachments
 for scopes, supported backends, limits and explicit file publication syntax.
 
 A bot can transcribe audio and video messages, such as Slack voice notes.
-With the `transcription` setting, Pogo replaces each audio or video file with
+With the `transcription` setting, Stargate replaces each audio or video file with
 a marked transcript in the prompt, before the agent turn starts. It uses
 Slack's own transcript when Slack has a complete one, and otherwise an Azure
 OpenAI deployment with the host's managed identity; no key is stored. A file
@@ -131,7 +131,7 @@ live reply with one collapsible **Request status** box. It states the safe cause
 and next action for a timeout, Stop, backend failure or missing thread context.
 With OpenCode, public text that settled before the failure stays above the box.
 If the finished reply is not yet readable in session history, a **Reply
-delayed** box appears and Pogo posts the reply when history is readable.
+delayed** box appears and Stargate posts the reply when history is readable.
 Later public replies from the same session, such as work resumed by background
 shell completions, reach the same thread. See [session transcript](docs/design.md#session-transcript).
 Delivery retries do not repeat agent work. Check agent state before retrying
@@ -160,7 +160,7 @@ Opt into a separate collapsible crew activity message with
 the default. Both modes show journal facts without a model call per refresh.
 An optional configured Pi reporter prepares one final tools-off summary only
 when its slot is free. Busy reporters are skipped, not queued. Set its
-short Pogo member ID in `reporter`; there is no built-in Twiki default.
+short Stargate member ID in `reporter`; there is no built-in Twiki default.
 Empty captures and the reporter's own maintenance
 do not create an activity message or summary request. See [crew activity](docs/crew-activity.md) for
 setup, privacy, and delivery limits.
@@ -197,8 +197,8 @@ per-bot hourly limit also apply. Retries never post twice.
 See [captain posts](docs/captain-post.md).
 
 Set `"dashboard": true` for a read-only fleet dashboard: ships, captain and
-crew status, Pogo bots, queue, cronjobs and session history with subagents
-for OpenCode and Pi Durable. Pogo serves it on a private Unix socket; an
+crew status, Stargate bots, queue, cronjobs and session history with subagents
+for OpenCode and Pi Durable. Stargate serves it on a private Unix socket; an
 authenticating reverse proxy publishes it. See [dashboard](docs/dashboard.md).
 
 Shared captains receive `s=slack;c=<channel>;t=<thread>;m=<message>;u=<user>`
@@ -243,18 +243,24 @@ leave its deny prompts blank when no exclusions are needed.
 Wildcards do not grant Slack channel membership or bypass Slack permissions.
 App/workspace routing checks and bot rejection remain in force. Accessible DMs
 and human participants in shared channels are included, so consider exclusions
-before enabling tools. Restart Pogo after changing access rules. Denies are
+before enabling tools. Restart Stargate after changing access rules. Denies are
 also checked before queued work and pending reply delivery.
 
 Optional local command link:
 
 ```sh
 mise exec -- bun link
-pogo --help
+stargate --help
 ```
 
-The linked command requires `bun` on `PATH`, including outside this directory.
-You can always use `mise exec -- bun run src/main.ts` instead of `pogo`.
+The linked commands require `bun` on `PATH`, including outside this directory.
+The linked commands `stargate` and `pogo` run the same CLI. From a source
+checkout you can also use `mise exec -- bun run src/main.ts`.
+
+Stargate was previously named Pogo. Existing `pogo.json` files and their
+`.env` companions, `maintenance.pogo` settings, state directories, databases
+and service names continue to work in place. Slack's `/pogo` command and
+the `pogo_*` tools keep their existing names.
 
 ## Task shortcuts
 
@@ -273,7 +279,7 @@ make start
 make check
 make config-check ARGS='--config pogo.example.json --schema-only'
 make service ARGS='install --config /srv/pogo/pogo.json'
-make pogo ARGS='bot add --help'
+make stargate ARGS='bot add --help'
 ```
 
 Equivalent mise commands use `mise run TASK -- OPTIONS`, for example:
@@ -281,7 +287,7 @@ Equivalent mise commands use `mise run TASK -- OPTIONS`, for example:
 ```sh
 mise tasks ls
 mise run config-check -- --config pogo.example.json --schema-only
-mise run pogo -- bot add --help
+mise run stargate -- bot add --help
 ```
 
 Other tasks: `manifest`, `service`, `test`, `typecheck`, `lint`, and `format`.
@@ -312,8 +318,8 @@ The wizard supplies event subscriptions and the bot's Messages tab.
 Generate the same manifest without running setup:
 
 ```sh
-pogo manifest --name Pogo
-pogo manifest --name Pogo --json > slack-manifest.json
+stargate manifest --name Stargate
+stargate manifest --name Stargate --json > slack-manifest.json
 ```
 
 Slack App IDs begin with `A`; member IDs with `U` or `W`; channel IDs with
@@ -322,27 +328,27 @@ channel details show the channel ID. `--help` includes these instructions.
 
 ## Scripted and agent-operated setup
 
-Agents should follow [Agent-led Pogo setup](docs/setup.md) first. It covers
+Agents should follow [Agent-led Stargate setup](docs/setup.md) first. It covers
 Slack skill/CLI installation, the `/slackauthticket` challenge exchange, manifest
 creation, secure token handoff, and the difference between CLI login and app
 installation. Persistent tokens must not be requested in chat.
 
 ```sh
-pogo bot add --config /srv/pogo/pogo.json \
+stargate bot add --config /srv/pogo/pogo.json \
   --id code-helper --app-id A123 \
   --app-token-env POGO_CODE_APP_TOKEN --bot-token-env POGO_CODE_BOT_TOKEN \
   --allowed-users U123 --allowed-channels C123 \
   --backend opencode --directory /srv/project --url http://localhost:4096
 
-pogo bot add --config /srv/pogo/pogo.json \
+stargate bot add --config /srv/pogo/pogo.json \
   --id pi-helper --app-id A456 \
   --app-token-env POGO_PI_APP_TOKEN --bot-token-env POGO_PI_BOT_TOKEN \
   --allowed-users U123 --allowed-channels C123 \
   --backend pi-durable --directory /srv/project --model openai/gpt-5
 
-pogo config check --config /srv/pogo/pogo.json --schema-only
-pogo config check --config /srv/pogo/pogo.json
-pogo start --config /srv/pogo/pogo.json
+stargate config check --config /srv/pogo/pogo.json --schema-only
+stargate config check --config /srv/pogo/pogo.json
+stargate start --config /srv/pogo/pogo.json
 ```
 
 Replace example IDs and choose an available model. Without bot-option flags,
@@ -366,12 +372,12 @@ Validate the file, then signal the running gateway (replace the unit name if
 this installation uses another name):
 
 ```sh
-pogo config check --config /srv/pogo/pogo.json
+stargate config check --config /srv/pogo/pogo.json
 systemctl --user kill --signal=HUP pogo.service
 ```
 
 SIGHUP reads the same regular configuration file and credential companion as
-`config check`. Requests are serialised. Pogo validates the complete candidate
+`config check`. Requests are serialised. Stargate validates the complete candidate
 before publishing any setting. Invalid input, missing credentials, a busy crew
 removal or any restart-only change refuses the whole candidate; the current
 configuration and connections stay in place. Startup now uses these same checks:
@@ -422,7 +428,7 @@ separate maintenance procedure.
 
 ### OpenCode V2
 
-Run and authenticate an OpenCode V2 server separately. Pogo uses
+Run and authenticate an OpenCode V2 server separately. Stargate uses
 `@opencode/client` and does not start or stop that server.
 Set `backend.url` and the server-side `backend.directory`. Optional `agent`
 and `model: { "providerID": "…", "id": "…" }` select the session agent/model.
@@ -438,19 +444,19 @@ Use HTTPS for remote servers. Do not expose an unauthenticated service.
 
 Tool permissions default to **deny all**. Configure `backend.permissions`
 with OpenCode V2 `action`, `resource`, and `effect` rules to permit tools.
-Pogo accepts `allow` and `deny`, not `ask`: Slack approval UI is not implemented.
+Stargate accepts `allow` and `deny`, not `ask`: Slack approval UI is not implemented.
 Consult the server's V2 permission documentation before permitting tools.
 
 ### Pi Durable
 
-Pogo embeds `@earendil-works/pi-durable` **1.5.2**, using SQLite on Bun.
+Stargate embeds `@earendil-works/pi-durable` **1.5.2**, using SQLite on Bun.
 It does not require a Pi server or the Pi CLI. Pi Durable's API is experimental;
 the three direct Pi packages are pinned together.
 
 - `model`: `openai/modelId` or `anthropic/modelId`.
 - Credentials: `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 - `thinkingLevel`: optional Pi SDK level (`off`, `minimal`, `low`, `medium`,
-  `high`, `xhigh`, `max`). Unset keeps Pi's default `off`. Pogo refuses a
+  `high`, `xhigh`, `max`). Unset keeps Pi's default `off`. Stargate refuses a
   level the model does not support instead of clamping it. Changing it on a
   bot selects a new session namespace; existing crew conversations keep the
   level they were created with, like `model`.
@@ -465,7 +471,7 @@ of native provider credentials. The supported proxy models are
 Use loopback HTTP or HTTPS, with no URL credentials, query or fragment. The
 Claude route requires a `baseURL` that ends with `/v1`, the same endpoint as
 OpenCode's `claude-proxy`. `apiKeyEnv` names the private proxy client
-key variable; never place its value in JSON. Go requests identify Pogo and retain
+key variable; never place its value in JSON. Go requests identify Stargate and retain
 a stable Go session header per Pi conversation. Capabilities, cost and limits
 come from the pinned Pi catalog. Without `thinkingLevel`, Haiku requests
 disable thinking; `"thinkingLevel": "low"` sends adaptive thinking with effort
@@ -480,7 +486,7 @@ without another Slack app or OpenCode root session.
 
 ### Claude Agent SDK
 
-Pogo pins `@anthropic-ai/claude-agent-sdk` to one exact version and runs its
+Stargate pins `@anthropic-ai/claude-agent-sdk` to one exact version and runs its
 bundled Claude Code CLI for each turn. `backend.type: "claude"` works for
 Slack bots, IRC captains and IRC crew members. The model is reached only
 through an explicit `provider: { baseURL, apiKeyEnv }`, such as the local
@@ -494,7 +500,7 @@ for setup, permissions, recovery and limits.
 
 ### Codex SDK
 
-Pogo pins `@openai/codex-sdk` to one exact version and runs the Codex CLI of
+Stargate pins `@openai/codex-sdk` to one exact version and runs the Codex CLI of
 that version for each turn. `backend.type: "codex"` works for Slack bots, IRC
 captains and IRC crew members. The model is reached only through an explicit
 `provider: { baseURL, apiKeyEnv }`, such as the local CLIProxyAPI at
@@ -537,10 +543,10 @@ Do not assume your shell's exported variables reach systemd: use the private
 companion file or configure the user-service environment explicitly.
 
 ```sh
-pogo service stop
-pogo service start
-pogo service status
-pogo service uninstall
+stargate service stop
+stargate service start
+stargate service status
+stargate service uninstall
 ```
 
 Use `--name other-pogo` for a separate unit. Separate instances need separate
@@ -553,31 +559,31 @@ SQLite file lock that the OS releases on exit.
 
 Opt-in `maintenance.cleanup` removes guarded stale scratch directories,
 merged local branches and leaked worktrees. It is disabled by default. Preview
-with `pogo maintenance cleanup --plan`; configure literal roots/repositories
+with `stargate maintenance cleanup --plan`; configure literal roots/repositories
 before enabling it. Apply uses the maintenance window and idle gate; reports
 record each removed or retained item. See [cleanup guards](docs/maintenance.md#opt-in-cleanup).
 
-`pogo maintenance update --version X.Y.Z --now` installs one verified Pogo
+`stargate maintenance update --version X.Y.Z --now` installs one verified Stargate
 release immediately, without the window or the idle gate, as a transient user
 unit with automatic rollback; `--plan` shows what it would do. Never create a
 release directory by hand. See [update now](docs/maintenance.md#update-now).
 
 Optional and off by default. In a configured window (default 00:00–01:00
-Europe/London, with a stable per-install jitter) `pogo maintenance run`
-updates Pogo from verified GitHub releases, CLIProxyAPI and the agent CLIs
+Europe/London, with a stable per-install jitter) `stargate maintenance run`
+updates Stargate from verified GitHub releases, CLIProxyAPI and the agent CLIs
 (one-day supply-chain cool-off), and moves agent profiles and live
 captain/crew sessions to newer models of the same family. It waits for an
 idle boundary, checks health after every change, rolls back automatically,
 and writes a versioned JSON report plus one Slack summary.
 
 ```sh
-pogo maintenance plan --config /srv/pogo/pogo.json        # read-only
-pogo maintenance install-timer --config /srv/pogo/pogo.json --print
+stargate maintenance plan --config /srv/pogo/pogo.json        # read-only
+stargate maintenance install-timer --config /srv/pogo/pogo.json --print
 ```
 
 An optional built-in maintenance droid (a Pi Durable agent) explains each
 run and escalates problems through the report bot. It can only read
-maintenance state and run `plan` or `recover`, within Pogo's limits.
+maintenance state and run `plan` or `recover`, within Stargate's limits.
 
 See [nightly maintenance](docs/maintenance.md) for configuration, the install
 layout, the report schema, the [maintenance droid](docs/maintenance.md#maintenance-droid)
@@ -595,14 +601,14 @@ and the one-time migration.
   turns and a 30-minute turn timeout (maximum one hour).
 - Replies persist separately from execution; Slack retries do not rerun tools.
   Up to eight delivery attempts use bounded exponential delays.
-- A stopped process can leave tool outcomes unknown. On restart, Pogo attempts
+- A stopped process can leave tool outcomes unknown. On restart, Stargate attempts
   to interrupt surviving work and reports the interrupted request rather than
   automatically running it again. Transcript/session state remains available.
   Pi Durable's task storage does not provide automatic gateway-turn recovery.
 - Exactly-once external side effects are **not** guaranteed. A crash after
   Slack accepts a reply but before SQLite records it can duplicate that reply.
 - OpenCode thread replies follow a durable per-thread message cursor. After a
-  restart or reconnect, Pogo catches up every mapped thread. Failed history
+  restart or reconnect, Stargate catches up every mapped thread. Failed history
   reads keep the cursor and retry with backoff. A deleted session or lost
   cursor stops catch-up for that thread. After a lost cursor, the next reply
   starts with a note that earlier replies may be missing. Existing threads
@@ -618,7 +624,7 @@ and the one-time migration.
   Adding `backend.sessionID` only binds an existing native session; it does not
   change the namespace, thread admission or cron schedules. Changing that pin
   requires an explicit idle migration. One pinned session can have only one
-  Slack bot registration, at most one IRC registration and one Pogo process
+  Slack bot registration, at most one IRC registration and one Stargate process
   owner; each transport delivers only replies to its own inputs.
 - Claude Agent SDK backends deliver only each turn's own reply: no
   transcript catch-up, dashboard history or pinned captain session.
@@ -631,7 +637,7 @@ and the one-time migration.
   policy. Keep the data directory private and back it up only while stopped.
 
 Access rules are request filters, not isolation. A permitted user can ask the
-agent to use every enabled capability under the Pogo process's OS account.
+agent to use every enabled capability under the Stargate process's OS account.
 Separate users/containers are required to isolate untrusted workloads. Never
 enable coding tools for an untrusted Slack audience.
 
@@ -719,4 +725,4 @@ calls run in tests.
 Live Slack and model verification still requires your credentials.
 
 PIPA was evaluated as a reference for Slack setup and thread behavior.
-Pogo is a standalone implementation, not a PIPA fork.
+Stargate is a standalone implementation, not a PIPA fork.

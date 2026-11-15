@@ -1,7 +1,7 @@
 # Slack thread context
 
 Initial history loading for unpinned conversations is disabled by default.
-To enable it for one bot, add this top-level setting, then restart Pogo:
+To enable it for one bot, add this top-level setting, then restart Stargate:
 
 ```json
 "threadContext": true
@@ -13,22 +13,22 @@ Existing backend sessions continue unchanged. Custom `SlackDelivery`
 implementations can optionally implement `threadContext`; without it, enabled
 requests that need history fail before an agent turn starts.
 
-## When Pogo reads history
+## When Stargate reads history
 
 If an unpinned conversation's first agent turn starts from a reply in an existing
-Slack thread, Pogo reads prior messages in that same channel and thread. It does
+Slack thread, Stargate reads prior messages in that same channel and thread. It does
 so only when no backend session exists for that conversation. Its later turns
 keep their existing per-thread session context without another history read.
 
 A pinned captain shares one native session across sources. Each real Slack turn
-carries only a compact source line and the new user message. Pogo does not reread
+carries only a compact source line and the new user message. Stargate does not reread
 or resend prior Slack messages on a source switch, backend failure, restart or
 model compaction. This avoids accumulating repeated history in the shared
 session. New thread roots and scheduled runs have no earlier history to import.
-With `threadContext: false`, Pogo makes no thread-history calls.
+With `threadContext: false`, Stargate makes no thread-history calls.
 
-Pogo persists the accepted request before Slack ACK. The history call occurs
-during queued execution, after Pogo checks current user and channel access
+Stargate persists the accepted request before Slack ACK. The history call occurs
+during queued execution, after Stargate checks current user and channel access
 again. The call uses the current message timestamp as an exclusive cutoff.
 Messages at or after that timestamp are not imported, even if Slack returns
 them. Cancellation aborts the history transport and prevents backend execution.
@@ -44,11 +44,11 @@ own user. It does not fetch files, attachments, links, other channels or other
 threads. Quoted text inside an eligible message remains untrusted text.
 
 Each history read makes **one** `conversations.replies` request with a page
-limit of **50**. It does not follow pagination cursors. From that page, Pogo
+limit of **50**. It does not follow pagination cursors. From that page, Stargate
 imports up to **20 messages**, in timestamp order, up to **2,000 Unicode
 codepoints per message** and **12,000 text codepoints total**. These limits
 apply to message text before JSON escaping, not the complete prompt size.
-Pogo keeps the eligible root, then selects the newest eligible messages from that
+Stargate keeps the eligible root, then selects the newest eligible messages from that
 page within the remaining limits. It presents them in chronological order. A
 thread longer than the API page remains truncated; this is not full history.
 
@@ -57,7 +57,7 @@ labels are `requester` and `this_bot`, not agent conversation roles.
 The actual user instruction follows separately.
 A `truncated` flag reports a remaining Slack page or a message/text limit.
 This is a filtered subset, not a claim that
-Pogo read the full thread. If no eligible messages exist and no limit was hit,
+Stargate read the full thread. If no eligible messages exist and no limit was hit,
 the unpinned user instruction stays unchanged.
 
 JSON encoding prevents text from breaking the prompt's data structure; it does
@@ -86,26 +86,26 @@ refer to the current thread's user goal, not the latest task in the shared
 session. An earlier bot reply does not replace the user's original goal.
 IDs alone do not restore missing context. The captain should use an authorized
 history tool if available, or ask for clarification, rather than guess. It should
-not retrieve history when existing context is sufficient. Pogo does not add a
+not retrieve history when existing context is sufficient. Stargate does not add a
 history tool or summary helper as part of this source format.
 Source identity does not authorize replay, change task ownership or create a new
 captain. This supplies a context anchor, not a model-level isolation guarantee.
 
 Existing native history remains unchanged. Only the next user input is framed;
-Pogo does not rewrite earlier messages or claim guaranteed provider cache hits.
+Stargate does not rewrite earlier messages or claim guaranteed provider cache hits.
 
 ## Slack access and errors
 
-Pogo uses the registration's existing bot token and Web API connection. Slack's
+Stargate uses the registration's existing bot token and Web API connection. Slack's
 [current method contract](https://docs.slack.dev/reference/methods/conversations.replies.md)
 lists bot-token history scopes: `channels:history`, `groups:history`,
-`im:history`, and `mpim:history`, according to conversation type. Pogo's normal
+`im:history`, and `mpim:history`, according to conversation type. Stargate's normal
 app setup already requests the first three. This feature does not request
 additional scopes or change a live installation. Bot membership and Slack's
-visibility rules still apply; a Pogo allowlist does not grant Slack access.
+visibility rules still apply; a Stargate allowlist does not grant Slack access.
 
 History access, malformed-response, network and rate-limit failures fail closed:
-Pogo reports that initial context could not be loaded and starts no agent turn.
+Stargate reports that initial context could not be loaded and starts no agent turn.
 It does not silently proceed as if it had read the thread. SDK payloads and
 credential details are not logged or returned. Rate-limited calls are not
 automatically retried; check Slack access or wait before sending a new request.

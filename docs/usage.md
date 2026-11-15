@@ -99,7 +99,7 @@ the Codex workers use a local login outside this proxy. A proxy observation
 only applies to workers using the same provider account. To watch a native
 Codex login alongside proxy-based Claude, set `nativeCodexFile` to the
 absolute path of its trusted local quota receipt and include `"codex"` in
-`providers`. Pogo will use only that receipt for Codex and will skip Codex
+`providers`. Stargate will use only that receipt for Codex and will skip Codex
 proxy calls.
 
 The host should publish the minimum remaining percentage from the native

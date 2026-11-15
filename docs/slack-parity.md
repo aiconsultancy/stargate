@@ -1,7 +1,7 @@
 # Slack agent feature comparison
 
 Comparison date: 2026-11-06. This is a product capability comparison, not a
-claim that Pogo has the same security model or deployment architecture.
+claim that Stargate has the same security model or deployment architecture.
 
 ## Products compared
 
@@ -23,7 +23,7 @@ The linked documentation can change after this comparison.
 
 ## Capability gaps
 
-| Capability                    | Vendor evidence                                                              | Pogo status                                                                                                                                                  |
+| Capability                    | Vendor evidence                                                              | Stargate status                                                                                                                                              |
 | ----------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Start work from a mention     | Both coding integrations                                                     | Supported, with explicit user/channel access rules.                                                                                                          |
 | Continue a thread             | Both coding integrations                                                     | Ordinary bots use durable per-thread sessions; captains use one pinned session across sources, with source-specific reply delivery.                          |
@@ -36,8 +36,8 @@ The linked documentation can change after this comparison.
 | Open the task/session         | Claude Code **View session**; ChatGPT **Follow along**                       | Gap: no backend-neutral task link in Slack.                                                                                                                  |
 | Repository/environment choice | Claude repository picker; ChatGPT accessible Cloud environments              | Gap: backend directory is configured per bot, not selected in Slack.                                                                                         |
 | Approval cards                | ChatGPT private **Allow**/**Deny**                                           | Gap: no Slack approval bridge for backend permissions. Deny-by-default remains required.                                                                     |
-| Create-PR control             | Claude Code **Create PR**                                                    | Gap in native UI. An authorized agent may use GitHub tools; that is not a Pogo PR button.                                                                    |
-| Per-user repository identity  | Claude individual accounts; ChatGPT account/environment access               | Architectural gap: Pogo uses a shared configured backend, not each Slack user's repository credentials.                                                      |
+| Create-PR control             | Claude Code **Create PR**                                                    | Gap in native UI. An authorized agent may use GitHub tools; that is not a Stargate PR button.                                                                |
+| Per-user repository identity  | Claude individual accounts; ChatGPT account/environment access               | Architectural gap: Stargate uses a shared configured backend, not each Slack user's repository credentials.                                                  |
 | Files/artifact transport      | Not established by the compared coding pages                                 | Supported for backends on the same host: images and files in both directions; see [attachments](attachments.md). Do not claim vendor equivalence.            |
 
 ## Incremental delivery order

@@ -1,11 +1,11 @@
 # Slack scopes for development
 
-OAuth grants describe what the bot token can do. Pogo's tools, event subscriptions,
+OAuth grants describe what the bot token can do. Stargate's tools, event subscriptions,
 channel membership and access rules are separate. Adding a scope does not install
 a tool or authorize arbitrary writes. Keep user/channel allowlists, deny rules,
 bot rejection and task-origin routing unchanged when expanding development access.
 
-## Required by current Pogo
+## Required by current Stargate
 
 | Scope                                              | Use                                                                   |
 | -------------------------------------------------- | --------------------------------------------------------------------- |
@@ -25,7 +25,7 @@ For a development/beta bot, this is a useful capability expansion rather than a
 minimum-permission profile. Preserve existing grants and add approved missing
 scopes; do not replace a broader installed app with the generated baseline.
 
-| Scope                               | Capability                                             | Pogo status                                                     |
+| Scope                               | Capability                                             | Stargate status                                                 |
 | ----------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------- |
 | `channels:read`, `groups:read`      | Discover joined conversations and metadata.            | Diagnostic/future tools.                                        |
 | `im:read`, `im:write`               | Inspect and open one-to-one DMs.                       | Future tools.                                                   |
@@ -50,15 +50,15 @@ bookmarks, links, assistant, skills, MCP and trigger grants. No media scope was
 missing. Useful missing additions were `im:read`, `im:write`, `mpim:read`,
 `mpim:history`, `users:read`, `users:read.email`, `usergroups:read`, `pins:read`,
 `pins:write`, `chat:write.public` and `channels:join`. These are recommendations,
-not evidence that the installed token or Pogo implementation changed.
+not evidence that the installed token or Stargate implementation changed.
 
 ## Do not conflate these capabilities
 
 - Native scheduled messages use existing `chat:write`; there is no separate
-  scheduled-message scope. Pogo cron is a different mechanism.
+  scheduled-message scope. Stargate cron is a different mechanism.
 - `remote_files:write` is not the native file upload permission.
 - Modern real-time search uses its own granular scopes and event `action_token`.
-  Pogo does not currently retain/use that token for search. Its storage rules
+  Stargate does not currently retain/use that token for search. Its storage rules
   require separate design before search results enter durable context.
 - Private/DM/group-DM search scopes in the current documentation require a user
   token, not a larger bot scope array. Do not silently add user impersonation.

@@ -25,7 +25,7 @@ whose external outcome is uncertain. Check actual task/session evidence first.
 
 ## Durable records
 
-`pogo crew init` creates these private Markdown files under the captain's
+`stargate crew init` creates these private Markdown files under the captain's
 directory, for the captain and **all configured members**, including Pi workers:
 
 ```text
@@ -44,7 +44,7 @@ directory in the team's private backup; it is not another task database.
 
 These Markdown journals are retained as history, not the new note-writing path.
 Write concise milestones, checks, blockers and outcomes with `pogo_journal`.
-Pogo supplies IDs, time, identity and task context in the existing crew SQLite
+Stargate supplies IDs, time, identity and task context in the existing crew SQLite
 database. Notes remain when temporary Slack activity captures expire. Skip
 routine turns, empty updates and tool transcripts. Native-workaround feedback
 is an ordinary note, not a separate tracker or automatic implementation loop.
@@ -154,12 +154,12 @@ messages directly. Inspect or remove the job through `/cron`.
 
 ## Activation
 
-Fresh teams can use `pogo crew init --team team.example.json` with their own
+Fresh teams can use `stargate crew init --team team.example.json` with their own
 directories and namespace. Do not rerun it over a live customized profile to
 replace files. Existing installations need an explicit, backed-up rollout of
 the common journal instructions and skill-source path. Preserve durable member
 IDs, sessions, tasks and history. To add Bosun to an established roster, set
-`allowCrewExpansion: true` explicitly in each generated Pogo plugin's options.
+`allowCrewExpansion: true` explicitly in each generated Stargate plugin's options.
 Supply the same expanded team and add Bosun's worktree path everywhere. This
 append-only rollout accepts new OpenCode and Pi workers but rejects removal,
 rebinding or changes to existing members, directories, captain, project or

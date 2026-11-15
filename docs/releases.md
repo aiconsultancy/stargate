@@ -30,7 +30,9 @@ release only when it contains a user-facing change. The first release is
 5. The workflow creates `pogo-vX.Y.Z.tar.gz` (a `git archive` of the commit)
    and its SHA-256 file, and publishes the tag and release with the commit
    subjects as notes. GitHub build provenance (artifact attestations) is not
-   available on the organization's current plan.
+   available on the organization's current plan. Archive and checksum names,
+   archive root prefixes, and `.pogo-release.json` metadata stay compatible
+   with existing updaters after the Stargate rename.
 
 ## Release manually
 
@@ -38,7 +40,7 @@ To release changes that do not release on their own, run the Release workflow
 on `main`:
 
 ```sh
-gh workflow run release.yml --repo aiconsultancy/pogo --ref main
+gh workflow run release.yml --repo aiconsultancy/stargate --ref main
 ```
 
 It releases the head of `main` only after its Quality checks have passed, and
@@ -51,7 +53,7 @@ The version lives in the tag, not in `package.json`. CI never commits to
 ## Verify a release
 
 ```sh
-gh release download v0.1.0 --repo aiconsultancy/pogo
+gh release download v0.1.0 --repo aiconsultancy/stargate
 sha256sum -c pogo-v0.1.0.tar.gz.sha256
 # Strongest check without attestations: rebuild the archive from the tag.
 git archive --format=tar.gz --prefix=pogo-v0.1.0/ v0.1.0 | sha256sum

@@ -43,7 +43,7 @@ Changing a local manifest does not update an installed Slack app.
 Custom slash commands cannot run inside message threads. Invoke `/cron` from
 the channel or DM composer. Slack command names are workspace-wide: if another
 app registers `/cron`, Slack routes that name to the most recently installed
-app. Do not register the same command on multiple Pogo apps in one workspace.
+app. Do not register the same command on multiple Stargate apps in one workspace.
 
 Each command, button, and form submission checks the configured app and
 workspace, current user/channel access, and schedule ownership. Denies
@@ -53,14 +53,14 @@ schedule namespace; old schedules are not executed with the new backend.
 
 ## Limits
 
-- Pogo must be running for scheduled work to start.
+- Stargate must be running for scheduled work to start.
 - Missed intervals are skipped, not replayed as a backlog.
 - A schedule does not start overlapping runs while prior work is active.
 - Access is checked again before scheduled work and reply delivery.
 - Retried form submissions do not create duplicate schedules.
 - Interrupted or uncertain Slack announcements are not automatically reposted.
 - Missing gateway queue history holds the schedule until you remove it;
-  Pogo does not guess whether its tools ran.
+  Stargate does not guess whether its tools ran.
 - No exactly-once guarantee applies to external tool actions or Slack delivery.
 - Prompts are stored in the private SQLite state. Keep backups private.
 
@@ -92,7 +92,7 @@ Omit `dailyReport` to disable automatic reports. Its channel defaults to
 `cronjobs.channel`; its time defaults to `08:30`. Reports currently use UTC.
 
 The directory is an explicit execution boundary, not a general file search.
-Each bot needs its own directory. Pogo checks up to 100 immediate job
+Each bot needs its own directory. Stargate checks up to 100 immediate job
 directories every ten seconds. Configuring this directory authorizes its
 valid, enabled definitions to run; do not point it at unreviewed files.
 Without this setting, existing SQLite-only schedules continue unchanged.
@@ -161,12 +161,12 @@ Generated profiles expose the `pogo-cronjobs` skill. Bind the captain tool
 to one existing gateway configuration and bot:
 
 ```sh
-pogo crew init --directory /srv/captain --project /srv/project \
+stargate crew init --directory /srv/captain --project /srv/project \
   --worktrees /srv/crew --cron-config /srv/pogo/pogo.json --cron-bot helper
 ```
 
 For an existing profile, merge this non-secret binding into the existing
-Pogo plugin options; preserve other options and the pinned captain session:
+Stargate plugin options; preserve other options and the pinned captain session:
 
 ```json
 "cron": { "configPath": "/srv/pogo/pogo.json", "bot": "helper" }
@@ -189,11 +189,11 @@ Admission is not completion. Inspect status before retrying uncertain work.
 Local operator equivalents:
 
 ```sh
-pogo cron list --config /srv/pogo/pogo.json --bot helper
-pogo cron add --config /srv/pogo/pogo.json --bot helper --input job.json
-pogo cron run overnight-maintenance --config /srv/pogo/pogo.json --bot helper
-pogo cron remove JOB_UUID --config /srv/pogo/pogo.json --bot helper
-pogo cron report --config /srv/pogo/pogo.json --bot helper
+stargate cron list --config /srv/pogo/pogo.json --bot helper
+stargate cron add --config /srv/pogo/pogo.json --bot helper --input job.json
+stargate cron run overnight-maintenance --config /srv/pogo/pogo.json --bot helper
+stargate cron remove JOB_UUID --config /srv/pogo/pogo.json --bot helper
+stargate cron report --config /srv/pogo/pogo.json --bot helper
 ```
 
 `job.json` uses the tool's add fields: `name`, `description`, `schedule`,
@@ -210,7 +210,7 @@ it does not send a report or change settings.
   normal public reply at the job's destination.
 - `report: daily`: no announcement, live preview, reaction, activity message,
   failure message, attachment upload or final reply is sent for the run.
-  Pogo retains the public result/failure in private local queue state.
+  Stargate retains the public result/failure in private local queue state.
 - At 08:30 UTC, the configured report channel receives one bounded message
   for this bot: job inventory, deferred outcomes and definition-error count.
   It calls no model. Up to ten jobs and ten result excerpts fit the message;
@@ -236,13 +236,13 @@ maintenance tasks.
 
 [`system-maintenance`](../cronjobs/system-maintenance/CRONJOB.md) is a
 disabled example with a supporting policy. It covers OpenCode, Claude Code,
-Codex, Pi, CLIProxyAPI, Pogo dependencies, AgentsView and Worktrunk. Copy it
+Codex, Pi, CLIProxyAPI, Stargate dependencies, AgentsView and Worktrunk. Copy it
 only into the intended configured directory, review ownership and timing,
 then explicitly enable it. The sample 03:15 UTC schedule is provisional.
 
 Reuse an existing OS updater rather than installing a competing schedule.
-A Pogo job can inspect that updater's private logs and include verified
+A Stargate job can inspect that updater's private logs and include verified
 results in the morning digest. Shared executable replacement needs a proven
 idle window. Dependency or version pins require reviewed changes and tests;
-live Pogo/proxy activation requires a separate deployment decision. A
+live Stargate/proxy activation requires a separate deployment decision. A
 schedule is not permission to interrupt workers or blindly restart itself.

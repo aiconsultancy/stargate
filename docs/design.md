@@ -1,4 +1,4 @@
-# Pogo design
+# Stargate design
 
 ## Boundaries
 
@@ -46,7 +46,7 @@ bot first. Requests that arrive after that point get no ACK, so Slack
 redelivers them. All workers then stop together: each turn sees its signal
 abort and records an `interrupted` outcome. Backends, stores and the instance
 lock close last. A failure after startup stops every bot and exits with code
-1, so the service manager restarts Pogo.
+1, so the service manager restarts Stargate.
 
 ## Live configuration reload
 
@@ -163,11 +163,11 @@ first turn creates that native session and later turns resume it from the
 namespace's transcript directory. Previews come from streamed main-agent
 text blocks; the answer comes from completed assistant messages, never from
 error frames. When the CLI exits, is cancelled or lingers after its result,
-Pogo stops its process group and every process that carries the turn's random
+Stargate stops its process group and every process that carries the turn's random
 environment marker (Claude Code runs Bash in separate sessions), and forces
 survivors after a grace period. Each signal follows a synchronous check of
 the process's start time, user IDs and marker (no pidfd API is available).
-Records of running CLIs let `interrupt` stop what an earlier Pogo process
+Records of running CLIs let `interrupt` stop what an earlier Stargate process
 left: the group only while its recorded leader still matches, other
 processes only by that check. See [Claude backend](claude.md).
 
@@ -176,24 +176,24 @@ pinned Codex SDK, with a minimal environment and a private `CODEX_HOME` per
 namespace. Command-line `--config` overrides define the only model provider
 (the configured proxy), the sandbox (`read-only` by default), approval
 policy `never`, and turn off project instructions, skills, plugins, hooks,
-subagents and optional network traffic. `createSession` allocates a Pogo
+subagents and optional network traffic. `createSession` allocates a Stargate
 UUID; the first turn's `thread.started` event stores the Codex thread ID,
 and later turns resume it. Previews and the answer are the completed agent
 messages of the turn; failures carry fixed causes, never CLI stderr. The
-CLI shares Pogo's process group and its sandbox uses new sessions and PID
+CLI shares Stargate's process group and its sandbox uses new sessions and PID
 namespaces, so clean-up uses only the turn marker (`POGO_CODEX_TURN`) and
 the same verified per-process signals as Claude, from the shared
 `backends/cli-agent.ts` module. Cancellation starts that clean-up at once,
 not after the SDK's stream ends, because the SDK only sends `SIGTERM` and
 then waits for the CLI's output. The SDK exposes no process or stream
-handle, so Pogo's `sh` launcher (`codexPathOverride`) `exec`s the CLI with
+handle, so Stargate's `sh` launcher (`codexPathOverride`) `exec`s the CLI with
 its output through an unlinked FIFO and a marked `cat`: only marked
-processes hold Pogo's pipes, and the clean-up closes them. The launcher
+processes hold Stargate's pipes, and the clean-up closes them. The launcher
 is written (`O_EXCL | O_NOFOLLOW`) and verified per turn at its canonical
 path and runs root-owned system utilities by absolute path; after
-validation every path that Pogo writes, checks or runs is used only in
+validation every path that Stargate writes, checks or runs is used only in
 canonical form, and changeable symbolic links are refused; `codex-paths.ts`
-refuses a `workspace-write` directory that overlaps Pogo's data,
+refuses a `workspace-write` directory that overlaps Stargate's data,
 installation, the SDK packages or the home directory. The CLI never sees
 the operator's `PATH`: it gets a fixed one built at start-up from the SDK
 helper directory, root-controlled system directories (every program
@@ -203,7 +203,7 @@ records hold only the marker and start time. See [Codex backend](codex.md).
 
 `startActivity` is an optional, request-scoped reporting capability. Its
 `ActivityWatch` reads bounded visible journal facts and can finish or cancel
-the capture. OpenCode implements it through the location-scoped Pogo reporting
+the capture. OpenCode implements it through the location-scoped Stargate reporting
 RPC. Other adapters remain compatible without it. The gateway manages report
 delivery separately from answer delivery, with its own deadline and access
 rechecks. See [crew activity](crew-activity.md) and [`activity.ts`](../src/activity.ts).
@@ -241,7 +241,7 @@ server API and asks the crew plugin for crew roots and Pi crew transcripts.
 Pi Durable reads its own store. Adapters answer what they are asked;
 [`dashboard-source.ts`](../src/dashboard-source.ts) decides which sessions
 belong to a bot. The dashboard listens on a Unix socket in the private data
-directory, so Pogo still opens no network port.
+directory, so Stargate still opens no network port.
 
 Custom modules export:
 
@@ -347,7 +347,7 @@ Scheduled names remain literal. The gateway consumes reaction and silent
 directives before classification, including streaming previews.
 Updates are coalesced, not sent for every token. Preview timestamps are
 stored in SQLite; completion, errors, and restart recovery update those same
-messages. If the final reply is shorter, Pogo removes its extra preview messages.
+messages. If the final reply is shorter, Stargate removes its extra preview messages.
 Slack failures stop live updates but do not stop or rerun tools. Final delivery
 uses the durable response and retry cursor. A crash between a Slack post and
 timestamp persistence can still leave an extra preview.
@@ -387,7 +387,7 @@ captain or a model-level isolation guarantee. See
 `captain_cursors` stores one cursor and delivery owner for that bot and session.
 The native input ID commits on the job before admission. History attributes
 each public entry to its preceding user or standalone shell input. A known
-Pogo input selects its originating job; an unknown native input clears the
+Stargate input selects its originating job; an unknown native input clears the
 Slack owner. Crew tasks retain the exact originating captain input resolved
 from the dispatch tool's message ancestry, including while queued. Captain-bound
 crew wakes queue rather than steer another source's active turn. Their metadata
@@ -403,7 +403,7 @@ This includes tasks already running during activation. Recover the result and
 report it in its proven source; do not replay the assignment to obtain routing.
 
 Replies for the current input, continuation outbox rows for earlier owners,
-and cursor advancement commit together. Native UI output with no Pogo owner
+and cursor advancement commit together. Native UI output with no Stargate owner
 stays in native history instead of being copied to a Slack chat. Catch-up waits
 for queued and running captain requests and never broadcasts to old mappings.
 Targeted per-thread transcript repair does not support pinned captains and
@@ -413,11 +413,11 @@ fails without writing state.
 
 A mapped OpenCode session can continue after its Slack turn ends. Background
 shell completions and crew notifications resume it after a successful wait, a
-timeout, or Stop. Pogo delivers that public assistant text to the same thread.
+timeout, or Stop. Stargate delivers that public assistant text to the same thread.
 It never runs the request again for this delivery.
 
 The `sessions` row stores a transcript cursor: the newest native message that
-Pogo accounted for in Slack. NULL means the mapping predates the cursor.
+Stargate accounted for in Slack. NULL means the mapping predates the cursor.
 
 - A turn records its starting cursor. After the prompt settles, the reply is
   all settled public text after that cursor, not only the last answer. The
@@ -434,7 +434,7 @@ Pogo accounted for in Slack. NULL means the mapping predates the cursor.
 - The final read retries briefly (100, 200, 400 ms) for completion marks. If
   history stays unreadable, or no public text has settled, the turn posts one
   **Reply delayed** status box and catch-up delivers the reply from history.
-  Pogo never posts the streamed copy without its cursor. Settled text before
+  Stargate never posts the streamed copy without its cursor. Settled text before
   an unsettled message is delivered; the rest follows through catch-up.
 - On timeout, backend failure, or Stop, settled public text stays above the
   one **Request status** box. Shutdown keeps the cursor; restart catch-up
@@ -465,11 +465,11 @@ Delivery targets the latest request row of the exact bot/app/workspace/
 backend/channel/thread conversation. Session IDs that map only in another bot
 namespace, worker sessions, and child sessions are ignored.
 
-At startup, mappings without a cursor get a baseline at current history. Pogo
+At startup, mappings without a cursor get a baseline at current history. Stargate
 does not backfill earlier history. If that baseline read fails when a request
 starts, the reply is read strictly after the request's own native input, and
 the cursor is seeded there. Later replies are not skipped. If that read also
-fails, Pogo posts the streamed reply and leaves the cursor unset.
+fails, Stargate posts the streamed reply and leaves the cursor unset.
 
 A catch-up reads every history page back to its cursor. If the cursor message
 is missing, for example after a session revert, catch-up stops and keeps the
@@ -518,7 +518,7 @@ console.log(JSON.stringify(await repairThread({
 }), null, 2));'
 ```
 
-Pogo's running worker delivers applied rows; the helper does not post to
+Stargate's running worker delivers applied rows; the helper does not post to
 Slack. Only `apply: true` refuses a thread with a queued or running request;
 a dry run never queues replies or moves the cursor. Both modes first restrict
 the existing data directory to `0700` and `pogo.sqlite` to `0600`, before SQLite

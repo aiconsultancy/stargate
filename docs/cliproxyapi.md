@@ -1,8 +1,8 @@
-# CLIProxyAPI for Pogo
+# CLIProxyAPI for Stargate
 
 ## Portable bootstrap
 
-Run this sequence from the Pogo checkout on the **new host**, after explicit
+Run this sequence from the Stargate checkout on the **new host**, after explicit
 operator approval. It requires mise, the repository's pinned Bun, and installed
 dependencies (`mise install`, then `make deps`). It creates a separate local
 proxy, not a Slack bot runtime. No global OpenCode config, service, timer, or
@@ -149,10 +149,10 @@ Starting the foreground proxy is a separate approved action. If port 8317 is
 occupied, inspect its owner; do not stop an existing proxy to make this work.
 No service installation, login persistence, or updater is implied.
 
-### Connect OpenCode and Pogo
+### Connect OpenCode and Stargate
 
 1. Configure the default OpenCode provider through
-   [Pogo's profile guide](agents/default-opencode.md): provider `openai-proxy`,
+   [Stargate's profile guide](agents/default-opencode.md): provider `openai-proxy`,
    endpoint `http://127.0.0.1:8317/v1`, and the generated `{file:…/client.key}`
    reference. Configure [global child agents](agents/agent-profiles.md) only
    after discovery, proposal, and operator approval. Do not overwrite global
@@ -170,7 +170,7 @@ No service installation, login persistence, or updater is implied.
    `x-opencode-session` **per conversation**. The `$…` header values above copy
    incoming headers; they do not invent a missing session or use one global ID.
 4. Follow [Slack batch setup](setup.md), reuse the live Bowser App ID, and
-   register additional bots with private token references. Pogo's `backend.url`
+   register additional bots with private token references. Stargate's `backend.url`
    addresses OpenCode, not port 8317. Pi uses this proxy only with an explicit
    `provider` configuration and a supported model (DeepSeek Go or Claude
    Haiku 5.5); see
@@ -189,7 +189,7 @@ The remaining sections record one existing installation. Its paths, wrappers,
 services, and update timer are **not installed by the portable steps above**.
 Do not assume these units or credentials exist on a new host.
 
-CLIProxyAPI is installed separately from Pogo through mise. It listens only on
+CLIProxyAPI is installed separately from Stargate through mise. It listens only on
 `http://127.0.0.1:8317`. Client-key authentication is required; management APIs,
 the management panel, LAN discovery, and profiling are disabled.
 
@@ -203,9 +203,9 @@ the management panel, LAN discovery, and profiling are disabled.
 - User service: `cliproxyapi.service`.
 
 Do not print the config, client key, or provider credential files into chats or
-logs. Pogo/provider configuration can reference the key through environment
+logs. Stargate/provider configuration can reference the key through environment
 variable `CLIPROXYAPI_API_KEY`. Installation does not automatically modify
-OpenCode or Pogo provider settings.
+OpenCode or Stargate provider settings.
 
 ### Account sign-in
 

@@ -21,6 +21,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { maintenanceSchema } from "../src/nightly/config";
 import {
   type CommandOptions,
   type CommandRunner,
@@ -78,26 +79,38 @@ const storage = Bun.serve({
     return new Response(new Uint8Array(state.archive ?? archive));
   },
 });
+const legacyRepository = "aiconsultancy/pogo";
+const repositoryPath = "/repos/aiconsultancy/stargate";
+const repositoryIDPath = "/repositories/1447008811";
 let apiPort = 0;
 const api = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   fetch(request): Response {
     const url = new URL(request.url);
-    const repo = "/repos/aiconsultancy/pogo";
-    if (url.pathname === `${repo}/releases`)
+    const legacyPath = `/repos/${legacyRepository}/`;
+    if (url.pathname.startsWith(legacyPath)) {
+      const suffix = url.pathname.slice(legacyPath.length);
+      return new Response(null, {
+        status: 301,
+        headers: { location: `${repositoryIDPath}/${suffix}${url.search}` },
+      });
+    }
+    const path = url.pathname.replace(repositoryIDPath, repositoryPath);
+    const repo = repositoryPath;
+    if (path === `${repo}/releases`)
       // An API redirect to another host must not carry the token (L1).
       return state.redirectList
         ? Response.redirect(`http://127.0.0.1:${storage.port}/list`, 302)
         : Response.json(list());
-    if (url.pathname === `${repo}/releases/assets/1`)
+    if (path === `${repo}/releases/assets/1`)
       // Signed storage URL on another origin: credentials must not follow.
       return Response.redirect(`http://127.0.0.1:${storage.port}/blob`, 302);
-    if (url.pathname === `${repo}/releases/assets/2`)
+    if (path === `${repo}/releases/assets/2`)
       return new Response(state.checksum);
-    if (url.pathname === `${repo}/git/ref/tags/v0.2.0`)
+    if (path === `${repo}/git/ref/tags/v0.2.0`)
       return Response.json({ object: { type: "commit", sha: commit } });
-    if (url.pathname === `${repo}/compare/${commit}...main`)
+    if (path === `${repo}/compare/${commit}...main`)
       return Response.json({ status: state.compare });
     return new Response("missing", { status: 404 });
   },
@@ -106,7 +119,7 @@ apiPort = api.port ?? 0;
 
 function list() {
   const base = `http://127.0.0.1:${apiPort}`;
-  const repo = "/repos/aiconsultancy/pogo";
+  const repo = repositoryPath;
   const at = "2026-11-10T00:00:00Z";
   const uploader = state.uploader ? { uploader: { login: state.author } } : {};
   return [
@@ -160,9 +173,11 @@ const runner: CommandRunner = {
 };
 
 function config(root: string, withCheckout = true): PogoReleaseConfig {
+  const release = maintenanceSchema.parse({ pogo: { root } }).pogo;
+  if (!release) throw new Error("missing release configuration");
   return {
     root,
-    repository: "aiconsultancy/pogo",
+    repository: release.repository,
     apiURL: `http://127.0.0.1:${apiPort}`,
     author: "github-actions[bot]",
     branch: "main",
@@ -180,7 +195,7 @@ beforeAll(async () => {
   source = join(directory, "source");
   await mkdir(join(source, "src"), { recursive: true });
   git(directory, "init", "-q", "-b", "main", source);
-  await writeFile(join(source, "package.json"), '{ "name": "pogo" }\n');
+  await writeFile(join(source, "package.json"), '{ "name": "stargate" }\n');
   await writeFile(join(source, "src", "main.ts"), "console.log(1);\n");
   await writeFile(join(source, "run.sh"), "#!/bin/sh\n");
   await chmod(join(source, "run.sh"), 0o755);
@@ -234,17 +249,19 @@ async function newRoot(name: string) {
   return root;
 }
 
-async function stage(root: string, withCheckout = true) {
+async function stage(root: string, withCheckout = true, repository?: string) {
+  const settings = config(root, withCheckout);
+  if (repository) settings.repository = repository;
   const headers = githubHeaders("secret-token");
   const release = await newerRelease(
-    config(root, withCheckout),
+    settings,
     headers,
     "0.1.0",
     Date.parse("2026-11-12T00:00:00Z"),
   );
   if (!release) throw new Error("no release");
   return stageRelease({
-    config: config(root, withCheckout),
+    config: settings,
     release,
     headers,
     runner,
@@ -254,7 +271,41 @@ async function stage(root: string, withCheckout = true) {
   });
 }
 
-describe("Pogo release update", () => {
+describe("Stargate release update", () => {
+  test("adopts a Stargate package with legacy metadata alongside a Pogo release", async () => {
+    const root = await newRoot("adopt-stargate");
+    const path = join(root, "releases", "0.2.0");
+    await mkdir(join(path, "src"), { recursive: true });
+    await writeFile(join(path, "package.json"), '{ "name": "stargate" }');
+    await writeFile(join(path, "src", "main.ts"), "");
+
+    expect(await adoptRelease(root, path, "0.2.0")).toEqual({
+      current: "unchanged",
+    });
+    expect(await readMetadata(path)).toMatchObject({
+      schema: "pogo.release.v1",
+      version: "0.2.0",
+      verification: "adopted",
+    });
+    expect((await linkedRelease(root, "current"))?.metadata.version).toBe(
+      "0.1.0",
+    );
+  });
+
+  test("a legacy repository URL stages a Stargate release through same-origin redirects", async () => {
+    const root = await newRoot("redirected-stargate");
+    const result = await stage(root, true, legacyRepository);
+    expect(result.metadata).toMatchObject({
+      schema: "pogo.release.v1",
+      version: "0.2.0",
+      verification: "verified",
+      tree: "equal",
+    });
+    expect(await readMetadata(result.directory)).toEqual(result.metadata);
+    expect(state.storageAuthorization).toEqual([null]);
+    expect((await linkedRelease(root, "current"))?.name).toBe("old");
+  });
+
   test("verifies, unpacks, compares with git archive, installs and tests", async () => {
     const root = await newRoot("ok");
     expect((await linkedRelease(root, "current"))?.metadata.version).toBe(
@@ -575,7 +626,7 @@ describe("Pogo release update", () => {
         seen.push(path);
         const found =
           releases[
-            path.replace("/repos/aiconsultancy/pogo/releases/tags/", "")
+            path.replace("/repos/aiconsultancy/stargate/releases/tags/", "")
           ];
         return found
           ? Response.json({
@@ -594,7 +645,9 @@ describe("Pogo release update", () => {
         apiURL: server.url.origin,
       };
       expect((await namedRelease(settings, {}, "0.2.0")).version).toBe("0.2.0");
-      expect(seen).toEqual(["/repos/aiconsultancy/pogo/releases/tags/v0.2.0"]);
+      expect(seen).toEqual([
+        "/repos/aiconsultancy/stargate/releases/tags/v0.2.0",
+      ]);
       for (const version of ["0.3.0", "0.4.0", "0.5.0", "0.9.0", "v0.2.0"])
         await expect(namedRelease(settings, {}, version)).rejects.toMatchObject(
           { reason: "not-found" },

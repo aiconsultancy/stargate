@@ -75,7 +75,7 @@ options. An idle probe could therefore wait indefinitely despite its abort
 signal. Wait cleanup could also outlive an explicitly completed crew result.
 The initial cancellation reproduction failed both observer cases.
 
-Pogo now binds only native session wait through the Effect host and forwards its
+Stargate now binds only native session wait through the Effect host and forwards its
 abort signal to the runner. The rest of the plugin keeps the installed adapter
 and its registration/cleanup behavior. No dependency upgrade or HTTP endpoint
 configuration is required. Remove this narrow bridge when the upstream Promise
@@ -136,5 +136,5 @@ provides useful principles without requiring its hosted runtime:
 
 The cancellation and delivery cases cover specific mechanics of these rules.
 Policy isolation, source-tool freshness and model decision quality need their own
-evidence before changing permissions, storage or prompts. Keep Pogo's durable
+evidence before changing permissions, storage or prompts. Keep Stargate's durable
 captain identity; request boundaries do not require fresh captain sessions.

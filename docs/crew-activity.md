@@ -1,6 +1,6 @@
 # Crew activity in Slack
 
-Pogo can show a separate **Crew activity** message in the requesting Slack
+Stargate can show a separate **Crew activity** message in the requesting Slack
 thread. It uses a native collapsible Slack container, initially collapsed.
 The captain's streamed answer and final answer stay separate.
 
@@ -48,12 +48,12 @@ older retained outcomes have no timing or progress details.
 
 ## Opt in
 
-No reporter is required. Pogo renders journal facts directly. To add one final
+No reporter is required. Stargate renders journal facts directly. To add one final
 summary, configure a Pi Durable colleague with tools-off reporting support and
 set its exact configured ID as `reporter`. It shares its normal worker slot;
 reporting does not reserve a second owner or wait behind busy maintenance.
 
-Add this field to the Slack bot's Pogo configuration:
+Add this field to the Slack bot's Stargate configuration:
 
 ```json
 "crewActivity": {
@@ -66,7 +66,7 @@ Add this field to the Slack bot's Pogo configuration:
 - `detailed`: also show bounded assignments, explicit task messages and results,
   labelled with configured crew display names.
 
-Apply Pogo configuration changes with an operator-approved gateway restart.
+Apply Stargate configuration changes with an operator-approved gateway restart.
 The OpenCode captain's plugin must include the reporting RPC implementation.
 This feature does not expose Pi worker history through OpenCode history tools.
 
@@ -76,7 +76,7 @@ The gateway opens a capture for one accepted captain request, using that
 session and request ID. Setup has a one-second deadline; reporting failure
 does not prevent the captain from answering.
 
-Pogo collects scoped journal facts, not arbitrary transcripts or tool output.
+Stargate collects scoped journal facts, not arbitrary transcripts or tool output.
 The activity box appears only after actual crew entries are captured. An empty
 capture does not start or queue a summary request. The reporter's own maintenance
 and reporting tasks do not count as crew activity.
@@ -87,7 +87,7 @@ Task transitions add reliable lifecycle facts.
 After the captain's turn, a configured, supported and free reporter may prepare
 one final summary. Busy, uncertain or unavailable reporters are skipped
 with an explanation; facts remain visible. Refreshes do not call a model.
-Pogo edits the same activity message in the original thread. It does not prompt
+Stargate edits the same activity message in the original thread. It does not prompt
 the captain again or let workers post to Slack.
 
 Accepted summary jobs belong to the reporter, not the short reporting RPC.

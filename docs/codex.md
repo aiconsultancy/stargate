@@ -4,13 +4,13 @@
 [Codex SDK][sdk]. `package.json` pins `@openai/codex-sdk` to one exact
 version, and a test keeps it exact. The SDK depends on `@openai/codex` of the
 same version, which installs the native Codex CLI for the host platform,
-with its bundled `bwrap` sandbox helper and `rg`. Pogo uses that binary, not
-a `codex` command on `PATH`. A test checks that Pogo resolves the same binary
+with its bundled `bwrap` sandbox helper and `rg`. Stargate uses that binary, not
+a `codex` command on `PATH`. A test checks that Stargate resolves the same binary
 and helper directory as the SDK.
 
 Use it for a Slack bot, an IRC captain or an IRC crew member, beside
 `opencode`, `pi-durable`, `claude` and `module` backends. Crew members of the
-OpenCode crew plugin (`pogo crew init` team JSON) still use OpenCode or Pi
+OpenCode crew plugin (`stargate crew init` team JSON) still use OpenCode or Pi
 Durable; see [limits](#limits).
 
 ## Set up through CLIProxyAPI
@@ -20,16 +20,16 @@ Responses API endpoint. There is no fallback to the host's Codex or ChatGPT
 login, `~/.codex`, `OPENAI_API_KEY`, `CODEX_API_KEY` or another provider.
 
 1. Install and sign in to the separate proxy as described in
-   [CLIProxyAPI for Pogo](cliproxyapi.md), including the Codex login.
+   [CLIProxyAPI for Stargate](cliproxyapi.md), including the Codex login.
 2. Confirm that authenticated model discovery lists the model you want, for
    example `gpt-6.1-sol`, `gpt-6.1-terra` or `gpt-6-luna`: the models of the
    OpenCode `openai-proxy` provider. Discovery is not an inference test.
-3. Put the proxy client key in an environment variable of the Pogo process,
+3. Put the proxy client key in an environment variable of the Stargate process,
    for example `CLIPROXYAPI_API_KEY` in the private `<config>.env` companion
    or the service environment. Never put the key in JSON. A separate client
    key for each Codex backend limits what one leaked key can do (see
    [sandbox](#sandbox-and-network)).
-4. Add the backend, run `pogo config check`, then restart Pogo. Backend
+4. Add the backend, run `stargate config check`, then restart Stargate. Backend
    changes are restart-only.
 5. Get consent for real model requests, then test one mention and a
    same-thread follow-up. Also run one tool command (for example "list the
@@ -100,7 +100,7 @@ not configurable. A change to any backend field selects a new session
 namespace, as for other backends.
 
 `baseURL` is the same `/v1` endpoint as the OpenCode `openai-proxy` provider.
-Pogo defines it as the only Codex model provider (`model_provider = "pogo"`,
+Stargate defines it as the only Codex model provider (`model_provider = "pogo"`,
 `wire_api = "responses"`) through `--config` overrides. Command-line
 overrides are above every user and project configuration layer, so no
 `config.toml` can redirect the endpoint or the key. The key travels as a
@@ -110,15 +110,15 @@ this backend.
 ## Sandbox and network
 
 Codex runs tool commands (shell commands, `apply_patch`) in its own sandbox.
-Pogo always starts Codex with approval policy `never`: a request to run a
+Stargate always starts Codex with approval policy `never`: a request to run a
 command outside the sandbox is refused, never asked. Approval buttons do not
 exist. Web search is always off.
 
-| `sandbox`            | Files                                                      | Tool network                         |
-| -------------------- | ---------------------------------------------------------- | ------------------------------------ |
-| `read-only`          | Read everything the Pogo account can; write nothing        | Always blocked                       |
-| `workspace-write`    | Also write inside `directory` and the turn's temporary dir | Blocked unless `network: true`       |
-| `danger-full-access` | No sandbox: every file and command of the Pogo OS account  | Not blockable; needs `network: true` |
+| `sandbox`            | Files                                                         | Tool network                         |
+| -------------------- | ------------------------------------------------------------- | ------------------------------------ |
+| `read-only`          | Read everything the Stargate account can; write nothing       | Always blocked                       |
+| `workspace-write`    | Also write inside `directory` and the turn's temporary dir    | Blocked unless `network: true`       |
+| `danger-full-access` | No sandbox: every file and command of the Stargate OS account | Not blockable; needs `network: true` |
 
 Configuration refuses `network: true` with `read-only` (that sandbox always
 blocks network) and refuses `danger-full-access` without `network: true`,
@@ -135,32 +135,32 @@ commands fail; the model then sees the failure. Run one tool turn after
 setup to check the host.
 
 The sandbox limits writes and network, not reads: a `read-only` agent can
-read every file that the Pogo OS account can read, including the real home
+read every file that the Stargate OS account can read, including the real home
 directory. Use a separate OS account or container for an untrusted audience.
 
 ### What runs outside the sandbox
 
-Pogo's launcher, the Codex CLI and the commands that the CLI runs itself
+Stargate's launcher, the Codex CLI and the commands that the CLI runs itself
 (for example `git` in a repository) run outside the sandbox, with the proxy
 key in their environment. Nothing that they run or read may be writable from
-inside the sandbox. With `sandbox: "workspace-write"`, Pogo therefore
-refuses a `directory` that contains, or lies inside, Pogo's data directory
-(the launcher, `CODEX_HOME`, `ZDOTDIR` and thread maps), Pogo's
+inside the sandbox. With `sandbox: "workspace-write"`, Stargate therefore
+refuses a `directory` that contains, or lies inside, Stargate's data directory
+(the launcher, `CODEX_HOME`, `ZDOTDIR` and thread maps), Stargate's
 installation, or the Codex SDK and CLI packages, and a `directory` that
 contains the home directory (start-up files such as `~/.gitconfig`). A
 `directory` inside the home directory is fine. Paths are compared after
-symbolic links are resolved. `pogo config check` reports this for the
+symbolic links are resolved. `stargate config check` reports this for the
 configured data directory; backend start-up and every turn check it again,
 and a turn fails before the CLI starts. Inside `directory`, Codex itself
 keeps `.git` and `.codex` read-only. The turn's `TMPDIR` is new for each
-turn and holds nothing of Pogo's.
+turn and holds nothing of Stargate's.
 
-After these checks Pogo uses only the canonical form of each path (all
+After these checks Stargate uses only the canonical form of each path (all
 symbolic links resolved) for everything it writes, checks or runs: the
 workspace, the data directory and its subdirectories, the launcher, the
 CLI, the helper directory, the turn's `TMPDIR` and every `PATH` entry. A
 symbolic link on such a path is refused when its directory is writable by
-Pogo's user or lies inside a writable root, because it could be retargeted
+Stargate's user or lies inside a writable root, because it could be retargeted
 after the check. Links that only root controls, such as `/bin` →
 `/usr/bin`, are resolved and accepted.
 
@@ -178,7 +178,7 @@ name, so the root-controlled path as written is kept. It runs the native
 CLI by its canonical path.
 
 The operator's `PATH` is never passed on. The CLI and its tool commands
-get a fixed `PATH` that Pogo builds at start-up:
+get a fixed `PATH` that Stargate builds at start-up:
 
 1. the SDK's helper directory (with `rg`), in canonical form;
 2. `/usr/local/bin`, `/usr/bin` and `/bin`, in canonical form and without
@@ -199,7 +199,7 @@ uses its bundled copy, which may not start where the system one does.
 
 `extraPath` is trusted operator input for user-installed programs, such as
 `["/home/pogo/.local/bin"]`. Start-up fails when an entry is reached
-through a symbolic link that Pogo's user or the sandbox can change, is not
+through a symbolic link that Stargate's user or the sandbox can change, is not
 an existing directory, lies inside `directory`, or holds a program whose
 link chain passes through a link inside `directory` or that runs from
 inside it. Programs added to an `extraPath` directory later are not
@@ -217,7 +217,7 @@ client key, which you can revoke on its own.
 
 ## Instructions, skills and configuration
 
-Pogo passes these settings as `--config` overrides on every turn:
+Stargate passes these settings as `--config` overrides on every turn:
 
 - No `AGENTS.md` project instructions (`project_doc_max_bytes = 0`) unless
   `projectDocs` is `true`.
@@ -254,12 +254,12 @@ backend; unpinned turns get the transport note like Pi Durable.
 
 The Codex CLI gets a new, minimal environment. It inherits only `HOME`,
 `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `LC_CTYPE` and `TZ`.
-Pogo then sets:
+Stargate then sets:
 
 - `PATH`: fixed at start-up: the SDK's helper directory, root-owned system
   directories and `extraPath`; the inherited value is replaced
   ([details](#what-runs-outside-the-sandbox)).
-- `TMPDIR`: a new private directory for each turn under Pogo's temporary
+- `TMPDIR`: a new private directory for each turn under Stargate's temporary
   directory, removed after the turn. Image attachments are written there.
 - `CODEX_HOME`: a private directory for this backend namespace,
   `<dataDirectory>/<bot>/<namespace>/codex` (mode `0700`). Codex keeps its
@@ -278,22 +278,22 @@ Pogo then sets:
 Every other variable, such as Slack tokens, `OPENAI_API_KEY`,
 `CODEX_API_KEY`, `OPENAI_BASE_URL`, other provider keys, `HTTPS_PROXY` and
 `NODE_OPTIONS`, is dropped. Codex errors contain the CLI's stderr, which can
-contain request details; Pogo never forwards them and logs only fixed
-failure causes. The key variable must be present when Pogo starts; startup
+contain request details; Stargate never forwards them and logs only fixed
+failure causes. The key variable must be present when Stargate starts; startup
 fails otherwise.
 
 ## Sessions
 
-A new conversation gets a random Pogo UUID. Its first turn starts a Codex
-thread; Pogo stores the thread ID that Codex reports in
+A new conversation gets a random Stargate UUID. Its first turn starts a Codex
+thread; Stargate stores the thread ID that Codex reports in
 `<…>/codex-threads/<conversation>.json` before the turn continues. Later
-turns resume that thread (`codex exec resume`), also after a Pogo restart.
+turns resume that thread (`codex exec resume`), also after a Stargate restart.
 A turn that reports another thread ID fails without changing the mapping. A
 backend-setting change selects a new namespace with its own `CODEX_HOME`;
-Pogo never resumes another namespace's or another backend's thread. One
+Stargate never resumes another namespace's or another backend's thread. One
 conversation runs one turn at a time.
 
-Each turn starts one Codex process, which exits after the turn. Pogo streams
+Each turn starts one Codex process, which exits after the turn. Stargate streams
 the turn's completed agent messages to the live reply. Reasoning, commands,
 command output, file changes and error items are not shown. The reply is the
 agent messages of this turn, joined by blank lines. Codex reports a message
@@ -310,7 +310,7 @@ Stop, the turn time limit and shutdown abort the SDK's stream, which sends
 effects are not undone. A CLI that has not exited five seconds after its
 result is stopped the same way; the turn keeps its result.
 
-No process of a turn outlives it. The Codex CLI runs in Pogo's own process
+No process of a turn outlives it. The Codex CLI runs in Stargate's own process
 group, and its sandbox helpers and commands run in new sessions and PID
 namespaces, so there is no group to signal. Instead every process of a turn
 inherits a random `POGO_CODEX_TURN` value. Every process that carries the
@@ -325,28 +325,28 @@ output, which a CLI that ignores `SIGTERM` never closes. A cancelled turn,
 turn ends by itself, the same clean-up stops what it left.
 
 The SDK exposes neither the CLI process nor its output stream, and a process
-that the CLI starts can inherit that output and keep it open. Pogo therefore
+that the CLI starts can inherit that output and keep it open. Stargate therefore
 starts the CLI through its own launcher (`<…>/codex-bin/<turn>.sh`, the SDK's
 `codexPathOverride`), a short `sh` script. It `exec`s the CLI, so the CLI
 stays the SDK's child with unchanged signals and exit status, but sends the
 CLI's output through a FIFO to `cat`. The FIFO is unlinked as soon as both
-ends are open. Only `cat` then holds Pogo's output and error pipes, and it
+ends are open. Only `cat` then holds Stargate's output and error pipes, and it
 carries the turn marker, so the clean-up closes them even while a process
 without the marker keeps the CLI's own output open. The CLI's stderr goes to
-`/dev/null`; Pogo never uses it. If the output is still open one second
+`/dev/null`; Stargate never uses it. If the output is still open one second
 after the clean-up (only possible without `/proc`), the turn stops waiting
 for it.
 
-Pogo finds these processes through `/proc` (Linux only), with the same
+Stargate finds these processes through `/proc` (Linux only), with the same
 checks as the [Claude backend](claude.md#cancellation-and-recovery): all
-four user IDs are Pogo's, the process started no earlier than the turn, and
-its environment carries the turn value. Immediately before each signal, Pogo
+four user IDs are Stargate's, the process started no earlier than the turn, and
+its environment carries the turn value. Immediately before each signal, Stargate
 reads the start time, user IDs and marker again and signals only if all
 still match. A command that deliberately clears its environment or changes
 user escapes this clean-up; it is a guard against leftovers, not a sandbox.
 
-Pogo records each running turn (turn value and start time, no process ID) in
-`<…>/codex-runs/`. If Pogo stops abruptly, the CLI can continue until its
+Stargate records each running turn (turn value and start time, no process ID) in
+`<…>/codex-runs/`. If Stargate stops abruptly, the CLI can continue until its
 turn ends. On restart, recovery and the next turn of that conversation stop
 the processes that carry the recorded value, with the checks above. On
 systems without `/proc` an orphaned CLI runs until it finishes. systemd's
@@ -372,14 +372,14 @@ default `KillMode` also stops these processes when the service stops.
   or `/bin`. Hosts without them there, such as NixOS, cannot start a Codex
   backend.
 - With `workspace-write`, a workspace, data directory or CLI path that
-  passes through a symbolic link in a directory that Pogo's user can write
+  passes through a symbolic link in a directory that Stargate's user can write
   is refused; use the real path.
 - The CLI does not see the operator's `PATH`. Programs outside root-owned
   system directories need an `extraPath` entry. A host where no system
   directory qualifies, such as a hosted CI runner, needs `extraPath` to
   start a Codex backend.
-- `workspace-write` refuses a `directory` that contains Pogo's data
-  directory or installation, or the home directory. Move Pogo's
+- `workspace-write` refuses a `directory` that contains Stargate's data
+  directory or installation, or the home directory. Move Stargate's
   `dataDirectory` out of the workspace (its default `.pogo` is next to the
   configuration file).
 - Other files outside the sandbox that unsandboxed commands read, such as
@@ -406,7 +406,7 @@ project, and a recording HTTP proxy that must see no connection. It checks
 the exact tool set, resume after restart, sandboxed tool commands (no key,
 no writes or network unless configured, refused escalation, no leftover
 processes) and cancellation, also of a CLI that ignores `SIGTERM`. The fake
-CLI tests also check that Pogo's pipes close while a process without the
+CLI tests also check that Stargate's pipes close while a process without the
 marker holds the CLI's output, and do not grow over repeated cancellations.
 
 The tests do not depend on the host's `PATH` layout. They give each backend

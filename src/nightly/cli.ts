@@ -29,7 +29,7 @@ import {
   stableJitter,
 } from "./window";
 
-export const maintenanceHelp = `Usage: pogo maintenance <command> [--config PATH] [options]
+export const maintenanceHelp = `Usage: stargate maintenance <command> [--config PATH] [options]
 Commands:
   plan            Read-only dry run: print what tonight's run would change
                   (--json prints the full report). No probes, no writes.
@@ -69,7 +69,7 @@ Commands:
                   facts, findings, a Pi Durable model explanation and one
                   Slack post through the report bot, when there is
                   something to say. The model may only run plan and
-                  recover, within Pogo's preconditions and limits.
+                  recover, within Stargate's preconditions and limits.
                   --print shows the facts' deterministic post; no model,
                   actions or writes.
   window          Print the window, this install's jitter and next start.

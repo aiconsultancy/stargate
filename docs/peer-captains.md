@@ -1,6 +1,6 @@
 # Peer captains
 
-Pogo ignores messages sent by bots. One exception is optional: other fleet
+Stargate ignores messages sent by bots. One exception is optional: other fleet
 captains, such as `defiant-captain` or `enterprise-captain`, can mention a
 captain or reply in its threads. This lets captains hand work to each other in
 shared channels.
@@ -20,9 +20,9 @@ peer message is admitted.
 
 ## Who is a peer captain
 
-For each bot message, Pogo calls Slack's
+For each bot message, Stargate calls Slack's
 [`users.info`](https://docs.slack.dev/reference/methods/users.info) for the
-sending user. Message text is never used for identity. Pogo admits the message
+sending user. Message text is never used for identity. Stargate admits the message
 only when all of these are true:
 
 - the user is a bot in the same workspace, and not deleted;
@@ -54,11 +54,11 @@ A peer captain is a sender like a person. Every existing rule applies:
 
 ## Loop protection
 
-Pogo admits at most **5 peer captain messages in one thread in one rolling
+Stargate admits at most **5 peer captain messages in one thread in one rolling
 hour**. The hour is measured from the Slack message time. Later peer messages
-in that thread are not stored and get no reply; Pogo logs one warning without
+in that thread are not stored and get no reply; Stargate logs one warning without
 message content. People in the same thread, and other threads, are not
-limited. Restarting Pogo does not reset the count.
+limited. Restarting Stargate does not reset the count.
 
 The captain's own replies are never admitted back, and a silent reply posts
 nothing. Two captains that both answer every message still reach the limit

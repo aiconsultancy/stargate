@@ -48,8 +48,8 @@ The configured phrase interval remains unchanged.
 The override applies to registrations using the same OpenCode workspace and
 agent ID. Separate teams need separate captain workspaces. The gateway and
 OpenCode plugin must see the same workspace filesystem. For remote OpenCode
-without a shared filesystem, edit `pogo.json` and restart Pogo instead.
+without a shared filesystem, edit `pogo.json` and restart Stargate instead.
 Missing or invalid overrides fall back to the bot's configured waiting values.
 Delete the override file to restore those values. Natural-language changes
 require the installed plugin version that supplies `pogo_waiting`; refresh
-the OpenCode plugin after upgrading Pogo if the tool is not available.
+the OpenCode plugin after upgrading Stargate if the tool is not available.

@@ -1,8 +1,8 @@
-# Agent-led Pogo setup
+# Agent-led Stargate setup
 
-This guide creates **Slack app registrations for the existing Pogo gateway**.
-It does not create a Bolt starter, replace Pogo, or run a second bot runtime.
-Repeat app registration for each bot; one Pogo process can host them all.
+This guide creates **Slack app registrations for the existing Stargate gateway**.
+It does not create a Bolt starter, replace Stargate, or run a second bot runtime.
+Repeat app registration for each bot; one Stargate process can host them all.
 For a separate installation with different captain and crew identities, use
 the [repeatable instance procedure](instances.md).
 
@@ -16,7 +16,7 @@ another machine's credentials, state, or installed service files.
 ```sh
 mise install
 make deps
-make pogo ARGS='bot provision --help'
+make stargate ARGS='bot provision --help'
 ```
 
 For end-to-end model-led setup, ask OpenCode to read the
@@ -25,7 +25,7 @@ machine, and present its proposal before global migrations or authentication
 changes. Follow the [local application procedure](agents/agent-profiles.md),
 then install an [OpenCode captain/crew profile](agents/default-opencode.md).
 Omit `--team` for Bowser's starter roster. For a separate Galactica team, use
-`pogo crew init --team team.example.json` with new captain/crew directories.
+`stargate crew init --team team.example.json` with new captain/crew directories.
 The non-secret JSON selects captain ID, worker IDs, roles, permission profiles
 and optional models/instructions. See the profile guide for required flags.
 Use separate namespace, state, captain and crew paths per team, even on one
@@ -45,7 +45,7 @@ They contain no tokens or provider credentials. There are no shared defaults.
 - `app: { "mode": "reuse", "appId": "A…" }` uses an existing registration.
 - `app: { "mode": "create" }` requests a new registration.
 - The example reuses Bowser. **Replace its placeholder App ID with the live
-  Bowser App ID; never change Bowser to `create`.** Existing matching Pogo
+  Bowser App ID; never change Bowser to `create`.** Existing matching Stargate
   registrations remain unchanged. Conflicting settings fail, not overwrite.
 - `agent: "bowser"` selects the captain agent. Do not assign it to crew bots.
   Configure that agent on the OpenCode server before use. The example provider
@@ -56,7 +56,7 @@ They contain no tokens or provider credentials. There are no shared defaults.
 Plan first; this command does not write files or contact Slack:
 
 ```sh
-make pogo ARGS='bot provision --plan .local/bots.json --json'
+make stargate ARGS='bot provision --plan .local/bots.json --json'
 ```
 
 Review every bot, workspace, existing App ID, manifest, and creation link.
@@ -78,7 +78,7 @@ substitute. Never put the token value in the plan, CLI arguments, or chat.
 After explicit approval of the reviewed batch:
 
 ```sh
-make pogo ARGS='bot provision --plan .local/bots.json --apply --json'
+make stargate ARGS='bot provision --plan .local/bots.json --apply --json'
 ```
 
 Known App IDs are reused. New apps are created sequentially only when the
@@ -90,8 +90,8 @@ inference, start listeners, or change services.
 For each browser-created app, record its non-secret App ID:
 
 ```sh
-make pogo ARGS='bot provision --plan .local/bots.json --record-app research=A012NEWAPP --json'
-make pogo ARGS='bot provision --plan .local/bots.json --apply --json'
+make stargate ARGS='bot provision --plan .local/bots.json --record-app research=A012NEWAPP --json'
+make stargate ARGS='bot provision --plan .local/bots.json --apply --json'
 ```
 
 `--record-app BOT_ID=APP_ID` saves only the reconciliation checkpoint; without
@@ -102,7 +102,7 @@ environment references only, even if runtime tokens are not yet present.
 
 ### Resume and status
 
-The default journal is `.local/provision/bots.json` beside the Pogo config.
+The default journal is `.local/provision/bots.json` beside the Stargate config.
 It is gitignored through `.local/`, written atomically with mode `0600`, and
 protected by a writer lock. Use `--journal PATH` to select another private
 journal. Use a separate journal for a distinct batch, never to bypass an
@@ -151,7 +151,7 @@ token-bearing pages with snapshots, screenshots, DOM/eval, clipboard tools,
 console output, network dumps, or recordings. The human handles token pages
 and stores credentials directly in a private local source. Record only the
 App ID with `--record-app`. No private browser-to-credential transfer helper
-is implemented; a browser can also be on a different machine from Pogo.
+is implemented; a browser can also be on a different machine from Stargate.
 
 ### Optional portable driver
 
@@ -159,7 +159,7 @@ If built-in browser tools are unavailable, Vercel Labs
 [agent-browser](https://agent-browser.dev/installation) is an optional portable
 browser driver. Its documented `0.41.2` release is dated November 3, 2026.
 The optional mise task pins Node 24.21.0 and agent-browser 0.41.2 separately
-from Pogo's Bun runtime. Obtain permission before installing the CLI, browser,
+from Stargate's Bun runtime. Obtain permission before installing the CLI, browser,
 or system packages:
 
 ```sh
@@ -194,7 +194,7 @@ Read the current [security](https://agent-browser.dev/security) and
 
 Ask the operator for:
 
-- Bot name and unique Pogo ID, such as `pogo-test`.
+- Bot name and unique Stargate ID, such as `pogo-test`.
 - Target Slack workspace. Prefer a sandbox or a workspace without real users
   for initial tests; confirm any installation into a production workspace.
 - Existing Slack App ID, if an app has already been created. Reuse that app
@@ -208,18 +208,18 @@ Ask the operator for:
 - Backend, working directory, and model settings.
 
 Choose **OpenCode** for the initial CLIProxyAPI test. Configure the proxy as
-an OpenCode provider separately; installing it does not route Pogo automatically.
+an OpenCode provider separately; installing it does not route Stargate automatically.
 Pi Durable uses a proxy only with explicit provider configuration; see
 [Pi Durable crew](agents/default-opencode.md#pi-durable-crew).
 Do not substitute the proxy URL for `backend.url`: that field addresses the
 OpenCode server, not the model API. Keep tools disabled for the first test.
 
-Run project commands from the Pogo repository:
+Run project commands from the Stargate repository:
 
 ```sh
 mise install
 make deps
-make pogo ARGS='--help'
+make stargate ARGS='--help'
 ```
 
 ## 2. Install or update Slack skills
@@ -238,11 +238,11 @@ instructions in this session; do not wait for a new session:
 - [Slack CLI skill](https://docs.slack.dev/.well-known/skills/slack-cli/SKILL.md)
 - [Slack API skill](https://docs.slack.dev/.well-known/skills/slack-api/SKILL.md)
 
-**Pogo-specific adaptation:** the generic `create-slack-app` flow scaffolds
-Bolt templates. Pogo already exists, so skip its language, template, provider
+**Stargate-specific adaptation:** the generic `create-slack-app` flow scaffolds
+Bolt templates. Stargate already exists, so skip its language, template, provider
 SDK, and project-scaffolding steps. Reuse the CLI authentication guidance and
-Pogo's own manifest. Do not run `slack create` or `slack run` for this gateway.
-Pogo runs through `make start` or its user service.
+Stargate's own manifest. Do not run `slack create` or `slack run` for this gateway.
+Stargate runs through `make start` or its user service.
 
 ## 3. Detect and install the public Slack CLI
 
@@ -318,12 +318,12 @@ Do not ask the operator to run `slack login` in a separate terminal. The agent
 drives these commands; the human only approves in Slack and returns the code.
 Do not read or print `~/.slack/credentials.json` to recover credentials.
 
-## 5. Create or reuse Pogo's Slack app
+## 5. Create or reuse Stargate's Slack app
 
-**CLI login is not app creation.** Pogo is not a Slack CLI project, and `slack api`
+**CLI login is not app creation.** Stargate is not a Slack CLI project, and `slack api`
 does not automatically turn a developer login into a token for every method.
 App Manifest APIs require a configuration token with
-`app_configurations:write`, not Pogo's bot token. Do not add that permission to
+`app_configurations:write`, not Stargate's bot token. Do not add that permission to
 the runtime bot or assume `--team` supplies the required API token.
 
 Choose one of the following paths. Confirm the app name and target workspace
@@ -331,10 +331,10 @@ before creating anything remotely. If an app already exists, go to step 6.
 
 ### A. Prefilled manifest link: no configuration token required
 
-The agent generates Pogo's manifest and app-creation link:
+The agent generates Stargate's manifest and app-creation link:
 
 ```sh
-make manifest ARGS='--name Pogo'
+make manifest ARGS='--name Stargate'
 ```
 
 Open the printed link after the operator agrees. The operator selects the
@@ -342,7 +342,7 @@ workspace, reviews the manifest, and clicks **Create**. Record only the App ID,
 not secrets. If link prefill does not work, generate the JSON instead:
 
 ```sh
-make manifest ARGS='--name Pogo --json'
+make manifest ARGS='--name Stargate --json'
 ```
 
 At [Slack app settings](https://api.slack.com/apps), choose **Create New App →
@@ -350,7 +350,7 @@ From a manifest** and paste that JSON. A shared JSON manifest link must use
 the `manifest_json` query parameter, with the manifest URL-encoded.
 
 If the operator is remote or on a phone, share the clickable link in chat;
-opening a browser on the Pogo host does not help them. The third-party manifest
+opening a browser on the Stargate host does not help them. The third-party manifest
 and Socket Mode notices are expected, but **"We can't translate a manifest with
 errors"** is a validation failure. Check the generated fields against Slack's
 [manifest reference](https://docs.slack.dev/reference/app-manifest).
@@ -387,7 +387,7 @@ const response = await fetch("https://slack.com/api/apps.manifest.create", {
   method: "POST",
   headers: { authorization: `Bearer ${token}` },
   body: new URLSearchParams({
-    manifest: JSON.stringify(buildManifest("Pogo")),
+    manifest: JSON.stringify(buildManifest("Stargate")),
   }),
   signal: AbortSignal.timeout(30_000),
 });
@@ -409,11 +409,11 @@ those fields and prints only the App ID/settings link. Do not dump the raw API
 response or save it in the repository. On an uncertain network outcome, inspect
 Slack app settings before retrying: a retry may create a duplicate app.
 This path creates the registration; it does not finish workspace installation
-or automatically supply Pogo's app-level and bot tokens.
+or automatically supply Stargate's app-level and bot tokens.
 
 ## 6. Review permissions, install, and collect runtime tokens
 
-Pogo's manifest enables Socket Mode and subscribes to `app_mention`,
+Stargate's manifest enables Socket Mode and subscribes to `app_mention`,
 `message.channels`, `message.groups`, and `message.im`. Required bot scopes:
 
 | Scope               | Purpose                                |
@@ -442,11 +442,11 @@ Reactions use
 [`reactions.add`](https://docs.slack.dev/reference/methods/reactions.add):
 POST with the bot token, channel, emoji name, and original message timestamp.
 An `already_reacted` response means the reaction is already present.
-Pogo does not react to every question. The model can select `eyes` for a request
+Stargate does not react to every question. The model can select `eyes` for a request
 to inspect a concrete item, or another supported reaction when context calls for
 it. Reaction targets stay fixed to the current user's message.
 Generated captain definitions include this optional reaction protocol in their
-system instructions. Pogo does not prepend it to user messages. Custom OpenCode
+system instructions. Stargate does not prepend it to user messages. Custom OpenCode
 agents or Pi bots that need reactions should put the protocol in their agent
 definition or configured `systemPrompt`; reply parsing and target checks remain
 in the gateway.
@@ -456,9 +456,9 @@ turn starts and remove it after a text reply is delivered. The bot needs
 `reactions:write`.
 
 Set `resumeSlackThreads: true` to accept an untagged reply in an allowed Slack
-thread that Pogo has not seen before, when bounded Slack history confirms the
+thread that Stargate has not seen before, when bounded Slack history confirms the
 same bot previously replied there. The normal sender and channel rules still
-apply. This helps a bot continue conversations after migrating to Pogo.
+apply. This helps a bot continue conversations after migrating to Stargate.
 
 ### Silent replies
 
@@ -472,7 +472,7 @@ describes this directive. Rules:
   agent's session history.
 - One reaction line can come before or after the directive. The reaction is
   applied; a reaction that fails does not cause a status message.
-- Pogo removes waiting feedback and previews that are already shown, and
+- Stargate removes waiting feedback and previews that are already shown, and
   records the request as delivered. Nothing is retried or replayed.
 - With OpenCode, each assistant message is read separately. Other public text
   of the same turn is still posted, so a silent turn must contain no other
@@ -492,10 +492,10 @@ Guide the operator through these human-controlled steps:
 3. Under **OAuth & Permissions**, install the app to the chosen workspace.
    Wait for admin approval if required; do not claim the app is installed yet.
 4. Copy its **Bot User OAuth Token** (`xoxb-…`). Reinstall after scope changes.
-5. Invite the bot to each allowed channel with `/invite @Pogo`.
+5. Invite the bot to each allowed channel with `/invite @Stargate`.
 
 Keep persistent tokens out of the agent conversation, command-line arguments,
-and tool output. The human can paste them into Pogo's hidden wizard prompts,
+and tool output. The human can paste them into Stargate's hidden wizard prompts,
 or store them in the referenced private environment variables / `pogo.json.env`
 with mode `0600`. Do not overwrite existing credentials or print that file.
 
@@ -511,13 +511,13 @@ so the shell does not expand filenames. Within `make ... ARGS='...'`, use
 Whole `*` also works in deny lists to block everyone/everywhere, but partial
 globs such as `C*` are invalid. Denies override exact and wildcard allows.
 
-## 7. Register the bot with Pogo
+## 7. Register the bot with Stargate
 
 The agent runs a noninteractive registration using references, not token values.
 Replace example IDs, paths, URL, provider, and model with confirmed settings:
 
 ```sh
-make pogo ARGS='bot add --id pogo-test --app-id A0123456789 --app-token-env POGO_TEST_APP_TOKEN --bot-token-env POGO_TEST_BOT_TOKEN --allowed-users U0123456789 --allowed-channels C0123456789 --backend opencode --directory /srv/project --url http://localhost:4096 --provider openai-proxy --model MODEL_ID'
+make stargate ARGS='bot add --id pogo-test --app-id A0123456789 --app-token-env POGO_TEST_APP_TOKEN --bot-token-env POGO_TEST_BOT_TOKEN --allowed-users U0123456789 --allowed-channels C0123456789 --backend opencode --directory /srv/project --url http://localhost:4096 --provider openai-proxy --model MODEL_ID'
 ```
 
 `openai-proxy` here is an example **OpenCode provider ID**, not an automatic
@@ -541,7 +541,7 @@ credentials can change after its restart, so rediscover them if needed.
 Alternatively, the human can run `make init`. If the app was already created,
 decline opening another creation page and enter the existing App ID/tokens.
 Do not add the same bot twice. Multiple bots need unique IDs, Slack apps, and
-token environment references. Restart an existing Pogo process after adding one.
+token environment references. Restart an existing Stargate process after adding one.
 Restart after changing access rules, too. Adding Bowser to another channel
 needs no config change when channels are allowed with `*` and not denied.
 
@@ -557,8 +557,8 @@ make start
 - Credential check verifies local token references/prefixes, not live auth.
 - `Bot connected` confirms Slack authentication and a Socket Mode connection.
 - A proxy model listing proves discovery, not successful inference.
-- With the operator's consent, ask them to mention Pogo in an allowed channel:
-  `@Pogo Say "Pogo is ready" without using tools.`
+- With the operator's consent, ask them to mention Stargate in an allowed channel:
+  `@Stargate Say "Stargate is ready" without using tools.`
 - Confirm a real reply, then a follow-up in the same thread. Do not claim success
   before those work. A backend failure may require provider configuration or
   authentication; never fix it by enabling all tools or opening allowlists.
@@ -567,7 +567,7 @@ Use a sandbox or a workspace without real users for smoke tests. Keep only one
 Socket Mode listener per registration. Do not leave a second listener running
 when switching from a foreground test to a user service.
 
-## 9. Install the Pogo user service when requested
+## 9. Install the Stargate user service when requested
 
 ```sh
 make service ARGS='install --config /absolute/path/to/pogo.json'
@@ -576,7 +576,7 @@ systemctl --user status pogo.service
 ```
 
 Installation alone does not enable or start the unit. Obtain permission before
-starting/enabling services, and stop any foreground Pogo instance first.
+starting/enabling services, and stop any foreground Stargate instance first.
 The unit reads the private config companion; it does not inherit shell exports
 automatically. See the [README service section](../README.md#linux-user-service)
 and [CLIProxyAPI installation notes](cliproxyapi.md) for lifecycle details.
@@ -584,7 +584,7 @@ and [CLIProxyAPI installation notes](cliproxyapi.md) for lifecycle details.
 ## Agent completion checklist
 
 Report each state separately: skills installed, CLI installed, workspace
-authenticated, app created, app installed, tokens stored privately, Pogo bot
+authenticated, app created, app installed, tokens stored privately, Stargate bot
 registered, backend configured, live reply verified, and service enabled.
 List remaining human approvals or missing settings. Do not collapse these
 states into "setup complete" after merely logging in or creating an app.

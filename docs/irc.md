@@ -1,12 +1,12 @@
 # IRC transport
 
-Pogo can reach a captain over IRCv3 as well as Slack. One process can run
+Stargate can reach a captain over IRCv3 as well as Slack. One process can run
 Slack bots and IRC registrations together; neither depends on the other.
 An IRC registration has its own connection, access rules, queue namespace
 and delivery. It reuses the gateway's SQLite queue, outbox, delivery
 cursor, transcript catch-up and no-replay rules.
 
-Pogo does not start, configure or administer the IRC server. Account,
+Stargate does not start, configure or administer the IRC server. Account,
 channel and TLS setup belong to the server operator.
 
 ## Operator steps
@@ -24,7 +24,7 @@ channel and TLS setup belong to the server operator.
 4. Optional: give crew a lasting invite exception on an invite-only ship
    channel (see [channels](#channels)); otherwise the captain invites them.
 5. Optional: create the [DM audit](#dm-audit) channel.
-6. Run `pogo config check --config <path>`, then restart for connection changes.
+6. Run `stargate config check --config <path>`, then restart for connection changes.
    Access/transcription and IRC crew additions/idle removals can use
    [SIGHUP reload](../README.md#reload-configuration-without-restarting).
 7. Regenerate or edit the captain definition so it contains the
@@ -32,7 +32,7 @@ channel and TLS setup belong to the server operator.
 
 ## Server expectations
 
-Pogo is tested against [Ergo](https://ergo.chat) 2.19. Any IRCv3 server
+Stargate is tested against [Ergo](https://ergo.chat) 2.19. Any IRCv3 server
 works if it offers these capabilities:
 
 | Capability                        | Need        | Use                                              |
@@ -45,20 +45,20 @@ works if it offers these capabilities:
 | `account-notify`, `extended-join` | optional    | Nick hints for direct replies; WHOIS confirms    |
 | `draft/chathistory`               | optional    | Fetch channel messages missed during a reconnect |
 
-Without the configured SASL mechanism or `account-tag`, Pogo refuses the server and retries
+Without the configured SASL mechanism or `account-tag`, Stargate refuses the server and retries
 after five minutes. Without `labeled-response`, a line counts as sent when
 it is written to the socket.
 
-Every account must log in with SASL. Pogo never creates accounts. With
+Every account must log in with SASL. Stargate never creates accounts. With
 Ergo, `force-nick-equals-account` keeps each nick equal to its account, and
 `multiclient` lets a reconnect take over the nick.
 
 ### Optional features
 
-Pogo uses each of these only when the server offers it. A switch under
+Stargate uses each of these only when the server offers it. A switch under
 `irc[].features` turns one off; every switch defaults to `true`.
 
-| Server offers                                                                   | Switch       | Pogo then                                                                                                                                                                                            |
+| Server offers                                                                   | Switch       | Stargate then                                                                                                                                                                                        |
 | ------------------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `soju.im/FILEHOST` or `draft/FILEHOST` (ISUPPORT), or `server.filehostOverride` | `filesIn`    | Downloads FILEHOST links in admitted messages as attachments ([files](#files))                                                                                                                       |
 | the same FILEHOST                                                               | `filesOut`   | Uploads published reply files and posts one link line each ([files](#files))                                                                                                                         |
@@ -66,7 +66,7 @@ Pogo uses each of these only when the server offers it. A switch under
 | `message-tags` (client tags pass through)                                       | `typing`     | Sends `+typing=active` every 3 s while a turn runs and `+typing=done` before the reply, in channels and direct messages                                                                              |
 | `message-tags` (`+draft/react`, `+draft/reply`)                                 | `reactions`  | Sends reaction replies as `+draft/react`; a person reacting with a `stopReactions` emoji (default ✋, 🛑) on a request or its bot answer stops the active turn ([Stop](#stop-by-reaction))           |
 | `draft/chathistory` (with `batch`, `server-time`)                               | `catchUp`    | On each (re)connect replays missed channel messages (`AFTER`) and direct messages (`TARGETS`, then `AFTER`) from a cursor stored in SQLite, at most `catchUpHours` (24) back ([catch-up](#catch-up)) |
-| `draft/persistence`                                                             | `alwaysOn`   | Sends `PERSISTENCE SET ON` after each connect: the server keeps the account in its channels and stores direct messages while Pogo is away ([presence](#presence))                                    |
+| `draft/persistence`                                                             | `alwaysOn`   | Sends `PERSISTENCE SET ON` after each connect: the server keeps the account in its channels and stores direct messages while Stargate is away ([presence](#presence))                                |
 | ISUPPORT `BOT` (for example `BOT=B`)                                            | `botMode`    | Sets that user mode on its own nick (`MODE <nick> +B`) after each connect, so clients show the account as a bot                                                                                      |
 | `draft/read-marker`                                                             | `readMarker` | Sends `MARKREAD <target> timestamp=<time>` after a message is accepted, so the account's other clients see it read                                                                                   |
 
@@ -152,14 +152,14 @@ The examples use this naming rule for a ship `<ship>`:
 | Captain account/nick | `<ship>-captain` | `galactica-captain` |
 | Crew account/nick    | `<ship>-<crew>`  | `galactica-chief`   |
 
-Pogo does not enforce the rule: the server operator assigns names, and
+Stargate does not enforce the rule: the server operator assigns names, and
 peer captains stay an explicit list (see [peer captains](#peer-captains)).
 The rule makes ship accounts easy to grant with one invite exception mask
 such as `galactica-*!*@*`.
 
 Put passwords in the private `<config>.env` companion or the service
 environment, never in JSON. Every account needs its own `passwordEnv`.
-`pogo config check` validates the schema, checks that each password
+`stargate config check` validates the schema, checks that each password
 variable is set and that `caFile` is a file. It does not connect.
 
 For the TLS listeners, use the server's private CA:
@@ -173,14 +173,14 @@ For the TLS listeners, use the server's private CA:
 }
 ```
 
-Pogo verifies the certificate against that CA and the host name or IP.
+Stargate verifies the certificate against that CA and the host name or IP.
 
 For a captain using SASL EXTERNAL, link the client certificate to the
 captain's account on the server and set `clientPemFile` instead of
-`passwordEnv`. Use a regular file owned by the Pogo service user with mode
+`passwordEnv`. Use a regular file owned by the Stargate service user with mode
 `0600` (or `0400`) and put the leaf certificate first if it has a chain.
-`pogo config check` verifies ownership, private permissions and that the key
-matches the certificate. Pogo requires the server to attest the configured
+`stargate config check` verifies ownership, private permissions and that the key
+matches the certificate. Stargate requires the server to attest the configured
 account during SASL and has no password fallback. Restart after rotating the
 PEM. EXTERNAL does not supply the password that FILEHOST expects, so this
 captain cannot send or receive FILEHOST attachments. Crew still use PLAIN.
@@ -190,7 +190,7 @@ The namespace of each IRC connection includes the server host, port and
 Moving a registration to another host, port or network therefore starts new
 queues, outboxes and unpinned sessions; a pinned captain keeps its native
 session but starts a new delivery cursor at current history. Set `network`
-so a server that announces another network is refused before Pogo joins
+so a server that announces another network is refused before Stargate joins
 anything.
 
 ### One captain on Slack and IRC
@@ -268,13 +268,13 @@ on the server can drive the captain's enabled tools.
 is explicit; a naming rule such as `*-captain` is not used, because the
 server operator assigns account names and an explicit list cannot match by
 accident. Peer messages follow the Slack peer rules: the source line ends
-with `;k=captain`, they carry no operator or Admiralty authority, and Pogo
+with `;k=captain`, they carry no operator or Admiralty authority, and Stargate
 admits at most **5 per conversation (channel or direct message) in a
 rolling hour**. A peer list cannot contain this ship's own accounts.
 
 ## Conversations
 
-| IRC             | Pogo conversation                   |
+| IRC             | Stargate conversation               |
 | --------------- | ----------------------------------- |
 | Channel message | One conversation per channel        |
 | Direct message  | One conversation per sender account |
@@ -308,7 +308,7 @@ thread history or trust the tag as sender identity. The authenticated
   rules are removed; links keep their URL; inline code keeps its backticks.
   Control characters are removed, so a reply cannot send CTCP or IRC
   formatting.
-- Each line fits 512 bytes, including Pogo's tags and the source prefix
+- Each line fits 512 bytes, including Stargate's tags and the source prefix
   that the server adds. Long lines break at spaces, otherwise at a UTF-8
   character boundary. Blank lines are not sent.
 - With `draft/multiline`, each stored reply chunk goes as one batch (more
@@ -331,7 +331,7 @@ thread history or trust the tag as sender identity. The authenticated
   transcript catch-up retain it without rerunning the agent. Reactions and
   Stop still target the request message, not the thread root. Missing
   `message-tags` capability means plain replies, as before; SASL and
-  `account-tag` remain required. Pogo already requests `message-tags` and
+  `account-tag` remain required. Stargate already requests `message-tags` and
   `echo-message` when offered; no new configuration switch is needed.
 - A threaded direct message also receives replies tagged with its thread
   root. An ordinary direct message keeps the existing behaviour: replies
@@ -344,10 +344,10 @@ thread history or trust the tag as sender identity. The authenticated
   direct line is checked again when it is written to the socket, after the
   send throttle: if the binding was dropped meanwhile, the queued line is
   discarded and the stored reply waits for a retry. A nick that changes
-  hands with no event Pogo can see (no shared channel) after the WHOIS is
+  hands with no event Stargate can see (no shared channel) after the WHOIS is
   not detected for that chunk.
 - Sends are throttled: a burst of 4 lines, then one line every 600 ms.
-- While a turn runs, Pogo sends `+typing=active` (TAGMSG) every 3 seconds
+- While a turn runs, Stargate sends `+typing=active` (TAGMSG) every 3 seconds
   and `+typing=done` before the reply. Typing is skipped while replies wait
   in the send queue, so it never delays them. In a direct message it goes
   only to a nick that WHOIS shows holds the requester's account, checked
@@ -360,7 +360,7 @@ thread history or trust the tag as sender identity. The authenticated
 - `[[pogo:silent]]` posts nothing. `[[pogo:react:NAME]]` sends a
   `+draft/react` TAGMSG to the request's message.
 - A reply is stored before delivery. A failed delivery retries the stored
-  chunk later and never reruns the agent. Pogo stores how it split each
+  chunk later and never reruns the agent. Stargate stores how it split each
   chunk into units (batches or lines) and how many the server confirmed, so
   a retry resends only the units after the last confirmed one; only a unit
   whose confirmation was lost can repeat. When the server no longer offers
@@ -374,7 +374,7 @@ thread history or trust the tag as sender identity. The authenticated
 A person stops an active (queued or running) turn by reacting to its
 request message, or to a bot message that answers it, with one of
 `irc[].stopReactions` (default `["✋", "🛑"]`; skin tones and the emoji
-variation selector are ignored; `[]` turns Stop off). Pogo then cancels the
+variation selector are ignored; `[]` turns Stop off). Stargate then cancels the
 turn exactly like Slack Stop: the cancel signal reaches the backend, the
 "stop request" notice is posted, and tool effects are not rolled back.
 Only people can stop a turn: the reaction needs an account tag, must pass
@@ -386,7 +386,7 @@ a Stop cannot be undone.
 
 ### Not available on IRC
 
-- **Edits and deletion.** Pogo never edits or deletes an IRC message, so
+- **Edits and deletion.** Stargate never edits or deletes an IRC message, so
   there are no streaming previews, waiting messages, activity boxes or
   cancellable maintenance notices. A captain tool that needs a cancellable
   notice stays fail-closed on IRC.
@@ -409,20 +409,20 @@ Ergo can advertise a FILEHOST: an upload URL in ISUPPORT
 (`soju.im/FILEHOST` or `draft/FILEHOST`, see the
 [spec](https://github.com/emersion/soju/blob/master/doc/ext/filehost.md)).
 Set `server.filehostOverride` to the same upload URL when the server does
-not advertise it. When both exist with different origins, Pogo turns files
+not advertise it. When both exist with different origins, Stargate turns files
 off and logs one warning. The URL must be HTTPS; plain HTTP is accepted only
 on `127.0.0.1`/`::1` and only when the IRC connection is plaintext.
 
 **Files in** (`features.filesIn`): a link in an admitted message whose
 origin is exactly the FILEHOST origin becomes an attachment, as for Slack
 files (at most 10). Links to any other host stay text and are never
-fetched. Pogo downloads with HTTP Basic and the registration's own SASL
+fetched. Stargate downloads with HTTP Basic and the registration's own SASL
 account and password, refuses redirects, verifies TLS with `server.caFile`,
 and applies a 30-second timeout and the attachment limits (10 MiB a file,
 25 MiB in total). HTML, XHTML and SVG (declared or detected) reach the
 backend as `text/plain` source, never as a renderable page. Audio and video
 use the same path as Slack voice notes: with `irc[].transcription` (same
-settings as for Slack bots, without `spokenMentions`), Pogo replaces them
+settings as for Slack bots, without `spokenMentions`), Stargate replaces them
 with a transcript; without it, they go to the backend as files. A download
 failure ends the turn with the attachment failure notice, as on Slack.
 
@@ -430,37 +430,37 @@ failure ends the turn with the attachment failure notice, as on Slack.
 `![caption](file:///absolute/path)` (the Slack path, see
 [attachments](attachments.md)) are uploaded to the FILEHOST with the same
 credentials (`POST`, `Content-Type`, `Content-Disposition` with the file
-name), after the reply text. Pogo then posts one line per file,
+name), after the reply text. Stargate then posts one line per file,
 `caption: URL`. The upload's `Location` must be on the FILEHOST origin and
 carry no user name or password; any other answer makes the file
-unavailable, and Pogo never posts such a URL. The FILEHOST serves uploaded HTML sandboxed and renders
+unavailable, and Stargate never posts such a URL. The FILEHOST serves uploaded HTML sandboxed and renders
 Markdown, so `.html` and `.md` links open as pages. Upload is part of
-delivery, and Pogo never repeats an upload that may have stored the file:
+delivery, and Stargate never repeats an upload that may have stored the file:
 it records "uploading" before the `POST` and the returned URL before the
 link line. A retry posts a recorded URL without uploading again. When an
-upload had no certain outcome (Pogo stopped, the answer was lost, it timed
+upload had no certain outcome (Stargate stopped, the answer was lost, it timed
 out, the FILEHOST answered `429`, a `5xx` or another unexpected status, or
-a `201` without a usable `Location`), the file becomes unavailable and Pogo
+a `201` without a usable `Location`), the file becomes unavailable and Stargate
 posts the "attachment is unavailable or its upload is unconfirmed" notice;
 the FILEHOST may then hold an unlinked copy. Only a proven refusal (`400`,
 `401`, `403`, `413` or `415`), after which the FILEHOST holds nothing, is
 tried again. A crash between the post and the record
 can repeat only the link line. Without a FILEHOST, or with `filesOut` off,
-Pogo posts the existing "attachment is unavailable" notice.
+Stargate posts the existing "attachment is unavailable" notice.
 
 ## Connection
 
 - CAP 302 negotiation, then SASL PLAIN, then `CAP END`.
-- Keepalive: Pogo sends PING after 60 seconds of silence and reconnects
+- Keepalive: Stargate sends PING after 60 seconds of silence and reconnects
   after 150 seconds without data. Server PINGs are answered at once.
 - Reconnects use exponential backoff from 1 second to 2 minutes, with
   jitter. A refused login or a server without required capabilities waits
   5 minutes.
-- If the nick is taken, Pogo uses `<nick>_` and retries the configured nick
+- If the nick is taken, Stargate uses `<nick>_` and retries the configured nick
   every 30 seconds.
 - Catch-up with `draft/chathistory`: see [catch-up](#catch-up).
 - Shutdown sends `QUIT` and closes every connection before workers drain.
-- IRC connection failures never stop Slack or Pogo startup; they retry in
+- IRC connection failures never stop Slack or Stargate startup; they retry in
   the background.
 
 ## Catch-up
@@ -471,7 +471,7 @@ channels and with each direct-message partner (by nick), plus a
 direct-message baseline set on the first start. A cursor moves only after
 a message has been stored or refused, so a stop between the two replays
 it. Each partner has its own cursor, so one partner's newer message never
-skips another partner's older ones. On every connect and reconnect Pogo
+skips another partner's older ones. On every connect and reconnect Stargate
 asks for what it missed:
 
 - for each joined channel, `CHATHISTORY AFTER <channel> timestamp=<cursor>`;
@@ -487,7 +487,7 @@ and turn-limit rules, and their IRC message IDs deduplicate them against
 messages already stored, so nothing is admitted twice. The replay window is
 at most `irc[].catchUpHours` (default 24, maximum 168): an older cursor
 starts there, and replayed messages older than that are ignored. On a first
-start without a cursor, Pogo sets the cursor to now and replays nothing, so
+start without a cursor, Stargate sets the cursor to now and replays nothing, so
 an existing backlog is not answered. Replayed reactions never stop a turn.
 
 ## Presence
@@ -496,19 +496,19 @@ Each IRC connection (captain and crew) uses these when the server offers
 them:
 
 - **Always-on** (`draft/persistence`, switch `alwaysOn`): after each connect
-  Pogo sends `PERSISTENCE SET ON`. On Ergo an always-on account stays in its
+  Stargate sends `PERSISTENCE SET ON`. On Ergo an always-on account stays in its
   channels and keeps receiving direct messages (stored for later) while
-  Pogo is stopped or disconnected; with [catch-up](#catch-up) Pogo then
+  Stargate is stopped or disconnected; with [catch-up](#catch-up) Stargate then
   reads what it missed. Ergo allows this only when
   `accounts.multiclient.always-on` is `opt-in` (or `opt-out`); otherwise
-  the server refuses it and Pogo logs the `PERSISTENCE STATUS` it gets.
-  Always-on stays set on the server after Pogo stops; turn it off with
+  the server refuses it and Stargate logs the `PERSISTENCE STATUS` it gets.
+  Always-on stays set on the server after Stargate stops; turn it off with
   `PERSISTENCE SET DEFAULT` from another client of the account.
-- **Bot mode** (ISUPPORT `BOT`, switch `botMode`): Pogo sets that user mode
+- **Bot mode** (ISUPPORT `BOT`, switch `botMode`): Stargate sets that user mode
   (Ergo: `+B`) on its nick after each connect. Clients can show the account
   as a bot.
 - **Read marker** (`draft/read-marker`, switch `readMarker`): after a
-  message is accepted (stored as a turn), Pogo sends `MARKREAD` with the
+  message is accepted (stored as a turn), Stargate sends `MARKREAD` with the
   message's server time for that channel, or for the sender's nick in a
   direct message. Messages that are not admitted are not marked read.
 
@@ -530,7 +530,7 @@ channel and posts one entry per DM:
 [dm] jackie (jack) → galactica-captain: same person, other nick
 [dm] ghost (no account) → galactica-chief: hello?
 [dm] * jack waves (→ galactica-captain)
-[dm 2026-11-14T10:42Z] jack → galactica-captain: sent while Pogo was down
+[dm 2026-11-14T10:42Z] jack → galactica-captain: sent while Stargate was down
 ```
 
 **What is mirrored**
@@ -538,13 +538,13 @@ channel and posts one entry per DM:
 - Incoming: every PRIVMSG and NOTICE from a user to the nick of the captain
   or of a crew connection, whether or not it starts a turn.
 - Outgoing: every PRIVMSG and NOTICE that a ship connection sends to a nick
-  and the server confirms: agent replies, Pogo's own notices (for example
+  and the server confirms: agent replies, Stargate's own notices (for example
   "attachment unavailable" or the stop notice), FILEHOST link lines and
   `dmPolicy` redirects.
 - The sender or recipient shows as its nick. When its account differs, the
   account follows in parentheses; `(no account)` marks a user who is not
   logged in. The agent shows as its account.
-- A message that [catch-up](#catch-up) replays (it arrived while Pogo was
+- A message that [catch-up](#catch-up) replays (it arrived while Stargate was
   stopped or disconnected) shows its server time: `[dm <time>]`. Message
   IDs prevent a second entry for the same message.
 
@@ -572,19 +572,19 @@ channel and posts one entry per DM:
   heuristic: it errs on the side of withholding, and it cannot recognise a
   bare password.
 - DMs that another client of the same account sends (for example the
-  operator logged in as the captain account): Pogo does not see them as
+  operator logged in as the captain account): Stargate does not see them as
   sent. Ergo's stored DM history (see below) has them.
 
 **Rules**
 
 - The audit channel is never a conversation: no message in it starts a
   turn (mentions, all-calls and replies included), no reaction in it stops
-  one, and catch-up never replays it. Pogo never mirrors what it posts
+  one, and catch-up never replays it. Stargate never mirrors what it posts
   there, so the mirror cannot loop. `config check` refuses an audit channel
   that is a captain or crew channel of this registration, or a ship channel
   of any other IRC registration, on any server: host names and ports do not
   prove two servers distinct. The comparison uses one key that is at least
-  as coarse as every CASEMAPPING Pogo knows (`widestFold` in
+  as coarse as every CASEMAPPING Stargate knows (`widestFold` in
   `src/irc/protocol.ts`, built on the runtime `unicode` fold): Unicode
   compatibility forms, lower, upper and lower case again, then rfc1459.
   So `#Ärger` equals `#ärger`, and `#STRAẞE`, `#straße` and `#STRASSE`
@@ -598,7 +598,7 @@ channel and posts one entry per DM:
   offline or not in the channel, entries wait. A full queue drops new
   entries, and an entry that waits longer than the confirmation timeout
   (20 seconds) behind other traffic is removed from the send queue unsent;
-  both count as dropped. Pogo logs one warning with the count at most every
+  both count as dropped. Stargate logs one warning with the count at most every
   10 seconds, and a final count at shutdown. A post that the server refuses or does
   not confirm is dropped and logged. Logs carry counts only, never text.
 - The mirror is a convenience view, not the record. Exactly-once is not
@@ -621,12 +621,12 @@ chosen:
 | ----------------------- | -------------------------------------------------------- | --------------------------------------- |
 | Crew channel rule       | Unchanged                                                | New exception for every crew connection |
 | Joins and invite grants | One account                                              | Every ship account                      |
-| Entry attribution       | Pogo's text (`[dm] galactica-chief → …`)                 | The server's source nick as well        |
+| Entry attribution       | Stargate's text (`[dm] galactica-chief → …`)             | The server's source nick as well        |
 | Captain offline         | Crew entries wait in the queue (or drop when it is full) | Each connection posts on its own        |
 | Send rate               | Shares the captain's throttle (low priority)             | Each connection's throttle              |
 
-Attribution in the chosen design comes from Pogo's text, not from the
-poster's account. That is acceptable because only Pogo posts the entries,
+Attribution in the chosen design comes from Stargate's text, not from the
+poster's account. That is acceptable because only Stargate posts the entries,
 and Ergo's stored DM history keeps the authoritative copy.
 
 **Redirect policy**
@@ -635,8 +635,8 @@ and Ergo's stored DM history keeps the authoritative copy.
 DMs. No DM starts a turn. Every connection, captain and crew, answers a DM
 from a logged-in account with a NOTICE, `Please ask in #ship-galactica`
 (its first channel); a DM without an account gets no answer, so rotating
-nicks cannot make Pogo flood. The mirror still records every DM and
-answer. Pogo answers each account at most once every 5 minutes per
+nicks cannot make Stargate flood. The mirror still records every DM and
+answer. Stargate answers each account at most once every 5 minutes per
 connection, never answers a NOTICE (so two bots cannot answer each
 other), and never answers services or CTCP other than ACTION. Channel
 messages are not affected.
@@ -651,7 +651,7 @@ messages are not affected.
   the ship: grant only the operator.
 - For a complete record, store DMs on the server (Ergo persistent
   history with `direct-messages: mandatory` and a retention period). The
-  mirror shows DMs while Pogo runs; the server keeps all of them.
+  mirror shows DMs while Stargate runs; the server keeps all of them.
 - `audit` and `dmPolicy` changes need a restart; SIGHUP reload refuses them.
 
 ## Crew on IRC
@@ -669,7 +669,7 @@ accounts.
   At runtime the crew connection also requires each channel to be a
   captain channel under the server's `CASEMAPPING`; otherwise it never
   joins, answers or delivers there.
-- Pogo ignores an INVITE to any other channel and leaves a channel that
+- Stargate ignores an INVITE to any other channel and leaves a channel that
   the server joined it to without being listed.
 - When the ship channel is invite-only (`+i`) and the crew join fails, the
   captain connection sends `INVITE <crew nick> <channel>`. The captain must
@@ -686,7 +686,7 @@ accounts.
 A crew IRC connection is an ordinary unpinned registration: one session
 per channel, using its own `backend` (normally the member's native agent
 definition and worktree). It does **not** prompt the crew member's task
-session that the crew plugin manages. Pogo refuses a crew backend with a
+session that the crew plugin manages. Stargate refuses a crew backend with a
 pinned `sessionID`. A crew member can also run on Claude Code with a
 `claude` backend, or on the Codex CLI with a `codex` backend; see the
 Galactica examples for [Claude](claude.md#set-up-through-cliproxyapi) and
@@ -712,7 +712,7 @@ crew) is a **ship message**:
 - An all-call from a ship account counts once for each agent it reaches,
   like other ship messages; an all-call from a person is not limited by
   this cap.
-- Pogo admits at most `access.shipTurnsPerAgentPerHour` (default 60,
+- Stargate admits at most `access.shipTurnsPerAgentPerHour` (default 60,
   maximum 600) ship messages **per agent** in a rolling hour. A channel's
   cap is that value times the ship agents configured in it: the captain
   plus each crew member whose `channels` list it, with names folded like
@@ -749,7 +749,7 @@ agent replies on IRC only when:
    can see; or
 3. an all-call asks everyone to answer.
 
-Otherwise it answers `[[pogo:silent]]` and Pogo posts nothing. For an
+Otherwise it answers `[[pogo:silent]]` and Stargate posts nothing. For an
 all-call it answers once and briefly, and stays silent if another agent
 already said the same. No acknowledgements, thanks, agreement-only or status
 messages; one short, specific message, no repeats.
@@ -794,12 +794,12 @@ is guidance, not a hard block.
 
 #### pogo_dm and pogo_mail in crew IRC sessions
 
-With `"crewMessaging": { "sessions": true }` (default off), Pogo binds each
+With `"crewMessaging": { "sessions": true }` (default off), Stargate binds each
 crew IRC session to its crew member in the crew plugin, so `pogo_dm` and
 `pogo_mail` work there as that member:
 
 - **Binding.** Before each turn of a crew IRC session, once per process,
-  Pogo calls the crew plugin's `pogo.crew.irc` `bind` RPC at the captain
+  Stargate calls the crew plugin's `pogo.crew.irc` `bind` RPC at the captain
   location (the plugin answers it nowhere else) with the session ID and
   the crew ID (`crew[].id`, which must equal the member's ID in the team).
   The plugin binds the session only if it is a root OpenCode session with
@@ -846,10 +846,10 @@ not change; the IRC DM is a copy.
 - **Path.** The crew plugin records each stored `pogo_dm` (never plain
   `pogo_mail`) in a bounded outbox (24 hours, 1000 entries). The ship polls
   it every 2 seconds through the `pogo.crew.irc` `outbox` RPC at the
-  captain location, from a cursor in Pogo's SQLite store; the first read
+  captain location, from a cursor in Stargate's SQLite store; the first read
   only sets the cursor, so older messages are not copied. Items go out one
   at a time and in order. An entry older than 24 hours is never listed or
-  sent, even after a longer Pogo downtime or retries.
+  sent, even after a longer Stargate downtime or retries.
 - **Delivery.** The sender's IRC connection sends `[pogo_dm] <text>` as
   PRIVMSG to the nick that WHOIS shows holds the recipient's account (as
   for DM replies), rechecked at each socket write. Each line carries the
@@ -862,7 +862,7 @@ not change; the IRC DM is a copy.
   in pogo_mail)`. Text that may carry a credential (the same rules as the
   DM audit, CTCP parts included) is not copied: the copy reads `[pogo_dm <id>: not copied to
   IRC, it may contain credentials. Read it with pogo_mail.]`.
-- **Dedupe.** Pogo records each receipt ID before it sends the copy
+- **Dedupe.** Stargate records each receipt ID before it sends the copy
   (7 days). On the receiving connection, a DM from a ship account with a
   recorded `+pogo/dm` ID is never admitted as a turn (the native delivery
   already reached the recipient), never answered by `dmPolicy: "redirect"`,
@@ -887,13 +887,13 @@ other instruction changes.
 library. The maintained JavaScript option, `irc-framework`, targets Node
 `net`/`tls`, lists `labeled-response` and message IDs outside its stable
 support, and owns reconnect and SASL internally behind an untyped event
-API. Pogo needs per-line delivery confirmation, AbortSignal shutdown,
+API. Stargate needs per-line delivery confirmation, AbortSignal shutdown,
 fail-closed account checks and no new dependency; the protocol subset is
 small. Parsing and serialization (`protocol.ts`) refuse any parameter that
 would inject a line or a parameter.
 
 Crew IRC sessions are additional OpenCode root sessions (one per member
-and channel). Pogo's session title marks them `(irc #channel)`. They use
+and channel). Stargate's session title marks them `(irc #channel)`. They use
 the crew `backend.permissions`, which default to deny-all tools, and the
 model of their agent definition. Nightly model upgrades do not switch them.
 

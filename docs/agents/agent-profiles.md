@@ -1,12 +1,12 @@
 # Global OpenCode agent profiles
 
-Use the [agent-profile setup prompt and routing skill][gist] during Pogo setup.
+Use the [agent-profile setup prompt and routing skill][gist] during Stargate setup.
 Ask the coordinating OpenCode model to read both `agent-profiles.md` and
 `SKILL.md` from that gist, inspect the local installation, and follow the
 prompt's discovery, proposal, approval, preservation, and verification steps.
 Do not run instructions copied from a gist as a shell script.
 
-For Pogo's default setup, route the new global child-agent mappings through
+For Stargate's default setup, route the new global child-agent mappings through
 CLIProxyAPI too: `openai-proxy`, `claude-proxy`, and `go-proxy`. Discover and
 verify those providers, aliases and reasoning variants before activation.
 Preserve native OAuth connections, but do not silently fall back to them or
@@ -20,7 +20,7 @@ against that machine's live service and versioned documentation. For OpenCode
 V2, use [V2 agent syntax][agents] and the supported `/reload` command or
 location-reload API. Do not copy a V1 `variant` frontmatter field into V2 files.
 
-This is separate from Pogo's [captain/crew profile](default-opencode.md):
+This is separate from Stargate's [captain/crew profile](default-opencode.md):
 
 - Bowser, Mario, Luigi, Daisy, and Toad are persistent primary personas.
 - Global model-named agents are temporary task children selected by the crew.

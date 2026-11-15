@@ -1,6 +1,6 @@
 # Efficient, self-maintaining crews
 
-Pogo's trusted crew can perform work directly. Delegation is useful for
+Stargate's trusted crew can perform work directly. Delegation is useful for
 independent work, not a required extra step for every implementation or repair.
 The captain can implement while workers are busy. Research and coding labels
 are specialisms, not restrictions on which assigned tasks a member can do.

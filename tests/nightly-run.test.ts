@@ -114,7 +114,7 @@ const api = Bun.serve({
   async fetch(request): Promise<Response> {
     const url = new URL(request.url);
     const root = `http://127.0.0.1:${apiPort}`;
-    const pogo = "/repos/aiconsultancy/pogo";
+    const pogo = "/repos/aiconsultancy/stargate";
     const asset = (id: number, name: string, size: number, extra = {}) => ({
       id,
       name,

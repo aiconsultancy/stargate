@@ -1,9 +1,9 @@
 # Nightly maintenance
 
-Pogo can keep itself and its host dependencies up to date in a nightly
-maintenance window. One `pogo maintenance run` per night:
+Stargate can keep itself and its host dependencies up to date in a nightly
+maintenance window. One `stargate maintenance run` per night:
 
-1. updates Pogo to the newest verified GitHub release;
+1. updates Stargate to the newest verified GitHub release;
 2. updates CLIProxyAPI and the agent CLIs (OpenCode, Codex, Claude Code, Pi);
 3. moves child-agent profiles and live captain/crew sessions to a newer model
    of the same family when the proxy offers one;
@@ -31,10 +31,10 @@ disabled, with a five-day age threshold and no roots or repositories. Example:
 }
 ```
 
-Run `pogo maintenance cleanup --plan --config /srv/pogo/pogo.json` to inspect
+Run `stargate maintenance cleanup --plan --config /srv/pogo/pogo.json` to inspect
 the configured cleanup without writes, fetches, pruning or service changes.
 Cleanup must be enabled to select candidates. Apply runs only through
-`pogo maintenance run`, within its maintenance window and shared idle gate.
+`stargate maintenance run`, within its maintenance window and shared idle gate.
 Cleanup itself does not stop or restart services. It runs after interrupted
 update recovery and before preparing this run's updates. The idle gate is
 checked again before each deletion. Unlike updates, deletion has no automatic
@@ -126,12 +126,12 @@ is awaited before each deletion and after its result. An audit write failure
 stops further deletion. A `planned` entry in an interrupted apply records intent,
 not proof of removal; inspect that exact path before acting. Final Slack
 summaries include totals; full paths and kept-item reasons stay in the private
-report. No live cleanup or configuration change follows from installing Pogo.
+report. No live cleanup or configuration change follows from installing Stargate.
 
 ## Configuration
 
 Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
-`pogo config check --schema-only` validates it. Example (the Galactica install):
+`stargate config check --schema-only` validates it. Example (the Galactica install):
 
 ```json
 "maintenance": {
@@ -179,46 +179,46 @@ Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
 }
 ```
 
-| Setting                                   | Default                                                             | Meaning                                                                                                         |
-| ----------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `enabled`                                 | `false`                                                             | `run` refuses to start when false. `plan` and `update` always work.                                             |
-| `installID`                               | hash of host and config path                                        | Stable identity for jitter and reports.                                                                         |
-| `window.start`, `window.end`              | `00:00`, `01:00`                                                    | Local wall-clock times; the end can be after midnight.                                                          |
-| `window.timeZone`                         | `Europe/London`                                                     | IANA zone. Daylight saving time applies.                                                                        |
-| `window.jitterMinutes`                    | `15`                                                                | Maximum per-install start delay.                                                                                |
-| `window.reserveMinutes`                   | `10`                                                                | No new change starts in the last N minutes; they are kept for rollback.                                         |
-| `components.*`                            | `false`                                                             | `pogo`, `cliproxyapi`, `agentClis`, `models`. Each needs its section.                                           |
-| `report`                                  | none                                                                | Bot and channel for the Slack summary. The channel must be allowed for the bot.                                 |
-| `services.gateway`                        | `pogo.service`                                                      | User unit of this gateway.                                                                                      |
-| `services.openCodeRestart`                | `systemctl --user restart opencode2.service`                        | Command that restarts the shared OpenCode server.                                                               |
-| `idle.pollSeconds`                        | `30`                                                                | Idle-gate poll interval.                                                                                        |
-| `idle.cronHorizonMinutes`                 | `10`                                                                | A cron schedule due within this time blocks maintenance. See [Idle gate](#idle-gate).                           |
-| `proxy.url`, `proxy.clientKeyFile`        | loopback `:8317`, required                                          | CLIProxyAPI endpoint and its private client-key file (mode 0600).                                               |
-| `pogo.root`                               | required                                                            | Install root. See [install layout](#install-layout).                                                            |
-| `pogo.repository`, `pogo.branch`          | `aiconsultancy/pogo`, `main`                                        | Release source.                                                                                                 |
-| `pogo.tokenEnv`                           | none                                                                | Environment variable with a read-only GitHub token. Without it, Pogo uses `gh auth token` if `gh` is available. |
-| `pogo.author`                             | `github-actions[bot]`                                               | The only accepted release and asset author.                                                                     |
-| `pogo.checkout`                           | none (required)                                                     | Local clone (bare is fine) for the tree comparison. Without it the update fails closed (`not-configured`).      |
-| `pogo.requireTreeCheck`                   | `true`                                                              | `false` accepts releases without the tree comparison. Not recommended: see [Pogo releases](#pogo-releases).     |
-| `pogo.coolOffHours`                       | `0`                                                                 | Release age before install. Pogo releases are this project's own CI output.                                     |
-| `pogo.keep`                               | `3`                                                                 | Managed releases kept, always including `current` and `previous`.                                               |
-| `pogo.installCommand`, `pogo.testCommand` | `bun install --frozen-lockfile`, `bun test`                         | Run in the new release directory before the switch.                                                             |
-| `cliproxyapi.link`                        | required                                                            | Stable symlink that the proxy unit's `ExecStart` runs.                                                          |
-| `cliproxyapi.binary`                      | required                                                            | Installed binary path with `{version}`.                                                                         |
-| `cliproxyapi.asset`                       | `CLIProxyAPI_{version}_linux_amd64.tar.gz`                          | Release asset to download; its GitHub SHA-256 digest is pinned.                                                 |
-| `cliproxyapi.executable`                  | `cli-proxy-api`                                                     | Executable inside the asset, installed as `binary`.                                                             |
-| `cliproxyapi.coolOffHours`                | `24`                                                                | Minimum age of the release and of each of its assets.                                                           |
-| `agentClis.prefix`                        | required                                                            | npm global prefix.                                                                                              |
-| `agentClis.packages`                      | the four CLIs below                                                 | `{ name, command }` pairs.                                                                                      |
-| `agentClis.allowScripts`                  | `@opencode/cli`, `@anthropic-ai/claude-code`, `protobufjs`, `koffi` | Only these may run install scripts (`--strict-allow-scripts`); empty: `--ignore-scripts`.                       |
-| `agentClis.lockFile`                      | none                                                                | Shared `flock` lock of an existing updater.                                                                     |
-| `agentClis.coolOffHours`                  | `24`                                                                | Minimum npm publication age, also for dependencies (`--before`).                                                |
-| `models.families`                         | Claude Opus, Sonnet, Haiku; GPT Sol, Terra, Luna                    | Families that can move automatically.                                                                           |
-| `models.providers`                        | `openai-proxy`, `claude-proxy`                                      | OpenCode providers that route through the proxy.                                                                |
-| `models.agentProfiles`                    | none                                                                | Global child-agent profiles directory.                                                                          |
-| `models.teamFiles`                        | `[]`                                                                | Team JSON files whose models follow upgrades.                                                                   |
-| `models.probes`                           | `2`                                                                 | Maximum health probes per current model and night.                                                              |
-| `droid`                                   | none                                                                | Monitoring agent; see [Maintenance droid](#maintenance-droid).                                                  |
+| Setting                                   | Default                                                             | Meaning                                                                                                             |
+| ----------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                                 | `false`                                                             | `run` refuses to start when false. `plan` and `update` always work.                                                 |
+| `installID`                               | hash of host and config path                                        | Stable identity for jitter and reports.                                                                             |
+| `window.start`, `window.end`              | `00:00`, `01:00`                                                    | Local wall-clock times; the end can be after midnight.                                                              |
+| `window.timeZone`                         | `Europe/London`                                                     | IANA zone. Daylight saving time applies.                                                                            |
+| `window.jitterMinutes`                    | `15`                                                                | Maximum per-install start delay.                                                                                    |
+| `window.reserveMinutes`                   | `10`                                                                | No new change starts in the last N minutes; they are kept for rollback.                                             |
+| `components.*`                            | `false`                                                             | `pogo`, `cliproxyapi`, `agentClis`, `models`. Each needs its section.                                               |
+| `report`                                  | none                                                                | Bot and channel for the Slack summary. The channel must be allowed for the bot.                                     |
+| `services.gateway`                        | `pogo.service`                                                      | User unit of this gateway.                                                                                          |
+| `services.openCodeRestart`                | `systemctl --user restart opencode2.service`                        | Command that restarts the shared OpenCode server.                                                                   |
+| `idle.pollSeconds`                        | `30`                                                                | Idle-gate poll interval.                                                                                            |
+| `idle.cronHorizonMinutes`                 | `10`                                                                | A cron schedule due within this time blocks maintenance. See [Idle gate](#idle-gate).                               |
+| `proxy.url`, `proxy.clientKeyFile`        | loopback `:8317`, required                                          | CLIProxyAPI endpoint and its private client-key file (mode 0600).                                                   |
+| `pogo.root`                               | required                                                            | Install root. See [install layout](#install-layout).                                                                |
+| `pogo.repository`, `pogo.branch`          | `aiconsultancy/stargate`, `main`                                    | Release source.                                                                                                     |
+| `pogo.tokenEnv`                           | none                                                                | Environment variable with a read-only GitHub token. Without it, Stargate uses `gh auth token` if `gh` is available. |
+| `pogo.author`                             | `github-actions[bot]`                                               | The only accepted release and asset author.                                                                         |
+| `pogo.checkout`                           | none (required)                                                     | Local clone (bare is fine) for the tree comparison. Without it the update fails closed (`not-configured`).          |
+| `pogo.requireTreeCheck`                   | `true`                                                              | `false` accepts releases without the tree comparison. Not recommended: see [Stargate releases](#stargate-releases). |
+| `pogo.coolOffHours`                       | `0`                                                                 | Release age before install. Stargate releases are this project's own CI output.                                     |
+| `pogo.keep`                               | `3`                                                                 | Managed releases kept, always including `current` and `previous`.                                                   |
+| `pogo.installCommand`, `pogo.testCommand` | `bun install --frozen-lockfile`, `bun test`                         | Run in the new release directory before the switch.                                                                 |
+| `cliproxyapi.link`                        | required                                                            | Stable symlink that the proxy unit's `ExecStart` runs.                                                              |
+| `cliproxyapi.binary`                      | required                                                            | Installed binary path with `{version}`.                                                                             |
+| `cliproxyapi.asset`                       | `CLIProxyAPI_{version}_linux_amd64.tar.gz`                          | Release asset to download; its GitHub SHA-256 digest is pinned.                                                     |
+| `cliproxyapi.executable`                  | `cli-proxy-api`                                                     | Executable inside the asset, installed as `binary`.                                                                 |
+| `cliproxyapi.coolOffHours`                | `24`                                                                | Minimum age of the release and of each of its assets.                                                               |
+| `agentClis.prefix`                        | required                                                            | npm global prefix.                                                                                                  |
+| `agentClis.packages`                      | the four CLIs below                                                 | `{ name, command }` pairs.                                                                                          |
+| `agentClis.allowScripts`                  | `@opencode/cli`, `@anthropic-ai/claude-code`, `protobufjs`, `koffi` | Only these may run install scripts (`--strict-allow-scripts`); empty: `--ignore-scripts`.                           |
+| `agentClis.lockFile`                      | none                                                                | Shared `flock` lock of an existing updater.                                                                         |
+| `agentClis.coolOffHours`                  | `24`                                                                | Minimum npm publication age, also for dependencies (`--before`).                                                    |
+| `models.families`                         | Claude Opus, Sonnet, Haiku; GPT Sol, Terra, Luna                    | Families that can move automatically.                                                                               |
+| `models.providers`                        | `openai-proxy`, `claude-proxy`                                      | OpenCode providers that route through the proxy.                                                                    |
+| `models.agentProfiles`                    | none                                                                | Global child-agent profiles directory.                                                                              |
+| `models.teamFiles`                        | `[]`                                                                | Team JSON files whose models follow upgrades.                                                                       |
+| `models.probes`                           | `2`                                                                 | Maximum health probes per current model and night.                                                                  |
+| `droid`                                   | none                                                                | Monitoring agent; see [Maintenance droid](#maintenance-droid).                                                      |
 
 Default agent CLIs: `@opencode/cli` (`opencode2`), `@openai/codex` (`codex`),
 `@anthropic-ai/claude-code` (`claude`), `@earendil-works/pi-coding-agent` (`pi`).
@@ -244,7 +244,7 @@ this means:
 - on the fall-back night the window ends at the first 01:00 (BST).
 
 No change starts after `end - reserveMinutes`. A deferred or incomplete run
-leaves the remaining work for the next night. `pogo maintenance window` prints
+leaves the remaining work for the next night. `stargate maintenance window` prints
 the window, the jitter and the next start.
 
 ## What one run does
@@ -267,7 +267,7 @@ the window, the jitter and the next start.
    proxy model catalog; models in use. A captain or crew profile that exists
    but cannot be read fails closed (`idle-unknown`).
 3. **Prepare (no live change).** Download, verify, unpack, install and test the
-   Pogo release in its own directory. Download, verify and install the new
+   Stargate release in its own directory. Download, verify and install the new
    CLIProxyAPI binary in its own version directory. Probe new models.
 4. **Idle gate.** Poll until idle or until the deadline. If never idle, the run
    writes a `deferred` report and stops.
@@ -288,8 +288,8 @@ the window, the jitter and the next start.
    not answer, the run stops: no release or model change happens tonight. After
    a successful update, chosen models are probed again through the new proxy.
 9. **One OpenCode restart.** Idle gate, then without delay: journal and
-   switch `current` (Pogo), journal and write model configuration, restart
-   OpenCode, require every captain/crew location to report its Pogo plugin.
+   switch `current` (Stargate), journal and write model configuration, restart
+   OpenCode, require every captain/crew location to report its Stargate plugin.
    On failure the run undoes, one at a time, the release switch, the model
    configuration and the CLI update, restarting after each. The CLI update is
    committed here.
@@ -315,7 +315,7 @@ the window, the jitter and the next start.
 
 ### Gateway-only update
 
-A Pogo release that does not change the crew plugin needs no OpenCode
+A Stargate release that does not change the crew plugin needs no OpenCode
 restart. When a release is staged, maintenance records a digest of the crew
 plugin in `<release>/.pogo-plugin-digest`: the plugin entry and every file
 that it imports, `package.json`, the lockfile, the Bun and TypeScript
@@ -348,7 +348,7 @@ release directory. `state.json` records that release (`openCodeRelease`)
 and pruning keeps it until a later run restarts OpenCode.
 
 Every abnormal end (exception, `SIGTERM`, timeout) applies the same journal
-undo as `pogo maintenance recover`.
+undo as `stargate maintenance recover`.
 
 ## Journal and recovery
 
@@ -416,7 +416,7 @@ Who recovers:
   undo step that changes live state (see step 1);
 - the maintenance droid's `recover`, through the same path (see
   [Maintenance droid](#maintenance-droid));
-- an operator with `pogo maintenance recover`, unconditionally.
+- an operator with `stargate maintenance recover`, unconditionally.
 
 The run commits a verified release before it drops the `gateway` entry, so
 a kill between the two leaves only `gateway`, which a ready gateway of the
@@ -451,7 +451,7 @@ It never guesses. To get out:
 2. List what one entry still covers, without changing anything:
 
    ```sh
-   pogo maintenance recover --config pogo.json --accept-current files
+   stargate maintenance recover --config pogo.json --accept-current files
    ```
 
    For `files`, each path shows whether it still holds what maintenance
@@ -465,8 +465,8 @@ It never guesses. To get out:
 4. Drop that entry, then finish the others:
 
    ```sh
-   pogo maintenance recover --config pogo.json --accept-current files --yes
-   pogo maintenance recover --config pogo.json
+   stargate maintenance recover --config pogo.json --accept-current files --yes
+   stargate maintenance recover --config pogo.json
    ```
 
 For a corrupt journal, read `journal.json` (or `gateway-stopped.json`), undo
@@ -476,12 +476,14 @@ link, session models), then move it aside with
 `journal.accepted-<time>.json`, never deleted. `--accept-current` takes the
 run lock and refuses while a run holds it.
 
-## Pogo releases
+<a name="pogo-releases"></a>
+
+## Stargate releases
 
 A merge to `main` with a user-facing change publishes `vX.Y.Z` (see
 [releases](releases.md); other changes reach hosts with the next release) with `pogo-vX.Y.Z.tar.gz` (a
 `git archive --prefix=pogo-vX.Y.Z/`) and `pogo-vX.Y.Z.tar.gz.sha256`. GitHub
-artifact attestations are not available for the organization, so Pogo does
+artifact attestations are not available for the organization, so Stargate does
 not use `gh attestation verify`. The tree comparison against a local clone
 replaces it and is required by default. A release is used only if all of these
 pass; any failure fails closed:
@@ -561,9 +563,9 @@ switch and its rollback do not edit the unit. Candidates come from GitHub
 releases of `router-for-me/CLIProxyAPI`: stable, not draft, not pre-release,
 newer than the linked version, and past `coolOffHours` by the release's
 publication time _and_ every asset's creation and update time, so a replaced
-asset on an old release does not bypass the age rule. Pogo downloads
+asset on an old release does not bypass the age rule. Stargate downloads
 `cliproxyapi.asset` itself, requires GitHub's `sha256:` digest for it,
-verifies the download, validates the archive headers (the same rules as Pogo
+verifies the download, validates the archive headers (the same rules as Stargate
 releases), extracts only `cliproxyapi.executable`, checks with `lstat` that
 exactly that one regular file was written, and installs it as
 `cliproxyapi.binary` for that version. The installed binary must be a regular
@@ -615,7 +617,7 @@ downgrade. The newest candidate must:
 3. already be in OpenCode's live model catalog, globally and at every captain
    and crew location, with each variant in use (`#high`, ...).
 
-Pogo does not edit OpenCode provider declarations. A model that the proxy
+Stargate does not edit OpenCode provider declarations. A model that the proxy
 offers but OpenCode does not list is reported as `catalog-missing`.
 
 Changed places, keeping provider prefixes and variants:
@@ -646,7 +648,7 @@ After the reload, only the new agents that the selected profile
 (`agent-profiles/current`) routes must load with their new models; the
 disabled copies in other profiles are not loaded and not checked.
 
-JSON files are rewritten only when they use Pogo's canonical two-space layout;
+JSON files are rewritten only when they use Stargate's canonical two-space layout;
 a differently formatted file is reported as `config-format` and left alone.
 A symlinked file (for example from a dotfiles repository) keeps its link; its
 real target receives the change.
@@ -684,18 +686,18 @@ All of these must be true, observed read-only:
   them; for an ordinary assignment, for example a forgotten one from an
   earlier captain session: ask the captain to run `pogo_crew status
   <taskID>`;
-- no Pogo-owned OpenCode session is running (`session.active`) or has a
-  pending form or permission request. Pogo-owned sessions are the pinned
+- no Stargate-owned OpenCode session is running (`session.active`) or has a
+  pending form or permission request. Stargate-owned sessions are the pinned
   captain sessions (a gateway bot's pin and each crew plugin's own pin),
   every session in the gateway's thread mappings, the crew
   sessions (peers and crew IRC sessions) and their subagents at any depth.
 
-The OpenCode condition covers Pogo's own sessions only. Other sessions on the
+The OpenCode condition covers Stargate's own sessions only. Other sessions on the
 shared server, for example the operator's own work, never block maintenance;
 an OpenCode restart interrupts them. A session whose parent cannot be read is
 busy (`idle-unknown`). An unreadable source is
 busy (`idle-unknown`): this includes a captain or crew profile that exists but
-cannot be read or parsed, a dangling profile link, unparsable Pogo plugin
+cannot be read or parsed, a dangling profile link, unparsable Stargate plugin
 options and a configured OpenCode member without a profile. Symlinked profiles
 are followed. The gate never changes, cancels or replays work.
 
@@ -723,7 +725,7 @@ step names and private local paths. They never contain raw errors, command
 output, prompts or credentials. Changed files are also copied, before the
 change, to `<dataDirectory>/maintenance/backups/<runID>/`.
 
-`pogo maintenance schema` prints the JSON Schema. Version policy: the
+`stargate maintenance schema` prints the JSON Schema. Version policy: the
 `schema` value is `pogo.maintenance.report.v1`. Additive optional fields keep
 `v1`; renamed, removed or re-typed fields, and new required fields, change it.
 Readers must reject an unknown `schema` value.
@@ -777,13 +779,13 @@ bot does not allow is refused.
 
 ## Maintenance droid
 
-`pogo-maintenance-droid` is a Pi Durable agent built into Pogo. It monitors
+`pogo-maintenance-droid` is a Pi Durable agent built into Stargate. It monitors
 nightly maintenance, explains each run in plain English and escalates
 problems. It has no Slack app of its own: it posts through `report.bot` to
 `report.channel`, with the same outbox as the run summary. Slack users cannot
 address it. It is off by default.
 
-The deterministic engine stays authoritative. Pogo decides when to check,
+The deterministic engine stays authoritative. Stargate decides when to check,
 collects the facts, computes the findings, enforces every precondition and
 limit, and writes the findings, the droid's actions and the operator commands
 into each post itself. The model only chooses among four tools and writes the
@@ -824,10 +826,10 @@ or `OPENAI_API_KEY` from the environment.
 
 ### One check
 
-The droid timer starts `pogo maintenance droid` at `window.end` plus
+The droid timer starts `stargate maintenance droid` at `window.end` plus
 `afterRunMinutes` and at `healthCheck`. One check:
 
-1. **Facts (read-only, by Pogo code).** The latest `reports` reports, reduced
+1. **Facts (read-only, by Stargate code).** The latest `reports` reports, reduced
    to outcome, reason codes, changed components, failed steps, rollbacks and
    model counts; `ALERT.json`; whether a journal exists and its entry names;
    known-bad releases from `state.json` that are newer than `current`;
@@ -863,7 +865,7 @@ The droid timer starts `pogo maintenance droid` at `window.end` plus
    | `opencode-down`      | The OpenCode unit (from `services.openCodeRestart`) is not active.              |
    | `proxy-unhealthy`    | The proxy unit is not active, or `GET /v1/models` fails.                        |
    | `runs-failing`       | The last `failedNights` runs ended `failed` or `deferred`.                      |
-   | `known-bad`          | A failed Pogo release newer than `current` blocks updates.                      |
+   | `known-bad`          | A failed Stargate release newer than `current` blocks updates.                  |
    | `reports-unreadable` | A recent report cannot be read or has an unknown schema.                        |
 
 3. **Trigger.** A report newer than the last one the droid explained means a
@@ -881,27 +883,27 @@ The droid timer starts `pogo maintenance droid` at `window.end` plus
    resolves it) and `Operator commands:` for the findings.
    Slack receives it as plain text, so it cannot mention or link anyone.
 6. **Fallback.** If the model cannot be opened, fails, times out or answers
-   nothing, the explanation is Pogo's deterministic summary: the newest
+   nothing, the explanation is Stargate's deterministic summary: the newest
    report and every finding. Alerts are never lost to a model failure.
 
-`pogo maintenance droid --print` shows the facts' findings and the
+`stargate maintenance droid --print` shows the facts' findings and the
 deterministic post. It asks no model, runs no action and writes nothing.
 
 ### What the model can do
 
-| Tool                  | Effect                                                                                     |
-| --------------------- | ------------------------------------------------------------------------------------------ |
-| `maintenance_status`  | The facts above and the findings. Read-only.                                               |
-| `maintenance_reports` | Report digests, newest first. Read-only.                                                   |
-| `maintenance_plan`    | `pogo maintenance plan` in process; returns its summary. Once per check; not during a run. |
-| `maintenance_recover` | The run's leftover recovery in process, under the run lock. Preconditions below.           |
+| Tool                  | Effect                                                                                         |
+| --------------------- | ---------------------------------------------------------------------------------------------- |
+| `maintenance_status`  | The facts above and the findings. Read-only.                                                   |
+| `maintenance_reports` | Report digests, newest first. Read-only.                                                       |
+| `maintenance_plan`    | `stargate maintenance plan` in process; returns its summary. Once per check; not during a run. |
+| `maintenance_recover` | The run's leftover recovery in process, under the run lock. Preconditions below.               |
 
 The droid's Pi Durable store has only these four tools installed: no shell,
 files, network, systemd or Slack. A call of any other tool name fails, and a
 tool call from an earlier, interrupted check does nothing. The droid never
 runs `run` or `--accept-current`.
 
-`maintenance_recover` runs only when all of these hold; otherwise Pogo
+`maintenance_recover` runs only when all of these hold; otherwise Stargate
 refuses it and the refusal is final for the check:
 
 - it was not requested before in this check;
@@ -947,9 +949,9 @@ Everything is in `<dataDirectory>/maintenance/droid/` (0700):
 ### Install the droid timer
 
 ```sh
-pogo maintenance droid --config pogo.json --print
-pogo maintenance install-droid-timer --config pogo.json --print   # review
-pogo maintenance install-droid-timer --config pogo.json
+stargate maintenance droid --config pogo.json --print
+stargate maintenance install-droid-timer --config pogo.json --print   # review
+stargate maintenance install-droid-timer --config pogo.json
 systemctl --user enable --now pogo-maintenance-droid.timer
 ```
 
@@ -967,7 +969,7 @@ undo budget + 5 minutes. Reinstall it after you change the check times.
   post waits in the outbox and is sent when the gateway starts. The audit log
   and `systemctl --user status pogo-maintenance-droid` show it before that.
 - The model can misjudge or miss a problem. The findings, actions and
-  commands in each post come from Pogo, not from the model.
+  commands in each post come from Stargate, not from the model.
 - `pi.sqlite` keeps old daily conversations. It grows by a few small
   conversations per day; to reset it, stop the droid timer and delete the
   droid directory.
@@ -975,19 +977,19 @@ undo budget + 5 minutes. Reinstall it after you change the check times.
 ## Commands
 
 ```sh
-pogo maintenance plan --config pogo.json [--json]   # read-only; no probes
-pogo maintenance run --config pogo.json             # used by the timer
-pogo maintenance update --config pogo.json --version X.Y.Z --plan
-pogo maintenance update --config pogo.json --version X.Y.Z --now [--retry-failed]
-pogo maintenance window --config pogo.json
-pogo maintenance instructions --config pogo.json
-pogo maintenance install-timer --config pogo.json [--name NAME] [--print]
-pogo maintenance adopt --config pogo.json --release DIR [--version X.Y.Z]
-pogo maintenance recover --config pogo.json [--after-run]
-pogo maintenance recover --config pogo.json --accept-current ENTRY [--yes]
-pogo maintenance droid --config pogo.json [--print]
-pogo maintenance install-droid-timer --config pogo.json [--name NAME] [--print]
-pogo maintenance schema
+stargate maintenance plan --config pogo.json [--json]   # read-only; no probes
+stargate maintenance run --config pogo.json             # used by the timer
+stargate maintenance update --config pogo.json --version X.Y.Z --plan
+stargate maintenance update --config pogo.json --version X.Y.Z --now [--retry-failed]
+stargate maintenance window --config pogo.json
+stargate maintenance instructions --config pogo.json
+stargate maintenance install-timer --config pogo.json [--name NAME] [--print]
+stargate maintenance adopt --config pogo.json --release DIR [--version X.Y.Z]
+stargate maintenance recover --config pogo.json [--after-run]
+stargate maintenance recover --config pogo.json --accept-current ENTRY [--yes]
+stargate maintenance droid --config pogo.json [--print]
+stargate maintenance install-droid-timer --config pogo.json [--name NAME] [--print]
+stargate maintenance schema
 ```
 
 `run` refuses to start outside the window; `--outside-window` runs now with the
@@ -1022,16 +1024,16 @@ shell with Bun's directory first. When `pogo.root` is set, `ExecStart` runs
 
 ## Update now
 
-`pogo maintenance update --version X.Y.Z --now` installs one Pogo release
+`stargate maintenance update --version X.Y.Z --now` installs one Stargate release
 immediately. It is for an operator who accepts the interruption. It is the
 nightly run's own path for one named release, with three differences: it does
 not wait for the window, it does not check the idle gate and it does not apply
-the cool-off to the named version. It changes the Pogo release only;
+the cool-off to the named version. It changes the Stargate release only;
 CLIProxyAPI, the agent CLIs and models stay with the nightly run. It works
 also when `maintenance.enabled` is false; `maintenance.pogo` must be
 configured.
 
-Run it with the installed Pogo, not from a checkout:
+Run it with the installed Stargate, not from a checkout:
 
 ```sh
 bun <pogo.root>/current/src/main.ts maintenance update --version X.Y.Z --now --config pogo.json
@@ -1056,7 +1058,7 @@ What it does, in order:
    is looked up by its tag `vX.Y.Z`, so an older release is found too.
    These are refused, and nothing changes:
    - a downgrade (to go back after a failed update, use `recover`);
-   - a journal that an earlier run left (run `pogo maintenance recover`
+   - a journal that an earlier run left (run `stargate maintenance recover`
      first; the update never undoes another run);
    - a release that failed here after an earlier switch, unless
      `--retry-failed` is given.
@@ -1088,7 +1090,7 @@ What it does, in order:
    then exists.
 6. **Writes the private report** in `<dataDirectory>/maintenance/reports/`
    and queues the Slack summary. The report has the step `operator-update`
-   and the summary says "Operator update of Pogo".
+   and the summary says "Operator update of Stargate".
    `ALERT.json` exists when an operator must look.
 
 `--plan` makes the checks of step 1, prints what would happen and which
@@ -1104,7 +1106,7 @@ never move the `current` link by hand. A directory without a valid
 the gateway logs a warning at start, a readiness check for a version never
 passes, and maintenance refuses to switch to that directory.
 
-1. Plan: `pogo maintenance update --config pogo.json --version X.Y.Z --plan`.
+1. Plan: `stargate maintenance update --config pogo.json --version X.Y.Z --plan`.
 2. Apply: the same command with `--now`. Note the unit name that it prints
    (`pogo-update-X-Y-Z-<epoch seconds>`).
 3. Follow: `journalctl --user -u <unit>.service`.
@@ -1119,7 +1121,7 @@ passes, and maintenance refuses to switch to that directory.
    and `ready.json` names the previous version. Read the report before you
    try again; `--retry-failed` is required for the same version.
 6. If `maintenance/ALERT.json` exists with `"journal": true`, the automatic
-   undo did not finish: run `pogo maintenance recover --config pogo.json`.
+   undo did not finish: run `stargate maintenance recover --config pogo.json`.
    It restores the previous release and restarts what that needs. The
    update refuses to start while a journal is left.
 
@@ -1133,12 +1135,12 @@ What restarts when:
 | Rollback after OpenCode restarted with the update | yes     | yes      |
 
 To mark an existing, complete release directory as managed once, use
-`pogo maintenance adopt`. An adopted release has no plugin digest, so the
+`stargate maintenance adopt`. Use the CLI from the release being adopted. An adopted release has no plugin digest, so the
 next update restarts OpenCode.
 
 ## Captain and crew instructions
 
-`pogo crew init --maintenance-config pogo.json` renders this paragraph, with
+`stargate crew init --maintenance-config pogo.json` renders this paragraph, with
 the configured times, into the captain and crew agent definitions and Pi
 member definitions (only when maintenance is enabled):
 
@@ -1151,7 +1153,7 @@ member definitions (only when maintenance is enabled):
 > tasks in the window. After a restart, read your journal and continue from
 > the last checkpoint.
 
-`pogo maintenance instructions` prints it for an existing profile.
+`stargate maintenance instructions` prints it for an existing profile.
 
 ## Migration of an existing install
 
@@ -1159,15 +1161,15 @@ Do these steps once, at an idle moment, with backups. Maintenance does not
 perform them. The commands use the Galactica paths; adjust them for another
 install.
 
-1. **Get a release that contains `pogo maintenance`** and verify it by hand:
+1. **Get a release that contains the maintenance CLI** and verify it by hand:
 
    ```sh
    VERSION=X.Y.Z   # first release with this feature
    ROOT=$HOME/.local/share/pogo
    CFG=$HOME/.config/pogo/galactica-captain/pogo.json
-   cd /tmp/opencode && gh release download "v$VERSION" --repo aiconsultancy/pogo
+   cd /tmp/opencode && gh release download "v$VERSION" --repo aiconsultancy/stargate
    sha256sum -c "pogo-v$VERSION.tar.gz.sha256"
-   gh release view "v$VERSION" --repo aiconsultancy/pogo --json author --jq .author.login
+   gh release view "v$VERSION" --repo aiconsultancy/stargate --json author --jq .author.login
    tar -xzf "pogo-v$VERSION.tar.gz" -C "$ROOT/releases"
    mv "$ROOT/releases/pogo-v$VERSION" "$ROOT/releases/$VERSION"
    cd "$ROOT/releases/$VERSION" && mise exec -- bun install --frozen-lockfile && mise exec -- bun test
@@ -1214,7 +1216,7 @@ install.
    ```
 
 6. **Give CLIProxyAPI a stable link** to a copy of the running binary in
-   Pogo's own version layout, and run it through a drop-in:
+   Stargate's own version layout, and run it through a drop-in:
 
    ```sh
    CPA=$HOME/.local/share/cliproxyapi
@@ -1231,7 +1233,7 @@ install.
    ```
 
 7. **Tree comparison source (required by default):**
-   `git clone --bare git@github.com:aiconsultancy/pogo.git "$ROOT/source.git"`
+   `git clone --bare git@github.com:aiconsultancy/stargate.git "$ROOT/source.git"`
    (set `pogo.checkout` to it). The run fetches only the release tag into it,
    with the SSH credentials of the user service; check that a non-interactive
    `git -C "$ROOT/source.git" fetch origin` works.
@@ -1274,13 +1276,13 @@ install.
 
 If `gh` cannot read its credentials in the systemd user session (for example a
 desktop keyring), create a fine-grained, read-only token for
-`aiconsultancy/pogo` (Contents: read), store it in `<config>.env`, and set
+`aiconsultancy/stargate` (Contents: read), store it in `<config>.env`, and set
 `pogo.tokenEnv`.
 
 ## Limits
 
 - Restarting the shared OpenCode server interrupts every session on it. The
-  gate waits only for Pogo-owned sessions: a session that Pogo does not own,
+  gate waits only for Stargate-owned sessions: a session that Stargate does not own,
   for example the operator's own, is interrupted by the restart.
 - While the gateway is stopped, Slack keeps retrying undelivered Socket Mode
   events only for a short time. The stop covers only the restarts.

@@ -1,6 +1,6 @@
 # State machines
 
-Pogo has state machines in persistent rows, promises, timers, and session
+Stargate has state machines in persistent rows, promises, timers, and session
 mappings. This inventory describes the transitions without adding a state
 machine framework. The existing owners must keep each transition valid.
 
@@ -122,9 +122,9 @@ Owners are `irc/client.ts`, `irc/ship.ts`, `irc/delivery.ts` and the
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Run            | Recover → discover → prepare → idle gate → agent CLIs → stop gateway → proxy → OpenCode restart → live sessions → start gateway → commit | Check idle again immediately before each step that changes live state. Busy or out of time: undo this run's changes and defer.  |
 | Undo journal   | No entry → entry written before its change → entry cleared after verification                                                            | An entry means that an undo is owed. A corrupt journal is never undone. Commit the release before the gateway entry is cleared. |
-| Idle gate      | Busy or unknown → idle, at gateway scope or Pogo scope                                                                                   | Read-only. Unknown is busy. Gateway scope for a gateway restart; Pogo scope for all else. Sessions of others never block.       |
+| Idle gate      | Busy or unknown → idle, at gateway scope or Stargate scope                                                                               | Read-only. Unknown is busy. Gateway scope for a gateway restart; Stargate scope for all else. Sessions of others never block.   |
 | Gateway update | Same plugin digest → gateway idle → stop gateway → switch → start gateway → commit                                                       | Only when no other change is due. Unknown digest: full run. Keep the release that OpenCode still runs.                          |
-| Update now     | Checks → transient unit → stage and verify → stop gateway → switch → restart → ready → commit                                            | No window, idle gate or cool-off. Pogo release only. Refuse a downgrade, a leftover journal and a known-bad release.            |
+| Update now     | Checks → transient unit → stage and verify → stop gateway → switch → restart → ready → commit                                            | No window, idle gate or cool-off. Stargate release only. Refuse a downgrade, a leftover journal and a known-bad release.        |
 | Summary outbox | `.json` → `.claimed` → `.sent`, `.failed` or `.refused`                                                                                  | Claim by rename before the post. A claimed summary is never posted again, also after a crash.                                   |
 
 Owners are `nightly/run.ts`, `nightly/journal.ts`, `nightly/idle.ts`,

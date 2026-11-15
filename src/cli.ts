@@ -26,8 +26,9 @@ Tokens are NEVER accepted as CLI arguments. Use environment variable references.
 Wizard credentials go in <config>.env with mode 0600. Keep this file private.`;
 
 const help: Record<string, string> = {
-  root: `Pogo — Slack AI assistant
-Usage: bun run src/main.ts <command> [options]
+  root: `Stargate — Slack AI assistant
+Usage: stargate <command> [options]
+The pogo command is a compatibility alias.
 Commands:
   start             Run configured bots (also the default command)
   init              Interactive setup; append a bot safely
@@ -42,21 +43,21 @@ Commands:
   service start     Start the user unit
   service stop      Stop the user unit
   service status    Show user unit state
-  service uninstall Disable, stop, and remove a Pogo-managed user unit
+  service uninstall Disable, stop, and remove a Stargate-managed user unit
 Use <command> --help for full options.\n${common}`,
-  start: `Usage: pogo start [--config PATH]\n${common}
+  start: `Usage: stargate start [--config PATH]\n${common}
 Provide token values through environment variables or <config>.env.
 Both user and channel must be allowed; deny rules always win. Bots are rejected.
 SIGHUP validates and reloads live access, transcription and IRC crew changes.
 Reconnect-only changes report "restart required"; running turns keep their
 execution snapshot, but new denies block delivery. No file watcher is enabled.`,
-  init: `Usage: pogo init [--config PATH]\n${common}
+  init: `Usage: stargate init [--config PATH]\n${common}
 Requires an interactive terminal; token input is hidden.
 Creates a prefilled Slack manifest link, collects IDs and backend settings,
 and appends a validated bot. Existing bots/credentials are never overwritten.
 ${slackInstructions}`,
-  bot: `Usage: pogo bot add [--config PATH] [options]
-Batch: pogo bot provision --plan PATH [--apply] [--config PATH]
+  bot: `Usage: stargate bot add [--config PATH] [options]
+Batch: stargate bot provision --plan PATH [--apply] [--config PATH]
   --journal PATH         Private resumable journal (default: .local/provision/)
   --record-app BOT=APP    Reconcile an app created through the browser
   --json                 Print sanitized plan/status JSON
@@ -94,13 +95,13 @@ Wildcards do not grant Slack membership or allow bot messages. Quote '*'.
 ${common}
 Environment names must match [A-Z_][A-Z0-9_]* and be unique.
 Example:
-  pogo bot add --id helper --app-id A123 --app-token-env HELPER_APP \\
+  stargate bot add --id helper --app-id A123 --app-token-env HELPER_APP \\
     --bot-token-env HELPER_BOT --allowed-users U123 --allowed-channels C123 \\
     --backend opencode --directory /srv/project
 Scripted setup stores references only; supply secrets through the environment
 or create <config>.env securely. Exit status is nonzero on invalid input.
 ${slackInstructions}`,
-  crew: `Usage: pogo crew init --directory PATH --project PATH --worktrees PATH [options]
+  crew: `Usage: stargate crew init --directory PATH --project PATH --worktrees PATH [options]
 --directory PATH       Captain workspace (outside the crew configuration tree)
 --project PATH         Existing target Git repository, e.g. an Indra checkout
 --worktrees PATH       Parent of the configured crew worktrees
@@ -111,21 +112,21 @@ ${slackInstructions}`,
 --mesij-command PATH   Absolute Mesij executable (default: resolved from PATH)
 --proxy-url URL        CLIProxyAPI endpoint (default: http://127.0.0.1:8317/v1)
 --proxy-key-file PATH  Reference an existing private key file; never a key value
---cron-config PATH     Bind cron and pogo_post tools to this Pogo config path
+--cron-config PATH     Bind cron and pogo_post tools to this Stargate config path
 --cron-bot ID          Cron bot registration; requires --cron-config (and vice versa)
---maintenance-config PATH  Render this Pogo config's nightly maintenance window
+--maintenance-config PATH  Render this Stargate config's nightly maintenance window
                        into captain and crew instructions (when enabled)
 Creates named feature branches, local agent/config overlays, and private state.
 Existing conflicting files are not overwritten. No sessions, apps, or services
 are started. Crew sessions are created lazily by the captain and then reused.
 The trusted crew profile enables implementation tools; it is not a sandbox.
 Default model: openai-proxy/gpt-6.1-sol. Global authentication is unchanged.`,
-  config: `Usage: pogo config check [--config PATH] [--schema-only]\n${common}
+  config: `Usage: stargate config check [--config PATH] [--schema-only]\n${common}
 Checks JSON/schema, Slack tokens and IRC password references from the
 environment and <config>.env, IRC caFile, and private IRC client PEM files.
 --schema-only  Check JSON/schema without requiring any credentials
 Does not contact Slack or IRC, or check provider credentials.`,
-  cron: `Usage: pogo cron <list|add|run|remove|report> --bot ID [options]
+  cron: `Usage: stargate cron <list|add|run|remove|report> --bot ID [options]
 --bot ID       Configured bot registration (required)
 --input PATH   Add only: JSON definition file, at most 64 KiB
 --name NAME    Run only: job name or UUID; positional name also accepted
@@ -136,19 +137,19 @@ List and report accept no input or job selector. Output is JSON.
 Uses configured cronjobs directory and destination; no prompt CLI arguments.
 ${common}`,
   maintenance: `${maintenanceHelp}\n${common}`,
-  manifest: `Usage: pogo manifest [--name NAME] [--json]
---name NAME  Slack app display name (default: Pogo; 1–80 characters)
+  manifest: `Usage: stargate manifest [--name NAME] [--json]
+--name NAME  Slack app display name (default: Stargate; 1–80 characters)
 --json       Print only JSON for scripts; otherwise include prefilled URL
 --help, -h   Show help
 ${slackInstructions}`,
-  service: `Usage: pogo service <install|start|stop|status|uninstall> [options]
+  service: `Usage: stargate service <install|start|stop|status|uninstall> [options]
 --name NAME  Unit basename (default: pogo; letters, digits, _ and -)
 ${common}
 Linux systemd USER scope only. No sudo.
 install: write ~/.config/systemd/user/<name>.service, then daemon-reload.
 Existing units are not overwritten. Install does not enable or start.
 start/stop: change running state only. status: print systemd unit properties.
-uninstall: disable and stop, remove Pogo-managed unit, then daemon-reload.
+uninstall: disable and stop, remove Stargate-managed unit, then daemon-reload.
 Manual commands for the default name:
   systemctl --user start pogo.service
   systemctl --user enable pogo.service
@@ -531,7 +532,9 @@ async function readMaintenanceWindow(path: string) {
   try {
     config = await loadConfig(path);
   } catch {
-    throw new Error("Cannot load --maintenance-config. Run pogo config check.");
+    throw new Error(
+      "Cannot load --maintenance-config. Run stargate config check.",
+    );
   }
   const maintenance = config.maintenance;
   if (!maintenance?.enabled) return undefined;

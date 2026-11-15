@@ -36,7 +36,7 @@ defence-in-depth issue.
 
 | ID  | Severity | Finding                                                                                                                                                                                                                                                                                                                                          | Status                                                                                                                                                                             |
 | --- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F1  | high     | A stopped gateway or cron worker aborted the process, but `start()` then resolved normally. Pogo exited with code 0, so systemd `Restart=on-failure` did not restart it.                                                                                                                                                                         | Fixed: any failure after startup, including a failed release, fails the program with `RuntimeStopped`; `main.ts` sets exit code 1.                                                 |
+| F1  | high     | A stopped gateway or cron worker aborted the process, but `start()` then resolved normally. Stargate exited with code 0, so systemd `Restart=on-failure` did not restart it.                                                                                                                                                                     | Fixed: any failure after startup, including a failed release, fails the program with `RuntimeStopped`; `main.ts` sets exit code 1.                                                 |
 | F2  | high     | During shutdown, `accept` returned `false` for every event, and `handleSlackRequest` then sent the ACK. Slack treated unpersisted events as delivered.                                                                                                                                                                                           | Fixed: one intake gate is shared by every bot. When it closes, no bot sends an ACK, so Slack redelivers to the next connection.                                                    |
 | F3  | high     | Shutdown drained workers and closed backends while Socket Mode connections still accepted events. With several bots, each intake closed only just before its own workers drained, so another bot could still accept work and start a turn that was then interrupted.                                                                             | Fixed: the shared intake finalizer runs first and closes every bot. One fiber holds all workers, so shutdown interrupts and drains them together; backends and stores close after. |
 | F4  | medium   | If the worker poll threw (for example `SQLITE_BUSY`), `Gateway.work` waited for the transcript watch, which only stops on the shutdown signal. The worker hung without an error.                                                                                                                                                                 | Fixed: the watch is a scoped fiber; a failed poll closes the scope, aborts the watch and rejects.                                                                                  |
@@ -62,7 +62,7 @@ SQLite schema or Slack scopes.
 
 `effect` is pinned to **4.1.0**, the exact version that the installed
 `@opencode/plugin` 2.2.7 requires and `@opencode/client` 2.2.7 declares as a peer.
-Pogo and the SDK then load one Effect runtime.
+Stargate and the SDK then load one Effect runtime.
 Upgrade Effect together with the OpenCode SDK; a dependency test enforces the
 match. API usage follows the Effect 4 documentation at
 <https://effect.website/docs/v4> and the installed declarations.
@@ -122,17 +122,17 @@ plain. Do not add service layers, queues or registries.
 ## Rollout and migration
 
 No configuration, CLI, database or Slack manifest change. Deploy as a normal
-release and restart only the Pogo gateway. Update crew plugin package paths at
+release and restart only the Stargate gateway. Update crew plugin package paths at
 an idle boundary; OpenCode reloads those plugins without a server restart.
 Restart OpenCode only for a confirmed unhealthy service. Behaviour differences
 an operator can see:
 
 - A failure after startup now ends the process with exit code 1 and the
-  message "Pogo stopped after a runtime failure". The service manager
+  message "Stargate stopped after a runtime failure". The service manager
   restarts it.
 - A startup interrupt failure other than a deleted session also restarts
   the service until OpenCode is reachable, instead of leaving it stopped.
-- Slack redelivers events that arrive while Pogo stops, for every bot.
+- Slack redelivers events that arrive while Stargate stops, for every bot.
 - Queued requests wait until every bot connects. A connection failure at
   startup leaves them queued for the next start.
 

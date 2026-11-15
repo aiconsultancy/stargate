@@ -9,8 +9,9 @@ shellcheck = "0.11.0"
 description = "Install dependencies from the lockfile"
 run = "bun install --frozen-lockfile"
 
-[tasks.pogo]
-description = "Run any Pogo CLI command"
+[tasks.stargate]
+alias = "pogo"
+description = "Run any Stargate CLI command"
 run = "bun run src/main.ts"
 raw = true
 
@@ -44,7 +45,7 @@ run = "bun run src/main.ts start"
 raw = true
 
 [tasks.config-check]
-description = "Validate Pogo configuration and token references"
+description = "Validate Stargate configuration and token references"
 run = "bun run src/main.ts config check"
 raw = true
 

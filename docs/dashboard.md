@@ -1,10 +1,10 @@
 # Fleet dashboard
 
 The dashboard is a read-only web page for the operator. It shows every bot
-registration in one Pogo process as a ship:
+registration in one Stargate process as a ship:
 
 - the captain and crew, with current, queued and recent tasks;
-- the Pogo bot: Slack app, workspace, access rules and backend;
+- the Stargate bot: Slack app, workspace, access rules and backend;
 - the request queue: totals and recent requests, without prompt text;
 - cronjobs: state, next run, last status and recent runs;
 - session history for the captain, each crew member and their subagents,
@@ -14,17 +14,17 @@ It starts no model work and changes no session, queue, schedule or file.
 
 ## Enable
 
-Add one top-level setting to `pogo.json`, then restart Pogo:
+Add one top-level setting to `pogo.json`, then restart Stargate:
 
 ```json
 { "dashboard": true, "bots": [] }
 ```
 
-Pogo serves the page on a Unix socket, `<dataDirectory>/dashboard.sock`.
+Stargate serves the page on a Unix socket, `<dataDirectory>/dashboard.sock`.
 The socket has mode `0600` in a directory with mode `0700`. Only the same
 operating-system user can connect. There is no TCP listener and no setting
 that creates one. A stale socket from an earlier run is replaced; the
-instance lock on the data directory proves that no other Pogo owns it.
+instance lock on the data directory proves that no other Stargate owns it.
 
 Startup fails when the socket cannot be created. Later request errors never
 stop the gateway.
@@ -32,7 +32,7 @@ stop the gateway.
 ## Publish through a reverse proxy
 
 A browser cannot open a Unix socket. Put an authenticating reverse proxy in
-front of it. Pogo does not authenticate viewers: the proxy must do that.
+front of it. Stargate does not authenticate viewers: the proxy must do that.
 This Caddy example sits behind Tailscale Serve, admits one Tailscale user
 and serves the page below `/pogo/`:
 
@@ -71,7 +71,7 @@ stays closed until you open it.
 
 Full detail can contain file contents, command output and credentials that
 an agent read. Use it on a trusted device. Responses are sent with
-`Cache-Control: no-store`. Pogo does not store or log transcript text for
+`Cache-Control: no-store`. Stargate does not store or log transcript text for
 the dashboard; it reads each page from the backend on request.
 
 ### Scope
@@ -120,8 +120,8 @@ details, identifiers or transcript text.
 
 ## Limits
 
-- View only. Use Slack, `pogo cron` or `pogo_cron` to change state.
-- One Pogo process. Another installation needs its own socket and route.
+- View only. Use Slack, `stargate cron` or `pogo_cron` to change state.
+- One Stargate process. Another installation needs its own socket and route.
 - Task and queue states are stored states. They do not prove that work is
   live. See [crew activity](crew-activity.md#query-a-member).
 - A transcript page has at most 50 entries. One entry shows at most 100

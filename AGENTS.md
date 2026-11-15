@@ -1,8 +1,8 @@
-# Pogo agent instructions
+# Stargate agent instructions
 
 ## Project
 
-Pogo is a Bun/TypeScript Slack gateway. One process hosts multiple Slack app
+Stargate is a Bun/TypeScript Slack gateway. One process hosts multiple Slack app
 registrations. Built-in backends connect to OpenCode V2, embed Pi Durable,
 run Claude Code through the Claude Agent SDK (`docs/claude.md`), or run the
 Codex CLI through the Codex SDK (`docs/codex.md`); trusted local modules can
@@ -26,7 +26,7 @@ mise install
 make deps
 make check
 make format
-make pogo ARGS='--help'
+make stargate ARGS='--help'
 make config-check ARGS='--config pogo.example.json --schema-only'
 ```
 
@@ -119,7 +119,7 @@ SQLite, `bun:test`, and the existing Promise adapter contract.
   and Pi and Claude tools to none; directories are starting locations, not
   sandboxes. Never default Claude to `bypassPermissions`. Default Codex to
   the `read-only` sandbox, approval policy `never` and no tool network.
-  Nothing that runs outside the Codex sandbox (launcher, CLI, Pogo data,
+  Nothing that runs outside the Codex sandbox (launcher, CLI, Stargate data,
   `PATH` entries) may be writable from inside it.
 - Persist accepted requests before Slack ACK. Delivery retries must not rerun
   tools. Interrupted execution has uncertain outcomes; do not blindly replay it.

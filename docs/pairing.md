@@ -9,16 +9,16 @@ bot, agent, project, or directory.
 Review that warning, then select **Generate**. Only that button requests a
 single-use code from the bot's existing authenticated OpenCode backend.
 The modal then shows copyable, literal URLs and the server-reported lifetime.
-Standard OpenCode codes normally last five minutes. Pogo uses `expires_in`
+Standard OpenCode codes normally last five minutes. Stargate uses `expires_in`
 from the response, not a fixed assumed expiry. Local confirmation expiry and
 elapsed code lifetime use a monotonic clock, so wall-clock corrections cannot
-extend or shorten them. Pogo subtracts elapsed request time from `expires_in`,
+extend or shorten them. Stargate subtracts elapsed request time from `expires_in`,
 then adds the remaining duration to the current wall clock for the displayed
 use-before time. This is a conservative local estimate, not an authorization
 deadline. The OpenCode server's expiry remains authoritative.
 
 Copy one URL into the browser on your trusted device. Redeeming **any one**
-invalidates all URL aliases. Pogo never opens, fetches, or redeems these URLs.
+invalidates all URL aliases. Stargate never opens, fetches, or redeems these URLs.
 After pairing, use OpenCode's session list to find the conversation. New
 sessions use `<bot name> (slack <conversation ID>)`, for example
 `Galactica Captain (slack D123)`. The name comes from `displayName`, then the
@@ -44,12 +44,12 @@ an existing OpenCode bot registration only after the operator approves it:
 
 These are placeholders, not discovered or tested endpoints. Replace them
 with the exact human user IDs and already reachable origins. Do not add a
-live operator merely to test the feature. Restart Pogo after config changes.
+live operator merely to test the feature. Restart Stargate after config changes.
 
 - `operators`: 1–100 exact Slack human user IDs (`U…` or `W…`). No `*`.
 - `urls`: 1–5 absolute origins, with an optional port and trailing slash.
   Credentials, paths, query strings, fragments, and non-HTTP protocols fail
-  validation. Pogo normalizes origins before constructing URLs.
+  validation. Stargate normalizes origins before constructing URLs.
 - Public routes, including Cloudflare routes, require HTTPS. HTTP is allowed
   only for Tailscale `*.ts.net` names or Tailscale address ranges
   (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`). A short MagicDNS name is not accepted;
@@ -57,9 +57,9 @@ live operator merely to test the feature. Restart Pogo after config changes.
   or tailnet membership.
 - Every origin must serve the **same OpenCode server** as `backend.url`,
   including `/auth/connect/:code`. A wrong origin can expose the code to its
-  owner. Pogo does not discover origins or verify external routing.
+  owner. Stargate does not discover origins or verify external routing.
 - Tailscale and Cloudflare are independent existing access paths, not modes
-  Pogo enables. Keep their access controls. A protected Cloudflare route may
+  Stargate enables. Keep their access controls. A protected Cloudflare route may
   require its own browser sign-in before OpenCode pairing can finish.
 - Normal `access.users` and `access.channels` rules still apply. Both deny
   lists override pairing operators, including when normal allows contain `*`.
@@ -68,7 +68,9 @@ live operator merely to test the feature. Restart Pogo after config changes.
   capability. `backend.headersEnv` supplies its existing server authentication.
   There is no separate remote-auth assumption or pairing credential source.
 
-Apply Pogo's regenerated Slack app manifest to the existing app. It registers
+Apply Stargate's regenerated Slack app manifest to the existing app. Pass its
+current display name with `stargate manifest --name NAME` to keep that name.
+The manifest registers
 `/pogo` and enables Socket Mode interactivity. It uses the existing `commands`
 bot scope and the same bot-token modal APIs as `/cron`; no new scope is added.
 Installing or updating Slack app settings remains an operator action. Editing
@@ -85,7 +87,7 @@ Do not paste it into a channel, agent prompt, log, issue, or external tool.
 No QR image is generated: URL-only delivery avoids a new dependency, external
 QR service, credential upload, and image persistence.
 
-Pogo does not put codes or generated URLs in SQLite, session prompts, model
+Stargate does not put codes or generated URLs in SQLite, session prompts, model
 tools, application logs, or local persistent artifacts. It keeps only bounded,
 five-minute confirmation records in process memory (maximum 128 per bot).
 The first accepted click consumes that confirmation before network work.
@@ -100,11 +102,11 @@ Malformed or foreign interactive payloads are acknowledged without effects.
 Expired or revoked owned confirmations receive a private notice.
 
 A timeout, cancellation, process exit, or failed Slack update can leave a code
-issued but not delivered. Pogo cannot prove that the server did not issue it.
+issued but not delivered. Stargate cannot prove that the server did not issue it.
 It does not retry minting or recover the code. Inspect the server and wait for
 expiry before deciding whether to request another. Closing the modal does not
 revoke a code or the device's 30-day access. Removing an operator stops future
-Pogo generation, not access already granted by OpenCode. Use OpenCode's own
+Stargate generation, not access already granted by OpenCode. Use OpenCode's own
 device/session controls for revocation where available.
 
 This feature never runs `opencode pair --remote`, starts a CLI process,

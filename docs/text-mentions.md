@@ -1,6 +1,6 @@
 # Text mentions
 
-In a channel, Pogo starts a conversation only when a message mentions the
+In a channel, Stargate starts a conversation only when a message mentions the
 bot. A post such as "Calling all captains" often tags one captain or none,
 so the other captains do not receive it. `access.textMentions` lets a bot
 start a conversation when a top-level message names it in plain text.

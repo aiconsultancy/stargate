@@ -147,10 +147,10 @@ export async function adoptRelease(
     !manifest ||
     typeof manifest !== "object" ||
     !("name" in manifest) ||
-    manifest.name !== "pogo" ||
+    (manifest.name !== "pogo" && manifest.name !== "stargate") ||
     !(await Bun.file(join(resolved, "src", "main.ts")).exists())
   )
-    throw new Error("Directory is not an unpacked Pogo release.");
+    throw new Error("Directory is not an unpacked Stargate release.");
   if (await readMetadata(resolved))
     throw new Error("Release is already managed.");
   const metadata: ReleaseMetadata = {

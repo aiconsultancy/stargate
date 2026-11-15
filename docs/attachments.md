@@ -1,12 +1,12 @@
 # Images and attachments
 
-Pogo supports files on accepted Slack messages and explicit file publication in
+Stargate supports files on accepted Slack messages and explicit file publication in
 agent replies. User and channel allowlists, deny rules, bot rejection and source
 ownership apply to both directions. OAuth scopes do not change those rules.
 
 ## Slack to agent
 
-The app needs `files:read`. Pogo stores the accepted Slack file IDs before ACK,
+The app needs `files:read`. Stargate stores the accepted Slack file IDs before ACK,
 then resolves them with `files.info` using that registration's bot token. It
 checks that the hosted file is shared in the accepted channel. It does not trust
 download URLs supplied in a message or follow redirects with a bot token.
@@ -30,7 +30,7 @@ reported before agent admission instead of silently dropping attachments.
 - A custom backend must declare `supportsAttachments` and accept the optional
   sixth `prompt` argument. Otherwise a file-bearing request fails before admission.
 
-Files are untrusted input. Pogo does not execute them, unpack archives or treat
+Files are untrusted input. Stargate does not execute them, unpack archives or treat
 their contents as instructions. The agent must apply the project's normal rules.
 
 Audio and video files are passed to the backend as files unless the bot sets
@@ -56,17 +56,17 @@ Ordinary `[label](file:///path)` citations and markers inside code are not uploa
 Local paths are hidden from streamed previews and Slack text. HTTP images and
 Linear Resources links do not cause downloads or uploads.
 
-The gateway and backend must share the local filesystem. Pogo refuses local-file
+The gateway and backend must share the local filesystem. Stargate refuses local-file
 publication from a non-loopback OpenCode endpoint. It rejects symlinks, special
 files, hidden/credential/state paths, empty files and files over the limits.
 Stage evidence under `join(os.tmpdir(), "opencode")`, evaluated in the gateway
-process at inspection and each upload read. Pogo and OpenCode services MUST
+process at inspection and each upload read. Stargate and OpenCode services MUST
 share `TMPDIR`; for example, both can use `TMPDIR=$HOME/.cache/tmp` to publish
 from `$HOME/.cache/tmp/opencode`. Hidden ancestors of that scratch root are
 allowed, but hidden paths below it (including `.git` and `.ssh`) and credential
 files are still refused. Paths outside scratch keep the existing rules;
 unrelated files under `~/.cache` are not allowed.
-Pogo records size and SHA-256, then rechecks the file before uploading. MIME types
+Stargate records size and SHA-256, then rechecks the file before uploading. MIME types
 come from extensions, not content inspection. These checks are not a sandbox:
 a trusted agent can explicitly publish other readable, non-denied files. Only
 publish evidence the user requested.
@@ -74,7 +74,7 @@ publish evidence the user requested.
 The outbox saves file metadata and Slack upload IDs. Retrying delivery never
 re-prompts the agent or repeats its tools. An abandoned reservation can leave a
 private, unshared upload. Finalization is one-shot: after an ambiguous response,
-Pogo checks for the exact channel/thread share. If it cannot confirm that share,
+Stargate checks for the exact channel/thread share. If it cannot confirm that share,
 it reports an unavailable or unconfirmed attachment rather than completing again
 or posting a replacement. This is not exactly-once delivery. Text and file
 delivery are separate; a visible text reply is not proof its files were shared.

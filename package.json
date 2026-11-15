@@ -1,5 +1,5 @@
 {
-  "name": "pogo",
+  "name": "stargate",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,6 +7,7 @@
     ".": "./src/crew/plugin.ts"
   },
   "bin": {
+    "stargate": "./src/main.ts",
     "pogo": "./src/main.ts"
   },
   "engines": {

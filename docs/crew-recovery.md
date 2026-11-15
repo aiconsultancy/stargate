@@ -14,7 +14,7 @@ or send an unsolicited Slack reply.
 
 ### OpenCode
 
-Pogo checks the existing worker session's identity and successful native
+Stargate checks the existing worker session's identity and successful native
 execution outcome. It reads that session's messages backwards through the
 authenticated OpenCode API until it reaches the saved task `inputID`. The input
 must contain the original task envelope and captain metadata. The last completed
@@ -24,7 +24,7 @@ metadata match. A later user input, unrelated synthetic input or standalone
 shell input prevents selection of an unrelated answer.
 
 Normal skill, compaction and model records do not prevent recovery. Only visible
-answer text is stored, up to 64,000 characters, as for Pi worker results. Pogo
+answer text is stored, up to 64,000 characters, as for Pi worker results. Stargate
 does not use private reasoning as a result.
 
 Recovery can complete `running` and `uncertain` tasks. It updates only the same
@@ -36,7 +36,7 @@ by result recovery.
 ### Pi Durable
 
 New Pi tasks submit their saved task `inputID` as the native request key.
-Pogo saves the task's native conversation binding before admission. Tools-off
+Stargate saves the task's native conversation binding before admission. Tools-off
 reports still use a fresh isolated conversation, not the maintenance context.
 
 After restart, recovery reads the exact request receipt through the Pi SDK in
@@ -46,7 +46,7 @@ The absence of an in-memory execution is not proof that the task failed.
 
 Queued, placed, unanswered, missing or unreadable receipts do not become
 successful results. Read-only recovery does not resume native work. Older tasks
-without a durable conversation binding remain recovery-required; Pogo does not
+without a durable conversation binding remain recovery-required; Stargate does not
 guess from another conversation's answer. A released or abandoned task cannot
 be revived by a late receipt.
 
@@ -62,14 +62,14 @@ does not restart automatically.
 The plugin uses the existing same-server history connection. Managed discovery
 does not start another OpenCode server. If discovery is unavailable, configure
 `team.historyAPI` for the existing server. History reads use the caller's abort
-signal and a ten-second recovery timeout. Pogo does not query the OpenCode
+signal and a ten-second recovery timeout. Stargate does not query the OpenCode
 runtime database directly. Pi receipt recovery uses the installed SDK's
 read-only harness mode, not hand-written queries against native tables. The
 storage adapter still checks its schema; review that path when upgrading Pi.
 
 ## Admission and completion protocol
 
-Pogo reserves the task and its input identity before native admission. A lost
+Stargate reserves the task and its input identity before native admission. A lost
 OpenCode response is checked against that exact inbox/history identity, never
 by sending the assignment again. Admission can still mean queued, not started.
 Cancellation withdraws the task's own queued input before considering an
@@ -134,7 +134,7 @@ complete secret detector. Do not publish secrets from workspace output.
 
 Stash and reset require the current HEAD, workspace fingerprint and active task
 ID returned by inspection. They hold the worker control slot and refuse active
-Pogo work. If native idle cannot be confirmed, the captain must explicitly set
+Stargate work. If native idle cannot be confirmed, the captain must explicitly set
 `acknowledgeUnconfirmedExecution: true`.
 
 ```js
@@ -162,11 +162,11 @@ paths that obstruct HEAD are refused before either stash or reset writes.
 Resolve those obstructions without discarding their contents.
 Submodules and nested repositories are refused for both mutations.
 
-Fingerprint checks and Pogo control slots do not provide filesystem isolation.
+Fingerprint checks and Stargate control slots do not provide filesystem isolation.
 Native processes can still write concurrently, especially when execution is
 unknown. An acknowledgement accepts that limit; it does not prove a stop.
 Read-only Git commands have a deadline. Once a mutating Git command starts,
-Pogo lets it finish rather than killing it on an arbitrary timer. Cancellation
+Stargate lets it finish rather than killing it on an arbitrary timer. Cancellation
 is checked before the write; it cannot undo a write already in progress. Inspect
 the resulting workspace and checkpoint before retrying an interrupted request.
 

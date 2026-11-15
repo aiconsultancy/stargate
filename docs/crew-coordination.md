@@ -13,7 +13,7 @@ Generated native agent IDs and definition filenames use `<ship>-<role>-<name>`, 
 example `galactica-captain-adama.md`, `galactica-crew-apollo.md` and
 `pegasus-crew-apollo.md`. Use `crew init --id galactica` to select the namespace.
 Native IDs remain at most 64 characters; generation rejects longer combinations.
-Pogo addresses stay short, for example `adama` and `apollo`. An optional `agent`
+Stargate addresses stay short, for example `adama` and `apollo`. An optional `agent`
 on the existing configured member maps that short ID to its native definition.
 Generated profiles fill this mapping; direct legacy configurations default it
 to the short ID. No address registry or hidden old-ID aliases are introduced.
@@ -79,7 +79,7 @@ Completed and uncertain tasks do not select a captain for new messages. A
 task-free crew send needs a validated reply. Its inbox can read all mail
 addressed to that member; explicit historical task inbox reads remain supported.
 
-Before sending, Pogo saves the authorized route intent and an envelope hash,
+Before sending, Stargate saves the authorized route intent and an envelope hash,
 not another copy of the message text. If Mesij stores the message but its
 response is lost, a later read can restore the route from an exact event/intent
 match. Namespace, sender, recipient and task/captain lineage must still match.
@@ -115,7 +115,7 @@ if it had already finished. Captain task notices also support an existing wait.
 Free-worker notification reuses the existing durable control reservation. A
 process crash can retain that control and block dispatch. A captain can inspect
 the exact reservation and explicitly abandon its blocked task with an audit;
-a control still held by an operation in this process cannot be cleared. Pogo
+a control still held by an operation in this process cannot be cleared. Stargate
 never clears another controller automatically or adds a lock lease. See
 [captain recovery](crew-recovery.md#captain-controlled-recovery); do not edit
 the database to clear a slot.
@@ -183,7 +183,7 @@ Improve this agreement from recorded task outcomes through the existing
 
 ## Native clients
 
-Prefer Pogo tools when adequate. Use authentic existing OpenCode/Pi APIs for
+Prefer Stargate tools when adequate. Use authentic existing OpenCode/Pi APIs for
 recoverable gaps within existing scope and authority. Do not start another Pi
 storage owner, read OpenCode's database, change global credentials, create extra
 roots or replay uncertain tools. Record concrete deficiencies and successful
@@ -205,7 +205,7 @@ deployment. Retain explicit reporter configuration when a final summary is
 desired, using the short member ID. Back up state before a native-ID migration.
 Install namespaced definitions and matching `agent` mappings together. Switch
 existing sessions to their mapped native definitions with the supported native
-API when needed; keep their history and Pogo task/member IDs. Runtime checks
+API when needed; keep their history and Stargate task/member IDs. Runtime checks
 accept only the mapped native name or that member's original short native
 name during this migration, with unchanged session/directory/namespace checks.
 Historical final answers with the original short agent name remain recoverable.

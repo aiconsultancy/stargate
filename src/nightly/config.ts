@@ -179,7 +179,7 @@ export const maintenanceSchema = z
       .strictObject({
         /** Install root: `releases/<version>` and the `current` symlink. */
         root: absolutePath,
-        repository: repository.default("aiconsultancy/pogo"),
+        repository: repository.default("aiconsultancy/stargate"),
         apiURL: url(false).default("https://api.github.com"),
         /** Token environment name; otherwise `gh auth token` when available. */
         tokenEnv: envName.optional(),
