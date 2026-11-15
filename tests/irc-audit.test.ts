@@ -320,7 +320,7 @@ test("irc audit: line format for incoming and outgoing DMs", () => {
   for (const text of [
     "identify hunter2",
     "SET PASSWORD correct-horse",
-    "token: xoxb-1234-abcdef",
+    "token: synthetic-test-token",
     "password=hunter2",
   ])
     expect(

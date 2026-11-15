@@ -21,6 +21,23 @@ hooks = [
 repo = "local"
 
 [[repos.hooks]]
+id = "gitleaks"
+name = "Detect secrets in the Git index"
+# Scan all indexed files, not history or untracked local credentials.
+# A full index snapshot also covers CI, where the staged diff is empty.
+entry = """
+set -eu
+snapshot=$(mktemp -d)
+trap 'rm -rf "$snapshot"' EXIT HUP INT TERM
+git checkout-index --all --prefix="$snapshot/"
+mise exec -- gitleaks dir --redact --no-banner "$snapshot"
+"""
+shell = "sh"
+language = "system"
+pass_filenames = false
+always_run = true
+
+[[repos.hooks]]
 id = "workflow-lint"
 name = "GitHub Actions validation"
 entry = "mise run workflow-check"
