@@ -56,58 +56,29 @@ The CLI discovers credentials locally; never pass authorization values as
 arguments. Twiki's summary generation remains tools-free and task-scoped even
 when its maintenance shell can search authorised history.
 
-## Indra documentation: QMD
+## Project documentation
 
-Indra already owns the wrapper and query guidance:
-
-- `scripts/qmd.py`: refreshes and selects this checkout's index.
-- `.agents/skills/indra-qmd/SKILL.md`: query instructions.
-- `docs/agent-memory.md`: index ownership and freshness contract.
-
-Run commands from the relevant Indra checkout, not from the captain's empty
-coordination directory. Each crew worktree has its own index. The captain
-uses the configured project checkout. Do not substitute a sibling checkout
-without an explicit workspace change.
+Search the project checkout assigned to the current agent. The captain's
+coordination directory may contain only instructions and task state. Start
+with the target project's README, linked guides and contributor instructions.
 
 ```sh
-make wiki-setup
-python3 scripts/qmd.py search "row-level security" -c indra-docs -n 5
-python3 scripts/qmd.py get "#REPLACE_WITH_RETURNED_DOCUMENT_ID"
-python3 scripts/qmd.py status
+rg -n -i 'configuration|authentication' README.md docs
 ```
 
-`make wiki-setup` installs pinned QMD 2.5.3 if absent and initialises the four
-Markdown collections. If global npm installation lacks write access, install
-to a user-owned prefix; do not use sudo or change `/opt/node` permissions:
-
-```sh
-npm install --global --prefix "$HOME/.local" @tobilu/qmd@2.5.3
-export PATH="$HOME/.local/bin:$PATH"
-make wiki-setup
-```
-
-The OpenCode/plugin host must have the user-prefix binary on its PATH too.
-Verify in the actual agent host, not just an interactive shell. Do not replace
-existing hooks; the wrapper preserves custom hooks and refreshes on queries.
-
-Keyword search needs no embedding model or paid inference. Semantic search
-and reranking require additional local model downloads; `make wiki-embed` is
-a separate explicit operation, not required for initial setup. Do not launch
-a global QMD MCP server or use bare `qmd search`: it can select another index
-and bypass checkout freshness. Do not index private session transcripts,
-credential files or runtime databases.
-
-QMD indexes Markdown, not source code. Validate derived wiki claims against
-canonical guides and current code. If indexing fails, use local file reads
-and `rg` while resolving the setup problem.
+Adapt the paths to the project. If the project provides a documentation
+index such as QMD, use its documented refresh and query commands from the
+correct checkout. Stargate does not install a project index. Keep transcripts,
+credentials and runtime databases out of indexes. Confirm search results
+against the current documentation or source before relying on them.
 
 ## Current source code
 
 Use `grep`/`rg` to locate implementations and then read the surrounding code:
 
 ```sh
-rg -n 'OrgMembership|RowLevelSecurity' backend frontend
-rg --files -g '*Invitation*' -g '*invitation*'
+rg -n 'configSchema|loadConfig' src tests
+rg --files -g '*config*'
 ```
 
 Adapt paths and symbols to the current checkout. Use the files actually found,

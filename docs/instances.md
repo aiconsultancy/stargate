@@ -283,8 +283,6 @@ has not been created merely because these templates exist.
 ## Search readiness
 
 Follow [session, documentation and code search](knowledge-search.md). Verify
-`pogo_history` and stored permissions in each existing session. For an Indra
-target, run `make wiki-setup` in the project and each crew checkout, then one
-wrapper keyword search per checkout. Keep the CLI on the agent host's PATH.
-Load Indra's existing `indra-qmd` guidance; do not create a global mixed-project
-index. These checks need no embedding downloads or provider inference.
+`pogo_history` and stored permissions in each existing session. If the target
+project has a documentation index, follow its instructions in the project and
+each crew checkout. Verify that the agent host can query the correct index.

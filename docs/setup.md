@@ -1,39 +1,79 @@
-# Agent-led Stargate setup
+# Set up a Slack bot
 
-This guide creates **Slack app registrations for the existing Stargate gateway**.
-It does not create a Bolt starter, replace Stargate, or run a second bot runtime.
-Repeat app registration for each bot; one Stargate process can host them all.
-For a separate installation with different captain and crew identities, use
-the [repeatable instance procedure](instances.md).
+Stargate runs your bot in your own process and uses Slack Socket Mode for
+incoming messages. Each bot needs a Slack app installed in its workspace.
+Start with one bot and one test channel. Use [IRC setup](irc.md) if you want an
+IRC-only installation.
+
+## Configure your first Slack bot
+
+1. [Install Stargate](../README.md#install), then choose Pi Durable or OpenCode
+   V2. Pi runs in Stargate with an OpenAI or Anthropic API key. OpenCode needs a
+   reachable V2 server with its own model and provider already configured. See
+   [backend configuration](configuration.md#backend-configuration).
+2. Run the setup wizard from the Stargate directory in a terminal:
+
+   ```sh
+   bun run src/main.ts init
+   ```
+
+   Enter a lowercase bot ID like `project-helper`. Open the printed manifest
+   link, select your workspace, and create the app. If you already created it
+   from the Stargate manifest, skip opening a new creation page. If the link
+   does not prefill, run `bun run src/main.ts manifest --name project-helper --json`
+   and paste the output into Slack's [manifest form][manifest].
+3. In Slack's app settings, copy the **App ID** (`A…`) from **Basic
+   Information**. Under **App-Level Tokens**, generate an `xapp-…` token with
+   `connections:write`. Install the app from **OAuth & Permissions** and copy
+   its **Bot User OAuth Token** (`xoxb-…`). Workspace admins may need to
+   approve the install. Reinstall the app after changing its scopes.
+4. Give the wizard your member ID and the test channel ID. Slack's member
+   profile menu has **Copy member ID**; the channel details show its ID.
+   Invite the installed bot with `/invite @your-bot`. Pick the backend and set
+   its working directory. For OpenCode, leave the session ID blank to create
+   separate sessions per conversation. Enter both Slack tokens in the wizard's
+   hidden prompts.
+5. Stargate writes `pogo.json` and a private `pogo.json.env` file. If using
+   Pi, add `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` to that same private file,
+   according to the model you chose. If OpenCode needs an authorization header,
+   map it with [`headersEnv`](configuration.md#opencode-v2). Keep credentials
+   out of command arguments, chat and version control.
+6. Validate, then start the gateway in the foreground:
+
+   ```sh
+   bun run src/main.ts config check
+   bun run src/main.ts start
+   ```
+
+   `config check --schema-only` checks structure without credentials. A normal
+   check validates Slack token references locally. Look for `Bot connected`
+   at startup, then mention your bot in the allowed channel and ask it to
+   reply with "Stargate is ready" without using tools. Send a follow-up in the
+   same thread and verify the reply. The two messages test inference and
+   thread routing as well as the Slack connection.
+
+Use the same `--config PATH` on every command when choosing an explicit path.
+Run the wizard again to add another bot with its own app. It appends the new
+registration and credentials.
+See [scripted registration](configuration.md#scripted-slack-registration) for
+noninteractive setup or to configure another backend. Stop any foreground
+listener before starting a [Linux user service](operations.md#linux-user-service)
+for the same app.
 
 ## Quick batch setup on another machine
 
-Install mise and OpenCode V2 first. The checkout pins Bun and Mesij, not Node
-or the OpenCode executable. Follow the [portable proxy bootstrap](cliproxyapi.md)
-for CLIProxyAPI and subscription sign-in before testing inference. Do not copy
-another machine's credentials, state, or installed service files.
+Batch provisioning can plan creation or reuse of multiple Slack apps. Install
+the pinned Bun version from the [install guide](../README.md#install), install
+dependencies, then inspect the provisioning options:
 
 ```sh
-mise install
-make deps
-make stargate ARGS='bot provision --help'
+bun run src/main.ts bot provision --help
 ```
 
-For end-to-end model-led setup, ask OpenCode to read the
-[agent-profile setup prompt and routing skill][agent-profile-gist], inspect this
-machine, and present its proposal before global migrations or authentication
-changes. Follow the [local application procedure](agents/agent-profiles.md),
-then install an [OpenCode captain/crew profile](agents/default-opencode.md).
-Omit `--team` for Bowser's starter roster. For a separate Galactica team, use
-`stargate crew init --team team.example.json` with new captain/crew directories.
-The non-secret JSON selects captain ID, worker IDs, roles, permission profiles
-and optional models/instructions. See the profile guide for required flags.
-Use separate namespace, state, captain and crew paths per team, even on one
-OpenCode server. Do not change live Bowser settings or rebind persisted team
-identities. Setup output supplies captain `agent` and `permissions` for gateway
-registration; register only the captain, never its workers, as a Slack bot.
-The gist's example models, reasoning syntax, and commands must be adapted to
-the installed V2 version, not copied without verification.
+Choose the backend and verify its prerequisites for each bot. If a registration
+uses an [OpenCode captain profile](agents/default-opencode.md), use the profile's
+generated `agent` and `permissions` in its backend settings. Register the
+captain's Slack app; the crew workers run through the profile.
 
 Copy [`bots.example.json`](../bots.example.json) to a private local plan, such
 as `.local/bots.json`. Replace every example workspace, app, user, channel,
@@ -44,12 +84,11 @@ They contain no tokens or provider credentials. There are no shared defaults.
 
 - `app: { "mode": "reuse", "appId": "A…" }` uses an existing registration.
 - `app: { "mode": "create" }` requests a new registration.
-- The example reuses Bowser. **Replace its placeholder App ID with the live
-  Bowser App ID; never change Bowser to `create`.** Existing matching Stargate
-  registrations remain unchanged. Conflicting settings fail, not overwrite.
-- `agent: "bowser"` selects the captain agent. Do not assign it to crew bots.
-  Configure that agent on the OpenCode server before use. The example provider
-  `openai-proxy` and model `gpt-6.1-sol` must exist on that server.
+- The example reuses an existing app for `project-helper`. Supply its App ID,
+  or use `create` and remove `appId` if you need a new app.
+- Existing matching local registrations stay in place. Conflicting settings
+  fail before any app is created. An OpenCode backend with no `model` override
+  uses the server's default model.
 - Tool permissions remain deny-all unless explicitly configured. Do not enable
   tools merely to make provisioning or a connectivity test pass.
 
@@ -129,10 +168,12 @@ not proof of installation or successful Slack/provider authentication.
   an alternative single-bot registration workflow, not a token-update command
   for an already registered bot.
 
-Before starting on another host, arrange an explicit listener handover.
-**Never run a second Bowser Socket Mode listener with the live credentials.**
-For genuinely separate concurrent deployments, use separate Slack apps. Follow
-the staged verification below; provisioning alone is not setup completion.
+The batch and agent-assisted examples use mise tasks. Install their pinned
+tools with `mise install`; the direct Bun commands above work independently.
+
+When moving an existing bot, stop the old listener before starting the new
+one. Active deployments each need their own Slack apps. Follow the
+[staged verification](#8-verify-in-stages) after provisioning.
 
 ## Browser-assisted registration
 
@@ -190,7 +231,13 @@ Read the current [security](https://agent-browser.dev/security) and
   plaintext session tokens unless explicitly encrypted. Close this named
   session when finished: `make cua ARGS='--session pogo-slack-setup close'`.
 
-## 1. Confirm the target
+## Agent-assisted setup
+
+Use this workflow when an agent is assisting a human who owns the Slack app.
+Browser and Slack CLI tools help with app creation and workspace operations.
+Runtime credentials still go directly into private local storage.
+
+### 1. Confirm the target
 
 Ask the operator for:
 
@@ -207,12 +254,11 @@ Ask the operator for:
   beats allow**, even when an ID is explicitly allowed or an allow contains `*`.
 - Backend, working directory, and model settings.
 
-Choose **OpenCode** for the initial CLIProxyAPI test. Configure the proxy as
-an OpenCode provider separately; installing it does not route Stargate automatically.
-Pi Durable uses a proxy only with explicit provider configuration; see
-[Pi Durable crew](agents/default-opencode.md#pi-durable-crew).
-Do not substitute the proxy URL for `backend.url`: that field addresses the
-OpenCode server, not the model API. Keep tools disabled for the first test.
+Choose a backend with [known working credentials](configuration.md#backend-configuration).
+For OpenCode, `backend.url` is the OpenCode server URL. A provider proxy, if
+used, is configured on that server. For Pi Durable, use a standard provider
+API key or an [explicit proxy](configuration.md#pi-durable). Keep tools disabled
+for the first test.
 
 Run project commands from the Stargate repository:
 
@@ -222,7 +268,7 @@ make deps
 make stargate ARGS='--help'
 ```
 
-## 2. Install or update Slack skills
+### 2. Install or update Slack skills
 
 For OpenCode, run the official Slack skill installer through mise's Node:
 
@@ -234,6 +280,8 @@ This installs or updates the user-level skills, including `slack-cli`,
 `slack-api`, `slack-docs`, and `create-slack-app`. Read the current hosted
 instructions in this session; do not wait for a new session:
 
+[manifest]: https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests/#creating-apps-using-manifests
+- [Slack Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode/)
 - [Slack agent setup](https://docs.slack.dev/agent-setup/prompt.md)
 - [Slack CLI skill](https://docs.slack.dev/.well-known/skills/slack-cli/SKILL.md)
 - [Slack API skill](https://docs.slack.dev/.well-known/skills/slack-api/SKILL.md)
@@ -244,7 +292,7 @@ SDK, and project-scaffolding steps. Reuse the CLI authentication guidance and
 Stargate's own manifest. Do not run `slack create` or `slack run` for this gateway.
 Stargate runs through `make start` or its user service.
 
-## 3. Detect and install the public Slack CLI
+### 3. Detect and install the public Slack CLI
 
 Follow the hosted `slack-cli` skill in order:
 
@@ -276,7 +324,7 @@ SLACK_CMD="$HOME/.slack/bin/slack"
 Run each unfamiliar command's `--help` before constructing its flags. These
 steps were checked with Slack CLI 4.12.0; installed help remains authoritative.
 
-## 4. Authenticate the selected workspace
+### 4. Authenticate the selected workspace
 
 Authentication is per workspace. An existing login to another workspace is
 not enough. Confirm which workspace the operator wants before starting login.
@@ -318,7 +366,7 @@ Do not ask the operator to run `slack login` in a separate terminal. The agent
 drives these commands; the human only approves in Slack and returns the code.
 Do not read or print `~/.slack/credentials.json` to recover credentials.
 
-## 5. Create or reuse Stargate's Slack app
+### 5. Create or reuse Stargate's Slack app
 
 **CLI login is not app creation.** Stargate is not a Slack CLI project, and `slack api`
 does not automatically turn a developer login into a token for every method.
@@ -329,7 +377,7 @@ the runtime bot or assume `--team` supplies the required API token.
 Choose one of the following paths. Confirm the app name and target workspace
 before creating anything remotely. If an app already exists, go to step 6.
 
-### A. Prefilled manifest link: no configuration token required
+#### A. Prefilled manifest link: no configuration token required
 
 The agent generates Stargate's manifest and app-creation link:
 
@@ -362,7 +410,7 @@ For a human driving the entire local wizard, use `make init`. For agent-led
 registration, continue with steps 6 and 7 below; an interactive wizard cannot
 be driven through a non-TTY shell tool.
 
-### B. Programmatic creation: optional configuration-token path
+#### B. Programmatic creation: optional configuration-token path
 
 Use this path only when the operator wants the agent to create the registration
 through the API and can supply the configuration token securely. Obtain it
@@ -411,7 +459,7 @@ Slack app settings before retrying: a retry may create a duplicate app.
 This path creates the registration; it does not finish workspace installation
 or automatically supply Stargate's app-level and bot tokens.
 
-## 6. Review permissions, install, and collect runtime tokens
+### 6. Review permissions, install, and collect runtime tokens
 
 Stargate's manifest enables Socket Mode and subscribes to `app_mention`,
 `message.channels`, `message.groups`, and `message.im`. Required bot scopes:
@@ -460,7 +508,7 @@ thread that Stargate has not seen before, when bounded Slack history confirms th
 same bot previously replied there. The normal sender and channel rules still
 apply. This helps a bot continue conversations after migrating to Stargate.
 
-### Silent replies
+#### Silent replies
 
 An agent posts nothing when the first line of its reply is exactly
 `[[pogo:silent]]`. The same instructions block that describes reactions
@@ -511,21 +559,19 @@ so the shell does not expand filenames. Within `make ... ARGS='...'`, use
 Whole `*` also works in deny lists to block everyone/everywhere, but partial
 globs such as `C*` are invalid. Denies override exact and wildcard allows.
 
-## 7. Register the bot with Stargate
+### 7. Register the bot with Stargate
 
 The agent runs a noninteractive registration using references, not token values.
-Replace example IDs, paths, URL, provider, and model with confirmed settings:
+Replace the example IDs, path and URL with settings for this installation:
 
 ```sh
-make stargate ARGS='bot add --id pogo-test --app-id A0123456789 --app-token-env POGO_TEST_APP_TOKEN --bot-token-env POGO_TEST_BOT_TOKEN --allowed-users U0123456789 --allowed-channels C0123456789 --backend opencode --directory /srv/project --url http://localhost:4096 --provider openai-proxy --model MODEL_ID'
+make stargate ARGS='bot add --id pogo-test --app-id A0123456789 --app-token-env POGO_TEST_APP_TOKEN --bot-token-env POGO_TEST_BOT_TOKEN --allowed-users U0123456789 --allowed-channels C0123456789 --backend opencode --directory /srv/project --url http://localhost:4096'
 ```
 
-`openai-proxy` here is an example **OpenCode provider ID**, not an automatic
-integration. It must already exist on the selected server. The model ID must
-be one that provider exposes. Do not modify the user's global OpenCode
-configuration without permission; prefer an explicitly scoped test workspace.
-OpenCode server authentication uses `backend.headersEnv` when needed; proxy
-client authentication belongs in the OpenCode provider configuration.
+This uses the selected OpenCode server's default model. To select a specific
+provider and model, pass `--provider ID --model ID` for a pair the server
+already knows. For an authenticated OpenCode server, configure
+`backend.headersEnv` with the name of a private environment variable.
 
 Do not assume the wizard's `http://localhost:4096` default is the running
 OpenCode service. Check `opencode service status`, or use
@@ -542,10 +588,10 @@ Alternatively, the human can run `make init`. If the app was already created,
 decline opening another creation page and enter the existing App ID/tokens.
 Do not add the same bot twice. Multiple bots need unique IDs, Slack apps, and
 token environment references. Restart an existing Stargate process after adding one.
-Restart after changing access rules, too. Adding Bowser to another channel
-needs no config change when channels are allowed with `*` and not denied.
+For access-only changes, use
+[live reload](configuration.md#reload-configuration-without-restarting).
 
-## 8. Verify in stages
+### 8. Verify in stages
 
 ```sh
 make config-check ARGS='--schema-only'
@@ -556,7 +602,6 @@ make start
 - Schema check validates configuration structure only.
 - Credential check verifies local token references/prefixes, not live auth.
 - `Bot connected` confirms Slack authentication and a Socket Mode connection.
-- A proxy model listing proves discovery, not successful inference.
 - With the operator's consent, ask them to mention Stargate in an allowed channel:
   `@Stargate Say "Stargate is ready" without using tools.`
 - Confirm a real reply, then a follow-up in the same thread. Do not claim success
@@ -567,7 +612,7 @@ Use a sandbox or a workspace without real users for smoke tests. Keep only one
 Socket Mode listener per registration. Do not leave a second listener running
 when switching from a foreground test to a user service.
 
-## 9. Install the Stargate user service when requested
+### 9. Install the Stargate user service
 
 ```sh
 make service ARGS='install --config /absolute/path/to/pogo.json'
@@ -578,8 +623,8 @@ systemctl --user status pogo.service
 Installation alone does not enable or start the unit. Obtain permission before
 starting/enabling services, and stop any foreground Stargate instance first.
 The unit reads the private config companion; it does not inherit shell exports
-automatically. See the [README service section](../README.md#linux-user-service)
-and [CLIProxyAPI installation notes](cliproxyapi.md) for lifecycle details.
+automatically. See [Linux user service](operations.md#linux-user-service) for
+lifecycle details.
 
 ## Agent completion checklist
 
@@ -594,7 +639,8 @@ or runtime databases. Link to this guide rather than copying a live transcript.
 
 ## Official references
 
-[agent-profile-gist]: https://gist.github.com/withakay/1c20e455063bc9be4c4ede76ef866a71
+[manifest]: https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests/#creating-apps-using-manifests
+- [Slack Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode/)
 - [Slack agent setup](https://docs.slack.dev/agent-setup/prompt.md)
 - [Hosted Slack CLI skill](https://docs.slack.dev/.well-known/skills/slack-cli/SKILL.md)
 - [App manifests and configuration tokens](https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests)

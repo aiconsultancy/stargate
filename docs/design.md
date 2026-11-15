@@ -74,7 +74,7 @@ checks that gate again when a queued line reaches its socket. Calls already sent
 to Slack cannot be recalled. Cron and interactive surfaces also receive current
 access rules without replacing their pending state.
 
-See [reload fields and operator commands](../README.md#reload-configuration-without-restarting)
+See [reload fields and operator commands](configuration.md#reload-configuration-without-restarting)
 for the exact live-safe set and conservative restart-only policy. Only the IRC
 crew roster is in this configuration; the separate OpenCode crew-plugin roster
 keeps its existing append-only/migration requirements.

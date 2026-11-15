@@ -3,12 +3,12 @@
   "teamId": "T0123456789",
   "bots": [
     {
-      "id": "bowser",
-      "name": "Bowser",
+      "id": "project-helper",
+      "name": "Project Helper",
       "app": { "mode": "reuse", "appId": "A0123456789" },
       "slack": {
-        "appTokenEnv": "POGO_BOWSER_APP_TOKEN",
-        "botTokenEnv": "POGO_BOWSER_BOT_TOKEN"
+        "appTokenEnv": "POGO_PROJECT_HELPER_APP_TOKEN",
+        "botTokenEnv": "POGO_PROJECT_HELPER_BOT_TOKEN"
       },
       "access": {
         "users": ["U0123456789"],
@@ -17,14 +17,12 @@
       "backend": {
         "type": "opencode",
         "url": "http://127.0.0.1:4096",
-        "directory": "/srv/project",
-        "agent": "bowser",
-        "model": { "providerID": "openai-proxy", "id": "gpt-6.1-sol" }
+        "directory": "/srv/project"
       }
     },
     {
       "id": "research",
-      "name": "Pogo Research",
+      "name": "Research Helper",
       "app": { "mode": "create" },
       "slack": {
         "appTokenEnv": "POGO_RESEARCH_APP_TOKEN",
@@ -37,8 +35,7 @@
       "backend": {
         "type": "opencode",
         "url": "http://127.0.0.1:4096",
-        "directory": "/srv/project",
-        "model": { "providerID": "openai-proxy", "id": "gpt-6.1-sol" }
+        "directory": "/srv/project"
       }
     }
   ]

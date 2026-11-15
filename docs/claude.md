@@ -123,19 +123,20 @@ tools for people who should not run code as Stargate.
 For a bot that needs an existing integration, explicitly list its servers in
 `backend.mcpServers`. The configured servers are available on the first turn.
 Leave `allowedTools` empty if no built-in tools are needed.
+Replace these example URLs, commands and arguments with your own servers.
 
 ```json
 "allowedTools": [],
 "mcpServers": {
-  "linear": {
+  "docs": {
     "type": "http",
-    "url": "https://mcp.linear.app/mcp",
-    "headersHelper": "/usr/local/bin/fleet-keys linear-headers"
+    "url": "https://mcp.example.org/docs",
+    "headersHelper": "/usr/local/bin/docs-mcp-headers"
   },
-  "fleet": {
+  "search": {
     "type": "stdio",
-    "command": "/usr/local/lib/indra-workstation/kirk-mcp",
-    "args": ["--admiral-reply"]
+    "command": "/usr/local/bin/project-search-mcp",
+    "args": ["--read-only"]
   }
 }
 ```

@@ -103,7 +103,7 @@ or create <config>.env securely. Exit status is nonzero on invalid input.
 ${slackInstructions}`,
   crew: `Usage: stargate crew init --directory PATH --project PATH --worktrees PATH [options]
 --directory PATH       Captain workspace (outside the crew configuration tree)
---project PATH         Existing target Git repository, e.g. an Indra checkout
+--project PATH         Existing Git checkout for the project
 --worktrees PATH       Parent of the configured crew worktrees
 --team PATH            Non-secret team JSON (default: Bowser's starter roster)
 --id ID                Bot namespace (default: configured captain ID; bowser)

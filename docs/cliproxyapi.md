@@ -2,8 +2,8 @@
 
 ## Portable bootstrap
 
-Run this sequence from the Stargate checkout on the **new host**, after explicit
-operator approval. It requires mise, the repository's pinned Bun, and installed
+Set up CLIProxyAPI when you want an explicit model endpoint for one or more
+backends. Run these commands from the Stargate checkout. It requires mise, the repository's pinned Bun, and installed
 dependencies (`mise install`, then `make deps`). It creates a separate local
 proxy, not a Slack bot runtime. No global OpenCode config, service, timer, or
 existing proxy installation is changed by the bootstrap.
@@ -169,9 +169,9 @@ No service installation, login persistence, or updater is implied.
    The caller must supply its own identifying `User-Agent` and a stable
    `x-opencode-session` **per conversation**. The `$…` header values above copy
    incoming headers; they do not invent a missing session or use one global ID.
-4. Follow [Slack batch setup](setup.md), reuse the live Bowser App ID, and
-   register additional bots with private token references. Stargate's `backend.url`
-   addresses OpenCode, not port 8317. Pi uses this proxy only with an explicit
+4. Follow [Slack setup](setup.md) to register a bot with private token
+   references. For OpenCode, Stargate's `backend.url` addresses the OpenCode
+   service. Port 8317 is its provider endpoint. Pi uses this proxy only with an explicit
    `provider` configuration and a supported model (DeepSeek Go or Claude
    Haiku 5.5); see
    [Pi Durable crew](agents/default-opencode.md#pi-durable-crew).
@@ -183,99 +183,19 @@ No service installation, login persistence, or updater is implied.
    same-thread follow-up. A running proxy, provider listing, or Socket Mode
    connection alone is not end-to-end success. Enable services only if asked.
 
-## Original machine: example operator installation
+## Run the proxy long term
 
-The remaining sections record one existing installation. Its paths, wrappers,
-services, and update timer are **not installed by the portable steps above**.
-Do not assume these units or credentials exist on a new host.
+Keep the proxy on loopback when Stargate or OpenCode runs on the same host.
+Store its config and client key privately and run it as a dedicated user
+service if it should survive logout. Point the service at your chosen version
+and the same private authentication directory used during sign-in. The
+foreground setup above creates no service or timer.
 
-CLIProxyAPI is installed separately from Stargate through mise. It listens only on
-`http://127.0.0.1:8317`. Client-key authentication is required; management APIs,
-the management panel, LAN discovery, and profiling are disabled.
-
-### Locations
-
-- Command: `~/.local/bin/cliproxyapi`.
-- Pinned tool: `~/.config/cliproxyapi/mise.toml`.
-- Proxy config: `~/.config/cliproxyapi/config.yaml`.
-- Client key: `~/.config/cliproxyapi/client.env`, mode `0600`.
-- Provider credentials: `~/.local/share/cliproxyapi/auth/`, mode `0700`.
-- User service: `cliproxyapi.service`.
-
-Do not print the config, client key, or provider credential files into chats or
-logs. Stargate/provider configuration can reference the key through environment
-variable `CLIPROXYAPI_API_KEY`. Installation does not automatically modify
-OpenCode or Stargate provider settings.
-
-### Account sign-in
-
-Run these commands in your own terminal and complete each browser flow:
-
-```sh
-cliproxyapi --codex-login
-cliproxyapi --claude-login
-```
-
-The local callback ports are 1455 and 54545 respectively. Authentication files
-are discovered by the running proxy. Subscription limits and provider terms
-still apply. No provider request is made by the installation health check.
-
-### OpenCode Go upstream
-
-OpenCode Go is configured as a separate v8 `api-keys.openai-compatibility`
-upstream named `opencode-go`, using
-`https://opencode.ai/inference/go/openai/v1`. Its aliases are explicitly named
-`opencode-go/<model-id>` so they cannot silently share a route with a Codex or
-Claude subscription model. No global prefix-routing setting was changed.
-
-The upstream model list is a snapshot of Go's public catalog, not automatic
-discovery. Refresh that list when new Go models are needed. Existing Bowser
-OpenCode model definitions are separate; proxy discovery does not add them to
-the OpenCode config automatically.
-
-Go requires coding-agent traffic, an identifying User-Agent, and a stable
-session ID per conversation. The upstream forwards the caller's `User-Agent`
-and `x-opencode-session` headers. Clients must supply them; a missing session
-header is not replaced by a fabricated global session ID.
-
-The API token is stored in the private proxy config. The private input file
-`~/.config/cliproxyapi/opencode-go.key` must also remain mode `0600`. Never print
-either file. A private config backup was made before adding this upstream.
-The running proxy required one restart before the new routes were published;
-check model discovery after configuration changes rather than assuming reload.
-
-See [OpenCode Go](https://opencode.ai/v2/docs/console/go) for current model
-availability, session-header requirements, quota, and privacy settings.
-
-### Automatic updates
-
-`cliproxyapi-update.timer` checks daily at **04:00 local time**, with a random
-delay of up to 15 minutes. Missed checks run when the user manager next starts.
-Updates stay within **stable v8**; major upgrades require operator action.
-
-The updater uses mise release verification, pins the selected version, and
-restarts an active proxy only when a newer version was installed. A stopped
-proxy stays stopped. Failed startup/HTTP checks restore the previous version
-and attempt to restart it. Older binaries are retained by mise for rollback.
-Updates can interrupt active model requests; rollback cannot undo upstream
-side effects or credential-file changes made by a new release.
-
-```sh
-systemctl --user list-timers cliproxyapi-update.timer
-systemctl --user start cliproxyapi-update.service
-journalctl --user -u cliproxyapi-update.service -n 30
-systemctl --user disable --now cliproxyapi-update.timer
-```
-
-The proxy itself is started but is not enabled at login by installation.
-To enable it explicitly:
-
-```sh
-systemctl --user enable cliproxyapi.service
-```
-
-Timers and services depend on the systemd user manager. Operation after logout
-requires user lingering or an active login session.
+Use versioned upgrades and verify model discovery and inference after an
+upgrade. Restarting the proxy can interrupt active requests. Keep the previous
+version and config available for rollback. If you use Stargate's optional
+nightly updater, see [CLIProxyAPI maintenance](maintenance.md#cliproxyapi)
+for the required install layout and health checks.
 
 [release]: https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.54
 [v8-example]: https://raw.githubusercontent.com/router-for-me/CLIProxyAPI/v8.0.54/config.example.yaml

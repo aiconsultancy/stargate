@@ -55,8 +55,9 @@ rollback: only the guarded, explicitly configured paths are eligible.
   (including Pi workers) are always retained. Add any other permanent paths to
   `protectedPaths`.
 
-Scratch roots themselves, `slack-share`, `avondale-fixtures`, inspection files
-less than seven days old and relay JSON files written today are retained.
+Scratch roots, built-in protected names, inspection files less than seven days
+old, and relay JSON files written today are retained. Use `protectedPaths` for
+other directories you want to retain.
 Use by a process is checked through Linux `/proc`: the executable
 (`exe`) and the mapped files (`maps`, the path column only) of each
 process, and the working directory, root directory and open files of each
@@ -223,8 +224,9 @@ Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
 Default agent CLIs: `@opencode/cli` (`opencode2`), `@openai/codex` (`codex`),
 `@anthropic-ai/claude-code` (`claude`), `@earendil-works/pi-coding-agent` (`pi`).
 
-Never put token values in `pogo.json`. Put a release token, if you use one, in
-the private `<config>.env` companion and reference its name in `tokenEnv`.
+The public Stargate release feed supports unauthenticated access. If you use a
+read-only token for API rate limits, store it in the private `<config>.env`
+companion and reference its name in `tokenEnv`.
 
 ## Window, jitter and daylight saving time
 
@@ -480,13 +482,11 @@ run lock and refuses while a run holds it.
 
 ## Stargate releases
 
-A merge to `main` with a user-facing change publishes `vX.Y.Z` (see
-[releases](releases.md); other changes reach hosts with the next release) with `pogo-vX.Y.Z.tar.gz` (a
-`git archive --prefix=pogo-vX.Y.Z/`) and `pogo-vX.Y.Z.tar.gz.sha256`. GitHub
-artifact attestations are not available for the organization, so Stargate does
-not use `gh attestation verify`. The tree comparison against a local clone
-replaces it and is required by default. A release is used only if all of these
-pass; any failure fails closed:
+Stargate publishes `vX.Y.Z` on [GitHub Releases](releases.md) with
+`pogo-vX.Y.Z.tar.gz` (a `git archive --prefix=pogo-vX.Y.Z/`) and
+`pogo-vX.Y.Z.tar.gz.sha256`. The release workflow does not publish artifact
+attestations. The updater verifies the checksum and compares the unpacked
+tree against a local clone by default. A release must pass these checks:
 
 - the SHA-256 of the archive equals the published `.sha256` line for exactly
   that file name;

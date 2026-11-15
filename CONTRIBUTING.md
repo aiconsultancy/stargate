@@ -9,7 +9,8 @@ prompts, and message contents before sharing logs or examples.
 Make a branch from the latest `main` and keep each pull request focused. Use
 a Conventional Commit title such as `fix: preserve reply progress after a failure`.
 Explain how you verified the change. Follow [AGENTS.md](AGENTS.md) for project
-conventions and [docs/design.md](docs/design.md) for architecture.
+conventions and the [architecture guide](docs/design.md) for code boundaries.
+See [development](docs/development.md) for local checks and workflow details.
 
 ```sh
 mise install

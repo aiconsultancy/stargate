@@ -224,7 +224,7 @@ starter states. Keep existing state and sessions. New members can use the
 explicit append-only `allowCrewExpansion` rollout described below without a
 new namespace. Other roster changes require an explicit migration. Model
 changes use the explicit session-switch operation below. Setup refuses
-conflicting overlays; it does not overwrite a live Bowser installation.
+conflicting overlays; it does not overwrite an existing starter installation.
 Existing sessions also keep their stored permission rules. New agent defaults
 do not grant history/model tools to old sessions; update session permissions
 only during an operator-approved rollout.
@@ -348,7 +348,7 @@ and one read-only call before any explicitly authorised write.
 5. Create the starter configuration and worktrees (or use `--team` above):
 
 ```sh
-make crew-init ARGS='--directory /srv/pogo/bowser --project /srv/indra --worktrees /srv/pogo/indra-crew --id bowser --base origin/main'
+make crew-init ARGS='--directory /srv/pogo/bowser --project /srv/projects/example --worktrees /srv/pogo/example-crew --id bowser --base origin/main'
 ```
 
 The captain and crew directories must not be nested inside each other's
@@ -368,7 +368,7 @@ must exist in the **OpenCode service's** environment, not merely Stargate's shel
 Alternatively, reference an existing private key file without exposing it:
 
 ```sh
-make crew-init ARGS='--directory /srv/pogo/bowser --project /srv/indra --worktrees /srv/pogo/indra-crew --proxy-key-file /srv/private/proxy-client.key'
+make crew-init ARGS='--directory /srv/pogo/bowser --project /srv/projects/example --worktrees /srv/pogo/example-crew --proxy-key-file /srv/private/proxy-client.key'
 ```
 
 Never pass a token value in `ARGS`. This command does not install/start a
