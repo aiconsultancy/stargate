@@ -8,8 +8,9 @@ run Claude Code through the Claude Agent SDK (`docs/claude.md`), or run the
 Codex CLI through the Codex SDK (`docs/codex.md`); trusted local modules can
 implement the same adapter interface.
 
-Read `README.md` for setup and limits, `docs/design.md` for architecture, and
-`docs/cliproxyapi.md` for the separate local proxy installation.
+Read `README.md` for setup, `docs/operations.md` for limits, and
+`docs/design.md` for architecture. Use `docs/cliproxyapi.md` when configuring
+the separate local proxy.
 For Slack bot provisioning, follow `docs/setup.md`. Create registrations for
 this gateway; do not scaffold or run a replacement Bolt application.
 For the trusted OpenCode captain/crew profile, use

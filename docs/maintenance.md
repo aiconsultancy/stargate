@@ -55,8 +55,9 @@ rollback: only the guarded, explicitly configured paths are eligible.
   (including Pi workers) are always retained. Add any other permanent paths to
   `protectedPaths`.
 
-Scratch roots themselves, `slack-share`, `avondale-fixtures`, inspection files
-less than seven days old and relay JSON files written today are retained.
+Scratch roots, [built-in protected names](../src/nightly/cleanup.ts), inspection
+files less than seven days old, and relay JSON files written today are retained. Use `protectedPaths` for
+other directories you want to retain.
 Use by a process is checked through Linux `/proc`: the executable
 (`exe`) and the mapped files (`maps`, the path column only) of each
 process, and the working directory, root directory and open files of each
@@ -223,8 +224,9 @@ Add a top-level `maintenance` section to `pogo.json`. The schema is strict;
 Default agent CLIs: `@opencode/cli` (`opencode2`), `@openai/codex` (`codex`),
 `@anthropic-ai/claude-code` (`claude`), `@earendil-works/pi-coding-agent` (`pi`).
 
-Never put token values in `pogo.json`. Put a release token, if you use one, in
-the private `<config>.env` companion and reference its name in `tokenEnv`.
+The public Stargate release feed supports unauthenticated access. If you use a
+read-only token for API rate limits, store it in the private `<config>.env`
+companion and reference its name in `tokenEnv`.
 
 ## Window, jitter and daylight saving time
 
@@ -480,13 +482,12 @@ run lock and refuses while a run holds it.
 
 ## Stargate releases
 
-A merge to `main` with a user-facing change publishes `vX.Y.Z` (see
-[releases](releases.md); other changes reach hosts with the next release) with `pogo-vX.Y.Z.tar.gz` (a
-`git archive --prefix=pogo-vX.Y.Z/`) and `pogo-vX.Y.Z.tar.gz.sha256`. GitHub
-artifact attestations are not available for the organization, so Stargate does
-not use `gh attestation verify`. The tree comparison against a local clone
-replaces it and is required by default. A release is used only if all of these
-pass; any failure fails closed:
+Stargate publishes `vX.Y.Z` on [GitHub Releases](releases.md) with
+`pogo-vX.Y.Z.tar.gz` (a `git archive --prefix=pogo-vX.Y.Z/`) and
+`pogo-vX.Y.Z.tar.gz.sha256`. The release workflow does not publish artifact
+attestations. The updater verifies the checksum and compares the unpacked
+tree against a local clone by default. A failure blocks installation of the
+candidate. A release must pass these checks:
 
 - the SHA-256 of the archive equals the published `.sha256` line for exactly
   that file name;
@@ -1100,8 +1101,10 @@ nothing. The unit runs `update --now --foreground`; do not use
 
 ### Runbook: install a release by hand
 
-Never create, copy or edit a directory under `<pogo.root>/releases`, and
-never move the `current` link by hand. A directory without a valid
+For managed updates, use the updater to place releases under
+`<pogo.root>/releases` and switch `current`. The
+[one-time adoption procedure](#migration-of-an-existing-install) handles
+existing unpacked installs. A directory without a valid
 `.pogo-release.json` is not a release: `ready.json` then has `version: null`,
 the gateway logs a warning at start, a readiness check for a version never
 passes, and maintenance refuses to switch to that directory.
@@ -1140,144 +1143,75 @@ next update restarts OpenCode.
 
 ## Captain and crew instructions
 
-`stargate crew init --maintenance-config pogo.json` renders this paragraph, with
-the configured times, into the captain and crew agent definitions and Pi
-member definitions (only when maintenance is enabled):
-
-> Nightly maintenance: every night from 00:00 to 01:00 (Europe/London), Pogo
-> can update itself, the model proxy, the agent CLIs and agent models. At an
-> idle moment in this window, the Slack gateway, the OpenCode server and your
-> session can restart, and your model can change to a newer model of the same
-> family. Before the window, checkpoint work in progress: commit or push
-> branch work, write a journal note and report task state. Do not start long
-> tasks in the window. After a restart, read your journal and continue from
-> the last checkpoint.
-
-`stargate maintenance instructions` prints it for an existing profile.
+`stargate crew init --maintenance-config pogo.json` includes the configured
+maintenance window in new captain, crew and Pi member definitions when
+maintenance is enabled. The guidance describes possible restarts and model
+updates, asks agents to checkpoint their work before the window, and explains
+how to resume from the journal. For existing profiles, use
+`stargate maintenance instructions --config pogo.json` to generate the text.
 
 ## Migration of an existing install
 
-Do these steps once, at an idle moment, with backups. Maintenance does not
-perform them. The commands use the Galactica paths; adjust them for another
-install.
-
-1. **Get a release that contains the maintenance CLI** and verify it by hand:
-
-   ```sh
-   VERSION=X.Y.Z   # first release with this feature
-   ROOT=$HOME/.local/share/pogo
-   CFG=$HOME/.config/pogo/galactica-captain/pogo.json
-   cd /tmp/opencode && gh release download "v$VERSION" --repo aiconsultancy/stargate
-   sha256sum -c "pogo-v$VERSION.tar.gz.sha256"
-   gh release view "v$VERSION" --repo aiconsultancy/stargate --json author --jq .author.login
-   tar -xzf "pogo-v$VERSION.tar.gz" -C "$ROOT/releases"
-   mv "$ROOT/releases/pogo-v$VERSION" "$ROOT/releases/$VERSION"
-   cd "$ROOT/releases/$VERSION" && mise exec -- bun install --frozen-lockfile && mise exec -- bun test
-   POGO="mise exec -- bun $ROOT/releases/$VERSION/src/main.ts"
-   ```
-
-2. **Add the `maintenance` section** with `"enabled": false`, then
-   `$POGO config check --config "$CFG" --schema-only`.
-
-3. **Adopt the release** (creates `$ROOT/current`):
+1. **Record and back up the install.** Find its config path, data directory,
+   launch command, running version, and service names. Inventory any OpenCode
+   profiles, proxy services, and scheduled updaters that this install uses.
+   Schedule the cutover at an [idle boundary](#idle-gate). Back up the
+   config and its private companion, launcher, service definitions, profiles,
+   and any schedules you will change. Keep the old release for rollback.
+2. **Prepare a release and the configuration.** Use a complete unpacked
+   Stargate release with the maintenance CLI. Verify its archive before
+   unpacking and run `bun install --frozen-lockfile` and `bun test` in that
+   directory. See [release verification](releases.md#verify-a-release).
+   Add the [maintenance settings](#configuration) to the existing config
+   with `enabled: false`. Set `maintenance.pogo.root` to the chosen install
+   root. Preserve the existing config, data path, and service name.
+3. **Set up the tree comparison and adopt the baseline.** Create a bare
+   clone inside the chosen root and point `maintenance.pogo.checkout` to it.
+   The canonical public feed supports anonymous HTTPS. Verify that the
+   service account can fetch release tags. For the one-time adoption, the
+   unpacked release must be a direct child of `<root>/releases`. Set the
+   shell variables below to your config, root, unpacked directory, and
+   release version without its leading `v`.
 
    ```sh
-   $POGO maintenance adopt --config "$CFG" --release "$ROOT/releases/$VERSION" --version "$VERSION"
+   git clone --bare https://github.com/aiconsultancy/stargate.git "$root/source.git"
+   bun "$release_dir/src/main.ts" config check --config "$config"
+   bun "$release_dir/src/main.ts" maintenance adopt \
+     --config "$config" --release "$release_dir" --version "$version"
    ```
 
-4. **Move the install-specific plugin wrapper outside the releases** and make it
-   load `current`:
+   Adoption writes `.pogo-release.json` and creates `current` if absent.
+   An adopted release gets its first verified upgrade through the nightly
+   run before it can use [manual updates](#update-now).
+4. **Point launchers and profiles at stable paths.** Follow the
+   [install layout](#install-layout) for the gateway launcher and any
+   OpenCode plugin and skill paths. Keep an installation's custom plugin
+   wrapper outside the release directory. If opting into proxy updates,
+   follow the [CLIProxyAPI layout](#cliproxyapi). At the idle boundary, stop
+   the gateway and back up its SQLite state before changing any paths.
+   Apply the changes and restart the affected services. Verify the readiness record's
+   timestamp and expected version, then send a test request through the
+   configured transport. Restore the backed-up setup if verification fails.
+   For existing crew profiles, update the generated guidance inside the
+   `<!-- POGO:START -->` block when enabling maintenance.
+5. **Review the plan and enable the timer.** Enable the selected components
+   and set `maintenance.enabled` to `true`. Run the plan and inspect the
+   generated units. Disable overlapping scheduled updaters before enabling
+   the new timer. If an old agent CLI updater remains available for manual
+   use, configure the shared `agentClis.lockFile`.
 
    ```sh
-   OLD=$ROOT/releases/3a22aa9497d6ee7c2b8a5d67d5c7280ec64cad88-galactica
-   mkdir -m 700 "$ROOT/deployment-plugin"
-   sed 's#"../src/crew/plugin"#"../current/src/crew/plugin"#' \
-     "$OLD/deployment-plugin/index.ts" > "$ROOT/deployment-plugin/index.ts"
-   chmod 600 "$ROOT/deployment-plugin/index.ts"
+   bun "$root/current/src/main.ts" maintenance plan --config "$config"
+   bun "$root/current/src/main.ts" maintenance install-timer --config "$config" --print
+   bun "$root/current/src/main.ts" maintenance install-timer --config "$config"
+   systemctl --user enable --now pogo-maintenance.timer
+   systemctl --user list-timers pogo-maintenance.timer
    ```
 
-5. **Point launchers and profiles at the stable paths.** Stop the gateway
-   first (`systemctl --user stop galactica-pogo.service`): OpenCode reloads a
-   changed profile at once. Back up each file, then replace the old release
-   path. The plugin package moves to the wrapper;
-   every other reference (for example the captain's skill source) moves to
-   `current`:
-
-   ```sh
-   FILES=("$HOME/.local/share/pogo/galactica-captain/captain/.opencode/opencode.json"
-          "$HOME"/workspace/galactica-captain-crew/{chief,starbuck,roslin,apollo,bosun}/.opencode/opencode.json
-          "$HOME/.local/bin/pogo"
-          "$HOME/workspace/pogo/.local/setup/launch-galactica.ts")
-   for f in "${FILES[@]}"; do
-     cp -p "$f" "$f.before-maintenance"
-     sed -i "s#$OLD/deployment-plugin#$ROOT/deployment-plugin#g; s#$OLD#$ROOT/current#g" "$f"
-   done
-   grep -n "$OLD" "${FILES[@]}"   # expect no output
-   ```
-
-6. **Give CLIProxyAPI a stable link** to a copy of the running binary in
-   Stargate's own version layout, and run it through a drop-in:
-
-   ```sh
-   CPA=$HOME/.local/share/cliproxyapi
-   install -D -m 700 \
-     "$HOME/.local/share/mise/installs/github-router-for-me-cli-proxy-api/8.0.54/cliproxyapi" \
-     "$CPA/8.0.54/cliproxyapi"
-   ln -s "$CPA/8.0.54/cliproxyapi" "$CPA/cliproxyapi-current"
-   mkdir -p "$HOME/.config/systemd/user/galactica-cliproxyapi.service.d"
-   printf '[Service]\nExecStart=\nExecStart=%s --config %s\n' \
-     "$CPA/cliproxyapi-current" \
-     "$HOME/.config/cliproxyapi/config.yaml" \
-     > "$HOME/.config/systemd/user/galactica-cliproxyapi.service.d/pogo-link.conf"
-   systemctl --user daemon-reload
-   ```
-
-7. **Tree comparison source (required by default):**
-   `git clone --bare git@github.com:aiconsultancy/stargate.git "$ROOT/source.git"`
-   (set `pogo.checkout` to it). The run fetches only the release tag into it,
-   with the SSH credentials of the user service; check that a non-interactive
-   `git -C "$ROOT/source.git" fetch origin` works.
-
-8. **Restart once at an idle boundary** and verify: proxy, OpenCode (plugin
-   path changed), then the gateway.
-
-   ```sh
-   systemctl --user restart galactica-cliproxyapi.service
-   systemctl --user restart opencode2.service
-   systemctl --user restart galactica-pogo.service
-   cat "$HOME/.config/pogo/galactica-captain/.pogo/ready.json"   # new readyAt and version
-   ```
-
-9. **Add the instructions paragraph** to the existing captain, crew and Pi
-   definitions (`$POGO maintenance instructions --config "$CFG"`), with
-   backups, inside each `<!-- POGO:START -->` block.
-
-10. **Enable:** set `"enabled": true`, check the plan, then install the timer:
-
-    ```sh
-    $POGO maintenance plan --config "$CFG"
-    $POGO maintenance install-timer --config "$CFG" --print   # review
-    mise exec -- bun "$ROOT/current/src/main.ts" maintenance install-timer --config "$CFG"
-    systemctl --user enable --now pogo-maintenance.timer
-    systemctl --user list-timers pogo-maintenance.timer
-    ```
-
-11. **Retire the cron updater.** The 03:15 UTC `update-agent-clis` job now
-    competes with maintenance. Back up and remove only that line:
-
-    ```sh
-    crontab -l > "$HOME/crontab.before-maintenance"
-    crontab -l | grep -Fv -- "$HOME/.local/bin/update-agent-clis" | crontab -
-    crontab -l   # confirm
-    ```
-
-    Keep the script for manual use; `agentClis.lockFile` makes a manual run and
-    maintenance exclude each other.
-
-If `gh` cannot read its credentials in the systemd user session (for example a
-desktop keyring), create a fine-grained, read-only token for
-`aiconsultancy/stargate` (Contents: read), store it in `<config>.env`, and set
-`pogo.tokenEnv`.
+   Substitute the timer name if you passed `--name`. After the first run,
+   check the [report](#reports) and readiness record, and follow
+   [journal recovery](#journal-and-recovery) if it reports an incomplete
+   rollback.
 
 ## Limits
 

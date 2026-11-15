@@ -9,6 +9,49 @@ cursor, transcript catch-up and no-replay rules.
 Stargate does not start, configure or administer the IRC server. Account,
 channel and TLS setup belong to the server operator.
 
+## One bot with no Slack app
+
+Create a SASL account for the bot and make sure it can join a test channel.
+The example uses password authentication over TLS, an allowlist of IRC
+accounts, and a Pi Durable backend with a direct OpenAI API key. Save the
+configuration as `pogo.json` and replace the host, account, channel, and
+working directory with your own values.
+
+```json
+{
+  "irc": [
+    {
+      "id": "project-helper",
+      "server": { "host": "irc.example.net", "port": 6697, "tls": true },
+      "account": "project-helper",
+      "passwordEnv": "STARGATE_IRC_PASSWORD",
+      "channels": ["#agents"],
+      "access": { "allowedAccounts": ["your-account"], "allCallWords": [] },
+      "backend": {
+        "type": "pi-durable",
+        "directory": "/srv/projects/example",
+        "model": "openai/gpt-5",
+        "tools": "none"
+      }
+    }
+  ]
+}
+```
+
+Put `STARGATE_IRC_PASSWORD` and `OPENAI_API_KEY` in the private
+`pogo.json.env` file (mode `0600`). If the server uses a private CA, set
+`server.caFile` to the CA certificate path. Validate and start from the
+[Stargate directory](../README.md#install):
+
+```sh
+bun run src/main.ts config check
+bun run src/main.ts start
+```
+
+Sign in as the allowed account and send the bot a direct message asking it to
+reply "Stargate is ready" without using tools. See [access rules](#access) for
+channel requests and team behavior.
+
 ## Operator steps
 
 1. On the IRC server, create one SASL account for the captain and one per
@@ -26,7 +69,7 @@ channel and TLS setup belong to the server operator.
 5. Optional: create the [DM audit](#dm-audit) channel.
 6. Run `stargate config check --config <path>`, then restart for connection changes.
    Access/transcription and IRC crew additions/idle removals can use
-   [SIGHUP reload](../README.md#reload-configuration-without-restarting).
+   [SIGHUP reload](configuration.md#reload-configuration-without-restarting).
 7. Regenerate or edit the captain definition so it contains the
    "IRC messages" paragraph (see [captain instructions](#captain-instructions)).
 

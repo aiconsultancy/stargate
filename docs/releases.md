@@ -1,8 +1,8 @@
 # Releases
 
-`main` is the trunk: small PRs merge often, and a merge creates a GitHub
-release only when it contains a user-facing change. The first public release is
-`v0.20.3`. Historical private tags are kept with the original repository.
+Stargate publishes releases on [GitHub][releases]. The public release
+sequence starts at `v0.20.3`. User-facing changes merged to `main` trigger
+releases through GitHub Actions.
 
 ## How a release is made
 
@@ -29,10 +29,10 @@ release only when it contains a user-facing change. The first public release is
    release are included in the next release's notes.
 5. The workflow creates `pogo-vX.Y.Z.tar.gz` (a `git archive` of the commit)
    and its SHA-256 file, and publishes the tag and release with the commit
-   subjects as notes. GitHub build provenance (artifact attestations) is not
-   available on the organization's current plan. Archive and checksum names,
-   archive root prefixes, and `.pogo-release.json` metadata stay compatible
-   with existing updaters after the Stargate rename.
+   subjects as notes. The workflow publishes checksums. The updater also
+   compares the unpacked tree against the tagged commit by default. Archive
+   and checksum names, archive root prefixes, and `.pogo-release.json`
+   metadata stay compatible with existing updaters.
 
 ## Release manually
 
@@ -52,15 +52,28 @@ The version lives in the tag, not in `package.json`. CI never commits to
 
 ## Verify a release
 
+Download the archive and matching checksum together from [GitHub Releases][releases].
+Public assets are available without signing in. For example:
+
 ```sh
-gh release download v0.20.3 --repo aiconsultancy/stargate
+release_url=https://github.com/aiconsultancy/stargate/releases/download/v0.20.3
+curl -fLO "$release_url/pogo-v0.20.3.tar.gz"
+curl -fLO "$release_url/pogo-v0.20.3.tar.gz.sha256"
 sha256sum -c pogo-v0.20.3.tar.gz.sha256
-# Strongest check without attestations: rebuild the archive from the tag.
+```
+
+On macOS, use `shasum -a 256 -c pogo-v0.20.3.tar.gz.sha256`. To compare the
+archive against the tagged source, fetch the same tag in a Stargate checkout
+and rebuild it:
+
+```sh
+git fetch origin tag v0.20.3
 git archive --format=tar.gz --prefix=pogo-v0.20.3/ v0.20.3 | sha256sum
 ```
 
-`git archive` output is reproducible for one git version; compare the
-unpacked trees (`diff -r`) if the hashes differ only because of compression.
+Use `shasum -a 256` on macOS for the last command. The workflow does not publish
+artifact attestations. If archive hashes differ across Git or compression
+versions, compare the unpacked files against the tree from the tag.
 
 ## Dependency updates
 
@@ -69,3 +82,5 @@ after a version is published before proposing it. Bun applies the same rule
 locally: `bunfig.toml` sets `minimumReleaseAge` to one day. Dependabot
 updates merge automatically after Quality checks pass. `effect` is excluded:
 it stays pinned to the OpenCode SDK's version.
+
+[releases]: https://github.com/aiconsultancy/stargate/releases
