@@ -84,6 +84,60 @@ test("persists once and resumes the same session on thread replies", async () =>
   expect(f.titles).toEqual(["helper (slack C123)"]);
 });
 
+test("resumes an existing Slack thread only after seeing this bot's earlier reply", async () => {
+  const config = bot();
+  config.resumeSlackThreads = true;
+  const f = fixture(config);
+  const request = event("Continue", "2.000");
+  const reply = {
+    ...request,
+    event: { ...request.event, type: "message", thread_ts: "1.000" },
+  };
+  f.slack.threadContext = async () => ({
+    messages: [{ author: "requester", text: "Earlier question" }],
+    truncated: false,
+  });
+  expect(await f.gateway.receive(reply)).toBe(false);
+  f.slack.threadContext = async () => {
+    throw new ThreadContextUnavailable();
+  };
+  await expect(f.gateway.receive(reply)).rejects.toThrow(
+    ThreadContextUnavailable,
+  );
+  f.slack.threadContext = async (input) => {
+    expect(input).toMatchObject({
+      channel: "C123",
+      thread: "1.000",
+      before: "2.000",
+      botUser: "UBOT",
+    });
+    return {
+      messages: [{ author: "this_bot", text: "Earlier reply" }],
+      truncated: false,
+    };
+  };
+  expect(await f.gateway.receive(reply)).toBe(true);
+  expect(await f.gateway.receive(reply)).toBe(false);
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(f.delivered).toEqual(["answer: Continue"]);
+});
+
+test("a Slack read receipt marks the request before work and clears after delivery", async () => {
+  const config = bot();
+  config.slackReadReceipts = true;
+  const f = fixture(config);
+  const order: string[] = [];
+  f.slack.readReceipt = async (channel, ts, active) => {
+    order.push(`${active ? "seen" : "clear"} ${channel}:${ts}`);
+  };
+  f.slack.post = async () => {
+    order.push("delivered");
+  };
+  expect(await f.gateway.receive(event())).toBe(true);
+  await f.gateway.process(f.next(), new AbortController().signal);
+  expect(order).toEqual(["seen C123:1.000", "delivered", "clear C123:1.000"]);
+});
+
 test("reaction support does not prepend instructions to user messages", async () => {
   const f = fixture();
   const reactions: string[] = [];

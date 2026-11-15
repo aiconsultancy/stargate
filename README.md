@@ -467,8 +467,8 @@ bundled Claude Code CLI for each turn. `backend.type: "claude"` works for
 Slack bots, IRC captains and IRC crew members. The model is reached only
 through an explicit `provider: { baseURL, apiKeyEnv }`, such as the local
 CLIProxyAPI at `http://127.0.0.1:8317/v1`; there is no native login or
-API-key fallback. Tools default to none; `allowedTools` lists the permitted
-tool names, and no other tool exists for the model. Settings files,
+API-key fallback. Tools default to none. `allowedTools` selects built-in
+tools, and `mcpServers` opts into named external tool servers. Settings files,
 `CLAUDE.md` and MCP servers are not loaded by default. The child process gets
 a minimal environment and a private `CLAUDE_CONFIG_DIR`. `directory` is a
 starting location, not a sandbox. See [Claude Agent SDK backend](docs/claude.md)

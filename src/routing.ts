@@ -147,6 +147,7 @@ export function routeEvent(
     thread: event.thread_ts ?? event.ts,
     user: event.user,
     text,
+    ...(config.slackReadReceipts ? { received: Number(event.ts) * 1000 } : {}),
     ...(event.files?.length
       ? { files: event.files.map((file) => file.id) }
       : {}),

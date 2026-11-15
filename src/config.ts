@@ -13,6 +13,7 @@ import {
   piModelSchema,
   piProviderSchema,
   piThinkingLevelSchema,
+  secureLocalOrHttpsURL,
 } from "./pi-model";
 import { transcriptionSchema } from "./transcription";
 import { waitingSchema } from "./waiting";
@@ -68,6 +69,29 @@ const claudeToolsSchema = z
     message: "Duplicate allowedTools entry",
   });
 
+/** Explicit, operator-controlled MCP servers; no embedded credentials. */
+const claudeMcpServersSchema = z.record(
+  z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
+  z.discriminatedUnion("type", [
+    z.strictObject({
+      type: z.literal("http"),
+      url: secureLocalOrHttpsURL,
+      headersHelper: z
+        .string()
+        .regex(
+          /^\/[a-zA-Z0-9_./-]+(?: [a-zA-Z0-9_./-]+)*$/,
+          "Use an absolute executable and optional literal arguments",
+        )
+        .optional(),
+    }),
+    z.strictObject({
+      type: z.literal("stdio"),
+      command: absolutePath,
+      args: z.array(z.string()).default([]),
+    }),
+  ]),
+);
+
 /**
  * Claude Agent SDK backend. The model is reached only through the explicit
  * proxy `provider`; there is no native login or API-key fallback.
@@ -92,6 +116,7 @@ export const claudeBackendSchema = z.strictObject({
   systemPrompt: z.string().trim().min(1).max(64_000).optional(),
   /** The only tools the model can see and run; every other one is absent. */
   allowedTools: claudeToolsSchema.default([]),
+  mcpServers: claudeMcpServersSchema.optional(),
   /**
    * Filesystem settings to load from `directory`: `project` loads
    * `.claude/settings.json` and CLAUDE.md, `local` loads
@@ -270,6 +295,10 @@ export const botSchema = z.strictObject({
   cronjobs: cronjobsSchema.optional(),
   pairing: pairingSchema.optional(),
   threadContext: z.boolean().default(false),
+  /** Follow an untagged reply when Slack history proves this bot already replied. */
+  resumeSlackThreads: z.boolean().optional(),
+  /** Acknowledge a human Slack message while its turn runs. */
+  slackReadReceipts: z.boolean().optional(),
   /** Speech-to-text for accepted audio and video messages; absent is off. */
   transcription: transcriptionSchema.optional(),
   waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),

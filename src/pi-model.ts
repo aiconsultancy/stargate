@@ -17,7 +17,7 @@ export const piProxyModels: readonly string[] = [
 
 const envName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 
-const piProxyURL = z.url().refine((value) => {
+export const secureLocalOrHttpsURL = z.url().refine((value) => {
   const url = new URL(value);
   const loopback =
     url.hostname === "localhost" ||
@@ -43,7 +43,7 @@ export const piModelSchema = z
 
 /** Explicit proxy endpoint; the key is an environment reference, never a value. */
 export const piProviderSchema = z.strictObject({
-  baseURL: piProxyURL,
+  baseURL: secureLocalOrHttpsURL,
   apiKeyEnv: envName,
 });
 

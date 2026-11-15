@@ -234,6 +234,7 @@ export interface SlackDelivery {
     signal?: AbortSignal,
   ): Promise<string>;
   threadContext?(input: ThreadContextRequest): Promise<ThreadContext>;
+  readReceipt?(channel: string, ts: string, active: boolean): Promise<void>;
   post(
     channel: string,
     thread: string,
@@ -449,12 +450,12 @@ export class Gateway {
     );
   }
 
-  accept(body: unknown, peer?: PeerSender) {
+  accept(body: unknown, peer?: PeerSender, resumesThread = false) {
     const bot = this.bot;
     if (!bot) return false;
     const routed = routeEvent(body, bot, this.identity, peer);
     if (!routed) return false;
-    const followed = this.store.follows(routed.conversation);
+    const followed = resumesThread || this.store.follows(routed.conversation);
     // A voice message in a thread the bot follows keeps today's behaviour,
     // unless every turn needs a mention.
     const held = "gate" in routed && routed.gate === "spoken";
@@ -485,14 +486,46 @@ export class Gateway {
    * checked again after the lookup, before anything is stored.
    */
   async receive(body: unknown, open: () => boolean = () => true) {
+    const bot = this.bot;
+    if (!bot || !open()) return false;
     const sender = botSender(body);
-    if (!sender || !this.bot?.access.peerCaptains || !this.peers)
-      return this.accept(body);
-    const verified = await this.peers
-      .verify(sender, AbortSignal.timeout(peerLookupMs))
-      .catch(() => false);
-    if (!open()) return false;
-    return this.accept(body, verified ? sender : undefined);
+    if (sender && bot.access.peerCaptains && this.peers) {
+      const verified = await this.peers
+        .verify(sender, AbortSignal.timeout(peerLookupMs))
+        .catch(() => false);
+      if (!open()) return false;
+      return this.accept(body, verified ? sender : undefined);
+    }
+    if (bot.resumeSlackThreads && this.slack.threadContext && !sender) {
+      const input = routeEvent(body, bot, this.identity);
+      if (!input) return false;
+      const before = input.eventId.slice(input.channel.length + 1);
+      if (
+        before !== input.thread &&
+        !input.startsConversation &&
+        !input.gate &&
+        !this.store.follows(input.conversation)
+      ) {
+        // No ACK on a transient lookup failure: Slack can redeliver.
+        const history = await this.slack.threadContext({
+          channel: input.channel,
+          thread: input.thread,
+          before,
+          user: input.user,
+          botUser: this.identity.user,
+          appId: bot.slack.appId,
+          team: this.identity.team,
+          signal: AbortSignal.timeout(1800),
+        });
+        if (!open() || this.bot !== bot) return false;
+        return this.accept(
+          body,
+          undefined,
+          history.messages.some((message) => message.author === "this_bot"),
+        );
+      }
+    }
+    return this.accept(body);
   }
 
   /** Commit the exact requester-authorized target before Socket Mode ACK. */
@@ -1108,6 +1141,22 @@ export class Gateway {
     }
     const job: Job =
       held.gate === "spoken" ? { ...held, gate: "admitted" } : held;
+    const readReceipt = async (active: boolean) => {
+      if (
+        bot?.slackReadReceipts &&
+        job.received != null &&
+        !job.sender &&
+        !job.deferDelivery &&
+        allowed(job)
+      ) {
+        const timestamp = job.eventId.slice(job.channel.length + 1);
+        await this.slack
+          .readReceipt?.(job.channel, timestamp, active)
+          .catch(() =>
+            this.log.warn({ job: job.id }, "Slack read receipt unavailable"),
+          );
+      }
+    };
     const statusText = (cause: RequestFailure) =>
       job.deferDelivery && cause === "history"
         ? "The agent finished, but its public reply is not yet readable in session history. Pogo will retain it locally when it becomes readable. The request was not repeated."
@@ -1116,6 +1165,7 @@ export class Gateway {
     let failure = job.failure ?? undefined;
     if (job.status === "queued") {
       if (!this.store.running(job.id)) return;
+      await readReceipt(true);
       // Ends before delivery, so a typing indicator never outlasts the turn.
       const typing = new AbortController();
       const working = job.deferDelivery
@@ -1608,6 +1658,7 @@ export class Gateway {
         this.store.sent(job.id, i + 1);
       }
       await this.deliverAttachments(job, shutdown, allowed);
+      if (output.length > 0) await readReceipt(false);
       this.store.finish(job.id);
     } catch {
       this.log.warn({ job: job.id }, "Slack delivery failed");

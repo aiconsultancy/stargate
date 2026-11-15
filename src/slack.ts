@@ -336,6 +336,18 @@ export class SlackConnection implements SlackDelivery {
     }
   }
 
+  async readReceipt(channel: string, timestamp: string, active: boolean) {
+    const web = this.historyWeb(AbortSignal.timeout(1500));
+    const args = { channel, timestamp, name: "eyes" };
+    try {
+      if (active) await web.reactions.add(args);
+      else await web.reactions.remove(args);
+    } catch (error) {
+      if (!slackError(error, active ? "already_reacted" : "no_reaction"))
+        throw error;
+    }
+  }
+
   /** Idempotent: a repeated SDK disconnect can wait for an event that never comes. */
   close() {
     this.closing ??= this.socket.disconnect();

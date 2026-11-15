@@ -357,6 +357,144 @@ test("real Claude Code CLI runs only the allowed tool names", async () => {
   expect(await readdir(root)).not.toContain("ran");
 }, 120_000);
 
+test("real Claude Code runs native HTTP and scoped stdio MCP without coding tools", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pogo-claude-mcp-"));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const dataDirectory = join(root, "data");
+  await mkdir(dataDirectory);
+
+  const headerHelper = join(root, "auth");
+  const bearer = "MCP_FIXTURE_SECRET";
+  await writeFile(
+    headerHelper,
+    `#!/bin/sh
+printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
+`,
+    { mode: 0o700 },
+  );
+  const tools = [
+    {
+      name: "save_issue",
+      description: "Change an issue's blocking dependency",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          blockedBy: { type: "array", items: { type: "string" } },
+        },
+      },
+    },
+  ];
+  const httpCalls: { method: string; arguments?: unknown }[] = [];
+  const mcp = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      if (request.headers.get("authorization") !== `Bearer ${bearer}`)
+        return new Response(null, { status: 401 });
+      if (request.method !== "POST") return new Response(null, { status: 405 });
+      const { id, method, params } = (await request.json()) as {
+        id?: unknown;
+        method: string;
+        params?: { protocolVersion?: unknown; arguments?: unknown };
+      };
+      httpCalls.push({ method, arguments: params?.arguments });
+      if (id === undefined) return new Response(null, { status: 202 });
+      const result =
+        method === "initialize"
+          ? {
+              protocolVersion: params?.protocolVersion ?? "2025-03-26",
+              capabilities: { tools: {} },
+              serverInfo: { name: "linear-fixture", version: "1" },
+            }
+          : method === "tools/list"
+            ? { tools }
+            : {
+                content: [{ type: "text", text: "dependency saved" }],
+              };
+      return Response.json({ jsonrpc: "2.0", id, result });
+    },
+  });
+  cleanup.push(async () => mcp.stop(true));
+
+  const stdio = join(root, "stdio.ts");
+  await writeFile(
+    stdio,
+    `
+    for await (const line of console) {
+      const { id, method, params } = JSON.parse(line);
+      if (id === undefined) continue;
+      const result = method === "initialize"
+        ? { protocolVersion: params.protocolVersion, capabilities: { tools: {} },
+            serverInfo: { name: "kirk-fixture", version: "1" } }
+        : method === "tools/list"
+        ? { tools: [{name: "cloudflare_access", description: "Read policy", inputSchema: {type: "object"}}] }
+        : { content: [{ type: "text", text: "policy read" }] };
+      console.log(JSON.stringify({ jsonrpc: "2.0", id, result }));
+    }
+  `,
+  );
+
+  const { baseURL, requests } = fixture([
+    {
+      tools: [
+        {
+          id: "toolu_dep",
+          name: "mcp__linear__save_issue",
+          input: { id: "NET-1617", blockedBy: ["NET-1615"] },
+        },
+        { id: "toolu_policy", name: "mcp__kirk__cloudflare_access", input: {} },
+        {
+          id: "toolu_bash",
+          name: "Bash",
+          input: { command: `touch ${join(root, "ran")}` },
+        },
+      ],
+    },
+    { text: "Tools done" },
+  ]);
+  setEnv({ [apiKeyEnv]: key });
+  const backend = await ClaudeBackend.open(
+    claudeBackendSchema.parse({
+      type: "claude",
+      directory: root,
+      model: "claude-fable-5-2",
+      provider: { baseURL, apiKeyEnv },
+      mcpServers: {
+        linear: {
+          type: "http",
+          url: `http://127.0.0.1:${mcp.port}/mcp`,
+          headersHelper: headerHelper,
+        },
+        kirk: { type: "stdio", command: process.execPath, args: [stdio] },
+      },
+    }),
+    { dataDirectory },
+  );
+  cleanup.push(() => backend.close());
+  const signal = AbortSignal.timeout(60_000);
+  const id = await backend.createSession({ key: "k", title: "T", signal });
+  expect(await backend.prompt(id, "Change the dependency", signal)).toBe(
+    "Tools done",
+  );
+  const first = requests.find(({ path }) => path === "/v1/messages");
+  expect(
+    first?.tools?.filter((name) => name !== "DeferredToolPlaceholder").sort(),
+  ).toEqual(["mcp__kirk__cloudflare_access", "mcp__linear__save_issue"]);
+  const results = new Map(
+    (requests.at(-1)?.results ?? []).map((r) => [r.id, r]),
+  );
+  expect(results.get("toolu_dep")?.error).toBe(false);
+  expect(results.get("toolu_dep")?.text).toContain("dependency saved");
+  expect(results.get("toolu_policy")?.error).toBe(false);
+  expect(results.get("toolu_policy")?.text).toContain("policy read");
+  expect(results.get("toolu_bash")?.error).toBe(true);
+  expect(await readdir(root)).not.toContain("ran");
+  expect(
+    httpCalls.find(({ method }) => method === "tools/call")?.arguments,
+  ).toEqual({ id: "NET-1617", blockedBy: ["NET-1615"] });
+}, 120_000);
+
 test("no Bash process of the real CLI outlives its turn", async () => {
   const root = await mkdtemp(join(tmpdir(), "pogo-claude-cli-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

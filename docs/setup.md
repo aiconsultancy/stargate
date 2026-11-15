@@ -451,6 +451,15 @@ agents or Pi bots that need reactions should put the protocol in their agent
 definition or configured `systemPrompt`; reply parsing and target checks remain
 in the gateway.
 
+Set `slackReadReceipts: true` on a bot to add 👀 to a human request when its
+turn starts and remove it after a text reply is delivered. The bot needs
+`reactions:write`.
+
+Set `resumeSlackThreads: true` to accept an untagged reply in an allowed Slack
+thread that Pogo has not seen before, when bounded Slack history confirms the
+same bot previously replied there. The normal sender and channel rules still
+apply. This helps a bot continue conversations after migrating to Pogo.
+
 ### Silent replies
 
 An agent posts nothing when the first line of its reply is exactly

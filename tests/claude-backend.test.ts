@@ -581,7 +581,26 @@ test("Claude configuration is strict and fails closed", () => {
     { settingSources: ["user"] },
     { settingSources: ["project", "project"] },
     { permissionMode: "bypassPermissions" },
-    { mcpServers: {} },
+    { mcpServers: { linear: { type: "http", url: "http://mcp.example/" } } },
+    {
+      mcpServers: {
+        linear: {
+          type: "http",
+          url: "https://mcp.example/",
+          headers: { Authorization: "Bearer sk-value" },
+        },
+      },
+    },
+    {
+      mcpServers: {
+        linear: {
+          type: "http",
+          url: "https://mcp.example/",
+          headersHelper: "/usr/local/bin/helper; echo nope",
+        },
+      },
+    },
+    { mcpServers: { helper: { type: "stdio", command: "relative" } } },
     { env: { ANTHROPIC_API_KEY: "x" } },
     { maxTurns: 0 },
   ])

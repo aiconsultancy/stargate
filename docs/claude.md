@@ -77,12 +77,13 @@ the `irc[].crew` array; see [IRC transport](irc.md#crew-on-irc)):
 | `provider`       | Required. `baseURL` (HTTPS, or loopback HTTP, ending `/v1`) and `apiKeyEnv`     |
 | `effort`         | Optional `low`, `medium`, `high`, `xhigh` or `max`; unset keeps the CLI default |
 | `systemPrompt`   | Optional text appended to Claude Code's own system prompt                       |
-| `allowedTools`   | Bare tool names the model can see and run; default `[]` (no tools)              |
+| `allowedTools`   | Bare built-in tool names; default `[]` (no built-in tools)                      |
+| `mcpServers`     | Optional trusted HTTP and stdio MCP servers; default absent                     |
 | `settingSources` | `project` and/or `local`; default `[]` (no settings files, no CLAUDE.md)        |
 | `maxTurns`       | Model round trips per turn, 1–500; default 50                                   |
 
-Unknown fields are refused. `bypassPermissions`, `auto`, MCP servers, plugins
-and custom environment variables are not configurable. A change to any
+Unknown fields are refused. `bypassPermissions`, `auto`, plugins and custom
+environment variables are not configurable. A change to any
 backend field selects a new session namespace, as for other backends.
 
 `baseURL` uses the same `/v1` endpoint as the OpenCode `claude-proxy`
@@ -98,9 +99,9 @@ With the defaults the model has **no tools**. Pogo always starts Claude Code
 in `dontAsk` permission mode with no permission prompts: a tool call that no
 allow rule permits is denied, never asked. Approval buttons do not exist.
 
-`allowedTools` names the only tools that the model can see (the SDK `tools`
+`allowedTools` names the only built-in tools that the model can see (the SDK `tools`
 option) and permits every call to them (the SDK `allowedTools` option). Any
-other tool does not exist for the model. Scoped rules such as
+other built-in tool is absent. Scoped rules such as
 `Read(./src/**)` or `Bash(git status:*)` are refused: Claude Code permits
 reads anywhere in its working directory whatever the scope says, so a scope
 would promise a limit that nothing enforces. There is no deny list; leave a
@@ -116,6 +117,43 @@ the agent can reach every file and command that the Pogo OS account can,
 including the real home directory. `Bash` permits every command. Use a
 separate OS account or container for an untrusted audience. Do not enable
 tools for people who should not run code as Pogo.
+
+## MCP servers
+
+For a bot that needs an existing integration, explicitly list its servers in
+`backend.mcpServers`. The configured servers are available on the first turn.
+Leave `allowedTools` empty if no built-in tools are needed.
+
+```json
+"allowedTools": [],
+"mcpServers": {
+  "linear": {
+    "type": "http",
+    "url": "https://mcp.linear.app/mcp",
+    "headersHelper": "/usr/local/bin/fleet-keys linear-headers"
+  },
+  "fleet": {
+    "type": "stdio",
+    "command": "/usr/local/lib/indra-workstation/kirk-mcp",
+    "args": ["--admiral-reply"]
+  }
+}
+```
+
+Server names use lowercase letters, digits, underscores or hyphens and start
+with a letter. HTTP URLs require HTTPS or loopback HTTP, with no credentials,
+query or fragment. An optional `headersHelper` is an absolute executable
+followed by literal arguments. Claude Code runs it to obtain a JSON object
+of headers. Use an existing credential helper and keep credentials out of
+configuration and arguments. Stdio servers start an absolute executable with
+an optional list of arguments.
+
+Configuring a server permits all the MCP tools it exposes. Use trusted
+servers for the audience authorised to use the bot. A local server or
+credential helper runs as Pogo's OS account, with its filesystem and network
+access. Neither `allowedTools: []` nor the working directory confines those
+programs. Only the explicitly configured servers are loaded from bot
+configuration.
 
 ## Settings, memory and prompts
 
@@ -238,7 +276,7 @@ default `KillMode` also stops these processes when the service stops.
 - Not available as an OpenCode crew-plugin member (`team.json` `backend`).
   Those members use OpenCode or Pi Durable. Use an IRC crew registration for
   a Claude crew member.
-- No MCP servers, plugins, sandbox settings, hooks or interactive approvals.
+- No plugins, sandbox settings, hooks or interactive approvals.
 - One Claude Code process per turn. Its start-up time adds to each turn.
 - Nightly maintenance model updates do not change `claude` backends; edit
   `model` and restart (this selects a new session namespace).

@@ -569,15 +569,25 @@ export class ClaudeBackend implements AgentBackend {
         cwd: this.config.directory,
         model: this.config.model,
         env,
-        // The same bare names select the visible tools and permit them.
+        // Built-ins and explicit MCP servers are separate permissions.
         tools: [...this.config.allowedTools],
-        allowedTools: [...this.config.allowedTools],
+        allowedTools: [
+          ...this.config.allowedTools,
+          ...Object.keys(this.config.mcpServers ?? {}).map(
+            (name) => `mcp__${name}`,
+          ),
+        ],
         permissionMode: "dontAsk",
         permissionPrompts: "none",
         settingSources: this.config.settingSources,
         // Loaded settings cannot run hooks or change the routing variables.
         settings: { env: claudeRouting(this.config), disableAllHooks: true },
-        mcpServers: {},
+        mcpServers: Object.fromEntries(
+          Object.entries(this.config.mcpServers ?? {}).map(([name, server]) => [
+            name,
+            { ...server, alwaysLoad: true },
+          ]),
+        ),
         strictMcpConfig: true,
         // Slack text is data: no @file expansion or slash-command dispatch.
         verbatimPrompts: true,
