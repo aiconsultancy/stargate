@@ -15,6 +15,7 @@ See [development](docs/development.md) for local checks and workflow details.
 ```sh
 mise install
 mise run deps
+mise run hooks-install
 mise run hooks
 ```
 

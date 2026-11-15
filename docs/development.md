@@ -23,6 +23,13 @@ hook for this clone. `hooks` runs the same repository-wide gate as CI, plus
 workflow validation, merge/case conflicts, broken symlinks, large files, private
 keys, trailing whitespace, final newlines, and TOML/YAML syntax. File hygiene
 hooks can edit files; review and stage their changes before retrying a commit.
+The pinned Gitleaks scanner also checks a temporary snapshot of every file in
+the Git index. Commits scan the staged versions, not unstaged edits. `hooks`
+and CI scan the same full index, even when there is no staged diff. Stage new
+files and edits before running this secret check manually. The scanner does
+not read Git history, untracked files, or ignored local credentials. Scanner
+output is redacted; do not add real credentials to test the hook. Keep secrets
+outside tracked files and use environment references in configuration.
 GitHub Actions runs this gate for pull requests and pushes to `main`, using
 pinned tools and frozen dependency installation. No Slack or provider credentials
 are required.

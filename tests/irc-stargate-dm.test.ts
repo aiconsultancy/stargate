@@ -303,7 +303,7 @@ test("irc stargate_dm copy: baseline, members without IRC, credentials and lengt
     id: id(3),
     from: chiefMember,
     to: captainMember,
-    text: "token: xoxb-1234-abcdef",
+    text: "token: synthetic-test-token",
   });
   link.push({
     id: id(4),
