@@ -6,6 +6,7 @@ import {
   piProxyModel,
   piProxyModels,
 } from "../pi-model";
+import { cleanupSchema } from "./cleanup-config";
 
 /** Strict `maintenance` section of pogo.json. Every component is opt-in. */
 const absolutePath = z
@@ -90,6 +91,7 @@ export const defaultAgentPackages = [
 export const maintenanceSchema = z
   .strictObject({
     enabled: z.boolean().default(false),
+    cleanup: cleanupSchema.optional(),
     /** Stable identity for jitter and reports. Default: hash of host and config path. */
     installID: z
       .string()

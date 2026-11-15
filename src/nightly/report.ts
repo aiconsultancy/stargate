@@ -1,6 +1,7 @@
 import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { cleanupResultSchema } from "./cleanup-config";
 import { type Reason, reasons } from "./exec";
 import { maintenanceDirectory } from "./paths";
 
@@ -108,6 +109,7 @@ export const reportSchema = z.strictObject({
   startedAt: iso,
   finishedAt: iso,
   components: z.array(componentSchema).max(limits.components),
+  cleanup: cleanupResultSchema.optional(),
   models: z.array(modelChangeSchema).max(limits.models),
   steps: z.array(stepSchema).max(limits.steps),
   rollbacks: z
@@ -308,6 +310,12 @@ export function summary(report: Report, reportName: string) {
   const parts = [
     `Nightly maintenance ${report.window.localStart}–${report.window.localEnd} ${report.window.timeZone}: ${report.outcome}${report.reason ? ` (${labels[report.reason]})` : ""}.`,
   ];
+  if (report.cleanup) {
+    const items = report.cleanup.items;
+    parts.push(
+      `Cleanup: ${report.cleanup.freedBytes} bytes freed; ${items.filter((item) => item.status === "removed").length} removed, ${items.filter((item) => item.status === "skipped").length} kept, ${items.filter((item) => item.status === "failed").length} failed. Per-item paths and reasons are in the private report.`,
+    );
+  }
   for (const component of changed.slice(0, 12))
     parts.push(
       line(

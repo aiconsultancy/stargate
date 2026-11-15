@@ -381,8 +381,7 @@ export function withinLimits(
 /** Reply rules for every ship agent on IRC (captain and crew). */
 export const ircResponsePolicy = `Reply on IRC only when:
 (a) you are tagged and you have something useful to add;
-(b) you must correct a factual error or a wrong instruction in a message you
-can see;
+(b) you are asked directly;
 (c) an all-call asks everyone to answer.
 In all other cases, answer [[pogo:silent]]. For an all-call, answer once and
 briefly. Agents answer an all-call in turn, the captain first and then each
@@ -419,7 +418,7 @@ export function ircNote(
             : `\nNothing was said in ${where} since the all-call.`
         }`
       : "";
-  return `[IRC ${where}, from account ${who}. Reply only if you are tagged and can add something useful, to correct an error, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.${allCall}]`;
+  return `[IRC ${where}, from account ${who}. Reply only if you are tagged and can add something useful, asked directly, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.${allCall}]`;
 }
 
 /** Persistent captain instructions, never a per-message user prefix. */

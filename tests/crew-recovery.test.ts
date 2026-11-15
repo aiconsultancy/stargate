@@ -8,6 +8,7 @@ import {
   type CrewSessions,
   type ResultConnector,
 } from "../src/crew/engine";
+import type { MesijMessage } from "../src/crew/mesij";
 import type { ResultAPI, ResultMessage } from "../src/crew/result";
 import type { CrewTask } from "../src/crew/state";
 
@@ -44,6 +45,8 @@ async function fixture() {
     ],
   ]);
   const messages: ResultMessage[] = [];
+  const mail: MesijMessage[] = [];
+  const receipts = new Map<string, MesijMessage>();
   const busy = new Set<string>();
   let prompts = 0;
   let synthetics = 0;
@@ -139,11 +142,29 @@ async function fixture() {
       async register() {
         return { id: "0".repeat(32), sequence: 0 };
       },
-      async send() {
-        return { id: "1".repeat(32), sequence: 1 };
+      async send(input) {
+        let event = receipts.get(input.key);
+        if (!event) {
+          event = {
+            actor: input.actor,
+            sessionID: input.sessionID,
+            to: input.to,
+            text: input.text,
+            ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+            id: String(mail.length + 1).repeat(32),
+            sequence: mail.length + 1,
+            type: input.replyTo ? "message.replied" : "message.posted",
+          };
+          receipts.set(input.key, event);
+          mail.push(event);
+        }
+        return { id: event.id, sequence: event.sequence };
       },
-      async inbox() {
-        return [];
+      async inbox(input) {
+        return mail.filter(
+          (event) =>
+            event.to === input.sessionID && event.sequence > (input.after ?? 0),
+        );
       },
     },
     undefined,
@@ -183,6 +204,7 @@ async function fixture() {
     captain,
     sessions,
     messages,
+    mail,
     busy,
     dispatch,
     finish,
@@ -284,7 +306,201 @@ for (const op of ["status", "wait"] as const) {
       await f.close();
     }
   });
+
+  test(`${op} collects the exact ended turn after a late DM, without replay or native notification`, async () => {
+    const f = await fixture();
+    try {
+      const task = await f.dispatch();
+      f.finish(task);
+      const final = f.messages.at(-1);
+      const input = { op: "send", to: "worker", text: "Any update?" };
+      for (let retry = 0; retry < 2; retry++)
+        expect(await f.engine.dm(input, f.captain)).toMatchObject({
+          stored: true,
+          notification: "inbox",
+        });
+      expect(f.mail).toHaveLength(1);
+      expect(f.counts().synthetics).toBe(0);
+      expect(f.messages.at(-1)).toBe(final);
+      // Deferral does not equate native idle with successful task completion.
+      expect(f.engine.state.task(task.id)?.status).toBe("running");
+      expect(
+        await f.engine.run({ op, taskID: task.id }, f.captain),
+      ).toMatchObject({
+        status: "completed",
+        task: { result: "Implemented and tested." },
+      });
+      expect(f.counts().prompts).toBe(1);
+      expect(
+        (
+          await f.engine.mail(
+            { op: "inbox" },
+            {
+              sessionID: task.workerSessionID,
+              agent: "worker",
+              signal: f.captain.signal,
+            },
+          )
+        ).messages,
+      ).toMatchObject([{ text: input.text }]);
+    } finally {
+      await f.close();
+    }
+  });
 }
+
+test("a worker ending during notification validation leaves DM in its inbox", async () => {
+  const f = await fixture();
+  try {
+    const task = await f.dispatch();
+    const get = f.native.get;
+    f.native.get = async (input, request) => {
+      if (input.sessionID === task.workerSessionID) f.finish(task);
+      return get(input, request);
+    };
+    expect(
+      await f.engine.dm({ op: "send", to: "worker", text: "Check" }, f.captain),
+    ).toMatchObject({ stored: true, notification: "inbox" });
+    expect(f.counts().synthetics).toBe(0);
+    expect(
+      await f.engine.run({ op: "status", taskID: task.id }, f.captain),
+    ).toMatchObject({
+      status: "completed",
+      task: { result: "Implemented and tested." },
+    });
+    expect(f.counts().prompts).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a targeted DM collected concurrently cannot become an idle-worker wake", async () => {
+  const f = await fixture();
+  try {
+    const task = await f.dispatch();
+    const notify = f.engine.notifyMail.bind(f.engine);
+    f.engine.notifyMail = async (...args) => {
+      f.finish(task);
+      expect(
+        await f.engine.run({ op: "status", taskID: task.id }, f.captain),
+      ).toMatchObject({ status: "completed" });
+      return notify(...args);
+    };
+    expect(
+      await f.engine.dm({ op: "send", to: "worker", text: "Check" }, f.captain),
+    ).toMatchObject({ stored: true, notification: "inbox" });
+    expect(f.counts().synthetics).toBe(0);
+    expect(f.engine.state.task(task.id)?.result).toBe(
+      "Implemented and tested.",
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("notification reservation prevents slot reuse while the ended turn is collected", async () => {
+  const f = await fixture();
+  try {
+    const task = await f.dispatch();
+    const wait = f.native.wait;
+    f.native.wait = async (input, request) => {
+      f.native.wait = wait;
+      f.finish(task);
+      expect(
+        await f.engine.run({ op: "status", taskID: task.id }, f.captain),
+      ).toMatchObject({ status: "completed" });
+      expect(
+        await f.engine.run(
+          { op: "dispatch", crew: "worker", text: "Next" },
+          f.captain,
+        ),
+      ).toMatchObject({ status: "busy" });
+      return wait(input, request);
+    };
+    expect(
+      await f.engine.dm({ op: "send", to: "worker", text: "Check" }, f.captain),
+    ).toMatchObject({ stored: true, notification: "inbox" });
+    expect(f.engine.state.task(task.id)).toMatchObject({
+      status: "completed",
+      notifying: 0,
+      released: 0,
+    });
+    expect(f.counts()).toMatchObject({ prompts: 1, synthetics: 0 });
+  } finally {
+    await f.close();
+  }
+});
+
+test("completion after the busy probe keeps admitted steer task-marked and never resumes it", async () => {
+  const f = await fixture();
+  try {
+    const task = await f.dispatch();
+    const synthetic = f.native.synthetic;
+    f.native.synthetic = async (input, request) => {
+      f.finish(task);
+      expect(input.resume).toBe(false);
+      expect(input.metadata).toMatchObject({ pogoCrew: { taskID: task.id } });
+      return synthetic(input, request);
+    };
+    expect(
+      await f.engine.dm({ op: "send", to: "worker", text: "Check" }, f.captain),
+    ).toMatchObject({ stored: true, notification: "accepted" });
+    expect(
+      await f.engine.run({ op: "status", taskID: task.id }, f.captain),
+    ).toMatchObject({
+      status: "completed",
+      task: { result: "Implemented and tested." },
+    });
+    expect(f.counts()).toMatchObject({ prompts: 1, synthetics: 1 });
+  } finally {
+    await f.close();
+  }
+});
+
+for (const status of ["uncertain", "cancelling"] as const) {
+  test(`notification defers if the occupied task becomes ${status} during its native probe`, async () => {
+    const f = await fixture();
+    try {
+      const task = await f.dispatch();
+      f.native.wait = async () => {
+        if (status === "uncertain") f.engine.state.uncertain(task.id);
+        else f.engine.state.beginCancel(task.id, task.originCaptainID);
+        throw new Error("Native probe did not confirm idle");
+      };
+      expect(
+        await f.engine.dm(
+          { op: "send", to: "worker", text: "Check" },
+          f.captain,
+        ),
+      ).toMatchObject({ stored: true, notification: "deferred" });
+      expect(f.counts()).toMatchObject({ prompts: 1, synthetics: 0, reads: 0 });
+      expect(f.engine.state.task(task.id)).toMatchObject({
+        status,
+        notifying: 0,
+      });
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test("ordinary mail after a final answer never requests native delivery or result recovery", async () => {
+  const f = await fixture();
+  try {
+    const task = await f.dispatch();
+    f.finish(task);
+    expect(
+      await f.engine.mail(
+        { op: "send", to: "worker", text: "Later" },
+        f.captain,
+      ),
+    ).toMatchObject({ stored: true, notification: "not_requested" });
+    expect(f.counts()).toMatchObject({ prompts: 1, synthetics: 0, reads: 0 });
+    expect(f.engine.state.task(task.id)?.status).toBe("running");
+  } finally {
+    await f.close();
+  }
+});
 
 test("dispatch recovers an uncertain slot and admits new work without replaying old input", async () => {
   const f = await fixture();
@@ -447,6 +663,7 @@ for (const failure of [
   "failed-answer",
   "unfinished",
   "later-input",
+  "later-synthetic",
   "wrong-envelope",
   "wrong-session",
   "api",
@@ -465,6 +682,13 @@ for (const failure of [
         f.messages.push({
           id: "other",
           type: "user",
+          text: "Unrelated",
+          time: { created: 4 },
+        });
+      if (failure === "later-synthetic")
+        f.messages.push({
+          id: "other",
+          type: "synthetic",
           text: "Unrelated",
           time: { created: 4 },
         });

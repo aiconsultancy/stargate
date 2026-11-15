@@ -527,6 +527,12 @@ SQLite file lock that the OS releases on exit.
 
 ## Nightly maintenance
 
+Opt-in `maintenance.cleanup` removes guarded stale scratch directories,
+merged local branches and leaked worktrees. It is disabled by default. Preview
+with `pogo maintenance cleanup --plan`; configure literal roots/repositories
+before enabling it. Apply uses the maintenance window and idle gate; reports
+record each removed or retained item. See [cleanup guards](docs/maintenance.md#opt-in-cleanup).
+
 Optional and off by default. In a configured window (default 00:00–01:00
 Europe/London, with a stable per-install jitter) `pogo maintenance run`
 updates Pogo from verified GitHub releases, CLIProxyAPI and the agent CLIs

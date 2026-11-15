@@ -247,7 +247,7 @@ test("irc routing: ship and peer senders are marked; access rechecks", () => {
     ircNote({ channel: "#galactica", user: "galactica", sender: "crew" }),
   ).toContain("[[pogo:silent]]");
   expect(ircNote({ channel: "jack", user: "jack", sender: null })).toBe(
-    "[IRC a direct message, from account jack. Reply only if you are tagged and can add something useful, to correct an error, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.]",
+    "[IRC a direct message, from account jack. Reply only if you are tagged and can add something useful, asked directly, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.]",
   );
   expect(
     sourceLine({
@@ -914,7 +914,7 @@ test("irc instructions: response policy, all-calls and crew routing via the capt
   for (const text of [ircInstructions, ircCrewInstructions]) {
     expect(text).toContain("[[pogo:silent]]");
     expect(text).toContain("tagged");
-    expect(text).toContain("correct");
+    expect(text).toContain("asked directly");
     expect(text).toContain("all-call");
     expect(text).toContain("answer once");
     expect(text).toContain("acknowledgements");

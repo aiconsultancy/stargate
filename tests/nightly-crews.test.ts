@@ -61,6 +61,28 @@ describe("crew discovery fails closed", () => {
     expect(await discoverCrews(config)).toEqual([]);
   });
 
+  test("cleanup protects permanent Pi worktrees as well as OpenCode roots", async () => {
+    const { captain, chief, profile, config } = await setup("pi-protection");
+    const pi = join(root, "pi-worker");
+    const text = profile({
+      worktrees: { chief, twiki: pi },
+      team: {
+        crew: [
+          { id: "chief" },
+          { id: "twiki", backend: { type: "pi-durable" } },
+        ],
+      },
+    });
+    await writeFile(join(captain, ".opencode", "opencode.json"), text);
+    await writeFile(join(chief, ".opencode", "opencode.json"), text);
+    const crews = await discoverCrews(config);
+    expect(crews[0]?.worktreeDirectories).toEqual([chief, pi]);
+    expect(crews[0]?.roots.map((item) => item.directory)).toEqual([
+      captain,
+      chief,
+    ]);
+  });
+
   test("unreadable profiles, broken plugin options or a missing member profile are unknown", async () => {
     const broken = await setup("broken");
     await writeFile(

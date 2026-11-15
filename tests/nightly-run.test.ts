@@ -534,6 +534,116 @@ const run = (
   );
 const commands = (prefix: string) =>
   fixture.commands.filter((command) => command.join(" ").startsWith(prefix));
+
+test("cleanup-only maintenance records results without stopping services", async () => {
+  const { config, path } = await install();
+  if (!config.maintenance) throw new Error("fixture maintenance missing");
+  config.maintenance.components = {
+    pogo: false,
+    cliproxyapi: false,
+    agentClis: false,
+    models: false,
+  };
+  config.maintenance.cleanup = {
+    enabled: true,
+    olderThanDays: 5,
+    scratchRoots: [],
+    repositories: [],
+    protectedPaths: [],
+  };
+  const result = await run(config, path);
+  expect(result.report.cleanup).toEqual({
+    items: [],
+    freedBytes: 0,
+    plannedBytes: 0,
+  });
+  expect(
+    result.report.components.find((item) => item.id === "cleanup")?.status,
+  ).toBe("unchanged");
+  expect(
+    fixture.commands.some(
+      (command) => command.includes("stop") || command.includes("restart"),
+    ),
+  ).toBe(false);
+});
+
+test("cleanup fails closed when the shared OpenCode server has activity", async () => {
+  const { config, path } = await install();
+  if (!config.maintenance) throw new Error("fixture maintenance missing");
+  config.maintenance.components = {
+    pogo: false,
+    cliproxyapi: false,
+    agentClis: false,
+    models: false,
+  };
+  config.maintenance.cleanup = {
+    enabled: true,
+    olderThanDays: 5,
+    scratchRoots: [],
+    repositories: [],
+    protectedPaths: [],
+  };
+  fixture.active = ["ses_busy"];
+  const result = await run(config, path);
+  expect(result.report.cleanup).toBeUndefined();
+  expect(
+    result.report.components.find((item) => item.id === "cleanup")?.status,
+  ).toBe("deferred");
+});
+
+test("cleanup checkpoints intent and result privately before one final notice", async () => {
+  const { config, path } = await install();
+  if (!config.maintenance) throw new Error("fixture maintenance missing");
+  config.maintenance.components = {
+    pogo: false,
+    cliproxyapi: false,
+    agentClis: false,
+    models: false,
+  };
+  config.maintenance.cleanup = {
+    enabled: true,
+    olderThanDays: 5,
+    scratchRoots: [],
+    repositories: [],
+    protectedPaths: [],
+  };
+  const result = await run(config, path, "run", {
+    cleanup: async (input) => {
+      const item = {
+        kind: "scratch" as const,
+        path: join(base, "fixture-only-intent"),
+        status: "planned" as const,
+        size: 42,
+        newestMtime: now - 864_000_000,
+        reason: "stale" as const,
+      };
+      await input.beforeItem?.(item);
+      await input.record?.(item);
+      const directory = join(config.dataDirectory, "maintenance", "reports");
+      const files = await readdir(directory);
+      const checkpoint = reportSchema.parse(
+        JSON.parse(
+          await readFile(join(directory, files[0] ?? "missing"), "utf8"),
+        ),
+      );
+      expect(checkpoint.cleanup?.items).toEqual([item]);
+      expect(
+        await readdir(
+          join(config.dataDirectory, "maintenance", "outbox"),
+        ).catch(() => []),
+      ).toEqual([]);
+      const removed = { ...item, status: "removed" as const };
+      await input.record?.(removed);
+      return { items: [removed], freedBytes: 42, plannedBytes: 0 };
+    },
+  });
+  expect(result.report.cleanup?.freedBytes).toBe(42);
+  expect(result.report.outcome).toBe("completed");
+  expect(
+    await readdir(join(config.dataDirectory, "maintenance", "outbox")),
+  ).toHaveLength(1);
+  expect(result.report.restarts).toEqual([]);
+});
 const live = async () => ({
   release: await readlink(join(fixture.dir, "pogo", "current")),
   proxy: await readlink(join(fixture.dir, "cpa-current")),

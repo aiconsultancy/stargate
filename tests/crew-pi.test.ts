@@ -498,6 +498,39 @@ test("Pi coordination is host-bound and location plugins share one native storag
   }
 });
 
+test("a Pi DM captured before completion stays inbox-only after the exact result is collected", async () => {
+  const f = await fixture();
+  try {
+    const started = f.started();
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "twiki", text: "Bound work" },
+        f.caller(),
+      )
+    ).task;
+    await started;
+    if (!task) throw new Error("Missing Pi task");
+    const notify = f.engine.notifyMail.bind(f.engine);
+    f.engine.notifyMail = async (...args) => {
+      f.turns[0]?.resolve("Exact completed Pi result");
+      expect(
+        await f.engine.run({ op: "wait", taskID: task.id }, f.caller()),
+      ).toMatchObject({ status: "completed" });
+      return notify(...args);
+    };
+    expect(
+      await f.engine.dm({ op: "send", to: "twiki", text: "Check" }, f.caller()),
+    ).toMatchObject({ stored: true, notification: "inbox" });
+    expect(f.notifications).toEqual([]);
+    expect(f.turns).toHaveLength(1);
+    expect(f.engine.state.task(task.id)?.result).toBe(
+      "Exact completed Pi result",
+    );
+  } finally {
+    await f.close();
+  }
+});
+
 test("Pi consumes the trusted member definition without creating an OpenCode profile", async () => {
   const f = await fixture();
   try {

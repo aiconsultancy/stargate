@@ -4,6 +4,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/cli";
 
+test("maintenance cleanup requires a dry-run flag and documents its scope", async () => {
+  const output = spyOn(console, "log").mockImplementation(() => {});
+  try {
+    await runCli(["maintenance", "--help"]);
+    expect(output.mock.calls.flat().join(" ")).toContain("cleanup --plan");
+    await expect(
+      runCli(["maintenance", "cleanup", "--config", "/missing/config"]),
+    ).rejects.toThrow("--plan");
+    await expect(
+      runCli([
+        "maintenance",
+        "cleanup",
+        "--plan",
+        "/unexpected",
+        "--config",
+        "/missing/config",
+      ]),
+    ).rejects.toThrow();
+  } finally {
+    output.mockRestore();
+  }
+});
+
 test("cron help documents operations and never reads config", async () => {
   const output = spyOn(console, "log").mockImplementation(() => {});
   expect(

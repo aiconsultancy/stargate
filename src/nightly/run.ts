@@ -7,6 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { type Config, pinnedSessionIDs } from "../config";
 import { isAllowedChannel } from "../routing";
+import { type CleanupResult, runCleanup } from "./cleanup";
+import { cleanupProtection } from "./cleanup-protection";
 import { defaultCronHorizonMinutes, type MaintenanceConfig } from "./config";
 import { type Crew, crewDatabase, discoverCrews } from "./crews";
 import {
@@ -117,6 +119,8 @@ export type Dependencies = {
   uuid: () => string;
   /** Tests only: false simulates a hard kill (no in-process undo). */
   undoOnExit?: boolean;
+  /** Injectable filesystem boundary for orchestration tests. */
+  cleanup?: typeof runCleanup;
 };
 export const defaultDependencies: Dependencies = {
   runner: processRunner,
@@ -711,10 +715,12 @@ export async function runMaintenance(
   const remaining = () => window.deadline - clock.now();
   const toClose = () => window.closes - clock.now();
   let attention = false;
+  let cleanup: CleanupResult | undefined;
 
   const finish = async (
     result: Report["outcome"],
     reason: Reason | undefined,
+    checkpoint = false,
   ): Promise<RunResult> => {
     const report: Report = {
       schema: reportSchemaID,
@@ -727,6 +733,7 @@ export async function runMaintenance(
       startedAt: new Date(startedAt).toISOString(),
       finishedAt: new Date(clock.now()).toISOString(),
       components: rec.components,
+      ...(cleanup ? { cleanup } : {}),
       models: rec.models,
       steps: rec.steps,
       rollbacks: rec.rollbacks,
@@ -741,6 +748,12 @@ export async function runMaintenance(
     } catch {
       attention = true;
     }
+    if (checkpoint)
+      return {
+        report: written?.report ?? report,
+        ...(written ? { reportPath: written.path } : {}),
+        attention,
+      };
     if (attention || result === "failed")
       await writeAlert(config.dataDirectory, {
         runID,
@@ -751,7 +764,9 @@ export async function runMaintenance(
         journal: (await Journal.read(config)).kind !== "none",
       }).catch(() => {});
     const notify = m.report;
-    const needsLook = rec.components.some((c) => c.reason !== undefined);
+    const needsLook =
+      rec.components.some((c) => c.reason !== undefined) ||
+      Boolean(cleanup?.items.length);
     if (written && notify && (result !== "no-op" || needsLook)) {
       const bot = config.bots.find((b) => b.id === notify.bot);
       if (bot && isAllowedChannel(bot, notify.channel))
@@ -838,6 +853,91 @@ export async function runMaintenance(
         if (!leftover.ok) {
           attention = true;
           return await finish("failed", "recovery-required");
+        }
+      }
+    }
+
+    if (m.cleanup?.enabled) {
+      if (crewsUnknown) {
+        rec.component({
+          id: "cleanup",
+          before: null,
+          after: null,
+          candidate: null,
+          status: "deferred",
+          reason: "idle-unknown",
+        });
+      } else {
+        const idle =
+          mode === "plan"
+            ? ({ idle: true } as const)
+            : await waitForIdle(
+                idleInput(),
+                window.deadline,
+                m.idle.pollSeconds * 1000,
+                clock,
+              );
+        if (!idle.idle) {
+          rec.component({
+            id: "cleanup",
+            before: null,
+            after: null,
+            candidate: null,
+            status: "deferred",
+            reason: idle.reason,
+          });
+        } else {
+          cleanup = { items: [], freedBytes: 0, plannedBytes: 0 };
+          cleanup = await (deps.cleanup ?? runCleanup)({
+            settings: m.cleanup,
+            plan: mode === "plan",
+            runner: deps.runner,
+            now: clock.now(),
+            signal,
+            ...(mode === "run" ? { deadline: window.deadline } : {}),
+            protectedPaths: cleanupProtection(config, input.configPath, crews),
+            beforeItem: async () => {
+              if (remaining() <= 0) throw new Defer("deadline");
+              const idle = await checkIdle({
+                ...idleInput(),
+                now: clock.now(),
+              });
+              if (!idle.idle) throw new Defer(idle.reason);
+            },
+            record: async (item) => {
+              if (mode === "plan" || !cleanup) return;
+              const index = cleanup.items.findIndex(
+                (entry) =>
+                  entry.kind === item.kind &&
+                  entry.path === item.path &&
+                  entry.branch === item.branch,
+              );
+              if (index < 0) cleanup.items.push(item);
+              else cleanup.items[index] = item;
+              cleanup.freedBytes = cleanup.items
+                .filter((entry) => entry.status === "removed")
+                .reduce((sum, entry) => sum + entry.size, 0);
+              const checkpoint = await finish("partial", undefined, true);
+              if (!checkpoint.reportPath || checkpoint.attention)
+                throw new Error("Cleanup audit unavailable");
+            },
+          });
+          const failed = cleanup.items.some((item) => item.status === "failed");
+          rec.component({
+            id: "cleanup",
+            before: null,
+            after: null,
+            candidate: null,
+            status: failed
+              ? "failed"
+              : cleanup.items.some((item) => item.status === "removed")
+                ? "updated"
+                : mode === "plan" &&
+                    cleanup.items.some((item) => item.status === "planned")
+                  ? "planned"
+                  : "unchanged",
+            ...(failed ? { reason: "command-failed" as const } : {}),
+          });
         }
       }
     }

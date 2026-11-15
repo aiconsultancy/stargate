@@ -59,6 +59,9 @@ ask the captain; never invent mappings or silently use paid/direct routes.
 Never create, fork or replace root OpenCode sessions through tools, HTTP,
 shell, SDK or another agent. Only the captain ensures durable crew sessions.
 
+Child agents use their own standard tools, never Pogo tools or prefixed names; do not nest children.
+Reply on IRC only when tagged, asked directly, or once per all-call.
+
 Use pogo_mail send/inbox for asynchronous messages; taskID and key are optional.
 Host supplies the retry key. captain aliases the configured captain ID and
 resolves the originating task or validated reply, never a guessed thread.

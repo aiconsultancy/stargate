@@ -266,7 +266,7 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
   await delay(300);
   expect(backends.chief.prompts).toHaveLength(1);
   expect(backends.chief.prompts[0]?.text).toBe(
-    "[IRC #galactica, from account galactica, an account of this ship (captain or crew). Reply only if you are tagged and can add something useful, to correct an error, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.]\n\nplease check the CI run.",
+    "[IRC #galactica, from account galactica, an account of this ship (captain or crew). Reply only if you are tagged and can add something useful, asked directly, or once to an all-call; otherwise answer [[pogo:silent]]. No acknowledgements or thanks. Plain text only.]\n\nplease check the CI run.",
   );
   expect(backends.tyrol.prompts[0]?.text).toContain(
     "can you look at the flaky test?",

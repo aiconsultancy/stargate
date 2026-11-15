@@ -455,6 +455,14 @@ Coding-enabled Pi crew share these handlers; tools-none crew remain tools-off.
 Mail and journal notes never wake agents. Explicit DM can wake the originating
 captain and free colleagues; another captain's busy work receives stored mail
 without steering. No final answer substitutes for a correlated peer reply.
+When an assigned worker has become idle, a late DM stays in its durable inbox
+without appending native input. This leaves the exact retained task answer
+recoverable through `status` or `wait`. Idle is not proof of success: those
+operations still verify the original task turn. Active workers retain DM steer;
+an occupied task does not become a free-worker wake if collection races delivery.
+Child agents use their own standard tools, never Pogo tools or prefixed names,
+and do not start children. Crew reply on IRC only when tagged, asked directly,
+or once per all-call.
 New tools reuse existing permission actions (`pogo_journal`: `pogo_crew`,
 `pogo_dm`: `pogo_mail`), without replacing stored session permissions.
 

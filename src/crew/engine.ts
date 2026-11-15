@@ -758,6 +758,15 @@ export class CrewEngine {
           : this.mailTask(caller)?.originCaptainID;
     if (busy && !this.sameCaptain(senderCaptainID, route.captainID))
       return "deferred";
+    // A DM captured for an occupied task must not turn into a free-worker
+    // wake if status/wait collected it while Mesij was storing the message.
+    // sourceTaskID belongs to the sender, not this worker's assignment.
+    if (
+      peer &&
+      route.targetTaskID &&
+      (route.targetTaskID !== task?.id || task.status === "completed")
+    )
+      return "inbox";
     if (busy && delivery === "queue" && !this.member(busy.crewID).backend)
       return "unsupported";
     const framing = `Pogo DM ${route.id} from ${caller.agent}.\n${text}\n\nReply through pogo_mail or pogo_dm with replyTo=${route.id}; a final answer is not a peer reply.${busy ? ` Your final answer remains task ${busy.id}'s result; restate it if you had already finished.` : ""}`;
@@ -777,6 +786,25 @@ export class CrewEngine {
         control = this.state.reserveControl(peer.crewID);
         if (!(await this.idle(peer, caller.signal))) return "deferred";
       }
+      if (peer && !this.member(peer.crewID).backend)
+        this.validPeer(
+          await this.sessions.get(
+            { sessionID: peer.sessionID },
+            { signal: caller.signal },
+          ),
+          peer,
+        );
+      if (peer && busy) {
+        // Do not append input after an ended, uncollected task turn. Leave
+        // mail durable; status/wait owns canonical retained-answer recovery.
+        // Idle alone is not evidence of a successful task result.
+        if (await this.idle(peer, caller.signal)) return "inbox";
+        caller.signal.throwIfAborted();
+        const current = this.state.task(busy.id);
+        if (current?.status === "completed") return "inbox";
+        if (!current || !["running", "dispatching"].includes(current.status))
+          return "deferred";
+      }
       if (peer && this.member(peer.crewID).backend) {
         return await this.pi.notify(
           this.member(peer.crewID),
@@ -788,14 +816,6 @@ export class CrewEngine {
           caller.signal,
         );
       }
-      if (peer)
-        this.validPeer(
-          await this.sessions.get(
-            { sessionID: peer.sessionID },
-            { signal: caller.signal },
-          ),
-          peer,
-        );
       await this.sessions.synthetic(
         {
           sessionID: route.recipient,

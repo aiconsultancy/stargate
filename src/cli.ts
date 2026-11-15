@@ -164,59 +164,71 @@ export type CliResult =
   | { command: "exit" };
 
 function parseCli(args: string[]) {
+  const options = {
+    help: { type: "boolean", short: "h" },
+    config: { type: "string" },
+    bot: { type: "string" },
+    input: { type: "string" },
+    name: { type: "string" },
+    json: { type: "boolean" },
+    "schema-only": { type: "boolean" },
+    id: { type: "string" },
+    "app-id": { type: "string" },
+    "app-token-env": { type: "string" },
+    "bot-token-env": { type: "string" },
+    "allowed-users": { type: "string" },
+    "allowed-channels": { type: "string" },
+    "denied-users": { type: "string" },
+    "denied-channels": { type: "string" },
+    backend: { type: "string" },
+    directory: { type: "string" },
+    url: { type: "string" },
+    provider: { type: "string" },
+    model: { type: "string" },
+    agent: { type: "string" },
+    "session-id": { type: "string" },
+    "mention-only": { type: "boolean" },
+    plan: { type: "string" },
+    apply: { type: "boolean" },
+    journal: { type: "string" },
+    "record-app": { type: "string" },
+    project: { type: "string" },
+    worktrees: { type: "string" },
+    team: { type: "string" },
+    base: { type: "string" },
+    "mesij-command": { type: "string" },
+    "proxy-url": { type: "string" },
+    "proxy-key-file": { type: "string" },
+    "cron-config": { type: "string" },
+    "cron-bot": { type: "string" },
+    "maintenance-config": { type: "string" },
+    release: { type: "string" },
+    version: { type: "string" },
+    print: { type: "boolean" },
+    "outside-window": { type: "boolean" },
+    "after-run": { type: "boolean" },
+    "accept-current": { type: "string" },
+    yes: { type: "boolean" },
+  } as const;
+  const input = { args, allowPositionals: true, strict: true } as const;
   try {
-    return parseArgs({
-      args,
-      allowPositionals: true,
-      strict: true,
-      options: {
-        help: { type: "boolean", short: "h" },
-        config: { type: "string" },
-        bot: { type: "string" },
-        input: { type: "string" },
-        name: { type: "string" },
-        json: { type: "boolean" },
-        "schema-only": { type: "boolean" },
-        id: { type: "string" },
-        "app-id": { type: "string" },
-        "app-token-env": { type: "string" },
-        "bot-token-env": { type: "string" },
-        "allowed-users": { type: "string" },
-        "allowed-channels": { type: "string" },
-        "denied-users": { type: "string" },
-        "denied-channels": { type: "string" },
-        backend: { type: "string" },
-        directory: { type: "string" },
-        url: { type: "string" },
-        provider: { type: "string" },
-        model: { type: "string" },
-        agent: { type: "string" },
-        "session-id": { type: "string" },
-        "mention-only": { type: "boolean" },
-        plan: { type: "string" },
-        apply: { type: "boolean" },
-        journal: { type: "string" },
-        "record-app": { type: "string" },
-        project: { type: "string" },
-        worktrees: { type: "string" },
-        team: { type: "string" },
-        base: { type: "string" },
-        "mesij-command": { type: "string" },
-        "proxy-url": { type: "string" },
-        "proxy-key-file": { type: "string" },
-        "cron-config": { type: "string" },
-        "cron-bot": { type: "string" },
-        "maintenance-config": { type: "string" },
-        release: { type: "string" },
-        version: { type: "string" },
-        print: { type: "boolean" },
-        "outside-window": { type: "boolean" },
-        "after-run": { type: "boolean" },
-        "accept-current": { type: "string" },
-        yes: { type: "boolean" },
-      },
-    });
+    return parseArgs({ ...input, options });
   } catch {
+    // Provisioning uses --plan PATH; cleanup alone has the boolean --plan.
+    // Retry parsing only for that exact command, including global options.
+    try {
+      const parsed = parseArgs({
+        ...input,
+        options: { ...options, plan: { type: "boolean" } },
+      });
+      if (
+        parsed.positionals[0] === "maintenance" &&
+        parsed.positionals[1] === "cleanup"
+      )
+        return parsed;
+    } catch {
+      /* Fall through to the fixed, credential-safe error. */
+    }
     throw new Error(
       "Invalid CLI arguments. Use --help. Secret values must never be passed as arguments.",
     );
@@ -277,6 +289,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
           : command === "maintenance"
             ? [
                 "json",
+                ...(p[1] === "cleanup" ? ["plan"] : []),
                 "name",
                 "print",
                 "release",
@@ -304,6 +317,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
     if (p.length !== 2) throw new Error("Use maintenance --help.");
     const code = await maintenanceCli(p[1], {
       configPath,
+      ...(v.plan === true ? { plan: true } : {}),
       ...(v.json ? { json: true } : {}),
       ...(v.name ? { name: v.name } : {}),
       ...(v.print ? { print: true } : {}),
@@ -401,7 +415,8 @@ export async function runCli(args: string[]): Promise<CliResult> {
     });
     console.log(JSON.stringify(result, null, 2));
   } else if (command === "bot" && p[1] === "provision" && p.length === 2) {
-    if (!v.plan) throw new Error("--plan is required.");
+    if (typeof v.plan !== "string" || !v.plan)
+      throw new Error("--plan PATH is required.");
     const result = await provisionBots({
       planPath: resolve(v.plan),
       apply: v.apply ?? false,

@@ -16,6 +16,64 @@ automatic rollback.
 
 Maintenance is off by default. Every component is also off by default.
 
+## Opt-in cleanup
+
+`maintenance.cleanup` is independent of the update components. It defaults to
+disabled, with a five-day age threshold and no roots or repositories. Example:
+
+```json
+"cleanup": {
+  "enabled": true,
+  "olderThanDays": 5,
+  "scratchRoots": ["/tmp/opencode"],
+  "repositories": ["/srv/project"],
+  "protectedPaths": ["/srv/permanent-worker"]
+}
+```
+
+Run `pogo maintenance cleanup --plan --config /srv/pogo/pogo.json` to inspect
+the configured cleanup without writes, fetches, pruning or service changes.
+Cleanup must be enabled to select candidates. Apply runs only through
+`pogo maintenance run`, within its maintenance window and shared idle gate.
+Cleanup itself does not stop or restart services. It runs after interrupted
+update recovery and before preparing this run's updates. The idle gate is
+checked again before each deletion. Unlike updates, deletion has no automatic
+rollback: only the guarded, explicitly configured paths are eligible.
+
+- Scratch: only directly listed child directories older than the threshold.
+  The newest nested mtime determines age. Symlinks, special files, credentials,
+  service state, unknown metadata or active use retain the directory. Git
+  repositories also require a clean tree and remote evidence for every local
+  branch and HEAD. Scratch checks use existing remote-tracking refs offline.
+- Branches: fetch/prune `origin` in each configured repository, then require
+  ancestry in `origin/main`. Never delete `main`, `master`, a checked-out branch
+  or a branch absent from `origin/main`. Use only `git branch -d`; refusal is
+  reported, not overridden with `-D`. Each item records its branch and tip SHA.
+- Worktrees: only stale, clean, unlocked, unused worktrees with remote evidence
+  for their commits. Removal never uses `--force`, then metadata is pruned.
+  Primary checkouts, configured backend directories and permanent crew paths
+  (including Pi workers) are always retained. Add any other permanent paths to
+  `protectedPaths`.
+
+Scratch roots themselves, `slack-share`, `avondale-fixtures`, inspection files
+less than seven days old and relay JSON files written today are retained.
+Open files and process working directories are checked through Linux `/proc`;
+an unavailable or inaccessible use check fails closed. Runtime/configuration
+roots and known credential/state directories are protected automatically.
+Scanning, commands, report items and execution time are bounded. Unknown or
+over-limit results retain the item. Filesystem/process checks cannot provide
+an atomic lock against unrelated processes; do not configure shared writable
+scratch roots for automatic deletion.
+
+The private maintenance report has an optional `cleanup` object with bounded
+per-item `kind`, `path`, `status`, `reason`, `size`, `newestMtime`, and optional
+`branch`/`tip`, plus `freedBytes` and `plannedBytes`. A private report checkpoint
+is awaited before each deletion and after its result. An audit write failure
+stops further deletion. A `planned` entry in an interrupted apply records intent,
+not proof of removal; inspect that exact path before acting. Final Slack
+summaries include totals; full paths and kept-item reasons stay in the private
+report. No live cleanup or configuration change follows from installing Pogo.
+
 ## Configuration
 
 Add a top-level `maintenance` section to `pogo.json`. The schema is strict;

@@ -22,6 +22,8 @@ export type Crew = {
   captainDirectory: string;
   stateDirectory: string;
   roots: CrewRoot[];
+  /** Every permanent worker directory, including Pi workers without a plugin. */
+  worktreeDirectories?: string[];
   /** Pi crew IDs; their task state lives under `<state>/pi/<sha256(id)>`. */
   piMembers: string[];
   /** The pinned captain session: the plugin's own pin, else the bot's. */
@@ -147,6 +149,7 @@ export async function discoverCrews(config: Config): Promise<Crew[]> {
       captainDirectory: captain.options.captainDirectory,
       stateDirectory: captain.options.stateDirectory,
       roots,
+      worktreeDirectories: Object.values(captain.options.worktrees),
       piMembers: [...pi],
       ...(pin ? { captainSessionID: pin } : {}),
     });

@@ -3,7 +3,10 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { type Config, loadConfig } from "../config";
+import { runCleanup } from "./cleanup";
+import { cleanupProtection } from "./cleanup-protection";
 import type { MaintenanceConfig } from "./config";
+import { discoverCrews } from "./crews";
 import { runDroid } from "./droid";
 import { processRunner } from "./exec";
 import { nightlyInstructions } from "./instructions";
@@ -24,6 +27,8 @@ export const maintenanceHelp = `Usage: pogo maintenance <command> [--config PATH
 Commands:
   plan            Read-only dry run: print what tonight's run would change
                   (--json prints the full report). No probes, no writes.
+  cleanup --plan  Read-only cleanup dry run; list guarded scratch, branch and
+                  worktree candidates. Changes run only through maintenance run.
   run             Apply changes inside the configured window, idle-gated, with
                   health checks and automatic rollback. Writes a private
                   report and queues one Slack summary. Exit 1 and
@@ -152,6 +157,7 @@ export async function maintenanceCli(
   options: {
     configPath: string;
     json?: boolean;
+    plan?: boolean;
     name?: string;
     print?: boolean;
     release?: string;
@@ -162,6 +168,12 @@ export async function maintenanceCli(
     yes?: boolean;
   },
 ) {
+  if (operation === "cleanup" && !options.plan)
+    throw new Error(
+      "Use maintenance cleanup --plan; cleanup applies only through maintenance run.",
+    );
+  if (options.plan && operation !== "cleanup")
+    throw new Error("--plan applies only to cleanup.");
   if (
     (options.acceptCurrent !== undefined || options.yes) &&
     (operation !== "recover" ||
@@ -178,6 +190,22 @@ export async function maintenanceCli(
   const { loadEnvironment } = await import("../runtime");
   await loadEnvironment(options.configPath);
   const config = await loadConfig(options.configPath);
+  if (operation === "cleanup") {
+    const settings = config.maintenance?.cleanup;
+    if (!settings)
+      throw new Error("Configure maintenance.cleanup before planning cleanup.");
+    const crews = await discoverCrews(config);
+    const result = await runCleanup({
+      settings,
+      plan: true,
+      runner: processRunner,
+      now: Date.now(),
+      signal: AbortSignal.timeout(120_000),
+      protectedPaths: cleanupProtection(config, options.configPath, crews),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return result.items.some((item) => item.status === "failed") ? 1 : 0;
+  }
   if (operation === "recover") {
     const result =
       options.acceptCurrent !== undefined
