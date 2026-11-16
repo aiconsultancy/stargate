@@ -26,6 +26,8 @@ type Client = {
 export type FakeIrcOptions = {
   caps?: string[];
   accounts?: Record<string, string>;
+  /** Server-authenticated bot tags, never client-supplied account labels. */
+  botAccounts?: readonly string[];
   inviteOnly?: string[];
   taken?: string[];
   /** Extra ISUPPORT tokens, for example `soju.im/FILEHOST=…`. */
@@ -356,6 +358,10 @@ export class FakeIrcServer {
           formatMessage(message.command, [...message.params], {
             ...(withLabel && label !== undefined ? { label } : {}),
             ...Object.fromEntries(tags),
+            ...(client.account &&
+            this.options.botAccounts?.includes(client.account)
+              ? { bot: "" }
+              : {}),
             time: new Date().toISOString(),
             msgid: id,
             ...(client.account ? { account: client.account } : {}),
@@ -516,6 +522,10 @@ export class FakeIrcServer {
         {
           ...(withLabel && label !== undefined ? { label } : {}),
           ...clientTags,
+          ...(client.account &&
+          this.options.botAccounts?.includes(client.account)
+            ? { bot: "" }
+            : {}),
           time: new Date().toISOString(),
           msgid: id,
           ...(client.account ? { account: client.account } : {}),

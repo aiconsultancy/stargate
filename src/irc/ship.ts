@@ -1,7 +1,11 @@
+import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { type BackendConfig, type IrcConfig, secret } from "../config";
 import { type OutboxPage, outboxMaxAgeMs } from "../crew/irc-rpc";
+import type { FleetSource } from "../fleet/protocol";
+import { fleetAuthority, fleetInstructions } from "../fleet-policy";
+import { fleetSourceReference } from "../fleet-source";
 import type { GatewayConfig, GatewayTransport } from "../gateway";
 import { backendFingerprint, type Identity } from "../routing";
 import type { Store } from "../store";
@@ -28,6 +32,7 @@ import {
   type IrcMember,
   ircAllowed,
   ircNote,
+  ircResultJobAllowed,
   routeIrcMessage,
   routeIrcStop,
   shipAccounts,
@@ -246,16 +251,30 @@ const sinceChars = 300;
 function shipTransport(
   config: IrcConfig,
   member: IrcMember,
-  client: Pick<IrcClient, "fold" | "inChannel" | "isChannel">,
+  client: Pick<IrcClient, "fold" | "inChannel" | "isChannel" | "nick">,
   said: (channel: string, after: number, except: string) => string[] = () => [],
   sessionReady?: GatewayTransport["sessionReady"],
 ): GatewayTransport {
   return {
     ...(sessionReady ? { sessionReady } : {}),
     name: "irc",
+    ...(config.fleetPolicy
+      ? {
+          instructions: () =>
+            config.fleetPolicy ? fleetInstructions(config.fleetPolicy) : "",
+        }
+      : {}),
     key: member.key,
-    allowed: (user, channel) =>
+    allowed: (user, channel, job) =>
       ircAllowed(config, member, user, channel, client.fold) &&
+      ircResultJobAllowed(
+        config,
+        member,
+        client.nick,
+        user,
+        job,
+        client.fold,
+      ) &&
       (config.access.channelRequests !== "nick-mention" ||
         !client.isChannel(channel) ||
         client.inChannel(channel)),
@@ -268,6 +287,19 @@ function shipTransport(
         ? { replyParent: job.replyParent }
         : {}),
       user: job.user,
+      ...(config.fleetControl
+        ? {
+            reference: fleetSourceReference(
+              "irc",
+              member.key,
+              job.channel,
+              job.eventId.slice(job.channel.length + 1),
+            ),
+          }
+        : {}),
+      ...(config.fleetPolicy
+        ? { authority: fleetAuthority(config.fleetPolicy, job.user) }
+        : {}),
       ...(job.sender ? { sender: job.sender } : {}),
     }),
     note: (job) =>
@@ -305,6 +337,20 @@ type Built = { registration: IrcRegistration; lifetime: Lifetime };
  * join/invite path. Grants must stay captain-owned and auditable.
  */
 export class IrcShip {
+  sourceRecorder: ((source: FleetSource) => void) | undefined;
+  assignmentPrompt: ((dispatchID: string) => string | undefined) | undefined;
+  assignmentRecorder:
+    | ((
+        input: {
+          sender: string;
+          channel: string;
+          text: string;
+          botKey: string;
+          eventId: string;
+        },
+        fold: (value: string) => string,
+      ) => string | undefined)
+    | undefined;
   private current: IrcRegistration[] = [];
   private readonly lifetimes = new Map<IrcRegistration, Lifetime>();
   private readonly controller = new AbortController();
@@ -366,7 +412,7 @@ export class IrcShip {
     options: ShipOptions = {},
   ) {
     const ca = config.server.caFile
-      ? await Bun.file(config.server.caFile).text()
+      ? await readFile(config.server.caFile, "utf8")
       : undefined;
     const certificate = config.clientPemFile
       ? await clientPem(config.clientPemFile)
@@ -793,9 +839,75 @@ export class IrcShip {
       this.advance(member, client, message);
       return;
     }
+    let dispatchID: string | undefined;
+    let privateReview: string | undefined;
+    try {
+      dispatchID = this.assignmentRecorder?.(
+        {
+          sender: admission.user,
+          channel: admission.channel,
+          text: message.params[1] ?? admission.text,
+          botKey: member.key,
+          eventId: admission.eventId,
+        },
+        client.fold,
+      );
+      if (dispatchID) privateReview = this.assignmentPrompt?.(dispatchID);
+    } catch {
+      this.log.warn(
+        "Fleet assignment correlation refused; IRC request not admitted",
+      );
+      this.advance(member, client, message);
+      return;
+    }
+    if (
+      this.config.fleetControl?.results &&
+      this.config.fleetPolicy &&
+      fleetAuthority(this.config.fleetPolicy, admission.user) === "agent" &&
+      !dispatchID
+    ) {
+      this.advance(member, client, message);
+      return;
+    }
+    if (this.sourceRecorder && this.config.fleetPolicy) {
+      try {
+        const messageID = admission.eventId.slice(admission.channel.length + 1);
+        this.sourceRecorder({
+          reference: fleetSourceReference(
+            "irc",
+            member.key,
+            admission.channel,
+            messageID,
+          ),
+          transport: "irc",
+          account: admission.user,
+          authority: fleetAuthority(this.config.fleetPolicy, admission.user),
+          text: message.params[1] ?? admission.text,
+          channel: admission.channel,
+          messageID,
+          origin: { botKey: member.key, eventId: admission.eventId },
+          receivedAt: new Date(
+            Number.isFinite(Date.parse(time ?? ""))
+              ? Date.parse(time ?? "")
+              : admission.received,
+          ).toISOString(),
+        });
+      } catch {
+        this.log.warn(
+          "Fleet source persistence failed; IRC request not admitted",
+        );
+        return;
+      }
+    }
     this.store.enqueue({
       ...admission,
+      ...(privateReview
+        ? { text: `${admission.text}\n\n${privateReview}` }
+        : {}),
       ...this.stagger(member, client, admission),
+      ...(dispatchID
+        ? { fleet: { kind: "assignment" as const, dispatchID } }
+        : {}),
     });
     this.advance(member, client, message);
     // Accepted: tell the server's read marker (channel, or the partner).

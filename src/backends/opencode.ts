@@ -1,5 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 import {
+  isAgentNotFoundError,
   isSessionNotFoundError,
   OpenCode,
   type SessionMessageInfo,
@@ -21,6 +23,12 @@ import {
 import { type BackendConfig, secret } from "../config";
 import { CrewReporting } from "../crew/report-rpc";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
+import type {
+  FleetReviewBinding,
+  FleetReviewEvidence,
+  NativeMaker,
+} from "../fleet/protocol";
+import { reviewContextPrompt, reviewNativePrompt } from "../fleet/reviews";
 import {
   boundaryRecord,
   closesBoundaryContext,
@@ -49,7 +57,22 @@ const pinnedSessionSchema = z.object({
   fork: z.unknown().optional(),
   agent: z.string().optional(),
   location: z.object({ directory: z.string() }),
+  permissions: z
+    .array(
+      z.object({
+        action: z.string(),
+        resource: z.string(),
+        effect: z.enum(["allow", "deny", "ask"]),
+      }),
+    )
+    .optional(),
 });
+const readyAgentSchema = z.object({
+  location: z.object({ directory: z.string() }),
+  data: z.object({ id: z.string() }),
+});
+const agentReadyMs = 30_000;
+const agentReadyPollMs = 250;
 const pairingCode = z.object({
   code: z.string().regex(/^[A-Za-z0-9_-]{1,512}$/),
   expires_in: z.number().int().positive().max(86_400),
@@ -101,6 +124,342 @@ function generationFailureKind(error: {
 }
 
 export class OpenCodeBackend implements AgentBackend {
+  /** One gateway-owned attempt; IDs/nonce were persisted before this call. */
+  async startReview(
+    binding: FleetReviewBinding,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (
+      binding.reviewer.kind !== "crew" ||
+      binding.context.coordinatorSessionID !== this.sessionID
+    )
+      throw new Error("Review worker does not belong to this native root");
+    const reviewer = binding.reviewer;
+    const definition = await this.client.agent.get(
+      { agentID: reviewer.agent, location: { directory: reviewer.directory } },
+      { signal },
+    );
+    if (
+      definition.data.id !== reviewer.agent ||
+      definition.location.directory !== reviewer.directory ||
+      definition.data.mode !== "primary" ||
+      !definition.data.model ||
+      !reviewer.models.some(
+        (m) =>
+          m.provider === definition.data.model?.providerID &&
+          m.model === definition.data.model?.id &&
+          (m.variant === undefined ||
+            m.variant === definition.data.model?.variant),
+      )
+    )
+      throw new Error("Native review profile or model selector is unavailable");
+    const active = await this.client.session.active({ signal });
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+      const page = await this.client.session.list(
+        {
+          directory: reviewer.directory,
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+        },
+        { signal },
+      );
+      if (
+        page.data.some(
+          (s) => s.location.directory === reviewer.directory && active[s.id],
+        )
+      )
+        throw new Error(
+          "Configured review worker is busy; no worktree was changed",
+        );
+      for (const candidate of page.data) {
+        if (candidate.location.directory !== reviewer.directory) continue;
+        const inbox = await this.client.session.inbox.list(
+          { sessionID: candidate.id },
+          { signal },
+        );
+        if (inbox.length)
+          throw new Error("Configured review directory has queued native work");
+      }
+      const next = page.cursor.next;
+      if (!next) break;
+      if (seen.has(next) || pageNumber === 99)
+        throw new Error("Review worker ownership cannot be bounded");
+      seen.add(next);
+      cursor = next;
+    }
+    const session = await this.client.session.create(
+      {
+        id: binding.sessionID,
+        agent: reviewer.agent,
+        title: `PR review ${binding.context.repository}#${binding.context.pullRequest}`,
+        location: { directory: reviewer.directory },
+        model: definition.data.model,
+        permissions: [
+          { action: "*", resource: "*", effect: "deny" },
+          ...reviewer.permissions,
+        ],
+        metadata: {
+          stargateReview: {
+            id: binding.id,
+            nonce: binding.nonce,
+            owner: this.sessionID,
+            contextDigest: binding.context.contextDigest,
+          },
+        },
+      },
+      { signal },
+    );
+    if (
+      session.id !== binding.sessionID ||
+      session.agent !== reviewer.agent ||
+      session.location.directory !== reviewer.directory
+    )
+      throw new Error("Native review session identity changed");
+    await this.client.session.prompt(
+      {
+        sessionID: binding.sessionID,
+        id: binding.inputID,
+        text: reviewNativePrompt(binding),
+        metadata: { stargateReview: { id: binding.id, nonce: binding.nonce } },
+        delivery: "queue",
+        resume: true,
+      },
+      { signal },
+    );
+  }
+
+  /** Strict read-only evidence; never reads crew DBs, files, or inferred models. */
+  async readReview(
+    binding: FleetReviewBinding,
+    signal: AbortSignal,
+  ): Promise<FleetReviewEvidence | undefined> {
+    if (binding.context.coordinatorSessionID !== this.sessionID)
+      throw new Error("Review root mismatch");
+    const session = await this.client.session.get(
+      { sessionID: binding.sessionID },
+      { signal },
+    );
+    if (
+      session.id !== binding.sessionID ||
+      session.agent !== binding.reviewer.agent ||
+      session.location.directory !== binding.reviewer.directory
+    )
+      throw new Error("Native reviewer session identity changed");
+    if (binding.reviewer.kind === "captain") {
+      if (
+        binding.sessionID !== this.sessionID ||
+        binding.reviewer.agent !== this.config.agent ||
+        binding.reviewer.directory !== this.config.directory ||
+        session.parentID !== undefined
+      )
+        throw new Error("Review captain is not the configured root");
+    } else {
+      const marker = session.metadata?.["stargateReview"];
+      if (
+        typeof marker !== "object" ||
+        marker === null ||
+        !("id" in marker) ||
+        marker["id"] !== binding.id ||
+        !("nonce" in marker) ||
+        marker["nonce"] !== binding.nonce ||
+        !("owner" in marker) ||
+        marker["owner"] !== this.sessionID ||
+        !("contextDigest" in marker) ||
+        marker["contextDigest"] !== binding.context.contextDigest
+      )
+        throw new Error("Native worker review ownership unavailable");
+    }
+    const assistants: {
+      maker: NativeMaker;
+      completed: boolean;
+      failed: boolean;
+      finish: string | undefined;
+      text: string;
+      unsafeTools: boolean;
+    }[] = [];
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+      const page = await this.client.message.list(
+        {
+          sessionID: binding.sessionID,
+          limit: 100,
+          ...(cursor ? { cursor } : { order: "desc" as const }),
+        },
+        { signal },
+      );
+      for (const message of page.data) {
+        if (message.id === binding.inputID) {
+          if (
+            message.type !== "user" ||
+            (binding.reviewer.kind === "crew"
+              ? message.text !== reviewNativePrompt(binding)
+              : !message.text.endsWith(
+                  reviewContextPrompt(binding.context, binding.contextText),
+                ))
+          )
+            throw new Error(
+              "Native review input does not match immutable context",
+            );
+          const final = assistants[0];
+          if (!final) return;
+          if (assistants.some((m) => m.failed))
+            throw new Error("Native review failed");
+          if (assistants.some((m) => m.unsafeTools))
+            throw new Error(
+              "Native review used a tool outside the read-only review boundary",
+            );
+          if (assistants.some((m) => !m.completed)) return;
+          if (final.finish !== "stop")
+            throw new Error("Native review did not finish successfully");
+          const resultText = final.text;
+          if (
+            !resultText.trim() ||
+            Buffer.byteLength(resultText, "utf8") > 64000
+          )
+            throw new Error("Native review result is missing or oversized");
+          return {
+            resultText,
+            makers: assistants.reverse().map((m) => m.maker),
+          };
+        }
+        if (message.type === "assistant") {
+          if (assistants.length >= 100)
+            throw new Error("Native review maker bound exceeded");
+          assistants.push({
+            maker: {
+              messageID: message.id,
+              agent: message.agent,
+              provider: message.model.providerID,
+              model: message.model.id,
+              ...(message.model.variant
+                ? { variant: message.model.variant }
+                : {}),
+            },
+            completed: message.time.completed !== undefined,
+            failed: message.error !== undefined,
+            finish: message.finish,
+            text: message.content
+              .filter((p) => p.type === "text")
+              .map((p) => p.text)
+              .join("\n"),
+            unsafeTools: message.content.some(
+              (part) =>
+                part.type === "tool" &&
+                ![
+                  "read",
+                  "glob",
+                  "grep",
+                  "skill",
+                  "fleet_review",
+                  "fleet_verify_instruction",
+                  "fleet_status",
+                  "stargate_history",
+                ].includes(part.name),
+            ),
+          });
+        } else if (["user", "shell", "synthetic"].includes(message.type))
+          assistants.length = 0;
+      }
+      const next = page.cursor.next;
+      if (!next) return;
+      if (seen.has(next))
+        throw new Error("Native review history cursor repeated");
+      seen.add(next);
+      cursor = next;
+    }
+    throw new Error("Native review history exceeds bounds");
+  }
+
+  async toolBelongsToInput(
+    sessionID: string,
+    messageID: string,
+    inputID: string,
+    signal: AbortSignal,
+    expected?: { agent: string; id: string; tool: string; input: unknown },
+  ) {
+    if (sessionID !== this.sessionID) return false;
+    if (expected) {
+      try {
+        const message = await this.client.session.message.get(
+          { sessionID, messageID },
+          { signal },
+        );
+        signal.throwIfAborted();
+        if (
+          message.id !== messageID ||
+          message.type !== "assistant" ||
+          message.agent !== expected.agent ||
+          message.time.completed !== undefined
+        )
+          return false;
+        const tools = message.content
+          .filter((part) => part.type === "tool")
+          .filter((part) => part.id === expected.id);
+        const tool = tools[0];
+        if (
+          tools.length !== 1 ||
+          !tool ||
+          tool.name !== expected.tool ||
+          tool.state.status !== "running" ||
+          tool.time.completed !== undefined ||
+          !isDeepStrictEqual(tool.state.input, expected.input)
+        )
+          return false;
+      } catch {
+        signal.throwIfAborted();
+        return false;
+      }
+    }
+    // Native records prove liveness/correlation only. IPC authority comes from
+    // the gateway's independent, root-controlled permission rules.
+    return this.followsInput(sessionID, inputID, signal, messageID);
+  }
+  async permissionBelongsToInput(
+    sessionID: string,
+    requestID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ) {
+    if (sessionID !== this.sessionID) return false;
+    const request = await this.client.permission.get(
+      { sessionID, requestID },
+      { signal },
+    );
+    return (
+      request.sessionID === sessionID &&
+      request.id === requestID &&
+      request.source?.type === "tool" &&
+      this.followsInput(sessionID, inputID, signal, request.source.messageID)
+    );
+  }
+  async pendingPermissions(sessionID: string, signal: AbortSignal) {
+    if (sessionID !== this.sessionID)
+      throw new Error("Permission session mismatch");
+    return this.client.permission.list({ sessionID }, { signal });
+  }
+
+  async replyPermission(
+    sessionID: string,
+    requestID: string,
+    decision: "once" | "reject",
+    signal: AbortSignal,
+  ) {
+    if (sessionID !== this.sessionID)
+      throw new Error("Permission session mismatch");
+    const pending = await this.client.permission.get(
+      { sessionID, requestID },
+      { signal },
+    );
+    if (pending.id !== requestID || pending.sessionID !== sessionID)
+      throw new Error("Permission request mismatch");
+    await this.client.permission.reply(
+      { sessionID, requestID, decision },
+      { signal },
+    );
+  }
   readonly supportsAttachments = true;
   readonly history: OpenCodeHistory;
   private readonly client;
@@ -209,6 +568,7 @@ export class OpenCodeBackend implements AgentBackend {
     title,
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
+    await this.waitForConfiguredAgent(signal);
     if (this.sessionID !== undefined) {
       signal.throwIfAborted();
       try {
@@ -225,7 +585,10 @@ export class OpenCodeBackend implements AgentBackend {
           session.fork !== undefined ||
           session.location.directory !== this.config.directory ||
           (this.config.agent !== undefined &&
-            session.agent !== this.config.agent)
+            session.agent !== this.config.agent) ||
+          (this.config.enforcePermissions === true &&
+            JSON.stringify(session.permissions) !==
+              JSON.stringify(this.config.permissions))
         ) {
           throw new Error("Incompatible pinned session");
         }
@@ -247,6 +610,50 @@ export class OpenCodeBackend implements AgentBackend {
       { signal },
     );
     return session.id;
+  }
+
+  /**
+   * OpenCode 2.2.7 can expose a partial agent catalogue during plugin activation
+   * (anomalyco/opencode#63192). Opt-in fleet profiles must prove their exact
+   * agent at the requested location before creating or reusing a root. Never
+   * cache this across calls: the native engine may have restarted meanwhile.
+   */
+  private async waitForConfiguredAgent(signal: AbortSignal) {
+    const agentID = this.config.agent;
+    if (this.config.enforcePermissions !== true || agentID === undefined)
+      return;
+    const ready = AbortSignal.any([signal, AbortSignal.timeout(agentReadyMs)]);
+    try {
+      while (true) {
+        ready.throwIfAborted();
+        let result: Awaited<ReturnType<typeof this.client.agent.get>>;
+        try {
+          result = await this.client.agent.get(
+            { agentID, location: { directory: this.config.directory } },
+            { signal: ready },
+          );
+        } catch (error) {
+          ready.throwIfAborted();
+          if (!isAgentNotFoundError(error) || error.agentID !== agentID)
+            throw error;
+          await delay(agentReadyPollMs, undefined, { signal: ready });
+          continue;
+        }
+        ready.throwIfAborted();
+        const agent = readyAgentSchema.parse(result);
+        if (
+          agent.data.id !== agentID ||
+          agent.location.directory !== this.config.directory
+        )
+          throw new Error("Configured agent identity or location mismatch");
+        return;
+      }
+    } catch {
+      signal.throwIfAborted();
+      throw new Error(
+        "Configured OpenCode agent unavailable or incompatible; no session was created or reused",
+      );
+    }
   }
 
   get sessionID(): string | undefined {
@@ -541,6 +948,77 @@ export class OpenCodeBackend implements AgentBackend {
 
   async close() {
     // Attached OpenCode service belongs to its operator, not Stargate.
+  }
+
+  async executionMakers(
+    sessionID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ): Promise<NativeMaker[]> {
+    if (this.sessionID !== sessionID)
+      throw new Error("Fleet maker session is not pinned");
+    const { time } = await this.client.session.get({ sessionID }, { signal });
+    const idle =
+      time.idle !== undefined && time.idle >= (time.busy ?? 0)
+        ? time.idle
+        : undefined;
+    const messages: (InputBoundaryRecord & {
+      maker?: NativeMaker;
+      settled: boolean;
+    })[] = [];
+    let cursor: string | undefined;
+    const cursors = new Set<string>();
+    for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+      const page = await this.client.message.list(
+        cursor
+          ? { sessionID, limit: 100, cursor }
+          : { sessionID, order: "desc", limit: 100 },
+        { signal },
+      );
+      for (const message of page.data) {
+        messages.push({
+          ...boundaryRecord(message, sessionID),
+          settled:
+            message.type !== "assistant" ||
+            message.time.completed !== undefined ||
+            message.error !== undefined ||
+            (idle !== undefined && message.time.created <= idle),
+          ...(message.type === "assistant"
+            ? {
+                maker: {
+                  messageID: message.id,
+                  agent: message.agent,
+                  provider: message.model.providerID,
+                  model: message.model.id,
+                  ...(message.model.variant
+                    ? { variant: message.model.variant }
+                    : {}),
+                },
+              }
+            : {}),
+        });
+        if (message.id !== inputID) continue;
+        if (boundaryRecord(message, sessionID).input !== inputID)
+          throw new Error("Fleet native input is not a request boundary");
+        const fold = new InputBoundaryFold();
+        let owner: string | undefined;
+        const makers: NativeMaker[] = [];
+        for (const entry of messages.reverse()) {
+          owner = fold.next(entry) ?? owner;
+          if (entry.maker && owner === inputID && entry.settled)
+            makers.push(entry.maker);
+        }
+        if (!makers.length || makers.length > 100)
+          throw new Error(
+            "Native fleet maker evidence is unavailable or exceeds bounds",
+          );
+        return makers;
+      }
+      cursor = page.cursor.next ?? undefined;
+      if (!cursor || cursors.has(cursor)) break;
+      cursors.add(cursor);
+    }
+    throw new Error("Native fleet input was not found");
   }
 
   async interrupt(sessionId: string, signal: AbortSignal) {

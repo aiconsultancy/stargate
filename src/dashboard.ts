@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { chmod, lstat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Logger } from "pino";
+import { dashboardBranding, isDashboardFavicon } from "./dashboard-branding";
 import type { DashboardSource } from "./dashboard-model";
 import {
   historyChildrenInputSchema,
@@ -26,7 +27,7 @@ const headers = {
 
 function contentPolicy(html: string): string {
   const hashes = { script: new Set<string>(), style: new Set<string>() };
-  // Fail closed on asset references; CSP also blocks non-self-contained markup.
+  // Reject external assets; only exact bundled favicon data may use link href.
   if (
     /(?:https?|wss?|ftp):\/\/|(?:url\(\s*["']?|@import\s*["'])\s*\/\//i.test(
       html,
@@ -39,13 +40,29 @@ function contentPolicy(html: string): string {
     .on("*", {
       element(element) {
         const name = element.tagName;
+        const favicon =
+          name === "link" &&
+          element.getAttribute("rel") === "icon" &&
+          element.getAttribute("type") === "image/png" &&
+          element.getAttribute("sizes") === "32x32" &&
+          isDashboardFavicon(element.getAttribute("href") ?? "") &&
+          [null, "(prefers-color-scheme: dark)"].includes(
+            element.getAttribute("media"),
+          ) &&
+          [...element.attributes].every(([key]) =>
+            ["rel", "type", "sizes", "href", "media"].includes(key),
+          );
         for (const [key, value] of element.attributes) {
+          const embeddedFavicon =
+            favicon && key === "href" && isDashboardFavicon(value);
           if (
             key.startsWith("on") ||
             ((name === "script" || name === "style" || name === "link") &&
-              (key === "src" || key === "href")) ||
+              (key === "src" || key === "href") &&
+              !embeddedFavicon) ||
             (/^\s*(?:[a-z][\w+.-]*:|\/\/)/i.test(value) &&
-              !(name === "img" && key === "src" && /^data:/i.test(value)))
+              !(name === "img" && key === "src" && /^data:/i.test(value)) &&
+              !embeddedFavicon)
           ) {
             throw new Error("Dashboard HTML must be self-contained");
           }
@@ -86,7 +103,8 @@ function contentPolicy(html: string): string {
 }
 
 function createDashboard(options: Options) {
-  const policy = contentPolicy(options.html);
+  const html = dashboardBranding(options.html);
+  const policy = contentPolicy(html);
   const pending = new Set<Promise<unknown>>();
 
   async function fetch(request: Request): Promise<Response> {
@@ -133,7 +151,7 @@ function createDashboard(options: Options) {
       }
     }
     if (url.pathname === "/") {
-      return new Response(head ? null : options.html, {
+      return new Response(head ? null : html, {
         headers: {
           ...headers,
           "Content-Type": "text/html; charset=utf-8",

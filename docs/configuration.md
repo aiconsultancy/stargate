@@ -1,5 +1,10 @@
 # Configuration reference
 
+For Microsoft Teams, use the optional `teams` registrations described in
+[Teams transport](teams.md). [Fleet controls](fleet-tools.md) are separately
+opt-in. Teams registrations and fleet-control settings require a restart;
+existing Slack and IRC configurations keep their current defaults.
+
 The [Slack setup guide](setup.md) walks through the first bot. Use this reference
 to add registrations, choose a backend or change a running instance. IRC-only
 installations use the [IRC configuration](irc.md#configuration) instead of Slack

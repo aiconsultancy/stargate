@@ -315,6 +315,41 @@ with `;k=captain`, they carry no operator or Admiralty authority, and Stargate
 admits at most **5 per conversation (channel or direct message) in a
 rolling hour**. A peer list cannot contain this ship's own accounts.
 
+When the optional `fleetPolicy` is configured, strict nick-mention mode admits
+bot-tagged context only from a real SASL account present in **both**
+`fleetPolicy.agentAccounts` and `access.peerCaptains`. The ordinary account
+allowlist, denies, current nick mention, joined channel, live msgid, replay
+rejection and peer budget still apply. A direct message still needs the
+captain's current nick. Without that explicit fleet policy/peer intersection,
+strict bot rejection is unchanged. These senders remain agents, with no human
+approval or Stop authority.
+
+When `fleetControl.results: true` enables the
+[correlated fleet result outbox](fleet-tools.md), an agent message must also
+match a retained dispatch validated by the assignment recorder before it can
+start a turn. Ordinary agent replies, acknowledgements and completion claims
+do not start turns, even when they mention another agent. The gateway returns
+the correlated native outcome through the durable outbox to its original
+conversation; arbitrary IRC text cannot select that destination or declare
+completion. Queued ordinary peer jobs from an older gateway fail the normal
+access recheck before work or delivery, retaining their records.
+
+In this results mode, an explicit leading address to a known other fleet
+agent (`vance:` or `vance,`) also prevents a human message from waking this
+connection. A later mention of its name, a reply tag or an own-channel wake
+rule does not override that recipient. Fleet account names and configured
+target IDs are recognised under the server's case mapping. Human messages
+without a different fleet recipient retain their usual mention and wake
+rules. With results absent or false, peer admission and recipient matching
+keep their existing behaviour.
+
+Results-mode human jobs retain their original leading address in queued text
+so the same recipient rule applies after restart. A correctly addressed
+`discovery: vance: ...` therefore remains Discovery's request. An old queued
+row whose retained text starts with another fleet recipient fails the normal
+access check; historical rows and their original source evidence are not
+rewritten or replayed.
+
 ## Conversations
 
 | IRC             | Stargate conversation               |

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { maxAttachments } from "../attachments";
 import { defaultAllCallWords, type IrcConfig } from "../config";
+import { fleetAuthority } from "../fleet-policy";
 import { findMention } from "../mentions";
 import { peerTurnsPerHour } from "../peers";
 import type { Incoming, Job } from "../store";
@@ -104,6 +105,11 @@ export function ircAllowed(
   caseFold: Fold = rfc1459,
 ) {
   const access = config.access;
+  if (
+    config.fleetPolicy &&
+    fleetAuthority(config.fleetPolicy, account) === "context"
+  )
+    return false;
   if (listed(access.deniedAccounts, account, caseFold)) return false;
   if (
     access.allowedAccounts &&
@@ -146,6 +152,55 @@ function withoutAddress(
   return text;
 }
 
+/** In results mode, a leading fleet address selects one recipient. */
+function addressedToFleetPeer(
+  config: IrcConfig,
+  member: IrcMember,
+  currentNick: string,
+  text: string,
+  caseFold: Fold,
+) {
+  if (!config.fleetControl?.results) return false;
+  const own = new Set([member.account, member.nick, currentNick].map(caseFold));
+  const peers = [
+    ...(config.fleetPolicy?.agentAccounts ?? []),
+    ...config.fleetControl.targets.flatMap((target) => [
+      target.id,
+      target.account,
+    ]),
+  ].filter((name) => !own.has(caseFold(name)));
+  const body = text.trim();
+  return withoutAddress(body, peers, caseFold) !== body;
+}
+
+/**
+ * Recheck trusted persisted correlation, never marker text, before work
+ * and delivery. This also refuses ordinary peer jobs queued by an older
+ * results-mode gateway without deleting their records.
+ */
+export function ircResultJobAllowed(
+  config: IrcConfig,
+  member: IrcMember,
+  currentNick: string,
+  account: string,
+  job:
+    | Readonly<Pick<Incoming, "fleet"> & Partial<Pick<Incoming, "text">>>
+    | undefined,
+  caseFold: Fold = rfc1459,
+) {
+  if (!config.fleetControl?.results) return true;
+  if (!config.fleetPolicy) return false;
+  const authority = fleetAuthority(config.fleetPolicy, account);
+  if (authority === "agent")
+    return job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result";
+  return (
+    authority === "human" &&
+    (job?.fleet?.kind === "result" ||
+      job?.text === undefined ||
+      !addressedToFleetPeer(config, member, currentNick, job.text, caseFold))
+  );
+}
+
 /**
  * Admission for one received IRC message, or undefined. Identity is the
  * IRCv3 `account` tag, never the nick: a message without it is rejected.
@@ -180,15 +235,26 @@ export function routeIrcMessage(
   if (!ircAllowed(config, member, user, channel, caseFold)) return;
   const strict = config.access.channelRequests === "nick-mention";
   const tagged = message.tags.get("msgid");
+  const fleetPeer =
+    config.fleetPolicy &&
+    fleetAuthority(config.fleetPolicy, user) === "agent" &&
+    config.access.peerCaptains.some((peer) => caseFold(peer) === user);
   if (
     strict &&
-    (message.tags.has("bot") ||
+    ((message.tags.has("bot") && !fleetPeer) ||
       !validMsgid(tagged) ||
       (!direct && !context.joined?.(target)))
   )
     return;
   // A multiline message keeps its line breaks; each line is cleaned.
   const body = raw.split("\n").map(cleanText).join("\n").trim();
+  const human =
+    config.fleetPolicy && fleetAuthority(config.fleetPolicy, user) === "human";
+  if (
+    human &&
+    addressedToFleetPeer(config, member, context.currentNick, body, caseFold)
+  )
+    return;
   const nicks = strict
     ? [context.currentNick]
     : [...new Set([context.currentNick, member.nick])];
@@ -208,7 +274,10 @@ export function routeIrcMessage(
     !direct && !mentioned && !replied && words.length
       ? findMention([body], words)
       : undefined;
-  if (!direct && !mentioned && !replied && named === undefined) return;
+  const wake =
+    config.access.wakeChannels?.some((name) => caseFold(name) === channel) &&
+    validMsgid(tagged);
+  if (!direct && !mentioned && !replied && named === undefined && !wake) return;
   // An all-call stays an all-call when a mention or a reply also admits it:
   // its word is recorded, so the turn is staggered and sees the context.
   const allCall =
@@ -216,8 +285,11 @@ export function routeIrcMessage(
       ? findMention([body], config.access.allCallWords)
       : undefined;
   const mention = allCall ?? named;
-  const text = withoutAddress(body, nicks, caseFold).trim();
-  if (!text) return;
+  const content = withoutAddress(body, nicks, caseFold).trim();
+  if (!content) return;
+  // Recovery must see the same recipient as intake, including nested
+  // addresses such as `captain: vance: ...`; historical rows stay intact.
+  const text = config.fleetControl?.results && human ? body : content;
   const ship = shipAccounts(config, caseFold);
   const sender = ship.has(user)
     ? ("crew" as const)

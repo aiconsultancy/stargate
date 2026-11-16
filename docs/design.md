@@ -33,7 +33,12 @@ No shared agent implementation depends on Slack. No Slack implementation
 depends on a particular agent protocol. The gateway takes a
 `GatewayTransport` (namespace, access recheck, source line, sender note);
 Slack supplies `slackTransport`, and `src/irc/` supplies the IRC one with its
-own client, admission rules and line delivery. See [IRC transport](irc.md). Effect 4 owns lifetimes and
+own client, admission rules and line delivery. Teams uses the same durable worker
+with authenticated Bot Framework intake, stored conversation references and
+Connector delivery. See [IRC transport](irc.md) and [Teams transport](teams.md).
+Opt-in [fleet tools](fleet-tools.md) keep native session permissions, original
+message evidence and human approval separate from model text and agent rank.
+Effect 4 owns lifetimes and
 concurrency: the process scope in `runtime.ts`, the per-conversation worker
 slots in `Gateway.work`, and the crew plugin's resource scope. Pure logic,
 SQLite stores and the adapter contract stay Promise-based TypeScript with
@@ -364,6 +369,15 @@ to deliveries without a classification hook, but Slack never reparses its output
 Waiting feedback starts only if no visible text arrives before the configured
 delay. It reuses the first preview message. Visible text stops rotations, and
 completion or cancellation stops all feedback timers. See [waiting settings](waiting.md).
+
+With explicit `fleetControl.results`, the fleet ledger also owns a completion
+outbox. Authenticated IRC assignment intake claims its exact delegation and
+server event; the result worker binds the persisted native input and settled
+public outcome. The owner queues a continuation against the original ingress
+job/native input, with captain/agent source identity (`s=fleet`) and no human
+approval authority. Queue-before-ack recovery deduplicates continuations across
+restart. This is distinct from native crew tasks and from ordinary peer chat;
+see [fleet tools](fleet-tools.md) for failure and recovery semantics.
 
 ## Session transcript
 

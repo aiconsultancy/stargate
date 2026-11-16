@@ -17,6 +17,7 @@ import {
   ircCrewInstructions,
   ircInstructions,
   ircNote,
+  ircResultJobAllowed,
   routeIrcMessage,
   withinLimits,
 } from "../src/irc/routing";
@@ -1126,4 +1127,270 @@ test("irc all-call: a mention or a reply does not hide the all-call", () => {
   expect(
     route("#galactica", "galactica: status?")?.textMention,
   ).toBeUndefined();
+});
+
+test("strict fleet peer context requires BOTH enrolled agent and explicit peer; source stays non-human", async () => {
+  const fleet = {
+    role: "rear_admiral",
+    humanAccounts: ["jack"],
+    agentAccounts: ["defiant", "phoenix"],
+    assignedCheckout: "/workspace",
+    capabilities: ["read_code", "dispatch"],
+  };
+  const access = {
+    channelRequests: "nick-mention",
+    allowedAccounts: ["jack", "defiant", "phoenix", "stranger"],
+    peerCaptains: ["defiant", "stranger"],
+    peerTurnsPerHour: 1,
+  };
+  const restricted = shipConfig({ fleetPolicy: fleet, access });
+  const context = {
+    config: restricted,
+    member: captain,
+    currentNick: "galactica",
+    joined: (channel: string) => channel === "#galactica",
+    sent: () => false,
+    now: () => 0,
+    fold: (value: string) => fold(value),
+  };
+  for (const target of ["#galactica", "galactica"]) {
+    const admitted = routeIrcMessage(
+      message(target, "Galactica: verified peer context", {
+        account: "DEFIANT",
+        bot: "",
+      }),
+      context,
+    );
+    expect(admitted).toMatchObject({ user: "defiant", sender: "captain" });
+    if (!admitted) throw new Error("Expected enrolled peer");
+    expect(
+      withinLimits(admitted, restricted, {
+        shipKeys: [captain.key],
+        count: () => 1,
+      }),
+    ).toBe(false);
+  }
+  for (const candidate of [
+    message("#galactica", "galactica: spoof", { account: "stranger", bot: "" }),
+    message("#galactica", "galactica: not an explicit peer", {
+      account: "phoenix",
+      bot: "",
+    }),
+    message("#galactica", "galactica: nick is not identity", {
+      account: "*",
+      bot: "",
+    }),
+    message("#galactica", "galactica: no msgid", {
+      account: "defiant",
+      bot: "",
+      msgid: "",
+    }),
+    message("#galactica", "no current nick mention", {
+      account: "defiant",
+      bot: "",
+    }),
+    message("#unjoined", "galactica: elsewhere", {
+      account: "defiant",
+      bot: "",
+    }),
+    message("galactica-old", "direct to old nick", {
+      account: "defiant",
+      bot: "",
+    }),
+    message("#galactica", "galactica: human bot-tag is not a peer", {
+      account: "jack",
+      bot: "",
+    }),
+  ])
+    expect(routeIrcMessage(candidate, context)).toBeUndefined();
+  const denied = shipConfig({
+    fleetPolicy: fleet,
+    access: { ...access, deniedAccounts: ["defiant"] },
+  });
+  expect(
+    routeIrcMessage(
+      message("#galactica", "galactica: denied", {
+        account: "defiant",
+        bot: "",
+      }),
+      { ...context, config: denied },
+    ),
+  ).toBeUndefined();
+  const generic = shipConfig({ access });
+  expect(
+    routeIrcMessage(
+      message("#galactica", "galactica: defaults unchanged", {
+        account: "defiant",
+        bot: "",
+      }),
+      { ...context, config: generic },
+    ),
+  ).toBeUndefined();
+  const store = new Store(":memory:");
+  cleanup.push(() => store.close());
+  const ship = await IrcShip.create(
+    restricted,
+    store,
+    pino({ enabled: false }),
+    {
+      env: {
+        STARGATE_IRC_GALACTICA: "fixture-password",
+        STARGATE_IRC_GALACTICA_CHIEF: "fixture-password",
+      },
+    },
+  );
+  cleanup.push(() => ship.close());
+  const primary = ship.registrations[0];
+  if (!primary) throw new Error("Missing primary");
+  const admitted = routeIrcMessage(
+    message("#galactica", "galactica: context", {
+      account: "defiant",
+      bot: "",
+    }),
+    context,
+  );
+  if (!admitted) throw new Error("Expected peer context");
+  expect(
+    primary.transport.source({
+      ...admitted,
+      id: 1,
+      status: "queued",
+      response: null,
+      sent: 0,
+      attempts: 0,
+    }),
+  ).toMatchObject({ authority: "agent", user: "defiant", sender: "captain" });
+});
+
+test("results mode: an explicit other fleet recipient overrides later mentions, replies and own-channel wake", () => {
+  const restricted = shipConfig({
+    fleetPolicy: {
+      role: "captain",
+      humanAccounts: ["jack"],
+      agentAccounts: ["vance", "defiant"],
+      assignedCheckout: "/workspace",
+      capabilities: ["read_code", "dispatch"],
+    },
+    fleetControl: {
+      socketPath: "/tmp/irc-routing.sock",
+      statePath: "/tmp/irc-routing.sqlite",
+      results: true,
+      targets: [
+        {
+          id: "admiral",
+          account: "vance",
+          channel: "#command",
+          sessionID: "ses_vance",
+        },
+      ],
+    },
+    access: {
+      allowedAccounts: ["jack", "vance", "defiant"],
+      peerCaptains: ["vance", "defiant"],
+      wakeChannels: ["#galactica"],
+    },
+  });
+  const context = {
+    config: restricted,
+    member: captain,
+    currentNick: "galactica_",
+    sent: () => true,
+    joined: () => true,
+    now: () => 0,
+    fold: (value: string) => fold(value),
+  };
+  for (const text of [
+    "vance: ask galactica to report",
+    " VANCE, ask galactica to report ",
+    "vance:galactica status",
+    "admiral: ask galactica to report",
+    "defiant: ask galactica to report",
+    "vance: only you should wake",
+  ])
+    expect(
+      routeIrcMessage(
+        message("#galactica", text, {
+          account: "jack",
+          "+draft/reply": "own-1",
+        }),
+        context,
+      ),
+    ).toBeUndefined();
+  for (const text of [
+    "galactica_: ask vance to report",
+    "galactica: ask vance to report",
+    "vance-extra: galactica status",
+    "Please ask vance: galactica status",
+    "Ordinary human own-channel instruction",
+    "galactica: vance: this is still addressed to galactica",
+  ])
+    expect(
+      routeIrcMessage(
+        message("#galactica", text, { account: "jack" }),
+        context,
+      ),
+    ).toBeDefined();
+  const fleetControl = restricted.fleetControl;
+  if (!fleetControl) throw new Error("Missing fleet control fixture");
+  const legacy = {
+    ...restricted,
+    fleetControl: { ...fleetControl, results: false },
+  };
+  expect(
+    routeIrcMessage(
+      message("#galactica", "vance: ask galactica to report", {
+        account: "jack",
+      }),
+      { ...context, config: legacy },
+    ),
+  ).toBeDefined();
+  const strict = shipConfig({
+    ...restricted,
+    access: {
+      ...restricted.access,
+      wakeChannels: undefined,
+      channelRequests: "nick-mention",
+    },
+  });
+  expect(
+    routeIrcMessage(
+      message("#galactica", "vance: ask galactica_ to report", {
+        account: "jack",
+      }),
+      { ...context, config: strict },
+    ),
+  ).toBeUndefined();
+  // Matching the current recipient must not override the ordinary ACL.
+  expect(
+    routeIrcMessage(
+      message("#galactica", "galactica_: run", {
+        account: "stranger",
+      }),
+      context,
+    ),
+  ).toBeUndefined();
+  expect(
+    ircResultJobAllowed(restricted, captain, "galactica_", "vance", undefined),
+  ).toBe(false);
+  expect(
+    ircResultJobAllowed(restricted, captain, "galactica_", "jack", undefined),
+  ).toBe(true);
+  expect(
+    ircResultJobAllowed(legacy, captain, "galactica_", "vance", undefined),
+  ).toBe(true);
+  const nested = "galactica_: vance: this is addressed to galactica";
+  const admitted = routeIrcMessage(
+    message("#galactica", nested, { account: "jack" }),
+    context,
+  );
+  expect(admitted?.text).toBe(nested);
+  expect(
+    ircResultJobAllowed(restricted, captain, "galactica_", "jack", admitted),
+  ).toBe(true);
+  expect(
+    routeIrcMessage(message("#galactica", nested, { account: "jack" }), {
+      ...context,
+      config: legacy,
+    })?.text,
+  ).toBe("vance: this is addressed to galactica");
 });

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">Stargate</title>
+  <desc id="description">The Stargate gate mark. AI agents for Slack, Teams and IRC.</desc>
+  <rect width="1280" height="640" fill="#fff"/>
+  <image x="104" y="192" width="256" height="256" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiPjx0aXRsZT5TdGFyZ2F0ZSBkYXJrPC90aXRsZT48cmVjdCB3aWR0aD0iMTAyNCIgaGVpZ2h0PSIxMDI0IiBmaWxsPSIjZmZmIi8+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNTEyIDQ3MCkiIGZpbGw9Im5vbmUiIHN0cm9rZS13aWR0aD0iNTUiIHN0cm9rZS1saW5lY2FwPSJidXR0IiBzdHJva2UtbGluZWpvaW49Im1pdGVyIj48cGF0aCBkPSJNLTQzMCAzNTBILTE3NVYzMDMuMTA4OUEzNTAgMzUwIDAgMSAxIDE3NSAzMDMuMTA4OVYzNTBINDMwIiBzdHJva2U9IiMwMDAiLz48Y2lyY2xlIHI9IjI0NSIgc3Ryb2tlPSIjNTU1Ii8+PGNpcmNsZSByPSIxNDAiIHN0cm9rZT0iIzg4OCIvPjxjaXJjbGUgcj0iMjcuNSIgZmlsbD0iI2FhYSIgc3Ryb2tlPSJub25lIi8+PC9nPjwvc3ZnPgo="/>
+  <text x="424" y="305" font-family="Arial, Helvetica, sans-serif" font-size="76" font-weight="700" fill="#18212c">Stargate</text>
+  <text x="428" y="359" font-family="Arial, Helvetica, sans-serif" font-size="27" fill="#4c5969">AI agents for Slack, Teams and IRC</text>
+</svg>

@@ -41,6 +41,7 @@ const optionsSchema = z.strictObject({
   directory: absolute,
   projectDirectory: absolute,
   worktreeDirectory: absolute,
+  workspaceMode: z.enum(["worktree", "clone"]).default("worktree"),
   namespace: z
     .string()
     .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)
@@ -296,6 +297,20 @@ async function excludeGenerated(
 
 export async function initializeProfile(input: Options) {
   const options = parseOptions(input);
+  let cloneOrigin = options.projectDirectory;
+  if (options.workspaceMode === "clone") {
+    try {
+      cloneOrigin = git(
+        options.projectDirectory,
+        "remote",
+        "get-url",
+        "origin",
+      );
+    } catch {
+      /* A local repository need not have an upstream. */
+    }
+  }
+
   const sourceCommon = await realpath(
     resolve(
       options.projectDirectory,
@@ -371,29 +386,57 @@ export async function initializeProfile(input: Options) {
           recursive: true,
           mode: 0o700,
         });
-        git(
-          options.projectDirectory,
-          "worktree",
-          "add",
-          "-b",
-          `crew/${options.namespace}-${role}`,
-          directory,
-          base,
-        );
+        if (options.workspaceMode === "clone") {
+          git(
+            options.projectDirectory,
+            "clone",
+            "--no-hardlinks",
+            "--no-checkout",
+            "--",
+            options.projectDirectory,
+            directory,
+          );
+          git(
+            directory,
+            "checkout",
+            "-b",
+            `crew/${options.namespace}-${role}`,
+            base,
+          );
+          git(directory, "remote", "set-url", "origin", cloneOrigin);
+        } else {
+          git(
+            options.projectDirectory,
+            "worktree",
+            "add",
+            "-b",
+            `crew/${options.namespace}-${role}`,
+            directory,
+            base,
+          );
+        }
       }
       const common = await realpath(
         resolve(directory, git(directory, "rev-parse", "--git-common-dir")),
       );
       const branch = git(directory, "branch", "--show-current");
       if (
-        common !== sourceCommon ||
+        (options.workspaceMode === "clone"
+          ? common === sourceCommon ||
+            git(directory, "remote", "get-url", "origin") !== cloneOrigin
+          : common !== sourceCommon) ||
         !branch ||
         ["main", "master"].includes(branch)
       ) {
         throw new Error(
-          "Existing crew worktree must belong to this project and use a non-main feature branch.",
+          "Existing crew workspace must belong to this project and use a non-main feature branch.",
         );
       }
+      if (options.workspaceMode === "clone")
+        await excludeGenerated(
+          directory,
+          agents.map(({ id, agent }) => agent ?? id),
+        );
     }
     if (member?.backend) {
       await writeProfileFile(

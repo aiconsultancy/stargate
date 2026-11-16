@@ -25,6 +25,7 @@ import {
 import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "./config";
 import { abortable, runAbortable } from "./effect";
+import { fleetResultSource } from "./fleet/results";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
 import { textMentionNote } from "./mentions";
@@ -214,18 +215,25 @@ export type GatewayConfig =
       | "transcription"
     >;
 
+/** Immutable access context; scheduled/catch-up scopes may have no job. */
+export type GatewayAccessContext = Readonly<
+  Pick<Incoming, "user" | "channel" | "sender" | "fleet"> &
+    Partial<Pick<Incoming, "text">>
+>;
+
 /** Transport rules the gateway applies to every job of one registration. */
 export interface GatewayTransport {
   /** Session title and source label. */
-  readonly name: "slack" | "irc";
+  readonly name: "slack" | "irc" | "teams";
   /** Queue, session and outbox namespace of this registration. */
   readonly key: string;
   /** Current access rules, rechecked before work and before delivery. */
-  allowed(user: string, channel: string): boolean;
+  allowed(user: string, channel: string, job?: GatewayAccessContext): boolean;
   /** Model-visible source of a chat message; undefined for other jobs. */
   source(job: Job): PromptSourceContext["source"] | undefined;
   /** Prompt prefix naming the sender when no source line is sent. */
   note(job: Job): string | undefined;
+  instructions?(job: Job): string;
   /**
    * Best effort, before each turn of an unpinned session (IRC crew: bind
    * the session to its crew member). Never fails or blocks the turn.
@@ -319,6 +327,7 @@ export class Gateway {
         (this.turnPolicies.get(job.id) ?? this.transport).allowed(
           job.user,
           job.channel,
+          job,
         ) &&
         this.allowed(job),
       log,
@@ -365,17 +374,13 @@ export class Gateway {
     );
   }
 
-  private allowed(job: {
-    user: string;
-    channel: string;
-    sender?: string | null;
-  }) {
+  private allowed(job: GatewayAccessContext) {
     return (
       !(
         this.bot &&
         job.sender === "captain" &&
         !this.bot.access.peerCaptains
-      ) && this.transport.allowed(job.user, job.channel)
+      ) && this.transport.allowed(job.user, job.channel, job)
     );
   }
 
@@ -1028,11 +1033,8 @@ export class Gateway {
     const transcriber = this.transcriber;
     const transport = this.transport;
     // New allows never expand this turn; new denies stop its next delivery.
-    const allowed = (job: {
-      user: string;
-      channel: string;
-      sender?: string | null;
-    }) => transport.allowed(job.user, job.channel) && this.allowed(job);
+    const allowed = (job: GatewayAccessContext) =>
+      transport.allowed(job.user, job.channel, job) && this.allowed(job);
     this.active++;
     this.turnPolicies.set(held.id, transport);
     try {
@@ -1057,11 +1059,7 @@ export class Gateway {
       bot: BotConfig | undefined;
       transcriber: Transcriber | undefined;
       transport: GatewayTransport;
-      allowed: (job: {
-        user: string;
-        channel: string;
-        sender?: string | null;
-      }) => boolean;
+      allowed: (job: GatewayAccessContext) => boolean;
     },
   ) {
     const { config, bot, transcriber, transport, allowed } = snapshot;
@@ -1189,8 +1187,12 @@ export class Gateway {
           const pinned = this.backend.sessionID;
           session = pinned ? undefined : this.store.session(job.conversation);
           let text = job.text;
+          const instructions = transport.instructions?.(job);
+          if (instructions) text = `${instructions}\n\n${text}`;
           // Chat messages only. Digest runs have no thread.
-          const source = job.deferDelivery ? undefined : transport.source(job);
+          const source = job.deferDelivery
+            ? undefined
+            : (fleetResultSource(job) ?? transport.source(job));
           const sourceContext: PromptSourceContext | undefined =
             pinned && source ? { source } : undefined;
           // Without a source line, the prompt itself names a special sender.

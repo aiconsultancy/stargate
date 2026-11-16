@@ -510,6 +510,8 @@ test("a scratch root with more children than one run inspects is cleaned in batc
 
 test("every child of an oversized scratch root gets its turn, also when all of them stay", async () => {
   const wide = await fixture();
+  // Start on an even UTC day, when the first rotation window is selected.
+  const rotationStart = now - (Math.floor(now / day) % 2) * day;
   const names = Array.from(
     { length: 501 },
     (_, i) => `d${String(i).padStart(3, "0")}`,
@@ -523,7 +525,7 @@ test("every child of an oversized scratch root gets its turn, also when all of t
     const result = await cleanup(
       input([wide], {
         plan: true,
-        now: now + run * day,
+        now: rotationStart + run * day,
         inUse: async () => "in-use",
       }),
     );

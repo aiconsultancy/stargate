@@ -358,6 +358,13 @@ that ref first when current upstream code is required. Existing worktrees are
 reused only for the same Git project on a non-main branch. Local Git excludes
 keep generated overlays and persona files out of project commits.
 
+Use `--workspace-mode clone` for independent assigned checkouts instead. The
+`--worktrees` path remains the parent directory, but this mode uses `git clone
+--no-hardlinks` and creates no Git worktrees. Each clone retains its own Git
+metadata and the source repository's upstream URL. Existing clones must match
+that upstream and use a non-main feature branch. An assigned checkout is an
+operating rule; it does not prevent a process from reading other checkouts.
+
 The command refuses conflicting files; it never replaces custom instructions
 or tracked project config. If `.agents/opco` exists, it uses that canonical
 directory and requires `.opencode` to be its compatibility symlink. Otherwise
