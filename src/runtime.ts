@@ -559,6 +559,29 @@ export function serve(
                     : undefined,
                 allowDispatch:
                   irc.fleetPolicy?.capabilities.includes("dispatch") === true,
+                ...(entry.resource.backend.startReview &&
+                entry.resource.backend.readReview
+                  ? {
+                      nativeReviews: {
+                        startReview: (binding, signal) =>
+                          entry.resource.backend.startReview?.(
+                            binding,
+                            signal,
+                          ) ??
+                          Promise.reject(
+                            new Error("Review backend unavailable"),
+                          ),
+                        readReview: (binding, signal) =>
+                          entry.resource.backend.readReview?.(
+                            binding,
+                            signal,
+                          ) ??
+                          Promise.reject(
+                            new Error("Review backend unavailable"),
+                          ),
+                      },
+                    }
+                  : {}),
                 authorize: async (caller, signal, request) => {
                   const { action } = fleetRequestAction(request);
                   for (const key of [
@@ -581,7 +604,12 @@ export function serve(
                           },
                         ))
                       )
-                        return;
+                        return {
+                          botKey: job.botKey,
+                          eventId: job.eventId,
+                          sessionID: pin,
+                          inputID: job.input,
+                        };
                     }
                   }
                   throw new Error("Fleet caller is not an active native input");
@@ -618,6 +646,8 @@ export function serve(
           if (control.resultsEnabled) {
             ship.assignmentRecorder = (input, fold) =>
               control.assignment(input, fold);
+            ship.assignmentPrompt = (dispatchID) =>
+              control.reviewAssignmentPrompt(dispatchID);
             const results = new FleetResults({
               control,
               store,

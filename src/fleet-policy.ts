@@ -63,7 +63,10 @@ export type FleetRule = {
   effect: "allow" | "deny" | "ask";
 };
 /** Explicit native permissions for a newly provisioned fleet session. */
-export function fleetPermissions(policy: FleetPolicy): FleetRule[] {
+export function fleetPermissions(
+  policy: FleetPolicy,
+  options: { reviews?: boolean } = {},
+): FleetRule[] {
   const actions = new Set([
     "question",
     "skill",
@@ -77,6 +80,12 @@ export function fleetPermissions(policy: FleetPolicy): FleetRule[] {
   if (policy.capabilities.includes("dispatch"))
     for (const action of ["fleet_dispatch", "stargate_mail", "stargate_dm"])
       actions.add(action);
+  if (
+    options.reviews === true &&
+    policy.role === "captain" &&
+    policy.capabilities.includes("dispatch")
+  )
+    actions.add("fleet_review");
   if (policy.capabilities.includes("implement"))
     for (const action of [
       "shell",

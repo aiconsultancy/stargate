@@ -165,6 +165,7 @@ export class FleetResults {
       // Queue before acknowledgement: restart deduplicates the retained input.
       control.acknowledgeResult(completion.dispatchID);
     }
+    await control.pollReviews(signal);
   }
 
   async work(signal: AbortSignal) {

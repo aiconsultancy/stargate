@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -15,17 +15,34 @@ import {
   FleetError,
   type FleetOrigin,
   type FleetResultDelivery,
+  type FleetReviewAgent,
+  type FleetReviewAssignment,
+  type FleetReviewBinding,
+  type FleetReviewProof,
   type FleetSource,
   type FleetTarget,
   fleetAssignmentText,
   fleetCompletionSchema,
   fleetOriginSchema,
+  reviewBindingSchema,
+  reviewContextSchema,
+  reviewProofSchema,
   sourceSchema,
   type VerifiedSource,
 } from "./protocol";
 
 type SourceRow = { ownerSessionID: string; value: string };
 type DispatchRow = { fingerprint: string; value: string };
+type ReviewRow = {
+  binding: string;
+  state: "reserved" | "admitted" | "uncertain" | "completed";
+  proof: string | null;
+};
+export type ReviewRecord = {
+  binding: FleetReviewBinding;
+  state: ReviewRow["state"];
+  proof?: FleetReviewProof;
+};
 
 /** Gateway-only state. The engine may connect its socket, never open this DB. */
 export class FleetLedger {
@@ -99,6 +116,21 @@ export class FleetLedger {
           targetBotKey TEXT, targetEvent TEXT, targetAccount TEXT, targetInput TEXT, completion TEXT,
           acknowledged INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS fleet_review_requests (
+          id TEXT PRIMARY KEY, context TEXT NOT NULL, text TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS fleet_reviews (
+          id TEXT PRIMARY KEY, reviewID TEXT NOT NULL,
+          ownerSessionID TEXT NOT NULL, reviewerShip TEXT NOT NULL, reviewerAgent TEXT NOT NULL,
+          sessionID TEXT NOT NULL, inputID TEXT NOT NULL,
+          binding TEXT NOT NULL, state TEXT NOT NULL, proof TEXT,
+          UNIQUE(reviewID,reviewerShip,reviewerAgent), UNIQUE(sessionID,inputID)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS fleet_review_admission_slot
+          ON fleet_reviews(reviewerShip,reviewerAgent) WHERE state IN ('reserved','admitted');
+        CREATE TABLE IF NOT EXISTS fleet_review_poll_cursors (
+          ownerSessionID TEXT PRIMARY KEY, lastID TEXT NOT NULL
+        );
       `);
     } finally {
       process.umask(mask);
@@ -170,6 +202,7 @@ export class FleetLedger {
     senderAccount: string;
     text: string;
     origin?: FleetOrigin;
+    review?: FleetReviewAssignment;
   }): { created: boolean; result: DispatchResult } {
     const fingerprint = createHash("sha256")
       .update(JSON.stringify(input))
@@ -205,6 +238,42 @@ export class FleetLedger {
               }
             : {}),
         };
+        if (input.review) {
+          if (
+            !result.dispatchID ||
+            input.senderAccount.toLowerCase() ===
+              input.target.account.toLowerCase()
+          )
+            throw new FleetError(
+              "Review coordination requires another ship and a durable dispatch",
+            );
+          result.review = reviewContextSchema.parse({
+            id: result.dispatchID,
+            repository: input.review.repository,
+            pullRequest: input.review.pullRequest,
+            headSHA: input.review.headSHA,
+            baseSHA: input.review.baseSHA,
+            mergeBaseSHA: input.review.mergeBaseSHA,
+            contextDigest: createHash("sha256")
+              .update(input.review.context, "utf8")
+              .digest("hex"),
+            authorShip: input.senderAccount.toLowerCase(),
+            coordinatorShip: input.target.account.toLowerCase(),
+            coordinatorSessionID: input.target.sessionID,
+            dispatchID: result.dispatchID,
+          });
+          if (input.review.context.includes(`END_REVIEW_${result.review.id}`))
+            throw new FleetError("Ambiguous review context");
+          this.db
+            .query(
+              "INSERT INTO fleet_review_requests(id,context,text) VALUES(?,?,?)",
+            )
+            .run(
+              result.review.id,
+              JSON.stringify(result.review),
+              input.review.context,
+            );
+        }
         this.db
           .query(
             "INSERT INTO fleet_dispatches(ownerSessionID,requestID,fingerprint,value) VALUES(?,?,?,?)",
@@ -502,5 +571,273 @@ export class FleetLedger {
         "UPDATE fleet_results SET acknowledged=1 WHERE dispatchID=? AND ownerSessionID=? AND completion IS NOT NULL",
       )
       .run(dispatchID, sessionID);
+  }
+
+  private decodeReview(row: ReviewRow): ReviewRecord {
+    return {
+      binding: reviewBindingSchema.parse(JSON.parse(row.binding)),
+      state: row.state,
+      ...(row.proof
+        ? { proof: reviewProofSchema.parse(JSON.parse(row.proof)) }
+        : {}),
+    };
+  }
+
+  reviewContext(sessionID: string, ship: string, reviewID: string) {
+    const row = this.db
+      .query<{ context: string; text: string }, [string]>(
+        "SELECT context,text FROM fleet_review_requests WHERE id=?",
+      )
+      .get(reviewID);
+    if (!row) return;
+    const context = reviewContextSchema.parse(JSON.parse(row.context));
+    if (
+      context.coordinatorSessionID !== sessionID ||
+      context.coordinatorShip !== ship.toLowerCase()
+    )
+      return;
+    return { context, text: row.text };
+  }
+
+  reserveReview(input: {
+    ownerSessionID: string;
+    ship: string;
+    reviewID: string;
+    reviewer: FleetReviewAgent;
+    origin: FleetOrigin;
+    repositories: readonly string[];
+  }): { created: boolean; record: ReviewRecord } {
+    return this.db
+      .transaction(() => {
+        const request = this.db
+          .query<{ context: string; text: string }, [string]>(
+            "SELECT context,text FROM fleet_review_requests WHERE id=?",
+          )
+          .get(input.reviewID);
+        if (!request)
+          throw new FleetError("Structured review assignment unavailable");
+        const context = reviewContextSchema.parse(JSON.parse(request.context));
+        if (!input.repositories.includes(context.repository))
+          throw new FleetError("Review repository is not permitted");
+        const ship = input.ship.toLowerCase();
+        if (
+          context.coordinatorSessionID !== input.ownerSessionID ||
+          context.coordinatorShip !== ship ||
+          context.authorShip === ship ||
+          input.origin.sessionID !== input.ownerSessionID
+        )
+          throw new FleetError(
+            "Review is not assigned to this independent coordinator",
+          );
+        const intake = this.db
+          .query<
+            {
+              targetBotKey: string | null;
+              targetEvent: string | null;
+              targetInput: string | null;
+              targetAccount: string | null;
+            },
+            [string]
+          >(
+            "SELECT targetBotKey,targetEvent,targetInput,targetAccount FROM fleet_results WHERE dispatchID=?",
+          )
+          .get(context.dispatchID);
+        if (
+          !intake ||
+          intake.targetBotKey !== input.origin.botKey ||
+          intake.targetEvent !== input.origin.eventId ||
+          intake.targetAccount?.toLowerCase() !== ship ||
+          (intake.targetInput !== null &&
+            intake.targetInput !== input.origin.inputID)
+        )
+          throw new FleetError(
+            "Review must originate from its exact admitted coordinator input",
+          );
+        this.db
+          .query("UPDATE fleet_results SET targetInput=? WHERE dispatchID=?")
+          .run(input.origin.inputID, context.dispatchID);
+        const previous = this.db
+          .query<ReviewRow, [string, string, string]>(
+            "SELECT binding,state,proof FROM fleet_reviews WHERE reviewID=? AND reviewerShip=? AND reviewerAgent=?",
+          )
+          .get(input.reviewID, ship, input.reviewer.agent);
+        if (previous)
+          return { created: false, record: this.decodeReview(previous) };
+        const binding = reviewBindingSchema.parse({
+          id: `proof_${randomUUID().replaceAll("-", "")}`,
+          nonce: randomUUID().replaceAll("-", ""),
+          context,
+          contextText: request.text,
+          reviewerShip: ship,
+          reviewer: input.reviewer,
+          sessionID:
+            input.reviewer.kind === "captain"
+              ? input.ownerSessionID
+              : `ses_${randomUUID().replaceAll("-", "")}`,
+          inputID:
+            input.reviewer.kind === "captain"
+              ? input.origin.inputID
+              : `msg_${randomUUID().replaceAll("-", "")}`,
+          createdAt: new Date().toISOString(),
+        });
+        this.db
+          .query(
+            "INSERT INTO fleet_reviews(id,reviewID,ownerSessionID,reviewerShip,reviewerAgent,sessionID,inputID,binding,state) VALUES(?,?,?,?,?,?,?,?,?)",
+          )
+          .run(
+            binding.id,
+            context.id,
+            input.ownerSessionID,
+            ship,
+            input.reviewer.agent,
+            binding.sessionID,
+            binding.inputID,
+            JSON.stringify(binding),
+            "reserved",
+          );
+        return {
+          created: true,
+          record: { binding, state: "reserved" as const },
+        };
+      })
+      .immediate();
+  }
+
+  reviewState(id: string, state: "admitted" | "uncertain") {
+    this.db
+      .query("UPDATE fleet_reviews SET state=? WHERE id=? AND proof IS NULL")
+      .run(state, id);
+  }
+
+  reviewRecord(ownerSessionID: string, id: string): ReviewRecord | undefined {
+    const row = this.db
+      .query<ReviewRow, [string, string]>(
+        "SELECT binding,state,proof FROM fleet_reviews WHERE ownerSessionID=? AND id=?",
+      )
+      .get(ownerSessionID, id);
+    return row ? this.decodeReview(row) : undefined;
+  }
+
+  /** Rotate bounded read-only recovery across all work, including uncertainty. */
+  pendingReviews(ownerSessionID: string): ReviewRecord[] {
+    return this.db
+      .transaction(() => {
+        const lastID =
+          this.db
+            .query<{ lastID: string }, [string]>(
+              "SELECT lastID FROM fleet_review_poll_cursors WHERE ownerSessionID=?",
+            )
+            .get(ownerSessionID)?.lastID ?? "";
+        const after = this.db
+          .query<ReviewRow & { id: string }, [string, string]>(
+            `SELECT id,binding,state,proof FROM fleet_reviews WHERE ownerSessionID=? AND proof IS NULL
+           AND rowid>COALESCE((SELECT rowid FROM fleet_reviews WHERE id=?),0) ORDER BY rowid LIMIT 100`,
+          )
+          .all(ownerSessionID, lastID);
+        const batch =
+          after.length === 100
+            ? after
+            : after.concat(
+                this.db
+                  .query<ReviewRow & { id: string }, [string, string, number]>(
+                    `SELECT id,binding,state,proof FROM fleet_reviews WHERE ownerSessionID=? AND proof IS NULL
+           AND rowid<=COALESCE((SELECT rowid FROM fleet_reviews WHERE id=?),0) ORDER BY rowid LIMIT ?`,
+                  )
+                  .all(ownerSessionID, lastID, 100 - after.length),
+              );
+        const last = batch.at(-1);
+        if (last)
+          this.db
+            .query(
+              "INSERT INTO fleet_review_poll_cursors(ownerSessionID,lastID) VALUES(?,?) ON CONFLICT(ownerSessionID) DO UPDATE SET lastID=excluded.lastID",
+            )
+            .run(ownerSessionID, last.id);
+        return batch.map((row) => this.decodeReview(row));
+      })
+      .immediate();
+  }
+
+  completeReview(binding: FleetReviewBinding, proof: FleetReviewProof) {
+    const parsed = reviewProofSchema.parse(proof);
+    this.db
+      .transaction(() => {
+        const row = this.db
+          .query<ReviewRow, [string]>(
+            "SELECT binding,state,proof FROM fleet_reviews WHERE id=?",
+          )
+          .get(binding.id);
+        if (!row || row.binding !== JSON.stringify(binding))
+          throw new FleetError("Review native binding changed");
+        const context = binding.context;
+        if (
+          parsed.id !== binding.id ||
+          parsed.reviewID !== context.id ||
+          parsed.repository !== context.repository ||
+          parsed.pullRequest !== context.pullRequest ||
+          parsed.headSHA !== context.headSHA ||
+          parsed.baseSHA !== context.baseSHA ||
+          parsed.mergeBaseSHA !== context.mergeBaseSHA ||
+          parsed.contextDigest !== context.contextDigest ||
+          parsed.authorShip !== context.authorShip ||
+          parsed.coordinatorShip !== context.coordinatorShip ||
+          parsed.reviewerShip !== binding.reviewerShip ||
+          parsed.reviewerAgent !== binding.reviewer.agent ||
+          parsed.kind !== binding.reviewer.kind ||
+          parsed.sessionID !== binding.sessionID ||
+          parsed.inputID !== binding.inputID
+        )
+          throw new FleetError(
+            "Review proof does not match its immutable assignment",
+          );
+        const text = JSON.stringify(parsed);
+        if (row.proof !== null && row.proof !== text)
+          throw new FleetError("Review proof is immutable");
+        this.db
+          .query(
+            "UPDATE fleet_reviews SET state='completed',proof=? WHERE id=?",
+          )
+          .run(text, binding.id);
+      })
+      .immediate();
+  }
+
+  reviewProof(id: string, ship: string): FleetReviewProof | undefined {
+    const row = this.db
+      .query<{ proof: string | null }, [string]>(
+        "SELECT proof FROM fleet_reviews WHERE id=?",
+      )
+      .get(id);
+    if (!row?.proof) return;
+    const proof = reviewProofSchema.parse(JSON.parse(row.proof));
+    return [
+      proof.authorShip,
+      proof.coordinatorShip,
+      proof.reviewerShip,
+    ].includes(ship.toLowerCase())
+      ? proof
+      : undefined;
+  }
+
+  reviewProofs(
+    ship: string,
+    target: { repository: string; pullRequest: number; headSHA: string },
+  ): FleetReviewProof[] {
+    return this.db
+      .query<
+        { proof: string },
+        [string, number, string, string, string, string]
+      >(`SELECT proof FROM fleet_reviews WHERE proof IS NOT NULL
+      AND json_extract(proof,'$.repository')=? AND json_extract(proof,'$.pullRequest')=? AND json_extract(proof,'$.headSHA')=?
+      AND (json_extract(proof,'$.authorShip')=? OR json_extract(proof,'$.coordinatorShip')=? OR json_extract(proof,'$.reviewerShip')=?)
+      ORDER BY rowid DESC LIMIT 100`)
+      .all(
+        target.repository,
+        target.pullRequest,
+        target.headSHA,
+        ship.toLowerCase(),
+        ship.toLowerCase(),
+        ship.toLowerCase(),
+      )
+      .map((row) => reviewProofSchema.parse(JSON.parse(row.proof)));
   }
 }

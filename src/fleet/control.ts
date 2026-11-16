@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { z } from "zod";
 import { close, readBody, sendJson } from "../teams/http-util";
 import {
   listenOnUnixSocket,
@@ -20,13 +21,16 @@ import {
   FleetError,
   type FleetOrigin,
   type FleetRequest,
+  type FleetReviewNative,
   type FleetSource,
   type FleetTarget,
   fleetAssignmentText,
   fleetControlSchema,
   requestSchema,
+  reviewRepositorySchema,
   type VerifiedSource,
 } from "./protocol";
+import { FleetReviews, reviewContextPrompt } from "./reviews";
 
 export type FleetControlOptions = {
   config: FleetControlConfig;
@@ -42,13 +46,14 @@ export type FleetControlOptions = {
     caller: FleetCaller,
     signal: AbortSignal,
     request: FleetRequest,
-  ): Promise<void>;
+  ): Promise<void> | Promise<FleetOrigin>;
   send(target: FleetTarget, text: string, signal: AbortSignal): Promise<void>;
   status?(): Promise<unknown> | unknown;
   /** Resolve the immutable authenticated ingress job and native input locally. */
   origin?(source: VerifiedSource): FleetOrigin | undefined;
   /** Transport test seam; production uses the kernel startup lock. */
   ownership?: Ownership;
+  nativeReviews?: FleetReviewNative;
 };
 
 export class FleetControl {
@@ -59,6 +64,7 @@ export class FleetControl {
   private readonly pending = new Set<Promise<void>>();
   private readonly stop = new AbortController();
   private closed = false;
+  private readonly reviews: FleetReviews | undefined;
   private constructor(private readonly options: FleetControlOptions) {
     validateFleetPermissions(options.permissions);
     this.permissions = options.permissions.map((rule) => ({ ...rule }));
@@ -71,7 +77,20 @@ export class FleetControl {
       throw new FleetError(
         "Fleet control requires a pinned session and actual account.",
       );
+    if (options.config.reviews && !options.nativeReviews)
+      throw new FleetError("Native review backend unavailable");
     this.ledger = new FleetLedger(options.config.statePath);
+    if (options.config.reviews) {
+      if (!options.nativeReviews)
+        throw new FleetError("Native review backend unavailable");
+      this.reviews = new FleetReviews({
+        ledger: this.ledger,
+        config: options.config.reviews,
+        sessionID: options.sessionID,
+        ship: options.account,
+        native: options.nativeReviews,
+      });
+    }
   }
 
   static async open(options: FleetControlOptions) {
@@ -92,6 +111,25 @@ export class FleetControl {
 
   get resultsEnabled() {
     return this.options.config.results === true;
+  }
+  reviewAssignmentPrompt(dispatchID: string): string | undefined {
+    if (!this.reviews) return;
+    const assignment = this.ledger.reviewContext(
+      this.options.sessionID,
+      this.options.account,
+      dispatchID,
+    );
+    if (!assignment) return;
+    if (
+      !this.options.config.reviews?.repositories.includes(
+        assignment.context.repository,
+      )
+    )
+      throw new FleetError("Review repository is not permitted");
+    return reviewContextPrompt(assignment.context, assignment.text);
+  }
+  async pollReviews(signal: AbortSignal) {
+    await this.reviews?.poll(signal);
   }
 
   assignment(
@@ -174,6 +212,16 @@ export class FleetControl {
       throw new FleetError(
         "Fleet dispatch is disabled by this gateway's capability policy.",
       );
+    if (
+      input.review &&
+      (!this.reviews ||
+        !this.options.config.reviews?.repositories.includes(
+          input.review.repository,
+        ))
+    )
+      throw new FleetError(
+        "Review evidence is disabled or repository is not permitted",
+      );
     const target = this.options.config.targets.find(
       (entry) => entry.id === input.target,
     );
@@ -205,6 +253,7 @@ export class FleetControl {
       senderAccount: this.options.account,
       text: input.text,
       ...(origin ? { origin } : {}),
+      ...(input.review ? { review: input.review } : {}),
     });
     if (!reserved.created) return reserved.result;
     // This label reports real transport identity and immutable evidence. Rank,
@@ -240,12 +289,70 @@ export class FleetControl {
           AbortSignal.timeout(20_000),
         ]);
         try {
+          if (request.method === "GET" && request.url?.startsWith("/reviews")) {
+            if (!this.reviews) {
+              sendJson(response, 404, { error: "Not found" });
+              return;
+            }
+            const url = new URL(request.url, "http://fleet.local");
+            const match = /^\/reviews\/(proof_[a-f0-9]{32})$/.exec(
+              url.pathname,
+            );
+            if (match && !url.search) {
+              const proof = this.ledger.reviewProof(
+                match[1] ?? "",
+                this.options.account,
+              );
+              if (
+                !proof ||
+                !this.options.config.reviews?.repositories.includes(
+                  proof.repository,
+                )
+              )
+                sendJson(response, 404, { error: "Review proof unavailable" });
+              else sendJson(response, 200, { proof });
+              return;
+            }
+            if (url.pathname !== "/reviews") {
+              sendJson(response, 404, { error: "Not found" });
+              return;
+            }
+            const keys = [...url.searchParams.keys()];
+            if (
+              keys.length !== 3 ||
+              new Set(keys).size !== 3 ||
+              keys.some(
+                (k) => !["repository", "pullRequest", "headSHA"].includes(k),
+              )
+            )
+              throw new FleetError("Invalid review proof lookup");
+            const target = z
+              .strictObject({
+                repository: reviewRepositorySchema,
+                pullRequest: z
+                  .string()
+                  .regex(/^[1-9][0-9]*$/)
+                  .transform(Number)
+                  .pipe(z.number().int().positive().safe()),
+                headSHA: z.string().regex(/^[a-f0-9]{40}$/),
+              })
+              .parse(Object.fromEntries(url.searchParams));
+            const proofs = this.options.config.reviews?.repositories.includes(
+              target.repository,
+            )
+              ? this.ledger.reviewProofs(this.options.account, target)
+              : [];
+            sendJson(response, 200, { proofs });
+            return;
+          }
           if (request.method !== "POST" || request.url !== "/fleet") {
             sendJson(response, 404, { error: "Not found" });
             return;
           }
           const parsed = requestSchema.safeParse(
-            JSON.parse(await readBody(request, 32_768)),
+            JSON.parse(
+              await readBody(request, this.reviews ? 1_000_000 : 32_768),
+            ),
           );
           if (!parsed.success)
             throw new FleetError("Invalid fleet tool request.");
@@ -259,29 +366,53 @@ export class FleetControl {
             throw new FleetError(
               "Trusted gateway policy refuses this fleet operation.",
             );
-          await this.options.authorize(value.caller, signal, value);
+          const nativeOrigin = await this.options.authorize(
+            value.caller,
+            signal,
+            value,
+          );
           signal.throwIfAborted();
           const result =
-            value.operation === "verify"
-              ? this.ledger.verify(
-                  value.caller.sessionID,
-                  value.input.reference,
-                )
-              : value.operation === "dispatch"
-                ? await this.dispatch(value.input, value.caller, signal)
-                : value.input.requestID
-                  ? (this.ledger.dispatch(
-                      value.caller.sessionID,
-                      value.input.requestID,
-                    ) ?? { state: "not_found", humanApproval: false })
+            value.operation === "review"
+              ? !this.reviews
+                ? (() => {
+                    throw new FleetError("Review evidence is disabled");
+                  })()
+                : value.input.op === "start"
+                  ? await this.reviews.start(
+                      value.input,
+                      nativeOrigin ?? undefined,
+                      value.caller.agent,
+                      signal,
+                    )
                   : {
-                      account: this.options.account,
-                      targets: this.options.config.targets,
+                      proof:
+                        this.ledger.reviewProof(
+                          value.input.id,
+                          this.options.account,
+                        ) ?? null,
                       humanApproval: false,
-                      ...(this.options.status
-                        ? { transport: await this.options.status() }
-                        : {}),
-                    };
+                    }
+              : value.operation === "verify"
+                ? this.ledger.verify(
+                    value.caller.sessionID,
+                    value.input.reference,
+                  )
+                : value.operation === "dispatch"
+                  ? await this.dispatch(value.input, value.caller, signal)
+                  : value.input.requestID
+                    ? (this.ledger.dispatch(
+                        value.caller.sessionID,
+                        value.input.requestID,
+                      ) ?? { state: "not_found", humanApproval: false })
+                    : {
+                        account: this.options.account,
+                        targets: this.options.config.targets,
+                        humanApproval: false,
+                        ...(this.options.status
+                          ? { transport: await this.options.status() }
+                          : {}),
+                      };
           sendJson(response, 200, { result });
         } catch (error) {
           sendJson(response, 400, {

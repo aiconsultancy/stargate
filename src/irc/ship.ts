@@ -338,6 +338,7 @@ type Built = { registration: IrcRegistration; lifetime: Lifetime };
  */
 export class IrcShip {
   sourceRecorder: ((source: FleetSource) => void) | undefined;
+  assignmentPrompt: ((dispatchID: string) => string | undefined) | undefined;
   assignmentRecorder:
     | ((
         input: {
@@ -839,6 +840,7 @@ export class IrcShip {
       return;
     }
     let dispatchID: string | undefined;
+    let privateReview: string | undefined;
     try {
       dispatchID = this.assignmentRecorder?.(
         {
@@ -850,6 +852,7 @@ export class IrcShip {
         },
         client.fold,
       );
+      if (dispatchID) privateReview = this.assignmentPrompt?.(dispatchID);
     } catch {
       this.log.warn(
         "Fleet assignment correlation refused; IRC request not admitted",
@@ -898,6 +901,9 @@ export class IrcShip {
     }
     this.store.enqueue({
       ...admission,
+      ...(privateReview
+        ? { text: `${admission.text}\n\n${privateReview}` }
+        : {}),
       ...this.stagger(member, client, admission),
       ...(dispatchID
         ? { fleet: { kind: "assignment" as const, dispatchID } }

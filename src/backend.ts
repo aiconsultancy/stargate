@@ -6,7 +6,11 @@ import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
-import type { NativeMaker } from "./fleet/protocol";
+import type {
+  FleetReviewBinding,
+  FleetReviewEvidence,
+  NativeMaker,
+} from "./fleet/protocol";
 import { validMsgid } from "./irc/protocol";
 import type { MaintenanceWatch } from "./maintenance";
 import type { QuotaSnapshot } from "./quota";
@@ -88,6 +92,11 @@ export const latestInput = "\u0000latest-input";
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
+  startReview?(binding: FleetReviewBinding, signal: AbortSignal): Promise<void>;
+  readReview?(
+    binding: FleetReviewBinding,
+    signal: AbortSignal,
+  ): Promise<FleetReviewEvidence | undefined>;
   /** Reported native makers for this exact submitted input, never config guesses. */
   executionMakers?(
     sessionID: string,

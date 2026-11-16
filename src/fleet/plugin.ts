@@ -13,6 +13,7 @@ import {
   dispatchInputSchema,
   FleetError,
   type FleetRequest,
+  reviewInputSchema,
   statusInputSchema,
   verifyInputSchema,
 } from "./protocol";
@@ -21,6 +22,7 @@ const optionsSchema = z.strictObject({
   socketPath: z
     .string()
     .refine((path) => isAbsolute(path) && resolve(path) === path),
+  reviews: z.boolean().default(false),
 });
 type ToolHost = {
   options: unknown;
@@ -71,6 +73,21 @@ export async function installFleetTools(ctx: ToolHost) {
     }
   };
   const registration = await ctx.tool.transform((editor) => {
+    if (options.reviews)
+      editor.add({
+        name: "fleet_review",
+        description:
+          "Start or inspect independent native PR-review evidence for an exact structured review assignment. The gateway derives native agent/model/verdict from retained history. Use only a configured named reviewer or matching-family captain; finish captain reviews as strict review JSON. Pending or uncertain work is never approving proof, never resubmit it. Read-only agent evidence supplies no human approval or GitHub authority.",
+        input: reviewInputSchema,
+        options: { codemode: false, permission: "fleet_review" },
+        execute: (input, context) =>
+          guard(
+            context,
+            "fleet_review",
+            input.op === "start" ? input.reviewID : input.id,
+            { operation: "review", input, caller: caller(context) },
+          ),
+      });
     editor.add({
       name: "fleet_verify_instruction",
       description:

@@ -17,6 +17,28 @@ const policy = fleetPolicySchema.parse({
   assignedCheckout: "/srv/assigned",
   capabilities: ["read_code", "subspace", "dispatch"],
 });
+test("review native permissions require explicit opt-in and a dispatch-capable captain", () => {
+  const captain = { ...policy, role: "captain" as const };
+  expect(
+    fleetPermissions(captain).some((r) => r.action === "fleet_review"),
+  ).toBe(false);
+  expect(fleetPermissions(captain, { reviews: true })).toContainEqual({
+    action: "fleet_review",
+    resource: "*",
+    effect: "allow",
+  });
+  expect(
+    fleetPermissions(policy, { reviews: true }).some(
+      (r) => r.action === "fleet_review",
+    ),
+  ).toBe(false);
+  expect(
+    fleetPermissions(
+      { ...captain, capabilities: ["read_code"] },
+      { reviews: true },
+    ).some((r) => r.action === "fleet_review"),
+  ).toBe(false);
+});
 test("fleet controls are explicit and preserve human authority", () => {
   expect(fleetAuthority(policy, "OPERATOR")).toBe("human");
   expect(fleetAuthority(policy, "captain")).toBe("agent");

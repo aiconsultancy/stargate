@@ -5,6 +5,11 @@ The OpenCode V2 fleet plugin provides `fleet_dispatch`,
 opens a control listener by default. They do not replace native permissions,
 repository instructions or human approval and deployment gates.
 
+Optional [native PR review evidence](fleet-reviews.md) adds `fleet_review` only
+when explicitly enabled. It binds full immutable review context to actual
+native reviewers and exposes protected proof reads for a separate publication
+and merge integration. It supplies no GitHub identity or human approval.
+
 Each listener belongs to one configured gateway account and one pinned native
 OpenCode root session. The gateway verifies the native assistant/tool input
 ancestry for every call. The plugin passes its native session, agent, message
