@@ -174,7 +174,7 @@ test("irc reload: denies and text mentions apply to intake at once; earlier tran
 
   const transport = captain.transport;
   const settings = captain.settings;
-  const reload = ship.prepareReload(
+  const reload = await ship.prepareReload(
     config(
       ["chief"],
       { textMentions: ["all captains"], deniedAccounts: ["kara"] },
@@ -219,9 +219,12 @@ test("irc reload: a new per-agent ship limit applies to the next message", async
     false,
   ]);
 
-  ship
-    .prepareReload(config(["chief"], { shipTurnsPerAgentPerHour: 2 }), env)
-    .commit(idle);
+  (
+    await ship.prepareReload(
+      config(["chief"], { shipTurnsPerAgentPerHour: 2 }),
+      env,
+    )
+  ).commit(idle);
   const ship4 = say("galactica-chief", "galactica: four");
   await until(() => admitted(captain, ship4), 5000, "raised limit");
 });
@@ -231,7 +234,7 @@ test("irc reload: added crew connect at commit, join on the captain's invite and
     "chief",
   ]);
   const chief = member(ship, 1);
-  const reload = ship.prepareReload(config(["chief", "tyrol"]), env);
+  const reload = await ship.prepareReload(config(["chief", "tyrol"]), env);
   expect(reload.removed).toEqual([]);
   const [tyrol] = reload.added;
   if (!tyrol) throw new Error("missing added crew");
@@ -272,18 +275,20 @@ test("irc reload: a missing added credential or a changed connection throws and 
   const roster = [...ship.registrations];
   const transport = captain.transport;
   const { STARGATE_IRC_GALACTICA_TYROL: _, ...partial } = env;
-  expect(() =>
+  await expect(
     ship.prepareReload(
       config(["chief", "tyrol"], { deniedAccounts: ["jack"] }),
       partial,
     ),
-  ).toThrow("Missing environment variable: STARGATE_IRC_GALACTICA_TYROL");
-  expect(() =>
+  ).rejects.toThrow(
+    "Missing environment variable: STARGATE_IRC_GALACTICA_TYROL",
+  );
+  await expect(
     ship.prepareReload(config(["chief"], {}, { concurrency: 8 }), env),
-  ).toThrow("IRC connection settings of galactica-irc changed");
-  expect(() =>
+  ).rejects.toThrow("IRC connection settings of galactica-irc changed");
+  await expect(
     ship.prepareReload(config(["chief"], {}, { id: "pegasus-irc" }), env),
-  ).toThrow("IRC registration ID changed; restart required");
+  ).rejects.toThrow("IRC registration ID changed; restart required");
 
   expect([...ship.registrations]).toEqual(roster);
   expect(captain.transport).toBe(transport);
@@ -299,7 +304,7 @@ test("irc reload: removing an idle crew member QUITs only that connection", asyn
   ]);
   const chief = member(ship, 1);
   const tyrol = member(ship, 2);
-  const reload = ship.prepareReload(config(["chief"]), env);
+  const reload = await ship.prepareReload(config(["chief"]), env);
   expect(reload.added).toEqual([]);
   expect(reload.removed).toEqual([tyrol]);
 
@@ -329,7 +334,7 @@ test("irc reload: removing a busy crew member is refused before any change", asy
   await until(() => admitted(tyrol, work), 5000, "tyrol work queued");
 
   const transport = captain.transport;
-  const reload = ship.prepareReload(
+  const reload = await ship.prepareReload(
     config(["chief"], { deniedAccounts: ["jack"] }),
     env,
   );
@@ -363,8 +368,8 @@ test("irc reload: before start nothing connects; stale plans and a closed ship a
   const { fake, ship, config, idle } = await setup(["chief"], {
     start: false,
   });
-  const first = ship.prepareReload(config(["chief", "tyrol"]), env);
-  const second = ship.prepareReload(
+  const first = await ship.prepareReload(config(["chief", "tyrol"]), env);
+  const second = await ship.prepareReload(
     config(["chief"], { deniedAccounts: ["kara"] }),
     env,
   );
@@ -381,7 +386,7 @@ test("irc reload: before start nothing connects; stale plans and a closed ship a
   await ship.close();
   await ship.close();
   await quitted(fake, member(ship, 2));
-  const late = ship.prepareReload(config(["chief"]), env);
+  const late = await ship.prepareReload(config(["chief"]), env);
   expect(() => late.commit(idle)).toThrow(
     "IRC ship closed; reload not applied",
   );
