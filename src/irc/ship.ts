@@ -635,6 +635,12 @@ export class IrcShip {
         account: member.account,
         ...credential,
         nick: member.nick,
+        statusName:
+          member.displayName ??
+          (member.backend.type === "opencode"
+            ? member.backend.agent
+            : undefined) ??
+          member.id,
         channels: member.channels,
         ...(member.role === "crew" ? { captainChannels: config.channels } : {}),
         // Only the captain joins the audit channel; crew hand it their DMs.

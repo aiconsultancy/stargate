@@ -17,6 +17,7 @@ import {
   utf8Bytes,
   validMsgid,
 } from "./protocol";
+import { IrcStatus, type StatusResult, type StatusTiming } from "./status";
 
 export type IrcTiming = {
   /** Idle time before the client sends its own PING. */
@@ -99,6 +100,10 @@ export type IrcClientOptions = {
   catchUp?: boolean;
   /** Presence features, each used only when offered (default true). */
   presence?: { alwaysOn: boolean; botMode: boolean; readMarker: boolean };
+  /** Fixed public waiting phrases only; never a request or backend text. */
+  statusName?: string;
+  /** Injectable protocol timing for local fixtures; not a configuration setting. */
+  statusTiming?: Partial<StatusTiming>;
   log: Logger;
   timing?: Partial<IrcTiming>;
 };
@@ -153,8 +158,15 @@ type Queued = {
   /** Written together: one line, or a whole multiline batch. */
   lines: readonly string[];
   done?: (error?: Error) => void;
-  /** Checked at the socket write; false drops the line. */
+  /** Checked before the first socket byte, including through backpressure. */
   guard?: () => boolean;
+};
+
+type Output = {
+  bytes: Uint8Array;
+  started: boolean;
+  guard?: () => boolean;
+  done?: (error?: Error) => void;
 };
 
 /**
@@ -260,11 +272,19 @@ export class IrcClient {
   private tokens: number;
   private refilled = Date.now();
   private pumpTimer: ReturnType<typeof setTimeout> | undefined;
-  private output: Uint8Array | undefined;
+  private output: Output[] = [];
   private label = 0;
   private waiters = new Set<() => void>();
   private lastData = 0;
   private lastPing = 0;
+  private readonly status: IrcStatus | undefined;
+  private statusLimit = 344; // Ergo: key + value <=350 bytes; "status" owns six.
+  private metadataPending:
+    | {
+        value: string | undefined;
+        finish(result: StatusResult): void;
+      }
+    | undefined;
 
   constructor(
     private readonly options: IrcClientOptions,
@@ -280,6 +300,14 @@ export class IrcClient {
     this.timing = { ...defaultTiming, ...options.timing };
     this.tokens = this.timing.burst;
     this.currentNick = options.nick;
+    this.status =
+      options.statusName === undefined
+        ? undefined
+        : new IrcStatus(
+            options.statusName,
+            (value, guard) => this.publishStatus(value, guard),
+            options.statusTiming,
+          );
   }
 
   /** Case folding under the server's CASEMAPPING (rfc1459 until known). */
@@ -501,6 +529,103 @@ export class IrcClient {
 
   get typingMs() {
     return this.timing.typingMs;
+  }
+
+  /** Shared by every conversation on this captain or crew connection. */
+  startStatus(): () => void {
+    return this.status?.begin() ?? (() => {});
+  }
+
+  /** One owned key, with protocol acknowledgement rather than a socket-write claim. */
+  private publishStatus(
+    value: string | undefined,
+    valid: () => boolean,
+  ): Promise<StatusResult> {
+    if (
+      !this.registeredNow ||
+      !this.hasCap("draft/metadata-2") ||
+      !this.hasCap("batch") ||
+      this.metadataPending
+    )
+      return Promise.resolve({ kind: "unavailable" });
+    const generation = this.generation;
+    const result = Promise.withResolvers<StatusResult>();
+    const guard = () =>
+      this.metadataPending === pending &&
+      generation === this.generation &&
+      this.registeredNow &&
+      valid();
+    const item: Queued = {
+      lines: [
+        formatMessage(
+          "METADATA",
+          value === undefined
+            ? ["*", "SET", "status"]
+            : ["*", "SET", "status", value],
+        ),
+      ],
+      guard,
+      done: (error) => {
+        if (error) pending.finish({ kind: "unavailable" });
+      },
+    };
+    const timer = setTimeout(() => {
+      this.unqueue(item); // Never write an expired busy value after the turn ended.
+      pending.finish({ kind: "unavailable" });
+    }, this.timing.confirmMs);
+    const pending = {
+      value,
+      finish: (outcome: StatusResult) => {
+        if (this.metadataPending !== pending) return;
+        clearTimeout(timer);
+        this.metadataPending = undefined;
+        result.resolve(outcome);
+      },
+    };
+    this.metadataPending = pending;
+    this.enqueue(item);
+    return result.promise;
+  }
+
+  /** Ergo 2.19.1 uses 761/766, including subscriber notifications; ACK only our own key/value. */
+  private metadataReply(message: IrcMessage): void {
+    const pending = this.metadataPending;
+    if (!pending || message.source?.includes("!")) return;
+    const { command, params } = message;
+    const own = this.fold(params[1] ?? "") === this.fold(this.currentNick);
+    if (
+      command === "761" &&
+      own &&
+      params[2] === "status" &&
+      params[4] === pending.value
+    )
+      pending.finish({ kind: "ok" });
+    else if (
+      command === "766" &&
+      own &&
+      params[2] === "status" &&
+      pending.value === undefined
+    )
+      pending.finish({ kind: "ok" });
+    else if (command === "FAIL" && params[0] === "METADATA") {
+      if (
+        params[1] === "KEY_NOT_SET" &&
+        params[3] === "status" &&
+        pending.value === undefined
+      )
+        pending.finish({ kind: "ok" });
+      else if (params[1] === "RATE_LIMITED" && params[3] === "status") {
+        const seconds = /^\d+$/.test(params[4] ?? "") ? Number(params[4]) : 120;
+        pending.finish({
+          kind: "rate-limited",
+          retryAfterMs:
+            Number.isSafeInteger(seconds) && seconds > 0
+              ? seconds * 1000
+              : 120_000,
+        });
+      } else if (params.includes("status"))
+        pending.finish({ kind: "rejected" });
+    }
   }
 
   /** True while `nick` is bound to `account` in both directions. */
@@ -820,13 +945,21 @@ export class IrcClient {
       closed.resolve();
       return true;
     };
+    let closing = false;
     const abort = () => {
       if (abandon()) return;
-      this.raw("QUIT :Stargate shutting down");
+      if (closing) return;
+      closing = true;
       const socket = this.socket;
-      socket?.end();
-      // A peer that never closes must not hold shutdown.
-      setTimeout(() => socket?.terminate(), 2000).unref();
+      // Always-on Ergo retains metadata after QUIT: delete and acknowledge first.
+      void (this.status?.shutdown() ?? Promise.resolve())
+        .catch(() => {})
+        .finally(() => {
+          if (socket === this.socket) this.raw("QUIT :Stargate shutting down");
+          socket?.end();
+          // A peer that never closes must not hold shutdown.
+          setTimeout(() => socket?.terminate(), 2000).unref();
+        });
     };
     signal.addEventListener("abort", abort, { once: true });
     const timers = setInterval(
@@ -883,6 +1016,8 @@ export class IrcClient {
   }
 
   private disconnected() {
+    this.status?.disconnected();
+    this.metadataPending?.finish({ kind: "unavailable" });
     this.socket = undefined;
     this.registeredNow = false;
     this.welcomed = false;
@@ -890,7 +1025,7 @@ export class IrcClient {
     this.networkName = undefined;
     this.advertisedFilehost = undefined;
     this.botMode = undefined;
-    this.output = undefined;
+    const buffered = this.output.splice(0);
     this.caps = new Set();
     this.joinedChannels.clear();
     // Offline, nick changes are unseen: start again from fresh evidence.
@@ -908,6 +1043,7 @@ export class IrcClient {
     if (this.pumpTimer) clearTimeout(this.pumpTimer);
     this.pumpTimer = undefined;
     const error = new IrcUnavailable();
+    for (const output of buffered) output.done?.(error);
     for (const item of [...this.queue.splice(0), ...this.background.splice(0)])
       item.done?.(error);
     for (const [label, pending] of this.labels) {
@@ -917,22 +1053,47 @@ export class IrcClient {
     }
   }
 
-  /** Unthrottled write: registration, PONG and QUIT only. */
-  private raw(line: string) {
+  /** Control writes and already-throttled queue items retain their wire order. */
+  private raw(
+    line: string,
+    guard?: () => boolean,
+    done?: (error?: Error) => void,
+  ) {
     if (!this.socket) return;
     const bytes = Buffer.from(`${line}\r\n`, "utf8");
-    this.output = this.output ? Buffer.concat([this.output, bytes]) : bytes;
+    this.output.push({
+      bytes,
+      started: false,
+      ...(guard ? { guard } : {}),
+      ...(done ? { done } : {}),
+    });
     this.flush();
   }
 
   private flush() {
     const socket = this.socket;
-    const output = this.output;
-    if (!socket || !output) return;
-    const written = socket.write(output);
-    if (written < 0) return;
-    this.output =
-      written >= output.byteLength ? undefined : output.subarray(written);
+    if (!socket) return;
+    while (this.output.length) {
+      const output = this.output[0];
+      if (!output) return;
+      if (!output.started && output.guard && !output.guard()) {
+        this.output.shift();
+        output.done?.(new IrcRecipientChanged());
+        continue;
+      }
+      const written = socket.write(output.bytes);
+      if (written <= 0) return;
+      output.started = true;
+      // A partially written IRC line must finish before its subsequent clear;
+      // dropping its suffix would corrupt the following protocol command.
+      if (written >= output.bytes.byteLength) {
+        this.output.shift();
+        output.done?.();
+      } else {
+        output.bytes = output.bytes.subarray(written);
+        return;
+      }
+    }
   }
 
   private enqueue(item: Queued, priority: SendPriority = "normal") {
@@ -974,8 +1135,9 @@ export class IrcClient {
         continue;
       }
       this.tokens -= 1;
-      for (const line of item.lines) this.raw(line);
-      item.done?.();
+      // Commit the entire throttled unit after its first byte. In particular,
+      // a multiline opener must never lose its body/closer to a later guard.
+      this.raw(item.lines.join("\r\n"), item.guard, item.done);
     }
     if (this.waiting() && this.socket)
       this.pumpTimer = setTimeout(() => {
@@ -988,6 +1150,7 @@ export class IrcClient {
     const message = parseMessage(line);
     if (!message) return;
     this.lastData = Date.now();
+    this.metadataReply(message);
     const { command, params } = message;
     const label = message.tags.get("label");
     const batch = message.tags.get("batch");
@@ -1395,9 +1558,20 @@ export class IrcClient {
             : undefined;
       } else this.multilineOffer = undefined;
       const presence = this.options.presence;
+      const metadata = offered.get("draft/metadata-2");
+      this.statusLimit = 344;
+      for (const token of metadata?.split(",") ?? []) {
+        if (!token.startsWith("max-value-bytes=")) continue;
+        const limit = Number(token.slice("max-value-bytes=".length));
+        this.statusLimit =
+          Number.isSafeInteger(limit) && limit > 0 ? Math.min(344, limit) : 0;
+      }
       const wanted = [
         ...required,
         ...optional.filter((cap) => offered.has(cap)),
+        ...(this.status && metadata !== undefined && offered.has("batch")
+          ? ["draft/metadata-2"]
+          : []),
         ...(history ? [history] : []),
         ...(presence?.alwaysOn !== false && offered.has("draft/persistence")
           ? ["draft/persistence"]
@@ -1429,9 +1603,12 @@ export class IrcClient {
       this.raw(`AUTHENTICATE ${mechanism}`);
       return;
     }
-    if (sub === "DEL")
+    if (sub === "DEL") {
       for (const name of (params.at(-1) ?? "").split(" "))
         this.caps.delete(name);
+      if (!this.hasCap("draft/metadata-2") || !this.hasCap("batch"))
+        this.status?.disconnected();
+    }
   }
   private offered = new Map<string, string>();
   private requested = 0;
@@ -1468,6 +1645,8 @@ export class IrcClient {
       return;
     }
     this.registeredNow = true;
+    if (this.hasCap("draft/metadata-2") && this.hasCap("batch"))
+      this.status?.connected(this.statusLimit);
     this.readyFilehost = this.advertisedFilehost;
     this.options.log.info("IRC registered");
     for (const wake of this.waiters) wake();
