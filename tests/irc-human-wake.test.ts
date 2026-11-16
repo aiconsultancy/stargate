@@ -385,6 +385,7 @@ async function liveFixture() {
   let store = new Store(path);
   const prompts: {
     account: string;
+    sessionID: string;
     text: string;
     context?: PromptSourceContext;
   }[] = [];
@@ -408,7 +409,7 @@ async function liveFixture() {
           return `ses_${account}`;
         },
         async prompt(
-          _session,
+          sessionID,
           text,
           _signal,
           _onText,
@@ -416,7 +417,12 @@ async function liveFixture() {
           _files,
           context,
         ) {
-          prompts.push({ account, text, ...(context ? { context } : {}) });
+          prompts.push({
+            account,
+            sessionID,
+            text,
+            ...(context ? { context } : {}),
+          });
           return text.includes("remain silent")
             ? "[[stargate:silent]]"
             : `${account} reply`;
@@ -554,6 +560,57 @@ test("real IRC intake keeps silent broad listeners out of threads, confirms publ
     "own publication observed",
   );
   const own = publication();
+  if (own?.tags.get("+draft/reply") !== root) {
+    // Only synthetic fixture metadata: no full prompts or provider traffic.
+    const calls = f.prompts
+      .filter((prompt) => prompt.account === "discovery")
+      .slice(-4)
+      .map((prompt) => {
+        const source = prompt.context?.source;
+        const job = source
+          ? f.store.jobByEvent(
+              discovery.key,
+              `${source.channel}:${source.message}`,
+            )
+          : undefined;
+        return {
+          sessionID: prompt.sessionID,
+          expectedSilent: prompt.text.includes("remain silent"),
+          source,
+          job: job
+            ? {
+                id: job.id,
+                eventId: job.eventId,
+                thread: job.thread,
+                replyParent: job.replyParent,
+                status: job.status,
+              }
+            : null,
+          storedParent: source
+            ? f.store.ircReplyParent(discovery.key, source.thread)
+            : undefined,
+        };
+      });
+    console.error(
+      "IRC_HUMAN_WAKE_REPLY_DIAGNOSTIC",
+      JSON.stringify({
+        root,
+        selected: own ? { tags: [...own.tags], params: own.params } : null,
+        hasMessageTags: discovery.client.hasCap("message-tags"),
+        hasEchoMessage: discovery.client.hasCap("echo-message"),
+        hasLabeledResponse: discovery.client.hasCap("labeled-response"),
+        calls,
+        queue: f.store.queueCounts(discovery.key),
+        wire: f.fake
+          .received("discovery")
+          .filter((line) => {
+            const command = parseMessage(line)?.command;
+            return command === "PRIVMSG" || command === "BATCH";
+          })
+          .slice(-8),
+      }),
+    );
+  }
   expect(own?.tags.get("+draft/reply")).toBe(root);
   await f.restart();
   const before = f.prompts.length;
