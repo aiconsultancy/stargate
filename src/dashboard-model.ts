@@ -11,11 +11,33 @@ import type { JobStatus } from "./store";
 /** JSON shapes served by the fleet dashboard. Additive changes only. */
 export type QueueCounts = Record<JobStatus, number>;
 
+export type DashboardTransport =
+  | {
+      kind: "irc";
+      host: string;
+      port: number;
+      tls: boolean;
+      network?: string;
+      account: string;
+      nick: string;
+      channels: string[];
+      access: {
+        allowedAccounts?: string[];
+        deniedAccounts: string[];
+        deniedChannels: string[];
+        channelRequests?: string;
+        wakeChannels?: string[];
+        peerCaptains: string[];
+      };
+    }
+  | { kind: "teams"; tenantId: string; botClientId: string };
+
 export type ShipSummary = {
   /** Configured bot ID; one bot registration is one ship. */
   id: string;
   name: string;
   backend: "opencode" | "pi-durable" | "claude" | "codex" | "module";
+  transport?: DashboardTransport["kind"];
   agent?: string;
   /** Null when this backend has no crew or its status read failed. */
   crew: { total: number; busy: number } | null;
@@ -49,13 +71,14 @@ export type ShipView = {
   name: string;
   bot: {
     id: string;
-    slack: { appId: string; team: string; user: string };
-    access: {
+    slack?: { appId: string; team: string; user: string };
+    transport?: DashboardTransport;
+    access?: {
       users: string[];
       channels: string[];
       deniedUsers: string[];
       deniedChannels: string[];
-      mentionOnly: boolean;
+      mentionOnly?: boolean;
     };
     backend: {
       type: "opencode" | "pi-durable" | "claude" | "codex" | "module";
