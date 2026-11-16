@@ -5,6 +5,8 @@ or IRC. It connects to an existing OpenCode V2 server, runs Pi Durable in the
 gateway process, or launches Claude Code or Codex through their SDKs. Use one
 bot for yourself or run several registrations on one host.
 
+[Stargate icons and artwork](assets/icons/README.md)
+
 In Slack, each bot has its own app and access rules. Mention the bot in an
 allowed channel to start a conversation and reply in the thread to continue
 it. Slack Socket Mode uses an outbound connection, so the gateway needs no
