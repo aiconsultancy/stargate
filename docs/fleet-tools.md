@@ -151,8 +151,17 @@ The gateway adds an opaque dispatch ID to the IRC assignment. At captain
 intake, its real SASL sender, target account, joined channel, pinned session,
 full payload and server message ID must match the retained delegation. The
 first admitted event is claimed durably. A copied packet with another event
-ID cannot start another execution. Ordinary peer chat never becomes an
-assignment or completion, even if its text claims success.
+ID cannot start another execution. In results mode, ordinary agent chat does
+not start a model turn at all: the assignment recorder must validate a real
+correlated dispatch first. Peer acknowledgements and result chatter cannot
+feed another turn, even when they mention a recipient or claim completion.
+Captains return outcomes through the durable outbox below.
+
+A human message explicitly addressed at its start to another known fleet
+account or target ID (`vance:` or `vance,`) does not separately wake this
+captain because its name occurs later. This recipient rule also overrides an
+own-channel wake or reply tag. Other human own-channel and mention requests
+remain eligible under the ordinary access rules.
 
 Only the trusted gateway result worker can publish completion. Engine IPC has
 no completion operation. The worker binds the persisted native input to its
@@ -177,7 +186,14 @@ Queueing precedes ledger acknowledgement. A crash between those steps finds
 the same durable continuation after restart; it does not run the captain or
 coordinator twice. If a continuation's native execution is interrupted, the
 normal gateway recovery reports its uncertain outcome instead of replaying
-it. External delivery retains the gateway's existing retry/uncertainty rules;
+it. Access checks receive the immutable stored job correlation before work
+and delivery. Ordinary peer jobs queued by an older results-mode gateway are
+refused through that normal access path, including pending replies; their
+records remain retained. Genuine persisted assignment and result jobs retain
+their correlation and follow the normal recovery rules. Do not delete or
+replay old peer jobs to recover the conversation.
+
+External delivery retains the gateway's existing retry/uncertainty rules;
 this is not an exactly-once delivery guarantee. An unavailable original job
 leaves the result pending and visible through status; it never falls back to
 the latest conversation.

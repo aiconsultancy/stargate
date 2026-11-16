@@ -32,6 +32,7 @@ import {
   type IrcMember,
   ircAllowed,
   ircNote,
+  ircResultJobAllowed,
   routeIrcMessage,
   routeIrcStop,
   shipAccounts,
@@ -264,8 +265,9 @@ function shipTransport(
         }
       : {}),
     key: member.key,
-    allowed: (user, channel) =>
+    allowed: (user, channel, job) =>
       ircAllowed(config, member, user, channel, client.fold) &&
+      ircResultJobAllowed(config, user, job) &&
       (config.access.channelRequests !== "nick-mention" ||
         !client.isChannel(channel) ||
         client.inChannel(channel)),
@@ -845,6 +847,15 @@ export class IrcShip {
       this.log.warn(
         "Fleet assignment correlation refused; IRC request not admitted",
       );
+      this.advance(member, client, message);
+      return;
+    }
+    if (
+      this.config.fleetControl?.results &&
+      this.config.fleetPolicy &&
+      fleetAuthority(this.config.fleetPolicy, admission.user) === "agent" &&
+      !dispatchID
+    ) {
       this.advance(member, client, message);
       return;
     }

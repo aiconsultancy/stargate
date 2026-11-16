@@ -215,6 +215,11 @@ export type GatewayConfig =
       | "transcription"
     >;
 
+/** Immutable access context; scheduled/catch-up scopes may have no job. */
+export type GatewayAccessContext = Readonly<
+  Pick<Incoming, "user" | "channel" | "sender" | "fleet">
+>;
+
 /** Transport rules the gateway applies to every job of one registration. */
 export interface GatewayTransport {
   /** Session title and source label. */
@@ -222,7 +227,7 @@ export interface GatewayTransport {
   /** Queue, session and outbox namespace of this registration. */
   readonly key: string;
   /** Current access rules, rechecked before work and before delivery. */
-  allowed(user: string, channel: string): boolean;
+  allowed(user: string, channel: string, job?: GatewayAccessContext): boolean;
   /** Model-visible source of a chat message; undefined for other jobs. */
   source(job: Job): PromptSourceContext["source"] | undefined;
   /** Prompt prefix naming the sender when no source line is sent. */
@@ -321,6 +326,7 @@ export class Gateway {
         (this.turnPolicies.get(job.id) ?? this.transport).allowed(
           job.user,
           job.channel,
+          job,
         ) &&
         this.allowed(job),
       log,
@@ -367,17 +373,13 @@ export class Gateway {
     );
   }
 
-  private allowed(job: {
-    user: string;
-    channel: string;
-    sender?: string | null;
-  }) {
+  private allowed(job: GatewayAccessContext) {
     return (
       !(
         this.bot &&
         job.sender === "captain" &&
         !this.bot.access.peerCaptains
-      ) && this.transport.allowed(job.user, job.channel)
+      ) && this.transport.allowed(job.user, job.channel, job)
     );
   }
 
@@ -1030,11 +1032,8 @@ export class Gateway {
     const transcriber = this.transcriber;
     const transport = this.transport;
     // New allows never expand this turn; new denies stop its next delivery.
-    const allowed = (job: {
-      user: string;
-      channel: string;
-      sender?: string | null;
-    }) => transport.allowed(job.user, job.channel) && this.allowed(job);
+    const allowed = (job: GatewayAccessContext) =>
+      transport.allowed(job.user, job.channel, job) && this.allowed(job);
     this.active++;
     this.turnPolicies.set(held.id, transport);
     try {
@@ -1059,11 +1058,7 @@ export class Gateway {
       bot: BotConfig | undefined;
       transcriber: Transcriber | undefined;
       transport: GatewayTransport;
-      allowed: (job: {
-        user: string;
-        channel: string;
-        sender?: string | null;
-      }) => boolean;
+      allowed: (job: GatewayAccessContext) => boolean;
     },
   ) {
     const { config, bot, transcriber, transport, allowed } = snapshot;

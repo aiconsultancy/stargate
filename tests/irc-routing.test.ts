@@ -17,6 +17,7 @@ import {
   ircCrewInstructions,
   ircInstructions,
   ircNote,
+  ircResultJobAllowed,
   routeIrcMessage,
   withinLimits,
 } from "../src/irc/routing";
@@ -1259,4 +1260,116 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
       attempts: 0,
     }),
   ).toMatchObject({ authority: "agent", user: "defiant", sender: "captain" });
+});
+
+test("results mode: an explicit other fleet recipient overrides later mentions, replies and own-channel wake", () => {
+  const restricted = shipConfig({
+    fleetPolicy: {
+      role: "captain",
+      humanAccounts: ["jack"],
+      agentAccounts: ["vance", "defiant"],
+      assignedCheckout: "/workspace",
+      capabilities: ["read_code", "dispatch"],
+    },
+    fleetControl: {
+      socketPath: "/tmp/irc-routing.sock",
+      statePath: "/tmp/irc-routing.sqlite",
+      results: true,
+      targets: [
+        {
+          id: "admiral",
+          account: "vance",
+          channel: "#command",
+          sessionID: "ses_vance",
+        },
+      ],
+    },
+    access: {
+      allowedAccounts: ["jack", "vance", "defiant"],
+      peerCaptains: ["vance", "defiant"],
+      wakeChannels: ["#galactica"],
+    },
+  });
+  const context = {
+    config: restricted,
+    member: captain,
+    currentNick: "galactica_",
+    sent: () => true,
+    joined: () => true,
+    now: () => 0,
+    fold: (value: string) => fold(value),
+  };
+  for (const text of [
+    "vance: ask galactica to report",
+    " VANCE, ask galactica to report ",
+    "vance:galactica status",
+    "admiral: ask galactica to report",
+    "defiant: ask galactica to report",
+    "vance: only you should wake",
+  ])
+    expect(
+      routeIrcMessage(
+        message("#galactica", text, {
+          account: "jack",
+          "+draft/reply": "own-1",
+        }),
+        context,
+      ),
+    ).toBeUndefined();
+  for (const text of [
+    "galactica_: ask vance to report",
+    "galactica: ask vance to report",
+    "vance-extra: galactica status",
+    "Please ask vance: galactica status",
+    "Ordinary human own-channel instruction",
+    "galactica: vance: this is still addressed to galactica",
+  ])
+    expect(
+      routeIrcMessage(
+        message("#galactica", text, { account: "jack" }),
+        context,
+      ),
+    ).toBeDefined();
+  const fleetControl = restricted.fleetControl;
+  if (!fleetControl) throw new Error("Missing fleet control fixture");
+  const legacy = {
+    ...restricted,
+    fleetControl: { ...fleetControl, results: false },
+  };
+  expect(
+    routeIrcMessage(
+      message("#galactica", "vance: ask galactica to report", {
+        account: "jack",
+      }),
+      { ...context, config: legacy },
+    ),
+  ).toBeDefined();
+  const strict = shipConfig({
+    ...restricted,
+    access: {
+      ...restricted.access,
+      wakeChannels: undefined,
+      channelRequests: "nick-mention",
+    },
+  });
+  expect(
+    routeIrcMessage(
+      message("#galactica", "vance: ask galactica_ to report", {
+        account: "jack",
+      }),
+      { ...context, config: strict },
+    ),
+  ).toBeUndefined();
+  // Matching the current recipient must not override the ordinary ACL.
+  expect(
+    routeIrcMessage(
+      message("#galactica", "galactica_: run", {
+        account: "stranger",
+      }),
+      context,
+    ),
+  ).toBeUndefined();
+  expect(ircResultJobAllowed(restricted, "vance", undefined)).toBe(false);
+  expect(ircResultJobAllowed(restricted, "jack", undefined)).toBe(true);
+  expect(ircResultJobAllowed(legacy, "vance", undefined)).toBe(true);
 });

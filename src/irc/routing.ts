@@ -152,6 +152,45 @@ function withoutAddress(
   return text;
 }
 
+/** In results mode, a leading fleet address selects one recipient. */
+function addressedToFleetPeer(
+  config: IrcConfig,
+  member: IrcMember,
+  currentNick: string,
+  text: string,
+  caseFold: Fold,
+) {
+  if (!config.fleetControl?.results) return false;
+  const own = new Set([member.account, member.nick, currentNick].map(caseFold));
+  const peers = [
+    ...(config.fleetPolicy?.agentAccounts ?? []),
+    ...config.fleetControl.targets.flatMap((target) => [
+      target.id,
+      target.account,
+    ]),
+  ].filter((name) => !own.has(caseFold(name)));
+  const body = text.trim();
+  return withoutAddress(body, peers, caseFold) !== body;
+}
+
+/**
+ * Recheck trusted persisted correlation, never marker text, before work
+ * and delivery. This also refuses ordinary peer jobs queued by an older
+ * results-mode gateway without deleting their records.
+ */
+export function ircResultJobAllowed(
+  config: IrcConfig,
+  account: string,
+  job: Readonly<Pick<Incoming, "fleet">> | undefined,
+) {
+  if (!config.fleetControl?.results) return true;
+  if (!config.fleetPolicy) return false;
+  const authority = fleetAuthority(config.fleetPolicy, account);
+  if (authority === "agent")
+    return job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result";
+  return authority === "human";
+}
+
 /**
  * Admission for one received IRC message, or undefined. Identity is the
  * IRCv3 `account` tag, never the nick: a message without it is rejected.
@@ -199,6 +238,12 @@ export function routeIrcMessage(
     return;
   // A multiline message keeps its line breaks; each line is cleaned.
   const body = raw.split("\n").map(cleanText).join("\n").trim();
+  if (
+    config.fleetPolicy &&
+    fleetAuthority(config.fleetPolicy, user) === "human" &&
+    addressedToFleetPeer(config, member, context.currentNick, body, caseFold)
+  )
+    return;
   const nicks = strict
     ? [context.currentNick]
     : [...new Set([context.currentNick, member.nick])];

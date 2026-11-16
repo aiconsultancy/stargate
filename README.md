@@ -1,5 +1,10 @@
 # Stargate
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icons/stargate-light.svg">
+  <img src="assets/icons/stargate-dark.svg" width="128" height="128" alt="Stargate logo">
+</picture>
+
 Stargate is a self-hosted gateway that lets you talk to AI agents from Slack,
 Teams or IRC. It connects to an existing OpenCode V2 server, runs Pi Durable in the
 gateway process, or launches Claude Code or Codex through their SDKs. Use one

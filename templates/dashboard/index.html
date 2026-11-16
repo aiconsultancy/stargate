@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>Stargate fleet</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="{{stargate-favicon-dark}}">
+    <link rel="icon" type="image/png" sizes="32x32" media="(prefers-color-scheme: dark)" href="{{stargate-favicon-light}}">
     <style>
       :root { color-scheme: light dark; --bg: #f5f6f8; --panel: #fff; --text: #18212c; --muted: #4c5969; --line: #c3cad3; --link: #064ea6; --error: #a51c24; }
       @media (prefers-color-scheme: dark) {
@@ -15,6 +17,14 @@
       header, main, footer { max-width: 1400px; margin: auto; padding: 12px 20px; }
       header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid var(--line); }
       header strong { font-size: 18px; }
+      .brand { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; flex: none; color: var(--text); text-decoration: none; }
+      .brand:hover strong { text-decoration: underline; }
+      .brand img { display: block; width: 32px; height: 32px; }
+      .brand .brand-light { display: none; }
+      @media (prefers-color-scheme: dark) {
+        .brand .brand-dark { display: none; }
+        .brand .brand-light { display: block; }
+      }
       nav { flex: 1; overflow-wrap: anywhere; }
       a { color: var(--link); text-underline-offset: 3px; }
       button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
@@ -59,7 +69,11 @@
   <body>
     <a class="skip" href="#content">Skip to content</a>
     <header>
-      <strong>Stargate</strong>
+      <a class="brand" href="#/" aria-label="Stargate fleet">
+        <img class="brand-dark" src="{{stargate-logo-dark}}" width="32" height="32" alt="">
+        <img class="brand-light" src="{{stargate-logo-light}}" width="32" height="32" alt="">
+        <strong>Stargate</strong>
+      </a>
       <nav id="breadcrumbs" aria-label="Breadcrumb"><a href="#/">Fleet</a></nav>
       <button id="refresh" type="button">Refresh</button>
     </header>

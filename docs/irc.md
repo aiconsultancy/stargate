@@ -324,10 +324,24 @@ captain's current nick. Without that explicit fleet policy/peer intersection,
 strict bot rejection is unchanged. These senders remain agents, with no human
 approval or Stop authority.
 
-This admission is separate from the default-off
-[correlated fleet result outbox](fleet-tools.md). An arbitrary peer reply
-cannot declare a task complete or select a Teams destination. Correlated
-completion is published by the trusted gateway from the admitted native job.
+When `fleetControl.results: true` enables the
+[correlated fleet result outbox](fleet-tools.md), an agent message must also
+match a retained dispatch validated by the assignment recorder before it can
+start a turn. Ordinary agent replies, acknowledgements and completion claims
+do not start turns, even when they mention another agent. The gateway returns
+the correlated native outcome through the durable outbox to its original
+conversation; arbitrary IRC text cannot select that destination or declare
+completion. Queued ordinary peer jobs from an older gateway fail the normal
+access recheck before work or delivery, retaining their records.
+
+In this results mode, an explicit leading address to a known other fleet
+agent (`vance:` or `vance,`) also prevents a human message from waking this
+connection. A later mention of its name, a reply tag or an own-channel wake
+rule does not override that recipient. Fleet account names and configured
+target IDs are recognised under the server's case mapping. Human messages
+without a different fleet recipient retain their usual mention and wake
+rules. With results absent or false, peer admission and recipient matching
+keep their existing behaviour.
 
 ## Conversations
 
