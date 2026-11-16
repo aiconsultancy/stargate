@@ -1,8 +1,14 @@
 import type { AgentBackend } from "./backend";
-import type { BotConfig } from "./config";
+import type { BotConfig, IrcConfig, TeamsConfig } from "./config";
 import type { CrewStatus } from "./crew-status";
 import type { CronStore } from "./cron-store";
-import type { DashboardSource, ShipSummary, ShipView } from "./dashboard-model";
+import type {
+  DashboardSource,
+  DashboardTransport,
+  ShipSummary,
+  ShipView,
+} from "./dashboard-model";
+import type { IrcRegistration } from "./irc/ship";
 import type { Identity } from "./routing";
 import {
   HISTORY_PAGE,
@@ -12,12 +18,76 @@ import {
 import type { Store } from "./store";
 
 export type DashboardShip = {
-  bot: BotConfig;
+  bot: Pick<
+    BotConfig,
+    "id" | "displayName" | "backend" | "concurrency" | "turnTimeoutMs"
+  > & {
+    slack?: BotConfig["slack"];
+    access?: NonNullable<ShipView["bot"]["access"]>;
+    cronjobs?: BotConfig["cronjobs"];
+  };
   identity: Identity;
   /** `botKey(bot, identity)`: the queue, session and cron namespace. */
   key: string;
   backend: AgentBackend;
+  transport?: DashboardTransport;
 };
+
+/** Existing runtime objects only: no extra connection, backend or native root. */
+export function ircDashboardShip(
+  registration: IrcRegistration,
+  config: IrcConfig,
+  backend: AgentBackend,
+): DashboardShip {
+  return {
+    bot: registration.settings,
+    identity: registration.identity,
+    key: registration.key,
+    backend,
+    transport: {
+      kind: "irc",
+      host: config.server.host,
+      port: config.server.port,
+      tls: config.server.tls,
+      ...(config.server.network ? { network: config.server.network } : {}),
+      account: registration.account,
+      nick: registration.nick,
+      channels: [...registration.channels],
+      access: {
+        ...(config.access.allowedAccounts
+          ? { allowedAccounts: [...config.access.allowedAccounts] }
+          : {}),
+        deniedAccounts: [...config.access.deniedAccounts],
+        deniedChannels: [...config.access.deniedChannels],
+        ...(config.access.channelRequests
+          ? { channelRequests: config.access.channelRequests }
+          : {}),
+        ...(config.access.wakeChannels
+          ? { wakeChannels: [...config.access.wakeChannels] }
+          : {}),
+        peerCaptains: [...config.access.peerCaptains],
+      },
+    },
+  };
+}
+
+export function teamsDashboardShip(
+  config: TeamsConfig,
+  key: string,
+  backend: AgentBackend,
+): DashboardShip {
+  return {
+    bot: config,
+    identity: { team: config.tenantId, user: config.botClientId },
+    key,
+    backend,
+    transport: {
+      kind: "teams",
+      tenantId: config.tenantId,
+      botClientId: config.botClientId,
+    },
+  };
+}
 
 const RECENT = 20;
 const ROOT_CACHE_MS = 10_000;
@@ -39,8 +109,8 @@ export function dashboardSource(
   cronStore: Pick<CronStore, "report" | "recentRuns">,
   now: () => number = Date.now,
 ): DashboardSource {
-  const crewRoots = new Map<
-    string,
+  const crewRoots = new WeakMap<
+    DashboardShip,
     { at: number; sessions: HistorySession[] }
   >();
 
@@ -68,10 +138,10 @@ export function dashboardSource(
     history: SessionHistory,
     signal: AbortSignal,
   ) {
-    const cached = crewRoots.get(ship.bot.id);
+    const cached = crewRoots.get(ship);
     if (cached && now() - cached.at < ROOT_CACHE_MS) return cached.sessions;
     const sessions = await history.roots(signal);
-    crewRoots.set(ship.bot.id, { at: now(), sessions });
+    crewRoots.set(ship, { at: now(), sessions });
     return sessions;
   }
 
@@ -170,6 +240,7 @@ export function dashboardSource(
             id: ship.bot.id,
             name: name(ship),
             backend: ship.bot.backend.type,
+            ...(ship.transport ? { transport: ship.transport.kind } : {}),
             ...(named ? { agent: named } : {}),
             crew: status && {
               total: status.total,
@@ -208,14 +279,23 @@ export function dashboardSource(
         name: name(ship),
         bot: {
           id: bot.id,
-          slack: { appId: bot.slack.appId, ...ship.identity },
-          access: {
-            users: bot.access.users,
-            channels: bot.access.channels,
-            deniedUsers: bot.access.deniedUsers,
-            deniedChannels: bot.access.deniedChannels,
-            mentionOnly: bot.access.mentionOnly,
-          },
+          ...(bot.slack
+            ? { slack: { appId: bot.slack.appId, ...ship.identity } }
+            : {}),
+          ...(ship.transport ? { transport: ship.transport } : {}),
+          ...(bot.access
+            ? {
+                access: {
+                  users: bot.access.users,
+                  channels: bot.access.channels,
+                  deniedUsers: bot.access.deniedUsers,
+                  deniedChannels: bot.access.deniedChannels,
+                  ...(bot.access.mentionOnly !== undefined
+                    ? { mentionOnly: bot.access.mentionOnly }
+                    : {}),
+                },
+              }
+            : {}),
           backend: {
             type: bot.backend.type,
             ...(bot.backend.type === "module"

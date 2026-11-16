@@ -1,10 +1,11 @@
 # Fleet dashboard
 
 The dashboard is a read-only web page for the operator. It shows every bot
-registration in one Stargate process as a ship:
+registration in one Stargate process as a ship, including Slack, IRC captains
+and crew, and Teams:
 
 - the captain and crew, with current, queued and recent tasks;
-- the Stargate bot: Slack app, workspace, access rules and backend;
+- the Stargate registration: its real transport identity, access rules and backend;
 - the request queue: totals and recent requests, without prompt text;
 - cronjobs: state, next run, last status and recent runs;
 - session history for the captain, each crew member and their subagents,
@@ -28,6 +29,43 @@ instance lock on the data directory proves that no other Stargate owns it.
 
 Startup fails when the socket cannot be created. Later request errors never
 stop the gateway.
+
+### Share only the socket with an operator proxy
+
+An explicit optional setting exposes a separate Unix socket to an operator
+Unix group while leaving the gateway data directory private:
+
+```json
+{
+  "dashboard": true,
+  "dashboardSocket": {
+    "path": "/run/stargate/dashboard/http.sock",
+    "groupAccess": true
+  },
+  "bots": []
+}
+```
+
+Keep the existing transport registrations alongside these settings. The socket
+path must be absolute and normalised, outside `dataDirectory`. An operator must
+create its parent directory before startup: owner is the Stargate process user,
+group is the proxy's operator group, and mode is exactly `2750`. The setgid bit
+assigns that group to the socket; only its owner can write the directory. All
+ancestors must be real directories owned by root or the gateway user, without
+group/other write access except protected sticky temporary directories.
+
+The listener creates the socket with mode `0660` from the start. It refuses live
+listeners, regular files, symlinks and unsafe paths, and removes only its own
+socket on shutdown. Gateway users need no membership of the operator group.
+Separate per-gateway directories prevent other gateway users from reaching the
+sockets. Do not change the data directory's `0700` permissions or give the proxy
+access to stores, credentials or agent homes.
+
+Omitting `dashboardSocket` preserves the existing private `0600` socket.
+`dashboardSocket` requires `dashboard: true` and a restart; it creates no TCP
+listener. The operator group can read full transcripts, so assign it only to a
+trusted authenticating proxy. A dashboard connection or proxy login grants no
+native tool, approval, message-send or source-control authority.
 
 ## Publish through a reverse proxy
 
@@ -57,6 +95,34 @@ To read the API without a browser:
 ```sh
 curl --unix-socket /srv/stargate/.stargate/dashboard.sock http://stargate/api/fleet
 ```
+
+## Transport identities and process scope
+
+Each configured registration has its own dashboard ID and existing queue/session
+namespace. An IRC and Teams registration may deliberately share a pinned native
+root; they remain separate dashboard registrations and their mapped conversation
+histories and queue counts are not combined. The shared pinned root is visible
+to both. The dashboard reuses the running backends and connections and starts
+no model work. IRC access/roster reloads update the same view; removed crew
+registrations disappear after the committed reload.
+
+IRC detail reports server, port, TLS, network, real account/nick, joined channels
+and account/channel policy. Teams reports tenant and bot application IDs plus
+its configured user/channel policy. Neither invents Slack app or workspace IDs.
+Existing Slack detail and its `bot.slack` metadata are unchanged.
+
+The JSON API retains its existing paths. Non-Slack fleet summaries add
+`transport: "irc"` or `"teams"`; their detail uses `bot.transport` with the
+corresponding `kind` and real identity. `bot.slack` exists only for Slack.
+
+One process shows only its own registrations. For several independent processes,
+an authenticating operator proxy can expose one prefixed route per socket. An
+external read-only aggregator may combine exact known gateway summaries and route
+known registration IDs to fixed protected sockets; Stargate does not discover or
+trust arbitrary peers. Keep unavailable gateways explicit and preserve the
+owner's history checks, GET/HEAD-only methods, no-store headers and CSP. Do not
+forward browser credentials to a native engine or convert dashboard identity
+into a new human approval.
 
 ## Session history
 

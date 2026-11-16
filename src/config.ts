@@ -729,6 +729,16 @@ export const configSchema = z
     dataDirectory: z.string().default(".stargate"),
     /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
     dashboard: z.boolean().optional(),
+    /** Explicit operator-group socket; the private default is unchanged. */
+    dashboardSocket: z
+      .strictObject({
+        path: absolutePath.refine(
+          (path) => resolve(path) === path,
+          "An absolute normalised socket path is required",
+        ),
+        groupAccess: z.literal(true),
+      })
+      .optional(),
     bots: z.array(botSchema).default([]),
     /** IRCv3 registrations, independent of Slack; see docs/irc.md. */
     irc: z.array(ircSchema).default([]),
@@ -738,143 +748,158 @@ export const configSchema = z
     /** Read subscription quota and announce changes to crew availability. */
     quotaWatch: quotaWatchSchema.optional(),
   })
-  .superRefine(({ bots, irc, teams, maintenance, quotaWatch }, context) => {
-    if (bots.length + irc.length + teams.length === 0)
-      context.addIssue({
-        code: "custom",
-        path: ["bots"],
-        message: "Configure at least one Slack, Teams or IRC registration",
-      });
-    const ids = registrationIds({ bots, irc, teams });
-    if (new Set(ids).size !== ids.length)
-      context.addIssue({
-        code: "custom",
-        message: "Duplicate registration ID across bots, irc and IRC crew",
-      });
-    // One Slack bot and one IRC captain may share a pin: each delivers only
-    // replies attributed to its own native inputs. Same-transport pins stay
-    // unique, so one queue never owns another's cursor.
-    const ircPins = irc.flatMap((registration) =>
-      registration.backend.type === "opencode" &&
-      registration.backend.sessionID !== undefined
-        ? [registration.backend.sessionID]
-        : [],
-    );
-    if (new Set(ircPins).size !== ircPins.length)
-      context.addIssue({
-        code: "custom",
-        message: "Duplicate pinned OpenCode sessionID across IRC registrations",
-      });
-    const teamPins = teams.flatMap((team) =>
-      team.backend.type === "opencode" && team.backend.sessionID
-        ? [team.backend.sessionID]
-        : [],
-    );
-    const slackPins = bots.flatMap((bot) =>
-      bot.backend.type === "opencode" && bot.backend.sessionID
-        ? [bot.backend.sessionID]
-        : [],
-    );
-    if (
-      new Set(teamPins).size !== teamPins.length ||
-      teamPins.some((pin) => slackPins.includes(pin))
-    )
-      context.addIssue({
-        code: "custom",
-        message: "A pinned session needs one primary chat transport owner",
-      });
-    if (new Set(teams.map((team) => team.socketPath)).size !== teams.length)
-      context.addIssue({
-        code: "custom",
-        message: "Teams registrations need separate socket paths",
-      });
-    // An audit channel is never a conversation in any registration: another
-    // ship listing it would answer mirrored lines. Host names and ports do
-    // not prove two servers distinct (aliases, addresses, proxies), so every
-    // IRC registration counts, under the widest name folding.
-    const shipChannels = new Set(
-      irc.flatMap((registration) => registration.channels.map(widestFold)),
-    );
-    for (const registration of irc) {
-      const audit = registration.audit?.channel;
-      if (audit !== undefined && shipChannels.has(widestFold(audit)))
+  .superRefine(
+    (
+      { bots, irc, teams, maintenance, quotaWatch, dashboard, dashboardSocket },
+      context,
+    ) => {
+      if (dashboardSocket && dashboard !== true)
         context.addIssue({
           code: "custom",
-          message: `IRC audit channel of ${registration.id} is a ship channel of an IRC registration`,
+          path: ["dashboardSocket"],
+          message: "A shared dashboard socket requires dashboard: true",
         });
-    }
-    const ircSecrets = irc.flatMap((registration) => [
-      ...(registration.passwordEnv ? [registration.passwordEnv] : []),
-      ...registration.crew.map((member) => member.passwordEnv),
-    ]);
-    if (new Set(ircSecrets).size !== ircSecrets.length)
-      context.addIssue({
-        code: "custom",
-        message: "Each IRC account needs its own passwordEnv",
-      });
-    for (const [feature, report] of [
-      ["maintenance", maintenance?.report],
-      ["quotaWatch", quotaWatch?.report],
-    ] as const) {
-      if (!report) continue;
-      const bot = bots.find((item) => item.id === report.bot);
-      const matches = (rules: readonly string[]) =>
-        rules.includes("*") || rules.includes(report.channel);
+      if (bots.length + irc.length + teams.length === 0)
+        context.addIssue({
+          code: "custom",
+          path: ["bots"],
+          message: "Configure at least one Slack, Teams or IRC registration",
+        });
+      const ids = registrationIds({ bots, irc, teams });
+      if (new Set(ids).size !== ids.length)
+        context.addIssue({
+          code: "custom",
+          message: "Duplicate registration ID across bots, irc and IRC crew",
+        });
+      // One Slack bot and one IRC captain may share a pin: each delivers only
+      // replies attributed to its own native inputs. Same-transport pins stay
+      // unique, so one queue never owns another's cursor.
+      const ircPins = irc.flatMap((registration) =>
+        registration.backend.type === "opencode" &&
+        registration.backend.sessionID !== undefined
+          ? [registration.backend.sessionID]
+          : [],
+      );
+      if (new Set(ircPins).size !== ircPins.length)
+        context.addIssue({
+          code: "custom",
+          message:
+            "Duplicate pinned OpenCode sessionID across IRC registrations",
+        });
+      const teamPins = teams.flatMap((team) =>
+        team.backend.type === "opencode" && team.backend.sessionID
+          ? [team.backend.sessionID]
+          : [],
+      );
+      const slackPins = bots.flatMap((bot) =>
+        bot.backend.type === "opencode" && bot.backend.sessionID
+          ? [bot.backend.sessionID]
+          : [],
+      );
       if (
-        !bot ||
-        matches(bot.access.deniedChannels) ||
-        (feature === "maintenance" && !matches(bot.access.channels))
+        new Set(teamPins).size !== teamPins.length ||
+        teamPins.some((pin) => slackPins.includes(pin))
       )
         context.addIssue({
           code: "custom",
-          path: [feature, "report"],
-          message:
-            feature === "maintenance"
-              ? "Maintenance report bot must exist and allow the report channel"
-              : "Quota report bot must exist and not deny the report channel",
+          message: "A pinned session needs one primary chat transport owner",
         });
-    }
-    for (const [index, bot] of bots.entries())
-      if (bot.captainPost && bot.backend.type !== "opencode")
+      if (new Set(teams.map((team) => team.socketPath)).size !== teams.length)
         context.addIssue({
           code: "custom",
-          path: ["bots", index, "captainPost"],
-          message: "captainPost requires an OpenCode captain backend",
+          message: "Teams registrations need separate socket paths",
         });
-    const cronDirectories = bots.flatMap((bot) =>
-      bot.cronjobs ? [resolve(bot.cronjobs.directory)] : [],
-    );
-    if (new Set(cronDirectories).size !== cronDirectories.length)
-      context.addIssue({
-        code: "custom",
-        message: "Each bot needs a separate cronjobs directory",
-      });
-    const pinnedSessions = bots.flatMap((bot) =>
-      bot.backend.type === "opencode" && bot.backend.sessionID !== undefined
-        ? [bot.backend.sessionID]
-        : [],
-    );
-    if (new Set(pinnedSessions).size !== pinnedSessions.length) {
-      context.addIssue({
-        code: "custom",
-        message:
-          "Duplicate pinned OpenCode sessionID; each root needs one bot owner",
-      });
-    }
-    for (const field of [
-      "id",
-      "appId",
-      "botTokenEnv",
-      "appTokenEnv",
-    ] as const) {
-      const values = bots.map((bot) =>
-        field === "id" ? bot.id : bot.slack[field],
+      // An audit channel is never a conversation in any registration: another
+      // ship listing it would answer mirrored lines. Host names and ports do
+      // not prove two servers distinct (aliases, addresses, proxies), so every
+      // IRC registration counts, under the widest name folding.
+      const shipChannels = new Set(
+        irc.flatMap((registration) => registration.channels.map(widestFold)),
       );
-      if (new Set(values).size !== values.length) {
-        context.addIssue({ code: "custom", message: `Duplicate bot ${field}` });
+      for (const registration of irc) {
+        const audit = registration.audit?.channel;
+        if (audit !== undefined && shipChannels.has(widestFold(audit)))
+          context.addIssue({
+            code: "custom",
+            message: `IRC audit channel of ${registration.id} is a ship channel of an IRC registration`,
+          });
       }
-    }
-  });
+      const ircSecrets = irc.flatMap((registration) => [
+        ...(registration.passwordEnv ? [registration.passwordEnv] : []),
+        ...registration.crew.map((member) => member.passwordEnv),
+      ]);
+      if (new Set(ircSecrets).size !== ircSecrets.length)
+        context.addIssue({
+          code: "custom",
+          message: "Each IRC account needs its own passwordEnv",
+        });
+      for (const [feature, report] of [
+        ["maintenance", maintenance?.report],
+        ["quotaWatch", quotaWatch?.report],
+      ] as const) {
+        if (!report) continue;
+        const bot = bots.find((item) => item.id === report.bot);
+        const matches = (rules: readonly string[]) =>
+          rules.includes("*") || rules.includes(report.channel);
+        if (
+          !bot ||
+          matches(bot.access.deniedChannels) ||
+          (feature === "maintenance" && !matches(bot.access.channels))
+        )
+          context.addIssue({
+            code: "custom",
+            path: [feature, "report"],
+            message:
+              feature === "maintenance"
+                ? "Maintenance report bot must exist and allow the report channel"
+                : "Quota report bot must exist and not deny the report channel",
+          });
+      }
+      for (const [index, bot] of bots.entries())
+        if (bot.captainPost && bot.backend.type !== "opencode")
+          context.addIssue({
+            code: "custom",
+            path: ["bots", index, "captainPost"],
+            message: "captainPost requires an OpenCode captain backend",
+          });
+      const cronDirectories = bots.flatMap((bot) =>
+        bot.cronjobs ? [resolve(bot.cronjobs.directory)] : [],
+      );
+      if (new Set(cronDirectories).size !== cronDirectories.length)
+        context.addIssue({
+          code: "custom",
+          message: "Each bot needs a separate cronjobs directory",
+        });
+      const pinnedSessions = bots.flatMap((bot) =>
+        bot.backend.type === "opencode" && bot.backend.sessionID !== undefined
+          ? [bot.backend.sessionID]
+          : [],
+      );
+      if (new Set(pinnedSessions).size !== pinnedSessions.length) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Duplicate pinned OpenCode sessionID; each root needs one bot owner",
+        });
+      }
+      for (const field of [
+        "id",
+        "appId",
+        "botTokenEnv",
+        "appTokenEnv",
+      ] as const) {
+        const values = bots.map((bot) =>
+          field === "id" ? bot.id : bot.slack[field],
+        );
+        if (new Set(values).size !== values.length) {
+          context.addIssue({
+            code: "custom",
+            message: `Duplicate bot ${field}`,
+          });
+        }
+      }
+    },
+  );
 
 export type BackendConfig = z.infer<typeof backendSchema>;
 export type BotConfig = z.infer<typeof botSchema>;

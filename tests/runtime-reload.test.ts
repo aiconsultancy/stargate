@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Writable } from "node:stream";
 import { Effect } from "effect";
 import pino from "pino";
+import { z } from "zod";
 import type { AgentBackend } from "../src/backend";
 import { type Config, configSchema, ircSchema } from "../src/config";
 import { ConfigReload, readReloadCandidate } from "../src/config-reload";
@@ -33,6 +34,7 @@ async function running(
     environment?: Record<string, string>;
     turn?: Turn;
     failBackend?: string;
+    dashboard?: boolean;
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-runtime-reload-"));
@@ -41,6 +43,7 @@ async function running(
   const config = configSchema.parse({
     dataDirectory: join(directory, "data"),
     bots: [bot()],
+    dashboard: options.dashboard,
     irc: options.irc ?? [],
   });
   const environment = {
@@ -470,4 +473,53 @@ test("busy IRC removal rejects the whole reload without applying new denies", as
   } finally {
     release.resolve();
   }
+});
+
+test("dashboard follows IRC access reload and committed crew addition/removal without stale entries or extra backends", async () => {
+  const server = new FakeIrcServer({
+    accounts: { galactica: "captain-pass", "galactica-chief": "chief-pass" },
+  }).start();
+  cleanup.push(() => server.stop());
+  const registration = irc(server.port);
+  const f = await running({
+    dashboard: true,
+    irc: [registration],
+    environment: { IRC_MAIN: "captain-pass", IRC_CHIEF: "chief-pass" },
+  });
+  const get = async (path: string) =>
+    fetch("http://dashboard" + path, {
+      unix: join(f.config.dataDirectory, "dashboard.sock"),
+    });
+  const fleet = async () =>
+    z
+      .object({ ships: z.array(z.object({ id: z.string() })) })
+      .parse(await (await get("/api/fleet")).json())
+      .ships.map((s) => s.id)
+      .sort();
+  expect(await fleet()).toEqual(["fleet", "helper"]);
+  const next = {
+    ...registration,
+    access: { ...registration.access, allowedAccounts: ["new-human"] },
+    crew: [chief],
+  };
+  await f.write({ ...f.config, irc: [next] });
+  expect((await f.reload.request()).status).toBe("applied");
+  expect(await fleet()).toEqual(["fleet", "fleet-chief", "helper"]);
+  const detail = z
+    .object({
+      bot: z.object({
+        transport: z.object({
+          kind: z.literal("irc"),
+          access: z.object({ allowedAccounts: z.array(z.string()) }),
+        }),
+      }),
+    })
+    .parse(await (await get("/api/ships/fleet")).json());
+  expect(detail.bot.transport.access.allowedAccounts).toEqual(["new-human"]);
+  expect(f.built).toEqual(["helper", "fleet", "fleet-chief"]);
+  await f.write({ ...f.config, irc: [{ ...next, crew: [] }] });
+  expect((await f.reload.request()).status).toBe("applied");
+  expect(await fleet()).toEqual(["fleet", "helper"]);
+  expect((await get("/api/ships/fleet-chief")).status).toBe(404);
+  expect(f.closed).toEqual(["fleet-chief"]);
 });

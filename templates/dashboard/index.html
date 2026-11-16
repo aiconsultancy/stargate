@@ -289,12 +289,27 @@
       }
       function renderBot(bot) {
         const node = section("Stargate bot", "bot");
-        node.append(fields([
-          ["Bot ID", bot.id], ["Slack app", bot.slack.appId],
-          ["Slack team", bot.slack.team], ["Slack user", bot.slack.user],
+        const transport = bot.transport;
+        const identity = transport?.kind === "irc" ? [
+          ["Transport", "IRC"], ["Server", `${transport.host}:${transport.port}`],
+          ["TLS", transport.tls], ["Network", transport.network],
+          ["Account", transport.account], ["Nick", transport.nick], ["Joined channels", transport.channels],
+          ["Allowed accounts", transport.access.allowedAccounts ?? "No account allow-list"],
+          ["Denied accounts", transport.access.deniedAccounts], ["Denied channels", transport.access.deniedChannels],
+          ["Channel requests", transport.access.channelRequests], ["Wake channels", transport.access.wakeChannels],
+          ["Peer captains", transport.access.peerCaptains],
+        ] : transport?.kind === "teams" ? [
+          ["Transport", "Teams"], ["Tenant", transport.tenantId], ["Bot application", transport.botClientId],
+        ] : bot.slack ? [
+          ["Slack app", bot.slack.appId], ["Slack team", bot.slack.team], ["Slack user", bot.slack.user],
+        ] : [];
+        const access = bot.access ? [
           ["Allowed users", bot.access.users], ["Allowed channels", bot.access.channels],
           ["Denied users", bot.access.deniedUsers], ["Denied channels", bot.access.deniedChannels],
-          ["Mention only", bot.access.mentionOnly], ["Backend", bot.backend.type],
+          ...(bot.access.mentionOnly === undefined ? [] : [["Mention only", bot.access.mentionOnly]]),
+        ] : [];
+        node.append(fields([
+          ["Bot ID", bot.id], ...identity, ...access, ["Backend", bot.backend.type],
           ["Agent", bot.backend.agent], ["Model", bot.backend.model],
           ["Directory", bot.backend.directory], ["Concurrency", bot.concurrency],
           ["Turn timeout (ms)", bot.turnTimeoutMs],
@@ -309,9 +324,9 @@
         ));
         return node;
       }
-      function renderCron(cron) {
+      function renderCron(cron, transport) {
         const node = section("Cronjobs", "cron");
-        node.append(el("p", cron.fileBacked ? "File-backed schedules" : "Legacy Slack schedules"));
+        node.append(el("p", cron.fileBacked ? "File-backed schedules" : transport ? "No schedules configured" : "Legacy Slack schedules"));
         if (cron.dailyReport) node.append(fields([
           ["Daily report channel", cron.dailyReport.channel], ["Daily report time", cron.dailyReport.time],
           ["Timezone", cron.dailyReport.timezone],
@@ -420,7 +435,7 @@
         // Reuse session nodes so polling preserves loaded children and controls.
         const sessions = renderSessions(data);
         replaceView([el("h1", data.name), updated(data.generatedAt), renderCrew(data),
-          renderBot(data.bot), renderQueue(data.queue), renderCron(data.cron), sessions], saved);
+          renderBot(data.bot), renderQueue(data.queue), renderCron(data.cron, data.bot.transport), sessions], saved);
       }
       function partDetails(label, body) {
         const details = el("details");

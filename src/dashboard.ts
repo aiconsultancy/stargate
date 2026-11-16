@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { chmod, lstat, unlink } from "node:fs/promises";
+import { createServer } from "node:http";
 import { dirname } from "node:path";
 import type { Logger } from "pino";
 import { dashboardBranding, isDashboardFavicon } from "./dashboard-branding";
@@ -8,6 +9,13 @@ import {
   historyChildrenInputSchema,
   historyEntriesInputSchema,
 } from "./session-history";
+import { close as closeHttpServer } from "./teams/http-util";
+import {
+  listenOnUnixSocket,
+  type Ownership,
+  type SocketIdentity,
+  unlinkOwnSocket,
+} from "./teams/unix-socket";
 
 type Options = {
   source: DashboardSource;
@@ -261,16 +269,24 @@ export function dashboardHandler(
 }
 
 export async function startDashboard(
-  options: Options & { socket: string },
+  options: Options & {
+    socket: string;
+    groupAccess?: boolean;
+    ownership?: Ownership;
+  },
 ): Promise<{ stop(): Promise<void> }> {
   const parent = await lstat(dirname(options.socket));
   if (
     !parent.isDirectory() ||
     parent.uid !== process.getuid?.() ||
-    (parent.mode & 0o077) !== 0
+    (options.groupAccess
+      ? (parent.mode & 0o7777) !== 0o2750
+      : (parent.mode & 0o077) !== 0)
   ) {
     throw new Error(
-      "Dashboard socket directory must be private and owned by the current user",
+      options.groupAccess
+        ? "Shared dashboard socket directory must be owned by the current user with mode 2750 and its operator group"
+        : "Dashboard socket directory must be private and owned by the current user",
     );
   }
   const shutdown = new AbortController();
@@ -278,6 +294,59 @@ export async function startDashboard(
     ...options,
     signal: AbortSignal.any([options.signal, shutdown.signal]),
   });
+  if (options.groupAccess) {
+    // The existing listener checks every ancestor and binds under umask 0117.
+    // The setgid directory controls the operator group; no chgrp or home access.
+    const server = createServer((request, response) => {
+      request.resume();
+      void Promise.resolve()
+        .then(() =>
+          dashboard.fetch(
+            new Request(new URL(request.url ?? "/", "http://dashboard.local"), {
+              method:
+                request.method === "GET" || request.method === "HEAD"
+                  ? request.method
+                  : "POST",
+            }),
+          ),
+        )
+        .then(async (result) => {
+          response.writeHead(result.status, Object.fromEntries(result.headers));
+          response.end(Buffer.from(await result.arrayBuffer()));
+        })
+        .catch(() => {
+          if (!response.headersSent)
+            response.writeHead(502, { "Cache-Control": "no-store" });
+          response.end();
+        });
+    });
+    server.requestTimeout = 30_000;
+    server.headersTimeout = 10_000;
+    server.keepAliveTimeout = 1000;
+    let identity: SocketIdentity | undefined;
+    try {
+      identity = await listenOnUnixSocket(
+        server,
+        options.socket,
+        options.ownership,
+      );
+    } catch (error) {
+      await closeHttpServer(server);
+      throw error;
+    }
+    let stopping: Promise<void> | undefined;
+    return {
+      stop() {
+        stopping ??= (async () => {
+          shutdown.abort();
+          await closeHttpServer(server);
+          await dashboard.drain();
+          unlinkOwnSocket(options.socket, identity, options.ownership);
+        })();
+        return stopping;
+      },
+    };
+  }
   const old = await socketStat(options.socket);
   if (old) {
     if (!old.isSocket())

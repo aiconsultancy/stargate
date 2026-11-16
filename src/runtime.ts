@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { parseEnv } from "node:util";
 import { Cause, Data, Deferred, Effect, FiberMap } from "effect";
 import pino, { type Logger } from "pino";
@@ -29,7 +29,12 @@ import { type CronDelivery, CronScheduler } from "./cron";
 import { CronStore } from "./cron-store";
 import { CronUI, type CronUIApi } from "./cron-ui";
 import { startDashboard } from "./dashboard";
-import { type DashboardShip, dashboardSource } from "./dashboard-source";
+import {
+  type DashboardShip,
+  dashboardSource,
+  ircDashboardShip,
+  teamsDashboardShip,
+} from "./dashboard-source";
 import { abortable } from "./effect";
 import { FleetControl } from "./fleet/control";
 import { fleetRequestAction } from "./fleet/permissions";
@@ -178,6 +183,19 @@ export function serve(
   const program = Effect.scoped(
     Effect.gen(function* () {
       yield* Effect.promise(async () => {
+        if (config.dashboardSocket) {
+          const path = relative(
+            config.dataDirectory,
+            config.dashboardSocket.path,
+          );
+          if (
+            path === "" ||
+            (!isAbsolute(path) && path !== ".." && !path.startsWith("../"))
+          )
+            throw new Error(
+              "Shared dashboard socket must be outside the private data directory",
+            );
+        }
         await mkdir(config.dataDirectory, { recursive: true, mode: 0o700 });
         await chmod(config.dataDirectory, 0o700);
       });
@@ -290,6 +308,9 @@ export function serve(
           work: supervise(teamLog, "gateway", (signal) => gateway.work(signal)),
         });
         teamsRegistrations.push(registration);
+        ships.push(
+          teamsDashboardShip(teams, registration.key, resource.backend),
+        );
       }
       for (const bot of config.bots) {
         let currentBot = bot;
@@ -493,7 +514,12 @@ export function serve(
           );
           registration.stopTurn = (conversation, thread) =>
             gateway.stopTurn(conversation, thread);
-          return { registration, gateway, resource };
+          return {
+            registration,
+            gateway,
+            resource,
+            dashboard: ircDashboardShip(registration, irc, resource.backend),
+          };
         } catch (error) {
           await resource.close();
           throw error;
@@ -516,6 +542,7 @@ export function serve(
               release(registration.log, "Resource", entry.resource.close),
           );
           entries.set(registration.key, entry);
+          ships.push(entry.dashboard);
           workers.push({
             key: registration.key,
             work: supervise(registration.log, "gateway", (signal) =>
@@ -684,7 +711,10 @@ export function serve(
         yield* Effect.acquireRelease(
           Effect.promise(async () =>
             startDashboard({
-              socket: join(config.dataDirectory, "dashboard.sock"),
+              socket:
+                config.dashboardSocket?.path ??
+                join(config.dataDirectory, "dashboard.sock"),
+              groupAccess: config.dashboardSocket?.groupAccess ?? false,
               source: dashboardSource(ships, store, cronStore),
               html: await Bun.file(
                 new URL("../templates/dashboard/index.html", import.meta.url),
@@ -785,24 +815,29 @@ export function serve(
             if (paused.some((gateway) => !gateway.isIdle()))
               throw new ReloadRejected("busy");
             // Resolve every entry and namespace before publishing anything.
-            const updates = plans.flatMap(({ binding, plan, transcriber }) => {
-              const removed = new Set(plan.removed);
-              const registrations = [
-                ...binding.ship.registrations.filter(
-                  (registration) => !removed.has(registration),
-                ),
-                ...plan.added,
-              ];
-              return registrations.map((registration) => {
-                const entry =
-                  staged.find(
-                    ({ entry }) => entry.registration === registration,
-                  )?.entry ?? binding.entries.get(registration.key);
-                if (!entry || entry.gateway.key !== registration.transport.key)
-                  throw new ReloadRejected("unavailable");
-                return { binding, registration, entry, transcriber };
-              });
-            });
+            const updates = plans.flatMap(
+              ({ binding, plan, transcriber, next }) => {
+                const removed = new Set(plan.removed);
+                const registrations = [
+                  ...binding.ship.registrations.filter(
+                    (registration) => !removed.has(registration),
+                  ),
+                  ...plan.added,
+                ];
+                return registrations.map((registration) => {
+                  const entry =
+                    staged.find(
+                      ({ entry }) => entry.registration === registration,
+                    )?.entry ?? binding.entries.get(registration.key);
+                  if (
+                    !entry ||
+                    entry.gateway.key !== registration.transport.key
+                  )
+                    throw new ReloadRejected("unavailable");
+                  return { binding, registration, entry, transcriber, next };
+                });
+              },
+            );
             // No awaits: publish all access/settings and roster references in
             // one JS turn. Admission cannot observe a half-applied candidate.
             for (const { binding, plan } of plans)
@@ -815,12 +850,18 @@ export function serve(
               registration,
               entry,
               transcriber,
+              next,
             } of updates) {
               entry.gateway.reconfigure(
                 registration.settings,
                 transcriber,
                 registration.transport,
               );
+              Object.assign(
+                entry.dashboard,
+                ircDashboardShip(registration, next, entry.resource.backend),
+              );
+              if (!ships.includes(entry.dashboard)) ships.push(entry.dashboard);
               binding.entries.set(registration.key, entry);
             }
             committed = true;
@@ -834,6 +875,10 @@ export function serve(
               for (const registration of plan.removed) {
                 const entry = binding.entries.get(registration.key);
                 binding.entries.delete(registration.key);
+                if (entry) {
+                  const index = ships.indexOf(entry.dashboard);
+                  if (index >= 0) ships.splice(index, 1);
+                }
                 await Effect.runPromise(
                   FiberMap.remove(fibers, registration.key),
                 ).catch(() => log.warn("Retired worker cleanup failed"));

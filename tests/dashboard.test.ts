@@ -2,10 +2,14 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   chmod,
+  chown,
   lstat,
+  mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
+  symlink,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -14,6 +18,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { dashboardHandler, startDashboard } from "../src/dashboard";
 import type { DashboardSource } from "../src/dashboard-model";
+import type { Ownership } from "../src/teams/unix-socket";
 
 const html =
   '<!doctype html><style>body { color: red; }</style><script>console.log("ok");</script>';
@@ -436,5 +441,102 @@ test("timed-out uncancellable work retains its concurrency slot", async () => {
     expect((await f.get("/api/fleet")).status).toBe(503);
   } finally {
     release.resolve(fleet);
+  }
+});
+
+const sharedLock: NonNullable<Ownership["lockCommand"]> = (path) => ({
+  command: "python3",
+  args: [
+    "-u",
+    "-c",
+    "import fcntl,sys;f=open(sys.argv[1]);fcntl.flock(f,fcntl.LOCK_EX);print('R',flush=True);sys.stdin.read()",
+    path,
+  ],
+});
+test("opt-in shared Unix socket inherits the protected operator group and serves only reads", async () => {
+  const directory = await realpath(
+    await mkdtemp("/tmp/opencode/dashboard-shared-"),
+  );
+  const socket = join(directory, "http.sock");
+  if (!process.getuid || !process.getgid) throw new Error("POSIX IDs required");
+  await chown(directory, process.getuid(), process.getgid());
+  await chmod(directory, 0o2750);
+  const options = {
+    ...fixture().options,
+    socket,
+    groupAccess: true,
+    ownership: { lockCommand: sharedLock },
+  };
+  const server = await startDashboard(options);
+  try {
+    const parent = await lstat(directory),
+      file = await lstat(socket);
+    expect(file.mode & 0o777).toBe(0o660);
+    expect(file.gid).toBe(parent.gid);
+    expect(file.uid === process.getuid?.()).toBe(true);
+    expect(
+      await (
+        await fetch("http://dashboard/api/fleet", { unix: socket })
+      ).json(),
+    ).toEqual(fleet);
+    const head = await fetch("http://dashboard/api/fleet", {
+      unix: socket,
+      method: "HEAD",
+    });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    for (const method of ["POST", "PUT", "DELETE", "OPTIONS", "PATCH"]) {
+      const response = await fetch("http://dashboard/api/fleet", {
+        unix: socket,
+        method,
+      });
+      expect(response.status).toBe(405);
+      expect(response.headers.get("Allow")).toBe("GET, HEAD");
+    }
+    await expect(startDashboard(options)).rejects.toThrow();
+    expect(
+      (await fetch("http://dashboard/api/fleet", { unix: socket })).status,
+    ).toBe(200);
+  } finally {
+    await server.stop();
+    await server.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("shared dashboard refuses missing setgid, writable parents, symlinks and non-normalised paths", async () => {
+  const root = await realpath(await mkdtemp("/tmp/opencode/dashboard-shared-"));
+  const directory = join(root, "operator");
+  await mkdir(directory, { mode: 0o700 });
+  if (!process.getuid || !process.getgid) throw new Error("POSIX IDs required");
+  await chown(directory, process.getuid(), process.getgid());
+  const options = {
+    ...fixture().options,
+    socket: join(directory, "http.sock"),
+    groupAccess: true,
+    ownership: { lockCommand: sharedLock },
+  };
+  try {
+    for (const mode of [0o700, 0o750, 0o2770, 0o2755]) {
+      await chmod(directory, mode);
+      await expect(startDashboard(options)).rejects.toThrow();
+    }
+    await chmod(directory, 0o2750);
+    await chmod(root, 0o770);
+    await expect(startDashboard(options)).rejects.toThrow();
+    await chmod(root, 0o700);
+    const link = join(root, "linked");
+    await symlink(directory, link);
+    await expect(
+      startDashboard({ ...options, socket: join(link, "http.sock") }),
+    ).rejects.toThrow();
+    await expect(
+      startDashboard({
+        ...options,
+        socket: directory + "/../operator/http.sock",
+      }),
+    ).rejects.toThrow();
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
