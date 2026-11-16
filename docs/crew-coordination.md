@@ -37,11 +37,93 @@ edits; it does not create an unused OpenCode agent for a Pi member.
 Working agreements never override operator instructions or permissions.
 Historical Markdown journals remain; new milestone notes use SQLite.
 
-Each crew member has one permanent worktree named after its member ID. Task
+Each crew member has one permanent worktree per configured project, named after its member ID. Task
 branches change inside that worktree; tasks do not get replacement worktrees or
 crew sessions. Temporary work in tmp directories is allowed without moving the
 session. Existing legacy folder names need an explicit migration that preserves
 their work, branches and session identity.
+
+## Optional additional projects
+
+The default crew context keeps its existing `projectDirectory`, permanent
+`worktrees`, native captain pin and state identity. An optional `projects`
+registry adds explicit repository contexts; it does not move that captain root,
+rewrite an existing worker, change a model or expand a native permission grant.
+The captain's original `captainDirectory` can differ from the selected
+`projectDirectory`. Prepare each checkout and permanent worktree outside the
+plugin, then add only their exact canonical paths to trusted plugin options:
+
+```json
+{
+  "projects": {
+    "library": {
+      "projectDirectory": "/home/captain/workspace/library",
+      "worktrees": {
+        "apollo": "/home/captain/worktrees/apollo/library"
+      }
+    }
+  }
+}
+```
+
+Include every configured crew member in each project's `worktrees` map. Keys
+are lowercase identifiers of at most48 characters, never paths; `default` and
+prototype-related keys are reserved. Up to eight additional contexts and fifty
+configured member contexts are accepted. The default repository must not be
+duplicated under another key. All paths must exist, with distinct non-nested
+worker directories and no symbolic-link aliases. Each worker must have the same
+Git common directory as its configured project checkout; different project
+keys must identify different repositories. Validation performs bounded read-only
+Git inspection before opening any context. It never clones, creates a worktree,
+changes a branch or resets files.
+
+Captains select a configured key explicitly:
+
+```js
+stargate_crew({
+  op: "dispatch",
+  project: "library",
+  crew: "apollo",
+  text: "Implement and test the assigned change.",
+});
+stargate_crew({ op: "status", project: "library", taskID: "task_RETAINED_ID" });
+stargate_mail({ op: "inbox", project: "library" });
+```
+
+The same optional selector is available on mail, DM, journal, quota, model and
+history tools. A captain's omitted selector retains the default context. Reuse
+the project key from the task receipt for later captain status/wait/recovery
+operations; an unknown key never falls back. Workers can omit it: their actual
+persisted native session ID selects their context. A worker cannot switch to
+another project's tasks, mailbox or DM route by claiming a key. Unknown workers
+and changed native directory/identity are refused. Models and permissions still
+come from the existing configured native profile; do not install a worker
+definition that contradicts the selected permanent worktree. The protected task
+envelope identifies the selected directory and requires that repository's own
+instructions. A project selection, message or returned transcript is never human
+approval or permission to broaden scope.
+
+Additional contexts use `<stateDirectory>/projects/<key>` and namespace
+`<namespace>:project:<key>`. Each has separate persisted worker/native IDs,
+task slots, queues and Mesij context. The same logical member may have work in
+different projects; those are separate worker contexts. Retries, cancellation,
+uncertain outcomes and recovery stay with their original project and input.
+Changing a configured directory after state exists fails closed; retain the
+old state and use an explicitly commissioned new context rather than deleting
+or rebinding it. Existing default fingerprints and IDs are unchanged, including
+when the registry is first enabled.
+
+Read-only status reports label each member's project and count member contexts;
+the existing twenty-row cap reports truncation, the true total and an exact busy
+count across all contexts. Older truncated status producers without that count
+are labelled partial on the dashboard. Operator
+history includes the owned roots from every context, with project labels on
+additional roots. Unknown or cross-context session IDs do not gain access.
+Existing cron, post, waiting/maintenance and activity-capture RPCs retain the
+default captain scope. Recovery and IRC bind/outbox RPCs accept an optional
+project key; each outbox cursor belongs to that one context. An existing IRC
+consumer that omits it continues to read only the default outbox. No extra IRC
+account, transport, approval route or provider connection is created.
 
 ## Tools
 

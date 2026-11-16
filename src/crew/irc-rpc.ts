@@ -1,5 +1,6 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { z } from "zod";
+import { projectSelectionSchema } from "./project-options";
 
 const sessionID = z
   .string()
@@ -41,11 +42,16 @@ export const CrewIrc = Rpc.define({
   events: {},
   methods: {
     bind: {
-      input: z.strictObject({ sessionID, crewID: memberID }),
+      input: z.strictObject({
+        sessionID,
+        crewID: memberID,
+        project: projectSelectionSchema.optional(),
+      }),
       output: z.strictObject({ bound: z.literal(true) }),
     },
     outbox: {
       input: z.strictObject({
+        project: projectSelectionSchema.optional(),
         after: sequence.optional(),
         limit: z.number().int().min(1).max(100),
       }),

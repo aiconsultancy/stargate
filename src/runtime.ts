@@ -514,6 +514,8 @@ export function serve(
           );
           registration.stopTurn = (conversation, thread) =>
             gateway.stopTurn(conversation, thread);
+          registration.answerQuestion = (input, control) =>
+            gateway.answerQuestion(input, control);
           return {
             registration,
             gateway,

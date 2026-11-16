@@ -38,6 +38,11 @@ import {
   peerTurnsPerHour,
   peerWindowMs,
 } from "./peers";
+import {
+  type QuestionPort,
+  Questions,
+  type questionControl,
+} from "./questions";
 import { parseReactionReply, type ReactionName } from "./reactions";
 import {
   AttachmentInputUnavailable,
@@ -223,6 +228,8 @@ export type GatewayAccessContext = Readonly<
 
 /** Transport rules the gateway applies to every job of one registration. */
 export interface GatewayTransport {
+  /** Opt-in clarification channel; never a native permission-approval surface. */
+  questions?: QuestionPort;
   /** Session title and source label. */
   readonly name: "slack" | "irc" | "teams";
   /** Queue, session and outbox namespace of this registration. */
@@ -298,6 +305,8 @@ export class Gateway {
   /** Every job a worker holds, with the transport rules of its start. */
   private readonly turnPolicies = new Map<number, GatewayTransport>();
   readonly key: string;
+  private readonly questions: Questions | undefined;
+  private readonly questionLifetime = new AbortController();
   constructor(
     private config: GatewayConfig,
     private readonly identity: Identity,
@@ -318,6 +327,21 @@ export class Gateway {
     if (!selected) throw new Error("Gateway transport is required");
     this.transport = selected;
     this.key = selected.key;
+    if (
+      selected.questions &&
+      backend.pendingQuestions &&
+      backend.questionBelongsToInput &&
+      backend.replyQuestion &&
+      backend.questionInputSettled
+    )
+      this.questions = new Questions(
+        this.key,
+        store,
+        backend,
+        () => this.transport.questions,
+        (job) => this.allowed(job),
+        (session) => this.settle(session),
+      );
     this.activity = new ActivityDelivery(
       backend,
       slack,
@@ -483,6 +507,26 @@ export class Gateway {
     return true;
   }
 
+  /** Only transport-verified controls reach this method; they never enter a model. */
+  async answerQuestion(
+    input: Incoming,
+    control: NonNullable<ReturnType<typeof questionControl>>,
+  ) {
+    if (this.questionLifetime.signal.aborted) return;
+    await this.questions?.answer(
+      input,
+      control,
+      AbortSignal.any([
+        this.questionLifetime.signal,
+        AbortSignal.timeout(10_000),
+      ]),
+    );
+  }
+
+  async pollQuestions(signal: AbortSignal) {
+    await this.questions?.poll(signal);
+  }
+
   enqueueScheduled(input: {
     runId: string;
     channel: string;
@@ -533,9 +577,16 @@ export class Gateway {
    * restart Stargate instead of leaving a silent, half-stopped worker.
    */
   async work(signal: AbortSignal) {
-    await runAbortable(this.supervise(), signal).catch((error: unknown) => {
-      if (!signal.aborted) throw error;
-    });
+    const stopQuestions = () => this.questionLifetime.abort();
+    signal.addEventListener("abort", stopQuestions, { once: true });
+    try {
+      await runAbortable(this.supervise(), signal).catch((error: unknown) => {
+        if (!signal.aborted) throw error;
+      });
+    } finally {
+      stopQuestions();
+      signal.removeEventListener("abort", stopQuestions);
+    }
   }
 
   private supervise() {
@@ -543,6 +594,22 @@ export class Gateway {
     return Effect.scoped(
       Effect.gen(function* () {
         yield* abortable((signal) => gateway.recover(signal));
+        if (gateway.questions)
+          yield* Effect.forkScoped(
+            abortable(async (signal) => {
+              while (!signal.aborted) {
+                try {
+                  await gateway.questions?.poll(
+                    AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+                  );
+                } catch {
+                  if (!signal.aborted)
+                    gateway.log.warn("Native clarification check unavailable");
+                }
+                await delay(1000, undefined, { signal }).catch(() => {});
+              }
+            }),
+          );
         yield* Effect.addFinalizer(() =>
           Effect.promise(() => gateway.activity.close()),
         );
@@ -573,12 +640,33 @@ export class Gateway {
 
   /** Stop surviving backend work before a fresh turn can resume it. */
   private async recover(signal: AbortSignal) {
+    let retainedQuestions: string[] = [];
+    try {
+      retainedQuestions =
+        (await this.questions?.recover(
+          AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+        )) ?? [];
+    } catch {
+      this.log.warn(
+        "Native clarification recovery unavailable; ordinary recovery retained",
+      );
+    }
+    const retainedSessions = new Set(
+      retainedQuestions.map((input) => {
+        const job = this.store.jobByInput(this.key, input);
+        return job ? this.store.session(job.conversation) : undefined;
+      }),
+    );
     const interrupted = this.backend.sessionID
       ? []
       : this.store.interruptedSessions(this.key);
     if (this.backend.sessionID) {
       const input = this.store.interruptedInput(this.key);
-      if (input && this.backend.interruptInput) {
+      if (
+        input &&
+        !retainedQuestions.includes(input) &&
+        this.backend.interruptInput
+      ) {
         try {
           await this.backend.interruptInput(
             this.backend.sessionID,
@@ -593,9 +681,10 @@ export class Gateway {
       }
     }
     for (const session of interrupted) {
+      if (retainedSessions.has(session)) continue;
       await this.backend.interrupt?.(session, AbortSignal.timeout(5000));
     }
-    this.store.recover(this.key);
+    this.store.recover(this.key, retainedQuestions);
     // Restart catch-up for every mapping; unbaselined ones seed at current history.
     if (this.backend.transcript) this.settle();
     if (this.backend.sessionID) {
@@ -1369,10 +1458,10 @@ export class Gateway {
             text,
             signal,
             live ? (text) => live.push(reply(text, false)) : undefined,
-            pinned
+            pinned || this.questions
               ? (input) => {
                   this.store.saveInput(this.key, job.id, input, pinned);
-                  if (captain?.cursor === undefined) {
+                  if (pinned && captain?.cursor === undefined) {
                     captain = this.store.captainCursor(this.key, pinned);
                     from = captain.cursor;
                   }

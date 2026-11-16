@@ -27,6 +27,10 @@ export type DashboardTransport =
         deniedChannels: string[];
         channelRequests?: string;
         wakeChannels?: string[];
+        humanWakeChannels?: {
+          channel: string;
+          replies: "all" | "participating";
+        }[];
         peerCaptains: string[];
       };
     }
@@ -40,7 +44,7 @@ export type ShipSummary = {
   transport?: DashboardTransport["kind"];
   agent?: string;
   /** Null when this backend has no crew or its status read failed. */
-  crew: { total: number; busy: number } | null;
+  crew: { total: number; busy: number; busyPartial?: true } | null;
   queue: QueueCounts;
   cronjobs: number;
 };

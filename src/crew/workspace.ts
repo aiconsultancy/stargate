@@ -158,6 +158,33 @@ function within(parent: string, child: string): boolean {
 }
 
 /** The configured path must be its own worktree root of the team project. */
+export async function projectRepository(
+  directory: string,
+  signal: AbortSignal,
+) {
+  const info = await lstat(directory).catch(() => null);
+  if (!info?.isDirectory() || info.isSymbolicLink())
+    throw new CrewError("Project must be an existing real Git checkout.");
+  const root = await realpath(directory);
+  if (root !== resolve(directory))
+    throw new CrewError("Project directory contains a symbolic-link alias.");
+  const read = (args: string[]) =>
+    git(root, args, {
+      signal,
+      failure: "Project Git identity is unavailable; no Git change made.",
+    }).then(({ text }) => text.trim());
+  if (
+    (await realpath(await read(["rev-parse", "--show-toplevel"])).catch(
+      () => "",
+    )) !== root
+  )
+    throw new CrewError("Project must be its exact Git checkout root.");
+  const common = await realpath(
+    resolve(root, await read(["rev-parse", "--git-common-dir"])),
+  );
+  return { directory: root, common };
+}
+
 export async function workspaceRoot(
   configured: string,
   captainDirectory: string,

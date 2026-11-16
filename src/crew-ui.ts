@@ -81,6 +81,7 @@ export function crewStatusView(
       section(
         [
           `${member.name} (${member.id}) — ${member.backend}`,
+          ...(member.project ? [`Project: ${member.project}.`] : []),
           `Provisioning: ${member.provisioned}. ${member.observed ? "Execution observed in this process (not a health check)." : "Execution unobserved; liveness unknown."}`,
           member.current
             ? `Current stored task\n${taskLine(member.current)}\n${timing(member.current, now)}`

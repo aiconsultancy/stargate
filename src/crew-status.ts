@@ -28,27 +28,48 @@ const task = z.strictObject({
   updatedAt: time,
   finishedAt: time,
 });
-export const crewStatusSchema = z.strictObject({
-  members: z
-    .array(
-      z.strictObject({
-        id: z.string().max(64),
-        name: z.string().max(100),
-        backend: z.enum(["opencode", "pi-durable"]),
-        provisioned: z.enum(["unprovisioned", "pending", "ready"]),
-        observed: z.boolean(),
-        current: task.nullable(),
-        queuedCount: z.number().int().nonnegative(),
-        queued: z.array(task).max(5),
-        lastOutcome: task.nullable(),
-        recent: z.array(task).max(8),
-        recentCount: z.number().int().nonnegative(),
-      }),
+export const crewStatusSchema = z
+  .strictObject({
+    members: z
+      .array(
+        z.strictObject({
+          id: z.string().max(64),
+          /** Configured repository context; absent for the legacy single project. */
+          project: z
+            .string()
+            .regex(/^[a-z][a-z0-9_-]{0,47}$/)
+            .optional(),
+          name: z.string().max(100),
+          backend: z.enum(["opencode", "pi-durable"]),
+          provisioned: z.enum(["unprovisioned", "pending", "ready"]),
+          observed: z.boolean(),
+          current: task.nullable(),
+          queuedCount: z.number().int().nonnegative(),
+          queued: z.array(task).max(5),
+          lastOutcome: task.nullable(),
+          recent: z.array(task).max(8),
+          recentCount: z.number().int().nonnegative(),
+        }),
+      )
+      .max(20),
+    total: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    /** Exact aggregate across every context, including rows after the page limit. */
+    busy: z.number().int().min(0).max(50).optional(),
+  })
+  .superRefine((status, context) => {
+    const visible = status.members.filter((member) => member.current).length;
+    if (
+      status.busy !== undefined &&
+      (status.busy > status.total || status.busy < visible)
     )
-    .max(20),
-  total: z.number().int().nonnegative(),
-  truncated: z.boolean(),
-});
+      context.addIssue({
+        code: "custom",
+        path: ["busy"],
+        message:
+          "Busy count must include visible activity and cannot exceed total members.",
+      });
+  });
 export type CrewStatus = z.infer<typeof crewStatusSchema>;
 export type CrewStatusInput = z.infer<typeof crewStatusInputSchema>;
 export type CrewStatusTask = z.infer<typeof task>;

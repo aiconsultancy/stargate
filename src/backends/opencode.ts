@@ -41,6 +41,12 @@ import {
   type MaintenanceWatch,
   maintenanceNoticeSchema,
 } from "../maintenance";
+import {
+  type NativeQuestion,
+  nativeQuestionSchema,
+  type QuestionAnswer,
+  questionFingerprint,
+} from "../questions";
 import { quotaSnapshotSchema } from "../quota";
 import {
   BackendFailure,
@@ -124,6 +130,202 @@ function generationFailureKind(error: {
 }
 
 export class OpenCodeBackend implements AgentBackend {
+  private async nativeQuestion(
+    sessionID: string,
+    formID: string,
+    signal: AbortSignal,
+  ): Promise<NativeQuestion | undefined> {
+    if (this.sessionID !== undefined && sessionID !== this.sessionID) return;
+    const form = await this.client.session.form.get(
+      { sessionID, formID },
+      { signal },
+    );
+    if (
+      form.id !== formID ||
+      form.sessionID !== sessionID ||
+      form.state.status !== "pending"
+    )
+      return;
+    const origin = z
+      .strictObject({
+        kind: z.literal("question"),
+        tool: z.strictObject({
+          messageID: z.string().min(1),
+          id: z.string().min(1),
+        }),
+      })
+      .safeParse(form.metadata);
+    if (!origin.success) return;
+    const message = await this.client.session.message.get(
+      { sessionID, messageID: origin.data.tool.messageID },
+      { signal },
+    );
+    if (
+      message.id !== origin.data.tool.messageID ||
+      message.type !== "assistant" ||
+      message.time.completed !== undefined
+    )
+      return;
+    const tools = message.content.filter(
+      (p) => p.type === "tool" && p.id === origin.data.tool.id,
+    );
+    const tool = tools[0];
+    if (
+      tools.length !== 1 ||
+      !tool ||
+      tool.type !== "tool" ||
+      tool.name !== "question" ||
+      tool.state.status !== "running" ||
+      tool.time.completed !== undefined
+    )
+      return;
+    const inputID = await this.questionInput(sessionID, message.id, signal);
+    if (
+      !inputID ||
+      !(await this.followsInput(sessionID, inputID, signal, message.id))
+    )
+      return;
+    const parsed = nativeQuestionSchema.safeParse({
+      id: form.id,
+      sessionID,
+      inputID,
+      toolMessageID: message.id,
+      toolCallID: tool.id,
+      fingerprint: questionFingerprint({
+        id: form.id,
+        sessionID,
+        title: form.title,
+        metadata: form.metadata,
+        fields: form.fields,
+      }),
+      title: form.title,
+      fields: form.fields,
+    });
+    return parsed.success ? parsed.data : undefined;
+  }
+
+  /** Resolve the actual delivered input before this particular tool message. */
+  private async questionInput(
+    sessionID: string,
+    assistant: string,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    let found = false;
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    const chain: InputBoundaryRecord[] = [];
+    for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+      const page = await this.client.message.list(
+        cursor
+          ? { sessionID, limit: 100, cursor }
+          : { sessionID, limit: 100, order: "desc" },
+        { signal },
+      );
+      for (const message of page.data) {
+        if (!found) {
+          if (message.id === assistant && message.type === "assistant")
+            found = true;
+          continue;
+        }
+        const record = boundaryRecord(message, sessionID);
+        if (chain.length && closesBoundaryContext(record)) {
+          chain.push(record);
+          return resolveBoundaryContext(chain);
+        }
+        if (record.input === undefined) continue;
+        if (!chain.length && record.type !== "synthetic") return record.input;
+        chain.push(record);
+      }
+      cursor = page.cursor.next ?? undefined;
+      if (!cursor) return resolveBoundaryContext(chain);
+      if (seen.has(cursor)) throw new Error("Question history cursor repeated");
+      seen.add(cursor);
+    }
+    throw new Error("Question ancestry exceeds history bound");
+  }
+
+  async pendingQuestions(
+    sessionID: string,
+    signal: AbortSignal,
+  ): Promise<NativeQuestion[]> {
+    if (this.sessionID !== undefined && sessionID !== this.sessionID) return [];
+    const forms = await this.client.session.form.list(
+      { sessionID },
+      { signal },
+    );
+    if (forms.length > 16) throw new Error("Too many native forms");
+    const questions: NativeQuestion[] = [];
+    for (const form of forms) {
+      if (form.sessionID !== sessionID) continue;
+      const question = await this.nativeQuestion(sessionID, form.id, signal);
+      if (question) questions.push(question);
+    }
+    return questions;
+  }
+
+  async questionBelongsToInput(
+    sessionID: string,
+    formID: string,
+    inputID: string,
+    fingerprint: string,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const question = await this.nativeQuestion(sessionID, formID, signal);
+    return (
+      question?.inputID === inputID && question.fingerprint === fingerprint
+    );
+  }
+
+  async replyQuestion(
+    question: NativeQuestion,
+    answer: QuestionAnswer | null,
+    signal: AbortSignal,
+  ) {
+    if (
+      !(await this.questionBelongsToInput(
+        question.sessionID,
+        question.id,
+        question.inputID,
+        question.fingerprint,
+        signal,
+      ))
+    )
+      throw new Error("Native question is stale or has no owned input");
+    const input = { sessionID: question.sessionID, formID: question.id };
+    if (answer === null)
+      await this.client.session.form.cancel(input, { signal });
+    else await this.client.session.form.reply({ ...input, answer }, { signal });
+  }
+
+  async questionInputSettled(
+    sessionID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (this.sessionID !== undefined && sessionID !== this.sessionID)
+      return false;
+    const session = await this.client.session.get({ sessionID }, { signal });
+    if (
+      session.id !== sessionID ||
+      session.time.idle === undefined ||
+      session.time.idle < (session.time.busy ?? 0)
+    )
+      return false;
+    if ((await this.client.session.active({ signal }))[sessionID]) return false;
+    if (
+      (await this.client.session.inbox.list({ sessionID }, { signal })).some(
+        (v) => v.id === inputID,
+      )
+    )
+      return false;
+    const input = await this.client.session.message.get(
+      { sessionID, messageID: inputID },
+      { signal },
+    );
+    return (
+      input.id === inputID && boundaryRecord(input, sessionID).input === inputID
+    );
+  }
   /** One gateway-owned attempt; IDs/nonce were persisted before this call. */
   async startReview(
     binding: FleetReviewBinding,
