@@ -53,6 +53,10 @@ const allCaps = [
  * complete server; it implements what Stargate's client uses.
  */
 export class FakeIrcServer {
+  /** Synthetic nickname metadata retained across reconnects, like always-on Ergo. */
+  readonly metadata = new Map<string, string>();
+  /** Return true to supply a custom acknowledgement or refusal in a test. */
+  onMetadata: ((account: string, params: string[]) => boolean) | undefined;
   readonly clients: Client[] = [];
   readonly members = new Map<string, Set<Client>>();
   readonly invited = new Set<string>();
@@ -227,6 +231,27 @@ export class FakeIrcServer {
         : text;
     const [first = "", second = ""] = message.params;
     switch (message.command) {
+      case "METADATA": {
+        const account = client.account ?? "";
+        if (this.onMetadata?.(account, [...message.params])) return;
+        const value = message.params[3];
+        if (first !== "*" || second !== "SET" || message.params[2] !== "status")
+          return;
+        if (value !== undefined) {
+          this.metadata.set(account, value);
+          this.reply(
+            client,
+            `:fake 761 ${client.nick} ${client.nick} status * :${value}`,
+          );
+        } else {
+          this.metadata.delete(account);
+          this.reply(
+            client,
+            `:fake 766 ${client.nick} ${client.nick} status :Key deleted`,
+          );
+        }
+        return;
+      }
       case "CAP":
         if (first === "LS")
           this.reply(client, `:fake CAP * LS :${this.caps.join(" ")}`);

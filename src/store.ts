@@ -9,6 +9,7 @@ import {
   nativeMakerSchema,
 } from "./fleet/protocol";
 import { validMsgid } from "./irc/protocol";
+import type { QuestionOffer } from "./questions";
 import { failureText, type RequestFailure } from "./request-failure";
 import type { ReplyChunk } from "./slack-format";
 
@@ -243,6 +244,18 @@ export class Store {
         job INTEGER NOT NULL REFERENCES jobs(id), part INTEGER NOT NULL,
         plan TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY(job, part)
+      );
+      CREATE TABLE IF NOT EXISTS native_questions (
+        token TEXT PRIMARY KEY, botKey TEXT NOT NULL, formID TEXT NOT NULL,
+        sessionID TEXT NOT NULL, inputID TEXT NOT NULL, jobID INTEGER NOT NULL,
+        fingerprint TEXT NOT NULL, expires INTEGER NOT NULL, state TEXT NOT NULL,
+        notified INTEGER NOT NULL DEFAULT 0, recovering INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(botKey,sessionID,formID)
+      );
+      CREATE TABLE IF NOT EXISTS irc_question_sources (
+        botKey TEXT NOT NULL,eventId TEXT NOT NULL,user TEXT NOT NULL,
+        channel TEXT NOT NULL,thread TEXT NOT NULL,root TEXT NOT NULL,
+        PRIMARY KEY(botKey,eventId)
       );
     `);
     const column = (table: string, name: string, type: string) => {
@@ -1334,18 +1347,164 @@ export class Store {
     );
   }
 
-  recover(botKey: string) {
+  recover(botKey: string, retainedQuestionInputs: readonly string[] = []) {
     // greybeard: unknown tool outcomes are never retried automatically.
     // Reconciliation requires a backend-specific execution identifier.
     this.db
       .query(`UPDATE jobs SET status='responding',response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,sent=0,
       failure=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE 'interrupted' END
-      WHERE botKey=? AND status='running'`)
+      WHERE botKey=? AND status='running'${retainedQuestionInputs.length ? ` AND (input IS NULL OR input NOT IN (${retainedQuestionInputs.map(() => "?").join(",")}))` : ""}`)
       .run(
         JSON.stringify([cancellationNotice]),
         JSON.stringify([failureText("interrupted")]),
         botKey,
+        ...retainedQuestionInputs,
       );
+  }
+
+  offerQuestion(offer: QuestionOffer): QuestionOffer | undefined {
+    return this.db.transaction(() => {
+      this.db
+        .query(
+          "INSERT OR IGNORE INTO native_questions(token,botKey,formID,sessionID,inputID,jobID,fingerprint,expires,state,notified,recovering) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          offer.token,
+          offer.botKey,
+          offer.formID,
+          offer.sessionID,
+          offer.inputID,
+          offer.jobID,
+          offer.fingerprint,
+          offer.expires,
+          offer.state,
+          offer.notified,
+          offer.recovering,
+        );
+      const existing = this.db
+        .query<QuestionOffer, [string, string, string]>(
+          "SELECT * FROM native_questions WHERE botKey=? AND sessionID=? AND formID=?",
+        )
+        .get(offer.botKey, offer.sessionID, offer.formID);
+      if (
+        !existing ||
+        existing.inputID !== offer.inputID ||
+        existing.jobID !== offer.jobID ||
+        existing.fingerprint !== offer.fingerprint
+      )
+        return;
+      // A clarification creates a thread on the original request, never a new source.
+      this.db
+        .query(
+          "UPDATE jobs SET replyParent=COALESCE(replyParent,thread) WHERE id=? AND botKey=? AND input=? AND status='running'",
+        )
+        .run(offer.jobID, offer.botKey, offer.inputID);
+      return existing;
+    })();
+  }
+
+  recordQuestionSource(input: Incoming) {
+    this.db
+      .query(
+        "INSERT OR IGNORE INTO irc_question_sources(botKey,eventId,user,channel,thread,root) VALUES(?,?,?,?,?,?)",
+      )
+      .run(
+        input.botKey,
+        input.eventId,
+        input.user,
+        input.channel,
+        input.thread,
+        input.replyParent ?? input.thread,
+      );
+  }
+
+  ownsQuestionSource(job: Job): boolean {
+    return (
+      this.db
+        .query(
+          "SELECT 1 FROM irc_question_sources WHERE botKey=? AND eventId=? AND user=? AND channel=? AND thread=? AND root=? AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND cancel_requested=0 AND failure IS NOT 'cancelled')",
+        )
+        .get(
+          job.botKey,
+          job.eventId,
+          job.user,
+          job.channel,
+          job.thread,
+          job.replyParent ?? job.thread,
+          job.id,
+        ) !== null
+    );
+  }
+
+  questionByToken(botKey: string, token: string): QuestionOffer | undefined {
+    return (
+      this.db
+        .query<QuestionOffer, [string, string]>(
+          "SELECT * FROM native_questions WHERE botKey=? AND token=?",
+        )
+        .get(botKey, token) ?? undefined
+    );
+  }
+
+  questionOffers(botKey: string): QuestionOffer[] {
+    return this.db
+      .query<QuestionOffer, [string]>(
+        "SELECT * FROM native_questions WHERE botKey=? AND (state!='closed' OR recovering=1) ORDER BY rowid",
+      )
+      .all(botKey);
+  }
+
+  activeQuestionSessions(botKey: string): string[] {
+    return this.db
+      .query<{ session_id: string }, [string]>(
+        "SELECT DISTINCT s.session_id FROM sessions s JOIN jobs j ON j.conversation=s.conversation WHERE j.botKey=? AND j.status='running' AND j.input IS NOT NULL",
+      )
+      .all(botKey)
+      .map((v) => v.session_id);
+  }
+
+  questionNotified(token: string) {
+    this.db
+      .query(
+        "UPDATE native_questions SET notified=1 WHERE token=? AND state='offered'",
+      )
+      .run(token);
+  }
+  questionRecovering(token: string) {
+    this.db
+      .query(
+        "UPDATE native_questions SET recovering=1 WHERE token=? AND state!='closed'",
+      )
+      .run(token);
+  }
+  closeQuestion(token: string) {
+    this.db
+      .query("UPDATE native_questions SET state='closed' WHERE token=?")
+      .run(token);
+  }
+  attemptQuestion(token: string, now: number): boolean {
+    return (
+      this.db
+        .query(
+          "UPDATE native_questions SET state='attempted' WHERE token=? AND state='offered' AND expires>?",
+        )
+        .run(token, now).changes === 1
+    );
+  }
+
+  finishQuestionRecovery(offer: QuestionOffer) {
+    this.db.transaction(() => {
+      this.db
+        .query(
+          "UPDATE jobs SET status='done',response='[]',failure=NULL WHERE id=? AND botKey=? AND input=? AND status='running' AND EXISTS(SELECT 1 FROM native_questions WHERE token=? AND recovering=1)",
+        )
+        .run(offer.jobID, offer.botKey, offer.inputID, offer.token);
+      this.db
+        .query(
+          "UPDATE native_questions SET recovering=0,state='closed' WHERE token=?",
+        )
+        .run(offer.token);
+    })();
   }
 
   interruptedSessions(botKey: string): string[] {

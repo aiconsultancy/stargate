@@ -151,16 +151,34 @@ export class IrcDelivery implements SlackDelivery {
     signal: AbortSignal,
     allowed?: () => boolean,
   ) {
-    if (!this.presence.typing || !this.client.hasCap("message-tags")) return;
-    const target = await this.target(channel);
-    const guard = this.guard(channel, target, allowed);
-    const timer = this.client.typingMs;
-    while (!signal.aborted) {
-      if (guard && !guard()) return;
-      this.client.notify(target, { "+typing": "active" }, guard);
-      await delay(timer, undefined, { signal }).catch(() => {});
+    const finish = this.client.startStatus();
+    if (signal.aborted) {
+      finish();
+      return;
     }
-    this.client.notify(target, { "+typing": "done" }, guard);
+    // Typing may stop early (for example a DM nick changed hands); the turn
+    // still owns its aggregate status handle until its actual lifecycle ends.
+    signal.addEventListener("abort", finish, { once: true });
+    try {
+      if (!this.presence.typing || !this.client.hasCap("message-tags")) {
+        if (!signal.aborted)
+          await new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve(), { once: true }),
+          );
+        return;
+      }
+      const target = await this.target(channel);
+      const guard = this.guard(channel, target, allowed);
+      const timer = this.client.typingMs;
+      while (!signal.aborted) {
+        if (guard && !guard()) return;
+        this.client.notify(target, { "+typing": "active" }, guard);
+        await delay(timer, undefined, { signal }).catch(() => {});
+      }
+      this.client.notify(target, { "+typing": "done" }, guard);
+    } finally {
+      if (signal.aborted) finish();
+    }
   }
 
   /**

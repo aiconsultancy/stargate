@@ -13,6 +13,7 @@ import type {
 } from "./fleet/protocol";
 import { validMsgid } from "./irc/protocol";
 import type { MaintenanceWatch } from "./maintenance";
+import type { NativeQuestion, QuestionAnswer } from "./questions";
 import type { QuotaSnapshot } from "./quota";
 import type { SessionHistory } from "./session-history";
 
@@ -92,6 +93,27 @@ export const latestInput = "\u0000latest-input";
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
+  pendingQuestions?(
+    sessionID: string,
+    signal: AbortSignal,
+  ): Promise<NativeQuestion[]>;
+  questionBelongsToInput?(
+    sessionID: string,
+    formID: string,
+    inputID: string,
+    fingerprint: string,
+    signal: AbortSignal,
+  ): Promise<boolean>;
+  replyQuestion?(
+    question: NativeQuestion,
+    answer: QuestionAnswer | null,
+    signal: AbortSignal,
+  ): Promise<void>;
+  questionInputSettled?(
+    sessionID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ): Promise<boolean>;
   startReview?(binding: FleetReviewBinding, signal: AbortSignal): Promise<void>;
   readReview?(
     binding: FleetReviewBinding,

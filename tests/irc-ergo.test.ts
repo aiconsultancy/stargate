@@ -10,6 +10,7 @@ import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway";
 import { IrcClient } from "../src/irc/client";
+import { IrcDelivery } from "../src/irc/delivery";
 import {
   formatMessage,
   type IrcMessage,
@@ -31,6 +32,7 @@ const binary =
 const available =
   existsSync(binary) &&
   spawnSync("openssl", ["version"], { stdio: "ignore" }).status === 0;
+const rateProof = process.env["STARGATE_ERGO_RATE_TEST"] === "1";
 
 const cleanup: (() => unknown)[] = [];
 afterAll(async () => {
@@ -250,6 +252,7 @@ test.skipIf(!available)(
           network: "ErgoTest",
         },
         account: "galactica",
+        displayName: "Galactica",
         passwordEnv: "STARGATE_IRC_GALACTICA",
         channels: ["#galactica"],
         // One worker isolates wire framing from overlapping delivery polls.
@@ -259,6 +262,7 @@ test.skipIf(!available)(
         crew: [
           {
             id: "chief",
+            displayName: "Chief",
             account: "galactica-chief",
             passwordEnv: "STARGATE_IRC_GALACTICA_CHIEF",
             channels: ["#galactica"],
@@ -282,6 +286,8 @@ test.skipIf(!available)(
     );
     const prompts: string[] = [];
     const contexts: (PromptSourceContext | undefined)[] = [];
+    const firstReply = Promise.withResolvers<void>();
+    cleanup.push(() => firstReply.resolve());
     const backend: AgentBackend = {
       sessionID: "ses_captain",
       async createSession() {
@@ -298,6 +304,7 @@ test.skipIf(!available)(
       ) {
         prompts.push(text);
         contexts.push(context);
+        if (prompts.length === 1) await firstReply.promise;
         return `## Status\n\nAll **green**. ${"Details follow. ".repeat(40)}`;
       },
       async close() {},
@@ -318,6 +325,7 @@ test.skipIf(!available)(
     ).work(controller.signal);
     ship.start(() => true);
     cleanup.push(async () => {
+      firstReply.resolve();
       controller.abort();
       await worker;
       await ship.close();
@@ -352,7 +360,50 @@ test.skipIf(!available)(
       "crew joined",
     );
 
+    // Ergo 2.19.1 sends subscriber updates as 761/766, not METADATA messages.
+    jack.send("CAP REQ :batch draft/metadata-2");
+    await jack.wait(
+      (m) =>
+        m.command === "CAP" &&
+        m.params[1] === "ACK" &&
+        (m.params.at(-1)?.includes("draft/metadata-2") ?? false),
+      "metadata negotiated",
+    );
+    jack.send("METADATA * SUB status");
+    await jack.wait((m) => m.command === "770", "status subscribed");
+    const observer = await raw(plain);
+    cleanup.push(() => observer.close());
+    await observer.register("observer", "synthetic-observer-password", true);
+    observer.send("CAP REQ :batch draft/metadata-2");
+    await observer.wait(
+      (m) =>
+        m.command === "CAP" &&
+        m.params[1] === "ACK" &&
+        (m.params.at(-1)?.includes("draft/metadata-2") ?? false),
+      "observer metadata negotiated",
+    );
+    observer.send("METADATA * SUB status");
+    await observer.wait((m) => m.command === "770", "observer subscribed");
+    await captain.client.invite("observer", "#galactica");
+
     jack.send("PRIVMSG #galactica :galactica: status?");
+    await jack.wait(
+      (m) =>
+        m.command === "761" &&
+        m.params[1] === "galactica" &&
+        m.params[2] === "status" &&
+        m.params[4] === "Galactica is thinking…",
+      "captain waiting status",
+    );
+    observer.send("JOIN #galactica");
+    await observer.wait(
+      (m) =>
+        m.command === "761" &&
+        m.params[1] === "galactica" &&
+        m.params[4] === "Galactica is thinking…",
+      "late joining subscriber gets current status",
+    );
+    firstReply.resolve();
     await until(
       () =>
         jack.lines.filter(
@@ -378,6 +429,92 @@ test.skipIf(!available)(
       15_000,
       "delivery confirmed",
     );
+    await jack.wait(
+      (m) =>
+        m.command === "766" &&
+        m.params[1] === "galactica" &&
+        m.params[2] === "status",
+      "captain status cleared",
+    );
+    const stopCrewStatus = chief.client.startStatus();
+    await jack.wait(
+      (m) =>
+        m.command === "761" &&
+        m.params[1] === "galactica-chief" &&
+        m.params[4] === "Chief is thinking…",
+      "crew waiting status",
+    );
+    stopCrewStatus();
+    await jack.wait(
+      (m) =>
+        m.command === "766" &&
+        m.params[1] === "galactica-chief" &&
+        m.params[2] === "status",
+      "crew status cleared",
+    );
+    if (rateProof) {
+      // Real wall-clock proof against the unchanged ten-SET/two-minute limiter.
+      const setupRate = await raw(plain);
+      await setupRate.register("status-rate", "synthetic-rate-password");
+      setupRate.close();
+      const rateClient = new IrcClient({
+        host: "127.0.0.1",
+        port: plain,
+        tls: false,
+        account: "status-rate",
+        password: "synthetic-rate-password",
+        nick: "status-rate",
+        channels: ["#galactica"],
+        statusName: "Rate bot",
+        log: pino({ level: "silent" }),
+      });
+      const rateConnection = new AbortController();
+      const rateRunning = rateClient.run(rateConnection.signal);
+      cleanup.push(async () => {
+        rateConnection.abort();
+        await rateRunning;
+      });
+      await rateClient.waitReady(5000);
+      await captain.client.invite("status-rate", "#galactica");
+      rateClient.join("#galactica");
+      await until(
+        () => rateClient.inChannel("#galactica"),
+        5000,
+        "rate client joined",
+      );
+      const boundary = jack.lines.length;
+      const active = new AbortController();
+      const working = new IrcDelivery(rateClient).working(
+        "#galactica",
+        "synthetic-request",
+        active.signal,
+      );
+      cleanup.push(async () => {
+        active.abort();
+        await working;
+      });
+      await jack.wait(
+        (m) => m.command === "761" && m.params[1] === "status-rate",
+        "long-turn initial status",
+      );
+      await delay(125_000);
+      active.abort();
+      await working;
+      await jack.wait(
+        (m) => m.command === "766" && m.params[1] === "status-rate",
+        "long-turn terminal clear retains quota",
+      );
+      const values = jack.lines
+        .slice(boundary)
+        .filter((m) => m.command === "761" && m.params[1] === "status-rate");
+      expect(values.length).toBeGreaterThanOrEqual(7);
+      expect(
+        values.every(
+          (m) =>
+            m.params[2] === "status" && m.params[4]?.startsWith("Rate bot is "),
+        ),
+      ).toBe(true);
+    }
     // A real earlier message is the root; every relayed answer line stays
     // in that one-level thread, not in a thread under the new request.
     const root = reply[0]?.tags.get("msgid");
@@ -436,5 +573,5 @@ test.skipIf(!available)(
     expect(prompts).toEqual(["status?", "threaded status?", "private status?"]);
     jack.close();
   },
-  60_000,
+  rateProof ? 210_000 : 60_000,
 );

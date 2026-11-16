@@ -411,9 +411,11 @@ const ircCrewSchema = z.strictObject({
 
 /**
  * Optional IRCv3 features. Each is used only when the server offers it;
- * these switches can turn one off. All default on.
+ * these switches can turn one off. The separate native-question bridge is opt-in.
  */
 const ircFeaturesSchema = z.strictObject({
+  /** Bridge native clarification forms to their original authenticated requester. */
+  questions: z.boolean().default(false),
   /** Download FILEHOST links in admitted messages as attachments. */
   filesIn: z.boolean().default(true),
   /** Upload published reply files to FILEHOST and post their links. */
@@ -434,6 +436,7 @@ const ircFeaturesSchema = z.strictObject({
   readMarker: z.boolean().default(true),
 });
 const ircFeatureDefaults = {
+  questions: false,
   filesIn: true,
   filesOut: true,
   multiline: true,
@@ -611,6 +614,12 @@ export const ircSchema = z
       context.addIssue({
         code: "custom",
         message: "Wake channels conflict with nick-mention-only admission",
+      });
+    if (irc.features.questions && !irc.fleetPolicy?.humanAccounts.length)
+      context.addIssue({
+        code: "custom",
+        message:
+          "Native IRC questions require a fleet policy with explicit humanAccounts",
       });
     if (irc.access.humanWakeChannels?.length) {
       const keys = irc.access.humanWakeChannels.map(({ channel }) =>
