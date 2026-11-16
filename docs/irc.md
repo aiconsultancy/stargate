@@ -678,6 +678,7 @@ request. In that same thread, the original requester can send:
 ```text
 galactica: answer <token from the question> 1
 galactica: cancel-question <token from the question>
+galactica: renew-question <expired token from the question>
 ```
 
 One string field accepts a displayed choice number, or free text when the native
@@ -692,7 +693,8 @@ in an IRC answer.
 The target bot (its account or current nick under the server's casemapping), current allow-list, authenticated original account, channel,
 thread, token, form fingerprint and native input must all still match. A nick
 alone proves no identity. Tokens accept either hex case. All ships reserve targeted `answer` and
-`cancel-question` controls with a complete token before ordinary intake, so another captain does not
+`cancel-question` and `renew-question` controls, including unmistakably malformed
+hex-token/ellipsis variants, before ordinary intake, so another captain does not
 treat the control as a new prompt. These decisions answer a clarification only;
 they never grant tool permission or generic human approval.
 Ordinary requests such as `galactica: answer Bob's question` remain model prompts,
@@ -703,16 +705,31 @@ after a restart without relying on the connection's in-memory echo cache.
 Question offers and spent tokens survive a restart. A native reply attempt is
 recorded before its API call. If the outcome is uncertain, that token stays spent
 and no answer is automatically retried; an operator must inspect OpenCode.
-An expired, never-attempted offer can receive a fresh token only after the still-pending
+Polling never renews expired offers or reposts a waiting question unattended.
+The original human may send `renew-question` with the expired token in the same
+thread. An expired, never-attempted offer can then receive a fresh token only after the still-pending
 native form, original input and current human access are revalidated. The renewed
 offer is posted explicitly; the old token no longer works. Expiry never answers or
 cancels native work. Spent or uncertain attempts are never renewed. Publishing can repeat the same
 offer after a lost acknowledgement; this is not an exactly-once delivery claim.
 Native reply outcomes and notification delivery are stored separately. A failed
-confirmation retries the notice, not the native reply. An API deadline still
+confirmation retries the notice, not the native reply. Concurrent answer/poll
+paths share one in-flight notice; a restart after a lost acknowledgement can
+still repeat a notice. An API deadline still
 produces an uncertainty notice while the gateway and original source remain authorised.
 
 One unavailable native session does not prevent the others from being polled.
+Transient failures use exponential retry delays up to one minute. A matching native
+session-not-found result closes its offers and releases an otherwise orphaned
+recovery hold as interrupted work, never as a successful completion. Cancelled
+requesters receive no outcome notice. Their spent records remain durable without
+repeated native polling once no recovery hold remains. A cancelled recovered
+waiter still preserves its unknown native work until real settlement or verified
+session loss, including after another restart. Only an already-established hold
+with exact historical source/native evidence receives that exception; it restores
+no reply or notice authority. A new cancellation without that established hold
+keeps ordinary Stop and recovery behaviour. Cancelling a chat request never
+fabricates a native form answer.
 A filtered or temporarily unreadable question is not proof that its native form
 has ended. Unsupported owned question forms produce a fixed operator-required
 notice without revealing their fields, values, defaults or answers. Native form
@@ -721,7 +738,9 @@ cached in a bounded process-local map; live form, tool and original input state
 are still checked before an answer.
 
 Settled question/source proofs and IRC thread membership metadata are retained
-for 30 days, with at most hourly cleanup during activity. Active work and recovery
+for 30 days. An IRC background task runs indexed cleanup once per minute,
+removing at most 256 rows per table/registration in each batch; intake never
+runs this cleanup. Active work and recovery
 holds are retained; outcome notices for settled work share the 30-day window. Historical source
 proofs are removed with spent offer metadata, so pruning cannot make an old
 question eligible for a fresh answer. A thread older than this history window
@@ -730,7 +749,14 @@ may require a fresh explicit mention to establish participation again.
 Ordinary interrupted-work recovery remains unchanged. Its only exception is an
 already-persisted offer whose exact native form is still pending and whose
 original human/input binding can be revalidated. Stargate keeps that native
-waiter and holds new inputs until the native execution settles. The existing
+waiter and holds new inputs until the native execution settles. Once established,
+the exact historical source/input hold survives later restarts even when its
+form has resolved or disappeared while the input is still busy. A failed
+settlement read also leaves the hold intact; only verified input settlement or
+explicit session loss releases it. This restores no answer or notice authority. If any question-recovery lookup
+fails or times out during startup, the gateway fails startup before ordinary
+interruption or job reset. A failed read for another offer cannot discard a
+known hold; native work and durable job state stay untouched. The existing
 transcript outbox then delivers the continuation to the original source, without
 re-prompting the agent or selecting an intervening human request. A form that
 was never durably observed does not receive this exception.

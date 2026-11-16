@@ -59,12 +59,18 @@ function fixture() {
   let failWrite = false;
   let historyReads = 0;
   let formFailure = 0;
+  let missingSession = false;
   const writes: { method: string; path: string; body: unknown }[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const path = new URL(request.url).pathname;
+      if (missingSession)
+        return Response.json(
+          { _tag: "SessionNotFoundError", sessionID: session, message: "gone" },
+          { status: 404 },
+        );
       if (
         path === `/api/session/${session}/form/${formID}` &&
         request.method === "GET"
@@ -164,6 +170,9 @@ function fixture() {
     backend,
     get historyReads() {
       return historyReads;
+    },
+    missingSession() {
+      missingSession = true;
     },
     failForm(status: number) {
       formFailure = status;
@@ -395,4 +404,23 @@ test("only a matching native form-not-found error proves absence; outages stay u
   await expect(
     f.backend.questionState(session, formID, AbortSignal.timeout(3000)),
   ).rejects.toBeDefined();
+});
+
+test("matching native session-not-found is terminal metadata, not a repeated form polling error", async () => {
+  const f = fixture();
+  f.missingSession();
+  expect(await f.list()).toEqual([]);
+  expect(
+    await f.backend.questionState(session, formID, AbortSignal.timeout(3000)),
+  ).toBe("missing-session");
+  expect(
+    await f.backend.questionBelongsToInput(
+      session,
+      formID,
+      input,
+      "a".repeat(64),
+      AbortSignal.timeout(3000),
+    ),
+  ).toBe(false);
+  expect(f.writes).toEqual([]);
 });

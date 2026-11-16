@@ -20,10 +20,10 @@ afterEach(async () => {
 async function fixture(
   multiline = false,
   questions = true,
-  options: { wake?: boolean; nick?: string } = {},
+  options: { wake?: boolean; nick?: string; crew?: boolean } = {},
 ) {
   const server = new FakeIrcServer({
-    accounts: { captain: "fixture", other: "fixture" },
+    accounts: { captain: "fixture", other: "fixture", worker: "fixture" },
     isupport: ["CASEMAPPING=rfc1459"],
   });
   if (multiline)
@@ -59,6 +59,23 @@ async function fixture(
         assignedCheckout: "/project",
         capabilities: ["read_code"],
       },
+      ...(account === "captain" && options.crew
+        ? {
+            crew: [
+              {
+                id: "worker",
+                account: "worker",
+                passwordEnv: "IRC_WORKER_FIXTURE",
+                channels: ["#ship"],
+                backend: {
+                  type: "opencode",
+                  url: "http://127.0.0.1:4096",
+                  directory: "/project",
+                },
+              },
+            ],
+          }
+        : {}),
       backend: {
         type: "opencode",
         url: "http://127.0.0.1:4096",
@@ -103,11 +120,14 @@ async function fixture(
     const cfg = config(account);
     configs.push(cfg);
     const ship = await IrcShip.create(cfg, store, log, {
-      env: { IRC_FIXTURE: "fixture" },
+      env: { IRC_FIXTURE: "fixture", IRC_WORKER_FIXTURE: "fixture" },
       timing: { intervalMs: 1, burst: 100 },
       readyMs: 2000,
     });
-    const primary = ship.registrations[0];
+    const primary =
+      options.crew && account === "captain"
+        ? ship.registrations.find((r) => r.role === "crew")
+        : ship.registrations[0];
     if (!primary) throw new Error("No registration");
     const backend: AgentBackend = {
       sessionID: `ses_${account}`,
@@ -213,7 +233,10 @@ async function fixture(
     await Promise.all(ships.map((s) => s.close()));
   });
   await until(
-    () => ships.every((s) => s.registrations[0]?.client.inChannel("#ship")),
+    () =>
+      ships.every((s) =>
+        s.registrations.every((r) => r.client.inChannel("#ship")),
+      ),
     3000,
     "question ships joined",
   );
@@ -235,7 +258,11 @@ async function fixture(
       .map(([k, v]) => `${k}=${v}`)
       .join(";")} :jac!u@fixture PRIVMSG #ship :${text}`;
     const marker = `question-control-${++sequence}`;
-    for (const account of ["captain", "other"]) {
+    for (const account of [
+      "captain",
+      "other",
+      ...(options.crew ? ["worker"] : []),
+    ]) {
       server.sendTo(account, line);
       server.sendTo(account, `PING :${marker}`);
     }
@@ -257,11 +284,13 @@ async function fixture(
       if (!old || !cfg || !backend) throw new Error("Missing transport");
       await old.close();
       const fresh = await IrcShip.create(cfg, store, log, {
-        env: { IRC_FIXTURE: "fixture" },
+        env: { IRC_FIXTURE: "fixture", IRC_WORKER_FIXTURE: "fixture" },
         timing: { intervalMs: 1, burst: 100 },
         readyMs: 2000,
       });
-      const registration = fresh.registrations[0];
+      const registration = options.crew
+        ? fresh.registrations.find((r) => r.role === "crew")
+        : fresh.registrations[0];
       if (!registration) throw new Error("Missing renewed registration");
       const renewedGateway = new Gateway(
         registration.settings,
@@ -592,6 +621,58 @@ test("question replies resolve durable own-publication anchors after transport r
     () => f.replies.length === 1,
     3000,
     "restarted thread control accepted",
+  );
+  expect(f.replies).toEqual([{ q0: "wait" }]);
+}, 12_000);
+
+test("unmistakably malformed token controls never reach models, even with questions off", async () => {
+  const f = await fixture(false, false);
+  for (const token of ["a".repeat(31), "B".repeat(33), "abcd…"]) {
+    const at = f.send(
+      `captain: answer ${token} {"q0":"wait"}`,
+      `malformed-${token.length}`,
+    );
+    await f.received(at);
+  }
+  expect(f.prompts).toEqual([]);
+  expect(f.replies).toEqual([]);
+});
+
+test("crew question publication anchors survive a new IRC connection", async () => {
+  const f = await fixture(false, true, { wake: false, crew: true });
+  f.send("worker: investigate", "m1");
+  const worker = f.ships[0]?.registrations.find((r) => r.role === "crew");
+  if (!worker) throw new Error("No crew");
+  await until(
+    () => f.store.questionOffers(worker.key)[0]?.notified === 1,
+    5000,
+    "crew question offered",
+  );
+  const offer = f.store.questionOffers(worker.key)[0];
+  if (!offer) throw new Error("No offer");
+  const db = new Database(f.path, { readonly: true });
+  const questionID = db
+    .query<{ msgid: string }, [string]>(
+      "SELECT msgid FROM irc_thread_messages WHERE botKey=? AND root='m1' ORDER BY rowid LIMIT 1",
+    )
+    .get(worker.key)?.msgid;
+  db.close();
+  expect(questionID).toBeDefined();
+  if (!questionID) throw new Error("No durable crew echo anchor");
+  await f.restartTransport();
+  const fresh = f.ships[0]?.registrations.find((r) => r.role === "crew");
+  expect(fresh?.client.anchor(questionID)).toBeUndefined();
+  const at = f.send(
+    `worker: answer ${offer.token} 1`,
+    "crew-answer",
+    "jac",
+    questionID,
+  );
+  await f.received(at);
+  await until(
+    () => f.replies.length === 1,
+    3000,
+    "crew answer uses durable root",
   );
   expect(f.replies).toEqual([{ q0: "wait" }]);
 }, 12_000);

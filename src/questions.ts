@@ -136,17 +136,47 @@ export function questionFingerprint(value: unknown): string {
     .digest("hex");
 }
 
-/** Recognise the namespace even on other ships; controls are never model prompts. */
-export function questionControl(text: string) {
+export type QuestionControl = {
+  target: string;
+  token: string;
+  answer: string | null | undefined;
+  renew?: true;
+  invalid?: true;
+};
+
+/** Reserve unmistakable token controls, never ordinary `answer …` prose. */
+export function questionControl(text: string): QuestionControl | undefined {
   const match =
-    /^([^\s:,]{1,64})[:,]\s+(answer|cancel-question)\s+([a-f0-9]{32})(?:\s+([^\r\n]{1,4000}))?\s*$/i.exec(
+    /^([^\s:,]{1,64})[:,]\s+(answer|cancel-question|renew-question)\s+([a-f0-9]{32})(?:\s+([^\r\n]{1,4000}))?\s*$/i.exec(
       text,
     );
-  if (!match) return;
+  if (!match) {
+    const malformed =
+      /^([^\s:,]{1,64})[:,]\s+(?:answer|cancel-question|renew-question)\s+(\S+)/i.exec(
+        text,
+      );
+    const candidate = malformed?.[2];
+    if (
+      malformed &&
+      candidate &&
+      (/^[a-f0-9]{16,128}(?:\.{2,}|…+)?$/i.test(candidate) ||
+        /^[a-f0-9]{4,128}(?:\.{2,}|…+)$/i.test(candidate))
+    )
+      return {
+        target: malformed[1] ?? "",
+        token: "",
+        answer: undefined,
+        invalid: true,
+      };
+    return;
+  }
   return {
     target: match[1] ?? "",
     token: match[3]?.toLowerCase() ?? "",
     answer: match[2]?.toLowerCase() === "answer" ? match[4] : null,
+    ...(match[2]?.toLowerCase() === "renew-question"
+      ? { renew: true as const }
+      : {}),
   };
 }
 
@@ -244,6 +274,9 @@ export function questionText(
       "For multiple choices use comma-separated numbers; a JSON answer uses native option values.",
     );
   lines.push(`Or: ${account}: cancel-question ${token}`);
+  lines.push(
+    `After expiry, only you may request a fresh offer here: ${account}: renew-question ${token}`,
+  );
   lines.push("Valid for 30 minutes. Never send credentials.");
   const text = lines.join("\n");
   if (Buffer.byteLength(text) > 16_000)
@@ -262,7 +295,12 @@ export type QuestionPort = {
 export class Questions {
   private offset = 0;
   private readonly inFlight = new Set<string>();
-  private pruned = 0;
+  private readonly notifying = new Set<string>();
+  private readonly failures = new Map<
+    string,
+    { count: number; until: number }
+  >();
+  private readonly missing = new Set<string>();
   constructor(
     private readonly key: string,
     private readonly store: Store,
@@ -293,10 +331,36 @@ export class Questions {
     return job;
   }
 
-  /** Only a previously persisted, still-pending exact native form permits recovery. */
+  /** Preserve established native waiters only; this grants no reply authority. */
+  private establishedWaiter(offer: QuestionOffer): Job | undefined {
+    if (!offer.recovering) return;
+    const job = this.store.jobByInput(this.key, offer.inputID);
+    if (
+      !job ||
+      job.id !== offer.jobID ||
+      job.status !== "running" ||
+      job.deferDelivery ||
+      job.sender ||
+      job.fleet ||
+      !this.store.recordedQuestionSource(job) ||
+      (this.backend.sessionID ?? this.store.session(job.conversation)) !==
+        offer.sessionID
+    )
+      return;
+    return job;
+  }
+
+  /** New holds need pending forms; established holds preserve their exact input. */
   async recover(signal: AbortSignal): Promise<string[]> {
     const retained: string[] = [];
     for (const offer of this.store.questionOffers(this.key)) {
+      // A form may disappear while its original input still runs. Preserve an
+      // established hold through that unknown interval without restoring any
+      // permission to answer or notify the original requester.
+      if (this.establishedWaiter(offer)) {
+        retained.push(offer.inputID);
+        continue;
+      }
       const job = this.owner(offer);
       if (job?.status !== "running" || offer.state === "closed") continue;
       if (
@@ -316,10 +380,6 @@ export class Questions {
   }
 
   async poll(signal: AbortSignal) {
-    if (Date.now() - this.pruned >= 3_600_000) {
-      this.store.pruneIrcHistory(this.key, Date.now());
-      this.pruned = Date.now();
-    }
     const sessions = [
       ...new Set([
         ...this.store.activeQuestionSessions(this.key, this.backend.sessionID),
@@ -336,20 +396,45 @@ export class Questions {
       // Advance before awaiting: even a session exhausting the whole poll's
       // deadline cannot monopolise the first position after every timeout.
       this.offset = (sessions.indexOf(session) + 1) % sessions.length;
+      if (
+        this.missing.has(session) ||
+        (this.failures.get(session)?.until ?? 0) > Date.now()
+      )
+        continue;
       try {
         await this.pollSession(session, signal);
+        this.failures.delete(session);
       } catch {
         signal.throwIfAborted();
+        const count = Math.min(6, (this.failures.get(session)?.count ?? 0) + 1);
+        this.failures.set(session, {
+          count,
+          until: Date.now() + Math.min(60_000, 1000 * 2 ** count),
+        });
         failed = true;
       }
     }
+    for (const session of this.failures.keys())
+      if (!sessions.includes(session)) this.failures.delete(session);
+    for (const session of this.missing)
+      if (!sessions.includes(session)) this.missing.delete(session);
     if (failed) throw new Error("Native clarification session unavailable");
   }
 
   private async pollSession(session: string, signal: AbortSignal) {
+    let missingSession = false;
     for (const offer of this.store
       .questionOffers(this.key)
       .filter((o) => o.sessionID === session)) {
+      if (this.store.questionSourceCancelled(offer)) {
+        if (!this.inFlight.has(offer.token)) {
+          if (offer.state === "attempted" && !offer.outcome)
+            this.store.questionOutcome(offer.token, "uncertain");
+          this.store.questionOutcomeNotified(offer.token);
+          this.store.retireQuestion(offer.token);
+        }
+        continue;
+      }
       if (
         offer.state === "attempted" &&
         !offer.outcome &&
@@ -360,6 +445,18 @@ export class Questions {
         this.store.questionByToken(this.key, offer.token) ?? offer,
       );
     }
+    if (
+      !this.store
+        .activeQuestionSessions(this.key, this.backend.sessionID)
+        .includes(session) &&
+      !this.store
+        .questionOffers(this.key)
+        .some(
+          (o) =>
+            o.sessionID === session && (o.state !== "closed" || o.recovering),
+        )
+    )
+      return;
     const pending =
       (await this.backend.pendingQuestions?.(session, signal)) ?? [];
     if (pending.length > 16)
@@ -378,7 +475,7 @@ export class Questions {
         })
       )
         continue;
-      let offer = this.store.offerQuestion({
+      const offer = this.store.offerQuestion({
         token: randomBytes(16).toString("hex"),
         botKey: this.key,
         formID: question.id,
@@ -391,30 +488,12 @@ export class Questions {
         notified: 0,
         recovering: 0,
       });
-      let renewed = false;
       if (
-        offer?.state === "offered" &&
-        offer.expires <= Date.now() &&
-        !("unsupported" in question)
-      ) {
-        if (
-          !(await this.backend.questionBelongsToInput?.(
-            session,
-            question.id,
-            question.inputID,
-            question.fingerprint,
-            signal,
-          ))
-        )
-          continue;
-        offer = this.store.renewQuestion(
-          offer.token,
-          randomBytes(16).toString("hex"),
-          Date.now(),
-        );
-        renewed = !!offer;
-      }
-      if (offer?.state !== "offered" || offer.notified) continue;
+        offer?.state !== "offered" ||
+        offer.notified ||
+        offer.expires <= Date.now()
+      )
+        continue;
       if (
         !(await this.backend.questionBelongsToInput?.(
           session,
@@ -431,7 +510,7 @@ export class Questions {
         job,
         "unsupported" in question
           ? "OpenCode needs clarification, but this form cannot be safely shown or answered on IRC. The original requester must use the native operator interface. No answer or cancellation has been submitted."
-          : `${renewed ? "Previous clarification token expired; use this new token.\n" : ""}${questionText(question, port.account, offer.token)}`,
+          : questionText(question, port.account, offer.token),
         () => !signal.aborted && !!this.owner(offer),
       );
       this.store.questionNotified(offer.token);
@@ -442,16 +521,22 @@ export class Questions {
       if (pending.some((q) => q.id === offer.formID)) continue;
       // A filtered list is not proof of absence. Only the native form API can
       // authoritatively report settlement; transient/unsupported forms stay live.
-      if (
-        (await this.backend.questionState?.(session, offer.formID, signal)) !==
-        "resolved"
-      )
-        continue;
+      const state = await this.backend.questionState?.(
+        session,
+        offer.formID,
+        signal,
+      );
+      if (state !== "resolved" && state !== "missing-session") continue;
       // The form may settle before its reply request returns. Keep the durable
       // attempt writable until that request records its success/uncertainty.
       // Check after the awaited state read: an answer may start during it.
       if (this.inFlight.has(offer.token)) continue;
       this.store.closeQuestion(offer.token);
+      if (state === "missing-session") {
+        missingSession = true;
+        if (offer.recovering) this.store.failQuestionRecovery(offer);
+        continue;
+      }
       if (
         offer.recovering &&
         (await this.backend.questionInputSettled?.(
@@ -464,14 +549,29 @@ export class Questions {
         this.settled(session);
       }
     }
+    // Commit terminal session caching only after the entire pass succeeds and
+    // every offer/outcome is handled. An in-flight reply or later read failure
+    // must still get another pass, even after an earlier missing-session result.
+    if (
+      missingSession &&
+      pending.length === 0 &&
+      !this.store.questionOffers(this.key).some((o) => o.sessionID === session)
+    )
+      this.missing.add(session);
   }
 
   private async notifyOutcome(offer: QuestionOffer) {
-    if (!offer.outcome || offer.outcomeNotified || this.lifetime.aborted)
+    if (
+      !offer.outcome ||
+      offer.outcomeNotified ||
+      this.lifetime.aborted ||
+      this.notifying.has(offer.token)
+    )
       return;
     const job = this.owner(offer);
     const port = this.port();
     if (!job || !port) return;
+    this.notifying.add(offer.token);
     try {
       await port.publish(
         job,
@@ -483,6 +583,8 @@ export class Questions {
       this.store.questionOutcomeNotified(offer.token);
     } catch {
       // Delivery can retry. The native API outcome and spent token cannot change.
+    } finally {
+      this.notifying.delete(offer.token);
     }
   }
 
@@ -492,7 +594,12 @@ export class Questions {
     signal: AbortSignal,
   ) {
     const offer = this.store.questionByToken(this.key, control.token);
-    if (offer?.state !== "offered" || offer.expires <= Date.now()) return;
+    if (
+      control.invalid ||
+      offer?.state !== "offered" ||
+      (!control.renew && offer.expires <= Date.now())
+    )
+      return;
     const job = this.owner(offer);
     if (
       job?.status !== "running" ||
@@ -530,6 +637,25 @@ export class Questions {
       ))
     )
       return;
+    if (control.renew) {
+      if (offer.expires > Date.now()) return;
+      const port = this.port();
+      if (!port || !this.owner(offer)) return;
+      signal.throwIfAborted();
+      const fresh = this.store.renewQuestion(
+        offer.token,
+        randomBytes(16).toString("hex"),
+        Date.now(),
+      );
+      if (!fresh) return;
+      await port.publish(
+        job,
+        `Previous clarification token expired; use this new token.\n${questionText(question, port.account, fresh.token)}`,
+        () => !signal.aborted && !!this.owner(fresh),
+      );
+      this.store.questionNotified(fresh.token);
+      return;
+    }
     let answer: QuestionAnswer | null;
     try {
       answer =

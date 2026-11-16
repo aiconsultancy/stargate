@@ -190,7 +190,6 @@ export class TranscriptConflict extends Error {
 
 export class Store {
   private readonly db: Database;
-  private readonly ircPruned = new Map<string, number>();
   constructor(path: string) {
     this.db = new Database(path, { create: true, strict: true });
     this.db.exec(`
@@ -296,7 +295,16 @@ export class Store {
     ]) {
       if (column(table, "recorded", "INTEGER NOT NULL DEFAULT 0"))
         this.db.query(`UPDATE ${table} SET recorded=?`).run(Date.now());
+      this.db.exec(
+        `CREATE INDEX IF NOT EXISTS ${table}_retention ON ${table}(botKey,recorded)`,
+      );
     }
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS jobs_irc_root ON jobs(botKey,channel,CAST(COALESCE(replyParent,thread) AS TEXT),status)",
+    );
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS native_questions_job ON native_questions(botKey,jobID)",
+    );
     this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_fleet_assignment
       ON jobs(botKey,json_extract(fleet_context,'$.dispatchID'))
       WHERE json_extract(fleet_context,'$.kind')='assignment'`);
@@ -985,7 +993,6 @@ export class Store {
 
   /** New opt-in human intake: persist ancestry and explicit invitation atomically. */
   enqueueIrcHuman(input: Incoming, invited: boolean): boolean {
-    this.pruneIrcHistory(input.botKey, Date.now());
     const root = input.replyParent ?? input.thread;
     if (!validMsgid(input.thread) || !validMsgid(root))
       throw new Error("IRC human thread identity is invalid");
@@ -1435,9 +1442,21 @@ export class Store {
 
   ownsQuestionSource(job: Job): boolean {
     return (
+      this.recordedQuestionSource(job) &&
       this.db
         .query(
-          "SELECT 1 FROM irc_question_sources WHERE botKey=? AND eventId=? AND user=? AND channel=? AND thread=? AND root=? AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND cancel_requested=0 AND failure IS NOT 'cancelled')",
+          "SELECT 1 FROM jobs WHERE id=? AND cancel_requested=0 AND failure IS NOT 'cancelled'",
+        )
+        .get(job.id) !== null
+    );
+  }
+
+  /** Historical source evidence only, never current permission to reply. */
+  recordedQuestionSource(job: Job): boolean {
+    return (
+      this.db
+        .query(
+          "SELECT 1 FROM irc_question_sources WHERE botKey=? AND eventId=? AND user=? AND channel=? AND thread=? AND root=?",
         )
         .get(
           job.botKey,
@@ -1446,7 +1465,6 @@ export class Store {
           job.channel,
           job.thread,
           job.replyParent ?? job.thread,
-          job.id,
         ) !== null
     );
   }
@@ -1472,7 +1490,7 @@ export class Store {
   activeQuestionSessions(botKey: string, pinned?: string): string[] {
     const sessions = this.db
       .query<{ session_id: string }, [string]>(
-        "SELECT DISTINCT s.session_id FROM sessions s JOIN jobs j ON j.conversation=s.conversation JOIN irc_question_sources q ON q.botKey=j.botKey AND q.eventId=j.eventId WHERE j.botKey=? AND j.status='running' AND j.input IS NOT NULL",
+        "SELECT DISTINCT s.session_id FROM sessions s JOIN jobs j ON j.conversation=s.conversation JOIN irc_question_sources q ON q.botKey=j.botKey AND q.eventId=j.eventId WHERE j.botKey=? AND j.status='running' AND j.cancel_requested=0 AND j.failure IS NOT 'cancelled' AND j.input IS NOT NULL",
       )
       .all(botKey)
       .map((v) => v.session_id);
@@ -1480,7 +1498,7 @@ export class Store {
       pinned &&
       this.db
         .query(
-          "SELECT 1 FROM jobs j JOIN irc_question_sources q ON q.botKey=j.botKey AND q.eventId=j.eventId WHERE j.botKey=? AND j.status='running' AND j.input IS NOT NULL LIMIT 1",
+          "SELECT 1 FROM jobs j JOIN irc_question_sources q ON q.botKey=j.botKey AND q.eventId=j.eventId WHERE j.botKey=? AND j.status='running' AND j.cancel_requested=0 AND j.failure IS NOT 'cancelled' AND j.input IS NOT NULL LIMIT 1",
         )
         .get(botKey)
     )
@@ -1534,30 +1552,68 @@ export class Store {
       .run(token);
   }
 
+  questionSourceCancelled(offer: QuestionOffer): boolean {
+    return (
+      this.db
+        .query(
+          "SELECT 1 FROM jobs WHERE id=? AND botKey=? AND input=? AND (cancel_requested=1 OR failure='cancelled')",
+        )
+        .get(offer.jobID, offer.botKey, offer.inputID) !== null
+    );
+  }
+
+  retireQuestion(token: string) {
+    this.db
+      .query(
+        "UPDATE native_questions SET state='closed',outcomeNotified=1 WHERE token=? AND recovering=0",
+      )
+      .run(token);
+  }
+
+  /** A deleted native session is unknown work, never a successful completion. */
+  failQuestionRecovery(offer: QuestionOffer) {
+    this.db.transaction(() => {
+      this.db
+        .query(
+          `UPDATE jobs SET status='responding',response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,failure=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE 'interrupted' END,sent=0 WHERE id=? AND botKey=? AND input=? AND status='running' AND EXISTS(SELECT 1 FROM native_questions WHERE token=? AND recovering=1)`,
+        )
+        .run(
+          JSON.stringify([cancellationNotice]),
+          JSON.stringify([failureText("interrupted")]),
+          offer.jobID,
+          offer.botKey,
+          offer.inputID,
+          offer.token,
+        );
+      this.db
+        .query(
+          "UPDATE native_questions SET state='closed',recovering=0 WHERE token=?",
+        )
+        .run(offer.token);
+    })();
+  }
+
   /** Thirty days of settled history. Active native work and recovery holds survive. */
   pruneIrcHistory(botKey: string, now: number) {
-    const previous = this.ircPruned.get(botKey);
-    if (previous !== undefined && now - previous < 3_600_000) return;
     const cutoff = now - 30 * 86_400_000;
     this.db.transaction(() => {
       this.db
-        .query(`DELETE FROM native_questions WHERE botKey=? AND recorded<? AND recovering=0
-        AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.id=native_questions.jobID AND j.status NOT IN ('done','failed'))`)
+        .query(`DELETE FROM native_questions WHERE rowid IN (SELECT rowid FROM native_questions WHERE botKey=? AND recorded<? AND recovering=0
+        AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.id=native_questions.jobID AND j.status NOT IN ('done','failed')) ORDER BY recorded LIMIT 256)`)
         .run(botKey, cutoff);
       this.db
-        .query(`DELETE FROM irc_question_sources WHERE botKey=? AND recorded<?
+        .query(`DELETE FROM irc_question_sources WHERE rowid IN (SELECT rowid FROM irc_question_sources WHERE botKey=? AND recorded<?
         AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.botKey=irc_question_sources.botKey AND j.eventId=irc_question_sources.eventId AND j.status NOT IN ('done','failed'))
-        AND NOT EXISTS(SELECT 1 FROM native_questions q WHERE q.botKey=irc_question_sources.botKey AND q.jobID IN (SELECT id FROM jobs WHERE botKey=irc_question_sources.botKey AND eventId=irc_question_sources.eventId))`)
+        AND NOT EXISTS(SELECT 1 FROM native_questions q WHERE q.botKey=irc_question_sources.botKey AND q.jobID IN (SELECT id FROM jobs WHERE botKey=irc_question_sources.botKey AND eventId=irc_question_sources.eventId)) ORDER BY recorded LIMIT 256)`)
         .run(botKey, cutoff);
       for (const table of ["irc_thread_messages", "irc_thread_memberships"]) {
         this.db
-          .query(`DELETE FROM ${table} WHERE botKey=? AND recorded<?
-          AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.botKey=${table}.botKey AND j.channel=${table}.channel AND COALESCE(j.replyParent,j.thread)=${table}.root AND j.status NOT IN ('done','failed'))
-          AND NOT EXISTS(SELECT 1 FROM native_questions q JOIN jobs j ON j.id=q.jobID WHERE q.botKey=${table}.botKey AND j.channel=${table}.channel AND COALESCE(j.replyParent,j.thread)=${table}.root)`)
+          .query(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE botKey=? AND recorded<?
+          AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.botKey=${table}.botKey AND j.channel=${table}.channel AND CAST(COALESCE(j.replyParent,j.thread) AS TEXT)=${table}.root AND j.status NOT IN ('done','failed'))
+          AND NOT EXISTS(SELECT 1 FROM native_questions q JOIN jobs j ON j.id=q.jobID WHERE q.botKey=${table}.botKey AND j.channel=${table}.channel AND CAST(COALESCE(j.replyParent,j.thread) AS TEXT)=${table}.root) ORDER BY recorded LIMIT 256)`)
           .run(botKey, cutoff);
       }
     })();
-    this.ircPruned.set(botKey, now);
   }
 
   questionNotified(token: string) {
@@ -1593,9 +1649,15 @@ export class Store {
     this.db.transaction(() => {
       this.db
         .query(
-          "UPDATE jobs SET status='done',response='[]',failure=NULL WHERE id=? AND botKey=? AND input=? AND status='running' AND EXISTS(SELECT 1 FROM native_questions WHERE token=? AND recovering=1)",
+          "UPDATE jobs SET status=CASE WHEN cancel_requested=1 THEN 'responding' ELSE 'done' END,response=CASE WHEN cancel_requested=1 THEN ? ELSE '[]' END,failure=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE NULL END WHERE id=? AND botKey=? AND input=? AND status='running' AND EXISTS(SELECT 1 FROM native_questions WHERE token=? AND recovering=1)",
         )
-        .run(offer.jobID, offer.botKey, offer.inputID, offer.token);
+        .run(
+          JSON.stringify([cancellationNotice]),
+          offer.jobID,
+          offer.botKey,
+          offer.inputID,
+          offer.token,
+        );
       this.db
         .query(
           "UPDATE native_questions SET recovering=0,state='closed' WHERE token=?",

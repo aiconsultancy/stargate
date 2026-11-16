@@ -106,7 +106,7 @@ export interface AgentBackend {
     sessionID: string,
     formID: string,
     signal: AbortSignal,
-  ): Promise<"pending" | "resolved" | "unknown">;
+  ): Promise<"pending" | "resolved" | "missing-session" | "unknown">;
   questionBelongsToInput?(
     sessionID: string,
     formID: string,

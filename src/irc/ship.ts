@@ -500,10 +500,29 @@ export class IrcShip {
     if (this.started) return;
     this.started = true;
     this.open = open;
+    if (
+      this.config.features.questions ||
+      this.config.access.humanWakeChannels?.length
+    )
+      this.track(this.maintain(this.controller.signal));
     if (this.audit) this.track(this.audit.run(this.controller.signal));
     if (this.link && this.config.crewMessaging.ircCopies)
       this.track(this.copies(this.link, this.controller.signal));
     for (const registration of this.current) this.run(registration);
+  }
+
+  /** Bounded, indexed retention batches; never run synchronous cleanup on intake. */
+  private async maintain(signal: AbortSignal) {
+    while (!signal.aborted) {
+      await delay(60_000, undefined, { signal }).catch(() => {});
+      if (signal.aborted) return;
+      try {
+        for (const registration of this.current)
+          this.store.pruneIrcHistory(registration.key, Date.now());
+      } catch {
+        this.log.warn("IRC history cleanup unavailable");
+      }
+    }
   }
 
   /** Count a loop until it ends, so `close` waits for it. */
@@ -749,7 +768,7 @@ export class IrcShip {
         published: ({ target, msgid, request, root }) => {
           if (
             detached() ||
-            identity.role !== "captain" ||
+            (identity.role !== "captain" && !this.config.features.questions) ||
             (!this.config.access.humanWakeChannels?.length &&
               !this.config.features.questions) ||
             !client.isChannel(target) ||

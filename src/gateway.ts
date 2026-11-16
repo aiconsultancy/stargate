@@ -330,6 +330,7 @@ export class Gateway {
     if (
       selected.questions &&
       backend.pendingQuestions &&
+      backend.questionState &&
       backend.questionBelongsToInput &&
       backend.replyQuestion &&
       backend.questionInputSettled
@@ -649,8 +650,11 @@ export class Gateway {
         )) ?? [];
     } catch {
       this.log.warn(
-        "Native clarification recovery unavailable; ordinary recovery retained",
+        "Native clarification recovery unavailable; native work left untouched",
       );
+      // A later offer's failed read must not discard already-verified holds.
+      // Abort startup before ordinary recovery can interrupt/reset any input.
+      throw new Error("Native clarification recovery unavailable");
     }
     const retainedSessions = new Set(
       retainedQuestions.map((input) => {

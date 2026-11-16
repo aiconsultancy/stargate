@@ -144,11 +144,18 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ): Promise<PendingQuestion | undefined> {
     if (this.sessionID !== undefined && sessionID !== this.sessionID) return;
-    const form = await this.client.session.form.get(
-      { sessionID, formID },
-      { signal },
-    );
+    const form = await this.client.session.form
+      .get({ sessionID, formID }, { signal })
+      .catch((error: unknown) => {
+        if (
+          (isFormNotFoundError(error) && error.id === formID) ||
+          (isSessionNotFoundError(error) && error.sessionID === sessionID)
+        )
+          return undefined;
+        throw error;
+      });
     if (
+      !form ||
       form.id !== formID ||
       form.sessionID !== sessionID ||
       form.state.status !== "pending"
@@ -293,10 +300,13 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ): Promise<PendingQuestion[]> {
     if (this.sessionID !== undefined && sessionID !== this.sessionID) return [];
-    const forms = await this.client.session.form.list(
-      { sessionID },
-      { signal },
-    );
+    const forms = await this.client.session.form
+      .list({ sessionID }, { signal })
+      .catch((error: unknown) => {
+        if (isSessionNotFoundError(error) && error.sessionID === sessionID)
+          return [];
+        throw error;
+      });
     if (forms.length > 16) throw new Error("Too many native forms");
     const questions: PendingQuestion[] = [];
     for (const form of forms) {
@@ -311,7 +321,7 @@ export class OpenCodeBackend implements AgentBackend {
     sessionID: string,
     formID: string,
     signal: AbortSignal,
-  ): Promise<"pending" | "resolved" | "unknown"> {
+  ): Promise<"pending" | "resolved" | "missing-session" | "unknown"> {
     if (this.sessionID !== undefined && sessionID !== this.sessionID)
       return "unknown";
     try {
@@ -323,6 +333,8 @@ export class OpenCodeBackend implements AgentBackend {
       return form.state.status === "pending" ? "pending" : "resolved";
     } catch (error) {
       if (isFormNotFoundError(error) && error.id === formID) return "resolved";
+      if (isSessionNotFoundError(error) && error.sessionID === sessionID)
+        return "missing-session";
       throw error;
     }
   }
