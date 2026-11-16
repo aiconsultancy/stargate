@@ -452,6 +452,16 @@ export class Store {
     );
   }
 
+  /** Native approval candidates are executing inputs, never queued chat text. */
+  permissionCandidates(botKey: string): Job[] {
+    return this.db
+      .query<StoredJob, [string]>(
+        "SELECT * FROM jobs WHERE botKey=? AND status='running' AND input IS NOT NULL ORDER BY id LIMIT 32",
+      )
+      .all(botKey)
+      .map((row) => ({ ...row, deferDelivery: row.deferDelivery === 1 }));
+  }
+
   /** One cursor per pin. Old thread mappings and all outbox rows stay intact. */
   captainCursor(botKey: string, sessionID: string): CaptainCursor {
     return this.db.transaction(() => {

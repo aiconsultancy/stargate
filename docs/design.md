@@ -33,7 +33,12 @@ No shared agent implementation depends on Slack. No Slack implementation
 depends on a particular agent protocol. The gateway takes a
 `GatewayTransport` (namespace, access recheck, source line, sender note);
 Slack supplies `slackTransport`, and `src/irc/` supplies the IRC one with its
-own client, admission rules and line delivery. See [IRC transport](irc.md). Effect 4 owns lifetimes and
+own client, admission rules and line delivery. Teams uses the same durable worker
+with authenticated Bot Framework intake, stored conversation references and
+Connector delivery. See [IRC transport](irc.md) and [Teams transport](teams.md).
+Opt-in [fleet tools](fleet-tools.md) keep native session permissions, original
+message evidence and human approval separate from model text and agent rank.
+Effect 4 owns lifetimes and
 concurrency: the process scope in `runtime.ts`, the per-conversation worker
 slots in `Gateway.work`, and the crew plugin's resource scope. Pure logic,
 SQLite stores and the adapter contract stay Promise-based TypeScript with

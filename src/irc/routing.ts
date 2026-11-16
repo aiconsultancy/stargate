@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { maxAttachments } from "../attachments";
 import { defaultAllCallWords, type IrcConfig } from "../config";
+import { fleetAuthority } from "../fleet-policy";
 import { findMention } from "../mentions";
 import { peerTurnsPerHour } from "../peers";
 import type { Incoming, Job } from "../store";
@@ -104,6 +105,11 @@ export function ircAllowed(
   caseFold: Fold = rfc1459,
 ) {
   const access = config.access;
+  if (
+    config.fleetPolicy &&
+    fleetAuthority(config.fleetPolicy, account) === "context"
+  )
+    return false;
   if (listed(access.deniedAccounts, account, caseFold)) return false;
   if (
     access.allowedAccounts &&
@@ -208,7 +214,10 @@ export function routeIrcMessage(
     !direct && !mentioned && !replied && words.length
       ? findMention([body], words)
       : undefined;
-  if (!direct && !mentioned && !replied && named === undefined) return;
+  const wake =
+    config.access.wakeChannels?.some((name) => caseFold(name) === channel) &&
+    validMsgid(tagged);
+  if (!direct && !mentioned && !replied && named === undefined && !wake) return;
   // An all-call stays an all-call when a mention or a reply also admits it:
   // its word is recorded, so the turn is staggered and sees the context.
   const allCall =

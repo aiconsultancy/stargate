@@ -228,6 +228,12 @@ test("IRC thread: no message-tags capability keeps plain authenticated replies",
   );
   await delivered();
   expect(prompts).toHaveLength(1);
+  // Queue completion records the client write, before the peer receives it.
+  await until(
+    () => lineOf(fake.received("galactica"), "PRIVMSG").length >= 3,
+    5000,
+    "plain replies received by the server",
+  );
   const lines = lineOf(fake.received("galactica"), "PRIVMSG");
   expect(lines).toHaveLength(3);
   expect(lines.every((message) => !message.tags.has("+draft/reply"))).toBe(

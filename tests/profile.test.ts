@@ -34,7 +34,7 @@ afterEach(async () => {
   }
 });
 async function fixture() {
-  const root = await mkdtemp("/tmp/opencode/stargate-profile-");
+  const root = await realpath(await mkdtemp("/tmp/opencode/stargate-profile-"));
   directories.push(root);
   const projectDirectory = join(root, "indra");
   execFileSync("git", ["init", "-b", "main", projectDirectory]);
@@ -205,6 +205,31 @@ test("reaction protocol belongs once in the captain definition, not crew definit
     expect(crew.split("<!-- STARGATE:START -->")).toHaveLength(2);
     expect(crew).toEndWith("<!-- STARGATE:END -->\n");
   }
+});
+
+test("clone profile creates independent metadata and preserves the source", async () => {
+  const { git, options } = await fixture();
+  const config = { ...options, workspaceMode: "clone" as const };
+  const before = git("status", "--porcelain");
+  const result = await initializeProfile(config);
+  expect(
+    git("worktree", "list", "--porcelain").match(/^worktree /gm),
+  ).toHaveLength(1);
+  for (const directory of Object.values(result.worktrees)) {
+    const common = execFileSync(
+      "git",
+      ["-C", directory, "rev-parse", "--git-common-dir"],
+      { encoding: "utf8" },
+    ).trim();
+    expect(common).toBe(".git");
+    expect(
+      execFileSync("git", ["-C", directory, "status", "--porcelain"], {
+        encoding: "utf8",
+      }),
+    ).toBe("");
+  }
+  expect(git("status", "--porcelain")).toBe(before);
+  expect((await initializeProfile(config)).worktrees).toEqual(result.worktrees);
 });
 
 test("profile init creates named feature worktrees, preserves source and reuses paths", async () => {

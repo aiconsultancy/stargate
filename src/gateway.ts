@@ -217,7 +217,7 @@ export type GatewayConfig =
 /** Transport rules the gateway applies to every job of one registration. */
 export interface GatewayTransport {
   /** Session title and source label. */
-  readonly name: "slack" | "irc";
+  readonly name: "slack" | "irc" | "teams";
   /** Queue, session and outbox namespace of this registration. */
   readonly key: string;
   /** Current access rules, rechecked before work and before delivery. */
@@ -226,6 +226,7 @@ export interface GatewayTransport {
   source(job: Job): PromptSourceContext["source"] | undefined;
   /** Prompt prefix naming the sender when no source line is sent. */
   note(job: Job): string | undefined;
+  instructions?(job: Job): string;
   /**
    * Best effort, before each turn of an unpinned session (IRC crew: bind
    * the session to its crew member). Never fails or blocks the turn.
@@ -1189,6 +1190,8 @@ export class Gateway {
           const pinned = this.backend.sessionID;
           session = pinned ? undefined : this.store.session(job.conversation);
           let text = job.text;
+          const instructions = transport.instructions?.(job);
+          if (instructions) text = `${instructions}\n\n${text}`;
           // Chat messages only. Digest runs have no thread.
           const source = job.deferDelivery ? undefined : transport.source(job);
           const sourceContext: PromptSourceContext | undefined =

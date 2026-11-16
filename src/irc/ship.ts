@@ -1,7 +1,11 @@
+import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { type BackendConfig, type IrcConfig, secret } from "../config";
 import { type OutboxPage, outboxMaxAgeMs } from "../crew/irc-rpc";
+import type { FleetSource } from "../fleet/protocol";
+import { fleetAuthority, fleetInstructions } from "../fleet-policy";
+import { fleetSourceReference } from "../fleet-source";
 import type { GatewayConfig, GatewayTransport } from "../gateway";
 import { backendFingerprint, type Identity } from "../routing";
 import type { Store } from "../store";
@@ -253,6 +257,12 @@ function shipTransport(
   return {
     ...(sessionReady ? { sessionReady } : {}),
     name: "irc",
+    ...(config.fleetPolicy
+      ? {
+          instructions: () =>
+            config.fleetPolicy ? fleetInstructions(config.fleetPolicy) : "",
+        }
+      : {}),
     key: member.key,
     allowed: (user, channel) =>
       ircAllowed(config, member, user, channel, client.fold) &&
@@ -268,6 +278,19 @@ function shipTransport(
         ? { replyParent: job.replyParent }
         : {}),
       user: job.user,
+      ...(config.fleetControl
+        ? {
+            reference: fleetSourceReference(
+              "irc",
+              member.key,
+              job.channel,
+              job.eventId.slice(job.channel.length + 1),
+            ),
+          }
+        : {}),
+      ...(config.fleetPolicy
+        ? { authority: fleetAuthority(config.fleetPolicy, job.user) }
+        : {}),
       ...(job.sender ? { sender: job.sender } : {}),
     }),
     note: (job) =>
@@ -305,6 +328,7 @@ type Built = { registration: IrcRegistration; lifetime: Lifetime };
  * join/invite path. Grants must stay captain-owned and auditable.
  */
 export class IrcShip {
+  sourceRecorder: ((source: FleetSource) => void) | undefined;
   private current: IrcRegistration[] = [];
   private readonly lifetimes = new Map<IrcRegistration, Lifetime>();
   private readonly controller = new AbortController();
@@ -366,7 +390,7 @@ export class IrcShip {
     options: ShipOptions = {},
   ) {
     const ca = config.server.caFile
-      ? await Bun.file(config.server.caFile).text()
+      ? await readFile(config.server.caFile, "utf8")
       : undefined;
     const certificate = config.clientPemFile
       ? await clientPem(config.clientPemFile)
@@ -792,6 +816,35 @@ export class IrcShip {
       );
       this.advance(member, client, message);
       return;
+    }
+    if (this.sourceRecorder && this.config.fleetPolicy) {
+      try {
+        const messageID = admission.eventId.slice(admission.channel.length + 1);
+        this.sourceRecorder({
+          reference: fleetSourceReference(
+            "irc",
+            member.key,
+            admission.channel,
+            messageID,
+          ),
+          transport: "irc",
+          account: admission.user,
+          authority: fleetAuthority(this.config.fleetPolicy, admission.user),
+          text: message.params[1] ?? admission.text,
+          channel: admission.channel,
+          messageID,
+          receivedAt: new Date(
+            Number.isFinite(Date.parse(time ?? ""))
+              ? Date.parse(time ?? "")
+              : admission.received,
+          ).toISOString(),
+        });
+      } catch {
+        this.log.warn(
+          "Fleet source persistence failed; IRC request not admitted",
+        );
+        return;
+      }
     }
     this.store.enqueue({
       ...admission,

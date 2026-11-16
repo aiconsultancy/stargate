@@ -4,6 +4,9 @@ import { z } from "zod";
 import { crewActivitySchema } from "./activity";
 import { captainPostSchema } from "./captain-post-config";
 import { cronjobsSchema } from "./cronjob-config";
+import { validateFleetPermissions } from "./fleet/permissions";
+import { fleetControlSchema } from "./fleet/protocol";
+import { fleetPolicySchema } from "./fleet-policy";
 import { fold, widestFold } from "./irc/protocol";
 import { isLoopbackAddress } from "./loopback";
 import {
@@ -248,6 +251,7 @@ export const backendSchema = z.discriminatedUnion("type", [
       .regex(/^ses_[A-Za-z0-9]+$/)
       .optional(),
     agent: z.string().min(1).optional(),
+    enforcePermissions: z.boolean().optional(),
     model: z
       .strictObject({ providerID: z.string().min(1), id: z.string().min(1) })
       .optional(),
@@ -256,7 +260,7 @@ export const backendSchema = z.discriminatedUnion("type", [
         z.strictObject({
           action: z.string().min(1),
           resource: z.string().min(1),
-          effect: z.enum(["allow", "deny"]),
+          effect: z.enum(["allow", "deny", "ask"]),
         }),
       )
       .default([{ action: "*", resource: "*", effect: "deny" }]),
@@ -459,6 +463,8 @@ export const ircSchema = z
         allowedAccounts: z.array(ircAccount).min(1).max(50).optional(),
         /** Require an exact current nick mention in joined channels and a real msgid. */
         channelRequests: z.literal("nick-mention").optional(),
+        /** Explicit channels that wake on every admitted account's message. */
+        wakeChannels: z.array(ircChannel).max(20).optional(),
         /** Any SASL account may write unless denied; `*` denies everyone. */
         deniedAccounts: z
           .array(z.union([z.literal("*"), ircAccount]))
@@ -551,10 +557,49 @@ export const ircSchema = z
       })
       .default({ sessions: false, ircCopies: false }),
     backend: backendSchema,
+    fleetPolicy: fleetPolicySchema.optional(),
+    fleetControl: fleetControlSchema.optional(),
     concurrency: z.number().int().min(1).max(32).default(4),
     turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
   })
   .superRefine((irc, context) => {
+    if (irc.fleetControl && irc.backend.type === "opencode") {
+      try {
+        validateFleetPermissions(irc.backend.permissions);
+      } catch {
+        context.addIssue({
+          code: "custom",
+          path: ["backend", "permissions"],
+          message:
+            "Fleet IPC requires supported explicit allow/deny rules; native ask decisions cannot authorise gateway operations",
+        });
+      }
+    }
+    if (
+      irc.fleetControl &&
+      (!irc.fleetPolicy ||
+        irc.backend.type !== "opencode" ||
+        !irc.backend.sessionID)
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "Fleet control needs an explicit policy and pinned OpenCode root",
+      });
+    if (
+      irc.access.wakeChannels?.some(
+        (channel) => !irc.channels.includes(channel),
+      )
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Wake channels must be joined channels",
+      });
+    if (irc.access.wakeChannels?.length && irc.access.channelRequests)
+      context.addIssue({
+        code: "custom",
+        message: "Wake channels conflict with nick-mention-only admission",
+      });
     const issue = (message: string) =>
       context.addIssue({ code: "custom", message });
     // Collisions fold with rfc1459, the widest classic CASEMAPPING, so names
@@ -607,13 +652,52 @@ export const ircSchema = z
 
 export type IrcConfig = z.infer<typeof ircSchema>;
 
+/** Bot Framework transport: exact sender IDs, no credential values in config. */
+export const teamsSchema = z
+  .strictObject({
+    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+    displayName: z.string().min(1).max(100).optional(),
+    botClientId: z.uuid(),
+    tenantId: z.uuid(),
+    socketPath: absolutePath,
+    access: z.strictObject({
+      users: z.array(z.uuid()).min(1),
+      channels: z.array(z.string().min(1).max(1024)).default([]),
+      deniedUsers: z.array(z.uuid()).default([]),
+      deniedChannels: z.array(z.string().min(1).max(1024)).default([]),
+    }),
+    backend: backendSchema,
+    fleetPolicy: fleetPolicySchema.optional(),
+    approvalUsers: z.array(z.uuid()).default([]),
+    approvalTTLms: z.number().int().min(1000).max(3_600_000).default(600_000),
+    waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),
+    crewActivity: crewActivitySchema.default({ detail: "off" }),
+    concurrency: z.number().int().min(1).max(32).default(1),
+    turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
+  })
+  .superRefine((value, context) => {
+    if (value.approvalUsers.some((user) => !value.access.users.includes(user)))
+      context.addIssue({
+        code: "custom",
+        message: "Approval users must be allowed human users",
+      });
+    if (value.approvalUsers.length && value.backend.type !== "opencode")
+      context.addIssue({
+        code: "custom",
+        message: "Teams approvals require OpenCode",
+      });
+  });
+export type TeamsConfig = z.infer<typeof teamsSchema>;
+
 /** Registration IDs: Slack bots, IRC captains and `<irc id>-<crew id>`. */
 export function registrationIds(config: {
   bots: readonly { id: string }[];
   irc: readonly IrcConfig[];
+  teams?: readonly { id: string }[];
 }) {
   return [
     ...config.bots.map((bot) => bot.id),
+    ...(config.teams ?? []).map((team) => team.id),
     ...config.irc.flatMap((irc) => [
       irc.id,
       ...irc.crew.map((member) => `${irc.id}-${member.id}`),
@@ -625,14 +709,16 @@ export function registrationIds(config: {
 export function pinnedSessionIDs(config: {
   bots: readonly BotConfig[];
   irc: readonly IrcConfig[];
+  teams?: readonly TeamsConfig[];
 }) {
   return [
     ...new Set(
-      [...config.bots, ...config.irc].flatMap((registration) =>
-        registration.backend.type === "opencode" &&
-        registration.backend.sessionID !== undefined
-          ? [registration.backend.sessionID]
-          : [],
+      [...config.bots, ...config.irc, ...(config.teams ?? [])].flatMap(
+        (registration) =>
+          registration.backend.type === "opencode" &&
+          registration.backend.sessionID !== undefined
+            ? [registration.backend.sessionID]
+            : [],
       ),
     ),
   ];
@@ -646,19 +732,20 @@ export const configSchema = z
     bots: z.array(botSchema).default([]),
     /** IRCv3 registrations, independent of Slack; see docs/irc.md. */
     irc: z.array(ircSchema).default([]),
+    teams: z.array(teamsSchema).default([]),
     /** Nightly self-update and host maintenance; see docs/maintenance.md. */
     maintenance: maintenanceSchema.optional(),
     /** Read subscription quota and announce changes to crew availability. */
     quotaWatch: quotaWatchSchema.optional(),
   })
-  .superRefine(({ bots, irc, maintenance, quotaWatch }, context) => {
-    if (bots.length + irc.length === 0)
+  .superRefine(({ bots, irc, teams, maintenance, quotaWatch }, context) => {
+    if (bots.length + irc.length + teams.length === 0)
       context.addIssue({
         code: "custom",
         path: ["bots"],
-        message: "Configure at least one Slack bot or IRC registration",
+        message: "Configure at least one Slack, Teams or IRC registration",
       });
-    const ids = registrationIds({ bots, irc });
+    const ids = registrationIds({ bots, irc, teams });
     if (new Set(ids).size !== ids.length)
       context.addIssue({
         code: "custom",
@@ -677,6 +764,29 @@ export const configSchema = z
       context.addIssue({
         code: "custom",
         message: "Duplicate pinned OpenCode sessionID across IRC registrations",
+      });
+    const teamPins = teams.flatMap((team) =>
+      team.backend.type === "opencode" && team.backend.sessionID
+        ? [team.backend.sessionID]
+        : [],
+    );
+    const slackPins = bots.flatMap((bot) =>
+      bot.backend.type === "opencode" && bot.backend.sessionID
+        ? [bot.backend.sessionID]
+        : [],
+    );
+    if (
+      new Set(teamPins).size !== teamPins.length ||
+      teamPins.some((pin) => slackPins.includes(pin))
+    )
+      context.addIssue({
+        code: "custom",
+        message: "A pinned session needs one primary chat transport owner",
+      });
+    if (new Set(teams.map((team) => team.socketPath)).size !== teams.length)
+      context.addIssue({
+        code: "custom",
+        message: "Teams registrations need separate socket paths",
       });
     // An audit channel is never a conversation in any registration: another
     // ship listing it would answer mirrored lines. Host names and ports do

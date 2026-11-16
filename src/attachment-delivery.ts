@@ -44,6 +44,8 @@ export interface UploadTransport {
  * between post and record can repeat the link.
  */
 export interface LinkTransport {
+  /** Publication is one-shot; an uncertain send must never publish again. */
+  publishOnce?: boolean;
   upload(file: Attachment, signal: AbortSignal): Promise<string>;
   link(
     channel: string,
@@ -72,7 +74,11 @@ function links(
 ): LinkTransport | undefined {
   if (!transport?.upload || !transport.link) return;
   const { upload, link } = transport;
-  return { upload: upload.bind(transport), link: link.bind(transport) };
+  return {
+    upload: upload.bind(transport),
+    link: link.bind(transport),
+    ...(transport.publishOnce ? { publishOnce: true } : {}),
+  };
 }
 
 /** The transport's upload half, or undefined for a download-only one. */
@@ -185,6 +191,10 @@ export async function deliverAttachments(
     if (!context.allowed())
       throw new Error("Attachment delivery access denied");
     if (file.phase === "shared") continue;
+    if (file.phase === "completing" && linked?.publishOnce) {
+      file.phase = "unavailable";
+      save();
+    }
     if (file.prepared && !file.title) {
       file.title =
         [...(file.caption || file.prepared.name)]
@@ -269,6 +279,10 @@ export async function deliverAttachments(
       }
       if (!context.allowed())
         throw new Error("Attachment delivery access denied");
+      if (linked.publishOnce) {
+        file.phase = "completing";
+        save();
+      }
       await linked.link(
         job.channel,
         job.thread,

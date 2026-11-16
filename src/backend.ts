@@ -15,7 +15,9 @@ import type { SessionHistory } from "./session-history";
 export type PromptSourceContext = {
   source: {
     /** Absent means Slack. */
-    transport?: "irc";
+    transport?: "irc" | "teams";
+    authority?: "human" | "agent" | "context";
+    reference?: string;
     channel: string;
     thread: string;
     message: string;
@@ -30,8 +32,15 @@ export type PromptSourceContext = {
 /** Compact source identity; IRC optionally adds `;r=<encoded thread root>`. */
 export function sourceLine({ source }: PromptSourceContext) {
   const value = encodeURIComponent;
-  return `s=${source.transport ?? "slack"};c=${value(source.channel)};t=${value(source.thread)};m=${value(source.message)};u=${value(source.user)}${source.sender ? `;k=${source.sender}` : ""}${source.transport === "irc" && validMsgid(source.replyParent) ? `;r=${value(source.replyParent)}` : ""}`;
+  return `s=${source.transport ?? "slack"};c=${value(source.channel)};t=${value(source.thread)};m=${value(source.message)};u=${value(source.user)}${source.sender ? `;k=${source.sender}` : ""}${source.authority ? `;a=${source.authority}` : ""}${source.reference ? `;e=${value(source.reference)}` : ""}${source.transport === "irc" && validMsgid(source.replyParent) ? `;r=${value(source.replyParent)}` : ""}`;
 }
+
+export type PendingPermission = {
+  id: string;
+  sessionID: string;
+  action: string;
+  resources: string[];
+};
 
 /** Latest complete visible text for this turn, not reasoning or tool output. */
 export type TextSink = (text: string) => void;
@@ -78,6 +87,29 @@ export const latestInput = "\u0000latest-input";
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
+  toolBelongsToInput?(
+    sessionID: string,
+    messageID: string,
+    inputID: string,
+    signal: AbortSignal,
+    expected?: { agent: string; id: string; tool: string; input: unknown },
+  ): Promise<boolean>;
+  pendingPermissions?(
+    sessionID: string,
+    signal: AbortSignal,
+  ): Promise<PendingPermission[]>;
+  permissionBelongsToInput?(
+    sessionID: string,
+    requestID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ): Promise<boolean>;
+  replyPermission?(
+    sessionID: string,
+    requestID: string,
+    decision: "once" | "reject",
+    signal: AbortSignal,
+  ): Promise<void>;
   /** Explicit capability: unsupported adapters must not silently drop files. */
   readonly supportsAttachments?: boolean;
   /** Explicit durable identity; the gateway scopes routing to this session. */

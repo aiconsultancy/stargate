@@ -66,6 +66,39 @@ function linkTransport() {
   return { calls, transport };
 }
 
+test("one-shot publication records intent and never repeats an uncertain send", async () => {
+  const { calls, transport } = linkTransport();
+  transport.publishOnce = true;
+  const files: AttachmentDelivery[] = [
+    {
+      path: "/unused.png",
+      caption: "proof",
+      title: "proof",
+      prepared: {
+        path: "/unused.png",
+        caption: "proof",
+        name: "proof.png",
+        mime: "image/png",
+        size: 1,
+        sha256: "0".repeat(64),
+      },
+      phase: "uploaded",
+      fileID: "data:image/png;base64,proof",
+    },
+  ];
+  transport.link = async () => {
+    expect(files[0]?.phase).toBe("completing");
+    calls.push("link");
+    throw new Error("Uncertain delivery");
+  };
+  const run = fixture(files, transport);
+  await expect(run.deliver()).rejects.toThrow("Uncertain delivery");
+  await run.deliver();
+  expect(calls).toEqual(["link"]);
+  expect(files[0]?.phase).toBe("unavailable");
+  expect(run.notices).toHaveLength(1);
+});
+
 test("an upload with an unknown outcome is never repeated", async () => {
   const { calls, transport } = linkTransport();
   // A crash after "uploading" was stored and before the URL was recorded.

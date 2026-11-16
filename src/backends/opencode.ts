@@ -1,5 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 import {
+  isAgentNotFoundError,
   isSessionNotFoundError,
   OpenCode,
   type SessionMessageInfo,
@@ -49,7 +51,22 @@ const pinnedSessionSchema = z.object({
   fork: z.unknown().optional(),
   agent: z.string().optional(),
   location: z.object({ directory: z.string() }),
+  permissions: z
+    .array(
+      z.object({
+        action: z.string(),
+        resource: z.string(),
+        effect: z.enum(["allow", "deny", "ask"]),
+      }),
+    )
+    .optional(),
 });
+const readyAgentSchema = z.object({
+  location: z.object({ directory: z.string() }),
+  data: z.object({ id: z.string() }),
+});
+const agentReadyMs = 30_000;
+const agentReadyPollMs = 250;
 const pairingCode = z.object({
   code: z.string().regex(/^[A-Za-z0-9_-]{1,512}$/),
   expires_in: z.number().int().positive().max(86_400),
@@ -101,6 +118,93 @@ function generationFailureKind(error: {
 }
 
 export class OpenCodeBackend implements AgentBackend {
+  async toolBelongsToInput(
+    sessionID: string,
+    messageID: string,
+    inputID: string,
+    signal: AbortSignal,
+    expected?: { agent: string; id: string; tool: string; input: unknown },
+  ) {
+    if (sessionID !== this.sessionID) return false;
+    if (expected) {
+      try {
+        const message = await this.client.session.message.get(
+          { sessionID, messageID },
+          { signal },
+        );
+        signal.throwIfAborted();
+        if (
+          message.id !== messageID ||
+          message.type !== "assistant" ||
+          message.agent !== expected.agent ||
+          message.time.completed !== undefined
+        )
+          return false;
+        const tools = message.content
+          .filter((part) => part.type === "tool")
+          .filter((part) => part.id === expected.id);
+        const tool = tools[0];
+        if (
+          tools.length !== 1 ||
+          !tool ||
+          tool.name !== expected.tool ||
+          tool.state.status !== "running" ||
+          tool.time.completed !== undefined ||
+          !isDeepStrictEqual(tool.state.input, expected.input)
+        )
+          return false;
+      } catch {
+        signal.throwIfAborted();
+        return false;
+      }
+    }
+    // Native records prove liveness/correlation only. IPC authority comes from
+    // the gateway's independent, root-controlled permission rules.
+    return this.followsInput(sessionID, inputID, signal, messageID);
+  }
+  async permissionBelongsToInput(
+    sessionID: string,
+    requestID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ) {
+    if (sessionID !== this.sessionID) return false;
+    const request = await this.client.permission.get(
+      { sessionID, requestID },
+      { signal },
+    );
+    return (
+      request.sessionID === sessionID &&
+      request.id === requestID &&
+      request.source?.type === "tool" &&
+      this.followsInput(sessionID, inputID, signal, request.source.messageID)
+    );
+  }
+  async pendingPermissions(sessionID: string, signal: AbortSignal) {
+    if (sessionID !== this.sessionID)
+      throw new Error("Permission session mismatch");
+    return this.client.permission.list({ sessionID }, { signal });
+  }
+
+  async replyPermission(
+    sessionID: string,
+    requestID: string,
+    decision: "once" | "reject",
+    signal: AbortSignal,
+  ) {
+    if (sessionID !== this.sessionID)
+      throw new Error("Permission session mismatch");
+    const pending = await this.client.permission.get(
+      { sessionID, requestID },
+      { signal },
+    );
+    if (pending.id !== requestID || pending.sessionID !== sessionID)
+      throw new Error("Permission request mismatch");
+    await this.client.permission.reply(
+      { sessionID, requestID, decision },
+      { signal },
+    );
+  }
   readonly supportsAttachments = true;
   readonly history: OpenCodeHistory;
   private readonly client;
@@ -198,6 +302,7 @@ export class OpenCodeBackend implements AgentBackend {
     title,
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
+    await this.waitForConfiguredAgent(signal);
     if (this.sessionID !== undefined) {
       signal.throwIfAborted();
       try {
@@ -214,7 +319,10 @@ export class OpenCodeBackend implements AgentBackend {
           session.fork !== undefined ||
           session.location.directory !== this.config.directory ||
           (this.config.agent !== undefined &&
-            session.agent !== this.config.agent)
+            session.agent !== this.config.agent) ||
+          (this.config.enforcePermissions === true &&
+            JSON.stringify(session.permissions) !==
+              JSON.stringify(this.config.permissions))
         ) {
           throw new Error("Incompatible pinned session");
         }
@@ -236,6 +344,50 @@ export class OpenCodeBackend implements AgentBackend {
       { signal },
     );
     return session.id;
+  }
+
+  /**
+   * OpenCode 2.2.7 can expose a partial agent catalogue during plugin activation
+   * (anomalyco/opencode#63192). Opt-in fleet profiles must prove their exact
+   * agent at the requested location before creating or reusing a root. Never
+   * cache this across calls: the native engine may have restarted meanwhile.
+   */
+  private async waitForConfiguredAgent(signal: AbortSignal) {
+    const agentID = this.config.agent;
+    if (this.config.enforcePermissions !== true || agentID === undefined)
+      return;
+    const ready = AbortSignal.any([signal, AbortSignal.timeout(agentReadyMs)]);
+    try {
+      while (true) {
+        ready.throwIfAborted();
+        let result: Awaited<ReturnType<typeof this.client.agent.get>>;
+        try {
+          result = await this.client.agent.get(
+            { agentID, location: { directory: this.config.directory } },
+            { signal: ready },
+          );
+        } catch (error) {
+          ready.throwIfAborted();
+          if (!isAgentNotFoundError(error) || error.agentID !== agentID)
+            throw error;
+          await delay(agentReadyPollMs, undefined, { signal: ready });
+          continue;
+        }
+        ready.throwIfAborted();
+        const agent = readyAgentSchema.parse(result);
+        if (
+          agent.data.id !== agentID ||
+          agent.location.directory !== this.config.directory
+        )
+          throw new Error("Configured agent identity or location mismatch");
+        return;
+      }
+    } catch {
+      signal.throwIfAborted();
+      throw new Error(
+        "Configured OpenCode agent unavailable or incompatible; no session was created or reused",
+      );
+    }
   }
 
   get sessionID(): string | undefined {

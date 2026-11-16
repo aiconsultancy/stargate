@@ -104,6 +104,7 @@ ${slackInstructions}`,
 --directory PATH       Captain workspace (outside the crew configuration tree)
 --project PATH         Existing Git checkout for the project
 --worktrees PATH       Parent of the configured crew worktrees
+--workspace-mode MODE  worktree (default) or independent clone
 --team PATH            Non-secret team JSON (default: Bowser's starter roster)
 --id ID                Bot namespace (default: configured captain ID; bowser)
 --session-id ses_...    Bind all crew locations to one existing captain session
@@ -194,6 +195,7 @@ function parseCli(args: string[]) {
     "record-app": { type: "string" },
     project: { type: "string" },
     worktrees: { type: "string" },
+    "workspace-mode": { type: "string" },
     team: { type: "string" },
     base: { type: "string" },
     "mesij-command": { type: "string" },
@@ -408,6 +410,20 @@ export async function runCli(args: string[]): Promise<CliResult> {
       directory: resolve(v.directory),
       projectDirectory: resolve(v.project),
       worktreeDirectory: resolve(v.worktrees),
+      ...(v["workspace-mode"]
+        ? {
+            workspaceMode:
+              v["workspace-mode"] === "clone"
+                ? ("clone" as const)
+                : v["workspace-mode"] === "worktree"
+                  ? ("worktree" as const)
+                  : (() => {
+                      throw new Error(
+                        "--workspace-mode must be clone or worktree",
+                      );
+                    })(),
+          }
+        : {}),
       mesijCommand: resolve(mesijCommand),
       ...(team ? { team } : {}),
       ...(v.id ? { namespace: v.id } : {}),

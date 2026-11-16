@@ -31,6 +31,9 @@ import { CronUI, type CronUIApi } from "./cron-ui";
 import { startDashboard } from "./dashboard";
 import { type DashboardShip, dashboardSource } from "./dashboard-source";
 import { abortable } from "./effect";
+import { FleetControl } from "./fleet/control";
+import { fleetRequestAction } from "./fleet/permissions";
+import { sendFleetAssignment } from "./fleet-irc";
 import { Gateway, type SlackDelivery } from "./gateway";
 import { controlInteractions } from "./interactions";
 import { type IrcRegistration, IrcShip } from "./irc/ship";
@@ -40,9 +43,15 @@ import { PairingUI } from "./pairing";
 import { PeerDirectory } from "./peers";
 import { QuotaReader } from "./quota";
 import { QuotaWatch } from "./quota-watch";
-import { botKey, type Identity, isAllowedChannel } from "./routing";
+import {
+  backendFingerprint,
+  botKey,
+  type Identity,
+  isAllowedChannel,
+} from "./routing";
 import { SlackConnection, type SlackInteractions } from "./slack";
 import { Store } from "./store";
+import { TeamsRegistration } from "./teams/registration";
 import { createTranscriber } from "./transcribers/azure-openai";
 
 export async function loadEnvironment(configPath: string) {
@@ -97,7 +106,10 @@ export type RuntimeDependencies = {
 };
 
 /** Programmatic callers may omit transports they do not use. */
-export type ServeConfig = Omit<Config, "irc"> & { irc?: Config["irc"] };
+export type ServeConfig = Omit<Config, "irc" | "teams"> & {
+  irc?: Config["irc"];
+  teams?: Config["teams"];
+};
 
 const defaults: RuntimeDependencies = {
   slack: (bot, log) =>
@@ -232,6 +244,52 @@ export function serve(
       >();
       const ships: DashboardShip[] = [];
       const identities = new Set<string>();
+      const teamsRegistrations: TeamsRegistration[] = [];
+      for (const teams of config.teams ?? []) {
+        const teamLog = log.child({ teams: teams.id });
+        const dataDirectory = join(config.dataDirectory, teams.id);
+        yield* Effect.promise(() =>
+          mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
+        );
+        const resource = yield* Effect.acquireRelease(
+          Effect.promise(async () =>
+            ownedBackend(
+              await dependencies.backend(teams.backend, { dataDirectory }),
+            ),
+          ),
+          (resource) => release(teamLog, "Teams backend", resource.close),
+        );
+        const registration = yield* Effect.acquireRelease(
+          Effect.sync(
+            () =>
+              new TeamsRegistration(
+                teams,
+                join(dataDirectory, "teams.sqlite"),
+                store,
+                resource.backend,
+                (message) => teamLog.warn(message),
+              ),
+          ),
+          (registration) =>
+            release(teamLog, "Teams transport", () => registration.close()),
+        );
+        const gateway = new Gateway(
+          teams,
+          { team: teams.tenantId, user: teams.botClientId },
+          store,
+          resource.backend,
+          registration.delivery,
+          teamLog,
+          undefined,
+          undefined,
+          registration.transport,
+        );
+        workers.push({
+          key: registration.key,
+          work: supervise(teamLog, "gateway", (signal) => gateway.work(signal)),
+        });
+        teamsRegistrations.push(registration);
+      }
       for (const bot of config.bots) {
         let currentBot = bot;
         const botLog = log.child({ bot: bot.id });
@@ -465,12 +523,100 @@ export function serve(
           });
         }
         ircBindings.set(irc.id, { ship, entries });
+        if (
+          irc.fleetControl &&
+          irc.backend.type === "opencode" &&
+          irc.backend.sessionID
+        ) {
+          const pin = irc.backend.sessionID;
+          const permissions = irc.backend.permissions;
+          const fleetControl = irc.fleetControl;
+          const primary = ship.registrations[0];
+          const entry = primary ? entries.get(primary.key) : undefined;
+          if (!entry || !primary)
+            throw new Error("Fleet primary registration unavailable");
+          const relatedTeams = teamsRegistrations.filter(
+            (team) =>
+              team.config.backend.type === "opencode" &&
+              team.config.backend.sessionID === pin &&
+              backendFingerprint(team.config) === backendFingerprint(irc),
+          );
+          const control = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              FleetControl.open({
+                config: fleetControl,
+                sessionID: pin,
+                account: irc.account,
+                permissions,
+                allowDispatch:
+                  irc.fleetPolicy?.capabilities.includes("dispatch") === true,
+                authorize: async (caller, signal, request) => {
+                  const { action } = fleetRequestAction(request);
+                  for (const key of [
+                    primary.key,
+                    ...relatedTeams.map((team) => team.key),
+                  ]) {
+                    for (const job of store.permissionCandidates(key)) {
+                      if (
+                        job.input &&
+                        (await entry.resource.backend.toolBelongsToInput?.(
+                          pin,
+                          caller.messageID,
+                          job.input,
+                          signal,
+                          {
+                            agent: caller.agent,
+                            id: caller.id,
+                            tool: action,
+                            input: request.input,
+                          },
+                        ))
+                      )
+                        return;
+                    }
+                  }
+                  throw new Error("Fleet caller is not an active native input");
+                },
+                send: async (target, text, signal) => {
+                  await sendFleetAssignment(
+                    primary.client,
+                    target.channel,
+                    text,
+                    () => open,
+                    signal,
+                  );
+                },
+                status: () => ({
+                  account: irc.account,
+                  connected: ship.registrations.map((registration) => ({
+                    id: registration.id,
+                    channels: irc.channels.filter((channel) =>
+                      registration.client.inChannel(channel),
+                    ),
+                  })),
+                }),
+              }),
+            ),
+            (control) => release(log, "Fleet control", () => control.close()),
+          );
+          ship.sourceRecorder = (source) => {
+            control.recordSource(source);
+          };
+          for (const team of relatedTeams)
+            team.sourceRecorder = (source) => {
+              control.recordSource(source);
+            };
+        }
         let closing: Promise<void> | undefined;
         const close = () => (closing ??= ship.close());
         connections.push(close);
         yield* Effect.addFinalizer(() => closeIntake(close));
         ship.start(() => open);
         log.info({ irc: irc.id }, "IRC connecting");
+      }
+      for (const team of teamsRegistrations) {
+        yield* Effect.promise(() => team.start(() => open));
+        log.info({ teams: team.config.id }, "Teams listener ready");
       }
       if (config.dashboard) {
         // Before the worker fork: a bind failure is an ordinary startup
