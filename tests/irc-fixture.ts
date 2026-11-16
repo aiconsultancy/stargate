@@ -91,7 +91,7 @@ export class FakeIrcServer {
   private msgid = 0;
   readonly caps: string[];
   constructor(private readonly options: FakeIrcOptions = {}) {
-    this.caps = options.caps ?? allCaps;
+    this.caps = [...(options.caps ?? allCaps)];
     this.taken = new Set(options.taken ?? []);
   }
 
