@@ -541,14 +541,19 @@ test("real IRC intake keeps silent broad listeners out of threads, confirms publ
     (ship) => ship.registrations[0]?.account === "discovery",
   )?.registrations[0];
   if (!discovery) throw new Error("Missing discovery");
+  const publication = () =>
+    lineOf(f.fake.received("discovery"), "PRIVMSG").find(
+      (line) =>
+        line.params[0] === "#command" && line.params[1] === "discovery reply",
+    );
+  // The explicit invitation already records participation; wait for the real
+  // wire response rather than treating that earlier state as delivery proof.
   await until(
-    () => f.store.ircThreadParticipating(discovery.key, "#command", root),
+    () => publication() !== undefined,
     5000,
     "own publication observed",
   );
-  const own = lineOf(f.fake.received("discovery"), "PRIVMSG").find(
-    (line) => line.params[0] === "#command",
-  );
+  const own = publication();
   expect(own?.tags.get("+draft/reply")).toBe(root);
   await f.restart();
   const before = f.prompts.length;
