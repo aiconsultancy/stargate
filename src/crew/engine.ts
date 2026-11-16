@@ -38,6 +38,7 @@ import { redactCredentials } from "../credentials";
 import { journalInputSchema } from "./journal";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
+import { projectsSchema } from "./project-options";
 import {
   type AbandonInput,
   abandonInputSchema,
@@ -95,6 +96,8 @@ export const crewOptionsSchema = z
     captainDirectory: directory,
     projectDirectory: directory,
     worktrees: z.record(agentIDSchema, directory),
+    /** Additional configured repositories; omission preserves the existing team. */
+    projects: projectsSchema.optional(),
     team: teamSchema.optional(),
     quota: quotaConfigSchema.optional(),
     cron: z
@@ -407,14 +410,29 @@ export class CrewEngine {
   /** Location-authorized read surface. Unlike tool status, never reconciles,
    * promotes queued work, provisions peers, reads transcripts or invokes models.
    */
-  status(input: CrewStatusInput = {}): CrewStatus {
+  status(
+    input: CrewStatusInput,
+    options: { aggregate: true },
+  ): CrewStatus & { busy: number };
+  status(input?: CrewStatusInput): CrewStatus;
+  status(
+    input: CrewStatusInput = {},
+    options?: { aggregate: true },
+  ): CrewStatus {
     const members = this.options.team.crew.filter(
       ({ id }) => !input.member || input.member === id,
+    );
+    // Aggregate callers need every active task, before either engine or router
+    // pagination. Reuse that one snapshot for the visible rows as well.
+    const tasks = new Map(
+      members
+        .slice(0, options?.aggregate ? members.length : 20)
+        .map((member) => [member.id, this.state.activeTask(member.id)]),
     );
     return {
       members: members.slice(0, 20).map((member) => {
         const peer = this.state.peer(member.id);
-        const task = this.state.activeTask(member.id);
+        const task = tasks.get(member.id);
         const current = task && task.status !== "completed" ? task : null;
         return {
           id: member.id,
@@ -428,6 +446,13 @@ export class CrewEngine {
       }),
       total: members.length,
       truncated: members.length > 20,
+      ...(options?.aggregate
+        ? {
+            busy: [...tasks.values()].filter(
+              (task) => task && task.status !== "completed",
+            ).length,
+          }
+        : {}),
     };
   }
 
@@ -1145,7 +1170,7 @@ export class CrewEngine {
         resolve(this.options.captainDirectory)
     )
       throw new CrewError(
-        "Captain must be a root configured captain session in the configured project directory.",
+        "Captain must be a root configured captain session in the configured captain directory.",
       );
   }
 

@@ -8,6 +8,7 @@ import {
   type NativeMaker,
   nativeMakerSchema,
 } from "./fleet/protocol";
+import { validMsgid } from "./irc/protocol";
 import { failureText, type RequestFailure } from "./request-failure";
 import type { ReplyChunk } from "./slack-format";
 
@@ -223,6 +224,14 @@ export class Store {
       CREATE TABLE IF NOT EXISTS irc_cursors (
         botKey TEXT NOT NULL, target TEXT NOT NULL, time TEXT NOT NULL,
         PRIMARY KEY(botKey, target)
+      );
+      CREATE TABLE IF NOT EXISTS irc_thread_messages (
+        botKey TEXT NOT NULL, channel TEXT NOT NULL, msgid TEXT NOT NULL,
+        root TEXT NOT NULL, PRIMARY KEY(botKey,channel,msgid)
+      );
+      CREATE TABLE IF NOT EXISTS irc_thread_memberships (
+        botKey TEXT NOT NULL, channel TEXT NOT NULL, root TEXT NOT NULL,
+        PRIMARY KEY(botKey,channel,root)
       );
       CREATE TABLE IF NOT EXISTS irc_stargate_dm (
         id TEXT PRIMARY KEY, sent INTEGER NOT NULL
@@ -947,6 +956,102 @@ export class Store {
         )
         .get(botKey, thread)?.replyParent ?? undefined
     );
+  }
+
+  /** New opt-in human intake: persist ancestry and explicit invitation atomically. */
+  enqueueIrcHuman(input: Incoming, invited: boolean): boolean {
+    const root = input.replyParent ?? input.thread;
+    if (!validMsgid(input.thread) || !validMsgid(root))
+      throw new Error("IRC human thread identity is invalid");
+    return this.db.transaction(() => {
+      if (!this.enqueue(input)) return false;
+      this.ircThreadMessage(input.botKey, input.channel, input.thread, root);
+      if (invited) this.joinIrcThread(input.botKey, input.channel, root);
+      return true;
+    })();
+  }
+
+  ircThreadRoot(
+    botKey: string,
+    channel: string,
+    msgid: string,
+  ): string | undefined {
+    return this.db
+      .query<{ root: string }, [string, string, string]>(
+        "SELECT root FROM irc_thread_messages WHERE botKey=? AND channel=? AND msgid=?",
+      )
+      .get(botKey, channel, msgid)?.root;
+  }
+
+  ircThreadParticipating(
+    botKey: string,
+    channel: string,
+    root: string,
+  ): boolean {
+    return (
+      this.db
+        .query(
+          "SELECT 1 FROM irc_thread_memberships WHERE botKey=? AND channel=? AND root=?",
+        )
+        .get(botKey, channel, root) !== null
+    );
+  }
+
+  /** Called only for an exact locally-correlated, SASL-account-confirmed own echo. */
+  ircPublished(
+    botKey: string,
+    channel: string,
+    msgid: string,
+    request: string,
+    wireRoot?: string,
+  ) {
+    if (
+      !validMsgid(msgid) ||
+      !validMsgid(request) ||
+      (wireRoot !== undefined && !validMsgid(wireRoot))
+    )
+      return false;
+    return this.db.transaction(() => {
+      const job = this.db
+        .query<
+          { thread: string; replyParent: string | null },
+          [string, string, string]
+        >(
+          "SELECT thread,replyParent FROM jobs WHERE botKey=? AND channel=? AND thread=? ORDER BY id LIMIT 1",
+        )
+        .get(botKey, channel, request);
+      if (!job) return false;
+      const root = job.replyParent ?? job.thread;
+      if (!validMsgid(root) || (wireRoot !== undefined && wireRoot !== root))
+        return false;
+      this.ircThreadMessage(botKey, channel, msgid, root);
+      this.joinIrcThread(botKey, channel, root);
+      return true;
+    })();
+  }
+
+  private ircThreadMessage(
+    botKey: string,
+    channel: string,
+    msgid: string,
+    root: string,
+  ) {
+    const existing = this.ircThreadRoot(botKey, channel, msgid);
+    if (existing !== undefined && existing !== root)
+      throw new Error("IRC thread ancestry conflict");
+    this.db
+      .query(
+        "INSERT OR IGNORE INTO irc_thread_messages(botKey,channel,msgid,root) VALUES (?,?,?,?)",
+      )
+      .run(botKey, channel, msgid, root);
+  }
+
+  private joinIrcThread(botKey: string, channel: string, root: string) {
+    this.db
+      .query(
+        "INSERT OR IGNORE INTO irc_thread_memberships(botKey,channel,root) VALUES (?,?,?)",
+      )
+      .run(botKey, channel, root);
   }
 
   jobStatus(botKey: string, id: number): JobStatus | undefined {

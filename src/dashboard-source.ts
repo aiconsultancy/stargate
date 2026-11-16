@@ -65,6 +65,13 @@ export function ircDashboardShip(
         ...(config.access.wakeChannels
           ? { wakeChannels: [...config.access.wakeChannels] }
           : {}),
+        ...(registration.role === "captain" && config.access.humanWakeChannels
+          ? {
+              humanWakeChannels: config.access.humanWakeChannels.map(
+                (rule) => ({ ...rule }),
+              ),
+            }
+          : {}),
         peerCaptains: [...config.access.peerCaptains],
       },
     },
@@ -244,7 +251,12 @@ export function dashboardSource(
             ...(named ? { agent: named } : {}),
             crew: status && {
               total: status.total,
-              busy: status.members.filter((member) => member.current).length,
+              busy:
+                status.busy ??
+                status.members.filter((member) => member.current).length,
+              ...(status.busy === undefined && status.truncated
+                ? { busyPartial: true as const }
+                : {}),
             },
             queue: store.queueCounts(ship.key),
             cronjobs: cronStore.report(ship.key).length,

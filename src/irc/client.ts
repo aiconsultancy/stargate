@@ -116,6 +116,13 @@ export interface IrcEvents {
     target: string;
     text: string;
   }): void;
+  /** Exact pending own PRIVMSG echoed by the server with the expected SASL account. */
+  published?(message: {
+    target: string;
+    msgid: string;
+    request: string;
+    root?: string;
+  }): void;
   /** An INVITE addressed to this connection. */
   invite?(channel: string): void;
   joinFailed?(channel: string, numeric: string): void;
@@ -1242,6 +1249,23 @@ export class IrcClient {
         ...(validMsgid(root) ? { root } : {}),
         ...(echo ? { request: echo[1].request } : {}),
       });
+      if (
+        echo &&
+        !replay &&
+        account &&
+        this.fold(account) === this.fold(this.options.account)
+      ) {
+        try {
+          this.events.published?.({
+            target,
+            msgid,
+            request: echo[1].request,
+            ...(validMsgid(root) ? { root } : {}),
+          });
+        } catch {
+          this.options.log.warn("IRC published-message handler failed");
+        }
+      }
     }
     // A labeled echo confirms our own send; it is not new input.
     if (label === undefined) this.events.message?.(message, replay);

@@ -239,7 +239,7 @@
           heading.append(a);
           card.append(heading, fields([
             ["Backend", ship.backend], ["Agent", ship.agent],
-            ["Crew total", ship.crew?.total], ["Crew busy", ship.crew?.busy],
+            ["Crew total", ship.crew?.total], ["Crew busy", ship.crew?.busyPartial ? `at least ${ship.crew.busy}` : ship.crew?.busy],
             ["Cronjobs", ship.cronjobs],
           ]), counts(ship.queue));
           cards.append(card);
@@ -274,15 +274,16 @@
         if (data.crew.truncated) node.append(el("p", "Crew list truncated.", "label"));
         if (!data.crew.members.length) node.append(el("p", "none", "muted"));
         for (const member of data.crew.members) {
+          const memberKey = member.project ? `project-${member.project.length}-${member.project}-${member.id}` : member.id;
           const card = el("article", undefined, "member");
           card.append(el("h3", member.name), fields([
-            ["Member", member.id], ["Backend", member.backend],
+            ["Member", member.id], ...(member.project ? [["Project", member.project]] : []), ["Backend", member.backend],
             ["Provisioned", member.provisioned], ["Observed", member.observed],
             ["Queued", member.queuedCount], ["Recent count", member.recentCount],
           ]), el("h3", "Current task"), taskFields(member.current),
           el("h3", "Last outcome"), taskFields(member.lastOutcome),
-          taskList("Queued tasks", member.queued, `queued-${member.id}`),
-          taskList("Recent tasks", member.recent, `recent-${member.id}`));
+          taskList("Queued tasks", member.queued, `queued-${memberKey}`),
+          taskList("Recent tasks", member.recent, `recent-${memberKey}`));
           node.append(card);
         }
         return node;
@@ -297,6 +298,7 @@
           ["Allowed accounts", transport.access.allowedAccounts ?? "No account allow-list"],
           ["Denied accounts", transport.access.deniedAccounts], ["Denied channels", transport.access.deniedChannels],
           ["Channel requests", transport.access.channelRequests], ["Wake channels", transport.access.wakeChannels],
+          ["Human wake channels", transport.access.humanWakeChannels?.map((rule) => `${rule.channel}: ${rule.replies}`)],
           ["Peer captains", transport.access.peerCaptains],
         ] : transport?.kind === "teams" ? [
           ["Transport", "Teams"], ["Tenant", transport.tenantId], ["Bot application", transport.botClientId],

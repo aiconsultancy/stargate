@@ -267,7 +267,8 @@ settings and `shipTurnsPerAgentPerHour`.
   text mention or all-call alone cannot start a turn in this mode. Both
   DMs and channel requests must have a server message ID, which is used
   for durable deduplication. Bot-tagged messages, history replays and stop
-  reactions are ignored in this mode. Enable only the channels this
+  reactions are ignored in this mode, except for the explicit human wake
+  channel policy below. Enable only the channels this
   registration is authorised to join.
 - Channel messages count only in the registration's `channels` and not in
   `deniedChannels`. `deniedChannels: ["*"]` also blocks direct messages.
@@ -298,12 +299,72 @@ A channel message starts a turn when it:
 
 No other channel traffic reaches a captain or crew session.
 
+### Optional human wake channels
+
+`access.humanWakeChannels` is an opt-in policy for the captain connection;
+crew connections keep their ordinary mention rules. It requires an explicit
+`fleetPolicy`: only its verified human SASL accounts can use automatic wake.
+The ordinary account allowlist, channel allowlist and denies still apply.
+Every eligible request needs a real server message ID and a joined channel.
+Agent accounts, bot-tagged messages and unauthenticated messages cannot use
+this policy. The audit channel is never eligible.
+
+```json
+{
+  "channelRequests": "nick-mention",
+  "allCallWords": [],
+  "humanWakeChannels": [
+    { "channel": "#bridge", "replies": "participating" },
+    { "channel": "#home", "replies": "all" }
+  ]
+}
+```
+
+Each listed channel must be in the captain's `channels`, without duplicate
+names under IRC case folding. Omission preserves existing routing. This policy
+can coexist with strict `channelRequests`: other channels still require the
+current nick. Existing `wakeChannels` retains its separate legacy behaviour,
+which can wake on any admitted account and is incompatible with strict mode.
+
+Both new modes admit every top-level human message in the listed channel,
+including a message addressed to another fleet agent. This is intentional
+channel-wide delivery; each agent may answer `[[stargate:silent]]` when it has
+nothing useful to add. A top-level broadcast does **not** make every listener
+a permanent thread participant.
+
+- `participating`: a reply starts a turn only after the captain has published
+  its own response in that thread, or a human has explicitly invited its exact
+  current nick. An exact current-nick mention can invite it to a valid unknown
+  thread. An accepted but silent broad wake does not join the thread.
+- `all`: every human reply with a valid parent also starts a turn, even if the
+  captain has not answered or has never seen that parent. An unknown parent is
+  retained only as an opaque reply anchor: it does not prove historical text,
+  sender or authority. The source remains the current verified human message.
+  Malformed, empty or contradictory reply tags are rejected in
+  either mode; they never fall back to a top-level broadcast.
+
+The gateway uses actual `+draft/reply`/`+reply` and server `msgid` tags, with
+durable ancestry and participation scoped to registration and canonical
+channel. A human invitation is recorded atomically with accepted intake.
+Publication joins a thread only after the server echoes a matching pending
+send with the expected SASL account and an existing request ID. Merely seeing
+an own-looking nick, replaying an old output or accepting an unaddressed root
+does not count. Without a confirmed own echo, participation stays conservative;
+an explicit human invitation still works. No in-flight broad wake is treated
+as permanent membership.
+
+Membership survives gateway restart. Eligible human history replays in these
+explicit channels use the same rules and durable request deduplication;
+strict mode still ignores history elsewhere. Reply ancestry and membership
+grant no identity, tool permission or human approval. Peer dispatch/result
+correlation, budgets, source evidence and audit exclusion remain unchanged.
+
 A direct message to the captain always starts a turn. Crew connections
 ignore direct messages. With `dmPolicy: "redirect"`, no direct message
 starts a turn (see [DM audit](#dm-audit)).
 
-Access rules are request filters, not isolation. Every logged-in account
-on the server can drive the captain's enabled tools.
+Access rules are request filters, not isolation. An admitted account can drive
+the captain's enabled tools.
 
 ### Peer captains
 

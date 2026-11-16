@@ -1,6 +1,7 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { z } from "zod";
 import type { CrewEngine } from "./engine";
+import { projectSelectionSchema } from "./project-options";
 import {
   abandonInputSchema,
   inspectInputSchema,
@@ -10,6 +11,7 @@ import { workspaceInputSchemas } from "./workspace";
 
 export const recoveryRequestSchema = z.strictObject({
   sessionID: z.string().min(1).max(256),
+  project: projectSelectionSchema.optional(),
   request: z.discriminatedUnion("op", [
     inspectInputSchema,
     reconcileInputSchema,

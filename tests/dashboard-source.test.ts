@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentBackend } from "../src/backend";
+import type { CrewStatus } from "../src/crew-status";
 import { CronStore } from "../src/cron-store";
 import { type DashboardShip, dashboardSource } from "../src/dashboard-source";
 import { botKey, conversationKey } from "../src/routing";
@@ -36,6 +37,11 @@ function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
   const calls = { roots: 0, describe: 0, entries: [] as string[] };
   let crewRoots: HistorySession[] | Error = [];
   const leaked: HistorySession[] = [];
+  let crewStatus: CrewStatus = {
+    total: 2,
+    truncated: false,
+    members: [member("chief", true), member("twiki", false)],
+  };
   const history: SessionHistory = {
     async roots() {
       calls.roots++;
@@ -75,11 +81,7 @@ function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
       ? {}
       : {
           async crewStatus() {
-            return {
-              total: 2,
-              truncated: false,
-              members: [member("chief", true), member("twiki", false)],
-            };
+            return crewStatus;
           },
         }),
   };
@@ -104,6 +106,9 @@ function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
     key,
     known,
     calls,
+    setCrewStatus: (value: CrewStatus) => {
+      crewStatus = value;
+    },
     map,
     leak: (value: HistorySession) => {
       leaked.push(value);
@@ -147,6 +152,23 @@ function member(id: string, busy: boolean) {
 }
 
 describe("dashboard source", () => {
+  test("truncated crew summaries use exact aggregates or explicitly report a partial busy count", async () => {
+    const f = fixture();
+    const members = Array.from({ length: 20 }, (_, index) =>
+      member(`worker${index}`, false),
+    );
+    f.setCrewStatus({ total: 36, truncated: true, members, busy: 1 });
+    expect((await f.source.fleet(signal)).ships[0]?.crew).toEqual({
+      total: 36,
+      busy: 1,
+    });
+    f.setCrewStatus({ total: 36, truncated: true, members });
+    expect((await f.source.fleet(signal)).ships[0]?.crew).toEqual({
+      total: 36,
+      busy: 0,
+      busyPartial: true,
+    });
+  });
   test("fleet and ship views report state without prompt or reply text", async () => {
     const f = fixture({ pinned: "ses_captain" });
     f.known.set("ses_captain", session("ses_captain", { title: "Captain" }));

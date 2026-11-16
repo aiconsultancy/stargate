@@ -465,6 +465,16 @@ export const ircSchema = z
         channelRequests: z.literal("nick-mention").optional(),
         /** Explicit channels that wake on every admitted account's message. */
         wakeChannels: z.array(ircChannel).max(20).optional(),
+        /** Captain-only automatic human requests; reply membership is gateway-owned. */
+        humanWakeChannels: z
+          .array(
+            z.strictObject({
+              channel: ircChannel,
+              replies: z.enum(["all", "participating"]),
+            }),
+          )
+          .max(20)
+          .optional(),
         /** Any SASL account may write unless denied; `*` denies everyone. */
         deniedAccounts: z
           .array(z.union([z.literal("*"), ircAccount]))
@@ -600,6 +610,31 @@ export const ircSchema = z
         code: "custom",
         message: "Wake channels conflict with nick-mention-only admission",
       });
+    if (irc.access.humanWakeChannels?.length) {
+      const keys = irc.access.humanWakeChannels.map(({ channel }) =>
+        fold(channel),
+      );
+      if (!irc.fleetPolicy)
+        context.addIssue({
+          code: "custom",
+          message: "Human wake channels require an explicit fleet policy",
+        });
+      if (
+        new Set(keys).size !== keys.length ||
+        keys.some(
+          (key) => !irc.channels.some((channel) => fold(channel) === key),
+        )
+      )
+        context.addIssue({
+          code: "custom",
+          message: "Human wake channels must be unique joined channels",
+        });
+      if (irc.audit && keys.includes(fold(irc.audit.channel)))
+        context.addIssue({
+          code: "custom",
+          message: "The audit channel cannot be a human wake channel",
+        });
+    }
     const issue = (message: string) =>
       context.addIssue({ code: "custom", message });
     // Collisions fold with rfc1459, the widest classic CASEMAPPING, so names

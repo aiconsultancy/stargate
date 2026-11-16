@@ -26,6 +26,8 @@ export type IrcMember = {
 export type IrcAdmission = Incoming & {
   received: number;
   sender?: "captain" | "crew";
+  /** An exact current-nick invitation from a verified human; not a broad wake. */
+  threadInvitation?: true;
 };
 
 export type IrcRouteContext = {
@@ -38,6 +40,10 @@ export type IrcRouteContext = {
   joined?(channel: string): boolean;
   /** Thread root carried by one of this connection's own recent answers. */
   anchor?(msgid: string): string | undefined;
+  /** Durable ancestry and membership, scoped to this registration and channel. */
+  threadRoot?(channel: string, msgid: string): string | undefined;
+  participating?(channel: string, root: string): boolean;
+  replay?: boolean;
   now(): number;
   /** Case folding under the server's CASEMAPPING. */
   fold(value: string): string;
@@ -184,7 +190,9 @@ export function ircResultJobAllowed(
   currentNick: string,
   account: string,
   job:
-    | Readonly<Pick<Incoming, "fleet"> & Partial<Pick<Incoming, "text">>>
+    | Readonly<
+        Pick<Incoming, "fleet"> & Partial<Pick<Incoming, "text" | "channel">>
+      >
     | undefined,
   caseFold: Fold = rfc1459,
 ) {
@@ -197,6 +205,12 @@ export function ircResultJobAllowed(
     authority === "human" &&
     (job?.fleet?.kind === "result" ||
       job?.text === undefined ||
+      (member.role === "captain" &&
+        config.access.humanWakeChannels?.some(
+          ({ channel }) =>
+            job?.channel !== undefined &&
+            caseFold(channel) === caseFold(job.channel),
+        )) ||
       !addressedToFleetPeer(config, member, currentNick, job.text, caseFold))
   );
 }
@@ -214,7 +228,8 @@ export function ircResultJobAllowed(
  * Channel and account keys are folded, so every spelling of a channel
  * shares one conversation and one turn limit. With `nick-mention`, only
  * live messages with a server msgid are eligible; joined channels require
- * the connection's current nick and replies alone do not qualify.
+ * the connection's current nick and replies alone do not qualify, except
+ * for the explicitly configured captain-only human wake channel policy.
  */
 export function routeIrcMessage(
   message: IrcMessage,
@@ -235,6 +250,16 @@ export function routeIrcMessage(
   if (!ircAllowed(config, member, user, channel, caseFold)) return;
   const strict = config.access.channelRequests === "nick-mention";
   const tagged = message.tags.get("msgid");
+  const rule =
+    !direct && member.role === "captain"
+      ? config.access.humanWakeChannels?.find(
+          (rule) => caseFold(rule.channel) === channel,
+        )
+      : undefined;
+  const human =
+    config.fleetPolicy && fleetAuthority(config.fleetPolicy, user) === "human";
+  const protectedHuman = !!rule && !!human;
+  if (strict && context.replay && !protectedHuman) return;
   const fleetPeer =
     config.fleetPolicy &&
     fleetAuthority(config.fleetPolicy, user) === "agent" &&
@@ -248,21 +273,59 @@ export function routeIrcMessage(
     return;
   // A multiline message keeps its line breaks; each line is cleaned.
   const body = raw.split("\n").map(cleanText).join("\n").trim();
-  const human =
-    config.fleetPolicy && fleetAuthority(config.fleetPolicy, user) === "human";
-  if (
-    human &&
-    addressedToFleetPeer(config, member, context.currentNick, body, caseFold)
-  )
-    return;
   const nicks = strict
     ? [context.currentNick]
     : [...new Set([context.currentNick, member.nick])];
   const mentioned = nicks.some((nick) =>
     mentions(caseFold(body), caseFold(nick)),
   );
-  if (strict && !direct && !mentioned) return;
   const reply = message.tags.get("+draft/reply") ?? message.tags.get("+reply");
+  const hasReply =
+    message.tags.has("+draft/reply") || message.tags.has("+reply");
+  const validReply =
+    validMsgid(reply) &&
+    (!message.tags.has("+draft/reply") ||
+      !message.tags.has("+reply") ||
+      message.tags.get("+draft/reply") === message.tags.get("+reply"));
+  const knownRoot =
+    protectedHuman && validReply
+      ? context.threadRoot?.(channel, reply)
+      : undefined;
+  const root = validMsgid(knownRoot)
+    ? knownRoot
+    : validReply && context.participating?.(channel, reply)
+      ? reply
+      : undefined;
+  const currentMention = mentions(
+    caseFold(body),
+    caseFold(context.currentNick),
+  );
+  let humanWake = false;
+  if (protectedHuman && rule) {
+    if (
+      !validMsgid(tagged) ||
+      !context.joined?.(target) ||
+      message.tags.has("bot")
+    )
+      return;
+    // A malformed tag never becomes an unthreaded request, even when addressed.
+    if (hasReply && !validReply) return;
+    const member =
+      root !== undefined && !!context.participating?.(channel, root);
+    humanWake =
+      !hasReply ||
+      (validReply &&
+        (rule.replies === "all" || (root !== undefined && member)));
+    if (hasReply && !humanWake && !currentMention) return;
+  }
+  if (
+    human &&
+    !humanWake &&
+    !(protectedHuman && currentMention) &&
+    addressedToFleetPeer(config, member, context.currentNick, body, caseFold)
+  )
+    return;
+  if (strict && !direct && !mentioned && !humanWake) return;
   const replied = !strict && validMsgid(reply) && context.sent(reply);
   // Captain text mentions and all-calls; the matched word becomes the
   // turn's text mention, so the session sees why it was admitted.
@@ -277,7 +340,15 @@ export function routeIrcMessage(
   const wake =
     config.access.wakeChannels?.some((name) => caseFold(name) === channel) &&
     validMsgid(tagged);
-  if (!direct && !mentioned && !replied && named === undefined && !wake) return;
+  if (
+    !direct &&
+    !mentioned &&
+    !replied &&
+    named === undefined &&
+    !wake &&
+    !humanWake
+  )
+    return;
   // An all-call stays an all-call when a mention or a reply also admits it:
   // its word is recorded, so the turn is staggered and sees the context.
   const allCall =
@@ -306,7 +377,9 @@ export function routeIrcMessage(
         .slice(0, 32)}`;
   const files = filehostLinks(body, context.filehost);
   const parent = validMsgid(reply)
-    ? (context.anchor?.(reply) ?? reply)
+    ? protectedHuman
+      ? (root ?? reply)
+      : (context.anchor?.(reply) ?? reply)
     : undefined;
   return {
     eventId: `${channel}:${msgid}`,
@@ -315,6 +388,9 @@ export function routeIrcMessage(
     channel,
     thread: msgid,
     ...(validMsgid(parent) ? { replyParent: parent } : {}),
+    ...(protectedHuman && currentMention
+      ? { threadInvitation: true as const }
+      : {}),
     user,
     text,
     received,
