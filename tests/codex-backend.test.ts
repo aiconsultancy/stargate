@@ -232,6 +232,7 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
   expect(map.get("shell_environment_policy.exclude")).toBe(
     '["STARGATE_CODEX_PROVIDER_KEY"]',
   );
+  expect(map.get("shell_environment_policy.set.SHLVL")).toBe('"1"');
   // The key travels only in the environment, never in arguments.
   for (const flag of argv) expect(flag).not.toContain(key);
   // Explicit widening maps to the CLI's own enforcement.
