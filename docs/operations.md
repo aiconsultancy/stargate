@@ -142,3 +142,26 @@ Access rules are request filters, not isolation. A permitted user can ask the
 agent to use every enabled capability under the Stargate process's OS account.
 Separate users/containers are required to isolate untrusted workloads. Never
 enable coding tools for an untrusted Slack audience.
+
+## Read-only status report
+
+Run `stargate status --config PATH --bot ID --log PATH [--json]` to print
+JSON. `--log` is optional; without it, incident history is unknown. This is
+separate from `service status`. The command reads only the configured OpenCode
+endpoint and its existing loaded captain location. It does not start a backend,
+submit work, send messages, or change tasks. Other backend types report unknown.
+A successful server metadata read does not test requests or waits. The pinned
+session check verifies identity and location, not execution readiness. The crew
+RPC checks the read-only reporting status; an unloaded location is unknown.
+Each probe has a five-second deadline. No quota or journal probe is performed.
+
+The report scans at most the final 2 MiB of the supplied log for selected safe
+failure categories in the preceding 24 hours. It groups by category, capability,
+and bot attribution. Lines without a bot are unattributed, not assigned to the
+selected bot. Known job IDs are limited to 20 per group. Ticket and incident
+recovery remain unknown; current successful probes cannot prove old work
+completed. Log rotation and complete source coverage cannot be verified, so
+history is always incomplete even when the file is readable. Malformed lines,
+truncation, missing window coverage, and unreadable files are reported. Do not
+use an empty incident list as proof of health. Raw log messages, prompts,
+credentials and error details are not included in the report.
