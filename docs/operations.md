@@ -148,11 +148,12 @@ enable coding tools for an untrusted Slack audience.
 Run `stargate status --config PATH --bot ID --log PATH [--json]` to print
 JSON. `--log` is optional; without it, incident history is unknown. This is
 separate from `service status`. The command reads only the configured OpenCode
-endpoint and its existing loaded captain location. It does not start a backend,
+endpoint. It does not start a backend,
 submit work, send messages, or change tasks. Other backend types report unknown.
 A successful server metadata read does not test requests or waits. The pinned
-session check verifies identity and location, not execution readiness. The crew
-RPC checks the read-only reporting status; an unloaded location is unknown.
+session check verifies identity and location, not execution readiness. Crew
+reporting remains unknown: an atomic loaded-only read is unavailable. The
+command does not call the crew RPC or inspect loaded locations.
 Each probe has a five-second deadline. No quota or journal probe is performed.
 
 The report scans at most the final 2 MiB of the supplied log for selected safe

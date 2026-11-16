@@ -4,8 +4,6 @@ import { parseEnv } from "node:util";
 import { OpenCode } from "@opencode/client";
 import { z } from "zod";
 import type { BotConfig } from "./config";
-import { CrewReporting } from "./crew/report-rpc";
-import { crewStatusSchema } from "./crew-status";
 import { backendFailureKinds } from "./request-failure";
 import { readConfiguration } from "./setup";
 
@@ -44,12 +42,12 @@ async function capabilities(bot: BotConfig, env: NodeJS.ProcessEnv) {
   };
   if (bot.backend.type !== "opencode") return checks;
   const config = bot.backend;
+  checks.crewReporting = unknown("atomic loaded-only read unavailable");
   const headers: Record<string, string> = {};
   for (const [header, name] of Object.entries(config.headersEnv)) {
     const value = env[name];
     if (!value?.trim()) {
       checks.backendRead = unknown("backend credentials unavailable");
-      checks.crewReporting = unknown("backend credentials unavailable");
       return checks;
     }
     headers[header] = value;
@@ -86,18 +84,6 @@ async function capabilities(bot: BotConfig, env: NodeJS.ProcessEnv) {
         (config.agent === undefined || session.agent === config.agent)
       );
     });
-  // Do not initialize a location for a status request.
-  checks.crewReporting = await check(async (signal) => {
-    const locations = await client.debug.location.list({ signal });
-    if (!locations.some((location) => location.directory === config.directory))
-      throw new Error();
-    crewStatusSchema.parse(
-      await client
-        .rpc(CrewReporting)
-        .status({}, { location: { directory: config.directory }, signal }),
-    );
-    return true;
-  });
   return checks;
 }
 
@@ -121,6 +107,11 @@ const categories: Record<
     category: "agent-failure",
     capability: "backend",
     impact: "agent request failed or timed out",
+  },
+  "Worker failed; request will need recovery": {
+    category: "worker-recovery-required",
+    capability: "worker",
+    impact: "worker failed; recovery required",
   },
   "Slack delivery failed": {
     category: "delivery-failure",

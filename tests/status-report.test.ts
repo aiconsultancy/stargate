@@ -120,9 +120,10 @@ test("status help and argument errors precede configuration reads", async () => 
   }
 });
 
-test("configured session and loaded crew RPC are checked without work", async () => {
+test("status never requests a location or crew RPC, including if it is evicted", async () => {
   const calls: string[] = [];
   let incompatible = false;
+  let evicted = false;
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -143,16 +144,12 @@ test("configured session and loaded crew RPC are checked without work", async ()
             location: { directory: incompatible ? "/wrong" : "/workspace" },
           },
         });
-      if (url.pathname === "/api/debug/location")
+      if (url.pathname === "/api/debug/location") {
+        evicted = true; // A loaded location disappears after the list response.
         return Response.json([{ directory: "/workspace" }]);
-      if (url.pathname === "/api/rpc/stargate.crew.reporting/status") {
-        expect(req.method).toBe("POST");
-        expect(url.searchParams.get("location[directory]")).toBe("/workspace");
-        expect(await req.json()).toEqual({ input: {} });
-        return Response.json({
-          output: { members: [], total: 0, truncated: false },
-        });
       }
+      if (url.pathname === "/api/rpc/stargate.crew.reporting/status")
+        return new Response(null, { status: evicted ? 500 : 404 });
       return new Response(null, { status: 404 });
     },
   });
@@ -170,11 +167,21 @@ test("configured session and loaded crew RPC are checked without work", async ()
     await writeFile(config, JSON.stringify({ bots: [registration] }));
     const report = await statusReport(config, "helper", undefined, now);
     expect(report.checks.pinnedSession.state).toBe("available");
-    expect(report.checks.crewReporting.state).toBe("available");
-    expect(calls).toHaveLength(4);
+    expect(report.checks.crewReporting).toEqual({
+      state: "unknown",
+      reason: "atomic loaded-only read unavailable",
+    });
+    expect(calls).toEqual(["GET /api/info", "GET /api/session/ses_fixture"]);
+    expect(evicted).toBe(false);
     incompatible = true;
     const failed = await statusReport(config, "helper", undefined, now);
     expect(failed.checks.pinnedSession.state).toBe("failed");
+    expect(calls).toEqual([
+      "GET /api/info",
+      "GET /api/session/ses_fixture",
+      "GET /api/info",
+      "GET /api/session/ses_fixture",
+    ]);
   } finally {
     await server.stop(true);
     await rm(dir, { recursive: true, force: true });
@@ -206,4 +213,37 @@ test("large log reads only tail and reports truncation", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("groups worker failures separately without exposing errors", () => {
+  const text = [
+    line(now - 2000, {
+      msg: "Worker failed; request will need recovery",
+      job: 17,
+      error: "private exception",
+    }),
+    line(now - 1000, {
+      msg: "Worker failed; request will need recovery",
+      job: 18,
+      prompt: "private prompt",
+    }),
+    line(now - 500, { failure: "backend", job: 19 }),
+  ].join("\n");
+  const report = summarizeLog(text, "helper", now, false);
+  expect(report.incidents).toHaveLength(2);
+  expect(report.incidents[0]).toMatchObject({
+    category: "worker-recovery-required",
+    capability: "worker",
+    impact: "worker failed; recovery required",
+    count: 2,
+    first: new Date(now - 2000).toISOString(),
+    last: new Date(now - 1000).toISOString(),
+    jobs: [17, 18],
+    state: "unknown",
+  });
+  expect(report.incidents[1]).toMatchObject({
+    category: "agent-failure:backend",
+    jobs: [19],
+  });
+  expect(JSON.stringify(report)).not.toContain("private");
 });
