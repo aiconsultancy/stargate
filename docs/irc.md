@@ -59,7 +59,8 @@ channel requests and team behavior.
    operator). Register the ship channel with the captain as founder.
 2. Put each password in `<config>.env` (mode `0600`) under the variable
    named by its `passwordEnv`. A certificate-authenticated captain uses
-   `clientPemFile` instead. Never put a password or a private key in
+   `clientPemFile` instead. Crew may also use their own per-account
+   `clientPemFile`. Never put a password or a private key in
    `stargate.json` or chat.
 3. Add the `irc` registration. For a captain that is also on Slack, copy
    the Slack bot's OpenCode `url`, `directory`, `agent` and `sessionID`;
@@ -201,7 +202,7 @@ The rule makes ship accounts easy to grant with one invite exception mask
 such as `galactica-*!*@*`.
 
 Put passwords in the private `<config>.env` companion or the service
-environment, never in JSON. Every account needs its own `passwordEnv`.
+environment, never in JSON. Every PLAIN account needs its own `passwordEnv`.
 `stargate config check` validates the schema, checks that each password
 variable is set and that `caFile` is a file. It does not connect.
 
@@ -225,8 +226,23 @@ captain's account on the server and set `clientPemFile` instead of
 `stargate config check` verifies ownership, private permissions and that the key
 matches the certificate. Stargate requires the server to attest the configured
 account during SASL and has no password fallback. Restart after rotating the
-PEM. EXTERNAL does not supply the password that FILEHOST expects, so this
-captain cannot send or receive FILEHOST attachments. Crew still use PLAIN.
+PEM. EXTERNAL does not supply the password that FILEHOST expects, so an
+EXTERNAL connection cannot send or receive FILEHOST attachments.
+
+Each `crew[]` member uses exactly one of `passwordEnv` or `clientPemFile`,
+just like the captain. PLAIN and EXTERNAL accounts can share a ship. Each
+EXTERNAL member presents only its configured PEM, never the captain's
+certificate. All certificates require TLS and the same private-file checks.
+For example, replace a crew member's `passwordEnv` with
+`"clientPemFile": "/srv/private/galactica-chief.pem"` after the operator has
+registered that certificate with the member's account. Keep passwords in
+separate environment variables for accounts that still use PLAIN.
+
+Adding EXTERNAL crew through SIGHUP validates their PEMs before committing
+the roster. Changing an existing member's authentication reference requires
+a restart. Replacing a PEM at the same path also requires a restart: reload
+does not rotate the certificate held by an existing connection. Authentication
+references do not change the native session or durable queue namespace.
 
 The namespace of each IRC connection includes the server host, port and
 `network` name, the registration ID, the account and the backend settings.
@@ -796,8 +812,8 @@ messages are not affected.
 ## Crew on IRC
 
 Each crew member can have its own IRC account, for example
-`galactica-chief`, with its own `passwordEnv`. The operator creates these
-accounts.
+`galactica-chief`, with its own `passwordEnv` or `clientPemFile`. The operator
+creates these accounts.
 
 ### Channels
 

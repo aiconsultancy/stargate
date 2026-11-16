@@ -14,6 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import { dashboardHandler, startDashboard } from "../src/dashboard";
@@ -346,7 +347,7 @@ test("eight API calls occupy slots; excess gets Retry-After; settled work releas
 });
 
 test("Unix socket replaces stale socket, serves HTTP, has mode 0600 and cleans up", async () => {
-  const directory = await mkdtemp("/tmp/opencode/dashboard-test-");
+  const directory = await mkdtemp(join(tmpdir(), "dashboard-test-"));
   const socket = join(directory, "dashboard.sock");
   await chmod(directory, 0o700);
   const stale = createServer();
@@ -379,7 +380,7 @@ test("Unix socket replaces stale socket, serves HTTP, has mode 0600 and cleans u
 });
 
 test("Unix socket refuses regular files and non-private parent directories", async () => {
-  const directory = await mkdtemp("/tmp/opencode/dashboard-test-");
+  const directory = await mkdtemp(join(tmpdir(), "dashboard-test-"));
   const socket = join(directory, "dashboard.sock");
   try {
     await chmod(directory, 0o700);
@@ -399,7 +400,7 @@ test("Unix socket refuses regular files and non-private parent directories", asy
 });
 
 test("stop waits for underlying source work and removes the socket", async () => {
-  const directory = await mkdtemp("/tmp/opencode/dashboard-test-");
+  const directory = await mkdtemp(join(tmpdir(), "dashboard-test-"));
   const socket = join(directory, "dashboard.sock");
   await chmod(directory, 0o700);
   const entered = Promise.withResolvers<void>();
@@ -455,7 +456,7 @@ const sharedLock: NonNullable<Ownership["lockCommand"]> = (path) => ({
 });
 test("opt-in shared Unix socket inherits the protected operator group and serves only reads", async () => {
   const directory = await realpath(
-    await mkdtemp("/tmp/opencode/dashboard-shared-"),
+    await mkdtemp(join(tmpdir(), "dashboard-shared-")),
   );
   const socket = join(directory, "http.sock");
   if (!process.getuid || !process.getgid) throw new Error("POSIX IDs required");
@@ -505,7 +506,9 @@ test("opt-in shared Unix socket inherits the protected operator group and serves
 });
 
 test("shared dashboard refuses missing setgid, writable parents, symlinks and non-normalised paths", async () => {
-  const root = await realpath(await mkdtemp("/tmp/opencode/dashboard-shared-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "dashboard-shared-")),
+  );
   const directory = join(root, "operator");
   await mkdir(directory, { mode: 0o700 });
   if (!process.getuid || !process.getgid) throw new Error("POSIX IDs required");

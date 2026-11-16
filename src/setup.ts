@@ -133,13 +133,20 @@ export async function checkCredentials(
   for (const registration of irc) {
     for (const name of [
       ...(registration.passwordEnv ? [registration.passwordEnv] : []),
-      ...registration.crew.map((member) => member.passwordEnv),
+      ...registration.crew.flatMap((member) =>
+        member.passwordEnv ? [member.passwordEnv] : [],
+      ),
     ])
       if (!env[name]?.trim())
         throw new Error(
           "Missing IRC password environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
         );
-    if (registration.clientPemFile) await clientPem(registration.clientPemFile);
+    const pemFiles = new Set(
+      [registration, ...registration.crew].flatMap((member) =>
+        member.clientPemFile ? [member.clientPemFile] : [],
+      ),
+    );
+    for (const path of pemFiles) await clientPem(path);
     const ca = registration.server.caFile;
     if (ca && !(await lstat(ca).catch(() => undefined))?.isFile())
       throw new Error("IRC caFile is not a readable file.");
