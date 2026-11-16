@@ -370,6 +370,15 @@ Waiting feedback starts only if no visible text arrives before the configured
 delay. It reuses the first preview message. Visible text stops rotations, and
 completion or cancellation stops all feedback timers. See [waiting settings](waiting.md).
 
+With explicit `fleetControl.results`, the fleet ledger also owns a completion
+outbox. Authenticated IRC assignment intake claims its exact delegation and
+server event; the result worker binds the persisted native input and settled
+public outcome. The owner queues a continuation against the original ingress
+job/native input, with captain/agent source identity (`s=fleet`) and no human
+approval authority. Queue-before-ack recovery deduplicates continuations across
+restart. This is distinct from native crew tasks and from ordinary peer chat;
+see [fleet tools](fleet-tools.md) for failure and recovery semantics.
+
 ## Session transcript
 
 ### Pinned captains

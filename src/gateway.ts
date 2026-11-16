@@ -25,6 +25,7 @@ import {
 import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "./config";
 import { abortable, runAbortable } from "./effect";
+import { fleetResultSource } from "./fleet/results";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
 import { textMentionNote } from "./mentions";
@@ -1193,7 +1194,9 @@ export class Gateway {
           const instructions = transport.instructions?.(job);
           if (instructions) text = `${instructions}\n\n${text}`;
           // Chat messages only. Digest runs have no thread.
-          const source = job.deferDelivery ? undefined : transport.source(job);
+          const source = job.deferDelivery
+            ? undefined
+            : (fleetResultSource(job) ?? transport.source(job));
           const sourceContext: PromptSourceContext | undefined =
             pinned && source ? { source } : undefined;
           // Without a source line, the prompt itself names a special sender.

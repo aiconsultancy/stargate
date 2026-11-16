@@ -23,6 +23,7 @@ import {
 import { type BackendConfig, secret } from "../config";
 import { CrewReporting } from "../crew/report-rpc";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
+import type { NativeMaker } from "../fleet/protocol";
 import {
   boundaryRecord,
   closesBoundaryContext,
@@ -685,6 +686,77 @@ export class OpenCodeBackend implements AgentBackend {
 
   async close() {
     // Attached OpenCode service belongs to its operator, not Stargate.
+  }
+
+  async executionMakers(
+    sessionID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ): Promise<NativeMaker[]> {
+    if (this.sessionID !== sessionID)
+      throw new Error("Fleet maker session is not pinned");
+    const { time } = await this.client.session.get({ sessionID }, { signal });
+    const idle =
+      time.idle !== undefined && time.idle >= (time.busy ?? 0)
+        ? time.idle
+        : undefined;
+    const messages: (InputBoundaryRecord & {
+      maker?: NativeMaker;
+      settled: boolean;
+    })[] = [];
+    let cursor: string | undefined;
+    const cursors = new Set<string>();
+    for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+      const page = await this.client.message.list(
+        cursor
+          ? { sessionID, limit: 100, cursor }
+          : { sessionID, order: "desc", limit: 100 },
+        { signal },
+      );
+      for (const message of page.data) {
+        messages.push({
+          ...boundaryRecord(message, sessionID),
+          settled:
+            message.type !== "assistant" ||
+            message.time.completed !== undefined ||
+            message.error !== undefined ||
+            (idle !== undefined && message.time.created <= idle),
+          ...(message.type === "assistant"
+            ? {
+                maker: {
+                  messageID: message.id,
+                  agent: message.agent,
+                  provider: message.model.providerID,
+                  model: message.model.id,
+                  ...(message.model.variant
+                    ? { variant: message.model.variant }
+                    : {}),
+                },
+              }
+            : {}),
+        });
+        if (message.id !== inputID) continue;
+        if (boundaryRecord(message, sessionID).input !== inputID)
+          throw new Error("Fleet native input is not a request boundary");
+        const fold = new InputBoundaryFold();
+        let owner: string | undefined;
+        const makers: NativeMaker[] = [];
+        for (const entry of messages.reverse()) {
+          owner = fold.next(entry) ?? owner;
+          if (entry.maker && owner === inputID && entry.settled)
+            makers.push(entry.maker);
+        }
+        if (!makers.length || makers.length > 100)
+          throw new Error(
+            "Native fleet maker evidence is unavailable or exceeds bounds",
+          );
+        return makers;
+      }
+      cursor = page.cursor.next ?? undefined;
+      if (!cursor || cursors.has(cursor)) break;
+      cursors.add(cursor);
+    }
+    throw new Error("Native fleet input was not found");
   }
 
   async interrupt(sessionId: string, signal: AbortSignal) {

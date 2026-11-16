@@ -315,6 +315,20 @@ with `;k=captain`, they carry no operator or Admiralty authority, and Stargate
 admits at most **5 per conversation (channel or direct message) in a
 rolling hour**. A peer list cannot contain this ship's own accounts.
 
+When the optional `fleetPolicy` is configured, strict nick-mention mode admits
+bot-tagged context only from a real SASL account present in **both**
+`fleetPolicy.agentAccounts` and `access.peerCaptains`. The ordinary account
+allowlist, denies, current nick mention, joined channel, live msgid, replay
+rejection and peer budget still apply. A direct message still needs the
+captain's current nick. Without that explicit fleet policy/peer intersection,
+strict bot rejection is unchanged. These senders remain agents, with no human
+approval or Stop authority.
+
+This admission is separate from the default-off
+[correlated fleet result outbox](fleet-tools.md). An arbitrary peer reply
+cannot declare a task complete or select a Teams destination. Correlated
+completion is published by the trusted gateway from the admitted native job.
+
 ## Conversations
 
 | IRC             | Stargate conversation               |

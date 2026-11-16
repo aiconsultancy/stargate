@@ -33,6 +33,7 @@ import { type DashboardShip, dashboardSource } from "./dashboard-source";
 import { abortable } from "./effect";
 import { FleetControl } from "./fleet/control";
 import { fleetRequestAction } from "./fleet/permissions";
+import { FleetResults, fleetOrigin } from "./fleet/results";
 import { sendFleetAssignment } from "./fleet-irc";
 import { Gateway, type SlackDelivery } from "./gateway";
 import { controlInteractions } from "./interactions";
@@ -548,6 +549,14 @@ export function serve(
                 sessionID: pin,
                 account: irc.account,
                 permissions,
+                origin: (source) =>
+                  source.origin &&
+                  [
+                    primary.key,
+                    ...relatedTeams.map((team) => team.key),
+                  ].includes(source.origin.botKey)
+                    ? fleetOrigin(store, pin, source)
+                    : undefined,
                 allowDispatch:
                   irc.fleetPolicy?.capabilities.includes("dispatch") === true,
                 authorize: async (caller, signal, request) => {
@@ -606,6 +615,26 @@ export function serve(
             team.sourceRecorder = (source) => {
               control.recordSource(source);
             };
+          if (control.resultsEnabled) {
+            ship.assignmentRecorder = (input, fold) =>
+              control.assignment(input, fold);
+            const results = new FleetResults({
+              control,
+              store,
+              botKey: primary.key,
+              sessionID: pin,
+              account: irc.account,
+              backend: entry.resource.backend,
+            });
+            workers.push({
+              key: `${primary.key}:fleet-results`,
+              work: supervise(
+                log.child({ fleetResults: true }),
+                "gateway",
+                (signal) => results.work(signal),
+              ),
+            });
+          }
         }
         let closing: Promise<void> | undefined;
         const close = () => (closing ??= ship.close());

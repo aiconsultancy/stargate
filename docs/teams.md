@@ -189,3 +189,20 @@ Verify the reverse proxy exposes only the callback and that backend and
 operator listeners retain their own authentication and local-user restrictions.
 See [configuration](configuration.md), [operations](operations.md),
 [IRC](irc.md) and [CLIProxyAPI](cliproxyapi.md) for the neighbouring components.
+
+## Fleet result continuations
+
+Opt-in `fleetControl.results` on the related IRC gateway can return a captain's
+settled native outcome through the original Teams conversation and reply
+activity. The durable dispatch retains the original authenticated job/native
+input. Result delivery does not use the latest Teams conversation on a shared
+pin, so an intervening human request cannot redirect it. See the
+[fleet result protocol](fleet-tools.md).
+
+The continuation is model-visible agent context (`s=fleet`), with the real
+captain and reported native maker/model. The original human is retained only
+as the delivery recipient for current access checks. Teams never offers a
+human permission decision for this input, and an earlier human's permission
+token cannot authorise it. Source evidence and rank remain separate from
+human approval. Unknown or interrupted work is reported as uncertain without
+repeating the assignment.

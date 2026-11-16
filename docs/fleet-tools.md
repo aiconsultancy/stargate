@@ -36,6 +36,7 @@ evidence ledger and explicit captain destinations:
   "fleetControl": {
     "socketPath": "/run/stargate/coordinator/fleet.sock",
     "statePath": "/var/lib/stargate/control/evidence.sqlite",
+    "results": true,
     "targets": [
       {
         "id": "captain-one",
@@ -47,6 +48,11 @@ evidence ledger and explicit captain destinations:
   }
 }
 ```
+
+`results` is optional and defaults to off. Enable it on the dispatching IRC
+gateway and every participating captain gateway to return settled outcomes to
+the original IRC/Teams conversation. Related Teams registrations must share
+the same pinned backend and fingerprint as the dispatching IRC gateway.
 
 Paths must be absolute and normalised. Every target needs its exact native
 session pin; there is no lookup by a model-chosen account or channel. A target
@@ -127,8 +133,60 @@ A repeated request with the same ID and payload returns the retained outcome
 without sending again. Reusing the ID for different work is refused. Inspect
 `fleet_status({"requestID":"..."})` and the destination before deciding how to
 recover an unknown outcome. Do not switch to a new ID to blindly resend it.
-Status without a request ID reads configured targets and optional non-secret
+With results enabled, status also includes a retained `completion` and
+`resultQueued` when available. `resultQueued` means a continuation is durable
+in the original gateway queue; it does not prove external delivery. Status
+without a request ID reads configured targets and optional non-secret
 transport state; it never wakes a captain.
+
+## Correlated completion and recovery
+
+With `fleetControl.results: true`, authenticated intake retains its immutable
+queue namespace/event identity alongside the source. Dispatch resolves that
+exact local job and native input; missing evidence, an old source without an
+origin, or another registration's namespace fails closed. Do not replay an
+old assignment to obtain a result route.
+
+The gateway adds an opaque dispatch ID to the IRC assignment. At captain
+intake, its real SASL sender, target account, joined channel, pinned session,
+full payload and server message ID must match the retained delegation. The
+first admitted event is claimed durably. A copied packet with another event
+ID cannot start another execution. Ordinary peer chat never becomes an
+assignment or completion, even if its text claims success.
+
+Only the trusted gateway result worker can publish completion. Engine IPC has
+no completion operation. The worker binds the persisted native input to its
+admitted delegation and retains settled public text, actual actor, native
+session/input, and reported native assistant/agent/provider/model identifiers.
+It reads maker evidence from that exact native input, excluding later requests;
+it does not guess from configured model defaults or claim to independently
+verify an upstream model behind a proxy. Reasoning and tool payloads are not
+part of the completion. Missing native evidence, interruption or other failed
+outcomes are `uncertain`; recovery never resubmits the work.
+
+The shared ledger retains the outcome before delivery. Its owner resolves the
+original ingress job and requires its original native input to still match.
+It queues one deduplicated continuation with the original conversation, thread
+and delivery recipient. A later human request cannot select that destination.
+The model sees `s=fleet`, the captain's identity and `agent` authority. The
+recipient remains available only for current delivery access checks. This is
+agent context: it cannot expand human authorisation or request a Teams human
+permission decision. Historical human approval tokens cannot be borrowed.
+
+Queueing precedes ledger acknowledgement. A crash between those steps finds
+the same durable continuation after restart; it does not run the captain or
+coordinator twice. If a continuation's native execution is interrupted, the
+normal gateway recovery reports its uncertain outcome instead of replaying
+it. External delivery retains the gateway's existing retry/uncertainty rules;
+this is not an exactly-once delivery guarantee. An unavailable original job
+leaves the result pending and visible through status; it never falls back to
+the latest conversation.
+
+The initial IRC write still has `sent`/`unknown` transport semantics. A crash
+between claiming intake and persisting its queue can leave an assignment
+unconfirmed. Inspect retained status, native history and destination before
+operator recovery; neither a new event ID nor a new request ID is a safe
+blind resend. Disabling results preserves existing receipt-only operation.
 
 ## Gateway integration
 
@@ -152,5 +210,5 @@ Focused tests use real local Unix sockets, SQLite and fake transport/native-host
 callbacks, with no provider calls:
 
 ```sh
-bun test tests/fleet-tools.test.ts
+bun test tests/fleet-tools.test.ts tests/fleet-results.test.ts
 ```

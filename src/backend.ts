@@ -6,6 +6,7 @@ import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
+import type { NativeMaker } from "./fleet/protocol";
 import { validMsgid } from "./irc/protocol";
 import type { MaintenanceWatch } from "./maintenance";
 import type { QuotaSnapshot } from "./quota";
@@ -15,7 +16,7 @@ import type { SessionHistory } from "./session-history";
 export type PromptSourceContext = {
   source: {
     /** Absent means Slack. */
-    transport?: "irc" | "teams";
+    transport?: "irc" | "teams" | "fleet";
     authority?: "human" | "agent" | "context";
     reference?: string;
     channel: string;
@@ -87,6 +88,12 @@ export const latestInput = "\u0000latest-input";
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
+  /** Reported native makers for this exact submitted input, never config guesses. */
+  executionMakers?(
+    sessionID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ): Promise<NativeMaker[]>;
   toolBelongsToInput?(
     sessionID: string,
     messageID: string,

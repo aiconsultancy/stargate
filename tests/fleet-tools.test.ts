@@ -589,7 +589,7 @@ test("OpenCode tools assert native permission and bind native caller, never mode
   }
 });
 
-test("authenticated Teams instruction dispatches as Vance, captain verifies original, reply retains Teams origin", async () => {
+test("authenticated Teams instruction dispatches as Vance, captain verifies original, receipt reply retains Teams origin", async () => {
   const setup = await fixture();
   const teams = registrationFixture({ fleet: true });
   try {

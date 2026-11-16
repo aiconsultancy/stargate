@@ -329,6 +329,18 @@ type Built = { registration: IrcRegistration; lifetime: Lifetime };
  */
 export class IrcShip {
   sourceRecorder: ((source: FleetSource) => void) | undefined;
+  assignmentRecorder:
+    | ((
+        input: {
+          sender: string;
+          channel: string;
+          text: string;
+          botKey: string;
+          eventId: string;
+        },
+        fold: (value: string) => string,
+      ) => string | undefined)
+    | undefined;
   private current: IrcRegistration[] = [];
   private readonly lifetimes = new Map<IrcRegistration, Lifetime>();
   private readonly controller = new AbortController();
@@ -817,6 +829,25 @@ export class IrcShip {
       this.advance(member, client, message);
       return;
     }
+    let dispatchID: string | undefined;
+    try {
+      dispatchID = this.assignmentRecorder?.(
+        {
+          sender: admission.user,
+          channel: admission.channel,
+          text: message.params[1] ?? admission.text,
+          botKey: member.key,
+          eventId: admission.eventId,
+        },
+        client.fold,
+      );
+    } catch {
+      this.log.warn(
+        "Fleet assignment correlation refused; IRC request not admitted",
+      );
+      this.advance(member, client, message);
+      return;
+    }
     if (this.sourceRecorder && this.config.fleetPolicy) {
       try {
         const messageID = admission.eventId.slice(admission.channel.length + 1);
@@ -833,6 +864,7 @@ export class IrcShip {
           text: message.params[1] ?? admission.text,
           channel: admission.channel,
           messageID,
+          origin: { botKey: member.key, eventId: admission.eventId },
           receivedAt: new Date(
             Number.isFinite(Date.parse(time ?? ""))
               ? Date.parse(time ?? "")
@@ -849,6 +881,9 @@ export class IrcShip {
     this.store.enqueue({
       ...admission,
       ...this.stagger(member, client, admission),
+      ...(dispatchID
+        ? { fleet: { kind: "assignment" as const, dispatchID } }
+        : {}),
     });
     this.advance(member, client, message);
     // Accepted: tell the server's read marker (channel, or the partner).

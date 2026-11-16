@@ -15,13 +15,17 @@ import {
 import {
   type DispatchInput,
   type FleetCaller,
+  type FleetCompletion,
   type FleetControlConfig,
   FleetError,
+  type FleetOrigin,
   type FleetRequest,
   type FleetSource,
   type FleetTarget,
+  fleetAssignmentText,
   fleetControlSchema,
   requestSchema,
+  type VerifiedSource,
 } from "./protocol";
 
 export type FleetControlOptions = {
@@ -41,6 +45,8 @@ export type FleetControlOptions = {
   ): Promise<void>;
   send(target: FleetTarget, text: string, signal: AbortSignal): Promise<void>;
   status?(): Promise<unknown> | unknown;
+  /** Resolve the immutable authenticated ingress job and native input locally. */
+  origin?(source: VerifiedSource): FleetOrigin | undefined;
   /** Transport test seam; production uses the kernel startup lock. */
   ownership?: Ownership;
 };
@@ -84,6 +90,81 @@ export class FleetControl {
     return this.ledger.record(this.options.sessionID, source);
   }
 
+  get resultsEnabled() {
+    return this.options.config.results === true;
+  }
+
+  assignment(
+    input: {
+      sender: string;
+      channel: string;
+      text: string;
+      botKey: string;
+      eventId: string;
+    },
+    fold: (value: string) => string,
+  ) {
+    return this.resultsEnabled
+      ? this.ledger.assignment(
+          {
+            ...input,
+            sessionID: this.options.sessionID,
+            account: this.options.account,
+          },
+          fold,
+        )
+      : undefined;
+  }
+
+  delegation(dispatchID: string) {
+    return this.resultsEnabled
+      ? this.ledger.delegation(
+          this.options.sessionID,
+          this.options.account,
+          dispatchID,
+        )
+      : undefined;
+  }
+
+  complete(botKey: string, eventId: string, completion: FleetCompletion) {
+    if (!this.resultsEnabled)
+      throw new FleetError("Fleet results are disabled");
+    this.ledger.complete(
+      this.options.sessionID,
+      this.options.account,
+      botKey,
+      eventId,
+      completion,
+    );
+  }
+
+  bindInput(
+    botKey: string,
+    eventId: string,
+    dispatchID: string,
+    inputID: string,
+  ) {
+    if (!this.resultsEnabled)
+      throw new FleetError("Fleet results are disabled");
+    this.ledger.bindInput(
+      this.options.sessionID,
+      this.options.account,
+      botKey,
+      eventId,
+      dispatchID,
+      inputID,
+    );
+  }
+
+  pendingResults() {
+    return this.resultsEnabled
+      ? this.ledger.pendingResults(this.options.sessionID)
+      : [];
+  }
+  acknowledgeResult(dispatchID: string) {
+    this.ledger.acknowledgeResult(this.options.sessionID, dispatchID);
+  }
+
   private async dispatch(
     input: DispatchInput,
     caller: FleetCaller,
@@ -103,6 +184,19 @@ export class FleetControl {
       throw new FleetError(
         "Context-only messages cannot authorise fleet assignments.",
       );
+    const origin = this.resultsEnabled
+      ? this.options.origin?.(source)
+      : undefined;
+    if (
+      this.resultsEnabled &&
+      (!origin ||
+        !source.origin ||
+        origin.botKey !== source.origin.botKey ||
+        origin.eventId !== source.origin.eventId)
+    )
+      throw new FleetError(
+        "Fleet result origin has no retained ingress job/native input",
+      );
     const reserved = this.ledger.reserve({
       ownerSessionID: caller.sessionID,
       requestID: input.requestID ?? caller.id,
@@ -110,11 +204,16 @@ export class FleetControl {
       target,
       senderAccount: this.options.account,
       text: input.text,
+      ...(origin ? { origin } : {}),
     });
     if (!reserved.created) return reserved.result;
     // This label reports real transport identity and immutable evidence. Rank,
     // delegated evidence and a human source never grant human approval authority.
-    const text = `[fleet_dispatch from=${this.options.account} source=${source.reference} authority=${source.authority}; not human approval] ${target.account}: ${input.text}`;
+    const text = fleetAssignmentText(
+      reserved.result,
+      input.text,
+      source.authority,
+    );
     try {
       signal.throwIfAborted();
       await this.options.send(target, text, signal);

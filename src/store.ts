@@ -2,6 +2,12 @@ import { Database } from "bun:sqlite";
 import { z } from "zod";
 import type { PreparedAttachment, PublishedFile } from "./attachments";
 import { cancellationNotice } from "./cancellation";
+import {
+  type FleetJob,
+  fleetJobSchema,
+  type NativeMaker,
+  nativeMakerSchema,
+} from "./fleet/protocol";
 import { failureText, type RequestFailure } from "./request-failure";
 import type { ReplyChunk } from "./slack-format";
 
@@ -33,6 +39,8 @@ export type Incoming = {
   textMention?: string | null;
   /** Earliest start in ms (IRC all-call turns); absent starts at once. */
   notBefore?: number | null;
+  /** Only trusted gateway intake/result recovery supplies this correlation. */
+  fleet?: FleetJob;
 };
 
 /**
@@ -89,12 +97,32 @@ export type Job = Incoming & {
   attempts: number;
   failure?: RequestFailure | null;
   input?: string | null;
+  makers?: NativeMaker[];
 };
 
-type StoredJob = Omit<Job, "deferDelivery"> & { deferDelivery: number };
+type StoredJob = Omit<Job, "deferDelivery" | "fleet" | "makers"> & {
+  deferDelivery: number;
+  fleet_context: string | null;
+  makers: string | null;
+  fleet_exported: number;
+};
+
+function decodeStoredJob(row: StoredJob): Job {
+  const { fleet_context, makers, fleet_exported: _exported, ...job } = row;
+  return {
+    ...job,
+    deferDelivery: row.deferDelivery === 1,
+    ...(fleet_context
+      ? { fleet: fleetJobSchema.parse(JSON.parse(fleet_context)) }
+      : {}),
+    ...(makers
+      ? { makers: z.array(nativeMakerSchema).parse(JSON.parse(makers)) }
+      : {}),
+  };
+}
 
 function decodeJob(row: StoredJob | null): Job | null {
-  return row && { ...row, deferDelivery: row.deferDelivery === 1 };
+  return row && decodeStoredJob(row);
 }
 
 export type CaptainCursor = {
@@ -232,6 +260,12 @@ export class Store {
     column("jobs", "textMention", "TEXT");
     column("jobs", "received", "INTEGER");
     column("jobs", "replyParent", "TEXT");
+    column("jobs", "fleet_context", "TEXT");
+    column("jobs", "fleet_exported", "INTEGER NOT NULL DEFAULT 0");
+    column("jobs", "makers", "TEXT");
+    this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_fleet_assignment
+      ON jobs(botKey,json_extract(fleet_context,'$.dispatchID'))
+      WHERE json_extract(fleet_context,'$.kind')='assignment'`);
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS jobs_received ON jobs(sender,received) WHERE received IS NOT NULL",
     );
@@ -259,8 +293,8 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt)`)
+      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at,fleet_context)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt,$fleet)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -277,6 +311,9 @@ export class Store {
           $textMention: input.textMention ?? null,
           $received: input.received ?? null,
           $retryAt: input.notBefore ?? 0,
+          $fleet: input.fleet
+            ? JSON.stringify(fleetJobSchema.parse(input.fleet))
+            : null,
         }).changes > 0
     );
   }
@@ -459,7 +496,7 @@ export class Store {
         "SELECT * FROM jobs WHERE botKey=? AND status='running' AND input IS NOT NULL ORDER BY id LIMIT 32",
       )
       .all(botKey)
-      .map((row) => ({ ...row, deferDelivery: row.deferDelivery === 1 }));
+      .map(decodeStoredJob);
   }
 
   /** One cursor per pin. Old thread mappings and all outbox rows stay intact. */
@@ -784,7 +821,7 @@ export class Store {
       }
       ORDER BY id LIMIT ?`)
       .all(botKey, now, limit)
-      .map((row) => ({ ...row, deferDelivery: row.deferDelivery === 1 }));
+      .map(decodeStoredJob);
   }
 
   running(id: number) {
@@ -863,6 +900,42 @@ export class Store {
         "SELECT id,status FROM jobs WHERE botKey=? AND eventId=?",
       )
       .get(botKey, eventId);
+  }
+
+  jobByEvent(botKey: string, eventId: string): Job | null {
+    return decodeJob(
+      this.db
+        .query<StoredJob, [string, string]>(
+          "SELECT * FROM jobs WHERE botKey=? AND eventId=?",
+        )
+        .get(botKey, eventId),
+    );
+  }
+
+  pendingFleetJobs(botKey: string): Job[] {
+    return this.db
+      .query<StoredJob, [string]>(
+        "SELECT * FROM jobs WHERE botKey=? AND json_extract(fleet_context,'$.kind')='assignment' AND fleet_exported=0 ORDER BY id LIMIT 100",
+      )
+      .all(botKey)
+      .map(decodeStoredJob);
+  }
+
+  fleetPublished(id: number) {
+    this.db
+      .query(
+        "UPDATE jobs SET fleet_exported=1 WHERE id=? AND json_extract(fleet_context,'$.kind')='assignment'",
+      )
+      .run(id);
+  }
+
+  saveMakers(id: number, makers: NativeMaker[]) {
+    this.db
+      .query("UPDATE jobs SET makers=? WHERE id=? AND makers IS NULL")
+      .run(
+        JSON.stringify(z.array(nativeMakerSchema).max(100).parse(makers)),
+        id,
+      );
   }
 
   /** Outbound IRC root of this registration's request; legacy rows stay plain. */

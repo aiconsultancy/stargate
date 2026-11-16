@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { AgentBackend, PendingPermission } from "../backend";
 import type { TeamsConfig } from "../config";
 import type { FleetSource } from "../fleet/protocol";
+import { fleetResultSource } from "../fleet/results";
 import { fleetAuthority, fleetInstructions } from "../fleet-policy";
 import { fleetSourceReference } from "../fleet-source";
 import type { GatewayTransport, SlackDelivery } from "../gateway";
@@ -168,6 +169,8 @@ export class TeamsRegistration {
       key: this.key,
       allowed: (user, channel) => this.allowed(user, channel),
       source: (job) => {
+        const resultSource = fleetResultSource(job);
+        if (resultSource) return resultSource;
         return {
           transport: "teams",
           channel: job.channel,
@@ -306,6 +309,7 @@ export class TeamsRegistration {
         channel: conversation,
         messageID: activity.id,
         receivedAt: activity.timestamp ?? new Date().toISOString(),
+        origin: { botKey: this.key, eventId: `${conversation}:${activity.id}` },
       });
     this.store.enqueue({
       eventId: `${conversation}:${activity.id}`,
@@ -399,6 +403,7 @@ export class TeamsRegistration {
     const currentReference = this.reference(row.conversation);
     if (
       owner?.status !== "running" ||
+      owner.fleet?.kind === "result" ||
       owner.user !== row.user ||
       owner.channel !== row.conversation ||
       !currentReference?.personal ||
@@ -430,6 +435,7 @@ export class TeamsRegistration {
       for (const candidate of this.store.permissionCandidates(this.key)) {
         if (
           candidate.input &&
+          candidate.fleet?.kind !== "result" &&
           this.config.approvalUsers.some(
             (id) => id.toLowerCase() === candidate.user,
           ) &&

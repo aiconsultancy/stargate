@@ -186,9 +186,13 @@ export function routeIrcMessage(
   if (!ircAllowed(config, member, user, channel, caseFold)) return;
   const strict = config.access.channelRequests === "nick-mention";
   const tagged = message.tags.get("msgid");
+  const fleetPeer =
+    config.fleetPolicy &&
+    fleetAuthority(config.fleetPolicy, user) === "agent" &&
+    config.access.peerCaptains.some((peer) => caseFold(peer) === user);
   if (
     strict &&
-    (message.tags.has("bot") ||
+    ((message.tags.has("bot") && !fleetPeer) ||
       !validMsgid(tagged) ||
       (!direct && !context.joined?.(target)))
   )

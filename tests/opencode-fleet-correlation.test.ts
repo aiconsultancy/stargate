@@ -28,6 +28,8 @@ type Changes = {
   duplicate?: boolean;
   origin?: string;
   queued?: boolean;
+  laterInput?: boolean;
+  busy?: boolean;
 };
 
 function fixture(changes: Changes = {}) {
@@ -61,6 +63,18 @@ function fixture(changes: Changes = {}) {
     fetch(request) {
       const path = new URL(request.url).pathname;
       calls.push(path);
+      if (path === `/api/session/${sessionID}`)
+        return Response.json({
+          data: {
+            id: sessionID,
+            time: {
+              created: 0,
+              updated: 10,
+              busy: 1,
+              ...(changes.busy ? {} : { idle: 10 }),
+            },
+          },
+        });
       if (path === `/api/session/${sessionID}/message/${messageID}`)
         return Response.json({ data: message });
       if (path === `/api/session/${sessionID}/inbox`)
@@ -68,6 +82,23 @@ function fixture(changes: Changes = {}) {
       if (path === `/api/session/${sessionID}/message`)
         return Response.json({
           data: [
+            ...(changes.laterInput
+              ? [
+                  {
+                    ...message,
+                    id: "later-assistant",
+                    agent: "other-agent",
+                    model: { providerID: "other-provider", id: "other-model" },
+                    time: { created: 6, completed: 7 },
+                  },
+                  {
+                    id: "later-human",
+                    type: "user",
+                    time: { created: 5 },
+                    text: "Different request",
+                  },
+                ]
+              : []),
             message,
             {
               id: changes.origin ?? inputID,
@@ -125,6 +156,61 @@ test("live native tool correlation requires exact agent/call/name/full input and
     ]);
   } finally {
     await f.close();
+  }
+});
+
+test("fleet makers are read from exact settled native input, excluding a later request", async () => {
+  const f = fixture({ completed: true, laterInput: true });
+  try {
+    expect(
+      await f.backend.executionMakers(
+        sessionID,
+        inputID,
+        new AbortController().signal,
+      ),
+    ).toEqual([
+      {
+        messageID,
+        agent: expected.agent,
+        provider: "provider",
+        model: "model",
+      },
+    ]);
+    const count = f.calls.length;
+    await expect(
+      f.backend.executionMakers(
+        "foreign-session",
+        inputID,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("not pinned");
+    expect(f.calls).toHaveLength(count);
+    await expect(
+      f.backend.executionMakers(
+        sessionID,
+        messageID,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("request boundary");
+  } finally {
+    await f.close();
+  }
+});
+
+test("missing or unsettled native maker evidence fails closed", async () => {
+  for (const changes of [{ origin: "another-input" }, { busy: true }]) {
+    const f = fixture(changes);
+    try {
+      await expect(
+        f.backend.executionMakers(
+          sessionID,
+          inputID,
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await f.close();
+    }
   }
 });
 
