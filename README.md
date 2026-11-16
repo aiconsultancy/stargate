@@ -1,7 +1,7 @@
 # Stargate
 
-Stargate is a self-hosted gateway that lets you talk to AI agents from Slack
-or IRC. It connects to an existing OpenCode V2 server, runs Pi Durable in the
+Stargate is a self-hosted gateway that lets you talk to AI agents from Slack,
+Teams or IRC. It connects to an existing OpenCode V2 server, runs Pi Durable in the
 gateway process, or launches Claude Code or Codex through their SDKs. Use one
 bot for yourself or run several registrations on one host.
 
@@ -10,7 +10,10 @@ bot for yourself or run several registrations on one host.
 In Slack, each bot has its own app and access rules. Mention the bot in an
 allowed channel to start a conversation and reply in the thread to continue
 it. Slack Socket Mode uses an outbound connection, so the gateway needs no
-public HTTP endpoint. IRC can run on its own or alongside Slack.
+public HTTP endpoint. IRC can run on its own or alongside Slack. The optional
+[Teams transport](docs/teams.md) validates Bot Framework requests on a private
+Unix socket and uses managed identity for replies. [Fleet controls](docs/fleet-tools.md)
+add verified message evidence and captain dispatch when explicitly configured.
 
 ## Install
 
