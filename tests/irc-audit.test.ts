@@ -1009,3 +1009,59 @@ test("irc audit: CTCP wrappers never hide a credential or services command", () 
     "[dm] jack → galactica-captain: please identify the failing test",
   );
 });
+
+test("strict human-wake catch-up never redirects historical DMs before the replay guard", async () => {
+  const extra = {
+    dmPolicy: "redirect",
+    access: {
+      channelRequests: "nick-mention",
+      humanWakeChannels: [{ channel: "#ship-galactica", replies: "all" }],
+    },
+    fleetPolicy: {
+      role: "captain",
+      humanAccounts: ["jack"],
+      agentAccounts: [captainAccount, chiefAccount],
+      assignedCheckout: "/workspace",
+      capabilities: ["read_code"],
+    },
+  };
+  const first = await setup({ extra });
+  await first.close();
+  const time = new Date().toISOString();
+  first.fake.say(jack, captainAccount, "historical DM", {
+    time,
+    msgid: "old-redirect",
+  });
+  const resumed = await setup({
+    extra,
+    reuse: { fake: first.fake, store: first.store },
+  });
+  await mirrored(
+    first.fake,
+    `[dm ${time.slice(0, 16)}Z] jack → galactica-captain: historical DM`,
+  );
+  first.fake.sendTo(captainAccount, "PING :replayed-redirect-barrier");
+  await until(
+    () =>
+      lineOf(first.fake.received(captainAccount), "PONG").some(
+        (m) => m.params[0] === "replayed-redirect-barrier",
+      ),
+    3000,
+    "replayed DM processed",
+  );
+  expect(
+    lineOf(first.fake.received(captainAccount), "NOTICE").filter(
+      (m) => m.params[0] === "jack",
+    ),
+  ).toEqual([]);
+  first.fake.say(jack, captainAccount, "fresh DM");
+  await until(
+    () =>
+      lineOf(first.fake.received(captainAccount), "NOTICE").some(
+        (m) => m.params[0] === "jack",
+      ),
+    3000,
+    "only live DM redirected",
+  );
+  expect(resumed.prompts).toEqual([]);
+}, 10_000);

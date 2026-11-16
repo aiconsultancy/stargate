@@ -75,6 +75,10 @@ async function fixture(source = true) {
   let allowed = true;
   let fail = false;
   let nativeSettled = false;
+  let filtered = false;
+  let unsupported = false;
+  let publishFail = false;
+  let abortReply: AbortController | undefined;
   let fingerprint = "a".repeat(64);
   const backend: AgentBackend = {
     sessionID: "ses_captain",
@@ -86,7 +90,24 @@ async function fixture(source = true) {
     },
     async close() {},
     async pendingQuestions() {
-      return pending ? [{ ...question(), fingerprint }] : [];
+      return pending && !filtered
+        ? [
+            unsupported
+              ? {
+                  id: question().id,
+                  sessionID: question().sessionID,
+                  inputID: question().inputID,
+                  toolMessageID: question().toolMessageID,
+                  toolCallID: question().toolCallID,
+                  fingerprint,
+                  unsupported: true as const,
+                }
+              : { ...question(), fingerprint },
+          ]
+        : [];
+    },
+    async questionState() {
+      return pending ? "pending" : "resolved";
     },
     async questionBelongsToInput(s, f, i, hash) {
       return (
@@ -99,7 +120,8 @@ async function fixture(source = true) {
     },
     async replyQuestion(_q, answer) {
       decisions.push(answer);
-      if (fail) throw new Error("Do not expose provider details");
+      abortReply?.abort();
+      if (fail || abortReply) throw new Error("Do not expose provider details");
       pending = false;
     },
     async questionInputSettled() {
@@ -116,6 +138,7 @@ async function fixture(source = true) {
         human: (user) => user === "jac",
         async publish(_job, text, guard) {
           if (!guard()) throw new Error("Denied");
+          if (publishFail) throw new Error("IRC unavailable");
           published.push(text);
         },
       }),
@@ -128,6 +151,7 @@ async function fixture(source = true) {
     published,
     decisions,
     settled,
+    path,
     jobID: job.id,
     get store() {
       return store;
@@ -164,6 +188,18 @@ async function fixture(source = true) {
     revoke() {
       allowed = false;
     },
+    filter(value: boolean) {
+      filtered = value;
+    },
+    unsupported() {
+      unsupported = true;
+    },
+    failPublish(value: boolean) {
+      publishFail = value;
+    },
+    abortReply(controller: AbortController) {
+      abortReply = controller;
+    },
     failReply() {
       fail = true;
     },
@@ -196,6 +232,108 @@ test("durable question publication and answer are source-bound and one-shot", as
   expect(f.store.questionByToken(original.botKey, f.offer().token)?.state).toBe(
     "attempted",
   );
+});
+
+test("a filtered native list never closes a still-live offer or loses its restored answer", async () => {
+  const f = await fixture();
+  await f.poll();
+  const token = f.offer().token;
+  f.filter(true);
+  await f.poll();
+  expect(f.store.questionByToken(original.botKey, token)?.state).toBe(
+    "offered",
+  );
+  f.filter(false);
+  await f.poll();
+  await f.answer({}, { token });
+  expect(f.decisions).toEqual([{ q0: "wait" }]);
+});
+
+test("unsupported owned forms give a content-free operator notice without an answer token", async () => {
+  const f = await fixture();
+  f.unsupported();
+  await f.poll();
+  await f.poll();
+  expect(f.published).toHaveLength(1);
+  expect(f.published[0]).toContain("native operator interface");
+  expect(f.published[0]).not.toContain("Wait or continue");
+  expect(f.published[0]).not.toContain(f.offer().token);
+  await f.answer();
+  expect(f.decisions).toEqual([]);
+});
+
+test("native success survives a failed confirmation and retries only its notice after restart", async () => {
+  const f = await fixture();
+  await f.poll();
+  const token = f.offer().token;
+  f.failPublish(true);
+  await f.answer();
+  expect(f.decisions).toHaveLength(1);
+  expect(f.store.questionByToken(original.botKey, token)?.outcome).toBe(
+    "answered",
+  );
+  f.restart();
+  f.failPublish(false);
+  await f.poll();
+  await f.poll();
+  expect(f.published).toHaveLength(2);
+  expect(f.published[1]).toContain("decision recorded");
+  expect(f.published.join("\n")).not.toContain("uncertain");
+  expect(f.decisions).toHaveLength(1);
+});
+
+test("a timed-out native reply still notifies uncertainty once, without replay", async () => {
+  const f = await fixture();
+  await f.poll();
+  const operation = new AbortController();
+  f.abortReply(operation);
+  await f.bridge.answer(
+    { ...original, replyParent: "m1" },
+    { target: "captain", token: f.offer().token, answer: "1" },
+    operation.signal,
+  );
+  expect(operation.signal.aborted).toBe(true);
+  expect(f.published.at(-1)).toContain("uncertain");
+  await f.poll();
+  expect(f.decisions).toHaveLength(1);
+  expect(f.published.filter((s) => s.includes("uncertain"))).toHaveLength(1);
+});
+
+test("an unavailable first session cannot starve another native question", async () => {
+  const f = await fixture();
+  const earlier = {
+    ...original,
+    eventId: "#ship:earlier",
+    conversation: "earlier",
+    thread: "earlier",
+  };
+  f.store.enqueue(earlier);
+  const job = f.store.queuedJob(original.botKey, earlier.eventId);
+  if (!job) throw new Error("Missing earlier job");
+  f.store.running(job.id);
+  f.store.saveInput(original.botKey, job.id, "msg_earlier", "aaa_broken");
+  f.store.saveSession(earlier.conversation, "aaa_broken");
+  f.store.recordQuestionSource(earlier);
+  const pending = f.backend.pendingQuestions;
+  f.backend.pendingQuestions = async (session, signal) => {
+    if (session === "aaa_broken") throw new Error("Native session unavailable");
+    return (await pending?.(session, signal)) ?? [];
+  };
+  await expect(f.poll()).rejects.toThrow("session unavailable");
+  expect(f.published).toHaveLength(1);
+  await f.answer();
+  expect(f.decisions).toHaveLength(1);
+});
+
+test("an unused configured pin is not polled without an admitted source/job", async () => {
+  const f = await fixture(false);
+  let checks = 0;
+  f.backend.pendingQuestions = async () => {
+    checks++;
+    return [];
+  };
+  await f.poll();
+  expect(checks).toBe(0);
 });
 
 for (const mode of [
@@ -303,7 +441,7 @@ test("unknown native reply outcome remains consumed across restart, never replay
   );
 });
 
-test("expired question tokens cannot be answered or silently renewed", async () => {
+test("expired untouched offers visibly renew after restart without replaying native work", async () => {
   const f = await fixture();
   f.store.offerQuestion({
     token: "b".repeat(32),
@@ -318,11 +456,18 @@ test("expired question tokens cannot be answered or silently renewed", async () 
     notified: 0,
     recovering: 0,
   });
+  f.restart();
+  expect(await f.bridge.recover(AbortSignal.timeout(3000))).toEqual([
+    "msg_original",
+  ]);
   await f.poll();
-  await f.answer();
+  const fresh = f.offer();
+  expect(fresh.token).not.toBe("b".repeat(32));
+  expect(f.published[0]).toContain("Previous clarification token expired");
+  await f.answer({}, { token: "b".repeat(32) });
   expect(f.decisions).toEqual([]);
-  expect(f.published).toEqual([]);
-  expect(f.offer().token).toBe("b".repeat(32));
+  await f.answer();
+  expect(f.decisions).toEqual([{ q0: "wait" }]);
 });
 
 test("cancelled transport work cannot submit or consume a question answer", async () => {
@@ -515,6 +660,132 @@ test("question parser and render never select defaults or accept hidden/auth/ext
   expect(questionControl(`other: answer ${"a".repeat(32)} 1`)?.target).toBe(
     "other",
   );
-  expect(questionControl("other: answer malformed")).toBeDefined();
+  expect(questionControl("other: answer malformed")).toBeUndefined();
+  expect(questionControl(`other: ANSWER ${"A".repeat(32)} 1`)?.token).toBe(
+    "a".repeat(32),
+  );
   expect(questionControl("ordinary human request")).toBeUndefined();
 });
+
+test("retention removes settled historical proofs together but preserves active uncertain work and anchors", async () => {
+  const f = await fixture();
+  await f.poll();
+  const token = f.offer().token;
+  expect(
+    f.store.ircPublished(
+      original.botKey,
+      "#ship",
+      "published-question",
+      "m1",
+      "m1",
+    ),
+  ).toBe(true);
+  f.failReply();
+  await f.answer();
+  const future = Date.now() + 31 * 86_400_000;
+  f.store.pruneIrcHistory(original.botKey, future);
+  expect(f.store.questionByToken(original.botKey, token)?.outcome).toBe(
+    "uncertain",
+  );
+  expect(
+    f.store.ircThreadRoot(original.botKey, "#ship", "published-question"),
+  ).toBe("m1");
+  f.store.respond(f.jobID, []);
+  f.store.finish(f.jobID);
+  f.store.pruneIrcHistory(original.botKey, future + 3_600_001);
+  expect(f.store.questionByToken(original.botKey, token)).toBeUndefined();
+  expect(
+    f.store.ircThreadRoot(original.botKey, "#ship", "published-question"),
+  ).toBeUndefined();
+  expect(f.store.ircThreadParticipating(original.botKey, "#ship", "m1")).toBe(
+    false,
+  );
+  const job = f.store.jobByInput(original.botKey, "msg_original");
+  if (!job) throw new Error("Missing job");
+  expect(f.store.ownsQuestionSource(job)).toBe(false);
+  f.restart();
+  await f.poll();
+  expect(f.decisions).toHaveLength(1);
+});
+
+test("a session consuming the poll deadline rotates behind other sessions next time", async () => {
+  const f = await fixture();
+  const earlier = {
+    ...original,
+    eventId: "#ship:hang",
+    conversation: "hang",
+    thread: "hang",
+  };
+  f.store.enqueue(earlier);
+  const job = f.store.queuedJob(original.botKey, earlier.eventId);
+  if (!job) throw new Error("No hanging job");
+  f.store.running(job.id);
+  f.store.saveInput(original.botKey, job.id, "msg_hang", "aaa_hang");
+  f.store.saveSession(earlier.conversation, "aaa_hang");
+  f.store.recordQuestionSource(earlier);
+  const pending = f.backend.pendingQuestions;
+  f.backend.pendingQuestions = async (session, signal) => {
+    if (session !== "aaa_hang") return (await pending?.(session, signal)) ?? [];
+    await new Promise<void>((_resolve, reject) =>
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      }),
+    );
+    return [];
+  };
+  await expect(f.bridge.poll(AbortSignal.timeout(100))).rejects.toThrow();
+  expect(f.published).toEqual([]);
+  await expect(f.bridge.poll(AbortSignal.timeout(100))).rejects.toThrow();
+  expect(f.published).toHaveLength(1);
+});
+
+for (const outcome of ["success", "timeout"] as const) {
+  test(`resolved form cannot close an in-flight native reply before its ${outcome} is recorded`, async () => {
+    const f = await fixture();
+    await f.poll();
+    const token = f.offer().token;
+    f.restart();
+    expect(await f.bridge.recover(AbortSignal.timeout(3000))).toEqual([
+      "msg_original",
+    ]);
+    const entered = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<void>();
+    const native = f.backend.replyQuestion;
+    if (!native) throw new Error("No native question API");
+    f.backend.replyQuestion = async (question, answer, signal) => {
+      await native(question, answer, signal);
+      entered.resolve();
+      await response.promise;
+      signal.throwIfAborted();
+    };
+    const operation = new AbortController();
+    const answer = f.bridge.answer(
+      { ...original, replyParent: "m1" },
+      { target: "captain", token, answer: "1" },
+      operation.signal,
+    );
+    await entered.promise;
+    f.complete();
+    await f.poll();
+    const during = f.store.questionByToken(original.botKey, token);
+    expect(during?.state).toBe("attempted");
+    expect(during?.outcome).toBeNull();
+    expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("running");
+    expect(f.published).toHaveLength(1);
+    if (outcome === "timeout") operation.abort();
+    response.resolve();
+    await answer;
+    const completed = f.store.questionByToken(original.botKey, token);
+    expect(completed?.outcome).toBe(
+      outcome === "success" ? "answered" : "uncertain",
+    );
+    expect(f.published[1]).toContain(
+      outcome === "success" ? "decision recorded" : "uncertain",
+    );
+    await f.poll();
+    await f.answer({}, { token });
+    expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("done");
+    expect(f.decisions).toEqual([{ q0: "wait" }]);
+    expect(f.published).toHaveLength(2);
+  });
+}

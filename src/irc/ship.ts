@@ -272,7 +272,13 @@ function shipTransport(
     ...(config.features.questions
       ? {
           questions: {
-            account: member.account,
+            get account() {
+              return client.nick;
+            },
+            matchesTarget: (target: string) =>
+              [member.account, client.nick].some(
+                (name) => client.fold(name) === client.fold(target),
+              ),
             human: (user: string) => questionHuman(config, user, client.fold),
             publish: async (job, text, allowed) => {
               if (!client.hasCap("message-tags"))
@@ -744,7 +750,8 @@ export class IrcShip {
           if (
             detached() ||
             identity.role !== "captain" ||
-            !this.config.access.humanWakeChannels?.length ||
+            (!this.config.access.humanWakeChannels?.length &&
+              !this.config.features.questions) ||
             !client.isChannel(target) ||
             this.isAuditChannel(client, target)
           )
@@ -900,16 +907,40 @@ export class IrcShip {
     ) {
       // Never a turn: answer with the ship channel, act on nothing.
       this.advance(member, client, message);
-      this.redirect(member, client, message);
+      if (!replay) this.redirect(member, client, message);
       return;
     }
-    const admission = routeIrcMessage(message, {
+    const control = questionControl(message.params[1] ?? "");
+    const ownControl =
+      control &&
+      [member.account, client.nick].some(
+        (name) => client.fold(name) === client.fold(control.target),
+      );
+    // Account aliases are valid only for controls. Normal strict requests still
+    // require the current nick; all original identity/thread tags remain intact.
+    const routed = ownControl
+      ? {
+          ...message,
+          params: [
+            message.params[0] ?? "",
+            `${client.nick}: answer ${control.token}`,
+          ],
+        }
+      : message;
+    const admission = routeIrcMessage(routed, {
       config: this.config,
       member,
       currentNick: client.nick,
       sent: (msgid) => client.sent(msgid),
       joined: (channel) => client.inChannel(channel),
-      anchor: (msgid) => client.anchor(msgid),
+      anchor: (msgid) =>
+        (ownControl
+          ? this.store.ircThreadRoot(
+              member.key,
+              client.fold(message.params[0] ?? ""),
+              msgid,
+            )
+          : undefined) ?? client.anchor(msgid),
       threadRoot: (channel, msgid) =>
         this.store.ircThreadRoot(member.key, channel, msgid),
       participating: (channel, root) =>
@@ -919,7 +950,6 @@ export class IrcShip {
       fold: client.fold,
       filehost: this.config.features.filesIn ? filehost() : undefined,
     });
-    const control = questionControl(message.params[1] ?? "");
     if (control) {
       // Every ship suppresses the reserved namespace, even when not its target.
       if (

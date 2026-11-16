@@ -190,6 +190,7 @@ export class TranscriptConflict extends Error {
 
 export class Store {
   private readonly db: Database;
+  private readonly ircPruned = new Map<string, number>();
   constructor(path: string) {
     this.db = new Database(path, { create: true, strict: true });
     this.db.exec(`
@@ -285,6 +286,17 @@ export class Store {
     column("jobs", "fleet_context", "TEXT");
     column("jobs", "fleet_exported", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "makers", "TEXT");
+    column("native_questions", "outcome", "TEXT");
+    column("native_questions", "outcomeNotified", "INTEGER NOT NULL DEFAULT 0");
+    for (const table of [
+      "native_questions",
+      "irc_question_sources",
+      "irc_thread_messages",
+      "irc_thread_memberships",
+    ]) {
+      if (column(table, "recorded", "INTEGER NOT NULL DEFAULT 0"))
+        this.db.query(`UPDATE ${table} SET recorded=?`).run(Date.now());
+    }
     this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_fleet_assignment
       ON jobs(botKey,json_extract(fleet_context,'$.dispatchID'))
       WHERE json_extract(fleet_context,'$.kind')='assignment'`);
@@ -973,6 +985,7 @@ export class Store {
 
   /** New opt-in human intake: persist ancestry and explicit invitation atomically. */
   enqueueIrcHuman(input: Incoming, invited: boolean): boolean {
+    this.pruneIrcHistory(input.botKey, Date.now());
     const root = input.replyParent ?? input.thread;
     if (!validMsgid(input.thread) || !validMsgid(root))
       throw new Error("IRC human thread identity is invalid");
@@ -1054,17 +1067,17 @@ export class Store {
       throw new Error("IRC thread ancestry conflict");
     this.db
       .query(
-        "INSERT OR IGNORE INTO irc_thread_messages(botKey,channel,msgid,root) VALUES (?,?,?,?)",
+        "INSERT OR IGNORE INTO irc_thread_messages(botKey,channel,msgid,root,recorded) VALUES (?,?,?,?,?)",
       )
-      .run(botKey, channel, msgid, root);
+      .run(botKey, channel, msgid, root, Date.now());
   }
 
   private joinIrcThread(botKey: string, channel: string, root: string) {
     this.db
       .query(
-        "INSERT OR IGNORE INTO irc_thread_memberships(botKey,channel,root) VALUES (?,?,?)",
+        "INSERT OR IGNORE INTO irc_thread_memberships(botKey,channel,root,recorded) VALUES (?,?,?,?)",
       )
-      .run(botKey, channel, root);
+      .run(botKey, channel, root, Date.now());
   }
 
   jobStatus(botKey: string, id: number): JobStatus | undefined {
@@ -1366,7 +1379,7 @@ export class Store {
     return this.db.transaction(() => {
       this.db
         .query(
-          "INSERT OR IGNORE INTO native_questions(token,botKey,formID,sessionID,inputID,jobID,fingerprint,expires,state,notified,recovering) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT OR IGNORE INTO native_questions(token,botKey,formID,sessionID,inputID,jobID,fingerprint,expires,state,notified,recovering,recorded) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         )
         .run(
           offer.token,
@@ -1380,6 +1393,7 @@ export class Store {
           offer.state,
           offer.notified,
           offer.recovering,
+          Date.now(),
         );
       const existing = this.db
         .query<QuestionOffer, [string, string, string]>(
@@ -1406,7 +1420,7 @@ export class Store {
   recordQuestionSource(input: Incoming) {
     this.db
       .query(
-        "INSERT OR IGNORE INTO irc_question_sources(botKey,eventId,user,channel,thread,root) VALUES(?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO irc_question_sources(botKey,eventId,user,channel,thread,root,recorded) VALUES(?,?,?,?,?,?,?)",
       )
       .run(
         input.botKey,
@@ -1415,6 +1429,7 @@ export class Store {
         input.channel,
         input.thread,
         input.replyParent ?? input.thread,
+        Date.now(),
       );
   }
 
@@ -1449,18 +1464,100 @@ export class Store {
   questionOffers(botKey: string): QuestionOffer[] {
     return this.db
       .query<QuestionOffer, [string]>(
-        "SELECT * FROM native_questions WHERE botKey=? AND (state!='closed' OR recovering=1) ORDER BY rowid",
+        "SELECT * FROM native_questions WHERE botKey=? AND (state!='closed' OR recovering=1 OR (outcome IS NOT NULL AND outcomeNotified=0)) ORDER BY rowid",
       )
       .all(botKey);
   }
 
-  activeQuestionSessions(botKey: string): string[] {
-    return this.db
+  activeQuestionSessions(botKey: string, pinned?: string): string[] {
+    const sessions = this.db
       .query<{ session_id: string }, [string]>(
-        "SELECT DISTINCT s.session_id FROM sessions s JOIN jobs j ON j.conversation=s.conversation WHERE j.botKey=? AND j.status='running' AND j.input IS NOT NULL",
+        "SELECT DISTINCT s.session_id FROM sessions s JOIN jobs j ON j.conversation=s.conversation JOIN irc_question_sources q ON q.botKey=j.botKey AND q.eventId=j.eventId WHERE j.botKey=? AND j.status='running' AND j.input IS NOT NULL",
       )
       .all(botKey)
       .map((v) => v.session_id);
+    if (
+      pinned &&
+      this.db
+        .query(
+          "SELECT 1 FROM jobs j JOIN irc_question_sources q ON q.botKey=j.botKey AND q.eventId=j.eventId WHERE j.botKey=? AND j.status='running' AND j.input IS NOT NULL LIMIT 1",
+        )
+        .get(botKey)
+    )
+      sessions.push(pinned);
+    return [...new Set(sessions)];
+  }
+
+  renewQuestion(
+    token: string,
+    replacement: string,
+    now: number,
+  ): QuestionOffer | undefined {
+    const row = this.questionByTokenForRenewal(token);
+    if (!row) return;
+    const changed = this.db
+      .query(
+        "UPDATE native_questions SET token=?,expires=?,notified=0,recorded=? WHERE token=? AND state='offered' AND expires<=?",
+      )
+      .run(replacement, now + 1_800_000, now, token, now).changes;
+    return changed === 1
+      ? this.questionByToken(row.botKey, replacement)
+      : undefined;
+  }
+
+  private questionByTokenForRenewal(token: string): QuestionOffer | undefined {
+    return (
+      this.db
+        .query<QuestionOffer, [string]>(
+          "SELECT * FROM native_questions WHERE token=?",
+        )
+        .get(token) ?? undefined
+    );
+  }
+
+  questionOutcome(
+    token: string,
+    outcome: NonNullable<QuestionOffer["outcome"]>,
+  ) {
+    this.db
+      .query(
+        "UPDATE native_questions SET outcome=? WHERE token=? AND state='attempted' AND outcome IS NULL",
+      )
+      .run(outcome, token);
+  }
+
+  questionOutcomeNotified(token: string) {
+    this.db
+      .query(
+        "UPDATE native_questions SET outcomeNotified=1 WHERE token=? AND outcome IS NOT NULL",
+      )
+      .run(token);
+  }
+
+  /** Thirty days of settled history. Active native work and recovery holds survive. */
+  pruneIrcHistory(botKey: string, now: number) {
+    const previous = this.ircPruned.get(botKey);
+    if (previous !== undefined && now - previous < 3_600_000) return;
+    const cutoff = now - 30 * 86_400_000;
+    this.db.transaction(() => {
+      this.db
+        .query(`DELETE FROM native_questions WHERE botKey=? AND recorded<? AND recovering=0
+        AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.id=native_questions.jobID AND j.status NOT IN ('done','failed'))`)
+        .run(botKey, cutoff);
+      this.db
+        .query(`DELETE FROM irc_question_sources WHERE botKey=? AND recorded<?
+        AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.botKey=irc_question_sources.botKey AND j.eventId=irc_question_sources.eventId AND j.status NOT IN ('done','failed'))
+        AND NOT EXISTS(SELECT 1 FROM native_questions q WHERE q.botKey=irc_question_sources.botKey AND q.jobID IN (SELECT id FROM jobs WHERE botKey=irc_question_sources.botKey AND eventId=irc_question_sources.eventId))`)
+        .run(botKey, cutoff);
+      for (const table of ["irc_thread_messages", "irc_thread_memberships"]) {
+        this.db
+          .query(`DELETE FROM ${table} WHERE botKey=? AND recorded<?
+          AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.botKey=${table}.botKey AND j.channel=${table}.channel AND COALESCE(j.replyParent,j.thread)=${table}.root AND j.status NOT IN ('done','failed'))
+          AND NOT EXISTS(SELECT 1 FROM native_questions q JOIN jobs j ON j.id=q.jobID WHERE q.botKey=${table}.botKey AND j.channel=${table}.channel AND COALESCE(j.replyParent,j.thread)=${table}.root)`)
+          .run(botKey, cutoff);
+      }
+    })();
+    this.ircPruned.set(botKey, now);
   }
 
   questionNotified(token: string) {

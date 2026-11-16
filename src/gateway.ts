@@ -341,6 +341,7 @@ export class Gateway {
         () => this.transport.questions,
         (job) => this.allowed(job),
         (session) => this.settle(session),
+        this.questionLifetime.signal,
       );
     this.activity = new ActivityDelivery(
       backend,

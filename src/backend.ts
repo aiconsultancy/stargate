@@ -13,7 +13,11 @@ import type {
 } from "./fleet/protocol";
 import { validMsgid } from "./irc/protocol";
 import type { MaintenanceWatch } from "./maintenance";
-import type { NativeQuestion, QuestionAnswer } from "./questions";
+import type {
+  NativeQuestion,
+  PendingQuestion,
+  QuestionAnswer,
+} from "./questions";
 import type { QuotaSnapshot } from "./quota";
 import type { SessionHistory } from "./session-history";
 
@@ -96,7 +100,13 @@ export interface AgentBackend {
   pendingQuestions?(
     sessionID: string,
     signal: AbortSignal,
-  ): Promise<NativeQuestion[]>;
+  ): Promise<PendingQuestion[]>;
+  /** Authoritative form existence/state, independently of display filtering. */
+  questionState?(
+    sessionID: string,
+    formID: string,
+    signal: AbortSignal,
+  ): Promise<"pending" | "resolved" | "unknown">;
   questionBelongsToInput?(
     sessionID: string,
     formID: string,

@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
 import {
   isAgentNotFoundError,
+  isFormNotFoundError,
   isSessionNotFoundError,
   OpenCode,
   type SessionMessageInfo,
@@ -44,6 +45,7 @@ import {
 import {
   type NativeQuestion,
   nativeQuestionSchema,
+  type PendingQuestion,
   type QuestionAnswer,
   questionFingerprint,
 } from "../questions";
@@ -130,11 +132,17 @@ function generationFailureKind(error: {
 }
 
 export class OpenCodeBackend implements AgentBackend {
+  // Native messages/form IDs are immutable. Recheck their live tool/input state,
+  // but do not traverse the entire session twice every second for the same form.
+  private readonly questionAncestry = new Map<
+    string,
+    { fingerprint: string; inputID: string }
+  >();
   private async nativeQuestion(
     sessionID: string,
     formID: string,
     signal: AbortSignal,
-  ): Promise<NativeQuestion | undefined> {
+  ): Promise<PendingQuestion | undefined> {
     if (this.sessionID !== undefined && sessionID !== this.sessionID) return;
     const form = await this.client.session.form.get(
       { sessionID, formID },
@@ -179,29 +187,65 @@ export class OpenCodeBackend implements AgentBackend {
       tool.time.completed !== undefined
     )
       return;
-    const inputID = await this.questionInput(sessionID, message.id, signal);
-    if (
-      !inputID ||
-      !(await this.followsInput(sessionID, inputID, signal, message.id))
-    )
-      return;
+    const fingerprint = questionFingerprint({
+      id: form.id,
+      sessionID,
+      title: form.title,
+      metadata: form.metadata,
+      fields: form.fields,
+    });
+    const cacheKey = JSON.stringify([sessionID, form.id, message.id, tool.id]);
+    const cached = this.questionAncestry.get(cacheKey);
+    let inputID =
+      cached?.fingerprint === fingerprint ? cached.inputID : undefined;
+    if (inputID) {
+      const input = await this.client.session.message.get(
+        { sessionID, messageID: inputID },
+        { signal },
+      );
+      if (
+        input.id !== inputID ||
+        boundaryRecord(input, sessionID).input !== inputID ||
+        (await this.client.session.inbox.list({ sessionID }, { signal })).some(
+          (v) => v.id === inputID,
+        )
+      )
+        return;
+    } else {
+      inputID = await this.questionInput(sessionID, message.id, signal);
+      if (
+        inputID &&
+        (await this.followsInput(sessionID, inputID, signal, message.id))
+      ) {
+        if (this.questionAncestry.size >= 128) {
+          const oldest = this.questionAncestry.keys().next().value;
+          if (oldest !== undefined) this.questionAncestry.delete(oldest);
+        }
+        this.questionAncestry.set(cacheKey, { fingerprint, inputID });
+      } else return;
+    }
+    if (!inputID) return;
     const parsed = nativeQuestionSchema.safeParse({
       id: form.id,
       sessionID,
       inputID,
       toolMessageID: message.id,
       toolCallID: tool.id,
-      fingerprint: questionFingerprint({
-        id: form.id,
-        sessionID,
-        title: form.title,
-        metadata: form.metadata,
-        fields: form.fields,
-      }),
+      fingerprint,
       title: form.title,
       fields: form.fields,
     });
-    return parsed.success ? parsed.data : undefined;
+    return parsed.success
+      ? parsed.data
+      : {
+          id: form.id,
+          sessionID,
+          inputID,
+          toolMessageID: message.id,
+          toolCallID: tool.id,
+          fingerprint,
+          unsupported: true,
+        };
   }
 
   /** Resolve the actual delivered input before this particular tool message. */
@@ -247,20 +291,40 @@ export class OpenCodeBackend implements AgentBackend {
   async pendingQuestions(
     sessionID: string,
     signal: AbortSignal,
-  ): Promise<NativeQuestion[]> {
+  ): Promise<PendingQuestion[]> {
     if (this.sessionID !== undefined && sessionID !== this.sessionID) return [];
     const forms = await this.client.session.form.list(
       { sessionID },
       { signal },
     );
     if (forms.length > 16) throw new Error("Too many native forms");
-    const questions: NativeQuestion[] = [];
+    const questions: PendingQuestion[] = [];
     for (const form of forms) {
       if (form.sessionID !== sessionID) continue;
       const question = await this.nativeQuestion(sessionID, form.id, signal);
       if (question) questions.push(question);
     }
     return questions;
+  }
+
+  async questionState(
+    sessionID: string,
+    formID: string,
+    signal: AbortSignal,
+  ): Promise<"pending" | "resolved" | "unknown"> {
+    if (this.sessionID !== undefined && sessionID !== this.sessionID)
+      return "unknown";
+    try {
+      const form = await this.client.session.form.get(
+        { sessionID, formID },
+        { signal },
+      );
+      if (form.id !== formID || form.sessionID !== sessionID) return "unknown";
+      return form.state.status === "pending" ? "pending" : "resolved";
+    } catch (error) {
+      if (isFormNotFoundError(error) && error.id === formID) return "resolved";
+      throw error;
+    }
   }
 
   async questionBelongsToInput(
@@ -281,14 +345,16 @@ export class OpenCodeBackend implements AgentBackend {
     answer: QuestionAnswer | null,
     signal: AbortSignal,
   ) {
+    const live = await this.nativeQuestion(
+      question.sessionID,
+      question.id,
+      signal,
+    );
     if (
-      !(await this.questionBelongsToInput(
-        question.sessionID,
-        question.id,
-        question.inputID,
-        question.fingerprint,
-        signal,
-      ))
+      !live ||
+      "unsupported" in live ||
+      live.inputID !== question.inputID ||
+      live.fingerprint !== question.fingerprint
     )
       throw new Error("Native question is stale or has no owned input");
     const input = { sessionID: question.sessionID, formID: question.id };
