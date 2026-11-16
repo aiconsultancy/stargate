@@ -104,6 +104,7 @@ export class OpenCodeBackend implements AgentBackend {
   readonly supportsAttachments = true;
   readonly history: OpenCodeHistory;
   private readonly client;
+  private readonly waitForIdle;
   private readonly pairingClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
   private readonly inputs = new Map<string, string>();
@@ -118,6 +119,16 @@ export class OpenCodeBackend implements AgentBackend {
       ),
     };
     this.client = OpenCode.make(options);
+    // A quiet wait can exceed Bun's HTTP idle timeout. Keep the caller's
+    // Stop/deadline signal; leave other requests and pairing policy unchanged.
+    this.waitForIdle = OpenCode.make({
+      ...options,
+      fetch: Object.assign(
+        (url: URL | RequestInfo, init?: RequestInit) =>
+          fetch(url, { ...init, timeout: false }),
+        { preconnect: fetch.preconnect },
+      ),
+    }).experimental.session.wait;
     this.history = new OpenCodeHistory(this.client, config.directory);
     // Same endpoint and authentication; never follow a pairing redirect.
     this.pairingClient = OpenCode.make({
@@ -378,10 +389,7 @@ export class OpenCodeBackend implements AgentBackend {
       if (input.id !== id) throw new Error("OpenCode input identity changed");
       phase = { type: "submitted", input: id };
       admitted = true;
-      await this.client.experimental.session.wait(
-        { sessionID: sessionId },
-        { signal },
-      );
+      await this.waitForIdle({ sessionID: sessionId }, { signal });
       phase = { type: "settled" };
       // Read backwards to the submitted input; do not resend earlier replies.
       const history: (InputBoundaryRecord & {
