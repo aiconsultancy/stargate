@@ -435,9 +435,11 @@ thread history or trust the tag as sender identity. The authenticated
   account, then the account name. A nick with another account, or none,
   never receives it; the delivery fails and retries later. Account/nick
   hints are dropped on QUIT, NICK, PART, KICK, logout and reconnect. Each
-  direct line is checked again when it is written to the socket, after the
-  send throttle: if the binding was dropped meanwhile, the queued line is
-  discarded and the stored reply waits for a retry. A nick that changes
+  direct line or complete multiline batch is checked again before its first
+  socket byte, after the send throttle and any socket backpressure: if the
+  binding was dropped meanwhile, the unsent unit is discarded and the stored
+  reply waits for a retry. A partially submitted unit must finish to preserve
+  IRC framing; it cannot be retracted. A nick that changes
   hands with no event Stargate can see (no shared channel) after the WHOIS is
   not detected for that chunk.
 - Sends are throttled: a burst of 4 lines, then one line every 600 ms.
@@ -585,6 +587,90 @@ start without a cursor, Stargate sets the cursor to now and replays nothing, so
 an existing backlog is not answered. Replayed reactions never stop a turn.
 
 ## Presence
+
+### Agent waiting status (NET-1637, Step 1)
+
+Captain and crew connections publish their existing Slack waiting phrases as
+the nickname's IRCv3 metadata key `status`, when both `batch` and
+`draft/metadata-2` are negotiated. For example: `Galactica is thinking…`, then
+`Galactica is mulling it over…`. A server without these capabilities keeps
+the existing behaviour. There is no new server setting or gateway option.
+
+This is **Step 1**, not an action feed. The value contains only the configured
+agent display name (or existing agent/registration-name fallback) and a fixed
+waiting phrase. It never includes requests, conversation names, commands,
+filenames, arguments, tool output, reasoning or credentials. Control characters
+are removed from the display name, and UTF-8 length respects the server's
+advertised value limit and Ergo's key-plus-value limit. Nickname metadata is
+public across shared channels, including when work started in a private message.
+
+One writer per connection counts active turns across its conversations. An
+older turn finishing cannot clear a newer turn's status; only the last turn
+ending requests a clear, on success, failure or cancellation. The common
+transport lifecycle supports OpenCode, Pi, Claude and Codex without changing
+their backend adapters. Conversation-scoped `+typing` and Stop reactions stay
+as documented above; a metadata status has no Stop button.
+
+Non-clear updates are at least 15 seconds apart, including across rapid turns.
+The writer coalesces pending values and cancels a start whose turn already
+ended. It also counts metadata attempts, including startup cleanup and clears,
+against a conservative 10-attempt/120-second budget. A busy update reserves a
+slot for its terminal clear. Under load, a short turn may show no status rather
+than spend the clear reserve or publish an obsolete busy value. Terminal clears
+bypass the phrase interval, not the server quota. Rejected or quota-delayed
+clears remain pending, respect the server's retry delay, and block newer busy
+values until acknowledged.
+
+After each successful registration or reconnect, the writer first deletes its
+own `status` key and waits for the server acknowledgement before publishing
+busy values. Graceful shutdown attempts acknowledged deletion before QUIT,
+within a 140-second shutdown wait. An unavailable or refusing server cannot be
+forced to acknowledge a clear.
+
+**Abrupt-disconnect limit:** Ergo 2.19.1 retains metadata for always-on clients
+and clients with another session attached. A crash or network loss can leave a
+stale value until the gateway reconnects and its clear succeeds. With neither
+persistence nor another session, the nickname disappears with QUIT; clients
+must discard its cached status then. This feature does not add a metadata TTL,
+change persistence, or change server configuration. Another writer on the same
+account can also use its shared server quota or overwrite the key.
+
+#### Protocol and proof
+
+The [IRCv3 metadata draft](https://ircv3.net/specs/extensions/metadata) uses:
+
+```irc
+CAP REQ :batch draft/metadata-2
+METADATA * SET status :Galactica is thinking…
+METADATA * SET status
+```
+
+The last command deletes only `status`; an empty value is not used as idle text.
+Ergo 2.19.1 sends **761** for values and **766** for deletion, including
+subscriber notifications, rather than the draft's `METADATA` notification
+form. A client subscribes with `METADATA * SUB status`. On Ergo a late SUB
+returns 770/774; `METADATA *ALL SYNC` retrieves the current subscribed values.
+A subscribed client joining a shared channel receives current member values.
+The gateway does not need to subscribe to publish its own status.
+
+Do not replace the single-key delete with `METADATA * CLEAR`: Ergo clears all
+keys there and does not notify subscribers. Missing-key deletes and unchanged
+SETs also consume its ten-attempt/two-minute quota. Reconnecting to an
+always-on account does not reset that quota. `FAIL METADATA RATE_LIMITED`
+carries a positional retry delay, which the writer honours.
+
+The implementation is checked with fake wire fixtures and a throwaway local
+Ergo 2.19.1 server. These checks are not the live Enterprise pilot proof;
+Voyager owns that proof and the gateway owner installs the release. Step 2
+will separately add an allowlisted action-category feed to the backend
+contract and supported adapters. No real-action text is inferred in Step 1.
+
+Run the optional wall-clock rate proof with
+`STARGATE_ERGO_RATE_TEST=1 bun test tests/irc-ergo.test.ts`. It holds a real
+gateway status for 125 seconds under Ergo's unchanged 10/120-second quota,
+then checks the terminal deletion. It uses only temporary accounts, state and
+loopback listeners. Ordinary checks run the shorter real-server lifecycle and
+late-join proof when the local Ergo binary is installed.
 
 Each IRC connection (captain and crew) uses these when the server offers
 them:
