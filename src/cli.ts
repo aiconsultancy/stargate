@@ -19,6 +19,7 @@ import {
   setupWizard,
   slackInstructions,
 } from "./setup";
+import { statusReport } from "./status-report";
 
 const common = `--config PATH  Configuration file (default: ./stargate.json)
 --help, -h     Show help. No command runs when help is requested.
@@ -38,6 +39,7 @@ Commands:
   config check      Validate config, Slack token and IRC credential references
   maintenance       Nightly self-update and host maintenance (plan/run/timer)
   manifest          Print Slack manifest JSON and prefilled creation URL
+  status            Read-only capability and recent incident report
   service install   Install Linux systemd user unit; does not enable/start
   service start     Start the user unit
   service stop      Stop the user unit
@@ -142,6 +144,9 @@ ${common}`,
 --json       Print only JSON for scripts; otherwise include prefilled URL
 --help, -h   Show help
 ${slackInstructions}`,
+  status: `Usage: stargate status --bot ID [--config PATH] [--log PATH] [--json]
+Outputs JSON. No work is submitted. Log evidence may be incomplete.
+${common}`,
   service: `Usage: stargate service <install|start|stop|status|uninstall> [options]
 --name NAME  Unit basename (default: stargate; letters, digits, _ and -)
 ${common}
@@ -169,6 +174,7 @@ function parseCli(args: string[]) {
     help: { type: "boolean", short: "h" },
     config: { type: "string" },
     bot: { type: "string" },
+    log: { type: "string" },
     input: { type: "string" },
     name: { type: "string" },
     json: { type: "boolean" },
@@ -275,52 +281,62 @@ export async function runCli(args: string[]): Promise<CliResult> {
       ? p[1] === "provision"
         ? ["plan", "apply", "journal", "record-app", "json"]
         : botOptions
-      : command === "cron"
-        ? ["bot", "input", "name", "id"]
-        : command === "crew"
-          ? [
-              "directory",
-              "project",
-              "worktrees",
-              "team",
-              "id",
-              "session-id",
-              "base",
-              "mesij-command",
-              "proxy-url",
-              "proxy-key-file",
-              "cron-config",
-              "cron-bot",
-              "maintenance-config",
-            ]
-          : command === "maintenance"
+      : command === "status"
+        ? ["bot", "log", "json"]
+        : command === "cron"
+          ? ["bot", "input", "name", "id"]
+          : command === "crew"
             ? [
-                "json",
-                ...(p[1] === "cleanup" ? ["plan"] : []),
-                ...(p[1] === "update"
-                  ? ["plan", "now", "foreground", "retry-failed"]
-                  : []),
-                "name",
-                "print",
-                "release",
-                "version",
-                "outside-window",
-                "after-run",
-                "accept-current",
-                "yes",
+                "directory",
+                "project",
+                "worktrees",
+                "team",
+                "id",
+                "session-id",
+                "base",
+                "mesij-command",
+                "proxy-url",
+                "proxy-key-file",
+                "cron-config",
+                "cron-bot",
+                "maintenance-config",
               ]
-            : command === "manifest"
-              ? ["name", "json"]
-              : command === "service"
-                ? ["name"]
-                : command === "config"
-                  ? ["schema-only"]
-                  : []),
+            : command === "maintenance"
+              ? [
+                  "json",
+                  ...(p[1] === "cleanup" ? ["plan"] : []),
+                  ...(p[1] === "update"
+                    ? ["plan", "now", "foreground", "retry-failed"]
+                    : []),
+                  "name",
+                  "print",
+                  "release",
+                  "version",
+                  "outside-window",
+                  "after-run",
+                  "accept-current",
+                  "yes",
+                ]
+              : command === "manifest"
+                ? ["name", "json"]
+                : command === "service"
+                  ? ["name"]
+                  : command === "config"
+                    ? ["schema-only"]
+                    : []),
   ]);
   if (Object.keys(v).some((key) => !allowed.has(key)))
     throw new Error(
       "Option is not supported by this command. Use command --help.",
     );
+  if (command === "status") {
+    if (p.length !== 1 || !v.bot?.trim())
+      throw new Error("Use status --help; --bot is required.");
+    console.log(
+      JSON.stringify(await statusReport(configPath, v.bot, v.log), null, 2),
+    );
+    return { command: "exit" };
+  }
   if (command === "start" && p.length <= 1)
     return { command: "start", configPath };
   if (command === "maintenance") {

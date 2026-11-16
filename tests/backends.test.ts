@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type {
@@ -192,6 +192,7 @@ test("OpenCode sends only a compact Slack source line before the raw instruction
 
 test("OpenCode placed-input failure explicitly interrupts server-side execution", async () => {
   let interrupted = false;
+  let admissions = 0;
   let inputId = "";
   const server = Bun.serve({
     port: 0,
@@ -199,6 +200,7 @@ test("OpenCode placed-input failure explicitly interrupts server-side execution"
     async fetch(request) {
       const path = new URL(request.url).pathname;
       if (path.endsWith("/prompt")) {
+        admissions++;
         const input: { id: string } = await request.json();
         inputId = input.id;
         return Response.json({ data: { id: inputId } });
@@ -230,6 +232,7 @@ test("OpenCode placed-input failure explicitly interrupts server-side execution"
       ),
     ).rejects.toThrow();
     expect(interrupted).toBe(true);
+    expect(admissions).toBe(1);
   } finally {
     await server.stop(true);
   }
@@ -377,6 +380,7 @@ function openCodeStreamFixture(
     originCaptainID?: string;
     batched?: boolean;
   },
+  headersEnv: Record<string, string> = {},
 ) {
   const waiting = Promise.withResolvers<void>();
   const finish = Promise.withResolvers<void>();
@@ -386,10 +390,12 @@ function openCodeStreamFixture(
   let placed = !queued;
   let interrupts = 0;
   let cancelled = false;
+  const withdrawals: string[] = [];
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
   let sequence = 0;
   let historyReads = 0;
   let inputId = "";
+  let admissions = 0;
   const encoder = new TextEncoder();
   const emit = (type: string, data: Record<string, unknown>) => {
     if (!stream) throw new Error("Fixture SSE connection is not open");
@@ -427,6 +433,7 @@ function openCodeStreamFixture(
       }
       if (path.endsWith("/prompt")) {
         if (!stream) throw new Error("Prompt preceded event connection");
+        admissions++;
         const input: { id: string } = await request.json();
         inputId = input.id;
         return Response.json({ data: { id: inputId } });
@@ -505,6 +512,7 @@ function openCodeStreamFixture(
       }
       if (path.endsWith(`/inbox/${inputId}`) && request.method === "DELETE") {
         cancelled = true;
+        withdrawals.push(inputId);
         return new Response(null, { status: 204 });
       }
       return new Response(null, { status: 404 });
@@ -514,6 +522,7 @@ function openCodeStreamFixture(
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
+    headersEnv,
   });
   if (config.type !== "opencode") throw new Error("Invalid fixture");
   return {
@@ -524,12 +533,14 @@ function openCodeStreamFixture(
     finish: () => finish.resolve(),
     historyReads: () => historyReads,
     input: () => inputId,
+    admissions: () => admissions,
     checked: checked.promise,
     place: () => {
       placed = true;
     },
     interrupts: () => interrupts,
     cancelled: () => cancelled,
+    withdrawals: () => withdrawals,
     emit,
     disconnect() {
       stream?.close();
@@ -541,6 +552,66 @@ function openCodeStreamFixture(
     },
   };
 }
+
+test("OpenCode wait disables only HTTP idleness and preserves its request", async () => {
+  const headerEnv = "STARGATE_TEST_WAIT_HEADER";
+  const previous = process.env[headerEnv];
+  process.env[headerEnv] = "fixture-value";
+  const nativeFetch = globalThis.fetch;
+  const requests: {
+    path: string;
+    init: BunFetchRequestInit | undefined;
+  }[] = [];
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      (url: URL | RequestInfo, init?: BunFetchRequestInit) => {
+        requests.push({ path: new URL(String(url)).pathname, init });
+        return nativeFetch(url, init);
+      },
+      { preconnect: nativeFetch.preconnect },
+    ),
+  );
+  const fixture = openCodeStreamFixture(false, false, undefined, {
+    "x-fixture": headerEnv,
+  });
+  const controller = new AbortController();
+  const pending = fixture.backend.prompt(
+    "session-current",
+    "hello",
+    controller.signal,
+    () => {},
+  );
+  try {
+    await fixture.waiting;
+    const wait = requests.find((request) => request.path.endsWith("/wait"));
+    expect(wait?.init?.timeout).toBe(false);
+    expect(wait?.init?.signal).toBe(controller.signal);
+    expect(wait?.init?.method).toBe("POST");
+    expect(wait?.init?.headers).toBeInstanceOf(Headers);
+    expect(new Headers(wait?.init?.headers).get("x-fixture")).toBe(
+      "fixture-value",
+    );
+    expect(wait?.init?.body).toBeUndefined();
+    expect(
+      requests
+        .filter((request) => !request.path.endsWith("/wait"))
+        .every((request) => request.init?.timeout === undefined),
+    ).toBe(true);
+    expect(fixture.admissions()).toBe(1);
+    expect(fixture.interrupts()).toBe(0);
+    expect(fixture.withdrawals()).toEqual([]);
+    fixture.finish();
+    expect(await pending).toBe("Canonical final answer.");
+    expect(fixture.admissions()).toBe(1);
+  } finally {
+    controller.abort();
+    await pending.catch(() => {});
+    await fixture.close();
+    fetchSpy.mockRestore();
+    if (previous === undefined) delete process.env[headerEnv];
+    else process.env[headerEnv] = previous;
+  }
+});
 
 for (const origin of [
   { originInputID: "msg_sourceA" },
@@ -784,50 +855,61 @@ test.each([false, true])(
   },
 );
 
-test("OpenCode cancellation closes the event subscription and interrupts execution", async () => {
-  const fixture = openCodeStreamFixture();
-  const controller = new AbortController();
-  const result = fixture.backend.prompt(
-    "session-current",
-    "hello",
-    controller.signal,
-    () => {},
-  );
-  try {
-    await fixture.waiting;
-    controller.abort();
-    await expect(result).rejects.toThrow();
-    await fixture.interrupted;
-    await fixture.disconnected;
-    expect(fixture.historyReads()).toBe(1);
-  } finally {
-    controller.abort();
-    await result.catch(() => {});
-    await fixture.close();
-  }
-});
+for (const reason of [
+  new DOMException("Stop", "AbortError"),
+  new DOMException("Deadline", "TimeoutError"),
+]) {
+  test(`OpenCode ${reason.name} closes the event subscription and interrupts owned execution`, async () => {
+    const fixture = openCodeStreamFixture();
+    const controller = new AbortController();
+    const result = fixture.backend.prompt(
+      "session-current",
+      "hello",
+      controller.signal,
+      () => {},
+    );
+    try {
+      await fixture.waiting;
+      // Deliver Stop/deadline only after the wait is admitted; no clock race.
+      controller.abort(reason);
+      await expect(result).rejects.toThrow();
+      await fixture.interrupted;
+      await fixture.disconnected;
+      expect(fixture.historyReads()).toBe(1);
+      expect(fixture.admissions()).toBe(1);
+      expect(fixture.interrupts()).toBe(1);
+      expect(fixture.withdrawals()).toEqual([fixture.input()]);
+    } finally {
+      controller.abort();
+      await result.catch(() => {});
+      await fixture.close();
+    }
+  });
 
-test("OpenCode queued cancellation withdraws only its own input", async () => {
-  const fixture = openCodeStreamFixture(true);
-  const controller = new AbortController();
-  const pending = fixture.backend.prompt(
-    "session-current",
-    "follow-up",
-    controller.signal,
-    () => {},
-  );
-  try {
-    await fixture.waiting;
-    controller.abort();
-    await expect(pending).rejects.toThrow();
-    expect(fixture.cancelled()).toBe(true);
-    expect(fixture.interrupts()).toBe(0);
-  } finally {
-    controller.abort();
-    await pending.catch(() => {});
-    await fixture.close();
-  }
-});
+  test(`OpenCode queued ${reason.name} withdraws only its own input`, async () => {
+    const fixture = openCodeStreamFixture(true);
+    const controller = new AbortController();
+    const pending = fixture.backend.prompt(
+      "session-current",
+      "follow-up",
+      controller.signal,
+      () => {},
+    );
+    try {
+      await fixture.waiting;
+      controller.abort(reason);
+      await expect(pending).rejects.toThrow();
+      expect(fixture.cancelled()).toBe(true);
+      expect(fixture.interrupts()).toBe(0);
+      expect(fixture.admissions()).toBe(1);
+      expect(fixture.withdrawals()).toEqual([fixture.input()]);
+    } finally {
+      controller.abort();
+      await pending.catch(() => {});
+      await fixture.close();
+    }
+  });
+}
 
 test("Pi partial text excludes thinking and tools and tolerates missing or malformed live state", () => {
   const view = (docs: ConversationView["docs"]): ConversationView => ({
