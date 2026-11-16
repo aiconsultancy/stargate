@@ -101,7 +101,11 @@ async function setup(
   );
   const delivered = (count = 1) =>
     until(
-      () => store.queueCounts(captain.key).done === count,
+      () =>
+        store.queueCounts(captain.key).done === count &&
+        // A completed socket write can precede the server's TCP read.
+        lineOf(fake.received("galactica"), "PRIVMSG").length ===
+          count * answer.split("\n").length,
       5000,
       "thread reply delivered",
     );
