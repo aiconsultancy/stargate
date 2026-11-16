@@ -234,6 +234,12 @@ Stargate passes these settings as `--config` overrides on every turn:
   `check_for_update_on_startup = false`, `history.persistence = "none"`).
 - The key variable is excluded from tool command environments
   (`shell_environment_policy.exclude`).
+- Tool commands get `SHLVL=1` before the shell starts. On Linux, the network
+  sandbox makes `getpeername` fail with `EPERM`, even for `/dev/null` input.
+  Bash treats this error as a network connection and reads `~/.bashrc` at
+  shell level 1 even with `login: false`. The fixed parent level prevents
+  that startup path, including when an account with a non-shell login such
+  as `nologin` makes Codex fall back to Bash. Network restrictions stay intact.
 
 `CODEX_HOME` is a private directory of the backend namespace, so the host's
 `~/.codex` (login, `config.toml`, profiles, MCP servers, hooks, rules) is

@@ -466,13 +466,20 @@ args = ["${join(root, "mcp")}"]
 
 /** JavaScript for Codex's exec tool: each command's output, tagged. */
 function commands(
-  list: { tag: string; cmd: string; escalate?: boolean; wait?: number }[],
+  list: {
+    tag: string;
+    cmd: string;
+    shell?: string;
+    escalate?: boolean;
+    wait?: number;
+  }[],
 ) {
   return list
     .map(
-      ({ tag, cmd, escalate, wait }) =>
+      ({ tag, cmd, shell, escalate, wait }) =>
         `try { const r = await tools.exec_command(${JSON.stringify({
           cmd,
+          ...(shell ? { shell } : {}),
           login: false,
           yield_time_ms: wait ?? 10_000,
           ...(escalate
@@ -501,6 +508,9 @@ test.skipIf(!sandboxed)(
     for (const rc of [".zshenv", ".zshrc", ".bashrc", ".profile"])
       await writeFile(join(home, rc), "export STARGATE_RC_RAN=1\n");
     setEnv({ [apiKeyEnv]: key, HOME: home });
+    // Probe both the account's default shell and Codex's Linux fallback.
+    // Network seccomp can make Bash mistake even /dev/null for socket stdin.
+    const environmentCommand = `printf 'turn=%s\\n' "$STARGATE_CODEX_TURN"; printf 'matches=%s\\n' "$(env | grep -c -F -e '${key}' -e STARGATE_CODEX_PROVIDER_KEY -e ${apiKeyEnv} -e STARGATE_RC_RAN)"`;
     // Shared /tmp is never a writable root.
     const shared = `/tmp/stargate-codex-test-${crypto.randomUUID()}`;
     cleanup.push(() =>
@@ -522,7 +532,12 @@ test.skipIf(!sandboxed)(
               // The marker, and a count of variables that must be absent;
               // the environment itself is never printed.
               tag: "ENV",
-              cmd: `printf 'turn=%s\\n' "$STARGATE_CODEX_TURN"; printf 'matches=%s\\n' "$(env | grep -c -F -e '${key}' -e STARGATE_CODEX_PROVIDER_KEY -e ${apiKeyEnv} -e STARGATE_RC_RAN)"`,
+              cmd: environmentCommand,
+            },
+            {
+              tag: "BASHENV",
+              shell: "/bin/bash",
+              cmd: environmentCommand,
             },
             { tag: "RG", cmd: "command -v rg" },
             { tag: "WRITE", cmd: `touch ${join(project, name)}; echo rc=$?` },
@@ -549,9 +564,12 @@ test.skipIf(!sandboxed)(
       ).toBe("Tools done");
       const output = (requests.at(-1)?.outputs ?? []).join("\n");
       expect(output).toContain("ENV:");
+      expect(output).toContain("BASHENV:");
       expect(output).toContain("BG:");
       expect(output).not.toContain("STARGATE_RC_RAN");
-      expect(/matches=(\d+)/.exec(output)?.[1]).toBe("0");
+      expect(
+        [...output.matchAll(/matches=(\d+)/g)].map((match) => match[1]),
+      ).toEqual(["0", "0"]);
       // The SDK's helper commands come first on PATH, as without Stargate.
       expect(output).toMatch(/RG:[^\n]*codex-path\/rg/);
       const marker = /turn=([0-9a-f-]{36})/.exec(output)?.[1];
