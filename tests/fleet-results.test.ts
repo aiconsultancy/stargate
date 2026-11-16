@@ -1082,3 +1082,76 @@ test("fleet results: queued and recovered ordinary peer jobs are retained but re
     f.fake.received("vance").filter((line) => line.includes("PRIVMSG")),
   ).toEqual(before);
 });
+
+test("fleet results: recovery refuses retained misaddressed human jobs but a correctly addressed nested-prefix request runs", async () => {
+  const f = await world(true, "captain", true);
+  const key = f.targetIrc.gateway.key;
+  const before = f.fake
+    .received("captain")
+    .filter((line) => line.includes("PRIVMSG"));
+  for (const [id, text] of [
+    ["misaddressed", "Vance: ask captain to report."],
+    // Older intake may have removed an own prefix; do not guess or rewrite it.
+    [
+      "ambiguous-old-prefix",
+      "vance: this may have followed a removed captain address.",
+    ],
+  ] as const) {
+    const eventId = `#command:old-human-${id}`;
+    expect(
+      f.captainStore.enqueue({
+        eventId,
+        botKey: key,
+        conversation: JSON.stringify([key, "#command"]),
+        channel: "#command",
+        thread: `old-human-${id}`,
+        user: "operator",
+        text,
+      }),
+    ).toBe(true);
+    const job = f.captainStore.jobByEvent(key, eventId);
+    if (!job) throw new Error("Missing retained human request");
+    await f.targetIrc.gateway.process(job, signal());
+    expect(f.captainStore.jobByEvent(key, eventId)).toMatchObject({
+      id: job.id,
+      status: "failed",
+      text,
+      user: "operator",
+      sent: 0,
+    });
+  }
+  expect(f.captain.calls).toHaveLength(0);
+  expect(
+    f.fake.received("captain").filter((line) => line.includes("PRIVMSG")),
+  ).toEqual(before);
+  f.captain.handler = async () => "Correctly addressed human request answered.";
+  const text =
+    "Captain: Vance: this request is for captain, not the nested name.";
+  const time = new Date().toISOString();
+  const id = f.fake.say(
+    { nick: "operator", account: "operator" },
+    "#command",
+    text,
+    { time },
+  );
+  await until(
+    () =>
+      f.captainStore.ready(key, Number.MAX_SAFE_INTEGER, 1).length === 1 &&
+      f.ownerStore.ircCursor(f.ownerIrc.gateway.key, "#command") === time,
+    2000,
+    "correctly addressed nested-prefix request retained",
+  );
+  const admitted = f.captainStore.jobByEvent(key, `#command:${id}`);
+  expect(admitted?.text).toBe(text);
+  await f.processNext(f.targetIrc.gateway, f.captainStore);
+  expect(f.captainStore.jobByEvent(key, `#command:${id}`)).toMatchObject({
+    status: "done",
+    sent: 1,
+    text,
+  });
+  expect(f.captain.calls).toHaveLength(1);
+  expect(f.vance.calls).toHaveLength(0);
+  expect(
+    f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100),
+  ).toHaveLength(0);
+});

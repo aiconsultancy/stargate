@@ -1369,7 +1369,28 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
       context,
     ),
   ).toBeUndefined();
-  expect(ircResultJobAllowed(restricted, "vance", undefined)).toBe(false);
-  expect(ircResultJobAllowed(restricted, "jack", undefined)).toBe(true);
-  expect(ircResultJobAllowed(legacy, "vance", undefined)).toBe(true);
+  expect(
+    ircResultJobAllowed(restricted, captain, "galactica_", "vance", undefined),
+  ).toBe(false);
+  expect(
+    ircResultJobAllowed(restricted, captain, "galactica_", "jack", undefined),
+  ).toBe(true);
+  expect(
+    ircResultJobAllowed(legacy, captain, "galactica_", "vance", undefined),
+  ).toBe(true);
+  const nested = "galactica_: vance: this is addressed to galactica";
+  const admitted = routeIrcMessage(
+    message("#galactica", nested, { account: "jack" }),
+    context,
+  );
+  expect(admitted?.text).toBe(nested);
+  expect(
+    ircResultJobAllowed(restricted, captain, "galactica_", "jack", admitted),
+  ).toBe(true);
+  expect(
+    routeIrcMessage(message("#galactica", nested, { account: "jack" }), {
+      ...context,
+      config: legacy,
+    })?.text,
+  ).toBe("vance: this is addressed to galactica");
 });

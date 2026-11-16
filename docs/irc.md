@@ -343,6 +343,13 @@ without a different fleet recipient retain their usual mention and wake
 rules. With results absent or false, peer admission and recipient matching
 keep their existing behaviour.
 
+Results-mode human jobs retain their original leading address in queued text
+so the same recipient rule applies after restart. A correctly addressed
+`discovery: vance: ...` therefore remains Discovery's request. An old queued
+row whose retained text starts with another fleet recipient fails the normal
+access check; historical rows and their original source evidence are not
+rewritten or replayed.
+
 ## Conversations
 
 | IRC             | Stargate conversation               |

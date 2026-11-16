@@ -162,6 +162,10 @@ account or target ID (`vance:` or `vance,`) does not separately wake this
 captain because its name occurs later. This recipient rule also overrides an
 own-channel wake or reply tag. Other human own-channel and mention requests
 remain eligible under the ordinary access rules.
+Results-mode human queued text retains its leading address so recovery uses
+the same recipient rule, including correctly addressed nested prefixes. Old
+queued text beginning with a different fleet recipient is refused without
+rewriting the record or guessing an address removed by an older gateway.
 
 Only the trusted gateway result worker can publish completion. Engine IPC has
 no completion operation. The worker binds the persisted native input to its

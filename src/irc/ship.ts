@@ -251,7 +251,7 @@ const sinceChars = 300;
 function shipTransport(
   config: IrcConfig,
   member: IrcMember,
-  client: Pick<IrcClient, "fold" | "inChannel" | "isChannel">,
+  client: Pick<IrcClient, "fold" | "inChannel" | "isChannel" | "nick">,
   said: (channel: string, after: number, except: string) => string[] = () => [],
   sessionReady?: GatewayTransport["sessionReady"],
 ): GatewayTransport {
@@ -267,7 +267,14 @@ function shipTransport(
     key: member.key,
     allowed: (user, channel, job) =>
       ircAllowed(config, member, user, channel, client.fold) &&
-      ircResultJobAllowed(config, user, job) &&
+      ircResultJobAllowed(
+        config,
+        member,
+        client.nick,
+        user,
+        job,
+        client.fold,
+      ) &&
       (config.access.channelRequests !== "nick-mention" ||
         !client.isChannel(channel) ||
         client.inChannel(channel)),

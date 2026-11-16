@@ -180,15 +180,25 @@ function addressedToFleetPeer(
  */
 export function ircResultJobAllowed(
   config: IrcConfig,
+  member: IrcMember,
+  currentNick: string,
   account: string,
-  job: Readonly<Pick<Incoming, "fleet">> | undefined,
+  job:
+    | Readonly<Pick<Incoming, "fleet"> & Partial<Pick<Incoming, "text">>>
+    | undefined,
+  caseFold: Fold = rfc1459,
 ) {
   if (!config.fleetControl?.results) return true;
   if (!config.fleetPolicy) return false;
   const authority = fleetAuthority(config.fleetPolicy, account);
   if (authority === "agent")
     return job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result";
-  return authority === "human";
+  return (
+    authority === "human" &&
+    (job?.fleet?.kind === "result" ||
+      job?.text === undefined ||
+      !addressedToFleetPeer(config, member, currentNick, job.text, caseFold))
+  );
 }
 
 /**
@@ -238,9 +248,10 @@ export function routeIrcMessage(
     return;
   // A multiline message keeps its line breaks; each line is cleaned.
   const body = raw.split("\n").map(cleanText).join("\n").trim();
+  const human =
+    config.fleetPolicy && fleetAuthority(config.fleetPolicy, user) === "human";
   if (
-    config.fleetPolicy &&
-    fleetAuthority(config.fleetPolicy, user) === "human" &&
+    human &&
     addressedToFleetPeer(config, member, context.currentNick, body, caseFold)
   )
     return;
@@ -274,8 +285,11 @@ export function routeIrcMessage(
       ? findMention([body], config.access.allCallWords)
       : undefined;
   const mention = allCall ?? named;
-  const text = withoutAddress(body, nicks, caseFold).trim();
-  if (!text) return;
+  const content = withoutAddress(body, nicks, caseFold).trim();
+  if (!content) return;
+  // Recovery must see the same recipient as intake, including nested
+  // addresses such as `captain: vance: ...`; historical rows stay intact.
+  const text = config.fleetControl?.results && human ? body : content;
   const ship = shipAccounts(config, caseFold);
   const sender = ship.has(user)
     ? ("crew" as const)
