@@ -197,6 +197,7 @@ function shipMembers(config: IrcConfig): ShipMember[] {
       nick: member.nick ?? member.account,
       channels: member.channels,
       passwordEnv: member.passwordEnv,
+      clientPemFile: member.clientPemFile,
       backend: member.backend,
       displayName: member.displayName ?? member.account,
       concurrency: member.concurrency,
@@ -205,11 +206,18 @@ function shipMembers(config: IrcConfig): ShipMember[] {
   ];
 }
 
-/**
- * Everything a running connection and its gateway settings were built
- * from, except reloadable access and transcription settings. A reload
- * reuses a connection only when this is unchanged.
- */
+/** Load each distinct PEM once; never substitute another account's credential. */
+async function memberCertificates(members: readonly ShipMember[]) {
+  const certificates = new Map<string, Awaited<ReturnType<typeof clientPem>>>();
+  for (const member of members) {
+    const path = member.clientPemFile;
+    if (path && !certificates.has(path))
+      certificates.set(path, await clientPem(path));
+  }
+  return certificates;
+}
+
+/** Non-reloadable connection settings; includes each member's auth references. */
 function connection(config: IrcConfig, member: ShipMember) {
   return JSON.stringify([
     config.server,
@@ -378,7 +386,10 @@ export class IrcShip {
     private readonly store: Store,
     private readonly log: Logger,
     private readonly ca: string | undefined,
-    private readonly certificate: IrcClientOptions["clientCertificate"],
+    private readonly certificates: ReadonlyMap<
+      string,
+      NonNullable<IrcClientOptions["clientCertificate"]>
+    >,
     private readonly options: ShipOptions,
   ) {
     const env = options.env ?? process.env;
@@ -414,10 +425,8 @@ export class IrcShip {
     const ca = config.server.caFile
       ? await readFile(config.server.caFile, "utf8")
       : undefined;
-    const certificate = config.clientPemFile
-      ? await clientPem(config.clientPemFile)
-      : undefined;
-    return new IrcShip(config, store, log, ca, certificate, options);
+    const certificates = await memberCertificates(shipMembers(config));
+    return new IrcShip(config, store, log, ca, certificates, options);
   }
 
   /** Captain first, then crew in configuration order. */
@@ -462,14 +471,17 @@ export class IrcShip {
 
   /**
    * Stage a reload to `next`, a fully validated config of this
-   * registration. Builds clients for added crew, reading their passwords
-   * from `env`, but connects nothing and changes nothing. Throws, with no
-   * change, when an added member's password reference is missing, the
+   * registration. Builds clients for added crew, reading their credentials,
+   * but connects nothing and changes nothing. Throws, with no
+   * change, when an added member's credential is invalid, the
    * registration ID changes, or a kept connection's settings change
-   * (server, features, channels, or a member's account, nick, password
+   * (server, features, channels, or a member's account, nick, credential
    * reference, backend, display name or limits): those need a restart.
    */
-  prepareReload(next: IrcConfig, env: NodeJS.ProcessEnv): IrcReload {
+  async prepareReload(
+    next: IrcConfig,
+    env: NodeJS.ProcessEnv,
+  ): Promise<IrcReload> {
     const base = this.config;
     if (next.id !== base.id)
       throw new Error("IRC registration ID changed; restart required");
@@ -477,6 +489,9 @@ export class IrcShip {
       shipMembers(base).map((member) => [member.id, connection(base, member)]),
     );
     const current = new Map(this.current.map((item) => [item.id, item]));
+    const certificates = await memberCertificates(
+      shipMembers(next).filter((member) => !current.has(member.id)),
+    );
     const slots: ({ member: ShipMember } & (
       | { kept: IrcRegistration }
       | { built: Built }
@@ -484,7 +499,10 @@ export class IrcShip {
     for (const member of shipMembers(next)) {
       const kept = current.get(member.id);
       if (!kept) {
-        slots.push({ member, built: this.build(member, next, env) });
+        slots.push({
+          member,
+          built: this.build(member, next, env, certificates),
+        });
         continue;
       }
       if (previous.get(member.id) !== connection(next, member))
@@ -577,11 +595,15 @@ export class IrcShip {
     member: ShipMember,
     config: IrcConfig,
     env: NodeJS.ProcessEnv,
+    certificates = this.certificates,
   ): Built {
+    const certificate = member.clientPemFile
+      ? certificates.get(member.clientPemFile)
+      : undefined;
     const credential = member.passwordEnv
       ? { password: secret(member.passwordEnv, env) }
-      : this.certificate
-        ? { clientCertificate: this.certificate }
+      : certificate
+        ? { clientCertificate: certificate }
         : undefined;
     if (!credential) throw new Error("Missing IRC registration credential");
     const key = ircKey(

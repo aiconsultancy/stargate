@@ -390,7 +390,9 @@ const ircCrewSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/),
   displayName: z.string().trim().min(1).max(100).optional(),
   account: ircAccount,
-  passwordEnv: envName,
+  passwordEnv: envName.optional(),
+  /** Private certificate and key for this account's SASL EXTERNAL login. */
+  clientPemFile: absolutePath.optional(),
   /** Defaults to the account; Ergo forces nick = account anyway. */
   nick: ircAccount.optional(),
   /**
@@ -617,15 +619,17 @@ export const ircSchema = z
     ];
     if (new Set(nicks.map(lower)).size !== nicks.length)
       issue("Captain and crew need distinct IRC nicks");
-    if (Boolean(irc.passwordEnv) === Boolean(irc.clientPemFile))
-      issue(
-        "Set exactly one of passwordEnv (PLAIN) or clientPemFile (EXTERNAL)",
-      );
-    if (irc.clientPemFile && !irc.server.tls)
-      issue("IRC clientPemFile requires TLS");
+    for (const member of [irc, ...irc.crew]) {
+      if (Boolean(member.passwordEnv) === Boolean(member.clientPemFile))
+        issue(
+          "Set exactly one of passwordEnv (PLAIN) or clientPemFile (EXTERNAL)",
+        );
+      if (member.clientPemFile && !irc.server.tls)
+        issue("IRC clientPemFile requires TLS");
+    }
     const secrets = [
       ...(irc.passwordEnv ? [irc.passwordEnv] : []),
-      ...irc.crew.map((m) => m.passwordEnv),
+      ...irc.crew.flatMap((m) => (m.passwordEnv ? [m.passwordEnv] : [])),
     ];
     if (new Set(secrets).size !== secrets.length)
       issue("Captain and crew need separate passwordEnv variables");
@@ -826,7 +830,9 @@ export const configSchema = z
       }
       const ircSecrets = irc.flatMap((registration) => [
         ...(registration.passwordEnv ? [registration.passwordEnv] : []),
-        ...registration.crew.map((member) => member.passwordEnv),
+        ...registration.crew.flatMap((member) =>
+          member.passwordEnv ? [member.passwordEnv] : [],
+        ),
       ]);
       if (new Set(ircSecrets).size !== ircSecrets.length)
         context.addIssue({

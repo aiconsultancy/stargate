@@ -770,7 +770,7 @@ export function serve(
             for (const next of candidate.config.irc) {
               const binding = ircBindings.get(next.id);
               if (!binding) throw new ReloadRejected("unavailable");
-              const plan = binding.ship.prepareReload(
+              const plan = await binding.ship.prepareReload(
                 next,
                 candidate.environment,
               );
