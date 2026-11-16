@@ -27,7 +27,8 @@ import {
 import { type CommandRunner, processRunner } from "../src/nightly/exec";
 
 const root = await mkdtemp("/tmp/opencode/stargate-cleanup-");
-const now = Date.now();
+// Even epoch day: oversized scratch batches start with the first window.
+const now = Date.parse("2026-01-01T00:00:00Z");
 const day = 86_400_000;
 afterAll(() => rm(root, { recursive: true, force: true }));
 let sequence = 0;
