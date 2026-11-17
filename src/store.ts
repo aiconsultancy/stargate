@@ -2140,8 +2140,16 @@ export class Store {
   deliverMeta(registration: string, message: string) {
     this.db
       .query(
-        "UPDATE meta_receipts SET delivered=1 WHERE registration=? AND message=? AND state='applied'",
+        "UPDATE meta_receipts SET delivered=1 WHERE registration=? AND message=?",
       )
+      .run(registration, message);
+  }
+
+  /** Only a fresh claim proven to have made no write can be released. */
+  releaseMetaClaim(registration: string, message: string) {
+    this.db
+      .query(`DELETE FROM meta_receipts WHERE registration=? AND message=?
+      AND state='pending' AND delivered=0 AND reply IS NULL`)
       .run(registration, message);
   }
 

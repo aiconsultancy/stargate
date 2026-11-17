@@ -28,15 +28,37 @@ const envelope = z.object({
   }),
 });
 
-/** Intercept only addressed slash candidates, including disguised quotations. */
+/** Only a literal first-token bot tag followed by a command word is local. */
 export function metaCandidate(raw: unknown, identity: Identity): boolean {
   const parsed = z
-    .object({ event: z.object({ text: z.string() }) })
+    .object({
+      event: z.object({
+        text: z.string(),
+        blocks: z.unknown().optional(),
+        attachments: z.unknown().optional(),
+      }),
+    })
     .safeParse(raw);
   if (!parsed.success) return false;
-  const text = parsed.data.event.text;
-  if (!text.includes(`<@${identity.user}>`)) return false;
-  return /^[\s>`]*\//.test(text.replace(/<@[A-Z0-9]+>/g, "").trim());
+  const event = parsed.data.event;
+  const text = event.text.trimStart();
+  const tag = `<@${identity.user}>`;
+  return (
+    text.startsWith(tag) &&
+    /^\s*\/[a-z][a-z-]*(?=\s|$)/.test(text.slice(tag.length)) &&
+    event.attachments === undefined &&
+    !unsafeMetadata(event.blocks)
+  );
+}
+
+/** A proven pre-write admission change may retry; an I/O failure may not. */
+class MetaAdmissionChanged extends Error {
+  constructor() {
+    super("Command admission changed; retry delivery.");
+  }
+}
+function assertOpen(open: () => boolean) {
+  if (!open()) throw new MetaAdmissionChanged();
 }
 
 function unsafeMetadata(raw: unknown, depth = 0): boolean {
@@ -126,7 +148,7 @@ const commands: readonly Command[] = [
         return { reply: unavailable };
       const oldDelayMs = (await resolveWaiting(bot)).delayMs;
       const newDelayMs = count === null ? null : count * 1000;
-      if (!open()) throw new Error("Intake changed");
+      assertOpen(open);
       await saveWaitingDelay(
         bot.backend.directory,
         bot.backend.agent,
@@ -211,7 +233,8 @@ export class MetaCommands {
     open: () => boolean,
   ) {
     const parsed = envelope.safeParse(raw);
-    if (!parsed.success || !open()) return;
+    if (!parsed.success) return;
+    assertOpen(open);
     const body = parsed.data;
     const event = body.event;
     const text = event.text.trim();
@@ -238,13 +261,15 @@ export class MetaCommands {
     const entry = commands.find((candidate) =>
       candidate.pattern.test(commandText),
     );
+    const at = (this.options.now ?? Date.now)();
+    assertOpen(open);
     const fresh = this.store.claimMeta({
       registration,
       message,
       channel: event.channel,
       thread: event.thread_ts ?? event.ts,
       user: event.user,
-      at: (this.options.now ?? Date.now)(),
+      at,
       command: entry?.syntax ?? "unknown",
     });
     if (fresh) {
@@ -258,13 +283,19 @@ export class MetaCommands {
                 match,
               )
             : { reply: help() };
-      } catch {
+      } catch (error) {
+        if (error instanceof MetaAdmissionChanged) {
+          this.store.releaseMetaClaim(registration, message);
+          throw error;
+        }
         // A write may have completed: retain pending and never reapply it.
+        assertOpen(open);
         await this.slack.post(
           event.channel,
           event.thread_ts ?? event.ts,
           unconfirmed,
         );
+        this.store.deliverMeta(registration, message);
         return;
       }
       this.store.applyMeta(
@@ -276,14 +307,14 @@ export class MetaCommands {
       );
     }
     const receipt = this.store.metaReceipt(registration, message);
-    if (!receipt || receipt.user !== event.user || receipt.delivered || !open())
-      return;
+    if (!receipt || receipt.user !== event.user) return;
+    assertOpen(open);
+    if (receipt.delivered) return;
     await this.slack.post(
       receipt.channel,
       receipt.thread,
       receipt.reply ?? unconfirmed,
     );
-    if (receipt.state === "applied")
-      this.store.deliverMeta(registration, message);
+    this.store.deliverMeta(registration, message);
   }
 }

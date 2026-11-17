@@ -350,7 +350,6 @@ for (const rule of ["deniedUsers", "deniedChannels"] as const) {
 
 for (const text of [
   "<@UOTHER> /config waiting 3",
-  "<@UOTHER> /config waiting 3 <@UBOT>",
   "<@UBOT> /config waiting 3 <@UOTHER>",
 ]) {
   test(`multiple/different bot addressing is refused: ${text}`, async () => {
@@ -408,7 +407,13 @@ for (const [name, metadata] of [
       ...request,
       event: { ...request.event, ...metadata },
     });
-    noCaptainWork(f);
+    expect(
+      f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10),
+    ).toHaveLength(1);
+    expect(
+      f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10)[0]?.text,
+    ).toBe("/config waiting 3");
+    expect(f.calls).toEqual([]);
     expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
   });
 }
@@ -452,10 +457,13 @@ for (const text of [
   "<@UBOT> ```\n/config waiting 3\n```",
   "```<@UBOT> /config waiting 3```",
 ]) {
-  test(`literal quoted/code command is refused without model fallback: ${text}`, async () => {
+  test(`literal quoted/code discussion stays ordinary chat: ${text}`, async () => {
     const f = await fixture();
     await f.gateway.receive(event(text));
-    noCaptainWork(f);
+    const queued = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.text).toBe(text.replace("<@UBOT>", "").trim());
+    expect(f.calls).toEqual([]);
     expect(f.delivered).toEqual([]);
     expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
   });
@@ -492,14 +500,18 @@ for (const changes of [
     ],
   },
 ] as const) {
-  test(`self/hidden/subtyped/inline-code candidate is refused: ${JSON.stringify(changes)}`, async () => {
+  test(`event security and quoted-content routing: ${JSON.stringify(changes)}`, async () => {
     const f = await fixture();
     const request = event("<@UBOT> /config waiting 3");
     await f.gateway.receive({
       ...request,
       event: { ...request.event, ...changes },
     });
-    noCaptainWork(f);
+    if ("blocks" in changes) {
+      const queued = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]?.text).toBe("/config waiting 3");
+    } else noCaptainWork(f);
     expect(f.delivered).toEqual([]);
     expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
   });
@@ -604,7 +616,7 @@ test("failed waiting write remains pending and cannot later overwrite a tool cha
   f.delivered.length = 0;
   await f.gateway.receive(event("<@UBOT> /config waiting 3"));
   expect((await resolveWaiting(f.config)).delayMs).toBe(8000);
-  expect(reply(f)).toContain("unconfirmed");
+  expect(f.delivered).toEqual([]);
   noCaptainWork(f);
 });
 
@@ -732,4 +744,202 @@ test("unavailable mute storage gives a fixed local error", async () => {
   await f.gateway.receive(event("<@UBOT> /config mutes"));
   noCaptainWork(f);
   expect(reply(f)).toBe("Mute preferences unavailable for this registration.");
+});
+
+for (const text of [
+  "`/api/health` returns 500, <@UBOT> can you check?",
+  "/var/log is full <@UBOT> please check",
+  "<@UBOT> please run /config later",
+  "<@OTHER> <@UBOT> /config",
+  "<@UBOT> /api/health is down",
+  "<@UBOT> /tmp/foo",
+  "<@UOTHER> /config waiting 3 <@UBOT>",
+]) {
+  test(`text outside the strict command grammar stays ordinary chat: ${text}`, async () => {
+    const f = await fixture();
+    expect(await f.gateway.receive(event(text))).toBe(true);
+    const queued = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.text).toBe(text.replace("<@UBOT>", "").trim());
+    expect(f.delivered).toEqual([]);
+  });
+}
+
+for (const text of [
+  "&gt; <@UBOT> /config waiting 3",
+  "<@UBOT> &gt; /config waiting 3",
+]) {
+  test(`Slack-escaped blockquote stays ordinary chat: ${text}`, async () => {
+    const f = await fixture();
+    await f.gateway.receive(event(text));
+    const queued = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.text).toBe(text.replace("<@UBOT>", "").trim());
+    expect(f.calls).toEqual([]);
+    expect(f.delivered).toEqual([]);
+    expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
+  });
+}
+
+test("binding change before queued admission withholds ACK and permits fresh-binding retry", async () => {
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const f = await fixture({
+    listMutes: async () => {
+      entered.resolve();
+      await release.promise;
+      return { settings: [], cursor: null, counts: { channel: 0, thread: 0 } };
+    },
+  });
+  let acks = 0;
+  const failures: unknown[] = [];
+  const deliver = (body: unknown) =>
+    handleSlackRequest(
+      {
+        type: "events_api",
+        body,
+        async ack() {
+          acks++;
+        },
+      },
+      async (raw) => {
+        try {
+          return await f.gateway.receive(raw);
+        } catch (error) {
+          failures.push(error);
+          throw error;
+        }
+      },
+      pino({ enabled: false }),
+    );
+  const first = deliver(event("<@UBOT> /config"));
+  await entered.promise;
+  const waiting = deliver(event("<@UBOT> /config waiting 3", "2.000"));
+  f.gateway.reconfigure({ ...f.config });
+  release.resolve();
+  await Promise.all([first, waiting]);
+  expect(failures).toHaveLength(2);
+  expect(acks).toBe(0);
+  expect(
+    f.store.metaReceipt(notificationKey(f.config, identity), "C123:2.000"),
+  ).toBeNull();
+  expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
+  expect(f.delivered).toEqual([]);
+  await deliver(event("<@UBOT> /config waiting 3", "2.000"));
+  expect(acks).toBe(1);
+  expect((await resolveWaiting(f.config)).delayMs).toBe(3000);
+  noCaptainWork(f);
+});
+
+test("binding invalidation during waiting read releases only the proven-unwritten claim", async () => {
+  let invalidate = () => {};
+  let invalidated = false;
+  const f = await fixture({
+    now: () => {
+      if (!invalidated)
+        queueMicrotask(() => {
+          invalidated = true;
+          invalidate();
+        });
+      return now;
+    },
+  });
+  invalidate = () => f.gateway.reconfigure({ ...f.config });
+  const request = event("<@UBOT> /config waiting 3");
+  await expect(f.gateway.receive(request)).rejects.toThrow();
+  expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
+  expect(
+    f.store.metaReceipt(notificationKey(f.config, identity), "C123:1.000"),
+  ).toBeNull();
+  expect(f.delivered).toEqual([]);
+  await f.gateway.receive(request);
+  expect((await resolveWaiting(f.config)).delayMs).toBe(3000);
+  expect(reply(f)).toMatch(/5.*3/s);
+  noCaptainWork(f);
+});
+
+test("binding invalidation after apply retains the receipt and retries only its reply", async () => {
+  const f = await fixture();
+  const apply = f.store.applyMeta.bind(f.store);
+  let changed = false;
+  f.store.applyMeta = (...args: Parameters<Store["applyMeta"]>) => {
+    apply(...args);
+    if (!changed) {
+      changed = true;
+      f.gateway.reconfigure({ ...f.config });
+    }
+  };
+  const request = event("<@UBOT> /config waiting 3");
+  await expect(f.gateway.receive(request)).rejects.toThrow();
+  expect((await resolveWaiting(f.config)).delayMs).toBe(3000);
+  expect(f.delivered).toEqual([]);
+  expect(
+    f.store.metaReceipt(notificationKey(f.config, identity), "C123:1.000"),
+  ).toMatchObject({ state: "applied", delivered: 0 });
+  await f.waiting.run({ seconds: 8 }, f.caller);
+  await f.gateway.receive(request);
+  expect((await resolveWaiting(f.config)).delayMs).toBe(8000);
+  expect(reply(f)).toMatch(/5.*3/s);
+  noCaptainWork(f);
+});
+
+test("confirmed uncertainty reply is delivered once while the receipt stays pending", async () => {
+  const f = await fixture();
+  const registration = notificationKey(f.config, identity);
+  f.store.claimMeta({
+    registration,
+    message: "C123:1.000",
+    channel: "C123",
+    thread: "1.000",
+    user: "U123",
+    at: now,
+    command: "/config waiting <0..3600|off>",
+  });
+  const request = event("<@UBOT> /config waiting 3");
+  await f.gateway.receive(request);
+  await f.gateway.receive({
+    ...request,
+    event_id: "EvRetry",
+    event: { ...request.event, type: "message" },
+  });
+  expect(f.delivered).toHaveLength(1);
+  expect(reply(f)).toContain("unconfirmed");
+  expect(f.store.metaReceipt(registration, "C123:1.000")).toMatchObject({
+    state: "pending",
+    delivered: 1,
+  });
+  expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
+  noCaptainWork(f);
+});
+
+test("failed uncertainty delivery retries the reply once, never the pending mutation", async () => {
+  const f = await fixture();
+  const registration = notificationKey(f.config, identity);
+  f.store.claimMeta({
+    registration,
+    message: "C123:1.000",
+    channel: "C123",
+    thread: "1.000",
+    user: "U123",
+    at: now,
+    command: "/config waiting <0..3600|off>",
+  });
+  const post = f.slack.post;
+  f.slack.post = async () => {
+    throw new Error("Slack unavailable");
+  };
+  const request = event("<@UBOT> /config waiting 3");
+  await expect(f.gateway.receive(request)).rejects.toThrow("Slack unavailable");
+  expect(f.store.metaReceipt(registration, "C123:1.000")).toMatchObject({
+    state: "pending",
+    delivered: 0,
+  });
+  await f.waiting.run({ seconds: 8 }, f.caller);
+  f.slack.post = post;
+  await f.gateway.receive(request);
+  await f.gateway.receive(request);
+  expect(f.delivered).toHaveLength(1);
+  expect(reply(f)).toContain("unconfirmed");
+  expect((await resolveWaiting(f.config)).delayMs).toBe(8000);
+  noCaptainWork(f);
 });

@@ -42,10 +42,17 @@ The configured app, workspace, user and conversation checks still apply. Denies
 take precedence over wildcard allows. Only an allowed human can use a meta
 command; another captain's bot cannot, even when ordinary peer chat is allowed.
 
-Address only one bot. Commands addressed to a different bot, commands in quoted
-or forwarded text, and code examples are not executed. An unknown command,
-setting or invalid value gets short local usage guidance, never a model prompt.
-Ordinary requests such as `@your-captain explain /config` remain normal chat.
+The bot's mention must be the first token after leading whitespace. Its next
+non-space character must be `/`, followed by a word matching `[a-z][a-z-]*`
+and then whitespace or the end of the message. An unknown command word, setting
+or invalid value gets short local usage guidance, never a model prompt.
+
+Paths such as `@your-captain /api/health is down` and `@your-captain /tmp/foo`
+are ordinary chat, not commands. So are later-slash requests such as
+`@your-captain please run /config later` and messages that mention another bot
+first. Quoted, code or forwarded text before or around the mention remains
+ordinary quoted chat with unchanged text; it never changes a gateway setting.
+An actual meta command must address only one bot.
 `!config` is not an alias. These commands do not change access lists, credentials,
 models, permissions or IRC settings.
 
