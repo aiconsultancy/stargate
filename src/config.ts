@@ -480,6 +480,8 @@ export const ircSchema = z
           )
           .max(20)
           .optional(),
+        /** Quiet window for consecutive live human messages; absent/0 is off. */
+        humanMessageDebounceMs: z.number().int().min(0).max(5000).optional(),
         /** Any SASL account may write unless denied; `*` denies everyone. */
         deniedAccounts: z
           .array(z.union([z.literal("*"), ircAccount]))
