@@ -243,7 +243,12 @@ export function codexConfig(config: Config): CodexConfig {
     check_for_update_on_startup: false,
     allow_login_shell: false,
     history: { persistence: "none" },
-    shell_environment_policy: { exclude: [keyVariable] },
+    shell_environment_policy: {
+      exclude: [keyVariable],
+      // Network seccomp makes getpeername fail with EPERM, which Bash
+      // mistakes for a remote shell at level 1 and sources HOME/.bashrc.
+      set: { SHLVL: "1" },
+    },
     // workspace-write: `directory` and the turn's TMPDIR, not shared /tmp.
     sandbox_workspace_write: { exclude_slash_tmp: true },
   };
