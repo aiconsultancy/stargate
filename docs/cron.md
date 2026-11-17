@@ -158,10 +158,15 @@ replaces a definition.
 ## OpenCode tool and local CLI
 
 Generated profiles expose the `stargate-cronjobs` skill. Bind the captain tool
-to one existing gateway configuration and bot:
+to one existing gateway configuration and bot. For a new profile, copy
+[`team.example.json`](../team.example.json) to `/srv/stargate/team.json`.
+Set its Pi helper's model, provider URL and credential environment reference
+for this instance. Verify the model route and reference in the OpenCode plugin
+host before creating a worker; copying the example does not make it ready.
 
 ```sh
-stargate crew init --directory /srv/captain --project /srv/project \
+stargate crew init --team /srv/stargate/team.json \
+  --directory /srv/captain --project /srv/project \
   --worktrees /srv/crew --cron-config /srv/stargate/stargate.json --cron-bot helper
 ```
 
