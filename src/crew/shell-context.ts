@@ -78,6 +78,13 @@ function candidate(message: ShellContextRecord) {
   return { shellID: metadata.data.shellID, command: description.data };
 }
 
+/** Wire recognition only; callers must still resolve task ownership. */
+export function isShellCompletionCandidate(
+  message: ShellContextRecord,
+): boolean {
+  return candidate(message) !== undefined;
+}
+
 type Witness = {
   shellID: string;
   command: string;
@@ -100,10 +107,14 @@ export class ShellCompletionContext {
   }> = [];
   private launches = new Map<string, Witness[]>();
   private witnesses = 0;
-  constructor(private readonly workerAgent: string) {}
+  private readonly workerAgents: ReadonlySet<string>;
+  constructor(workerAgent: string, crewID = workerAgent) {
+    // Match the two identifiers already accepted by validPeer and final proof.
+    this.workerAgents = new Set([workerAgent, crewID]);
+  }
 
-  get pending() {
-    return this.callbacks.length > 0;
+  get exceededBounds() {
+    return !this.valid;
   }
 
   /** True only means defer a strict candidate; finish must still prove it. */
@@ -152,7 +163,7 @@ export class ShellCompletionContext {
         seen.has(callback.shellID) ||
         entries?.length !== 1 ||
         !witness ||
-        witness.agent !== this.workerAgent ||
+        !this.workerAgents.has(witness.agent ?? "") ||
         witness.command !== callback.command ||
         !Number.isFinite(witness.created) ||
         !Number.isFinite(callback.created) ||

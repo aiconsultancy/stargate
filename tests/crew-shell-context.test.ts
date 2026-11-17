@@ -109,7 +109,11 @@ function history() {
 }
 function api(
   rows: EvidenceMessage[],
-  options: { repeated?: boolean; wrongSession?: boolean } = {},
+  options: {
+    repeated?: boolean;
+    wrongSession?: boolean;
+    pageSize?: number;
+  } = {},
 ): CrewInspectionAPI {
   return {
     session: {
@@ -136,7 +140,10 @@ function api(
         const filtered = rows
           .toReversed()
           .filter((row) => !type || row.type === type);
-        const data = filtered.slice(offset, offset + 2);
+        const data = filtered.slice(
+          offset,
+          offset + Math.min(query.limit ?? 100, options.pageSize ?? 2),
+        );
         return {
           data,
           cursor: {
@@ -204,13 +211,6 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     (rows) => {
       const value = rows[1];
       if (value) value.agent = "foreign";
-    },
-  ],
-  [
-    "crew alias is not the configured native agent",
-    (rows) => {
-      const value = rows[1];
-      if (value) value.agent = task.crewID;
     },
   ],
   [
@@ -346,8 +346,8 @@ for (const [name, change] of invalid)
     await expect(
       verifyResult(reader, task, reconcile, execution, signal(), agent),
     ).rejects.toThrow();
-    expect(await observePlacement(reader, task, signal(), agent)).not.toBe(
-      "placed",
+    expect(await observePlacement(reader, task, signal(), agent)).toBe(
+      "superseded",
     );
     expect(task.status).toBe("uncertain");
     expect(task.released).toBe(0);
@@ -438,4 +438,91 @@ test("a callback after an earlier stop still needs a subsequent visible final", 
   expect(await observePlacement(api(rows), task, signal(), agent)).toBe(
     "placed",
   );
+});
+
+test("retained crew-ID launch and final use the existing protected session alias rule", async () => {
+  const rows = history();
+  for (const row of rows) if (row.type === "assistant") row.agent = task.crewID;
+  expect(await readTaskResult(api(rows), task, signal(), agent)).toBe(
+    "Retained worker final",
+  );
+  expect(
+    (await verifyResult(api(rows), task, reconcile, execution, signal(), agent))
+      .result,
+  ).toBe("Retained worker final");
+  expect(await observePlacement(api(rows), task, signal(), agent)).toBe(
+    "placed",
+  );
+});
+
+test("empty native output has both writer newlines, not an overlapping prefix/suffix", async () => {
+  const rows = history();
+  const callback = rows[2];
+  if (!callback?.text) throw new Error("Missing callback");
+  callback.text = callback.text.replace("Opaque output", "");
+  expect(callback.text.endsWith(">\n\n</shell>")).toBe(true);
+  expect(await readTaskResult(api(rows), task, signal(), agent)).toBe(
+    "Retained worker final",
+  );
+  expect(await observePlacement(api(rows), task, signal(), agent)).toBe(
+    "placed",
+  );
+  callback.text = callback.text.replace("\n\n</shell>", "\n</shell>");
+  await expect(
+    readTaskResult(api(rows), task, signal(), agent),
+  ).rejects.toThrow("later input");
+  expect(await observePlacement(api(rows), task, signal(), agent)).toBe(
+    "superseded",
+  );
+});
+
+function longHistory(count: number) {
+  const rows = history();
+  const retained: EvidenceMessage[] = Array.from(
+    { length: count },
+    (_, index) => ({
+      id: `msg_progress${index}`,
+      type: "assistant",
+      agent,
+      finish: "tool-calls",
+      time: {
+        created: 26 + index / (count + 1),
+        completed: 26 + index / (count + 1),
+      },
+      content: [{ type: "text", text: "Fixture progress" }],
+    }),
+  );
+  // Same native order as the real long turn: input -> first job -> long work -> next job -> final.
+  rows.splice(3, 0, ...retained);
+  return rows;
+}
+
+test("placement and result prove actual-sized long native turns beyond 512 records in authoritative order", async () => {
+  const rows = longHistory(1950);
+  const reader = api(rows, { pageSize: 100 });
+  expect(rows.length).toBeGreaterThan(512);
+  expect(await observePlacement(reader, task, signal(), agent)).toBe("placed");
+  expect(await readTaskResult(reader, task, signal(), agent)).toBe(
+    "Retained worker final",
+  );
+  // A complete, equally long scan disproves ownership: this is a boundary, not unreadable evidence.
+  const origin = rows[1];
+  if (!origin) throw new Error("Missing origin");
+  origin.agent = "foreign";
+  expect(
+    await observePlacement(api(rows, { pageSize: 100 }), task, signal(), agent),
+  ).toBe("superseded");
+});
+
+test("exhausted history bounds stay unknown and the result diagnostic never invents missing history", async () => {
+  const reader = api(longHistory(10020), { pageSize: 100 });
+  expect(await observePlacement(reader, task, signal(), agent)).toBe("unknown");
+  try {
+    await readTaskResult(reader, task, signal(), agent);
+    throw new Error("Expected scan bound refusal");
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toContain("scan bound exceeded");
+    expect(String(error)).not.toContain("Restore");
+  }
 });

@@ -14,6 +14,7 @@ import {
   taskEnvelopePayload,
 } from "./message-protocol";
 import {
+  isShellCompletionCandidate,
   ShellCompletionContext,
   type ShellContextRecord,
 } from "./shell-context";
@@ -186,27 +187,32 @@ type PlacementTask = Pick<
   "id" | "crewID" | "workerSessionID" | "inputID" | "originCaptainID"
 >;
 
-/** Newest first, one native message class per scan. Throws past the bound. */
+/** Newest first, optionally filtered. Enforce bounded pages and row counts. */
 async function* newest(
   api: CrewInspectionAPI,
   sessionID: string,
-  type: "user" | "shell" | "synthetic" | "assistant",
+  type: "user" | "shell" | "synthetic" | undefined,
   signal: AbortSignal,
 ): AsyncGenerator<EvidenceMessage> {
   let cursor: string | undefined;
   const cursors = new Set<string>();
-  for (let page = 0; page < 8; page++) {
+  const limit = type === undefined ? 100 : 64;
+  const pages = type === undefined ? 100 : 8;
+  for (let page = 0; page < pages; page++) {
     signal.throwIfAborted();
     const result = await api.message.list(
       {
         sessionID,
-        limit: 64,
-        ...(cursor ? { cursor } : { order: "desc" as const, type }),
+        limit,
+        ...(cursor
+          ? { cursor }
+          : { order: "desc" as const, ...(type ? { type } : {}) }),
       },
       { signal },
     );
     signal.throwIfAborted();
-    if (result.data.length > 64) throw new CrewError("Invalid evidence page.");
+    if (result.data.length > limit)
+      throw new CrewError("Invalid evidence page.");
     yield* result.data;
     const next = result.cursor.next;
     if (!next) return;
@@ -255,59 +261,40 @@ export async function observePlacement(
     }
     if (!own) return "absent";
     if (later) return "superseded";
-    const shellContext = new ShellCompletionContext(workerAgent);
+    let pendingShellCallback = false;
     // Shell and foreign synthetic inputs also start or steer other work.
     for (const type of ["shell", "synthetic"] as const)
       for await (const message of newest(api, sessionID, type, signal)) {
         if (message.time.created < own.time.created) break;
+        if (message.type !== type) continue;
+        if (type === "synthetic") {
+          if (taskScoped(message, task) || isNativeInstructionContext(message))
+            continue;
+          if (isShellCompletionCandidate(message)) {
+            pendingShellCallback = true;
+            continue;
+          }
+        }
+        return "superseded";
+      }
+    if (pendingShellCallback) {
+      // Cross-type ordering needs native history, never timestamps alone.
+      const proof = new ShellCompletionContext(workerAgent, task.crewID);
+      for await (const message of newest(api, sessionID, undefined, signal)) {
+        if (message.type === "user") {
+          if (message.id !== task.inputID) return "superseded";
+          if (proof.exceededBounds) return "unknown";
+          return proof.finish(message.time.created) ? "placed" : "superseded";
+        }
+        const candidate = proof.track(message);
         if (
-          message.type === type &&
-          !(
-            type === "synthetic" &&
-            (taskScoped(message, task) ||
-              isNativeInstructionContext(message) ||
-              shellContext.track(message))
-          )
+          message.type === "shell" ||
+          (message.type === "synthetic" &&
+            !taskScoped(message, task) &&
+            !isNativeInstructionContext(message) &&
+            !candidate)
         )
           return "superseded";
-      }
-    if (shellContext.pending) {
-      // Typed scans cannot prove order between a launch and its callback.
-      // Only this exceptional path needs the bounded full retained turn.
-      const proof = new ShellCompletionContext(workerAgent);
-      let cursor: string | undefined;
-      const seen = new Set<string>();
-      for (let pageNumber = 0; pageNumber < 8; pageNumber++) {
-        signal.throwIfAborted();
-        const page = await api.message.list(
-          {
-            sessionID,
-            limit: 64,
-            ...(cursor ? { cursor } : { order: "desc" as const }),
-          },
-          { signal },
-        );
-        signal.throwIfAborted();
-        if (page.data.length > 64) return "unknown";
-        for (const message of page.data) {
-          if (message.type === "user") {
-            if (message.id !== task.inputID) return "superseded";
-            return proof.finish(message.time.created) ? "placed" : "unknown";
-          }
-          const candidate = proof.track(message);
-          if (
-            message.type === "shell" ||
-            (message.type === "synthetic" &&
-              !taskScoped(message, task) &&
-              !isNativeInstructionContext(message) &&
-              !candidate)
-          )
-            return "superseded";
-        }
-        const next = page.cursor.next;
-        if (!next || seen.has(next)) return "unknown";
-        seen.add(next);
-        cursor = next;
       }
       return "unknown";
     }
@@ -379,7 +366,7 @@ export async function verifyResult(
   let final: EvidenceMessage | undefined;
   let unansweredShellCallback = false;
   const cursors = new Set<string>();
-  const shellContext = new ShellCompletionContext(workerAgent);
+  const shellContext = new ShellCompletionContext(workerAgent, task.crewID);
   for (let pageNumber = 0; pageNumber < 8; pageNumber++) {
     signal.throwIfAborted();
     const page = await api.message.list(

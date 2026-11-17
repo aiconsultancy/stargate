@@ -98,7 +98,7 @@ export async function readTaskResult(
   let final: ResultMessage | undefined;
   let unansweredShellCallback = false;
   const cursors = new Set<string>();
-  const shellContext = new ShellCompletionContext(workerAgent);
+  const shellContext = new ShellCompletionContext(workerAgent, task.crewID);
   for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
     signal.throwIfAborted();
     const page = await api.message.list(
@@ -166,6 +166,10 @@ export async function readTaskResult(
     cursor = next ?? undefined;
     if (!cursor) break;
   }
+  if (cursor)
+    throw new CrewError(
+      "Result history scan bound exceeded (100 pages, up to 10,000 records). The original input is unverified beyond this window; inspect its retained turn without replaying it.",
+    );
   throw new CrewError(
     "The admitted input is absent from retained history. Restore this session's history before retrying status; do not replay the assignment.",
   );

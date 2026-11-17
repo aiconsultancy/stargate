@@ -522,18 +522,27 @@ for (const changes of [
     }
   });
 
-for (const callback of ["owned", "missing", "foreign"] as const)
-  test(`native shell callback cannot launder unsafe or unowned review tools: ${callback}`, async () => {
+for (const callback of ["owned", "foreign"] as const)
+  test(`review shell callback keeps unsafe-tool refusal: ${callback}`, async () => {
     const b = binding();
     const f = fixture(b, { shellCallback: callback });
     try {
       await expect(f.backend.readReview(b, signal())).rejects.toThrow(
-        callback === "owned"
-          ? "outside the read-only review boundary"
-          : "shell callback ownership",
+        "outside the read-only review boundary",
       );
       expect(f.calls.every((call) => call.method === "GET")).toBe(true);
     } finally {
       await f.close();
     }
   });
+
+test("unowned review shell notice retains the original pending boundary behaviour", async () => {
+  const b = binding();
+  const f = fixture(b, { shellCallback: "missing" });
+  try {
+    expect(await f.backend.readReview(b, signal())).toBeUndefined();
+    expect(f.calls.every((call) => call.method === "GET")).toBe(true);
+  } finally {
+    await f.close();
+  }
+});

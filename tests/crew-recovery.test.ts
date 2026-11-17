@@ -269,6 +269,53 @@ test("mapped native profiles recover old-named uncertain answers and retain old 
     const task = await f.dispatch();
     f.engine.state.uncertain(task.id);
     f.finish(task);
+    const final = f.messages.at(-1);
+    if (!final) throw new Error("Missing retained final");
+    final.time = { created: 8, completed: 9 };
+    f.messages.splice(
+      f.messages.length - 1,
+      0,
+      {
+        id: "msg_mappedLaunch",
+        type: "assistant",
+        agent: "worker",
+        finish: "tool-calls",
+        time: { created: 2, completed: 3 },
+        content: [
+          {
+            type: "tool",
+            name: "shell",
+            executed: false,
+            state: {
+              status: "completed",
+              input: { command: "echo mapped" },
+              content: [{ type: "text", text: "Background" }],
+              metadata: {
+                shellID: "sh_mapped",
+                status: "running",
+                truncated: false,
+              },
+            },
+          },
+        ],
+      },
+      {
+        id: "msg_mappedCallback",
+        type: "synthetic",
+        time: { created: 4 },
+        description: "echo mapped",
+        metadata: {
+          source: "shell",
+          shellID: "sh_mapped",
+          jobID: "sh_mapped",
+          state: "completed",
+          truncated: false,
+          exit: 0,
+        },
+        text: '<shell id="sh_mapped" state="completed" command="echo mapped">\nFixture output\n</shell>',
+      },
+    );
+    const retainedHistory = JSON.stringify(f.messages);
     mapped = await CrewEngine.open(
       {
         ...f.options,
@@ -315,6 +362,7 @@ test("mapped native profiles recover old-named uncertain answers and retain old 
       result: "Implemented and tested.",
     });
     expect(f.counts().prompts).toBe(1);
+    expect(JSON.stringify(f.messages)).toBe(retainedHistory);
   } finally {
     await mapped?.close();
     await f.close();

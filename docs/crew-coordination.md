@@ -237,16 +237,18 @@ worker records the result. Stored or deferred mail is not confirmed delivery;
 retain the original result for later collection, without resubmitting work.
 
 Background shell completion notices are native context only when retained history
-proves a unique prior `shell` launch by the configured worker in the same original
-task turn. The callback's job/shell IDs, command and native wrapper must match that
+proves a unique prior `shell` launch by the task-owned worker in the same original
+task turn. Launch agent identifiers follow the same configured-agent or retained
+crew-ID rule as native session and final-answer validation. The callback's job/shell IDs, command and native wrapper must match that
 launch. User shell commands, unknown notices, foreign or missing launch witnesses
 remain boundaries; callback output stays opaque. A shell exit code is not a worker
 final answer. Completion still needs the original task envelope and a successful,
 visible native `stop` answer. No history or task is rewritten to supply that proof.
 
 Placement keeps its cheap input scans; only a candidate callback adds a bounded
-full-turn history scan to prove ordering. Missing history, pagination failures or
-exhausted bounds remain unknown. Explicit reconciliation still refuses compaction;
+full-turn history scan (up to 100 pages of 100 records) to prove native ordering.
+A complete scan with an unowned callback is superseded by that boundary. Missing
+history, pagination failures or exhausted bounds remain unknown. Explicit reconciliation still refuses compaction;
 this callback handling adds no resume, replay, cancellation or permission operation.
 Read-only review evidence keeps all maker and unsafe-tool checks: a shell callback
 cannot make an unsafe shell launch acceptable as a read-only review.

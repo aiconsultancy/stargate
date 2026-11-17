@@ -1784,12 +1784,7 @@ export class CrewEngine {
       ? await this.inspectionAPI({ ...caller, signal }).catch(() => null)
       : null;
     let placement: Placement = api
-      ? await observePlacement(
-          api,
-          task,
-          signal,
-          this.member(task.crewID).agent ?? task.crewID,
-        )
+      ? await observePlacement(api, task, signal, member.agent ?? task.crewID)
       : "unknown";
     let withdrawn = false;
     if (placement === "queued" && api?.session.inbox.cancel) {
@@ -1803,7 +1798,7 @@ export class CrewEngine {
         api,
         task,
         signal,
-        this.member(task.crewID).agent ?? task.crewID,
+        member.agent ?? task.crewID,
       );
       withdrawn = placement === "absent";
     }
@@ -2208,7 +2203,7 @@ export class CrewEngine {
               api,
               task,
               caller.signal,
-              this.member(task.crewID).agent ?? task.crewID,
+              member.agent ?? task.crewID,
             )
           : "unknown";
         if (placement === "queued" || placement === "placed") {
