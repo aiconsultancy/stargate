@@ -22,6 +22,7 @@ import {
   TranscriptUnavailable,
 } from "../backend";
 import { type BackendConfig, secret } from "../config";
+import { isNativeInstructionContext } from "../crew/instruction-context";
 import { CrewReporting } from "../crew/report-rpc";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
 import type {
@@ -640,7 +641,10 @@ export class OpenCodeBackend implements AgentBackend {
                 ].includes(part.name),
             ),
           });
-        } else if (["user", "shell", "synthetic"].includes(message.type))
+        } else if (
+          ["user", "shell", "synthetic"].includes(message.type) &&
+          !isNativeInstructionContext(message)
+        )
           assistants.length = 0;
       }
       const next = page.cursor.next;

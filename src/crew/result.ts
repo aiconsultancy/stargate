@@ -4,6 +4,7 @@ import type {
   SessionMessageInfo,
 } from "@opencode/client";
 import { z } from "zod";
+import { isNativeInstructionContext } from "./instruction-context";
 import {
   crewMessageMetadataKey,
   taskEnvelopePayload,
@@ -16,6 +17,7 @@ export interface ResultMessage {
   type: SessionMessageInfo["type"];
   time: { created: number; completed?: number };
   text?: string;
+  description?: string;
   metadata?: Record<string, unknown>;
   agent?: string;
   finish?: string;
@@ -129,7 +131,9 @@ export async function readTaskResult(
       }
       if (
         message.type === "user" ||
-        (message.type === "synthetic" && !matchesUrgency(message, task)) ||
+        (message.type === "synthetic" &&
+          !matchesUrgency(message, task) &&
+          !isNativeInstructionContext(message)) ||
         message.type === "shell"
       )
         throw new CrewError(
