@@ -4,15 +4,20 @@ import { z } from "zod";
 // keep the original strict union as the validator before any tool can execute.
 // Operation handlers parse again to apply their original branch defaults.
 export function objectToolInput(
-  schema: z.ZodDiscriminatedUnion<readonly z.ZodObject[]>,
+  schema:
+    | z.ZodDiscriminatedUnion<readonly z.ZodObject[]>
+    | z.ZodUnion<readonly z.ZodObject[]>,
 ) {
-  const fields = new Map<string, z.ZodType[]>();
+  const fields = new Map<string, z.core.$ZodType[]>();
   for (const option of schema.options) {
     for (const [name, field] of Object.entries(option.shape)) {
       const variants = fields.get(name) ?? [];
-      variants.push(
-        field instanceof z.ZodDefault ? field.removeDefault() : field,
-      );
+      let advertised: z.core.$ZodType =
+        field instanceof z.ZodDefault ? field.removeDefault() : field;
+      if (advertised instanceof z.ZodOptional) advertised = advertised.unwrap();
+      // Advertise a transform's input; the original validator still normalizes it.
+      if (advertised instanceof z.ZodPipe) advertised = advertised.in;
+      variants.push(advertised);
       fields.set(name, variants);
     }
   }

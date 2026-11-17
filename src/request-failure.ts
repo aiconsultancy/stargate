@@ -113,6 +113,7 @@ export type RequestFailure =
   | "interrupted"
   | "reaction"
   | "history"
+  | "muted"
   | ProviderFailure;
 
 type FixedFailure = Exclude<RequestFailure, ProviderFailure>;
@@ -193,6 +194,10 @@ function describe(cause: RequestFailure): { title: string; text: string } {
 }
 
 const failures = {
+  muted: {
+    title: "Notification suppressed",
+    text: "This queued chat notification was intentionally suppressed by a saved mute. No agent turn was started and no Slack error reply is sent. Unmuting does not replay it.",
+  },
   timeout: {
     title: "Time limit reached",
     text: "Stargate reached the request time limit and requested cancellation. Work may have run; it was not repeated. Check agent state before trying again. For longer work, increase turnTimeoutMs or split the request.",

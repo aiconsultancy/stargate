@@ -12,7 +12,7 @@ import { isLoopbackAddress } from "./loopback";
 import {
   mentionNameSchema,
   mentionNamesSchema,
-  mentionRuleSchema,
+  textMentionRuleSchema,
 } from "./mentions";
 import { maintenanceSchema } from "./nightly/config";
 import {
@@ -297,7 +297,7 @@ export const botSchema = z.strictObject({
      * In these channels, a top-level message whose text contains one of the
      * names starts a conversation like a mention. Absent is off.
      */
-    textMentions: mentionRuleSchema.optional(),
+    textMentions: textMentionRuleSchema.optional(),
   }),
   backend: backendSchema,
   cronjobs: cronjobsSchema.optional(),
