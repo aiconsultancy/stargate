@@ -1,5 +1,9 @@
 import { request } from "node:http";
-import { FleetError, type FleetRequest } from "./protocol";
+import {
+  FLEET_REVIEW_TRANSPORT_BYTES,
+  FleetError,
+  type FleetRequest,
+} from "./protocol";
 
 /** A bounded, cancellable local call. Never falls back to a TCP endpoint. */
 export function fleetRequest(
@@ -10,6 +14,14 @@ export function fleetRequest(
   return new Promise((resolve, reject) => {
     signal.throwIfAborted();
     const body = JSON.stringify(input);
+    if (Buffer.byteLength(body, "utf8") > FLEET_REVIEW_TRANSPORT_BYTES) {
+      reject(
+        new FleetError(
+          "Fleet control JSON exceeds its technical transport capacity; use supported context delivery, not truncation",
+        ),
+      );
+      return;
+    }
     const req = request(
       {
         socketPath,
@@ -27,7 +39,7 @@ export function fleetRequest(
         let bytes = 0;
         response.on("data", (chunk: Buffer) => {
           bytes += chunk.length;
-          if (bytes > 1_000_000) {
+          if (bytes > FLEET_REVIEW_TRANSPORT_BYTES) {
             req.destroy();
             reject(
               new FleetError(

@@ -578,7 +578,11 @@ export class OpenCodeBackend implements AgentBackend {
             (binding.reviewer.kind === "crew"
               ? message.text !== reviewNativePrompt(binding)
               : !message.text.endsWith(
-                  reviewContextPrompt(binding.context, binding.contextText),
+                  reviewContextPrompt(
+                    binding.context,
+                    binding.contextText,
+                    binding.maxDiffBytes,
+                  ),
                 ))
           )
             throw new Error(
