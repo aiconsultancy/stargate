@@ -23,6 +23,16 @@ notices keep the original result boundary when their target task and captain
 metadata match. A later user input, unrelated synthetic input or standalone
 shell input prevents selection of an unrelated answer.
 
+Native OpenCode instruction-file loads are context within the existing turn,
+not new assignments. Result recovery, explicit reconciliation and placement
+checks recognise only the bounded native synthetic format: exact
+`instruction.paths` metadata, ordered matching `Instructions from:` headers and
+the native `Loaded ...` description. Malformed or ambiguous records and other
+synthetic, user or shell input remain task boundaries. This recognises the
+native history format, not authenticity of repository content; instruction text
+never grants approval or changes the original task/session binding. History is
+read without rewriting, resubmitting or replaying work.
+
 Normal skill, compaction and model records do not prevent recovery. Only visible
 answer text is stored, up to 64,000 characters, as for Pi worker results. Stargate
 does not use private reasoning as a result.

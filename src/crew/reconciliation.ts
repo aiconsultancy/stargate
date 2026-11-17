@@ -8,6 +8,7 @@ import type {
 } from "@opencode/client";
 import { z } from "zod";
 import type { CrewSession } from "./engine";
+import { isNativeInstructionContext } from "./instruction-context";
 import {
   crewMessageMetadataKey,
   taskEnvelopePayload,
@@ -66,6 +67,7 @@ export interface EvidenceMessage {
   time: { created: number; completed?: number };
   metadata?: Record<string, unknown>;
   text?: string;
+  description?: string;
   agent?: string;
   finish?: string;
   error?: unknown;
@@ -252,7 +254,10 @@ export async function observePlacement(
         if (message.time.created < own.time.created) break;
         if (
           message.type === type &&
-          !(type === "synthetic" && taskScoped(message, task))
+          !(
+            type === "synthetic" &&
+            (taskScoped(message, task) || isNativeInstructionContext(message))
+          )
         )
           return "superseded";
       }
@@ -365,7 +370,10 @@ export async function verifyResult(
       }
       if (message.type === "assistant") {
         final ??= message;
-      } else if (message.type !== "idle") {
+      } else if (
+        message.type !== "idle" &&
+        !isNativeInstructionContext(message)
+      ) {
         // Interleaved prompts, compaction or steering can change result lineage.
         throw new CrewError(
           "Another input or control message follows this task; automatic evidence matching refused. Inspect the exact task history.",

@@ -626,7 +626,7 @@ for (const notice of [
   });
 }
 
-test("recovery survives reopening and traverses message pages and skill records", async () => {
+test("recovery survives reopening and traverses native instruction context and skill records", async () => {
   const f = await fixture();
   const reopened = await CrewEngine.open(
     f.options,
@@ -640,6 +640,16 @@ test("recovery survives reopening and traverses message pages and skill records"
   try {
     const task = await f.dispatch();
     f.messages.push({ id: "msg_skill", type: "skill", time: { created: 2 } });
+    f.messages.push({
+      id: "msg_instructions",
+      type: "synthetic",
+      time: { created: 2 },
+      metadata: {
+        instruction: { paths: ["/fixture/worker/nested/AGENTS.md"] },
+      },
+      description: "Loaded nested/AGENTS.md",
+      text: "Instructions from: /fixture/worker/nested/AGENTS.md\n# Fixture instructions",
+    });
     f.finish(task);
     f.engine.state.uncertain(task.id);
     expect(
