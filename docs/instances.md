@@ -2,7 +2,8 @@
 
 Use this procedure to prepare another Stargate installation with a different
 captain and crew. It does not copy an existing installation or its credentials.
-The example selects Cain, Shaw and Fisk. Names and normalized agent IDs must
+The example selects Cain, Shaw, Fisk and a tools-off Pi helper, Twiki.
+Names and normalized agent IDs must
 match. Do not retain hidden Mario, Luigi, Daisy, Toad or Bowser aliases.
 
 Preparation is local. Creating Slack apps, installing services and starting
@@ -66,7 +67,11 @@ optional, requires discovery/approval, and does not create crew root sessions.
 
 Copy [`teams/pegasus.example.json`](../teams/pegasus.example.json) to a private
 instance directory. Change its captain, crew, roles and explicit models before
-initialization. Do not omit `--team`: omission selects the Bowser starter.
+initialization. `--team` is required and must include a Pi helper with an
+explicit model and provider. Set the helper's provider URL and credential
+environment reference for this instance. Verify model availability and the
+reference in the OpenCode plugin host; example configuration is not readiness.
+Omitting `--team` fails rather than selecting the legacy Bowser starter.
 Do not infer authority from names. All trusted OpenCode profiles grant broad
 host commands and edits, including `research`; specialisms guide assignments.
 Review these grants before creating the profile. Pi tools remain explicit.

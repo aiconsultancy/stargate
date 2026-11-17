@@ -443,6 +443,59 @@ test("portable Bosun is an ordinary configured worker, not a runtime default", a
   );
 });
 
+for (const example of [
+  {
+    document: "instances.md",
+    teamPath: "teams/pegasus.example.json",
+    teamArgument: '"$ROOT/team.json"',
+    crewIDs: ["shaw", "fisk"],
+  },
+  {
+    document: "cron.md",
+    teamPath: "team.example.json",
+    teamArgument: "/srv/stargate/team.json",
+    crewIDs: ["starbuck", "gaeta", "bosun", "apollo"],
+  },
+]) {
+  test(`documented ${example.document} new-ship setup includes a tools-off Pi helper`, async () => {
+    const { options } = await fixture();
+    const document = await readFile(
+      join(import.meta.dir, "..", "docs", example.document),
+      "utf8",
+    );
+    const command = document.match(/crew init[^`]+/)?.[0];
+    expect(command).toContain(`--team ${example.teamArgument}`);
+    const team = teamSchema.parse(
+      await Bun.file(join(import.meta.dir, "..", example.teamPath)).json(),
+    );
+    expect(
+      team.crew.filter(({ backend }) => !backend).map(({ id }) => id),
+    ).toEqual(example.crewIDs);
+    const helper = team.crew.find(({ backend }) => backend?.provider);
+    expect(helper?.backend?.tools).toBe("none");
+    const path = join(options.projectDirectory, "team.json");
+    await writeFile(path, JSON.stringify(team));
+    expect(
+      await runCli([
+        "crew",
+        "init",
+        "--team",
+        path,
+        "--directory",
+        options.directory,
+        "--project",
+        options.projectDirectory,
+        "--worktrees",
+        options.worktreeDirectory,
+        "--base",
+        "main",
+        "--mesij-command",
+        options.mesijCommand,
+      ]),
+    ).toEqual({ command: "exit" });
+  });
+}
+
 test("ship initialization rejects a linked record without changing its target", async () => {
   const { options } = await fixture();
   const ship = join(options.directory, ".local", "ship");
