@@ -438,10 +438,12 @@ and `fleetControl.targets`. Without `fleetChannels`, existing membership and
 wake configuration are left unchanged. In this explicit profile, the gateway
 joins only target channels whose accounts are enrolled in `fleetPolicy.agentAccounts`
 and whose target `role` is `captain`, in addition to its explicit channels.
-Rear-admiral/crew targets and targets without a role add no membership. This
+The ship's own captain and crew accounts are excluded from derived membership
+and peer trust. Rear-admiral/crew targets and targets without a role add no membership. This
 uses the operator's roster, never IRC discovery or a naming pattern. An
 unrelated account or server channel gains no membership.
-Audit-channel overlap and the 20-channel limit still fail validation. Stargate
+Invalid derived IRC channel names, audit-channel overlap and the 20-channel
+limit fail validation. Stargate
 joins existing channels; agents must not create or administer channels.
 
 Set the role's `fleetChannels` once to get standard wake behaviour without a
@@ -456,11 +458,25 @@ command roots wake it, while command replies need confirmed participation or
 an explicit current-nick invitation. A rear admiral's `home` is its private
 coordination room: human messages and replies wake it there, and other joined
 rooms require a mention. Visitors require an exact current-nick mention.
-Explicit `humanWakeChannels`, account allowlists, denies and peer caps remain
-authoritative. Empty peer lists in this profile use the enrolled target roster;
-set `peerTurnsPerHour: 0` to disable peer intake. Non-fleet registrations retain
+Explicit `humanWakeChannels`, legacy `wakeChannels`, account allowlists, denies
+and peer caps remain authoritative. An explicit legacy wake list (including
+`[]`) prevents automatic human-wake and strict-mention defaults. Use
+`channelRequests: "standard"` to explicitly retain ordinary IRC mention,
+all-call, reply and replay admission; `"nick-mention"` selects strict admission.
+When `peerCaptains` is omitted, only enrolled captain/rear-admiral targets become
+peers. An explicit `peerCaptains: []` disables automatic peer trust;
+`peerTurnsPerHour: 0` disables peer intake. The normal 50-peer bound still
+applies; an explicit narrower peer list can limit a larger roster.
+The fleet policy itself restricts enrolled accounts without synthesising an
+extra account allowlist or imposing a new 50-human/agent combined limit.
+Non-fleet registrations retain
 their existing defaults. This configuration does not widen native permissions
 or create identities, human authority or an approval route.
+
+Fleet defaults are a runtime view. Parsing or saving a configuration, including
+`stargate bot add`, does not persist computed channels, peer lists, access or
+wake rules as operator choices. A later roster or human-policy change therefore
+recalculates omitted defaults instead of retaining stale derived grants.
 
 Set a captain's rear-admiral target channel to that captain's own room, where
 the rear admiral already listens. Captains can then tag the rear admiral there,
@@ -497,7 +513,9 @@ enrolled peers may still start a context turn with an exact current-nick mention
 The existing peer limit remains **5 per channel or DM per rolling hour** by
 default; `access.peerTurnsPerHour` can explicitly set 0–600, including 0 to
 disable peer intake. Peers get no automatic human wake or human approval.
-Their original addressing is retained and rechecked before execution/delivery.
+Their original text and the exact admitted nick are retained. Execution and
+delivery recheck current identity/access/peer policy against that captured
+recipient, so a fallback nick or nick recovery does not discard accepted work.
 An old queued row without that explicit address remains refused and retained.
 
 The reserved `[fleet_dispatch ...]` label must match a retained dispatch
@@ -507,12 +525,19 @@ Only the protected correlated native outcome returns through the durable outbox
 to its original conversation; arbitrary IRC text cannot select that destination,
 declare completion or impersonate a human approval. Ordinary peer chat does not
 create a correlated assignment or completion receipt. Silent acknowledgements
-remain appropriate, and the persistent peer cap bounds feedback loops.
+remain appropriate. Ordinary addressed replies, including acknowledgements,
+can start another peer turn. Two agents that keep addressing each other can
+therefore use up to five turns each per conversation in a rolling hour; the cap
+persists across restarts and is not a guarantee of zero feedback. Each joined
+channel is a separate conversation. No prose-based acknowledgement filter is
+used. Operators can explicitly narrow peers or lower the peer cap when needed.
 
 Outside protected human wake channels, an explicit leading address to a known
-other fleet agent (`vance:` or `vance,`) prevents a results-mode human message
+other fleet agent (`vance:`, `vance,` or `@vance:`) prevents a results-mode human or peer message
 from waking this connection. A later mention or reply tag does not override
-that recipient. Protected home/command human wake rules remain authoritative:
+that recipient. A leading list of explicit `@nick` mentions can intentionally
+address several agents in one atomic notice; mentions later in prose do not
+change the leading recipient. Protected home/command human wake rules remain authoritative:
 their top-level delivery still reaches the configured captains, and their reply
 policy still applies. Fleet account names and target IDs use the server's case
 mapping. Other human messages retain their usual mention and wake rules.

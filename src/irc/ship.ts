@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { type PromptSourceContext, sourceLine } from "../backend";
-import { type BackendConfig, type IrcConfig, secret } from "../config";
+import {
+  type BackendConfig,
+  effectiveIrcConfig,
+  type IrcConfig,
+  secret,
+} from "../config";
 import { type OutboxPage, outboxMaxAgeMs } from "../crew/irc-rpc";
 import type { FleetSource } from "../fleet/protocol";
 import { fleetAuthority, fleetInstructions } from "../fleet-policy";
@@ -323,15 +328,22 @@ function shipTransport(
   sessionReady?: GatewayTransport["sessionReady"],
 ): GatewayTransport {
   const authorized: GatewayTransport["allowed"] = (user, channel, job) => {
-    if (
-      !ircAllowed(config, member, user, channel, client.fold) ||
-      !ircResultJobAllowed(config, member, client.nick, user, job, client.fold)
-    )
-      return false;
-    if (!config.fleetControl?.results) return true;
     const stored = job?.eventId
       ? store.jobByEvent(member.key, job.eventId)
       : null;
+    if (
+      !ircAllowed(config, member, user, channel, client.fold) ||
+      !ircResultJobAllowed(
+        config,
+        member,
+        client.nick,
+        user,
+        stored ?? job,
+        client.fold,
+      )
+    )
+      return false;
+    if (!config.fleetControl?.results) return true;
     // Recheck original addressing too: the JSON wrapper must not conceal a
     // source that a later policy would refuse before execution or delivery.
     return (
@@ -431,7 +443,9 @@ function questionHuman(
   return (
     !!config.fleetPolicy?.humanAccounts.length &&
     !shipAccounts(config, caseFold).has(caseFold(user)) &&
-    !config.access.peerCaptains.some((p) => caseFold(p) === caseFold(user)) &&
+    !(config.access.peerCaptains ?? []).some(
+      (p) => caseFold(p) === caseFold(user),
+    ) &&
     fleetAuthority(config.fleetPolicy, user) === "human"
   );
 }
@@ -534,6 +548,7 @@ export class IrcShip {
     log: Logger,
     options: ShipOptions = {},
   ) {
+    config = effectiveIrcConfig(config);
     const ca = config.server.caFile
       ? await readFile(config.server.caFile, "utf8")
       : undefined;
@@ -613,6 +628,7 @@ export class IrcShip {
     next: IrcConfig,
     env: NodeJS.ProcessEnv,
   ): Promise<IrcReload> {
+    next = effectiveIrcConfig(next);
     const base = this.config;
     if (next.id !== base.id)
       throw new Error("IRC registration ID changed; restart required");

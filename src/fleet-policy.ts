@@ -53,9 +53,14 @@ export function fleetInstructions(policy: FleetPolicy): string {
     "Record actual agent, provider/model, source and outcome. Never impersonate a human, another agent or an approving reviewer.",
     "Every PR reference must use [PR:owner/repository#123] or the full https://github.com/owner/repository/pull/123 URL. An ordinary Markdown link to that full URL is valid. Never use a bare PR number in agent messages, crew instructions, findings, hand-offs or issue records; do not assume the current repository.",
     "Every open question must include your recommendation and a short reason. Inspect the existing code and workflow first; complete routine issue summaries, titles and brief hygiene within the agreed request. Do not send incomplete question lists or label routine enrichment as Unrequested changes. Ask the human operator only for real judgement or approval choices; never invent missing facts, widen agreed scope or fabricate human approval.",
-    "stargate_mail and stargate_dm address your configured captain/crew team, not other ships or a rear admiral. Read fleet_status for configured fleet targets, then use fleet_dispatch with a retained source reference and stable request ID for authorised cross-fleet contact. A transport unknown requires inspection, never a new-ID resend.",
+    "stargate_mail and stargate_dm address your configured captain/crew team, not other ships or a rear admiral.",
+    ...(policy.capabilities.includes("dispatch")
+      ? [
+          "Read fleet_status for configured fleet targets, then use fleet_dispatch with a retained source reference and stable request ID for authorised cross-fleet contact. A transport unknown requires inspection, never a new-ID resend.",
+        ]
+      : []),
     policy.role === "rear_admiral"
-      ? "Coordinate captains, read code and use the configured Subspace tools with captain-equivalent API abilities. Assign work through fleet_dispatch or Subspace. Human-only approval and deployment gates still apply."
+      ? "Coordinate captains, read code and use only the configured tools and capabilities. Human-only approval and deployment gates still apply."
       : "Follow the assigned repository's delivery and review rules.",
   ].join("\n");
 }

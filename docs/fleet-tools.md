@@ -163,14 +163,17 @@ intake, its real SASL sender, target account, joined channel, pinned session,
 full payload and server message ID must match the retained delegation. The
 first admitted event is claimed durably. A copied packet with another event
 ID cannot start another execution. Ordinary enrolled peer chat can still start
-an agent-context turn when it explicitly mentions the current nick, within the
-existing persistent peer cap. Reserved dispatch labels need exact retained
+an agent-context turn when it explicitly mentions the current nick and is not
+addressed at its start to a different fleet recipient, within the existing
+persistent peer cap. The accepted recipient is retained across nick changes;
+current enrolment and access policy are still rechecked before work/delivery.
+Reserved dispatch labels need exact retained
 correlation and never fall back to ordinary chat. Only gateway-produced
 correlated results can declare completion or select the durable return route;
 ordinary peer text never acquires human approval. Captains return correlated
 outcomes through the durable outbox below.
 
-A human message explicitly addressed at its start to another known fleet
+A human or ordinary peer message explicitly addressed at its start to another known fleet
 account or target ID (`vance:` or `vance,`) does not separately wake this
 captain because its name occurs later, except where protected human wake rules
 explicitly deliver a home/command request. A reply tag alone does not override

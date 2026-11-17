@@ -448,147 +448,224 @@ const ircFeatureDefaults = {
   readMarker: true,
 };
 
-export const ircSchema = z
-  .strictObject({
-    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-    displayName: z.string().trim().min(1).max(100).optional(),
-    server: ircServerSchema,
-    /** Expected SASL account of the captain bot. */
-    account: ircAccount,
-    passwordEnv: envName.optional(),
-    /** Owner-only PEM bundle used for SASL EXTERNAL instead of a password. */
-    clientPemFile: absolutePath.optional(),
-    /** Defaults to the account. */
-    nick: ircAccount.optional(),
-    /** The only channels the captain joins; the first is the ship channel. */
-    channels: z.array(ircChannel).min(1).max(20),
-    /** Role-aware fleet defaults; home is this ship or the rear admiral's room. */
-    fleetChannels: z
-      .strictObject({ home: ircChannel, command: ircChannel })
-      .optional(),
-    access: z
-      .strictObject({
-        /** When set, only these exact SASL accounts may start a turn. */
-        allowedAccounts: z.array(ircAccount).min(1).max(50).optional(),
-        /** Require an exact current nick mention in joined channels and a real msgid. */
-        channelRequests: z.literal("nick-mention").optional(),
-        /** Explicit channels that wake on every admitted account's message. */
-        wakeChannels: z.array(ircChannel).max(20).optional(),
-        /** Captain-only automatic human requests; reply membership is gateway-owned. */
-        humanWakeChannels: z
-          .array(
-            z.strictObject({
-              channel: ircChannel,
-              replies: z.enum(["all", "participating"]),
-            }),
-          )
-          .max(20)
-          .optional(),
-        /** Quiet window for consecutive live human messages; absent/0 is off. */
-        humanMessageDebounceMs: z.number().int().min(0).max(5000).optional(),
-        /** Any SASL account may write unless denied; `*` denies everyone. */
-        deniedAccounts: z
-          .array(z.union([z.literal("*"), ircAccount]))
-          .default([]),
-        /** `*` also blocks direct messages. */
-        deniedChannels: z
-          .array(z.union([z.literal("*"), ircChannel]))
-          .default([]),
-        /** Words that address the captain in its channels, like a nick mention. */
-        textMentions: mentionNamesSchema.optional(),
-        /**
-         * All-call words (whole words, any case): a channel message that
-         * contains one reaches the captain and every crew member in that
-         * channel. `[]` turns all-calls off.
-         */
-        allCallWords: z
-          .array(mentionNameSchema)
-          .max(20)
-          .default([...defaultAllCallWords]),
-        /** Accounts of other fleet captains: peer rules, 5 per target an hour. */
-        peerCaptains: z.array(ircAccount).max(50).default([]),
-        /** Peer turns per conversation/hour; absent keeps the default of five. */
-        peerTurnsPerHour: z.number().int().min(0).max(600).optional(),
-        /**
-         * Ship (captain/crew) messages admitted per agent in a rolling hour.
-         * A channel's cap is this value times the ship agents configured in
-         * it, counted across the whole ship. `0` turns ship messages off.
-         */
-        shipTurnsPerAgentPerHour: z.number().int().min(0).max(600).default(60),
-        /**
-         * All-call turns start this many milliseconds apart: the captain at
-         * once, then each crew member of the channel in configuration order.
-         * Each later turn lists what was said since the all-call. `0` is off.
-         */
-        allCallStaggerMs: z.number().int().min(0).max(30_000).default(4000),
-      })
-      .default({
-        deniedAccounts: [],
-        deniedChannels: [],
-        peerCaptains: [],
-        allCallWords: [...defaultAllCallWords],
-        shipTurnsPerAgentPerHour: 60,
-        allCallStaggerMs: 4000,
-      }),
-    crew: z.array(ircCrewSchema).max(20).default([]),
-    features: ircFeaturesSchema.default(ircFeatureDefaults),
-    /**
-     * Reactions (+draft/react) that stop an active turn when a person
-     * reacts to its request or to a bot message answering it. `[]` is off.
-     */
-    stopReactions: z
-      .array(z.string().min(1).max(32))
-      .max(10)
-      .default(["✋", "🛑"]),
-    /** Catch-up replays at most this many hours, whatever the cursor. */
-    catchUpHours: z.number().int().min(1).max(168).default(24),
-    /**
-     * Speech-to-text for audio and video files in admitted messages, as for
-     * Slack bots; absent is off. Spoken mentions are Slack-only.
-     */
-    transcription: transcriptionSchema
-      .refine(
-        (value) => value.spokenMentions === undefined,
-        "spokenMentions is not supported on IRC",
-      )
-      .optional(),
-    /**
-     * DM audit mirror: the captain connection posts a copy of every direct
-     * message that the captain or a crew connection receives or sends to
-     * this channel. Absent is off. The channel is never a conversation.
-     */
-    audit: z.strictObject({ channel: ircChannel }).optional(),
-    /**
-     * `agent`: the captain answers direct messages (crew ignore them).
-     * `redirect`: every connection answers a direct message with a NOTICE
-     * that points to its ship channel and never acts on its content.
-     */
-    dmPolicy: z.enum(["agent", "redirect"]).default("agent"),
-    /**
-     * Crew messaging over IRC (OpenCode captain; opt-in). `sessions` binds
-     * each crew IRC session to its crew member in the crew plugin, so
-     * stargate_dm and stargate_mail work there. `ircCopies` also sends each stargate_dm
-     * between two ship agents with IRC connections as an IRC DM from the
-     * sender's account.
-     */
-    crewMessaging: z
-      .strictObject({
-        sessions: z.boolean().default(false),
-        ircCopies: z.boolean().default(false),
-      })
-      .default({ sessions: false, ircCopies: false }),
-    backend: backendSchema,
-    fleetPolicy: fleetPolicySchema.optional(),
-    fleetControl: fleetControlSchema.optional(),
-    concurrency: z.number().int().min(1).max(32).default(4),
-    turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
-  })
-  .superRefine((irc, context) => {
-    const roster = irc.fleetControl?.targets.filter((target) =>
-      irc.fleetPolicy?.agentAccounts.some(
-        (account) => fold(account) === fold(target.account),
-      ),
-    );
+const ircConfiguredSchema = z.strictObject({
+  id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+  displayName: z.string().trim().min(1).max(100).optional(),
+  server: ircServerSchema,
+  /** Expected SASL account of the captain bot. */
+  account: ircAccount,
+  passwordEnv: envName.optional(),
+  /** Owner-only PEM bundle used for SASL EXTERNAL instead of a password. */
+  clientPemFile: absolutePath.optional(),
+  /** Defaults to the account. */
+  nick: ircAccount.optional(),
+  /** The only channels the captain joins; the first is the ship channel. */
+  channels: z.array(ircChannel).min(1).max(20),
+  /** Role-aware fleet defaults; home is this ship or the rear admiral's room. */
+  fleetChannels: z
+    .strictObject({ home: ircChannel, command: ircChannel })
+    .optional(),
+  access: z
+    .strictObject({
+      /** When set, only these exact SASL accounts may start a turn. */
+      allowedAccounts: z.array(ircAccount).min(1).max(50).optional(),
+      /** Require an exact current nick mention in joined channels and a real msgid. */
+      channelRequests: z.enum(["nick-mention", "standard"]).optional(),
+      /** Explicit channels that wake on every admitted account's message. */
+      wakeChannels: z.array(ircChannel).max(20).optional(),
+      /** Captain-only automatic human requests; reply membership is gateway-owned. */
+      humanWakeChannels: z
+        .array(
+          z.strictObject({
+            channel: ircChannel,
+            replies: z.enum(["all", "participating"]),
+          }),
+        )
+        .max(20)
+        .optional(),
+      /** Quiet window for consecutive live human messages; absent/0 is off. */
+      humanMessageDebounceMs: z.number().int().min(0).max(5000).optional(),
+      /** Any SASL account may write unless denied; `*` denies everyone. */
+      deniedAccounts: z
+        .array(z.union([z.literal("*"), ircAccount]))
+        .default([]),
+      /** `*` also blocks direct messages. */
+      deniedChannels: z
+        .array(z.union([z.literal("*"), ircChannel]))
+        .default([]),
+      /** Words that address the captain in its channels, like a nick mention. */
+      textMentions: mentionNamesSchema.optional(),
+      /**
+       * All-call words (whole words, any case): a channel message that
+       * contains one reaches the captain and every crew member in that
+       * channel. `[]` turns all-calls off.
+       */
+      allCallWords: z
+        .array(mentionNameSchema)
+        .max(20)
+        .default([...defaultAllCallWords]),
+      /** Accounts of other fleet captains: peer rules, 5 per target an hour. */
+      peerCaptains: z.array(ircAccount).max(50).optional(),
+      /** Peer turns per conversation/hour; absent keeps the default of five. */
+      peerTurnsPerHour: z.number().int().min(0).max(600).optional(),
+      /**
+       * Ship (captain/crew) messages admitted per agent in a rolling hour.
+       * A channel's cap is this value times the ship agents configured in
+       * it, counted across the whole ship. `0` turns ship messages off.
+       */
+      shipTurnsPerAgentPerHour: z.number().int().min(0).max(600).default(60),
+      /**
+       * All-call turns start this many milliseconds apart: the captain at
+       * once, then each crew member of the channel in configuration order.
+       * Each later turn lists what was said since the all-call. `0` is off.
+       */
+      allCallStaggerMs: z.number().int().min(0).max(30_000).default(4000),
+    })
+    .default({
+      deniedAccounts: [],
+      deniedChannels: [],
+      allCallWords: [...defaultAllCallWords],
+      shipTurnsPerAgentPerHour: 60,
+      allCallStaggerMs: 4000,
+    }),
+  crew: z.array(ircCrewSchema).max(20).default([]),
+  features: ircFeaturesSchema.default(ircFeatureDefaults),
+  /**
+   * Reactions (+draft/react) that stop an active turn when a person
+   * reacts to its request or to a bot message answering it. `[]` is off.
+   */
+  stopReactions: z
+    .array(z.string().min(1).max(32))
+    .max(10)
+    .default(["✋", "🛑"]),
+  /** Catch-up replays at most this many hours, whatever the cursor. */
+  catchUpHours: z.number().int().min(1).max(168).default(24),
+  /**
+   * Speech-to-text for audio and video files in admitted messages, as for
+   * Slack bots; absent is off. Spoken mentions are Slack-only.
+   */
+  transcription: transcriptionSchema
+    .refine(
+      (value) => value.spokenMentions === undefined,
+      "spokenMentions is not supported on IRC",
+    )
+    .optional(),
+  /**
+   * DM audit mirror: the captain connection posts a copy of every direct
+   * message that the captain or a crew connection receives or sends to
+   * this channel. Absent is off. The channel is never a conversation.
+   */
+  audit: z.strictObject({ channel: ircChannel }).optional(),
+  /**
+   * `agent`: the captain answers direct messages (crew ignore them).
+   * `redirect`: every connection answers a direct message with a NOTICE
+   * that points to its ship channel and never acts on its content.
+   */
+  dmPolicy: z.enum(["agent", "redirect"]).default("agent"),
+  /**
+   * Crew messaging over IRC (OpenCode captain; opt-in). `sessions` binds
+   * each crew IRC session to its crew member in the crew plugin, so
+   * stargate_dm and stargate_mail work there. `ircCopies` also sends each stargate_dm
+   * between two ship agents with IRC connections as an IRC DM from the
+   * sender's account.
+   */
+  crewMessaging: z
+    .strictObject({
+      sessions: z.boolean().default(false),
+      ircCopies: z.boolean().default(false),
+    })
+    .default({ sessions: false, ircCopies: false }),
+  backend: backendSchema,
+  fleetPolicy: fleetPolicySchema.optional(),
+  fleetControl: fleetControlSchema.optional(),
+  concurrency: z.number().int().min(1).max(32).default(4),
+  turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
+});
+
+/** Persisted operator configuration: fleet-derived fields remain absent. */
+export type IrcConfig = z.infer<typeof ircConfiguredSchema>;
+export type EffectiveIrcConfig = IrcConfig & {
+  access: IrcConfig["access"] & { peerCaptains: string[] };
+};
+
+/** Enrolment and an explicit trusted role are both required for automatic grants. */
+function fleetRoster(config: IrcConfig) {
+  const own = new Set(
+    [config.account, ...config.crew.map((member) => member.account)].map(
+      (account) => fold(account),
+    ),
+  );
+  const enrolled = new Set(
+    config.fleetPolicy?.agentAccounts.map((account) => fold(account)) ?? [],
+  );
+  return (
+    config.fleetControl?.targets.filter(
+      (target) =>
+        !own.has(fold(target.account)) &&
+        enrolled.has(fold(target.account)) &&
+        (target.role === "captain" || target.role === "rear_admiral"),
+    ) ?? []
+  );
+}
+
+/** Runtime view only; never write derived membership/wake/trust back to disk. */
+export function effectiveIrcConfig(config: IrcConfig): EffectiveIrcConfig {
+  const access = {
+    ...config.access,
+    peerCaptains: config.access.peerCaptains ?? [],
+  };
+  const metadata = config.fleetChannels;
+  if (
+    !metadata ||
+    !config.fleetPolicy ||
+    !config.fleetControl ||
+    config.fleetPolicy.role === "crew"
+  )
+    return { ...config, access };
+  const roster = fleetRoster(config);
+  // Explicit legacy wake configuration retains its complete admission policy.
+  if (access.channelRequests === undefined && access.wakeChannels === undefined)
+    access.channelRequests = "nick-mention";
+  if (
+    access.humanWakeChannels === undefined &&
+    access.wakeChannels === undefined
+  )
+    access.humanWakeChannels =
+      config.fleetPolicy.role === "rear_admiral"
+        ? [{ channel: metadata.home, replies: "all" }]
+        : [
+            { channel: metadata.home, replies: "all" },
+            { channel: metadata.command, replies: "participating" },
+          ];
+  if (config.access.peerCaptains === undefined) {
+    const seen = new Set<string>();
+    access.peerCaptains = roster.flatMap((target) => {
+      const key = fold(target.account);
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [target.account];
+    });
+  }
+  const seen = new Set<string>();
+  const channels = [
+    ...config.channels,
+    metadata.home,
+    metadata.command,
+    ...roster
+      .filter((target) => target.role === "captain")
+      .map((target) => target.channel),
+  ].filter((channel) => {
+    const key = fold(channel);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return { ...config, access, channels };
+}
+
+export const ircSchema = ircConfiguredSchema.superRefine(
+  (configured, context) => {
+    const irc = effectiveIrcConfig(configured);
     if (irc.fleetChannels) {
       if (
         !irc.fleetPolicy ||
@@ -602,77 +679,37 @@ export const ircSchema = z
             "Fleet channels need a captain/rear-admiral policy, target roster and distinct home/command channels",
         });
       else {
-        irc.access.channelRequests ??= "nick-mention";
-        irc.access.allowedAccounts ??= [
-          ...irc.fleetPolicy.humanAccounts,
-          ...irc.fleetPolicy.agentAccounts,
-        ];
-        if (
-          irc.access.allowedAccounts.length > 50 ||
-          irc.access.allowedAccounts.some(
-            (account) => !ircAccount.safeParse(account).success,
+        for (const target of fleetRoster(configured))
+          if (
+            target.role === "captain" &&
+            !ircChannel.safeParse(target.channel).success
           )
+            context.addIssue({
+              code: "custom",
+              path: [
+                "fleetControl",
+                "targets",
+                configured.fleetControl?.targets.indexOf(target) ?? 0,
+                "channel",
+              ],
+              message: "Derived fleet membership requires a valid IRC channel",
+            });
+        if (
+          !z.array(ircAccount).max(50).safeParse(irc.access.peerCaptains)
+            .success
         )
           context.addIssue({
             code: "custom",
+            path: ["access", "peerCaptains"],
             message:
-              "Fleet IRC account defaults must be at most 50 valid SASL accounts",
+              "Fleet IRC peer defaults must be at most 50 valid SASL accounts; configure an explicit peer list to narrow them",
           });
-        irc.access.humanWakeChannels ??=
-          irc.fleetPolicy.role === "rear_admiral"
-            ? [{ channel: irc.fleetChannels.home, replies: "all" }]
-            : [
-                { channel: irc.fleetChannels.home, replies: "all" },
-                {
-                  channel: irc.fleetChannels.command,
-                  replies: "participating",
-                },
-              ];
-        if (!irc.access.peerCaptains.length)
-          irc.access.peerCaptains = (roster ?? []).map(
-            (target) => target.account,
-          );
-        if (
-          irc.access.peerCaptains.length > 50 ||
-          irc.access.peerCaptains.some(
-            (account) => !ircAccount.safeParse(account).success,
-          )
-        )
+        if (irc.channels.length > 20)
           context.addIssue({
             code: "custom",
-            message:
-              "Fleet IRC peer defaults must be at most 50 valid SASL accounts",
+            message: "Fleet channel membership exceeds 20 configured channels",
           });
       }
-    }
-    if (irc.fleetChannels && irc.fleetPolicy && irc.fleetControl) {
-      if (
-        new Set(irc.channels.map((channel) => fold(channel))).size !==
-        irc.channels.length
-      )
-        context.addIssue({ code: "custom", message: "Duplicate IRC channel" });
-      const channels = [
-        ...irc.channels,
-        ...(irc.fleetChannels
-          ? [irc.fleetChannels.home, irc.fleetChannels.command]
-          : []),
-        ...(roster ?? []).flatMap((target) =>
-          target.role === "captain" &&
-          ircChannel.safeParse(target.channel).success
-            ? [target.channel]
-            : [],
-        ),
-      ];
-      irc.channels = channels.filter(
-        (channel, index) =>
-          channels.findIndex((other) => fold(other) === fold(channel)) ===
-          index,
-      );
-      if (irc.channels.length > 20)
-        context.addIssue({
-          code: "custom",
-          message: "Fleet channel membership exceeds 20 configured channels",
-        });
     }
     if (irc.fleetControl && irc.backend.type === "opencode") {
       try {
@@ -706,7 +743,10 @@ export const ircSchema = z
         code: "custom",
         message: "Wake channels must be joined channels",
       });
-    if (irc.access.wakeChannels?.length && irc.access.channelRequests)
+    if (
+      irc.access.wakeChannels?.length &&
+      irc.access.channelRequests === "nick-mention"
+    )
       context.addIssue({
         code: "custom",
         message: "Wake channels conflict with nick-mention-only admission",
@@ -775,7 +815,10 @@ export const ircSchema = z
       issue("Captain and crew need separate passwordEnv variables");
     if (new Set(irc.crew.map((member) => member.id)).size !== irc.crew.length)
       issue("Duplicate IRC crew id");
-    if (new Set(irc.channels.map(lower)).size !== irc.channels.length)
+    if (
+      new Set(configured.channels.map(lower)).size !==
+      configured.channels.length
+    )
       issue("Duplicate IRC channel");
     const granted = new Set(irc.channels.map(exact));
     for (const member of irc.crew)
@@ -792,9 +835,8 @@ export const ircSchema = z
       )
     )
       issue("The IRC audit channel must not be a captain or crew channel");
-  });
-
-export type IrcConfig = z.infer<typeof ircSchema>;
+  },
+);
 
 /** Bot Framework transport: exact sender IDs, no credential values in config. */
 export const teamsSchema = z
