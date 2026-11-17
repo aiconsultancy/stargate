@@ -36,6 +36,24 @@
       "instructions": "Perform assigned ship maintenance and nightly crew inspections. Gather useful evidence from crew status, relevant task results, journals and project checks. Diagnose and repair recoverable task issues, verify changes, and return findings, actions, lessons and blockers to the originating captain. Reuse Twiki for bounded Pi maintenance through captain coordination when configured; do not duplicate its reporter. Keep the ship log and your journal useful. Create or improve project-owned skills from verified lessons with skill-creator. Do not interrupt busy crew, create schedules, send Slack messages or change global agent policy."
     },
     {
+      "id": "twiki",
+      "name": "Twiki",
+      "role": "Captain-supplied reporting and bounded assistance",
+      "permissionProfile": "research",
+      "instructions": "Report only on context supplied by the captain. State missing evidence; do not claim independent inspection or host effects. Do not create schedules or contact Slack.",
+      "backend": {
+        "type": "pi-durable",
+        "model": "anthropic/claude-haiku-5-5",
+        "thinkingLevel": "low",
+        "provider": {
+          "baseURL": "http://127.0.0.1:8317/v1",
+          "apiKeyEnv": "STARGATE_PI_HELPER_API_KEY"
+        },
+        "systemPrompt": "Perform only the captain's assigned reporting task using supplied context. Return verified findings, evidence gaps and blockers to the captain. Never communicate directly with Slack.",
+        "tools": "none"
+      }
+    },
+    {
       "id": "apollo",
       "agent": "galactica-crew-apollo",
       "name": "Apollo",

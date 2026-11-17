@@ -413,6 +413,18 @@ test("portable Bosun is an ordinary configured worker, not a runtime default", a
   expect(bosun?.backend).toBeUndefined();
   expect(bosun?.instructions).toContain("nightly");
   expect(defaultTeam.crew.some(({ id }) => id === "bosun")).toBe(false);
+  const helper = example.crew.find(({ id }) => id === "twiki");
+  expect(helper?.backend).toMatchObject({
+    type: "pi-durable",
+    model: "anthropic/claude-haiku-5-5",
+    thinkingLevel: "low",
+    tools: "none",
+    provider: {
+      baseURL: "http://127.0.0.1:8317/v1",
+      apiKeyEnv: "STARGATE_PI_HELPER_API_KEY",
+    },
+  });
+  expect(defaultTeam.crew.some(({ backend }) => backend)).toBe(false);
   const result = await initializeProfile({ ...options, team: example });
   const directory = result.worktrees["bosun"];
   expect(directory).toBeDefined();
@@ -764,6 +776,54 @@ test("setup rejects a captain nested in a worker tree before creating overlays",
   await expect(stat(options.worktreeDirectory)).rejects.toThrow();
 });
 
+test("new ship CLI requests explicit Pi helper configuration before writing", async () => {
+  const { options } = await fixture();
+  const path = join(options.projectDirectory, "team.json");
+  const args = [
+    "crew",
+    "init",
+    "--directory",
+    options.directory,
+    "--project",
+    options.projectDirectory,
+    "--worktrees",
+    options.worktreeDirectory,
+    "--base",
+    "main",
+    "--mesij-command",
+    options.mesijCommand,
+  ];
+  await expect(runCli(args)).rejects.toThrow("Pi helper");
+  for (const candidate of [
+    defaultTeam,
+    {
+      ...defaultTeam,
+      crew: [
+        ...defaultTeam.crew,
+        {
+          id: "helper",
+          role: "Reporting",
+          permissionProfile: "research",
+          backend: { type: "pi-durable", model: "anthropic/claude-haiku-5-5" },
+        },
+      ],
+    },
+  ]) {
+    await writeFile(path, JSON.stringify(candidate));
+    await expect(runCli([...args, "--team", path])).rejects.toThrow(
+      "Pi helper",
+    );
+  }
+  await expect(stat(options.directory)).rejects.toThrow();
+  await expect(stat(options.worktreeDirectory)).rejects.toThrow();
+  expect(defaultTeam.crew.map(({ id }) => id)).toEqual([
+    "mario",
+    "luigi",
+    "daisy",
+    "toad",
+  ]);
+});
+
 test("crew CLI loads non-secret --team JSON and rejects invalid input without echoing it", async () => {
   const { options } = await fixture();
   const path = join(options.projectDirectory, "team.json");
@@ -798,7 +858,28 @@ test("crew CLI loads non-secret --team JSON and rejects invalid input without ec
       );
     }
   }
-  await writeFile(path, JSON.stringify(team));
+  const configured = teamSchema.parse({
+    ...team,
+    crew: [
+      ...team.crew,
+      {
+        id: "helper",
+        role: "Captain-supplied reporting",
+        permissionProfile: "research",
+        backend: {
+          type: "pi-durable",
+          model: "anthropic/claude-haiku-5-5",
+          thinkingLevel: "low",
+          provider: {
+            baseURL: "http://127.0.0.1:8317/v1",
+            apiKeyEnv: "TEST_PI_HELPER_KEY",
+          },
+          systemPrompt: "Report only on captain-supplied context.",
+        },
+      },
+    ],
+  });
+  await writeFile(path, JSON.stringify(configured));
   for (const invalidPath of ["", `${path}.missing`]) {
     await expect(runCli([...args.slice(0, -1), invalidPath])).rejects.toThrow(
       "Cannot load team file. Use valid team JSON without credentials.",
@@ -810,7 +891,29 @@ test("crew CLI loads non-secret --team JSON and rejects invalid input without ec
   ).json();
   expect(config.default_agent).toBe("adama-captain-adama");
   expect(config.plugins[0].options.namespace).toBe("adama");
-  expect(config.plugins[0].options.team).toEqual(profileTeam(team, "adama"));
+  expect(config.plugins[0].options.team).toEqual(
+    profileTeam(configured, "adama"),
+  );
+  expect(config.plugins[0].options.team.crew.at(-1).backend.tools).toBe("none");
+  expect(config.plugins[0].options.worktrees.helper).toBe(
+    join(options.worktreeDirectory, "helper"),
+  );
+  expect(
+    await Bun.file(
+      join(
+        options.directory,
+        ".local",
+        "ship",
+        "definitions",
+        "adama-crew-helper.md",
+      ),
+    ).exists(),
+  ).toBe(true);
+  expect(
+    await Bun.file(
+      join(options.worktreeDirectory, "helper", ".opencode", "opencode.json"),
+    ).exists(),
+  ).toBe(false);
 });
 
 test("captain, crew and Pi instructions render the configured maintenance window", async () => {

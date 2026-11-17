@@ -107,7 +107,7 @@ ${slackInstructions}`,
 --project PATH         Existing Git checkout for the project
 --worktrees PATH       Parent of the configured crew worktrees
 --workspace-mode MODE  worktree (default) or independent clone
---team PATH            Non-secret team JSON (default: Bowser's starter roster)
+--team PATH            Required non-secret team JSON, including a Pi helper
 --id ID                Bot namespace (default: configured captain ID; bowser)
 --session-id ses_...    Bind all crew locations to one existing captain session
 --base REF             Committed source ref (default: origin/main)
@@ -119,6 +119,10 @@ ${slackInstructions}`,
 --maintenance-config PATH  Render this Stargate config's nightly maintenance window
                        into captain and crew instructions (when enabled)
 Creates named feature branches, local agent/config overlays, and private state.
+New ships require a Pi helper with explicit backend.model and backend.provider
+(baseURL and apiKeyEnv). Start with team.example.json; helper tools default to none.
+Verify the model endpoint and key reference in the OpenCode host environment
+before ensure. Setup does not discover credentials or choose a fallback model.
 Existing conflicting files are not overwritten. No sessions, apps, or services
 are started. Crew sessions are created lazily by the captain and then reused.
 The trusted crew profile enables implementation tools; it is not a sandbox.
@@ -412,13 +416,18 @@ export async function runCli(args: string[]): Promise<CliResult> {
       );
     if (!v.directory || !v.project || !v.worktrees)
       throw new Error("--directory, --project, and --worktrees are required.");
+    // New-ship policy belongs to setup, not the legacy runtime roster schema.
+    const team =
+      v.team !== undefined ? await readTeamFile(resolve(v.team)) : undefined;
+    if (!team?.crew.some((member) => member.backend?.provider))
+      throw new Error(
+        "New ships require --team with a Pi helper: set backend.type to pi-durable, backend.model and backend.provider (baseURL and apiKeyEnv). Start with team.example.json; no credentials or model fallback are inferred.",
+      );
     const mesijCommand = v["mesij-command"] ?? Bun.which("mesij");
     if (!mesijCommand)
       throw new Error(
         "Mesij is unavailable. Run mise install or provide --mesij-command.",
       );
-    const team =
-      v.team !== undefined ? await readTeamFile(resolve(v.team)) : undefined;
     const maintenanceWindow = v["maintenance-config"]
       ? await readMaintenanceWindow(resolve(v["maintenance-config"]))
       : undefined;
@@ -441,7 +450,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
           }
         : {}),
       mesijCommand: resolve(mesijCommand),
-      ...(team ? { team } : {}),
+      team,
       ...(v.id ? { namespace: v.id } : {}),
       ...(v["session-id"] ? { captainSessionID: v["session-id"] } : {}),
       ...(v.base ? { base: v.base } : {}),
