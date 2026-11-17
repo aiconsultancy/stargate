@@ -269,6 +269,53 @@ test("mapped native profiles recover old-named uncertain answers and retain old 
     const task = await f.dispatch();
     f.engine.state.uncertain(task.id);
     f.finish(task);
+    const final = f.messages.at(-1);
+    if (!final) throw new Error("Missing retained final");
+    final.time = { created: 8, completed: 9 };
+    f.messages.splice(
+      f.messages.length - 1,
+      0,
+      {
+        id: "msg_mappedLaunch",
+        type: "assistant",
+        agent: "worker",
+        finish: "tool-calls",
+        time: { created: 2, completed: 3 },
+        content: [
+          {
+            type: "tool",
+            name: "shell",
+            executed: false,
+            state: {
+              status: "completed",
+              input: { command: "echo mapped" },
+              content: [{ type: "text", text: "Background" }],
+              metadata: {
+                shellID: "sh_mapped",
+                status: "running",
+                truncated: false,
+              },
+            },
+          },
+        ],
+      },
+      {
+        id: "msg_mappedCallback",
+        type: "synthetic",
+        time: { created: 4 },
+        description: "echo mapped",
+        metadata: {
+          source: "shell",
+          shellID: "sh_mapped",
+          jobID: "sh_mapped",
+          state: "completed",
+          truncated: false,
+          exit: 0,
+        },
+        text: '<shell id="sh_mapped" state="completed" command="echo mapped">\nFixture output\n</shell>',
+      },
+    );
+    const retainedHistory = JSON.stringify(f.messages);
     mapped = await CrewEngine.open(
       {
         ...f.options,
@@ -315,6 +362,7 @@ test("mapped native profiles recover old-named uncertain answers and retain old 
       result: "Implemented and tested.",
     });
     expect(f.counts().prompts).toBe(1);
+    expect(JSON.stringify(f.messages)).toBe(retainedHistory);
   } finally {
     await mapped?.close();
     await f.close();
@@ -858,3 +906,86 @@ test("a changed task status or expected input cannot be overwritten by recovery"
     await f.close();
   }
 });
+
+for (const hasFinal of [true, false])
+  test(`reopened recovery correlates background shell notices without replay; final=${hasFinal}`, async () => {
+    const f = await fixture();
+    const reopened = await CrewEngine.open(
+      f.options,
+      f.native,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.connect,
+    );
+    try {
+      const task = await f.dispatch();
+      for (const [index, command] of [
+        'printf "fixture"',
+        "cargo check --locked",
+      ].entries()) {
+        const shellID = `sh_fixture${index}`;
+        f.messages.push({
+          id: `msg_launch${index}`,
+          type: "assistant",
+          agent: "worker",
+          finish: "tool-calls",
+          time: { created: 2 + index * 2, completed: 3 + index * 2 },
+          content: [
+            {
+              type: "tool",
+              name: "shell",
+              executed: false,
+              state: {
+                status: "completed",
+                input: { command },
+                content: [{ type: "text", text: "Background command" }],
+                metadata: { shellID, status: "running", truncated: false },
+              },
+            },
+          ],
+        });
+        f.messages.push({
+          id: `msg_callback${index}`,
+          type: "synthetic",
+          time: { created: 3 + index * 2 },
+          description: command,
+          metadata: {
+            source: "shell",
+            shellID,
+            jobID: shellID,
+            state: "completed",
+            truncated: false,
+            exit: 0,
+          },
+          text: `<shell id="${shellID}" state="completed" command="${command}">\nFixture output\n</shell>`,
+        });
+      }
+      f.finish(task);
+      const final = f.messages.at(-1);
+      if (!final) throw new Error("Missing fixture final");
+      final.time = { created: 8, completed: 9 };
+      if (!hasFinal) f.messages.pop();
+      f.engine.state.uncertain(task.id);
+      const retained = JSON.stringify(f.messages);
+      const result = await reopened.run(
+        { op: "status", taskID: task.id },
+        f.captain,
+      );
+      expect(result).toMatchObject({
+        status: hasFinal ? "completed" : "uncertain",
+      });
+      expect(reopened.state.task(task.id)).toMatchObject({
+        workerSessionID: task.workerSessionID,
+        inputID: task.inputID,
+        result: hasFinal ? "Implemented and tested." : null,
+      });
+      if (!hasFinal) expect(reopened.state.task(task.id)?.released).toBe(0);
+      expect(JSON.stringify(f.messages)).toBe(retained);
+      expect(f.counts()).toMatchObject({ prompts: 1, synthetics: 0 });
+    } finally {
+      await reopened.close();
+      await f.close();
+    }
+  });

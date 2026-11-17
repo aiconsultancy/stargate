@@ -9,10 +9,14 @@ import {
   crewMessageMetadataKey,
   taskEnvelopePayload,
 } from "./message-protocol";
+import {
+  ShellCompletionContext,
+  type ShellContextRecord,
+} from "./shell-context";
 import { CrewError, type CrewTask } from "./state";
 
 type Request = NonNullable<Parameters<OpenCodeClient["message"]["list"]>[1]>;
-export interface ResultMessage {
+export interface ResultMessage extends ShellContextRecord {
   id: string;
   type: SessionMessageInfo["type"];
   time: { created: number; completed?: number };
@@ -22,7 +26,6 @@ export interface ResultMessage {
   agent?: string;
   finish?: string;
   error?: unknown;
-  content?: ReadonlyArray<{ type: string; text?: string }>;
 }
 export interface ResultAPI {
   message: {
@@ -93,8 +96,10 @@ export async function readTaskResult(
 ): Promise<string> {
   let cursor: string | undefined;
   let final: ResultMessage | undefined;
+  let unansweredShellCallback = false;
   const cursors = new Set<string>();
-  do {
+  const shellContext = new ShellCompletionContext(workerAgent, task.crewID);
+  for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
     signal.throwIfAborted();
     const page = await api.message.list(
       {
@@ -105,11 +110,17 @@ export async function readTaskResult(
       { signal },
     );
     signal.throwIfAborted();
+    if (page.data.length > 100)
+      throw new CrewError("Invalid result history page.");
     for (const message of page.data) {
       if (message.id === task.inputID && message.type === "user") {
         if (!matchesInput(message, task))
           throw new CrewError(
             "Retained input does not match the task envelope. Restore the original input before retrying status.",
+          );
+        if (!shellContext.finish(message.time.created))
+          throw new CrewError(
+            "A shell callback lacks unique task-owned launch proof; result refused.",
           );
         const result = (final?.content ?? [])
           .filter((part) => part.type === "text")
@@ -118,6 +129,7 @@ export async function readTaskResult(
           .trim();
         if (
           !final ||
+          unansweredShellCallback ||
           ![workerAgent, task.crewID].includes(final.agent ?? "") ||
           final.finish !== "stop" ||
           final.error !== undefined ||
@@ -129,11 +141,14 @@ export async function readTaskResult(
           );
         return result.slice(0, 64000);
       }
+      const shellCandidate = shellContext.track(message);
+      if (shellCandidate && !final) unansweredShellCallback = true;
       if (
         message.type === "user" ||
         (message.type === "synthetic" &&
           !matchesUrgency(message, task) &&
-          !isNativeInstructionContext(message)) ||
+          !isNativeInstructionContext(message) &&
+          !shellCandidate) ||
         message.type === "shell"
       )
         throw new CrewError(
@@ -149,7 +164,12 @@ export async function readTaskResult(
       );
     if (next) cursors.add(next);
     cursor = next ?? undefined;
-  } while (cursor);
+    if (!cursor) break;
+  }
+  if (cursor)
+    throw new CrewError(
+      "Result history scan bound exceeded (100 pages, up to 10,000 records). The original input is unverified beyond this window; inspect its retained turn without replaying it.",
+    );
   throw new CrewError(
     "The admitted input is absent from retained history. Restore this session's history before retrying status; do not replay the assignment.",
   );
