@@ -271,6 +271,7 @@ export class Store {
       return false;
     };
     column("jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0");
+    column("jobs", "question_stop_attempted", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "failure", "TEXT");
     column("jobs", "activity", "TEXT");
     column("jobs", "input", "TEXT");
@@ -1483,12 +1484,15 @@ export class Store {
     );
   }
 
-  questionOffers(botKey: string): QuestionOffer[] {
+  questionOffers(
+    botKey: string,
+    includeRunningOutcomes = false,
+  ): QuestionOffer[] {
     return this.db
-      .query<QuestionOffer, [string]>(
-        "SELECT * FROM native_questions WHERE botKey=? AND (state!='closed' OR recovering=1 OR (outcome IS NOT NULL AND outcomeNotified=0)) ORDER BY rowid",
+      .query<QuestionOffer, [string, number]>(
+        "SELECT * FROM native_questions WHERE botKey=? AND (state!='closed' OR recovering=1 OR (outcome IS NOT NULL AND (outcomeNotified=0 OR (?=1 AND EXISTS(SELECT 1 FROM jobs j WHERE j.id=native_questions.jobID AND j.status='running'))))) ORDER BY rowid",
       )
-      .all(botKey);
+      .all(botKey, includeRunningOutcomes ? 1 : 0);
   }
 
   activeQuestionSessions(botKey: string, pinned?: string): string[] {
@@ -1631,9 +1635,19 @@ export class Store {
   questionRecovering(token: string) {
     this.db
       .query(
-        "UPDATE native_questions SET recovering=1 WHERE token=? AND state!='closed'",
+        "UPDATE native_questions SET recovering=1 WHERE token=? AND (state!='closed' OR outcome IS NOT NULL)",
       )
       .run(token);
+  }
+
+  claimQuestionStop(offer: QuestionOffer): boolean {
+    return (
+      this.db
+        .query(
+          "UPDATE jobs SET question_stop_attempted=1 WHERE id=? AND botKey=? AND input=? AND status='running' AND cancel_requested=1 AND question_stop_attempted=0",
+        )
+        .run(offer.jobID, offer.botKey, offer.inputID).changes === 1
+    );
   }
   closeQuestion(token: string) {
     this.db

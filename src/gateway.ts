@@ -505,7 +505,22 @@ export class Gateway {
   stopTurn(conversation: string, thread: string) {
     const id = this.store.cancelTurn(this.key, conversation, thread);
     if (id === undefined) return false;
-    this.cancellations.get(id)?.abort();
+    const active = this.cancellations.get(id);
+    if (active) active.abort();
+    else
+      void this.questions
+        ?.stop(
+          id,
+          AbortSignal.any([
+            this.questionLifetime.signal,
+            AbortSignal.timeout(5000),
+          ]),
+        )
+        .catch(() =>
+          this.log.warn(
+            "Recovered native Stop outcome unavailable; not replayed",
+          ),
+        );
     return true;
   }
 

@@ -268,11 +268,18 @@ function shipTransport(
   said: (channel: string, after: number, except: string) => string[] = () => [],
   sessionReady?: GatewayTransport["sessionReady"],
 ): GatewayTransport {
+  const authorized: GatewayTransport["allowed"] = (user, channel, job) =>
+    ircAllowed(config, member, user, channel, client.fold) &&
+    ircResultJobAllowed(config, member, client.nick, user, job, client.fold);
   return {
     ...(config.features.questions
       ? {
           questions: {
             account: member.account,
+            authorized: (job) => authorized(job.user, job.channel, job),
+            ready: (job) =>
+              client.registered &&
+              (!client.isChannel(job.channel) || client.inChannel(job.channel)),
             matchesTarget: (target: string) =>
               [member.account, client.nick].some(
                 (name) => client.fold(name) === client.fold(target),
@@ -315,15 +322,7 @@ function shipTransport(
       : {}),
     key: member.key,
     allowed: (user, channel, job) =>
-      ircAllowed(config, member, user, channel, client.fold) &&
-      ircResultJobAllowed(
-        config,
-        member,
-        client.nick,
-        user,
-        job,
-        client.fold,
-      ) &&
+      authorized(user, channel, job) &&
       (config.access.channelRequests !== "nick-mention" ||
         !client.isChannel(channel) ||
         client.inChannel(channel)),
@@ -757,7 +756,18 @@ export class IrcShip {
           if (!replay && !strict) this.remember(identity, client, message);
           // A replayed reaction is old intent: it never stops a turn.
           if (message.command === "TAGMSG") {
-            if (!replay && !strict) this.stop(registration, message);
+            if (
+              !replay &&
+              (!strict ||
+                (this.config.features.questions &&
+                  !message.tags.has("bot") &&
+                  questionHuman(
+                    this.config,
+                    message.tags.get("account") ?? "",
+                    client.fold,
+                  )))
+            )
+              this.stop(registration, message);
           } else this.receive(identity, client, message, filehost, replay);
         },
         sent: (sent) => {

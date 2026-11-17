@@ -660,7 +660,10 @@ This bridge is **off by default**. Enable it for an IRC registration with:
 
 Enabling it also requires a `fleetPolicy` with an explicit, nonempty
 `humanAccounts` list. A broad IRC access allow-list and absence of a bot tag do
-not prove that an account is human. The same human policy is checked again when
+not prove that an account is human. Stable current access/human policy is separate from live IRC registration and
+channel readiness. Readiness gates publication; a disconnect or a not-yet-joined
+startup cannot discard native ownership or permanently deny an outcome notice.
+The same human policy is checked again when
 a source is admitted and when a reply is received, including after reload.
 
 Stargate reads the native form APIs; it does not ask a model to invent a question
@@ -763,7 +766,9 @@ may require a fresh explicit mention to establish participation again.
 Ordinary interrupted-work recovery remains unchanged. Its only exception is an
 already-persisted offer whose exact native form is still pending and whose
 original human/input binding can be revalidated. Stargate keeps that native
-waiter and holds new inputs until the native execution settles. Once established,
+waiter and holds new inputs until the native execution settles. An admitted native reply attempt or persisted native outcome also proves its
+original input for restart recovery, even when its form is already resolved
+before the first restart. This does not resubmit a reply or prompt. Once established,
 the exact historical source/input hold survives later restarts even when its
 form has resolved or disappeared while the input is still busy. A failed
 settlement read also leaves the hold intact; only verified input settlement or
@@ -774,6 +779,17 @@ known hold; native work and durable job state stay untouched. The existing
 transcript outbox then delivers the continuation to the original source, without
 re-prompting the agent or selecting an intervening human request. A form that
 was never durably observed does not receive this exception.
+
+An authenticated human Stop on the original request invokes the adapter's
+exact-input interruption even for a recovered waiter with no local worker.
+With questions enabled, strict IRC mode accepts these fresh reactions only from
+explicit human accounts, without a bot tag; replayed reactions remain ignored.
+The gateway durably claims the Stop attempt before calling the input-scoped API.
+The adapter revalidates native session/input ownership; there is no fallback to
+interrupting an uncertain whole session. A failed/uncertain Stop is not blindly
+replayed after restart. An old cancellation flag, expiry, reconnect or outcome
+notification is never a new approval to issue native Stop. Native settlement
+still determines when the held queue is released.
 
 ## Presence
 

@@ -9,6 +9,7 @@ import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway";
 import { parseMessage } from "../src/irc/protocol";
 import { routeIrcMessage } from "../src/irc/routing";
+import { IrcShip } from "../src/irc/ship";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
@@ -19,7 +20,7 @@ import {
 } from "../src/questions";
 import { type Incoming, Store } from "../src/store";
 import { bot, identity } from "./fixtures";
-import { until } from "./irc-fixture";
+import { FakeIrcServer, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
 afterEach(async () => {
@@ -77,6 +78,7 @@ async function fixture(source = true) {
   const settled: string[] = [];
   let pending = true;
   let allowed = true;
+  let connected = true;
   let fail = false;
   let nativeSettled = false;
   let filtered = false;
@@ -151,6 +153,8 @@ async function fixture(source = true) {
       backend,
       () => ({
         account: "captain",
+        authorized: () => allowed,
+        ready: () => connected,
         human: (user) => user === "jac",
         async publish(_job, text, guard) {
           if (!guard()) throw new Error("Denied");
@@ -172,7 +176,7 @@ async function fixture(source = true) {
           published.push(text);
         },
       }),
-      () => allowed,
+      () => allowed && connected,
       (s) => settled.push(s),
     );
   let bridge = make();
@@ -217,6 +221,12 @@ async function fixture(source = true) {
     },
     revoke() {
       allowed = false;
+    },
+    disconnect() {
+      connected = false;
+    },
+    reconnect() {
+      connected = true;
     },
     filter(value: boolean) {
       filtered = value;
@@ -1621,3 +1631,250 @@ test("recent participation preserves an older reply parent through cleanup and r
     clock.mockRestore();
   }
 });
+
+test("connection readiness cannot discard a new pending recovery hold or permanently suppress an outcome", async () => {
+  const f = await fixture();
+  await f.poll();
+  f.restart();
+  f.disconnect();
+  expect(await f.bridge.recover(AbortSignal.timeout(3000))).toEqual([
+    "msg_original",
+  ]);
+  await f.answer();
+  expect(f.decisions).toEqual([{ q0: "wait" }]);
+  expect(f.published).toHaveLength(1);
+  expect(f.store.questionOffers(original.botKey)[0]?.outcomeNotified).toBe(0);
+  f.reconnect();
+  await f.poll();
+  expect(f.published[1]).toContain("decision recorded");
+  expect(f.decisions).toHaveLength(1);
+});
+
+for (const closed of [false, true]) {
+  test(`first restart retains proven answered input while busy (${closed ? "closed offer" : "attempted offer"})`, async () => {
+    const f = await fixture();
+    await f.poll();
+    await f.answer();
+    const token = f.offer().token;
+    if (closed) await f.poll();
+    expect(f.store.questionByToken(original.botKey, token)?.state).toBe(
+      closed ? "closed" : "attempted",
+    );
+    f.restart();
+    const retained = await f.bridge.recover(AbortSignal.timeout(3000));
+    expect(retained).toEqual(["msg_original"]);
+    f.store.recover(original.botKey, retained);
+    expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("running");
+    await f.poll();
+    expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("running");
+    f.complete();
+    await f.poll();
+    expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("done");
+    expect(f.decisions).toEqual([{ q0: "wait" }]);
+  });
+}
+
+for (const uncertain of [false, true]) {
+  test(`fresh Stop interrupts only a recovered exact input once (${uncertain ? "uncertain response" : "success"})`, async () => {
+    const f = await fixture();
+    await f.poll();
+    f.restart();
+    await f.bridge.recover(AbortSignal.timeout(3000));
+    const scoped: string[][] = [];
+    let broad = 0;
+    f.backend.interruptInput = async (session, input) => {
+      scoped.push([session, input]);
+      if (uncertain) throw new Error("Unknown native outcome");
+      f.complete();
+    };
+    f.backend.interrupt = async () => {
+      broad++;
+    };
+    f.store.cancelTurn(original.botKey, original.conversation, original.thread);
+    if (uncertain)
+      await expect(
+        f.bridge.stop(f.jobID, AbortSignal.timeout(3000)),
+      ).rejects.toThrow();
+    else
+      expect(await f.bridge.stop(f.jobID, AbortSignal.timeout(3000))).toBe(
+        true,
+      );
+    expect(await f.bridge.stop(f.jobID, AbortSignal.timeout(3000))).toBe(false);
+    f.restart();
+    await f.bridge.recover(AbortSignal.timeout(3000));
+    expect(scoped).toEqual([["ses_captain", "msg_original"]]);
+    expect(broad).toBe(0);
+    if (!uncertain) {
+      await f.poll();
+      expect(f.store.jobByInput(original.botKey, "msg_original")?.failure).toBe(
+        "cancelled",
+      );
+    }
+    expect(f.decisions).toEqual([]);
+  });
+}
+
+test("unproven recovered Stop binding cannot fall back to a whole-session interruption", async () => {
+  const f = await fixture();
+  await f.poll();
+  f.restart();
+  await f.bridge.recover(AbortSignal.timeout(3000));
+  f.store.cancelTurn(original.botKey, original.conversation, original.thread);
+  let calls = 0;
+  f.backend.interruptInput = async () => {
+    calls++;
+  };
+  f.backend.interrupt = async () => {
+    calls++;
+  };
+  Object.defineProperty(f.backend, "sessionID", { value: "ses_other" });
+  expect(await f.bridge.stop(f.jobID, AbortSignal.timeout(3000))).toBe(false);
+  expect(calls).toBe(0);
+});
+
+test("actual strict IRC transport preserves startup hold before join and authenticated Stop reaches its recovered input", async () => {
+  const f = await fixture(false);
+  const server = new FakeIrcServer({
+    accounts: { captain: "fixture" },
+  }).start();
+  cleanup.push(() => server.stop());
+  const cfg = ircSchema.parse({
+    id: "recovered",
+    account: "captain",
+    passwordEnv: "FIXTURE",
+    channels: ["#ship"],
+    server: { host: "127.0.0.1", port: server.port, tls: false },
+    features: { questions: true },
+    access: { channelRequests: "nick-mention", allowedAccounts: ["jac"] },
+    fleetPolicy: {
+      role: "captain",
+      humanAccounts: ["jac"],
+      agentAccounts: ["captain"],
+      assignedCheckout: "/project",
+      capabilities: ["read_code"],
+    },
+    backend: {
+      type: "opencode",
+      url: "http://localhost:4096",
+      directory: "/project",
+      sessionID: "ses_captain",
+    },
+  });
+  const ship = await IrcShip.create(cfg, f.store, pino({ level: "silent" }), {
+    env: { FIXTURE: "fixture" },
+    timing: { intervalMs: 1, burst: 100 },
+    readyMs: 2000,
+  });
+  const registration = ship.registrations[0];
+  if (!registration) throw new Error("Missing IRC registration");
+  const input = {
+    ...original,
+    botKey: registration.key,
+    conversation: JSON.stringify([registration.key, "#ship"]),
+  };
+  f.store.enqueue(input);
+  const job = f.store.queuedJob(registration.key, input.eventId);
+  if (!job) throw new Error("Missing saved IRC work");
+  f.store.running(job.id);
+  f.store.started(job.id);
+  f.store.saveInput(registration.key, job.id, "msg_original", "ses_captain");
+  f.store.recordQuestionSource(input);
+  f.store.offerQuestion({
+    token: "f".repeat(32),
+    botKey: registration.key,
+    formID: question().id,
+    sessionID: question().sessionID,
+    inputID: question().inputID,
+    jobID: job.id,
+    fingerprint: question().fingerprint,
+    expires: Date.now() + 1_800_000,
+    state: "offered",
+    notified: 1,
+    recovering: 0,
+  });
+  expect(registration.transport.allowed(input.user, input.channel)).toBe(false);
+  let interrupts = 0;
+  const scoped: string[][] = [];
+  f.backend.createSession = async () => "ses_captain";
+  f.backend.interrupt = async () => {
+    interrupts++;
+  };
+  f.backend.interruptInput = async (session, input) => {
+    scoped.push([session, input]);
+    f.complete();
+  };
+  const gateway = new Gateway(
+    registration.settings,
+    registration.identity,
+    f.store,
+    f.backend,
+    registration.delivery,
+    pino({ level: "silent" }),
+    undefined,
+    undefined,
+    registration.transport,
+  );
+  registration.stopTurn = (conversation, thread) =>
+    gateway.stopTurn(conversation, thread);
+  const stop = new AbortController();
+  const worker = gateway.work(stop.signal);
+  try {
+    await until(
+      () => f.store.questionOffers(registration.key)[0]?.recovering === 1,
+      3000,
+      "unjoined real IRC transport retained native hold",
+    );
+    expect(scoped).toEqual([]);
+    expect(interrupts).toBe(0);
+    expect(f.store.jobStatus(registration.key, job.id)).toBe("running");
+    ship.start(() => true);
+    await until(
+      () => registration.client.inChannel("#ship"),
+      3000,
+      "IRC rejoined",
+    );
+    server.sendTo(
+      "captain",
+      "@account=jac;bot=1;+draft/react=✋;+draft/reply=m1 :jac!u@fixture TAGMSG #ship",
+    );
+    server.sendTo(
+      "captain",
+      "@account=stranger;+draft/react=✋;+draft/reply=m1 :stranger!u@fixture TAGMSG #ship",
+    );
+    server.sendTo("captain", "PING :stop-spoofs");
+    await until(
+      () =>
+        server
+          .received("captain")
+          .some(
+            (line) => line.includes("PONG") && line.includes("stop-spoofs"),
+          ),
+      2000,
+      "spoof Stop controls processed",
+    );
+    expect(scoped).toEqual([]);
+    server.sendTo(
+      "captain",
+      "@account=jac;+draft/react=✋;+draft/reply=m1 :jac!u@fixture TAGMSG #ship",
+    );
+    server.sendTo(
+      "captain",
+      "@account=jac;+draft/react=✋;+draft/reply=m1 :jac!u@fixture TAGMSG #ship",
+    );
+    await until(
+      () => f.store.jobStatus(registration.key, job.id) === "done",
+      4000,
+      "authenticated Stop released recovered queue",
+    );
+    expect(scoped).toEqual([["ses_captain", "msg_original"]]);
+    expect(interrupts).toBe(0);
+    expect(f.store.jobByInput(registration.key, "msg_original")?.failure).toBe(
+      "cancelled",
+    );
+    expect(f.decisions).toEqual([]);
+  } finally {
+    stop.abort();
+    await worker;
+    await ship.close();
+  }
+}, 10_000);

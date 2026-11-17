@@ -285,6 +285,9 @@ export function questionText(
 
 export type QuestionPort = {
   account: string;
+  /** Current authority only; connection readiness must not revoke ownership. */
+  authorized?(job: Job): boolean;
+  ready?(job: Job): boolean;
   matchesTarget?(target: string): boolean;
   human(user: string): boolean;
   publish(job: Job, text: string, allowed: () => boolean): Promise<void>;
@@ -323,7 +326,7 @@ export class Questions {
       job.fleet ||
       !this.store.ownsQuestionSource(job) ||
       !this.port()?.human(job.user) ||
-      !this.allowed(job) ||
+      !(this.port()?.authorized?.(job) ?? this.allowed(job)) ||
       (this.backend.sessionID ?? this.store.session(job.conversation)) !==
         offer.sessionID
     )
@@ -333,7 +336,8 @@ export class Questions {
 
   /** Preserve established native waiters only; this grants no reply authority. */
   private establishedWaiter(offer: QuestionOffer): Job | undefined {
-    if (!offer.recovering) return;
+    if (!offer.recovering && offer.state !== "attempted" && !offer.outcome)
+      return;
     const job = this.store.jobByInput(this.key, offer.inputID);
     if (
       !job ||
@@ -353,11 +357,12 @@ export class Questions {
   /** New holds need pending forms; established holds preserve their exact input. */
   async recover(signal: AbortSignal): Promise<string[]> {
     const retained: string[] = [];
-    for (const offer of this.store.questionOffers(this.key)) {
+    for (const offer of this.store.questionOffers(this.key, true)) {
       // A form may disappear while its original input still runs. Preserve an
       // established hold through that unknown interval without restoring any
       // permission to answer or notify the original requester.
       if (this.establishedWaiter(offer)) {
+        this.store.questionRecovering(offer.token);
         retained.push(offer.inputID);
         continue;
       }
@@ -377,6 +382,29 @@ export class Questions {
       }
     }
     return retained;
+  }
+
+  /** Called only for a newly received, authenticated Stop, never by recovery. */
+  async stop(jobID: number, signal: AbortSignal): Promise<boolean> {
+    const offer = this.store
+      .questionOffers(this.key)
+      .find((o) => o.jobID === jobID && o.recovering);
+    if (!offer || !this.backend.interruptInput) return false;
+    const job = this.establishedWaiter(offer);
+    const port = this.port();
+    if (
+      !job ||
+      !this.store.questionSourceCancelled(offer) ||
+      !port?.human(job.user) ||
+      !(port.authorized?.(job) ?? this.allowed(job))
+    )
+      return false;
+    signal.throwIfAborted();
+    if (!this.store.claimQuestionStop(offer)) return false;
+    // The adapter revalidates exact input ownership. Never fall back to a
+    // whole-session interruption, and never replay an uncertain Stop on boot.
+    await this.backend.interruptInput(offer.sessionID, offer.inputID, signal);
+    return true;
   }
 
   async poll(signal: AbortSignal) {
@@ -569,7 +597,8 @@ export class Questions {
       this.offering.has(offer.token) ||
       current?.state !== "offered" ||
       current.notified ||
-      current.expires <= Date.now()
+      current.expires <= Date.now() ||
+      port.ready?.(job) === false
     )
       return;
     this.offering.add(offer.token);
@@ -605,6 +634,7 @@ export class Questions {
         this.store.retireQuestion(offer.token);
       return;
     }
+    if (port.ready?.(job) === false) return;
     this.notifying.add(offer.token);
     try {
       await port.publish(
