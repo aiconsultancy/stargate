@@ -159,8 +159,7 @@ export function questionControl(text: string): QuestionControl | undefined {
     if (
       malformed &&
       candidate &&
-      (/^[a-f0-9]{16,128}(?:\.{2,}|…+)?$/i.test(candidate) ||
-        /^[a-f0-9]{4,128}(?:\.{2,}|…+)$/i.test(candidate))
+      /^[a-f0-9]{24,128}[.,:;!?…)]*$/i.test(candidate)
     )
       return {
         target: malformed[1] ?? "",
@@ -296,11 +295,12 @@ export class Questions {
   private offset = 0;
   private readonly inFlight = new Set<string>();
   private readonly notifying = new Set<string>();
+  private readonly offering = new Set<string>();
   private readonly failures = new Map<
     string,
     { count: number; until: number }
   >();
-  private readonly missing = new Set<string>();
+  private readonly missing = new Map<string, number>();
   constructor(
     private readonly key: string,
     private readonly store: Store,
@@ -386,6 +386,10 @@ export class Questions {
         ...this.store.questionOffers(this.key).map((o) => o.sessionID),
       ]),
     ].sort();
+    for (const session of this.failures.keys())
+      if (!sessions.includes(session)) this.failures.delete(session);
+    for (const session of this.missing.keys())
+      if (!sessions.includes(session)) this.missing.delete(session);
     if (!sessions.length) return;
     const selected = Array.from(
       { length: Math.min(16, sessions.length) },
@@ -397,7 +401,7 @@ export class Questions {
       // deadline cannot monopolise the first position after every timeout.
       this.offset = (sessions.indexOf(session) + 1) % sessions.length;
       if (
-        this.missing.has(session) ||
+        (this.missing.get(session) ?? 0) > Date.now() ||
         (this.failures.get(session)?.until ?? 0) > Date.now()
       )
         continue;
@@ -416,7 +420,7 @@ export class Questions {
     }
     for (const session of this.failures.keys())
       if (!sessions.includes(session)) this.failures.delete(session);
-    for (const session of this.missing)
+    for (const session of this.missing.keys())
       if (!sessions.includes(session)) this.missing.delete(session);
     if (failed) throw new Error("Native clarification session unavailable");
   }
@@ -504,16 +508,7 @@ export class Questions {
         ))
       )
         continue;
-      const port = this.port();
-      if (!port) continue;
-      await port.publish(
-        job,
-        "unsupported" in question
-          ? "OpenCode needs clarification, but this form cannot be safely shown or answered on IRC. The original requester must use the native operator interface. No answer or cancellation has been submitted."
-          : questionText(question, port.account, offer.token),
-        () => !signal.aborted && !!this.owner(offer),
-      );
-      this.store.questionNotified(offer.token);
+      await this.publishOffer(job, offer, question, signal);
     }
     for (const offer of this.store
       .questionOffers(this.key)
@@ -557,7 +552,39 @@ export class Questions {
       pending.length === 0 &&
       !this.store.questionOffers(this.key).some((o) => o.sessionID === session)
     )
-      this.missing.add(session);
+      this.missing.set(session, Date.now() + 60_000);
+  }
+
+  private async publishOffer(
+    job: Job,
+    offer: QuestionOffer,
+    question: PendingQuestion,
+    signal: AbortSignal,
+    prefix = "",
+  ) {
+    const port = this.port();
+    const current = this.store.questionByToken(this.key, offer.token);
+    if (
+      !port ||
+      this.offering.has(offer.token) ||
+      current?.state !== "offered" ||
+      current.notified ||
+      current.expires <= Date.now()
+    )
+      return;
+    this.offering.add(offer.token);
+    try {
+      await port.publish(
+        job,
+        "unsupported" in question
+          ? "OpenCode needs clarification, but this form cannot be safely shown or answered on IRC. The original requester must use the native operator interface. No answer or cancellation has been submitted."
+          : prefix + questionText(question, port.account, offer.token),
+        () => !signal.aborted && !!this.owner(offer),
+      );
+      this.store.questionNotified(offer.token);
+    } finally {
+      this.offering.delete(offer.token);
+    }
   }
 
   private async notifyOutcome(offer: QuestionOffer) {
@@ -570,7 +597,14 @@ export class Questions {
       return;
     const job = this.owner(offer);
     const port = this.port();
-    if (!job || !port) return;
+    if (!job || !port) {
+      // Policy loss is a delivery denial, not permission to retain an unusable
+      // notice in every poll. Preserve the outcome and any native recovery hold.
+      this.store.questionOutcomeNotified(offer.token);
+      if (!this.inFlight.has(offer.token))
+        this.store.retireQuestion(offer.token);
+      return;
+    }
     this.notifying.add(offer.token);
     try {
       await port.publish(
@@ -648,12 +682,13 @@ export class Questions {
         Date.now(),
       );
       if (!fresh) return;
-      await port.publish(
+      await this.publishOffer(
         job,
-        `Previous clarification token expired; use this new token.\n${questionText(question, port.account, fresh.token)}`,
-        () => !signal.aborted && !!this.owner(fresh),
+        fresh,
+        question,
+        signal,
+        "Previous clarification token expired; use this new token.\n",
       );
-      this.store.questionNotified(fresh.token);
       return;
     }
     let answer: QuestionAnswer | null;

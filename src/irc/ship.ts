@@ -272,9 +272,7 @@ function shipTransport(
     ...(config.features.questions
       ? {
           questions: {
-            get account() {
-              return client.nick;
-            },
+            account: member.account,
             matchesTarget: (target: string) =>
               [member.account, client.nick].some(
                 (name) => client.fold(name) === client.fold(target),

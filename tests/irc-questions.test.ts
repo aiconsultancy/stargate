@@ -558,6 +558,11 @@ for (const target of ["captain", "CAP{TAIN}"]) {
     );
     const offer = f.store.questionOffers(key)[0];
     if (!offer) throw new Error("No offer");
+    expect(
+      f.server
+        .received("captain")
+        .some((line) => line.includes(`captain: answer ${offer.token}`)),
+    ).toBe(true);
     f.send(
       `${target}: answer ${offer.token.toUpperCase()} 1`,
       "wrong-human",
@@ -627,7 +632,11 @@ test("question replies resolve durable own-publication anchors after transport r
 
 test("unmistakably malformed token controls never reach models, even with questions off", async () => {
   const f = await fixture(false, false);
-  for (const token of ["a".repeat(31), "B".repeat(33), "abcd…"]) {
+  for (const token of [
+    "a".repeat(31),
+    "B".repeat(33),
+    `${"abcd".repeat(6)}…`,
+  ]) {
     const at = f.send(
       `captain: answer ${token} {"q0":"wait"}`,
       `malformed-${token.length}`,
@@ -676,3 +685,24 @@ test("crew question publication anchors survive a new IRC connection", async () 
   );
   expect(f.replies).toEqual([{ q0: "wait" }]);
 }, 12_000);
+
+test("short hex-like prose remains ordinary while punctuated full tokens stay reserved", async () => {
+  const f = await fixture(false, false);
+  for (const [index, word] of ["2025...", "decade…", "faded…"].entries())
+    f.send(`other: answer ${word}`, `prose-${index}`);
+  await until(
+    () => f.prompts.length === 3,
+    4000,
+    "ordinary short prose admitted",
+  );
+  const count = f.prompts.length;
+  for (const [index, punctuation] of [",", ".", ":"].entries()) {
+    const at = f.send(
+      `other: answer ${"a".repeat(32)}${punctuation} 1`,
+      `punctuated-${index}`,
+    );
+    await f.received(at);
+  }
+  expect(f.prompts).toHaveLength(count);
+  expect(f.replies).toEqual([]);
+});

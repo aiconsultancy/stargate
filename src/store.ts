@@ -999,7 +999,11 @@ export class Store {
     return this.db.transaction(() => {
       if (!this.enqueue(input)) return false;
       this.ircThreadMessage(input.botKey, input.channel, input.thread, root);
-      if (invited) this.joinIrcThread(input.botKey, input.channel, root);
+      if (
+        invited ||
+        this.ircThreadParticipating(input.botKey, input.channel, root)
+      )
+        this.joinIrcThread(input.botKey, input.channel, root);
       return true;
     })();
   }
@@ -1074,7 +1078,7 @@ export class Store {
       throw new Error("IRC thread ancestry conflict");
     this.db
       .query(
-        "INSERT OR IGNORE INTO irc_thread_messages(botKey,channel,msgid,root,recorded) VALUES (?,?,?,?,?)",
+        "INSERT INTO irc_thread_messages(botKey,channel,msgid,root,recorded) VALUES (?,?,?,?,?) ON CONFLICT(botKey,channel,msgid) DO UPDATE SET recorded=excluded.recorded",
       )
       .run(botKey, channel, msgid, root, Date.now());
   }
@@ -1082,7 +1086,7 @@ export class Store {
   private joinIrcThread(botKey: string, channel: string, root: string) {
     this.db
       .query(
-        "INSERT OR IGNORE INTO irc_thread_memberships(botKey,channel,root,recorded) VALUES (?,?,?,?)",
+        "INSERT INTO irc_thread_memberships(botKey,channel,root,recorded) VALUES (?,?,?,?) ON CONFLICT(botKey,channel,root) DO UPDATE SET recorded=excluded.recorded",
       )
       .run(botKey, channel, root, Date.now());
   }
@@ -1610,8 +1614,9 @@ export class Store {
         this.db
           .query(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE botKey=? AND recorded<?
           AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.botKey=${table}.botKey AND j.channel=${table}.channel AND CAST(COALESCE(j.replyParent,j.thread) AS TEXT)=${table}.root AND j.status NOT IN ('done','failed'))
+          AND NOT EXISTS(SELECT 1 FROM irc_thread_memberships m WHERE m.botKey=${table}.botKey AND m.channel=${table}.channel AND m.root=${table}.root AND m.recorded>=?)
           AND NOT EXISTS(SELECT 1 FROM native_questions q JOIN jobs j ON j.id=q.jobID WHERE q.botKey=${table}.botKey AND j.channel=${table}.channel AND CAST(COALESCE(j.replyParent,j.thread) AS TEXT)=${table}.root) ORDER BY recorded LIMIT 256)`)
-          .run(botKey, cutoff);
+          .run(botKey, cutoff, cutoff);
       }
     })();
   }

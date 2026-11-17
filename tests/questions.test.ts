@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
+import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway";
+import { parseMessage } from "../src/irc/protocol";
+import { routeIrcMessage } from "../src/irc/routing";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
@@ -79,6 +82,12 @@ async function fixture(source = true) {
   let filtered = false;
   let unsupported = false;
   let publishFail = false;
+  let offerGate:
+    | {
+        entered: ReturnType<typeof Promise.withResolvers<void>>;
+        release: ReturnType<typeof Promise.withResolvers<void>>;
+      }
+    | undefined;
   let noticeGate:
     | {
         entered: ReturnType<typeof Promise.withResolvers<void>>;
@@ -146,6 +155,11 @@ async function fixture(source = true) {
         async publish(_job, text, guard) {
           if (!guard()) throw new Error("Denied");
           if (publishFail) throw new Error("IRC unavailable");
+          if (offerGate && text.includes("OpenCode needs clarification")) {
+            offerGate.entered.resolve();
+            await offerGate.release.promise;
+            if (!guard()) throw new Error("Denied offer after wait");
+          }
           if (
             noticeGate &&
             (text.includes("decision recorded") ||
@@ -209,6 +223,13 @@ async function fixture(source = true) {
     },
     unsupported() {
       unsupported = true;
+    },
+    pauseOffer() {
+      offerGate = {
+        entered: Promise.withResolvers<void>(),
+        release: Promise.withResolvers<void>(),
+      };
+      return offerGate;
     },
     pauseNotice() {
       noticeGate = {
@@ -1339,3 +1360,264 @@ for (const failure of ["read-error", "timeout"] as const) {
     }
   });
 }
+
+test("explicit renewal and concurrent polls publish the fresh offer only once", async () => {
+  const f = await fixture();
+  f.store.offerQuestion({
+    token: "e".repeat(32),
+    botKey: original.botKey,
+    formID: question().id,
+    sessionID: question().sessionID,
+    inputID: question().inputID,
+    jobID: f.jobID,
+    fingerprint: question().fingerprint,
+    expires: Date.now() - 1,
+    state: "offered",
+    notified: 1,
+    recovering: 0,
+  });
+  const gate = f.pauseOffer();
+  const renewal = f.answer({}, { token: "e".repeat(32), renew: true });
+  await gate.entered.promise;
+  await f.poll();
+  await f.poll();
+  expect(f.published).toEqual([]);
+  gate.release.resolve();
+  await renewal;
+  await f.poll();
+  expect(f.published).toHaveLength(1);
+  expect(f.published[0]).toContain("Previous clarification token expired");
+  expect(f.offer().notified).toBe(1);
+  expect(f.decisions).toEqual([]);
+});
+
+for (const cleanup of ["ttl", "empty-list"] as const) {
+  test(`missing-session suppression recovers via ${cleanup} for new fixed-session work`, async () => {
+    const f = await fixture();
+    await f.poll();
+    f.backend.pendingQuestions = async () => [];
+    f.backend.questionState = async () => "missing-session";
+    await f.poll();
+    if (cleanup === "empty-list") {
+      f.store.respond(f.jobID, []);
+      f.store.finish(f.jobID);
+      await f.poll();
+    }
+    const next = {
+      ...original,
+      eventId: "#ship:next",
+      conversation: "next-conversation",
+      thread: "next",
+    };
+    f.store.enqueue(next);
+    const job = f.store.queuedJob(original.botKey, next.eventId);
+    if (!job) throw new Error("Missing new job");
+    f.store.running(job.id);
+    f.store.saveInput(original.botKey, job.id, "msg_next", "ses_captain");
+    f.store.recordQuestionSource(next);
+    const q = { ...question(), id: "frm_next", inputID: "msg_next" };
+    f.backend.pendingQuestions = async () => [q];
+    f.backend.questionBelongsToInput = async () => true;
+    f.backend.questionState = async () => "pending";
+    const clock =
+      cleanup === "ttl"
+        ? spyOn(Date, "now").mockReturnValue(Date.now() + 60_001)
+        : undefined;
+    try {
+      await f.poll();
+    } finally {
+      clock?.mockRestore();
+    }
+    expect(
+      f.store
+        .questionOffers(original.botKey)
+        .some((o) => o.formID === "frm_next" && o.notified === 1),
+    ).toBe(true);
+    expect(f.published).toHaveLength(2);
+  });
+}
+
+test("denied outcome notices retire without publication or repeated inactive native polling", async () => {
+  const f = await fixture();
+  await f.poll();
+  const token = f.offer().token;
+  f.failPublish(true);
+  await f.answer();
+  f.store.respond(f.jobID, []);
+  f.store.finish(f.jobID);
+  f.revoke();
+  let reads = 0;
+  f.backend.pendingQuestions = async () => {
+    reads++;
+    return [];
+  };
+  await f.poll();
+  await f.poll();
+  expect(reads).toBe(0);
+  expect(f.published).toHaveLength(1);
+  expect(f.store.questionOffers(original.botKey)).toEqual([]);
+  expect(f.store.questionByToken(original.botKey, token)?.outcome).toBe(
+    "answered",
+  );
+  expect(f.decisions).toHaveLength(1);
+});
+
+for (const activity of ["human", "publication"] as const) {
+  test(`continuing ${activity} thread activity refreshes retention independently`, async () => {
+    const f = await fixture();
+    expect(
+      f.store.ircPublished(
+        original.botKey,
+        "#ship",
+        "old-bot-message",
+        "m1",
+        "m1",
+      ),
+    ).toBe(true);
+    const db = new Database(f.path);
+    try {
+      const old = Date.now() - 31 * 86_400_000;
+      db.query("UPDATE irc_thread_messages SET recorded=?").run(old);
+      db.query("UPDATE irc_thread_memberships SET recorded=?").run(old);
+      f.store.respond(f.jobID, []);
+      f.store.finish(f.jobID);
+      if (activity === "human") {
+        const reply = {
+          ...original,
+          eventId: "#ship:recent",
+          thread: "recent",
+          replyParent: "m1",
+        };
+        f.store.enqueueIrcHuman(reply, false);
+        const job = f.store.queuedJob(original.botKey, reply.eventId);
+        if (!job) throw new Error("No reply job");
+        f.store.finish(job.id, "failed");
+      } else
+        expect(
+          f.store.ircPublished(
+            original.botKey,
+            "#ship",
+            "old-bot-message",
+            "m1",
+            "m1",
+          ),
+        ).toBe(true);
+      f.store.pruneIrcHistory(original.botKey, Date.now());
+      expect(
+        f.store.ircThreadParticipating(original.botKey, "#ship", "m1"),
+      ).toBe(true);
+      expect(
+        f.store.ircThreadRoot(
+          original.botKey,
+          "#ship",
+          activity === "human" ? "recent" : "old-bot-message",
+        ),
+      ).toBe("m1");
+    } finally {
+      db.close();
+    }
+  });
+}
+
+test("recent participation preserves an older reply parent through cleanup and restart in its exact namespace", async () => {
+  const f = await fixture();
+  const start = Date.now();
+  expect(
+    f.store.ircPublished(original.botKey, "#ship", "old-parent", "m1", "m1"),
+  ).toBe(true);
+  f.store.respond(f.jobID, []);
+  f.store.finish(f.jobID);
+  const db = new Database(f.path);
+  db.query(
+    "INSERT INTO irc_thread_messages(botKey,channel,msgid,root,recorded) VALUES(?,'#foreign','old-parent','m1',?)",
+  ).run(original.botKey, start);
+  db.query(
+    "INSERT INTO irc_thread_messages(botKey,channel,msgid,root,recorded) VALUES('another-bot','#ship','old-parent','m1',?)",
+  ).run(start);
+  db.close();
+  const config = ircSchema.parse({
+    id: original.botKey,
+    account: "captain",
+    passwordEnv: "FIXTURE",
+    channels: ["#ship"],
+    server: { host: "localhost", port: 6697, tls: true },
+    backend: {
+      type: "opencode",
+      url: "http://localhost:4096",
+      directory: "/project",
+    },
+    access: {
+      channelRequests: "nick-mention",
+      humanWakeChannels: [{ channel: "#ship", replies: "participating" }],
+    },
+    fleetPolicy: {
+      role: "captain",
+      humanAccounts: ["jac"],
+      agentAccounts: ["captain"],
+      assignedCheckout: "/project",
+      capabilities: ["read_code"],
+    },
+  });
+  const route = (id: string) => {
+    const message = parseMessage(
+      `@account=jac;msgid=${id};+draft/reply=old-parent :jac!u@fixture PRIVMSG #ship :Continue this thread`,
+    );
+    if (!message) throw new Error("No fixture message");
+    return routeIrcMessage(message, {
+      config,
+      member: {
+        id: "captain",
+        key: original.botKey,
+        account: "captain",
+        nick: "captain",
+        role: "captain",
+        channels: ["#ship"],
+      },
+      currentNick: "captain",
+      joined: () => true,
+      sent: () => false,
+      fold: (value) => value.toLowerCase(),
+      now: Date.now,
+      threadRoot: (channel, id) =>
+        f.store.ircThreadRoot(original.botKey, channel, id),
+      participating: (channel, root) =>
+        f.store.ircThreadParticipating(original.botKey, channel, root),
+    });
+  };
+  const clock = spyOn(Date, "now").mockReturnValue(start + 29 * 86_400_000);
+  try {
+    const reply = route("recent");
+    if (!reply) throw new Error("No admitted day29reply");
+    expect(f.store.enqueueIrcHuman(reply, false)).toBe(true);
+    const job = f.store.queuedJob(original.botKey, reply.eventId);
+    if (!job) throw new Error("No reply job");
+    f.store.finish(job.id, "failed");
+    clock.mockReturnValue(start + 31 * 86_400_000);
+    f.store.pruneIrcHistory(original.botKey, Date.now());
+    f.restart();
+    expect(f.store.ircThreadRoot(original.botKey, "#ship", "old-parent")).toBe(
+      "m1",
+    );
+    expect(f.store.ircThreadParticipating(original.botKey, "#ship", "m1")).toBe(
+      true,
+    );
+    expect(route("after-restart")?.replyParent).toBe("m1");
+    expect(
+      f.store.ircThreadRoot(original.botKey, "#foreign", "old-parent"),
+    ).toBeUndefined();
+    const metadata = new Database(f.path, { readonly: true });
+    try {
+      expect(
+        metadata
+          .query<{ recorded: number }, []>(
+            "SELECT recorded FROM irc_thread_messages WHERE botKey='another-bot' AND msgid='old-parent'",
+          )
+          .get()?.recorded,
+      ).toBe(start);
+    } finally {
+      metadata.close();
+    }
+  } finally {
+    clock.mockRestore();
+  }
+});

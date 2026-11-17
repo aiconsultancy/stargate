@@ -690,11 +690,13 @@ conditional, authentication, credential-bearing and unsupported fields are not
 bridged; use the native operator interface for those forms. Never send credentials
 in an IRC answer.
 
+Controls display the stable authenticated bot account, so a temporary fallback
+nick cannot make a printed command stale. Intake also accepts the current nick.
 The target bot (its account or current nick under the server's casemapping), current allow-list, authenticated original account, channel,
 thread, token, form fingerprint and native input must all still match. A nick
 alone proves no identity. Tokens accept either hex case. All ships reserve targeted `answer` and
 `cancel-question` and `renew-question` controls, including unmistakably malformed
-hex-token/ellipsis variants, before ordinary intake, so another captain does not
+near-token-length hex/punctuation variants (at least 24 hex characters), before ordinary intake, so another captain does not
 treat the control as a new prompt. These decisions answer a clarification only;
 they never grant tool permission or generic human approval.
 Ordinary requests such as `galactica: answer Bob's question` remain model prompts,
@@ -705,6 +707,8 @@ after a restart without relying on the connection's in-memory echo cache.
 Question offers and spent tokens survive a restart. A native reply attempt is
 recorded before its API call. If the outcome is uncertain, that token stays spent
 and no answer is automatically retried; an operator must inspect OpenCode.
+Legacy attempted rows with no persisted outcome remain uncertain: an old inline
+notification is not durable proof that the native reply succeeded.
 Polling never renews expired offers or reposts a waiting question unattended.
 The original human may send `renew-question` with the expired token in the same
 thread. An expired, never-attempted offer can then receive a fresh token only after the still-pending
@@ -712,6 +716,7 @@ native form, original input and current human access are revalidated. The renewe
 offer is posted explicitly; the old token no longer works. Expiry never answers or
 cancels native work. Spent or uncertain attempts are never renewed. Publishing can repeat the same
 offer after a lost acknowledgement; this is not an exactly-once delivery claim.
+Renewal and ordinary polling share one in-flight offer publication.
 Native reply outcomes and notification delivery are stored separately. A failed
 confirmation retries the notice, not the native reply. Concurrent answer/poll
 paths share one in-flight notice; a restart after a lost acknowledgement can
@@ -719,10 +724,14 @@ still repeat a notice. An API deadline still
 produces an uncertainty notice while the gateway and original source remain authorised.
 
 One unavailable native session does not prevent the others from being polled.
-Transient failures use exponential retry delays up to one minute. A matching native
+Transient failures use exponential retry delays up to one minute. A verified
+missing session suppresses polling for at most one minute; the cache is also
+cleared when the session leaves the active list, including an empty list. A matching native
 session-not-found result closes its offers and releases an otherwise orphaned
 recovery hold as interrupted work, never as a successful completion. Cancelled
-requesters receive no outcome notice. Their spent records remain durable without
+requesters receive no outcome notice. Notices denied by a later access/human
+policy change are suppressed without publication, while their native outcomes
+and any recovery holds remain durable. Their spent records remain durable without
 repeated native polling once no recovery hold remains. A cancelled recovered
 waiter still preserves its unknown native work until real settlement or verified
 session loss, including after another restart. Only an already-established hold
@@ -743,7 +752,12 @@ removing at most 256 rows per table/registration in each batch; intake never
 runs this cleanup. Active work and recovery
 holds are retained; outcome notices for settled work share the 30-day window. Historical source
 proofs are removed with spent offer metadata, so pruning cannot make an old
-question eligible for a fresh answer. A thread older than this history window
+question eligible for a fresh answer. Existing thread membership and ancestry
+retention timestamps refresh on continuing admitted/verified publication
+activity; a thread does not expire merely because its first participation is old.
+Existing parent mappings remain available while recent participation keeps their
+exact bot/channel/root active, including across restart. Inactive threads still
+use the 30-day retention window. An inactive thread older than this history window
 may require a fresh explicit mention to establish participation again.
 
 Ordinary interrupted-work recovery remains unchanged. Its only exception is an
