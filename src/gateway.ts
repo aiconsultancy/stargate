@@ -224,7 +224,7 @@ export type GatewayConfig =
 /** Immutable access context; scheduled/catch-up scopes may have no job. */
 export type GatewayAccessContext = Readonly<
   Pick<Incoming, "user" | "channel" | "sender" | "fleet"> &
-    Partial<Pick<Incoming, "text">>
+    Partial<Pick<Incoming, "text" | "eventId">>
 >;
 
 /** Transport rules the gateway applies to every job of one registration. */
@@ -1314,7 +1314,9 @@ export class Gateway {
     let output: ReplyChunk[];
     let failure = job.failure ?? undefined;
     if (job.status === "queued") {
-      if (!this.store.running(job.id)) return;
+      // Intake may have extended a queued IRC burst after ready() returned.
+      // Refuse a stale snapshot; the next poll reads its full text and files.
+      if (!this.store.running(job.id, job.text)) return;
       await readReceipt(true);
       // Ends before delivery, so a typing indicator never outlasts the turn.
       const typing = new AbortController();
