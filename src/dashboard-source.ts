@@ -1,15 +1,21 @@
+import { createHash } from "node:crypto";
 import type { AgentBackend } from "./backend";
 import type { BotConfig, IrcConfig, TeamsConfig } from "./config";
 import type { CrewStatus } from "./crew-status";
 import type { CronStore } from "./cron-store";
 import type {
+  DashboardCaptain,
   DashboardSource,
   DashboardTransport,
   ShipSummary,
   ShipView,
 } from "./dashboard-model";
+import {
+  dashboardCrewMembers,
+  dashboardCrewSummary,
+} from "./dashboard-projection";
 import type { IrcRegistration } from "./irc/ship";
-import type { Identity } from "./routing";
+import { backendFingerprint, type Identity } from "./routing";
 import {
   HISTORY_PAGE,
   type HistorySession,
@@ -125,6 +131,52 @@ export function dashboardSource(
   const name = (ship: DashboardShip) => ship.bot.displayName ?? ship.bot.id;
   const agent = (ship: DashboardShip) =>
     ship.bot.backend.type === "opencode" ? ship.bot.backend.agent : undefined;
+
+  // Group display aliases only when their native execution identity is exact.
+  // Repeated transports are ambiguous (including different tenants), so keep
+  // every registration separate rather than guessing a captain relationship.
+  function captain(ship: DashboardShip): DashboardCaptain | undefined {
+    if (ship.bot.backend.type !== "opencode" || !ship.backend.sessionID)
+      return undefined;
+    const pinned = ship.backend.sessionID;
+    const fingerprint = backendFingerprint(ship.bot);
+    const matches = ships.filter(
+      (other) =>
+        other.bot.backend.type === "opencode" &&
+        other.backend.sessionID === pinned &&
+        backendFingerprint(other.bot) === fingerprint,
+    );
+    const kind = (value: DashboardShip) => value.transport?.kind ?? "slack";
+    if (
+      matches.length < 2 ||
+      new Set(matches.map(kind)).size !== matches.length
+    )
+      return undefined;
+    const ordered = [...matches].sort((a, b) =>
+      a.bot.id.localeCompare(b.bot.id),
+    );
+    const primary =
+      ordered.find((entry) => entry.transport?.kind === "irc") ?? ordered[0];
+    if (!primary) return undefined;
+    return {
+      key: createHash("sha256")
+        .update(
+          JSON.stringify([
+            fingerprint,
+            pinned,
+            ordered.map((entry) => entry.key),
+          ]),
+        )
+        .digest("hex"),
+      id: primary.bot.id,
+      name: name(primary),
+      registrations: ordered.map((entry) => ({
+        id: entry.bot.id,
+        name: name(entry),
+        transport: kind(entry),
+      })),
+    };
+  }
 
   async function crew(
     ship: DashboardShip,
@@ -243,21 +295,15 @@ export function dashboardSource(
         ships.map(async (ship): Promise<ShipSummary> => {
           const { status } = await crew(ship, signal);
           const named = agent(ship);
+          const captainView = captain(ship);
           return {
             id: ship.bot.id,
             name: name(ship),
             backend: ship.bot.backend.type,
             ...(ship.transport ? { transport: ship.transport.kind } : {}),
             ...(named ? { agent: named } : {}),
-            crew: status && {
-              total: status.total,
-              busy:
-                status.busy ??
-                status.members.filter((member) => member.current).length,
-              ...(status.busy === undefined && status.truncated
-                ? { busyPartial: true as const }
-                : {}),
-            },
+            crew: status && dashboardCrewSummary(status),
+            ...(captainView ? { captain: captainView } : {}),
             queue: store.queueCounts(ship.key),
             cronjobs: cronStore.report(ship.key).length,
           };
@@ -285,6 +331,7 @@ export function dashboardSource(
             ? bot.backend.model
             : undefined;
       const report = bot.cronjobs?.dailyReport;
+      const captainView = captain(ship);
       return {
         generatedAt: now(),
         id: bot.id,
@@ -320,6 +367,8 @@ export function dashboardSource(
           turnTimeoutMs: bot.turnTimeoutMs,
         },
         crew: status,
+        ...(status ? { crewMembers: dashboardCrewMembers(status) } : {}),
+        ...(captainView ? { captain: captainView } : {}),
         ...(error ? { crewError: error } : {}),
         queue: {
           counts: store.queueCounts(ship.key),

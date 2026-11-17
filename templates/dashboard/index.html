@@ -227,21 +227,41 @@
         node.append(document.createTextNode("Updated: "), time(value));
         return node;
       }
+      function registrationLabel(value) {
+        return value === "irc" ? "IRC" : value === "teams" ? "Teams" : "Slack";
+      }
+      function partial(value, lowerBound) {
+        return value === undefined ? "Unavailable" : lowerBound ? `at least ${value}` : value;
+      }
       function renderFleet(data) {
         document.title = "Stargate fleet";
         breadcrumbs.replaceChildren(link("Fleet", "#/"));
         const cards = el("div", undefined, "cards");
+        const captains = new Map();
         for (const ship of data.ships) {
+          const key = ship.captain?.key ?? `registration-${ship.id}`;
+          if (!captains.has(key)) captains.set(key, []);
+          captains.get(key).push(ship);
+        }
+        for (const registrations of captains.values()) {
+          const ship = registrations.find(item => item.id === item.captain?.id) ?? registrations[0];
           const card = el("article", undefined, "card");
           const heading = el("h2");
-          const a = link(ship.name, shipHash(ship.id));
+          const a = link(ship.captain?.name ?? ship.name, shipHash(ship.id));
           a.dataset.focus = `ship-${ship.id}`;
           heading.append(a);
+          const people = ship.crew?.people;
           card.append(heading, fields([
             ["Backend", ship.backend], ["Agent", ship.agent],
-            ["Crew total", ship.crew?.total], ["Crew busy", ship.crew?.busyPartial ? `at least ${ship.crew.busy}` : ship.crew?.busy],
-            ["Cronjobs", ship.cronjobs],
-          ]), counts(ship.queue));
+            ["Crew members", ship.crew ? partial(people?.total, people?.partial) : "Not available"],
+            ["Crew with recorded tasks", ship.crew ? partial(people?.busy, people?.partial) : "Not available"],
+            ["Project contexts", ship.crew?.total],
+          ]));
+          for (const registration of registrations) {
+            const label = registrationLabel(registration.transport);
+            card.append(link(`${label} (${registration.id})`, shipHash(registration.id)),
+              counts(registration.queue), el("p", `Cronjobs: ${registration.cronjobs}`, "muted"));
+          }
           cards.append(card);
         }
         if (!data.ships.length) cards.append(el("p", "No ships configured."));
@@ -266,26 +286,71 @@
         for (const task of tasks) details.append(taskFields(task));
         return details;
       }
+      function crewPeople(data) {
+        if (data.crewMembers) return data.crewMembers;
+        const people = new Map();
+        for (const context of data.crew.members) {
+          if (!people.has(context.id)) people.set(context.id, { id: context.id, name: context.name, contexts: [] });
+          people.get(context.id).contexts.push(context);
+        }
+        return [...people.values()];
+      }
+      function projectLabel(context, data) {
+        if (context.project && context.project !== "default") return context.project;
+        const directory = data.bot.backend.directory?.split(/[\\/]/).filter(Boolean).at(-1);
+        return directory ? `${directory} (default)` : "Default project";
+      }
+      function contextState(context) {
+        if (context.current) return `Recorded task: ${context.current.status}`;
+        if (context.queuedCount) return `${context.queuedCount} recorded queued`;
+        if (context.lastOutcome) return `Last recorded task: ${context.lastOutcome.status}`;
+        return context.provisioned === "unprovisioned" ? "No worker session yet" : "No current task";
+      }
       function renderCrew(data) {
         const node = section("Captain and crew", "crew");
         if (data.crewError) node.append(el("p", data.crewError, "error"));
-        if (!data.crew) { node.append(el("p", "Crew status: none", "muted")); return node; }
-        node.append(el("p", `Members: ${data.crew.total}`));
-        if (data.crew.truncated) node.append(el("p", "Crew list truncated.", "label"));
-        if (!data.crew.members.length) node.append(el("p", "none", "muted"));
-        for (const member of data.crew.members) {
-          const memberKey = member.project ? `project-${member.project.length}-${member.project}-${member.id}` : member.id;
+        if (!data.crew) { node.append(el("p", "Crew status unavailable or not configured.", "muted")); return node; }
+        const people = crewPeople(data);
+        node.append(el("p", `${data.crew.truncated ? "At least " : ""}${people.length} crew members · ${data.crew.total} project contexts`));
+        node.append(el("p", "A crew profile may not have a worker session in every project. Stored task state does not prove live execution.", "muted"));
+        if (data.crew.truncated) node.append(el("p", "Some project contexts are outside this page.", "label"));
+        if (!people.length) node.append(el("p", "No crew members configured.", "muted"));
+        for (const person of people) {
           const card = el("article", undefined, "member");
-          card.append(el("h3", member.name), fields([
-            ["Member", member.id], ...(member.project ? [["Project", member.project]] : []), ["Backend", member.backend],
-            ["Provisioned", member.provisioned], ["Observed", member.observed],
-            ["Queued", member.queuedCount], ["Recent count", member.recentCount],
-          ]), el("h3", "Current task"), taskFields(member.current),
-          el("h3", "Last outcome"), taskFields(member.lastOutcome),
-          taskList("Queued tasks", member.queued, `queued-${memberKey}`),
-          taskList("Recent tasks", member.recent, `recent-${memberKey}`));
+          card.append(el("h3", person.name), fields([["Member", person.id]]));
+          for (const context of person.contexts) {
+            const project = context.project ?? "default";
+            const memberKey = `project-${project.length}-${project}-${person.id}`;
+            const details = el("details");
+            details.dataset.section = `context-${memberKey}`;
+            details.open = Boolean(context.current || context.queuedCount || context.lastOutcome?.status === "uncertain");
+            const summary = el("summary", `${projectLabel(context, data)}: ${contextState(context)}`);
+            summary.dataset.focus = `context-${memberKey}`;
+            details.append(summary, fields([
+              ["Project", projectLabel(context, data)], ["Backend", context.backend],
+              ["Worker session", context.provisioned === "ready" ? "Recorded" : context.provisioned === "pending" ? "Starting" : "Not created"],
+              ["Live status", context.observed ? "Observed" : "Not checked"],
+              ["Queued", context.queuedCount], ["Recent tasks", context.recentCount],
+            ]), el("h3", "Current recorded task"), taskFields(context.current),
+            el("h3", "Last outcome"), taskFields(context.lastOutcome),
+            taskList("Queued tasks", context.queued, `queued-${memberKey}`),
+            taskList("Recent tasks", context.recent, `recent-${memberKey}`));
+            card.append(details);
+          }
           node.append(card);
         }
+        return node;
+      }
+      function renderRegistrations(data) {
+        const node = el("nav");
+        node.setAttribute("aria-label", "Transport registrations");
+        const registrations = data.captain?.registrations ?? [{ id: data.id, transport: data.bot.transport?.kind ?? "slack" }];
+        for (const registration of registrations) {
+          const item = link(`${registrationLabel(registration.transport)} (${registration.id})`, shipHash(registration.id));
+          if (registration.id === data.id) item.setAttribute("aria-current", "page");
+          node.append(item, document.createTextNode(" "));
+        }
+        node.append(el("p", "Queues and conversation history below belong to the selected registration.", "muted"));
         return node;
       }
       function renderBot(bot) {
@@ -436,7 +501,7 @@
         breadcrumbs.replaceChildren(link("Fleet", "#/"), document.createTextNode(" / "), el("span", data.name));
         // Reuse session nodes so polling preserves loaded children and controls.
         const sessions = renderSessions(data);
-        replaceView([el("h1", data.name), updated(data.generatedAt), renderCrew(data),
+        replaceView([el("h1", data.captain?.name ?? data.name), updated(data.generatedAt), renderRegistrations(data), renderCrew(data),
           renderBot(data.bot), renderQueue(data.queue), renderCron(data.cron, data.bot.transport), sessions], saved);
       }
       function partDetails(label, body) {

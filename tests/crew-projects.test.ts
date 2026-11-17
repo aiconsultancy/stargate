@@ -614,7 +614,11 @@ test("engine aggregate counts member twenty-one before its own page limit and re
       cron,
     );
     const fleet = await source.fleet(new AbortController().signal);
-    expect(fleet.ships[0]?.crew).toEqual({ total: 42, busy: 1 });
+    expect(fleet.ships[0]?.crew).toEqual({
+      total: 42,
+      busy: 1,
+      people: { total: 20, busy: 0, partial: true },
+    });
     expect(f.creations).toHaveLength(calls);
   } finally {
     store.close();
