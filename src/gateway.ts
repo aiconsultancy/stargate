@@ -224,7 +224,7 @@ export type GatewayConfig =
 /** Immutable access context; scheduled/catch-up scopes may have no job. */
 export type GatewayAccessContext = Readonly<
   Pick<Incoming, "user" | "channel" | "sender" | "fleet"> &
-    Partial<Pick<Incoming, "text">>
+    Partial<Pick<Incoming, "text" | "eventId">>
 >;
 
 /** Transport rules the gateway applies to every job of one registration. */

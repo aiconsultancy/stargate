@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
+import { type PromptSourceContext, sourceLine } from "../backend";
 import { type BackendConfig, type IrcConfig, secret } from "../config";
 import { type OutboxPage, outboxMaxAgeMs } from "../crew/irc-rpc";
 import type { FleetSource } from "../fleet/protocol";
@@ -256,6 +258,37 @@ const saidMs = 30 * 60_000;
 const sinceLines = 20;
 const sinceChars = 300;
 
+function ircSource(
+  config: IrcConfig,
+  member: IrcMember,
+  job: Incoming,
+): PromptSourceContext["source"] {
+  return {
+    transport: "irc",
+    channel: job.channel,
+    thread: job.thread,
+    message: job.eventId.slice(job.channel.length + 1),
+    ...(job.replyParent && validMsgid(job.replyParent)
+      ? { replyParent: job.replyParent }
+      : {}),
+    user: job.user,
+    ...(config.fleetControl
+      ? {
+          reference: fleetSourceReference(
+            "irc",
+            member.key,
+            job.channel,
+            job.eventId.slice(job.channel.length + 1),
+          ),
+        }
+      : {}),
+    ...(config.fleetPolicy
+      ? { authority: fleetAuthority(config.fleetPolicy, job.user) }
+      : {}),
+    ...(job.sender ? { sender: job.sender } : {}),
+  };
+}
+
 /**
  * Access rules and notes of one config version, never a later one. An
  * all-call note lists the channel lines that `said` returns: those after
@@ -265,12 +298,37 @@ function shipTransport(
   config: IrcConfig,
   member: IrcMember,
   client: IrcClient,
+  store: Store,
   said: (channel: string, after: number, except: string) => string[] = () => [],
   sessionReady?: GatewayTransport["sessionReady"],
 ): GatewayTransport {
-  const authorized: GatewayTransport["allowed"] = (user, channel, job) =>
-    ircAllowed(config, member, user, channel, client.fold) &&
-    ircResultJobAllowed(config, member, client.nick, user, job, client.fold);
+  const authorized: GatewayTransport["allowed"] = (user, channel, job) => {
+    if (
+      !ircAllowed(config, member, user, channel, client.fold) ||
+      !ircResultJobAllowed(config, member, client.nick, user, job, client.fold)
+    )
+      return false;
+    const stored = job?.eventId
+      ? store.jobByEvent(member.key, job.eventId)
+      : null;
+    // Recheck original addressing too: the JSON wrapper must not conceal a
+    // source that a later policy would refuse before execution or delivery.
+    return (
+      !stored ||
+      store
+        .ircBurstMessages(stored.id)
+        .every(({ originalText }) =>
+          ircResultJobAllowed(
+            config,
+            member,
+            client.nick,
+            user,
+            { ...job, text: originalText },
+            client.fold,
+          ),
+        )
+    );
+  };
   return {
     ...(config.features.questions
       ? {
@@ -326,30 +384,7 @@ function shipTransport(
       (config.access.channelRequests !== "nick-mention" ||
         !client.isChannel(channel) ||
         client.inChannel(channel)),
-    source: (job) => ({
-      transport: "irc",
-      channel: job.channel,
-      thread: job.thread,
-      message: job.eventId.slice(job.channel.length + 1),
-      ...(job.replyParent && validMsgid(job.replyParent)
-        ? { replyParent: job.replyParent }
-        : {}),
-      user: job.user,
-      ...(config.fleetControl
-        ? {
-            reference: fleetSourceReference(
-              "irc",
-              member.key,
-              job.channel,
-              job.eventId.slice(job.channel.length + 1),
-            ),
-          }
-        : {}),
-      ...(config.fleetPolicy
-        ? { authority: fleetAuthority(config.fleetPolicy, job.user) }
-        : {}),
-      ...(job.sender ? { sender: job.sender } : {}),
-    }),
+    source: (job) => ircSource(config, member, job),
     note: (job) =>
       ircNote(
         job,
@@ -613,6 +648,7 @@ export class IrcShip {
             next,
             slot.kept,
             slot.kept.client,
+            this.store,
             this.saidSince(slot.kept, slot.kept.client),
             this.sessionReady(next, slot.member),
           );
@@ -828,6 +864,7 @@ export class IrcShip {
         config,
         identity,
         client,
+        this.store,
         this.saidSince(identity, client),
         this.sessionReady(config, member),
       ),
@@ -1113,7 +1150,38 @@ export class IrcShip {
       questionHuman(this.config, input.user, client.fold)
     )
       this.store.recordQuestionSource(input);
+    const quietMs = this.config.access.humanMessageDebounceMs ?? 0;
     if (
+      quietMs > 0 &&
+      !replay &&
+      member.role === "captain" &&
+      !message.tags.has("bot") &&
+      !input.sender &&
+      !input.fleet &&
+      !input.gate &&
+      !input.deferDelivery &&
+      validMsgid(message.tags.get("msgid")) &&
+      (!this.config.fleetPolicy ||
+        fleetAuthority(this.config.fleetPolicy, input.user) === "human")
+    )
+      this.store.enqueueIrcBurst(input, {
+        quietMs,
+        // Config changes form a boundary even when the account namespace stays.
+        policy: createHash("sha256")
+          .update(
+            JSON.stringify({
+              access: this.config.access,
+              fleetPolicy: this.config.fleetPolicy,
+              fleetControl: this.config.fleetControl,
+              features: this.config.features,
+            }),
+          )
+          .digest("hex"),
+        source: sourceLine({ source: ircSource(this.config, member, input) }),
+        originalText: message.params[1] ?? input.text,
+        invited: admission.threadInvitation === true,
+      });
+    else if (
       member.role === "captain" &&
       this.config.access.humanWakeChannels?.some(
         ({ channel }) => client.fold(channel) === admission.channel,

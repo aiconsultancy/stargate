@@ -384,6 +384,46 @@ starts a turn (see [DM audit](#dm-audit)).
 Access rules are request filters, not isolation. An admitted account can drive
 the captain's enabled tools.
 
+### Optional human message quiet window
+
+Set `access.humanMessageDebounceMs` to wait briefly for consecutive human
+messages before starting a captain turn. Omission or `0` preserves immediate
+intake; the maximum is `5000` milliseconds. For example, `2500` gives a sender
+2.5 seconds of quiet to finish a request split across several IRC messages.
+The primary connection of a rear admiral uses the same option; crew do not.
+
+Every message must first pass the existing account, channel, bot, thread and
+human-authority checks. Buffering never admits an unaddressed message where
+routing requires an exact nick, or a reply to a thread the captain has not
+joined. Use IRCv3 `draft/multiline` on clients to send one long message
+atomically whenever possible; a quiet window can only combine messages that
+actually arrived and were admitted.
+
+Only consecutive live human messages from the same SASL account, connection,
+channel, conversation and reply thread can share a queued request. Changes to
+the routing policy, another admitted sender or request, or a different all-call
+class end the group. History replay, peer agents, crew messages, native
+clarification controls and Stop reactions keep their existing paths. A Stop
+reaction on any member of a queued burst stops that request immediately.
+
+The quiet deadline slides with host receive time, with a hard limit of 10
+seconds from the first message. Existing all-call staggering can still delay
+execution longer. A group holds at most 16 messages, 64 KiB of original records
+and prompt text, and 10 distinct attachment URLs; overflow starts another
+request without dropping its content. Each record keeps its own original
+message ID, timestamp, source reference, text and attachment URLs in private
+SQLite state. A grouped prompt labels each message separately; one message
+cannot lend its approval to another. Sources become correlated to the single
+native input only when that input is actually recorded. Queue state and
+deduplication survive a gateway restart.
+
+This does not interrupt an active turn or steer a running backend session.
+Follow-ups arriving after the window, or after execution starts, remain ordered
+behind the current request. Slack uses that same running-turn serialization;
+it has no equivalent quiet-window option. Slack normally delivers the entire
+message and its files in one event, which avoids IRC clients splitting text
+into separate requests.
+
 ### Peer captains
 
 `access.peerCaptains` lists the accounts of other fleet captains. The list

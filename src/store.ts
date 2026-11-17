@@ -8,6 +8,12 @@ import {
   type NativeMaker,
   nativeMakerSchema,
 } from "./fleet/protocol";
+import {
+  type IrcBurstMessage,
+  ircBurstLimits,
+  ircBurstMessageSchema,
+  ircBurstText,
+} from "./irc/burst";
 import { validMsgid } from "./irc/protocol";
 import {
   type NotificationContext,
@@ -251,6 +257,15 @@ export class Store {
         botKey TEXT NOT NULL, target TEXT NOT NULL, time TEXT NOT NULL,
         PRIMARY KEY(botKey, target)
       );
+      CREATE TABLE IF NOT EXISTS irc_bursts (
+        job INTEGER PRIMARY KEY REFERENCES jobs(id), policy TEXT NOT NULL,
+        deadline INTEGER NOT NULL, maximum INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS irc_burst_messages (
+        botKey TEXT NOT NULL, eventId TEXT NOT NULL,
+        job INTEGER NOT NULL REFERENCES jobs(id), ordinal INTEGER NOT NULL,
+        message TEXT NOT NULL, PRIMARY KEY(botKey,eventId), UNIQUE(job,ordinal)
+      );
       CREATE TABLE IF NOT EXISTS irc_thread_messages (
         botKey TEXT NOT NULL, channel TEXT NOT NULL, msgid TEXT NOT NULL,
         root TEXT NOT NULL, PRIMARY KEY(botKey,channel,msgid)
@@ -368,6 +383,12 @@ export class Store {
     if (
       this.db
         .query("SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?")
+        .get(input.botKey, input.eventId) !== null
+    )
+      return false;
+    if (
+      this.db
+        .query("SELECT 1 FROM irc_burst_messages WHERE botKey=? AND eventId=?")
         .get(input.botKey, input.eventId) !== null
     )
       return false;
@@ -998,10 +1019,13 @@ export class Store {
   jobByEvent(botKey: string, eventId: string): Job | null {
     return decodeJob(
       this.db
-        .query<StoredJob, [string, string]>(
-          "SELECT * FROM jobs WHERE botKey=? AND eventId=?",
+        .query<StoredJob, [string, string, string, string]>(
+          `SELECT * FROM jobs WHERE botKey=? AND eventId=?
+           UNION ALL SELECT j.* FROM irc_burst_messages b JOIN jobs j
+             ON j.id=b.job AND j.botKey=b.botKey
+           WHERE b.botKey=? AND b.eventId=? LIMIT 1`,
         )
-        .get(botKey, eventId),
+        .get(botKey, eventId, botKey, eventId),
     );
   }
 
@@ -1057,6 +1081,175 @@ export class Store {
         this.joinIrcThread(input.botKey, input.channel, root);
       return true;
     })();
+  }
+
+  /**
+   * Coalesce only consecutively admitted human messages before work starts.
+   * Original sources remain durable; event aliases never invent a native input.
+   * Host receive time owns the deadline, not sender-controlled server-time tags.
+   */
+  enqueueIrcBurst(
+    input: Incoming,
+    options: {
+      quietMs: number;
+      policy: string;
+      source: string;
+      originalText: string;
+      invited: boolean;
+      now?: number;
+    },
+  ): boolean {
+    if (
+      !Number.isInteger(options.quietMs) ||
+      options.quietMs < 1 ||
+      options.quietMs > 5000 ||
+      input.sender ||
+      input.fleet ||
+      input.gate ||
+      input.deferDelivery ||
+      !validMsgid(input.thread) ||
+      (input.replyParent != null && !validMsgid(input.replyParent))
+    )
+      throw new Error("IRC burst intake requires an eligible human message");
+    const now = options.now ?? Date.now();
+    const message: IrcBurstMessage = {
+      eventId: input.eventId,
+      thread: input.thread,
+      source: options.source,
+      text: input.text,
+      originalText: options.originalText,
+      received: input.received ?? now,
+      files: [...(input.files ?? [])],
+    };
+    // An individually large message still follows ordinary admission intact.
+    if (
+      message.files.length > ircBurstLimits.files ||
+      Buffer.byteLength(JSON.stringify(message)) > ircBurstLimits.bytes
+    )
+      return this.enqueueIrcHuman(input, options.invited);
+    ircBurstMessageSchema.parse(message);
+    return this.db.transaction(() => {
+      if (
+        this.jobByEvent(input.botKey, input.eventId) ||
+        this.db
+          .query("SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?")
+          .get(input.botKey, input.eventId) !== null
+      )
+        return false;
+      const latest = this.db
+        .query<StoredJob, [string]>(
+          "SELECT * FROM jobs WHERE botKey=? ORDER BY id DESC LIMIT 1",
+        )
+        .get(input.botKey);
+      const burst = latest
+        ? this.db
+            .query<
+              { policy: string; deadline: number; maximum: number },
+              [number]
+            >("SELECT policy,deadline,maximum FROM irc_bursts WHERE job=?")
+            .get(latest.id)
+        : null;
+      if (
+        latest &&
+        burst &&
+        latest.status === "queued" &&
+        !latest.input &&
+        latest.user === input.user &&
+        latest.channel === input.channel &&
+        latest.conversation === input.conversation &&
+        (latest.replyParent ?? null) === (input.replyParent ?? null) &&
+        (latest.textMention ?? null) === (input.textMention ?? null) &&
+        burst.policy === options.policy &&
+        now < burst.deadline &&
+        now < burst.maximum
+      ) {
+        const messages = this.ircBurstMessages(latest.id);
+        const combined = [...messages, message];
+        const files = [...new Set(combined.flatMap((item) => item.files))];
+        const text = ircBurstText(combined);
+        if (
+          combined.length <= ircBurstLimits.messages &&
+          files.length <= ircBurstLimits.files &&
+          Buffer.byteLength(JSON.stringify(combined)) <= ircBurstLimits.bytes &&
+          Buffer.byteLength(text) <= ircBurstLimits.bytes
+        ) {
+          const deadline = Math.min(now + options.quietMs, burst.maximum);
+          const changed = this.db
+            .query(
+              `UPDATE jobs SET text=?,input_files=?,retry_at=MAX(retry_at,?)
+               WHERE id=? AND status='queued' AND input IS NULL AND cancel_requested=0`,
+            )
+            .run(
+              text,
+              files.length ? JSON.stringify(files) : null,
+              Math.max(deadline, input.notBefore ?? 0),
+              latest.id,
+            ).changes;
+          if (changed) {
+            this.db
+              .query("UPDATE irc_bursts SET deadline=? WHERE job=?")
+              .run(deadline, latest.id);
+            this.saveIrcBurstMessage(
+              latest.id,
+              combined.length - 1,
+              input.botKey,
+              message,
+            );
+            const root = latest.replyParent ?? latest.thread;
+            this.ircThreadMessage(
+              input.botKey,
+              input.channel,
+              input.thread,
+              root,
+              latest.thread,
+            );
+            if (options.invited)
+              this.joinIrcThread(input.botKey, input.channel, root);
+            return true;
+          }
+        }
+      }
+      const deadline = now + options.quietMs;
+      if (
+        !this.enqueueIrcHuman(
+          { ...input, notBefore: Math.max(deadline, input.notBefore ?? 0) },
+          options.invited,
+        )
+      )
+        return false;
+      const job = this.jobByEvent(input.botKey, input.eventId);
+      if (!job) throw new Error("IRC burst job was not persisted");
+      this.db
+        .query(
+          "INSERT INTO irc_bursts(job,policy,deadline,maximum) VALUES(?,?,?,?)",
+        )
+        .run(job.id, options.policy, deadline, now + ircBurstLimits.waitMs);
+      this.saveIrcBurstMessage(job.id, 0, input.botKey, message);
+      return true;
+    })();
+  }
+
+  /** Original accepted text and source labels, retained across restarts. */
+  ircBurstMessages(job: number): IrcBurstMessage[] {
+    return this.db
+      .query<{ message: string }, [number]>(
+        "SELECT message FROM irc_burst_messages WHERE job=? ORDER BY ordinal",
+      )
+      .all(job)
+      .map(({ message }) => ircBurstMessageSchema.parse(JSON.parse(message)));
+  }
+
+  private saveIrcBurstMessage(
+    job: number,
+    ordinal: number,
+    botKey: string,
+    message: IrcBurstMessage,
+  ) {
+    this.db
+      .query(
+        "INSERT INTO irc_burst_messages(botKey,eventId,job,ordinal,message) VALUES(?,?,?,?,?)",
+      )
+      .run(botKey, message.eventId, job, ordinal, JSON.stringify(message));
   }
 
   ircThreadRoot(
