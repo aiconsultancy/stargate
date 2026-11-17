@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import type { AgentBackend } from "./backend";
-import type { BotConfig, IrcConfig, TeamsConfig } from "./config";
+import {
+  type BotConfig,
+  effectiveIrcConfig,
+  type IrcConfig,
+  type TeamsConfig,
+} from "./config";
 import type { CrewStatus } from "./crew-status";
 import type { CronStore } from "./cron-store";
 import type {
@@ -42,9 +47,10 @@ export type DashboardShip = {
 /** Existing runtime objects only: no extra connection, backend or native root. */
 export function ircDashboardShip(
   registration: IrcRegistration,
-  config: IrcConfig,
+  configured: IrcConfig,
   backend: AgentBackend,
 ): DashboardShip {
+  const config = effectiveIrcConfig(configured);
   return {
     bot: registration.settings,
     identity: registration.identity,
