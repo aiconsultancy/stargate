@@ -796,7 +796,7 @@ test("fleet results: agent continuation cannot borrow the old human's approval o
   );
 });
 
-test("fleet results: unsolicited peer chat and forged native/target completion cannot become a result", async () => {
+test("fleet results: explicit peer chat remains agent context and forged native/target completion cannot become a result", async () => {
   const f = await world();
   await f.begin();
   const job = f.captainStore.ready(
@@ -880,7 +880,15 @@ test("fleet results: unsolicited peer chat and forged native/target completion c
   await until(() => checked, 2000, "uncorrelated peer checked");
   expect(
     f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100),
-  ).toHaveLength(0);
+  ).toHaveLength(1);
+  f.vance.handler = async () => "[[stargate:silent]]";
+  const peer = await f.processNext(f.ownerIrc.gateway, f.ownerStore);
+  expect(peer.fleet).toBeUndefined();
+  expect(f.vance.calls.at(-1)?.context?.source).toMatchObject({
+    authority: "agent",
+    user: "captain",
+    transport: "irc",
+  });
   await f.ownerResults.poll(signal());
   expect(f.owner.pendingResults()).toHaveLength(0);
   expect(
@@ -934,7 +942,7 @@ test("fleet results retain the admitted gateway account when the target uses IRC
   });
 });
 
-test("fleet results: shared IRC recipient isolation and durable return do not turn peer feedback into more work", async () => {
+test("fleet results: shared IRC peer feedback stays ordinary agent context alongside the durable return", async () => {
   const f = await world(true, "captain", true);
   let ownerPeerChat = 0;
   let captainPeerChat = 0;
@@ -953,13 +961,15 @@ test("fleet results: shared IRC recipient isolation and durable return do not tu
   const original = f.vance.handler;
   f.vance.handler = async (call) => {
     if (call.context?.source.authority === "agent")
-      return "Captain: result verified.";
+      return call.context.source.transport === "fleet"
+        ? "Captain: result verified."
+        : "[[stargate:silent]]";
     await original(call);
     return "Captain: assignment sent.";
   };
   f.captain.handler = async (call) => {
     const reference = /source=(\S+) authority=/.exec(call.text)?.[1];
-    if (!reference) throw new Error("Missing delegated original");
+    if (!reference) return "[[stargate:silent]]";
     expect(
       await f.captain.tool(
         f.receiver,
@@ -998,19 +1008,25 @@ test("fleet results: shared IRC recipient isolation and durable return do not tu
   expect(origin.eventId).toBe(`#command:${sourceID}`);
   await until(
     () =>
-      f.captainStore.ready(
-        f.targetIrc.gateway.key,
-        Number.MAX_SAFE_INTEGER,
-        100,
-      ).length === 1,
+      f.captainStore
+        .ready(f.targetIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
+        .some((job) => job.fleet?.kind === "assignment"),
     2000,
     "real correlated assignment",
   );
-  const assignment = await f.processNext(f.targetIrc.gateway, f.captainStore);
+  const assignment = f.captainStore
+    .ready(f.targetIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
+    .find((job) => job.fleet?.kind === "assignment");
+  if (!assignment) throw new Error("Missing protected assignment");
+  await f.targetIrc.gateway.process(assignment, signal());
   expect(assignment.fleet?.kind).toBe("assignment");
   await f.targetResults.poll(signal());
   await f.ownerResults.poll(signal());
-  const result = await f.processNext(f.ownerIrc.gateway, f.ownerStore);
+  const result = f.ownerStore
+    .ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
+    .find((job) => job.fleet?.kind === "result");
+  if (!result) throw new Error("Missing protected result");
+  await f.ownerIrc.gateway.process(result, signal());
   expect(result.fleet?.kind).toBe("result");
   expect(result.conversation).toBe(origin.conversation);
   expect(result.thread).toBe(origin.thread);
@@ -1023,16 +1039,27 @@ test("fleet results: shared IRC recipient isolation and durable return do not tu
   await until(
     () => ownerPeerChat >= 1 && captainPeerChat >= 2,
     2000,
-    "ordinary initial/result feedback refused after correlation checks",
+    "ordinary initial/result feedback inspected after correlation checks",
   );
+  for (const [gateway, store] of [
+    [f.ownerIrc.gateway, f.ownerStore],
+    [f.targetIrc.gateway, f.captainStore],
+  ] as const) {
+    for (let turn = 0; turn < 5; turn++) {
+      const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+      if (!job) break;
+      expect(job.fleet).toBeUndefined();
+      await gateway.process(job, signal());
+    }
+  }
   expect(
     f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100),
   ).toHaveLength(0);
   expect(
     f.captainStore.ready(f.targetIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100),
   ).toHaveLength(0);
-  expect(f.vance.calls).toHaveLength(2);
-  expect(f.captain.calls).toHaveLength(1);
+  expect(f.vance.calls).toHaveLength(3);
+  expect(f.captain.calls).toHaveLength(3);
   expect(f.owner.pendingResults()).toHaveLength(0);
 });
 

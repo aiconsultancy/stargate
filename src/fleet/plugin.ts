@@ -104,7 +104,7 @@ export async function installFleetTools(ctx: ToolHost) {
     editor.add({
       name: "fleet_dispatch",
       description:
-        "Assign existing authorised work to an explicitly configured captain target, under your own real agent identity and a verified original source reference. Never approve as a human. Gateway records requestID before delivery; retry the SAME ID to read its retained result. unknown means delivery may have happened: inspect before any new request, never blindly resend. Optional requestID defaults to the native tool-call ID.",
+        "Contact an explicitly configured fleet target, including a rear admiral, with existing authorised work under your own real agent identity and a verified original source reference. Read fleet_status for target IDs/channels; stargate_mail is local captain/crew mail only. Never approve as a human. Gateway records requestID before delivery; retry the SAME ID to read its retained result. unknown means delivery may have happened: inspect before any new request, never blindly resend. Optional requestID defaults to the native tool-call ID.",
       input: dispatchInputSchema,
       options: { codemode: false, permission: "fleet_dispatch" },
       execute: (input, context) =>

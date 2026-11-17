@@ -34,7 +34,7 @@ the evidence database outside engine write access.
 ## Configure the gateway and plugin
 
 The optional IRC `fleetControl` object declares a private socket, shared private
-evidence ledger and explicit captain destinations:
+evidence ledger and explicit fleet destinations:
 
 ```json
 {
@@ -46,6 +46,7 @@ evidence ledger and explicit captain destinations:
       {
         "id": "captain-one",
         "account": "captain-one",
+        "role": "captain",
         "channel": "#captain-one",
         "sessionID": "ses_pinned_captain_one"
       }
@@ -58,6 +59,11 @@ evidence ledger and explicit captain destinations:
 gateway and every participating captain gateway to return settled outcomes to
 the original IRC/Teams conversation. Related Teams registrations must share
 the same pinned backend and fingerprint as the dispatching IRC gateway.
+For a new fleet setup, add the registration's explicit `fleetChannels` metadata
+and each target's real `role` to use the [role-aware IRC defaults](irc.md#configured-fleet-defaults).
+Target roles are routing metadata, never human approval. Omitted/unknown roles
+do not add automatic channel membership, and legacy configs without
+`fleetChannels` keep their explicit membership and wake configuration.
 
 Paths must be absolute and normalised. Every target needs its exact native
 session pin; there is no lookup by a model-chosen account or channel. A target
@@ -156,17 +162,19 @@ The gateway adds an opaque dispatch ID to the IRC assignment. At captain
 intake, its real SASL sender, target account, joined channel, pinned session,
 full payload and server message ID must match the retained delegation. The
 first admitted event is claimed durably. A copied packet with another event
-ID cannot start another execution. In results mode, ordinary agent chat does
-not start a model turn at all: the assignment recorder must validate a real
-correlated dispatch first. Peer acknowledgements and result chatter cannot
-feed another turn, even when they mention a recipient or claim completion.
-Captains return outcomes through the durable outbox below.
+ID cannot start another execution. Ordinary enrolled peer chat can still start
+an agent-context turn when it explicitly mentions the current nick, within the
+existing persistent peer cap. Reserved dispatch labels need exact retained
+correlation and never fall back to ordinary chat. Only gateway-produced
+correlated results can declare completion or select the durable return route;
+ordinary peer text never acquires human approval. Captains return correlated
+outcomes through the durable outbox below.
 
 A human message explicitly addressed at its start to another known fleet
 account or target ID (`vance:` or `vance,`) does not separately wake this
-captain because its name occurs later. This recipient rule also overrides an
-own-channel wake or reply tag. Other human own-channel and mention requests
-remain eligible under the ordinary access rules.
+captain because its name occurs later, except where protected human wake rules
+explicitly deliver a home/command request. A reply tag alone does not override
+the recipient. Other human requests retain their ordinary access rules.
 Results-mode human queued text retains its leading address so recovery uses
 the same recipient rule, including correctly addressed nested prefixes. Old
 queued text beginning with a different fleet recipient is refused without

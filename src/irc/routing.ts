@@ -180,9 +180,8 @@ function addressedToFleetPeer(
 }
 
 /**
- * Recheck trusted persisted correlation, never marker text, before work
- * and delivery. This also refuses ordinary peer jobs queued by an older
- * results-mode gateway without deleting their records.
+ * Recheck trusted persisted correlation and ordinary explicit peer addressing
+ * before work and delivery. Reserved dispatch labels never become peer chat.
  */
 export function ircResultJobAllowed(
   config: IrcConfig,
@@ -199,8 +198,18 @@ export function ircResultJobAllowed(
   if (!config.fleetControl?.results) return true;
   if (!config.fleetPolicy) return false;
   const authority = fleetAuthority(config.fleetPolicy, account);
-  if (authority === "agent")
-    return job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result";
+  if (authority === "agent") {
+    if (job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result")
+      return true;
+    return (
+      config.access.peerCaptains.some(
+        (peer) => caseFold(peer) === caseFold(account),
+      ) &&
+      typeof job?.text === "string" &&
+      !/\[fleet_dispatch\b/i.test(job.text) &&
+      mentions(caseFold(job.text), caseFold(currentNick))
+    );
+  }
   return (
     authority === "human" &&
     (job?.fleet?.kind === "result" ||
@@ -360,7 +369,8 @@ export function routeIrcMessage(
   if (!content) return;
   // Recovery must see the same recipient as intake, including nested
   // addresses such as `captain: vance: ...`; historical rows stay intact.
-  const text = config.fleetControl?.results && human ? body : content;
+  const text =
+    config.fleetControl?.results && (human || fleetPeer) ? body : content;
   const ship = shipAccounts(config, caseFold);
   const sender = ship.has(user)
     ? ("crew" as const)

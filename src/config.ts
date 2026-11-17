@@ -462,6 +462,10 @@ export const ircSchema = z
     nick: ircAccount.optional(),
     /** The only channels the captain joins; the first is the ship channel. */
     channels: z.array(ircChannel).min(1).max(20),
+    /** Role-aware fleet defaults; home is this ship or the rear admiral's room. */
+    fleetChannels: z
+      .strictObject({ home: ircChannel, command: ircChannel })
+      .optional(),
     access: z
       .strictObject({
         /** When set, only these exact SASL accounts may start a turn. */
@@ -580,6 +584,96 @@ export const ircSchema = z
     turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
   })
   .superRefine((irc, context) => {
+    const roster = irc.fleetControl?.targets.filter((target) =>
+      irc.fleetPolicy?.agentAccounts.some(
+        (account) => fold(account) === fold(target.account),
+      ),
+    );
+    if (irc.fleetChannels) {
+      if (
+        !irc.fleetPolicy ||
+        !irc.fleetControl ||
+        irc.fleetPolicy.role === "crew" ||
+        fold(irc.fleetChannels.home) === fold(irc.fleetChannels.command)
+      )
+        context.addIssue({
+          code: "custom",
+          message:
+            "Fleet channels need a captain/rear-admiral policy, target roster and distinct home/command channels",
+        });
+      else {
+        irc.access.channelRequests ??= "nick-mention";
+        irc.access.allowedAccounts ??= [
+          ...irc.fleetPolicy.humanAccounts,
+          ...irc.fleetPolicy.agentAccounts,
+        ];
+        if (
+          irc.access.allowedAccounts.length > 50 ||
+          irc.access.allowedAccounts.some(
+            (account) => !ircAccount.safeParse(account).success,
+          )
+        )
+          context.addIssue({
+            code: "custom",
+            message:
+              "Fleet IRC account defaults must be at most 50 valid SASL accounts",
+          });
+        irc.access.humanWakeChannels ??=
+          irc.fleetPolicy.role === "rear_admiral"
+            ? [{ channel: irc.fleetChannels.home, replies: "all" }]
+            : [
+                { channel: irc.fleetChannels.home, replies: "all" },
+                {
+                  channel: irc.fleetChannels.command,
+                  replies: "participating",
+                },
+              ];
+        if (!irc.access.peerCaptains.length)
+          irc.access.peerCaptains = (roster ?? []).map(
+            (target) => target.account,
+          );
+        if (
+          irc.access.peerCaptains.length > 50 ||
+          irc.access.peerCaptains.some(
+            (account) => !ircAccount.safeParse(account).success,
+          )
+        )
+          context.addIssue({
+            code: "custom",
+            message:
+              "Fleet IRC peer defaults must be at most 50 valid SASL accounts",
+          });
+      }
+    }
+    if (irc.fleetChannels && irc.fleetPolicy && irc.fleetControl) {
+      if (
+        new Set(irc.channels.map((channel) => fold(channel))).size !==
+        irc.channels.length
+      )
+        context.addIssue({ code: "custom", message: "Duplicate IRC channel" });
+      const channels = [
+        ...irc.channels,
+        ...(irc.fleetChannels
+          ? [irc.fleetChannels.home, irc.fleetChannels.command]
+          : []),
+        ...(roster ?? []).flatMap((target) =>
+          target.role === "captain" &&
+          ircChannel.safeParse(target.channel).success
+            ? [target.channel]
+            : [],
+        ),
+      ];
+      irc.channels = channels.filter(
+        (channel, index) =>
+          channels.findIndex((other) => fold(other) === fold(channel)) ===
+          index,
+      );
+      if (irc.channels.length > 20)
+        context.addIssue({
+          code: "custom",
+          message: "Fleet channel membership exceeds 20 configured channels",
+        });
+    }
     if (irc.fleetControl && irc.backend.type === "opencode") {
       try {
         validateFleetPermissions(irc.backend.permissions);

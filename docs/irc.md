@@ -431,6 +431,47 @@ it has no equivalent quiet-window option. Slack normally delivers the entire
 message and its files in one event, which avoids IRC clients splitting text
 into separate requests.
 
+### Configured fleet defaults
+
+New fleet setups can use explicit `fleetChannels` metadata with `fleetPolicy`
+and `fleetControl.targets`. Without `fleetChannels`, existing membership and
+wake configuration are left unchanged. In this explicit profile, the gateway
+joins only target channels whose accounts are enrolled in `fleetPolicy.agentAccounts`
+and whose target `role` is `captain`, in addition to its explicit channels.
+Rear-admiral/crew targets and targets without a role add no membership. This
+uses the operator's roster, never IRC discovery or a naming pattern. An
+unrelated account or server channel gains no membership.
+Audit-channel overlap and the 20-channel limit still fail validation. Stargate
+joins existing channels; agents must not create or administer channels.
+
+Set the role's `fleetChannels` once to get standard wake behaviour without a
+separate manual wake list:
+
+```json
+"fleetChannels": { "home": "#discovery", "command": "#fleet-command" }
+```
+
+For a captain, trusted-human messages and valid replies in `home` wake it;
+command roots wake it, while command replies need confirmed participation or
+an explicit current-nick invitation. A rear admiral's `home` is its private
+coordination room: human messages and replies wake it there, and other joined
+rooms require a mention. Visitors require an exact current-nick mention.
+Explicit `humanWakeChannels`, account allowlists, denies and peer caps remain
+authoritative. Empty peer lists in this profile use the enrolled target roster;
+set `peerTurnsPerHour: 0` to disable peer intake. Non-fleet registrations retain
+their existing defaults. This configuration does not widen native permissions
+or create identities, human authority or an approval route.
+
+Set a captain's rear-admiral target channel to that captain's own room, where
+the rear admiral already listens. Captains can then tag the rear admiral there,
+without joining its private home or broadcasting a human request in command.
+Set every known target's explicit `role` (`captain` or `rear_admiral`) in the new
+fleet setup; role metadata guides membership and grants no human authority.
+`stargate_mail` and `stargate_dm` address the local captain/crew team. For
+cross-fleet contact, read `fleet_status` for actual target IDs and use
+`fleet_dispatch` with the retained original source and a stable request ID.
+An unknown outcome is inspected and never resent under a new ID.
+
 ### Peer captains
 
 `access.peerCaptains` lists the accounts of other fleet captains. The list
@@ -451,29 +492,36 @@ strict bot rejection is unchanged. These senders remain agents, with no human
 approval or Stop authority.
 
 When `fleetControl.results: true` enables the
-[correlated fleet result outbox](fleet-tools.md), an agent message must also
-match a retained dispatch validated by the assignment recorder before it can
-start a turn. Ordinary agent replies, acknowledgements and completion claims
-do not start turns, even when they mention another agent. The gateway returns
-the correlated native outcome through the durable outbox to its original
-conversation; arbitrary IRC text cannot select that destination or declare
-completion. Queued ordinary peer jobs from an older gateway fail the normal
-access recheck before work or delivery, retaining their records.
+[correlated fleet result outbox](fleet-tools.md), ordinary authenticated,
+enrolled peers may still start a context turn with an exact current-nick mention.
+The existing peer limit remains **5 per channel or DM per rolling hour** by
+default; `access.peerTurnsPerHour` can explicitly set 0–600, including 0 to
+disable peer intake. Peers get no automatic human wake or human approval.
+Their original addressing is retained and rechecked before execution/delivery.
+An old queued row without that explicit address remains refused and retained.
 
-In this results mode, an explicit leading address to a known other fleet
-agent (`vance:` or `vance,`) also prevents a human message from waking this
-connection. A later mention of its name, a reply tag or an own-channel wake
-rule does not override that recipient. Fleet account names and configured
-target IDs are recognised under the server's case mapping. Human messages
-without a different fleet recipient retain their usual mention and wake
-rules. With results absent or false, peer admission and recipient matching
-keep their existing behaviour.
+The reserved `[fleet_dispatch ...]` label must match a retained dispatch
+validated by the assignment recorder. Malformed, forged or uncorrelated labels
+never fall back to ordinary peer chat, including when addressed to the captain.
+Only the protected correlated native outcome returns through the durable outbox
+to its original conversation; arbitrary IRC text cannot select that destination,
+declare completion or impersonate a human approval. Ordinary peer chat does not
+create a correlated assignment or completion receipt. Silent acknowledgements
+remain appropriate, and the persistent peer cap bounds feedback loops.
+
+Outside protected human wake channels, an explicit leading address to a known
+other fleet agent (`vance:` or `vance,`) prevents a results-mode human message
+from waking this connection. A later mention or reply tag does not override
+that recipient. Protected home/command human wake rules remain authoritative:
+their top-level delivery still reaches the configured captains, and their reply
+policy still applies. Fleet account names and target IDs use the server's case
+mapping. Other human messages retain their usual mention and wake rules.
 
 Results-mode human jobs retain their original leading address in queued text
 so the same recipient rule applies after restart. A correctly addressed
 `discovery: vance: ...` therefore remains Discovery's request. An old queued
-row whose retained text starts with another fleet recipient fails the normal
-access check; historical rows and their original source evidence are not
+row whose retained text starts with another fleet recipient outside a protected
+human wake channel fails the normal access check; historical rows and their original source evidence are not
 rewritten or replayed.
 
 ## Conversations

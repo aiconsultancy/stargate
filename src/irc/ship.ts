@@ -1120,7 +1120,15 @@ export class IrcShip {
       this.config.fleetControl?.results &&
       this.config.fleetPolicy &&
       fleetAuthority(this.config.fleetPolicy, admission.user) === "agent" &&
-      !dispatchID
+      !dispatchID &&
+      !ircResultJobAllowed(
+        this.config,
+        member,
+        client.nick,
+        admission.user,
+        admission,
+        client.fold,
+      )
     ) {
       this.advance(member, client, message);
       return;
