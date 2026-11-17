@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { Incoming } from "../store";
+import { validMsgid } from "./protocol";
 
 /** Bounds apply to accepted live messages, never to already running work. */
 export const ircBurstLimits = {
@@ -18,6 +20,18 @@ export const ircBurstMessageSchema = z.strictObject({
   files: z.array(z.string().max(2048)).max(10),
 });
 export type IrcBurstMessage = z.infer<typeof ircBurstMessageSchema>;
+
+/** Transport admission remains separate; only ordinary human jobs can group. */
+export function ircBurstEligible(input: Incoming): boolean {
+  return (
+    !input.sender &&
+    !input.fleet &&
+    !input.gate &&
+    !input.deferDelivery &&
+    validMsgid(input.thread) &&
+    (input.replyParent == null || validMsgid(input.replyParent))
+  );
+}
 
 /** JSON quotes user text; user-written delimiters cannot create another source. */
 export function ircBurstText(messages: readonly IrcBurstMessage[]) {

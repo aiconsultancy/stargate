@@ -10,6 +10,7 @@ import {
 } from "./fleet/protocol";
 import {
   type IrcBurstMessage,
+  ircBurstEligible,
   ircBurstLimits,
   ircBurstMessageSchema,
   ircBurstText,
@@ -382,14 +383,11 @@ export class Store {
   enqueue(input: Incoming): boolean {
     if (
       this.db
-        .query("SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?")
-        .get(input.botKey, input.eventId) !== null
-    )
-      return false;
-    if (
-      this.db
-        .query("SELECT 1 FROM irc_burst_messages WHERE botKey=? AND eventId=?")
-        .get(input.botKey, input.eventId) !== null
+        .query(
+          `SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?
+           UNION ALL SELECT 1 FROM irc_burst_messages WHERE botKey=? AND eventId=? LIMIT 1`,
+        )
+        .get(input.botKey, input.eventId, input.botKey, input.eventId) !== null
     )
       return false;
     return (
@@ -938,13 +936,15 @@ export class Store {
       .map(decodeStoredJob);
   }
 
-  running(id: number) {
+  running(id: number, expectedText?: string) {
     return (
       this.db
         .query(
-          "UPDATE jobs SET status='running',notification_held=0 WHERE id=? AND status='queued' AND cancel_requested=0",
+          `UPDATE jobs SET status='running',notification_held=0
+           WHERE id=$id AND status='queued' AND cancel_requested=0
+             AND ($expected IS NULL OR text=$expected)`,
         )
-        .run(id).changes > 0
+        .run({ $id: id, $expected: expectedText ?? null }).changes > 0
     );
   }
 
@@ -1096,21 +1096,22 @@ export class Store {
       source: string;
       originalText: string;
       invited: boolean;
+      /** Preserve the preexisting humanWakeChannels-only intake bookkeeping. */
+      trackThreads: boolean;
       now?: number;
     },
   ): boolean {
+    const ordinary = (job: Incoming) =>
+      options.trackThreads
+        ? this.enqueueIrcHuman(job, options.invited)
+        : this.enqueue(job);
     if (
       !Number.isInteger(options.quietMs) ||
       options.quietMs < 1 ||
       options.quietMs > 5000 ||
-      input.sender ||
-      input.fleet ||
-      input.gate ||
-      input.deferDelivery ||
-      !validMsgid(input.thread) ||
-      (input.replyParent != null && !validMsgid(input.replyParent))
+      !ircBurstEligible(input)
     )
-      throw new Error("IRC burst intake requires an eligible human message");
+      return ordinary(input);
     const now = options.now ?? Date.now();
     const message: IrcBurstMessage = {
       eventId: input.eventId,
@@ -1126,8 +1127,9 @@ export class Store {
       message.files.length > ircBurstLimits.files ||
       Buffer.byteLength(JSON.stringify(message)) > ircBurstLimits.bytes
     )
-      return this.enqueueIrcHuman(input, options.invited);
-    ircBurstMessageSchema.parse(message);
+      return ordinary(input);
+    if (!ircBurstMessageSchema.safeParse(message).success)
+      return ordinary(input);
     return this.db.transaction(() => {
       if (
         this.jobByEvent(input.botKey, input.eventId) ||
@@ -1138,7 +1140,9 @@ export class Store {
         return false;
       const latest = this.db
         .query<StoredJob, [string]>(
-          "SELECT * FROM jobs WHERE botKey=? ORDER BY id DESC LIMIT 1",
+          `SELECT * FROM jobs WHERE botKey=? AND text!=''
+           AND COALESCE(json_extract(fleet_context,'$.kind'),'')!='result'
+           ORDER BY id DESC LIMIT 1`,
         )
         .get(input.botKey);
       const burst = latest
@@ -1195,26 +1199,28 @@ export class Store {
               input.botKey,
               message,
             );
-            const root = latest.replyParent ?? latest.thread;
-            this.ircThreadMessage(
-              input.botKey,
-              input.channel,
-              input.thread,
-              root,
-              latest.thread,
-            );
-            if (options.invited)
-              this.joinIrcThread(input.botKey, input.channel, root);
+            if (options.trackThreads) {
+              const root = latest.replyParent ?? latest.thread;
+              this.ircThreadMessage(
+                input.botKey,
+                input.channel,
+                input.thread,
+                root,
+                latest.thread,
+              );
+              if (options.invited)
+                this.joinIrcThread(input.botKey, input.channel, root);
+            }
             return true;
           }
         }
       }
       const deadline = now + options.quietMs;
       if (
-        !this.enqueueIrcHuman(
-          { ...input, notBefore: Math.max(deadline, input.notBefore ?? 0) },
-          options.invited,
-        )
+        !ordinary({
+          ...input,
+          notBefore: Math.max(deadline, input.notBefore ?? 0),
+        })
       )
         return false;
       const job = this.jobByEvent(input.botKey, input.eventId);
@@ -1237,6 +1243,20 @@ export class Store {
       )
       .all(job)
       .map(({ message }) => ircBurstMessageSchema.parse(JSON.parse(message)));
+  }
+
+  /** Stop can resolve a grouped member without changing ordinary thread state. */
+  ircBurstRequest(
+    botKey: string,
+    channel: string,
+    msgid: string,
+  ): string | undefined {
+    return this.db
+      .query<{ thread: string }, [string, string, string]>(
+        `SELECT j.thread FROM irc_burst_messages b JOIN jobs j ON j.id=b.job AND j.botKey=b.botKey
+         WHERE b.botKey=? AND b.eventId=? AND j.channel=?`,
+      )
+      .get(botKey, `${channel}:${msgid}`, channel)?.thread;
   }
 
   private saveIrcBurstMessage(

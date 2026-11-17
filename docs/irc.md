@@ -402,20 +402,27 @@ actually arrived and were admitted.
 Only consecutive live human messages from the same SASL account, connection,
 channel, conversation and reply thread can share a queued request. Changes to
 the routing policy, another admitted sender or request, or a different all-call
-class end the group. History replay, peer agents, crew messages, native
+class end the group. Internal transcript delivery rows and fleet-result
+continuations do not end it. History replay, peer agents, crew messages, native
 clarification controls and Stop reactions keep their existing paths. A Stop
 reaction on any member of a queued burst stops that request immediately.
+Ordinary channels and DMs keep their existing thread ancestry and participation
+behaviour; buffering adds thread bookkeeping only where human wake already did.
 
 The quiet deadline slides with host receive time, with a hard limit of 10
 seconds from the first message. Existing all-call staggering can still delay
 execution longer. A group holds at most 16 messages, 64 KiB of original records
 and prompt text, and 10 distinct attachment URLs; overflow starts another
-request without dropping its content. Each record keeps its own original
+request without dropping its content. If optional burst metadata cannot be
+represented, the complete message follows ordinary intake instead. Each record
+keeps its own original
 message ID, timestamp, source reference, text and attachment URLs in private
 SQLite state. A grouped prompt labels each message separately; one message
 cannot lend its approval to another. Sources become correlated to the single
 native input only when that input is actually recorded. Queue state and
-deduplication survive a gateway restart.
+deduplication survive a gateway restart. A worker claims only the exact text it
+selected; if intake extended it in the meantime, the request stays queued for a
+fresh read rather than executing an incomplete snapshot.
 
 This does not interrupt an active turn or steer a running backend session.
 Follow-ups arriving after the window, or after execution starts, remain ordered

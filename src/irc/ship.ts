@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
@@ -9,10 +8,11 @@ import type { FleetSource } from "../fleet/protocol";
 import { fleetAuthority, fleetInstructions } from "../fleet-policy";
 import { fleetSourceReference } from "../fleet-source";
 import type { GatewayConfig, GatewayTransport } from "../gateway";
-import { questionControl } from "../questions";
+import { questionControl, questionFingerprint } from "../questions";
 import { backendFingerprint, type Identity } from "../routing";
 import type { Incoming, Store } from "../store";
 import { ctcp, IrcAudit, sensitive, serviceNick } from "./audit";
+import { ircBurstEligible } from "./burst";
 import {
   IrcClient,
   type IrcClientOptions,
@@ -257,6 +257,22 @@ const saidMs = 30 * 60_000;
 /** Lines and characters per line that an all-call note lists. */
 const sinceLines = 20;
 const sinceChars = 300;
+const burstPolicies = new WeakMap<IrcConfig, string>();
+
+/** Runtime config objects are immutable snapshots, replaced on reload. */
+function burstPolicy(config: IrcConfig): string {
+  let value = burstPolicies.get(config);
+  if (value === undefined) {
+    value = questionFingerprint({
+      access: config.access,
+      fleetPolicy: config.fleetPolicy,
+      fleetControl: config.fleetControl,
+      features: config.features,
+    });
+    burstPolicies.set(config, value);
+  }
+  return value;
+}
 
 function ircSource(
   config: IrcConfig,
@@ -299,7 +315,11 @@ function shipTransport(
   member: IrcMember,
   client: IrcClient,
   store: Store,
-  said: (channel: string, after: number, except: string) => string[] = () => [],
+  said: (
+    channel: string,
+    after: number,
+    except: readonly string[],
+  ) => string[] = () => [],
   sessionReady?: GatewayTransport["sessionReady"],
 ): GatewayTransport {
   const authorized: GatewayTransport["allowed"] = (user, channel, job) => {
@@ -308,6 +328,7 @@ function shipTransport(
       !ircResultJobAllowed(config, member, client.nick, user, job, client.fold)
     )
       return false;
+    if (!config.fleetControl?.results) return true;
     const stored = job?.eventId
       ? store.jobByEvent(member.key, job.eventId)
       : null;
@@ -317,13 +338,13 @@ function shipTransport(
       !stored ||
       store
         .ircBurstMessages(stored.id)
-        .every(({ originalText }) =>
+        .every(({ text }) =>
           ircResultJobAllowed(
             config,
             member,
             client.nick,
             user,
-            { ...job, text: originalText },
+            { ...job, text },
             client.fold,
           ),
         )
@@ -393,7 +414,10 @@ function shipTransport(
           config.access.allCallWords.includes(job.textMention) &&
           job.received !== undefined &&
           job.received !== null
-          ? said(job.channel, job.received, job.thread)
+          ? said(job.channel, job.received, [
+              job.thread,
+              ...store.ircBurstMessages(job.id).map(({ thread }) => thread),
+            ])
           : [],
       ),
   };
@@ -1151,15 +1175,19 @@ export class IrcShip {
     )
       this.store.recordQuestionSource(input);
     const quietMs = this.config.access.humanMessageDebounceMs ?? 0;
+    const trackThreads =
+      member.role === "captain" &&
+      !!this.config.access.humanWakeChannels?.some(
+        ({ channel }) => client.fold(channel) === admission.channel,
+      ) &&
+      !!this.config.fleetPolicy &&
+      fleetAuthority(this.config.fleetPolicy, admission.user) === "human";
     if (
       quietMs > 0 &&
       !replay &&
       member.role === "captain" &&
       !message.tags.has("bot") &&
-      !input.sender &&
-      !input.fleet &&
-      !input.gate &&
-      !input.deferDelivery &&
+      ircBurstEligible(input) &&
       validMsgid(message.tags.get("msgid")) &&
       (!this.config.fleetPolicy ||
         fleetAuthority(this.config.fleetPolicy, input.user) === "human")
@@ -1167,28 +1195,13 @@ export class IrcShip {
       this.store.enqueueIrcBurst(input, {
         quietMs,
         // Config changes form a boundary even when the account namespace stays.
-        policy: createHash("sha256")
-          .update(
-            JSON.stringify({
-              access: this.config.access,
-              fleetPolicy: this.config.fleetPolicy,
-              fleetControl: this.config.fleetControl,
-              features: this.config.features,
-            }),
-          )
-          .digest("hex"),
+        policy: burstPolicy(this.config),
         source: sourceLine({ source: ircSource(this.config, member, input) }),
         originalText: message.params[1] ?? input.text,
         invited: admission.threadInvitation === true,
+        trackThreads,
       });
-    else if (
-      member.role === "captain" &&
-      this.config.access.humanWakeChannels?.some(
-        ({ channel }) => client.fold(channel) === admission.channel,
-      ) &&
-      this.config.fleetPolicy &&
-      fleetAuthority(this.config.fleetPolicy, admission.user) === "human"
-    )
+    else if (trackThreads)
       this.store.enqueueIrcHuman(input, admission.threadInvitation === true);
     else this.store.enqueue(input);
     this.advance(member, client, message);
@@ -1440,9 +1453,11 @@ export class IrcShip {
 
   /** Lines a connection saw in a channel after `after`, oldest first. */
   private saidSince(member: IrcMember, client: IrcClient) {
-    return (channel: string, after: number, except: string) =>
+    return (channel: string, after: number, except: readonly string[]) =>
       (this.said.get(`${member.id} ${client.fold(channel)}`) ?? [])
-        .filter((line) => line.time >= after && line.msgid !== except)
+        .filter(
+          (line) => line.time >= after && !except.includes(line.msgid ?? ""),
+        )
         .slice(-sinceLines)
         .map((line) =>
           line.text.length > sinceChars
@@ -1573,6 +1588,7 @@ export class IrcShip {
       fold: client.fold,
       anchor: (msgid) =>
         this.store.ircRequestAnchor(registration.key, channel, msgid) ??
+        this.store.ircBurstRequest(registration.key, channel, msgid) ??
         client.requestAnchor(msgid),
     });
     if (!stop) return;

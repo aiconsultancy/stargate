@@ -41,7 +41,13 @@ function enqueue(
   store: Store,
   input: Incoming,
   now: number,
-  changes: { quietMs?: number; policy?: string; invited?: boolean } = {},
+  changes: {
+    quietMs?: number;
+    policy?: string;
+    invited?: boolean;
+    trackThreads?: boolean;
+    source?: string;
+  } = {},
 ) {
   return store.enqueueIrcBurst(input, {
     quietMs: 2500,
@@ -49,6 +55,7 @@ function enqueue(
     source: `s=irc;c=%23bridge;t=${input.thread};m=${input.thread};u=${input.user};a=human;e=${fleetSourceReference("irc", input.botKey, input.channel, input.thread)}`,
     originalText: `captain: ${input.text}`,
     invited: false,
+    trackThreads: true,
     now,
     ...changes,
   });
@@ -340,7 +347,13 @@ test("restart preserves original evidence, deduplication, and per-member native-
   ).toThrow();
 });
 
-async function live(quietMs?: number, multiline = false) {
+async function live(
+  quietMs?: number,
+  multiline = false,
+  transform: (value: ReturnType<typeof config>) => ReturnType<typeof config> = (
+    value,
+  ) => value,
+) {
   const fake = new FakeIrcServer({
     accounts: { discovery: "fixture-password" },
   });
@@ -348,7 +361,7 @@ async function live(quietMs?: number, multiline = false) {
   fake.start();
   cleanup.push(() => fake.stop());
   const store = state();
-  const cfg = config(fake.port, quietMs);
+  const cfg = transform(config(fake.port, quietMs));
   const ship = await IrcShip.create(cfg, store, pino({ enabled: false }), {
     env: { IRC_TEST_PASSWORD: "fixture-password" },
     timing: { reconnectMinMs: 20, intervalMs: 1, burst: 100 },
@@ -533,7 +546,7 @@ test("a reload rechecks the original addressing inside a pending burst instead o
   const first = f.fake.say(
     { nick: "jac", account: "jac" },
     "#bridge",
-    "phoenix: please take this work",
+    "\u0002phoenix\u0002: please take this work",
   );
   const second = f.fake.say(
     { nick: "jac", account: "jac" },
@@ -547,6 +560,12 @@ test("a reload rechecks the original addressing inside a pending burst instead o
   );
   const job = f.store.jobByEvent(f.registration.key, `#bridge:${first}`);
   if (!job) throw new Error("Missing pending burst");
+  expect(f.store.ircBurstMessages(job.id)[0]?.originalText).toContain(
+    "\u0002phoenix\u0002",
+  );
+  expect(f.store.ircBurstMessages(job.id)[0]?.text).toBe(
+    "phoenix: please take this work",
+  );
   expect(f.registration.transport.allowed(job.user, job.channel, job)).toBe(
     true,
   );
@@ -609,4 +628,237 @@ test("a raw-wire long single paragraph multiline batch preserves concat spaces a
   expect(job.user).toBe("jac");
   expect(f.store.queueCounts(f.registration.key).queued).toBe(1);
   expect(f.store.ircBurstMessages(job.id)).toEqual([]);
+});
+
+test("optional burst metadata failures preserve the complete ordinary admitted message", () => {
+  const store = state();
+  const cases = [
+    {
+      id: "long-url",
+      input: { files: [`https://files.test/${"x".repeat(3000)}`] },
+      options: {},
+    },
+    {
+      id: "long-source",
+      input: {},
+      options: { source: `s=irc;${"x".repeat(9000)}` },
+    },
+    {
+      id: "bad-source",
+      input: {},
+      options: { source: "unrepresentable optional metadata" },
+    },
+  ];
+  for (const item of cases) {
+    const input = incoming(item.id, item.input);
+    expect(
+      enqueue(store, input, 1000, { ...item.options, trackThreads: false }),
+    ).toBe(true);
+    const job = store.jobByEvent(input.botKey, input.eventId);
+    if (!job) throw new Error("Ordinary fallback lost an admitted message");
+    expect(job.text).toBe(input.text);
+    expect(store.ircBurstMessages(job.id)).toEqual([]);
+    expect(
+      store.ircThreadRoot(input.botKey, input.channel, input.thread),
+    ).toBeUndefined();
+  }
+});
+
+test("internal transcript delivery and fleet-result continuations do not split consecutive human input", () => {
+  const store = state();
+  enqueue(store, incoming("a"), 1000);
+  store.enqueue(
+    incoming("transcript", {
+      eventId: "transcript:reply",
+      conversation: "other-conversation",
+      text: "",
+    }),
+  );
+  enqueue(store, incoming("b"), 1100);
+  store.enqueue(
+    incoming("result", {
+      conversation: "other-conversation",
+      sender: "captain",
+      text: "Internal captain completion",
+      fleet: {
+        kind: "result",
+        originInputID: "native-origin",
+        completion: {
+          dispatchID: "dispatch-one",
+          sourceReference: "source-one",
+          actor: "phoenix",
+          sessionID: "ses_phoenix",
+          inputID: "input-phoenix",
+          channel: "#elsewhere",
+          outcome: "completed",
+          text: "Done",
+          makers: [],
+          humanApproval: false,
+        },
+      },
+    }),
+  );
+  enqueue(store, incoming("c"), 1200);
+  const ids = ["a", "b", "c"].map(
+    (id) => store.jobByEvent("captain", `#bridge:${id}`)?.id,
+  );
+  expect(new Set(ids).size).toBe(1);
+  expect(store.ircBurstMessages(ids[0] ?? -1)).toHaveLength(3);
+});
+
+for (const keepPolicy of [false, true])
+  test(`ordinary channels keep their original thread state and Stop resolves grouped members (fleet policy ${keepPolicy})`, async () => {
+    const f = await live(1000, false, (base) =>
+      ircSchema.parse({
+        ...base,
+        fleetPolicy: keepPolicy ? base.fleetPolicy : undefined,
+        access: {
+          ...base.access,
+          channelRequests: undefined,
+          humanWakeChannels: [],
+        },
+      }),
+    );
+    const first = f.fake.say(
+      { nick: "jac", account: "jac" },
+      "#bridge",
+      "discovery: first part",
+    );
+    const second = f.fake.say(
+      { nick: "jac", account: "jac" },
+      "#bridge",
+      "discovery: second part",
+    );
+    await until(
+      () =>
+        f.store.jobByEvent(f.registration.key, `#bridge:${second}`) !== null,
+      5000,
+      "ordinary burst accepted",
+    );
+    const head = f.store.jobByEvent(f.registration.key, `#bridge:${first}`);
+    if (!head) throw new Error("Missing ordinary burst");
+    expect(f.store.ircBurstMessages(head.id)).toHaveLength(2);
+    for (const id of [first, second])
+      expect(
+        f.store.ircThreadRoot(f.registration.key, "#bridge", id),
+      ).toBeUndefined();
+    expect(
+      f.store.ircThreadParticipating(f.registration.key, "#bridge", first),
+    ).toBe(false);
+    f.registration.stopTurn = (conversation, thread) =>
+      f.store.cancelTurn(f.registration.key, conversation, thread) !==
+      undefined;
+    f.fake.sendTo(
+      "discovery",
+      `@account=jac;+draft/react=✋;+draft/reply=${second} :jac!u@outside TAGMSG #bridge`,
+    );
+    await until(
+      () =>
+        f.store.jobByEvent(f.registration.key, `#bridge:${first}`)?.status ===
+        "responding",
+      5000,
+      "Stop on second member cancelled whole ordinary burst",
+    );
+  });
+
+test("all-call context excludes every grouped source while retaining unrelated channel context", async () => {
+  const f = await live(1000, false, (base) =>
+    ircSchema.parse({
+      ...base,
+      access: {
+        ...base.access,
+        channelRequests: undefined,
+        allCallWords: ["all hands"],
+      },
+    }),
+  );
+  const first = f.fake.say(
+    { nick: "jac", account: "jac" },
+    "#bridge",
+    "all hands: alpha instruction",
+  );
+  const second = f.fake.say(
+    { nick: "jac", account: "jac" },
+    "#bridge",
+    "all hands: beta instruction",
+  );
+  f.fake.say(
+    { nick: "outsider", account: "outsider" },
+    "#bridge",
+    "unrelated channel context",
+  );
+  await until(
+    () => f.store.jobByEvent(f.registration.key, `#bridge:${second}`) !== null,
+    5000,
+    "all-call burst admitted",
+  );
+  const job = f.store.jobByEvent(f.registration.key, `#bridge:${first}`);
+  if (!job) throw new Error("Missing all-call burst");
+  expect(f.store.ircBurstMessages(job.id)).toHaveLength(2);
+  const note = f.registration.transport.note(job);
+  expect(note).toContain("unrelated channel context");
+  expect(note).not.toContain("alpha instruction");
+  expect(note).not.toContain("beta instruction");
+  expect(job.text.match(/beta instruction/g)).toHaveLength(1);
+});
+
+test("a queued worker cannot claim a stale burst snapshot after a backward clock step", async () => {
+  const f = await live(1000);
+  const first = f.fake.say(
+    { nick: "jac", account: "jac" },
+    "#bridge",
+    "first request fragment",
+  );
+  await until(
+    () => f.store.jobByEvent(f.registration.key, `#bridge:${first}`) !== null,
+    5000,
+    "first fragment persisted",
+  );
+  // A forward wall-clock reading selects the request, then intake observes an
+  // earlier reading. This deterministically models a correction between reads.
+  const held = f.store.ready(f.registration.key, Date.now() + 2000, 1)[0];
+  if (!held) throw new Error("Missing selected request");
+  const second = f.fake.say(
+    { nick: "jac", account: "jac" },
+    "#bridge",
+    "second request fragment",
+  );
+  await until(
+    () => f.store.jobByEvent(f.registration.key, `#bridge:${second}`) !== null,
+    5000,
+    "second fragment appended",
+  );
+  const prompts: string[] = [];
+  const backend: AgentBackend = {
+    sessionID: "ses_discovery",
+    async createSession() {
+      return "ses_discovery";
+    },
+    async prompt(_session, text) {
+      prompts.push(text);
+      return "[[stargate:silent]]";
+    },
+    async close() {},
+  };
+  const primary = f.registration;
+  const gateway = new Gateway(
+    primary.settings,
+    primary.identity,
+    f.store,
+    backend,
+    primary.delivery,
+    pino({ enabled: false }),
+    undefined,
+    undefined,
+    primary.transport,
+  );
+  await gateway.process(held, new AbortController().signal);
+  expect(prompts).toEqual([]);
+  const fresh = f.store.jobByEvent(primary.key, `#bridge:${first}`);
+  if (!fresh) throw new Error("Missing updated request");
+  expect(fresh.status).toBe("queued");
+  await gateway.process(fresh, new AbortController().signal);
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0]).toContain("first request fragment");
+  expect(prompts[0]).toContain("second request fragment");
 });
