@@ -106,6 +106,7 @@ const RECENT = 20;
 const ROOT_CACHE_MS = 10_000;
 /** Subagents of subagents are rare; a deeper chain is refused, not followed. */
 const MAX_DEPTH = 8;
+type CrewRead = { status: CrewStatus | null; error?: string };
 
 /**
  * Read-only composition of gateway state for the dashboard. This module owns
@@ -196,7 +197,7 @@ export function dashboardSource(
   async function crew(
     ship: DashboardShip,
     signal: AbortSignal,
-  ): Promise<{ status: CrewStatus | null; error?: string }> {
+  ): Promise<CrewRead> {
     if (!ship.backend.crewStatus) return { status: null };
     try {
       return { status: await ship.backend.crewStatus({}, signal) };
@@ -309,15 +310,15 @@ export function dashboardSource(
       const groups = captains();
       const reads = new Map<
         DashboardShip | DashboardCaptain,
-        ReturnType<typeof crew>
+        Promise<CrewRead>
       >();
-      function sharedCrew(ship: DashboardShip) {
+      function sharedCrew(ship: DashboardShip): Promise<CrewRead> {
         const group = groups.get(ship);
         const key = group?.view ?? ship;
         const existing = reads.get(key);
         if (existing !== undefined) return existing;
-        const read = (async () => {
-          let last: Awaited<ReturnType<typeof crew>> = { status: null };
+        const read: Promise<CrewRead> = (async (): Promise<CrewRead> => {
+          let last: CrewRead = { status: null };
           // One successful read per pinned captain. Retry an exact alias only
           // after a failure; queue and transcript ownership are never shared.
           for (const member of group?.members ?? [ship]) {

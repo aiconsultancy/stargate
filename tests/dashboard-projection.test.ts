@@ -388,7 +388,12 @@ async function page() {
       node.textContent = value;
       return node;
     },
-    getElementById: (id: string) => (id === "content" ? main : new Element(id)),
+    getElementById: (id: string) =>
+      id === "content"
+        ? main
+        : id === "breadcrumbs"
+          ? breadcrumbs
+          : new Element(id),
   };
   const ui = runInNewContext(
     `${script.slice(0, script.lastIndexOf('refresh.addEventListener("click"'))}\n({ renderFleet, renderShip, renderCrew, replaceView, projectLabel });`,
