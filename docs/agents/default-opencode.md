@@ -74,6 +74,11 @@ thread with `stargate_post`, instead of asking an operator to relay. It uses the
 until the bot sets `captainPost`. Crew cannot use it. See
 [captain posts](../captain-post.md).
 
+The bound root Slack captain can use `stargate_notifications` to mute its own
+registration's threads or channels. The tool uses the existing `cron` binding
+and normal tool permissions; it does not grant new global permissions. See
+[notification muting](../notifications.md) for targets, wakes and limits.
+
 Copy [`team.example.json`](../../team.example.json), a portable Galactica team
 with captain `adama` and four workers, including researcher `gaeta` and ship
 maintenance worker `bosun`:

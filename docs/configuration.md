@@ -61,6 +61,11 @@ Set `bots[].access.mentionOnly` to require an explicit or configured mention
 on each Slack turn. By default, an allowed user can continue an active
 thread or send a direct message without another mention.
 
+`bots[].access.textMentions.muteBypassNames` is an optional subset of that
+rule's existing `names`. It uses the same channels and matcher. Absent or empty
+means no text-mention mute bypass. It does not apply to `spokenMentions`.
+See [notification muting](notifications.md) and [text mentions](text-mentions.md).
+
 Stargate names new Slack sessions `<bot name> (slack <conversation ID>)`.
 The bot name comes from `displayName`, then the configured OpenCode agent name,
 then the bot ID. Existing session titles keep their name. A pinned OpenCode

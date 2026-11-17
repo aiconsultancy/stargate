@@ -23,6 +23,18 @@ export const mentionRuleSchema = z.strictObject({
   names: mentionNamesSchema,
 });
 
+/** Wake phrases are only an explicit subset of existing Slack text aliases. */
+export const textMentionRuleSchema = mentionRuleSchema
+  .extend({ muteBypassNames: z.array(mentionNameSchema).max(20).optional() })
+  .superRefine((rule, context) => {
+    if (rule.muteBypassNames?.some((name) => !rule.names.includes(name)))
+      context.addIssue({
+        code: "custom",
+        path: ["muteBypassNames"],
+        message: "Mute bypass names must be configured text-mention names.",
+      });
+  });
+
 const pattern = (name: string) =>
   new RegExp(
     `(?<![\\p{L}\\p{N}])${name

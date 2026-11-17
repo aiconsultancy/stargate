@@ -45,6 +45,8 @@ import { controlInteractions } from "./interactions";
 import { type IrcRegistration, IrcShip } from "./irc/ship";
 import { MaintenanceOutbox } from "./nightly/outbox";
 import { writeReady } from "./nightly/ready";
+import { NotificationStore } from "./notification-store";
+import { notificationKey } from "./notifications";
 import { PairingUI } from "./pairing";
 import { PeerDirectory } from "./peers";
 import { QuotaReader } from "./quota";
@@ -353,6 +355,23 @@ export function serve(
                   slack.userInfo?.(user, signal) ?? Promise.resolve(undefined),
                 identity.team,
               )
+            : undefined,
+          undefined,
+          bot.backend.type === "opencode" && bot.backend.sessionID
+            ? (channel, thread) => {
+                const preferences = new NotificationStore(
+                  join(config.dataDirectory, "notifications.sqlite"),
+                );
+                try {
+                  return preferences.status(
+                    notificationKey(currentBot, identity),
+                    channel,
+                    thread,
+                  );
+                } finally {
+                  preferences.close();
+                }
+              }
             : undefined,
         );
         const cron = new CronScheduler(

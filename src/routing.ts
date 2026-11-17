@@ -4,6 +4,11 @@ import { maxAttachments } from "./attachments";
 import type { BotConfig } from "./config";
 import { markdownChunks } from "./markdown-chunks";
 import { findMention, visibleText } from "./mentions";
+import {
+  type NotificationContext,
+  type NotificationReader,
+  notificationNote,
+} from "./notifications";
 import type { PeerSender } from "./peers";
 
 const eventSchema = z.object({
@@ -84,6 +89,7 @@ export function routeEvent(
   config: BotConfig,
   identity: Identity,
   peer?: PeerSender,
+  notifications?: NotificationReader,
 ) {
   const parsed = envelopeSchema.safeParse(raw);
   if (!parsed.success) return;
@@ -114,15 +120,30 @@ export function routeEvent(
   const mentioned = event.text.includes(mention);
   const direct = event.channel_type === "im";
   const text = event.text.split(mention).join("").trim();
+  const notification =
+    !direct && !event.channel.startsWith("D")
+      ? notifications?.(event.channel, event.thread_ts ?? event.ts)
+      : undefined;
+  const muted = notification?.mode === "addressed-only";
   // A top-level channel message can address the bot by name, without a mention.
   const textRule = config.access.textMentions;
+  const broadcast =
+    !event.bot_id && textRule?.channels.includes(event.channel)
+      ? findMention([visibleText(text)], textRule.muteBypassNames ?? [])
+      : undefined;
+  const wake: NotificationContext["wake"] = mentioned
+    ? "direct"
+    : broadcast
+      ? "broadcast"
+      : "ordinary";
+  if (muted && wake === "ordinary") return;
   const named =
-    !mentioned &&
+    (!mentioned &&
     !direct &&
     (event.thread_ts === undefined || event.thread_ts === event.ts) &&
     textRule?.channels.includes(event.channel)
       ? findMention([visibleText(text)], textRule.names)
-      : undefined;
+      : undefined) ?? (muted ? broadcast : undefined);
   // Speech can name the bot; the gateway decides after transcription.
   const spoken =
     !mentioned &&
@@ -147,6 +168,23 @@ export function routeEvent(
     thread: event.thread_ts ?? event.ts,
     user: event.user,
     text,
+    ...(notification
+      ? {
+          notification: {
+            wake,
+            ...(muted && wake !== "ordinary"
+              ? {
+                  note: notificationNote(
+                    event.channel,
+                    event.thread_ts ?? event.ts,
+                    wake,
+                    notification,
+                  ),
+                }
+              : {}),
+          },
+        }
+      : {}),
     ...(config.slackReadReceipts ? { received: Number(event.ts) * 1000 } : {}),
     ...(event.files?.length
       ? { files: event.files.map((file) => file.id) }

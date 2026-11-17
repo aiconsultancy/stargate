@@ -9,6 +9,10 @@ import {
   nativeMakerSchema,
 } from "./fleet/protocol";
 import { validMsgid } from "./irc/protocol";
+import {
+  type NotificationContext,
+  notificationContextSchema,
+} from "./notifications";
 import type { QuestionOffer } from "./questions";
 import { failureText, type RequestFailure } from "./request-failure";
 import type { ReplyChunk } from "./slack-format";
@@ -43,6 +47,8 @@ export type Incoming = {
   notBefore?: number | null;
   /** Only trusted gateway intake/result recovery supplies this correlation. */
   fleet?: FleetJob;
+  /** Trusted Slack ingress classification; absent on legacy/scheduled/native jobs. */
+  notification?: NotificationContext;
 };
 
 /**
@@ -102,18 +108,37 @@ export type Job = Incoming & {
   makers?: NativeMaker[];
 };
 
-type StoredJob = Omit<Job, "deferDelivery" | "fleet" | "makers"> & {
+type StoredJob = Omit<
+  Job,
+  "deferDelivery" | "fleet" | "makers" | "notification"
+> & {
   deferDelivery: number;
   fleet_context: string | null;
   makers: string | null;
   fleet_exported: number;
+  notification_context: string | null;
+  notification_held: number;
 };
 
 function decodeStoredJob(row: StoredJob): Job {
-  const { fleet_context, makers, fleet_exported: _exported, ...job } = row;
+  const {
+    fleet_context,
+    makers,
+    fleet_exported: _exported,
+    notification_context,
+    notification_held: _notificationHeld,
+    ...job
+  } = row;
   return {
     ...job,
     deferDelivery: row.deferDelivery === 1,
+    ...(notification_context
+      ? {
+          notification: notificationContextSchema.parse(
+            JSON.parse(notification_context),
+          ),
+        }
+      : {}),
     ...(fleet_context
       ? { fleet: fleetJobSchema.parse(JSON.parse(fleet_context)) }
       : {}),
@@ -281,6 +306,8 @@ export class Store {
     column("jobs", "sender", "TEXT");
     column("jobs", "gate", "TEXT");
     column("jobs", "textMention", "TEXT");
+    column("jobs", "notification_context", "TEXT");
+    column("jobs", "notification_held", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "received", "INTEGER");
     column("jobs", "replyParent", "TEXT");
     column("jobs", "fleet_context", "TEXT");
@@ -347,8 +374,8 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at,fleet_context)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt,$fleet)`)
+      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at,fleet_context,notification_context)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt,$fleet,$notification)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -363,6 +390,11 @@ export class Store {
           $sender: input.sender ?? null,
           $gate: input.gate ?? null,
           $textMention: input.textMention ?? null,
+          $notification: input.notification
+            ? JSON.stringify(
+                notificationContextSchema.parse(input.notification),
+              )
+            : null,
           $received: input.received ?? null,
           $retryAt: input.notBefore ?? 0,
           $fleet: input.fleet
@@ -734,7 +766,7 @@ export class Store {
         [string, string]
       >(`SELECT s.session_id AS session, s.cursor, j.channel, j.thread, j.replyParent, j.user,j.deferDelivery
       FROM sessions s JOIN jobs j ON j.conversation=s.conversation
-      WHERE j.botKey=? AND s.conversation=? AND (j.gate IS NULL OR j.gate='admitted')
+      WHERE j.botKey=? AND s.conversation=? AND (j.gate IS NULL OR j.gate='admitted') AND j.failure IS NOT 'muted'
       ORDER BY j.id DESC LIMIT 1`)
       .get(botKey, conversation);
     return (
@@ -830,7 +862,7 @@ export class Store {
           .query(`UPDATE jobs SET status=${storedReplyStatus},
           sent=CASE WHEN deferDelivery=1 THEN COALESCE(json_array_length(response),0) ELSE sent END,
           attempts=0,retry_at=0
-          WHERE botKey=? AND conversation=? AND eventId=? AND status='failed'`)
+          WHERE botKey=? AND conversation=? AND eventId=? AND status='failed' AND failure IS NOT 'muted'`)
           .run(input.botKey, input.conversation, eventId).changes;
       for (const reply of input.replies) {
         queued += this.db
@@ -861,20 +893,27 @@ export class Store {
 
   ready(botKey: string, now: number, limit: number, serial = false): Job[] {
     return this.db
-      .query<StoredJob, [string, number, number]>(`SELECT * FROM jobs j
+      .query<StoredJob, (string | number)[]>(`SELECT * FROM jobs j
       WHERE botKey = ? AND status IN ('queued','responding') AND retry_at <= ?
       AND NOT EXISTS (SELECT 1 FROM jobs earlier
         WHERE earlier.conversation=j.conversation AND earlier.id < j.id
-         AND earlier.status IN (${unfinishedJobs}))
+         AND earlier.status IN (${unfinishedJobs})
+         AND NOT (j.notification_context IS NULL AND earlier.status='queued'
+           AND earlier.notification_held=1 AND (earlier.retry_at>? OR j.status='responding')))
+      AND NOT (j.notification_held=1 AND EXISTS (SELECT 1 FROM jobs later
+        WHERE later.conversation=j.conversation AND later.id>j.id
+        AND later.status IN ('running','responding')))
       ${
         serial
           ? `AND (j.status!='queued' OR NOT EXISTS
         (SELECT 1 FROM jobs pending WHERE pending.botKey=j.botKey
-        AND pending.id<j.id AND pending.status IN (${pendingJobs})))`
+        AND pending.id<j.id AND pending.status IN (${pendingJobs})
+        AND NOT (j.notification_context IS NULL AND pending.status='queued'
+          AND pending.notification_held=1 AND pending.retry_at>?)))`
           : ""
       }
       ORDER BY id LIMIT ?`)
-      .all(botKey, now, limit)
+      .all(botKey, now, now, ...(serial ? [now] : []), limit)
       .map(decodeStoredJob);
   }
 
@@ -882,7 +921,7 @@ export class Store {
     return (
       this.db
         .query(
-          "UPDATE jobs SET status='running' WHERE id=? AND status='queued' AND cancel_requested=0",
+          "UPDATE jobs SET status='running',notification_held=0 WHERE id=? AND status='queued' AND cancel_requested=0",
         )
         .run(id).changes > 0
     );
@@ -1282,6 +1321,27 @@ export class Store {
         this.db.query("DELETE FROM delivery_units WHERE job=?").run(id);
       return changed;
     })();
+  }
+
+  /** Intentional notification suppression, never cancellation or reply delivery. */
+  suppressNotification(id: number) {
+    return (
+      this.db
+        .query(`UPDATE jobs SET status='failed',failure='muted'
+      WHERE id=? AND status='queued'
+      AND json_extract(notification_context,'$.wake')='ordinary'`)
+        .run(id).changes === 1
+    );
+  }
+
+  /** A preference-store fault backs off only chat; exempt native/cron work may pass. */
+  holdNotification(id: number, until: number) {
+    return (
+      this.db
+        .query(`UPDATE jobs SET notification_held=1,retry_at=?
+      WHERE id=? AND status='queued' AND notification_context IS NOT NULL`)
+        .run(until, id).changes === 1
+    );
   }
 
   /**

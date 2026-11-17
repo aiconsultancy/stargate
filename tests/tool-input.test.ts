@@ -7,6 +7,7 @@ import { mailInputSchema } from "../src/crew/messaging";
 import { modelInputSchema } from "../src/crew/models";
 import { objectToolInput } from "../src/crew/tool-input";
 import { cronOperationSchema } from "../src/cron-control";
+import { notificationInputSchema } from "../src/notification-store";
 
 const schemas = {
   stargate_cron: cronOperationSchema,
@@ -15,6 +16,7 @@ const schemas = {
   stargate_journal: journalInputSchema,
   stargate_mail: mailInputSchema,
   stargate_model: modelInputSchema,
+  stargate_notifications: notificationInputSchema,
 };
 
 test("all Stargate union tools advertise an object root with their fields", () => {
@@ -28,6 +30,32 @@ test("all Stargate union tools advertise an object root with their fields", () =
       for (const name of Object.keys(option.shape))
         expect(json.properties).toHaveProperty(name);
   }
+});
+
+test("notification union keeps explicit scoped requirements and input expiry representation", () => {
+  const schema = objectToolInput(notificationInputSchema);
+  for (const input of [
+    { op: "mute", scope: "thread", channel: "C123" },
+    { op: "unmute", scope: "channel", channel: "D123" },
+    { op: "clear_all", channel: "C123" },
+    {
+      op: "status",
+      scope: "channel",
+      channel: "C123",
+      mute_until: "2026-11-18T10:00:00Z",
+    },
+  ])
+    expect(schema.safeParse(input).success).toBe(false);
+  const input = {
+    op: "mute",
+    scope: "thread",
+    channel: "C123",
+    thread_ts: "1.000",
+    mute_until: "2026-11-18T12:00:00+02:00",
+  };
+  expect(notificationInputSchema.parse(schema.parse(input))).toMatchObject({
+    mute_until: "2026-11-18T10:00:00.000Z",
+  });
 });
 
 test("original branch requirements, strictness and bounds remain enforced", () => {

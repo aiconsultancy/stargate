@@ -176,6 +176,7 @@ test("reaction protocol belongs once in the captain definition, not crew definit
     "utf8",
   );
   expect(captain).toContain(reactionInstructions);
+  expect(captain).toContain("Slack notification muting:");
   expect(captain).toStartWith("---\n");
   expect(captain.split("<!-- STARGATE:START -->")).toHaveLength(2);
   expect(captain.split("<!-- STARGATE:END -->")).toHaveLength(2);
@@ -200,6 +201,7 @@ test("reaction protocol belongs once in the captain definition, not crew definit
       "utf8",
     );
     expect(crew).not.toContain("Slack reaction protocol");
+    expect(crew).not.toContain("Slack notification muting:");
     expect(crew).not.toContain("Voice message transcripts:");
     expect(crew).not.toContain("Peer captain messages:");
     expect(crew.split("<!-- STARGATE:START -->")).toHaveLength(2);
