@@ -74,6 +74,7 @@ async function fixture(source = true) {
   store.saveInput(original.botKey, job.id, "msg_original", "ses_captain");
   if (source) store.recordQuestionSource(original);
   const published: string[] = [];
+  const publicationAttempts: string[] = [];
   const decisions: unknown[] = [];
   const settled: string[] = [];
   let pending = true;
@@ -158,6 +159,7 @@ async function fixture(source = true) {
         human: (user) => user === "jac",
         async publish(_job, text, guard) {
           if (!guard()) throw new Error("Denied");
+          publicationAttempts.push(text);
           if (publishFail) throw new Error("IRC unavailable");
           if (offerGate && text.includes("OpenCode needs clarification")) {
             offerGate.entered.resolve();
@@ -183,6 +185,7 @@ async function fixture(source = true) {
   return {
     backend,
     published,
+    publicationAttempts,
     decisions,
     settled,
     path,
@@ -510,7 +513,7 @@ test("expired offers renew only at their original human request after restart", 
     fingerprint: "a".repeat(64),
     expires: Date.now() - 1,
     state: "offered",
-    notified: 0,
+    notified: 1,
     recovering: 0,
   });
   f.restart();
@@ -537,6 +540,132 @@ test("expired offers renew only at their original human request after restart", 
   expect(f.decisions).toEqual([]);
   await f.answer();
   expect(f.decisions).toEqual([{ q0: "wait" }]);
+});
+
+test("an unseen offer starts its reply window at first publication after a long disconnect and restart", async () => {
+  const f = await fixture();
+  f.disconnect();
+  await f.poll();
+  const unseen = f.offer();
+  const clock = spyOn(Date, "now").mockReturnValue(unseen.expires + 60_000);
+  try {
+    f.restart();
+    expect(await f.bridge.recover(AbortSignal.timeout(3000))).toEqual([
+      "msg_original",
+    ]);
+    await f.poll();
+    expect(f.published).toEqual([]);
+    f.reconnect();
+    await f.poll();
+    const seen = f.offer();
+    expect(seen.token).toBe(unseen.token);
+    expect(seen.publicationStarted).toBe(Date.now());
+    expect(seen.expires).toBe(Date.now() + 1_800_000);
+    expect(f.published).toHaveLength(1);
+    await f.answer();
+    expect(f.decisions).toEqual([{ q0: "wait" }]);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test("a lost first-publication ACK cannot reset the seen token's expiry after restart", async () => {
+  const f = await fixture();
+  f.failPublish(true);
+  await expect(f.poll()).rejects.toThrow("session unavailable");
+  const attempted = f.offer();
+  expect(attempted.publicationStarted).toBeGreaterThan(0);
+  const clock = spyOn(Date, "now").mockReturnValue(attempted.expires + 1);
+  try {
+    f.restart();
+    f.failPublish(false);
+    await f.poll();
+    expect(f.offer().expires).toBe(attempted.expires);
+    expect(f.published).toEqual([]);
+    await f.answer();
+    expect(f.decisions).toEqual([]);
+    await f.answer({}, { renew: true });
+    expect(f.offer().token).not.toBe(attempted.token);
+    expect(f.published).toHaveLength(1);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test("upgrading legacy offers preserves possibly-seen token expiry", async () => {
+  const f = await fixture();
+  f.failPublish(true);
+  await expect(f.poll()).rejects.toThrow("session unavailable");
+  const attempted = f.offer();
+  const raw = new Database(f.path);
+  try {
+    raw.exec("ALTER TABLE native_questions DROP COLUMN publicationStarted");
+  } finally {
+    raw.close();
+  }
+  const clock = spyOn(Date, "now").mockReturnValue(attempted.expires + 1);
+  try {
+    f.restart();
+    f.failPublish(false);
+    await f.poll();
+    expect(f.offer().publicationStarted).toBe(1);
+    expect(f.offer().expires).toBe(attempted.expires);
+    expect(f.published).toEqual([]);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test("explicit renewal held by connection readiness cannot expire the new token unseen", async () => {
+  const f = await fixture();
+  await f.poll();
+  const originalOffer = f.offer();
+  const clock = spyOn(Date, "now").mockReturnValue(originalOffer.expires + 1);
+  try {
+    f.disconnect();
+    await f.answer({}, { renew: true });
+    const renewed = f.offer();
+    expect(renewed.token).not.toBe(originalOffer.token);
+    expect(renewed.publicationStarted).toBe(0);
+    clock.mockReturnValue(renewed.expires + 1);
+    f.restart();
+    f.reconnect();
+    await f.poll();
+    expect(f.published).toHaveLength(2);
+    expect(f.offer().expires).toBe(Date.now() + 1_800_000);
+    await f.answer({}, { token: originalOffer.token });
+    expect(f.decisions).toEqual([]);
+    await f.answer();
+    expect(f.decisions).toEqual([{ q0: "wait" }]);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test("lost outcome ACKs back off delivery without retrying the native answer", async () => {
+  const f = await fixture();
+  await f.poll();
+  f.failPublish(true);
+  await f.answer();
+  expect(f.publicationAttempts).toHaveLength(2);
+  for (let i = 0; i < 5; i++) await f.poll();
+  expect(f.publicationAttempts).toHaveLength(2);
+  const clock = spyOn(Date, "now").mockReturnValue(Date.now() + 2001);
+  try {
+    await f.poll();
+    expect(f.publicationAttempts).toHaveLength(3);
+    clock.mockReturnValue(Date.now() + 2001);
+    await f.poll();
+    expect(f.publicationAttempts).toHaveLength(3);
+    f.failPublish(false);
+    clock.mockReturnValue(Date.now() + 2001);
+    await f.poll();
+    expect(f.publicationAttempts).toHaveLength(4);
+    expect(f.published.at(-1)).toContain("decision recorded");
+    expect(f.decisions).toHaveLength(1);
+  } finally {
+    clock.mockRestore();
+  }
 });
 
 test("cancelled transport work cannot submit or consume a question answer", async () => {
@@ -1714,6 +1843,43 @@ for (const uncertain of [false, true]) {
   });
 }
 
+test("durable Stop anchors retain the exact request rather than an older visible root", async () => {
+  const f = await fixture();
+  const later = {
+    ...original,
+    eventId: "#ship:later",
+    thread: "later",
+    replyParent: "m1",
+  };
+  f.store.enqueue(later);
+  expect(
+    f.store.ircPublished(
+      original.botKey,
+      "#ship",
+      "question-echo",
+      "later",
+      "m1",
+    ),
+  ).toBe(true);
+  // The same native request IDs cannot redirect another conversation/bot.
+  expect(
+    f.store.ircPublished(original.botKey, "#ship", "question-echo", "m1", "m1"),
+  ).toBe(false);
+  f.restart();
+  expect(f.store.ircThreadRoot(original.botKey, "#ship", "question-echo")).toBe(
+    "m1",
+  );
+  expect(
+    f.store.ircRequestAnchor(original.botKey, "#ship", "question-echo"),
+  ).toBe("later");
+  expect(
+    f.store.ircRequestAnchor(original.botKey, "#other", "question-echo"),
+  ).toBeUndefined();
+  expect(
+    f.store.ircRequestAnchor("other-bot", "#ship", "question-echo"),
+  ).toBeUndefined();
+});
+
 test("unproven recovered Stop binding cannot fall back to a whole-session interruption", async () => {
   const f = await fixture();
   await f.poll();
@@ -1732,149 +1898,172 @@ test("unproven recovered Stop binding cannot fall back to a whole-session interr
   expect(calls).toBe(0);
 });
 
-test("actual strict IRC transport preserves startup hold before join and authenticated Stop reaches its recovered input", async () => {
-  const f = await fixture(false);
-  const server = new FakeIrcServer({
-    accounts: { captain: "fixture" },
-  }).start();
-  cleanup.push(() => server.stop());
-  const cfg = ircSchema.parse({
-    id: "recovered",
-    account: "captain",
-    passwordEnv: "FIXTURE",
-    channels: ["#ship"],
-    server: { host: "127.0.0.1", port: server.port, tls: false },
-    features: { questions: true },
-    access: { channelRequests: "nick-mention", allowedAccounts: ["jac"] },
-    fleetPolicy: {
-      role: "captain",
-      humanAccounts: ["jac"],
-      agentAccounts: ["captain"],
-      assignedCheckout: "/project",
-      capabilities: ["read_code"],
-    },
-    backend: {
-      type: "opencode",
-      url: "http://localhost:4096",
-      directory: "/project",
-      sessionID: "ses_captain",
-    },
-  });
-  const ship = await IrcShip.create(cfg, f.store, pino({ level: "silent" }), {
-    env: { FIXTURE: "fixture" },
-    timing: { intervalMs: 1, burst: 100 },
-    readyMs: 2000,
-  });
-  const registration = ship.registrations[0];
-  if (!registration) throw new Error("Missing IRC registration");
-  const input = {
-    ...original,
-    botKey: registration.key,
-    conversation: JSON.stringify([registration.key, "#ship"]),
-  };
-  f.store.enqueue(input);
-  const job = f.store.queuedJob(registration.key, input.eventId);
-  if (!job) throw new Error("Missing saved IRC work");
-  f.store.running(job.id);
-  f.store.started(job.id);
-  f.store.saveInput(registration.key, job.id, "msg_original", "ses_captain");
-  f.store.recordQuestionSource(input);
-  f.store.offerQuestion({
-    token: "f".repeat(32),
-    botKey: registration.key,
-    formID: question().id,
-    sessionID: question().sessionID,
-    inputID: question().inputID,
-    jobID: job.id,
-    fingerprint: question().fingerprint,
-    expires: Date.now() + 1_800_000,
-    state: "offered",
-    notified: 1,
-    recovering: 0,
-  });
-  expect(registration.transport.allowed(input.user, input.channel)).toBe(false);
-  let interrupts = 0;
-  const scoped: string[][] = [];
-  f.backend.createSession = async () => "ses_captain";
-  f.backend.interrupt = async () => {
-    interrupts++;
-  };
-  f.backend.interruptInput = async (session, input) => {
-    scoped.push([session, input]);
-    f.complete();
-  };
-  const gateway = new Gateway(
-    registration.settings,
-    registration.identity,
-    f.store,
-    f.backend,
-    registration.delivery,
-    pino({ level: "silent" }),
-    undefined,
-    undefined,
-    registration.transport,
-  );
-  registration.stopTurn = (conversation, thread) =>
-    gateway.stopTurn(conversation, thread);
-  const stop = new AbortController();
-  const worker = gateway.work(stop.signal);
-  try {
-    await until(
-      () => f.store.questionOffers(registration.key)[0]?.recovering === 1,
-      3000,
-      "unjoined real IRC transport retained native hold",
+for (const botReply of [false, true]) {
+  test(`actual strict IRC transport Stop on ${botReply ? "durable question echo" : "original request"} reaches its recovered input after restart`, async () => {
+    const f = await fixture(false);
+    const server = new FakeIrcServer({
+      accounts: { captain: "fixture" },
+    }).start();
+    cleanup.push(() => server.stop());
+    const cfg = ircSchema.parse({
+      id: "recovered",
+      account: "captain",
+      passwordEnv: "FIXTURE",
+      channels: ["#ship"],
+      server: { host: "127.0.0.1", port: server.port, tls: false },
+      features: { questions: true },
+      access: { channelRequests: "nick-mention", allowedAccounts: ["jac"] },
+      fleetPolicy: {
+        role: "captain",
+        humanAccounts: ["jac"],
+        agentAccounts: ["captain"],
+        assignedCheckout: "/project",
+        capabilities: ["read_code"],
+      },
+      backend: {
+        type: "opencode",
+        url: "http://localhost:4096",
+        directory: "/project",
+        sessionID: "ses_captain",
+      },
+    });
+    const ship = await IrcShip.create(cfg, f.store, pino({ level: "silent" }), {
+      env: { FIXTURE: "fixture" },
+      timing: { intervalMs: 1, burst: 100 },
+      readyMs: 2000,
+    });
+    const registration = ship.registrations[0];
+    if (!registration) throw new Error("Missing IRC registration");
+    const input = {
+      ...original,
+      botKey: registration.key,
+      ...(botReply ? { replyParent: "older-root" } : {}),
+      conversation: JSON.stringify([registration.key, "#ship"]),
+    };
+    f.store.enqueue(input);
+    const job = f.store.queuedJob(registration.key, input.eventId);
+    if (!job) throw new Error("Missing saved IRC work");
+    f.store.running(job.id);
+    f.store.started(job.id);
+    f.store.saveInput(registration.key, job.id, "msg_original", "ses_captain");
+    f.store.recordQuestionSource(input);
+    f.store.offerQuestion({
+      token: "f".repeat(32),
+      botKey: registration.key,
+      formID: question().id,
+      sessionID: question().sessionID,
+      inputID: question().inputID,
+      jobID: job.id,
+      fingerprint: question().fingerprint,
+      expires: Date.now() + 1_800_000,
+      state: "offered",
+      notified: 1,
+      recovering: 0,
+    });
+    const stopTarget = botReply ? "question-echo" : "m1";
+    if (botReply) {
+      // Previous gateway's verified own echo, persisted with an exact request
+      // distinct from its visible thread root. The new connection has no cache.
+      expect(
+        f.store.ircPublished(
+          registration.key,
+          "#ship",
+          stopTarget,
+          "m1",
+          "older-root",
+        ),
+      ).toBe(true);
+      expect(
+        f.store.ircRequestAnchor(registration.key, "#ship", stopTarget),
+      ).toBe("m1");
+      expect(registration.client.requestAnchor(stopTarget)).toBeUndefined();
+    }
+    expect(registration.transport.allowed(input.user, input.channel)).toBe(
+      false,
     );
-    expect(scoped).toEqual([]);
-    expect(interrupts).toBe(0);
-    expect(f.store.jobStatus(registration.key, job.id)).toBe("running");
-    ship.start(() => true);
-    await until(
-      () => registration.client.inChannel("#ship"),
-      3000,
-      "IRC rejoined",
+    let interrupts = 0;
+    const scoped: string[][] = [];
+    f.backend.createSession = async () => "ses_captain";
+    f.backend.interrupt = async () => {
+      interrupts++;
+    };
+    f.backend.interruptInput = async (session, input) => {
+      scoped.push([session, input]);
+      f.complete();
+    };
+    const gateway = new Gateway(
+      registration.settings,
+      registration.identity,
+      f.store,
+      f.backend,
+      registration.delivery,
+      pino({ level: "silent" }),
+      undefined,
+      undefined,
+      registration.transport,
     );
-    server.sendTo(
-      "captain",
-      "@account=jac;bot=1;+draft/react=✋;+draft/reply=m1 :jac!u@fixture TAGMSG #ship",
-    );
-    server.sendTo(
-      "captain",
-      "@account=stranger;+draft/react=✋;+draft/reply=m1 :stranger!u@fixture TAGMSG #ship",
-    );
-    server.sendTo("captain", "PING :stop-spoofs");
-    await until(
-      () =>
-        server
-          .received("captain")
-          .some(
-            (line) => line.includes("PONG") && line.includes("stop-spoofs"),
-          ),
-      2000,
-      "spoof Stop controls processed",
-    );
-    expect(scoped).toEqual([]);
-    server.sendTo(
-      "captain",
-      "@account=jac;+draft/react=✋;+draft/reply=m1 :jac!u@fixture TAGMSG #ship",
-    );
-    server.sendTo(
-      "captain",
-      "@account=jac;+draft/react=✋;+draft/reply=m1 :jac!u@fixture TAGMSG #ship",
-    );
-    await until(
-      () => f.store.jobStatus(registration.key, job.id) === "done",
-      4000,
-      "authenticated Stop released recovered queue",
-    );
-    expect(scoped).toEqual([["ses_captain", "msg_original"]]);
-    expect(interrupts).toBe(0);
-    expect(f.store.jobByInput(registration.key, "msg_original")?.failure).toBe(
-      "cancelled",
-    );
-    expect(f.decisions).toEqual([]);
-  } finally {
-    stop.abort();
-    await worker;
-    await ship.close();
-  }
-}, 10_000);
+    registration.stopTurn = (conversation, thread) =>
+      gateway.stopTurn(conversation, thread);
+    const stop = new AbortController();
+    const worker = gateway.work(stop.signal);
+    try {
+      await until(
+        () => f.store.questionOffers(registration.key)[0]?.recovering === 1,
+        3000,
+        "unjoined real IRC transport retained native hold",
+      );
+      expect(scoped).toEqual([]);
+      expect(interrupts).toBe(0);
+      expect(f.store.jobStatus(registration.key, job.id)).toBe("running");
+      ship.start(() => true);
+      await until(
+        () => registration.client.inChannel("#ship"),
+        3000,
+        "IRC rejoined",
+      );
+      server.sendTo(
+        "captain",
+        `@account=jac;bot=1;+draft/react=✋;+draft/reply=${stopTarget} :jac!u@fixture TAGMSG #ship`,
+      );
+      server.sendTo(
+        "captain",
+        `@account=stranger;+draft/react=✋;+draft/reply=${stopTarget} :stranger!u@fixture TAGMSG #ship`,
+      );
+      server.sendTo("captain", "PING :stop-spoofs");
+      await until(
+        () =>
+          server
+            .received("captain")
+            .some(
+              (line) => line.includes("PONG") && line.includes("stop-spoofs"),
+            ),
+        2000,
+        "spoof Stop controls processed",
+      );
+      expect(scoped).toEqual([]);
+      server.sendTo(
+        "captain",
+        `@account=jac;+draft/react=✋;+draft/reply=${stopTarget} :jac!u@fixture TAGMSG #ship`,
+      );
+      server.sendTo(
+        "captain",
+        `@account=jac;+draft/react=✋;+draft/reply=${stopTarget} :jac!u@fixture TAGMSG #ship`,
+      );
+      await until(
+        () => f.store.jobStatus(registration.key, job.id) === "done",
+        4000,
+        "authenticated Stop released recovered queue",
+      );
+      expect(scoped).toEqual([["ses_captain", "msg_original"]]);
+      expect(interrupts).toBe(0);
+      expect(
+        f.store.jobByInput(registration.key, "msg_original")?.failure,
+      ).toBe("cancelled");
+      expect(f.decisions).toEqual([]);
+    } finally {
+      stop.abort();
+      await worker;
+      await ship.close();
+    }
+  }, 10_000);
+}

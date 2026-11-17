@@ -114,6 +114,7 @@ export type QuestionOffer = {
   expires: number;
   state: "offered" | "attempted" | "closed";
   notified: number;
+  publicationStarted?: number;
   recovering: number;
   outcome?: "answered" | "cancelled" | "uncertain" | null;
   outcomeNotified?: number;
@@ -299,6 +300,10 @@ export class Questions {
   private readonly inFlight = new Set<string>();
   private readonly notifying = new Set<string>();
   private readonly offering = new Set<string>();
+  private readonly noticeFailures = new Map<
+    string,
+    { count: number; until: number }
+  >();
   private readonly failures = new Map<
     string,
     { count: number; until: number }
@@ -408,10 +413,14 @@ export class Questions {
   }
 
   async poll(signal: AbortSignal) {
+    const offers = this.store.questionOffers(this.key);
+    const tokens = new Set(offers.map((o) => o.token));
+    for (const token of this.noticeFailures.keys())
+      if (!tokens.has(token)) this.noticeFailures.delete(token);
     const sessions = [
       ...new Set([
         ...this.store.activeQuestionSessions(this.key, this.backend.sessionID),
-        ...this.store.questionOffers(this.key).map((o) => o.sessionID),
+        ...offers.map((o) => o.sessionID),
       ]),
     ].sort();
     for (const session of this.failures.keys())
@@ -523,7 +532,7 @@ export class Questions {
       if (
         offer?.state !== "offered" ||
         offer.notified ||
-        offer.expires <= Date.now()
+        ((offer.publicationStarted ?? 0) !== 0 && offer.expires <= Date.now())
       )
         continue;
       if (
@@ -591,18 +600,23 @@ export class Questions {
     prefix = "",
   ) {
     const port = this.port();
-    const current = this.store.questionByToken(this.key, offer.token);
+    let current = this.store.questionByToken(this.key, offer.token);
     if (
       !port ||
       this.offering.has(offer.token) ||
       current?.state !== "offered" ||
       current.notified ||
-      current.expires <= Date.now() ||
+      ((current.publicationStarted ?? 0) !== 0 &&
+        current.expires <= Date.now()) ||
       port.ready?.(job) === false
     )
       return;
     this.offering.add(offer.token);
     try {
+      // Start the reply window only when a first publication can be attempted.
+      // Persist before sending: an ACK loss must not silently renew a seen token.
+      current = this.store.startQuestionPublication(this.key, offer.token);
+      if (!current) return;
       await port.publish(
         job,
         "unsupported" in question
@@ -630,11 +644,16 @@ export class Questions {
       // Policy loss is a delivery denial, not permission to retain an unusable
       // notice in every poll. Preserve the outcome and any native recovery hold.
       this.store.questionOutcomeNotified(offer.token);
+      this.noticeFailures.delete(offer.token);
       if (!this.inFlight.has(offer.token))
         this.store.retireQuestion(offer.token);
       return;
     }
-    if (port.ready?.(job) === false) return;
+    if (
+      port.ready?.(job) === false ||
+      (this.noticeFailures.get(offer.token)?.until ?? 0) > Date.now()
+    )
+      return;
     this.notifying.add(offer.token);
     try {
       await port.publish(
@@ -645,8 +664,18 @@ export class Questions {
         () => !this.lifetime.aborted && !!this.owner(offer),
       );
       this.store.questionOutcomeNotified(offer.token);
+      this.noticeFailures.delete(offer.token);
     } catch {
-      // Delivery can retry. The native API outcome and spent token cannot change.
+      // A lost ACK may repeat a notice, but never flood each poll or replay the
+      // native answer. Retry delivery with the same bounded session backoff.
+      const count = Math.min(
+        6,
+        (this.noticeFailures.get(offer.token)?.count ?? 0) + 1,
+      );
+      this.noticeFailures.set(offer.token, {
+        count,
+        until: Date.now() + Math.min(60_000, 1000 * 2 ** count),
+      });
     } finally {
       this.notifying.delete(offer.token);
     }

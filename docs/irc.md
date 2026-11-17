@@ -688,7 +688,10 @@ One string field accepts a displayed choice number, or free text when the native
 field allows it. A multiple-choice field accepts comma-separated numbers.
 Several fields require a JSON object using the displayed field keys and native
 option values, for example `galactica: answer <token> {"q0":"wait"}`. The token
-lasts 30 minutes. No default or previous answer is shown or submitted. Hidden,
+lasts 30 minutes from its first publication attempt. A disconnected ship waits
+until it can attempt publication before starting that window; a lost
+acknowledgement does not extend a token that may already have been seen.
+No default or previous answer is shown or submitted. Hidden,
 conditional, authentication, credential-bearing and unsupported fields are not
 bridged; use the native operator interface for those forms. Never send credentials
 in an IRC answer.
@@ -723,7 +726,8 @@ Renewal and ordinary polling share one in-flight offer publication.
 Native reply outcomes and notification delivery are stored separately. A failed
 confirmation retries the notice, not the native reply. Concurrent answer/poll
 paths share one in-flight notice; a restart after a lost acknowledgement can
-still repeat a notice. An API deadline still
+still repeat a notice. Failed notices back off exponentially up to one minute,
+rather than repeating on every poll. An API deadline still
 produces an uncertainty notice while the gateway and original source remain authorised.
 
 One unavailable native session does not prevent the others from being polled.
@@ -780,7 +784,8 @@ transcript outbox then delivers the continuation to the original source, without
 re-prompting the agent or selecting an intervening human request. A form that
 was never durably observed does not receive this exception.
 
-An authenticated human Stop on the original request invokes the adapter's
+An authenticated human Stop on the original request, or its durably correlated
+bot clarification message, invokes the adapter's
 exact-input interruption even for a recovered waiter with no local worker.
 With questions enabled, strict IRC mode accepts these fresh reactions only from
 explicit human accounts, without a bot tag; replayed reactions remain ignored.

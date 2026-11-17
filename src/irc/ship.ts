@@ -779,13 +779,22 @@ export class IrcShip {
             (identity.role !== "captain" && !this.config.features.questions) ||
             (!this.config.access.humanWakeChannels?.length &&
               !this.config.features.questions) ||
-            !client.isChannel(target) ||
             this.isAuditChannel(client, target)
+          )
+            return;
+          const recipient = client.isChannel(target)
+            ? target
+            : this.config.features.questions
+              ? client.knownAccount(target)
+              : undefined;
+          if (
+            !recipient ||
+            (!client.isChannel(target) && !client.holds(recipient, target))
           )
             return;
           this.store.ircPublished(
             identity.key,
-            client.fold(target),
+            client.fold(recipient),
             msgid,
             request,
             root,
@@ -1485,12 +1494,18 @@ export class IrcShip {
   private stop(registration: IrcRegistration, message: IrcMessage) {
     if (!this.open() || !this.config.features.reactions) return;
     const client = registration.client;
+    const target = message.params[0] ?? "";
+    const channel = client.fold(
+      client.isChannel(target) ? target : (message.tags.get("account") ?? ""),
+    );
     const stop = routeIrcStop(message, {
       config: this.config,
       member: registration,
       currentNick: client.nick,
       fold: client.fold,
-      anchor: (msgid) => client.requestAnchor(msgid),
+      anchor: (msgid) =>
+        this.store.ircRequestAnchor(registration.key, channel, msgid) ??
+        client.requestAnchor(msgid),
     });
     if (!stop) return;
     if (registration.stopTurn?.(stop.conversation, stop.thread))

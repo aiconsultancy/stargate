@@ -288,6 +288,17 @@ export class Store {
     column("jobs", "makers", "TEXT");
     column("native_questions", "outcome", "TEXT");
     column("native_questions", "outcomeNotified", "INTEGER NOT NULL DEFAULT 0");
+    if (
+      column(
+        "native_questions",
+        "publicationStarted",
+        "INTEGER NOT NULL DEFAULT 0",
+      )
+    )
+      // Existing offers may have been seen despite a lost ACK. Preserve their
+      // original expiry rather than restarting their window on this migration.
+      this.db.exec("UPDATE native_questions SET publicationStarted=1");
+    column("irc_thread_messages", "request", "TEXT");
     for (const table of [
       "native_questions",
       "irc_question_sources",
@@ -1035,6 +1046,17 @@ export class Store {
     );
   }
 
+  /** Exact original request of a locally correlated own echo, never its root. */
+  ircRequestAnchor(botKey: string, channel: string, msgid: string) {
+    return (
+      this.db
+        .query<{ request: string | null }, [string, string, string]>(
+          "SELECT request FROM irc_thread_messages WHERE botKey=? AND channel=? AND msgid=?",
+        )
+        .get(botKey, channel, msgid)?.request ?? undefined
+    );
+  }
+
   /** Called only for an exact locally-correlated, SASL-account-confirmed own echo. */
   ircPublished(
     botKey: string,
@@ -1062,7 +1084,9 @@ export class Store {
       const root = job.replyParent ?? job.thread;
       if (!validMsgid(root) || (wireRoot !== undefined && wireRoot !== root))
         return false;
-      this.ircThreadMessage(botKey, channel, msgid, root);
+      const prior = this.ircRequestAnchor(botKey, channel, msgid);
+      if (prior !== undefined && prior !== request) return false;
+      this.ircThreadMessage(botKey, channel, msgid, root, request);
       this.joinIrcThread(botKey, channel, root);
       return true;
     })();
@@ -1073,15 +1097,16 @@ export class Store {
     channel: string,
     msgid: string,
     root: string,
+    request?: string,
   ) {
     const existing = this.ircThreadRoot(botKey, channel, msgid);
     if (existing !== undefined && existing !== root)
       throw new Error("IRC thread ancestry conflict");
     this.db
       .query(
-        "INSERT INTO irc_thread_messages(botKey,channel,msgid,root,recorded) VALUES (?,?,?,?,?) ON CONFLICT(botKey,channel,msgid) DO UPDATE SET recorded=excluded.recorded",
+        "INSERT INTO irc_thread_messages(botKey,channel,msgid,root,recorded,request) VALUES (?,?,?,?,?,?) ON CONFLICT(botKey,channel,msgid) DO UPDATE SET recorded=excluded.recorded,request=COALESCE(irc_thread_messages.request,excluded.request)",
       )
-      .run(botKey, channel, msgid, root, Date.now());
+      .run(botKey, channel, msgid, root, Date.now(), request ?? null);
   }
 
   private joinIrcThread(botKey: string, channel: string, root: string) {
@@ -1391,7 +1416,7 @@ export class Store {
     return this.db.transaction(() => {
       this.db
         .query(
-          "INSERT OR IGNORE INTO native_questions(token,botKey,formID,sessionID,inputID,jobID,fingerprint,expires,state,notified,recovering,recorded) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT OR IGNORE INTO native_questions(token,botKey,formID,sessionID,inputID,jobID,fingerprint,expires,state,notified,recovering,recorded,publicationStarted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
         )
         .run(
           offer.token,
@@ -1406,6 +1431,7 @@ export class Store {
           offer.notified,
           offer.recovering,
           Date.now(),
+          offer.publicationStarted ?? 0,
         );
       const existing = this.db
         .query<QuestionOffer, [string, string, string]>(
@@ -1523,7 +1549,7 @@ export class Store {
     if (!row) return;
     const changed = this.db
       .query(
-        "UPDATE native_questions SET token=?,expires=?,notified=0,recorded=? WHERE token=? AND state='offered' AND expires<=?",
+        "UPDATE native_questions SET token=?,expires=?,notified=0,publicationStarted=0,recorded=? WHERE token=? AND state='offered' AND expires<=?",
       )
       .run(replacement, now + 1_800_000, now, token, now).changes;
     return changed === 1
@@ -1623,6 +1649,19 @@ export class Store {
           .run(botKey, cutoff, cutoff);
       }
     })();
+  }
+
+  startQuestionPublication(botKey: string, token: string) {
+    const now = Date.now();
+    this.db
+      .query(
+        "UPDATE native_questions SET publicationStarted=?,expires=? WHERE botKey=? AND token=? AND state='offered' AND notified=0 AND publicationStarted=0",
+      )
+      .run(now, now + 1_800_000, botKey, token);
+    const offer = this.questionByToken(botKey, token);
+    return offer?.state === "offered" && !offer.notified && offer.expires > now
+      ? offer
+      : undefined;
   }
 
   questionNotified(token: string) {
