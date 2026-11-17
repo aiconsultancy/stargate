@@ -13,6 +13,10 @@ import {
   crewMessageMetadataKey,
   taskEnvelopePayload,
 } from "./message-protocol";
+import {
+  ShellCompletionContext,
+  type ShellContextRecord,
+} from "./shell-context";
 import { CrewError, type CrewTask } from "./state";
 import { agentIDSchema } from "./team";
 
@@ -61,7 +65,7 @@ export type AbandonInput = z.infer<typeof abandonInputSchema>;
 type RequestOptions = NonNullable<
   Parameters<OpenCodeClient["session"]["get"]>[1]
 >;
-export interface EvidenceMessage {
+export interface EvidenceMessage extends ShellContextRecord {
   id: string;
   type: SessionMessageInfo["type"];
   time: { created: number; completed?: number };
@@ -71,7 +75,6 @@ export interface EvidenceMessage {
   agent?: string;
   finish?: string;
   error?: unknown;
-  content?: ReadonlyArray<{ type: string; text?: string }>;
 }
 // Authenticated read APIs. No prompts, interrupts, forms or permission writes;
 // captain abandon alone may withdraw its own task's still-queued input.
@@ -180,19 +183,20 @@ export type Placement =
   | "unknown";
 type PlacementTask = Pick<
   CrewTask,
-  "id" | "workerSessionID" | "inputID" | "originCaptainID"
+  "id" | "crewID" | "workerSessionID" | "inputID" | "originCaptainID"
 >;
 
 /** Newest first, one native message class per scan. Throws past the bound. */
 async function* newest(
   api: CrewInspectionAPI,
   sessionID: string,
-  type: "user" | "shell" | "synthetic",
+  type: "user" | "shell" | "synthetic" | "assistant",
   signal: AbortSignal,
 ): AsyncGenerator<EvidenceMessage> {
   let cursor: string | undefined;
   const cursors = new Set<string>();
   for (let page = 0; page < 8; page++) {
+    signal.throwIfAborted();
     const result = await api.message.list(
       {
         sessionID,
@@ -201,6 +205,8 @@ async function* newest(
       },
       { signal },
     );
+    signal.throwIfAborted();
+    if (result.data.length > 64) throw new CrewError("Invalid evidence page.");
     yield* result.data;
     const next = result.cursor.next;
     if (!next) return;
@@ -231,6 +237,7 @@ export async function observePlacement(
   api: CrewInspectionAPI,
   task: PlacementTask,
   signal: AbortSignal,
+  workerAgent = task.crewID,
 ): Promise<Placement> {
   try {
     const sessionID = task.workerSessionID;
@@ -248,6 +255,7 @@ export async function observePlacement(
     }
     if (!own) return "absent";
     if (later) return "superseded";
+    const shellContext = new ShellCompletionContext(workerAgent);
     // Shell and foreign synthetic inputs also start or steer other work.
     for (const type of ["shell", "synthetic"] as const)
       for await (const message of newest(api, sessionID, type, signal)) {
@@ -256,11 +264,53 @@ export async function observePlacement(
           message.type === type &&
           !(
             type === "synthetic" &&
-            (taskScoped(message, task) || isNativeInstructionContext(message))
+            (taskScoped(message, task) ||
+              isNativeInstructionContext(message) ||
+              shellContext.track(message))
           )
         )
           return "superseded";
       }
+    if (shellContext.pending) {
+      // Typed scans cannot prove order between a launch and its callback.
+      // Only this exceptional path needs the bounded full retained turn.
+      const proof = new ShellCompletionContext(workerAgent);
+      let cursor: string | undefined;
+      const seen = new Set<string>();
+      for (let pageNumber = 0; pageNumber < 8; pageNumber++) {
+        signal.throwIfAborted();
+        const page = await api.message.list(
+          {
+            sessionID,
+            limit: 64,
+            ...(cursor ? { cursor } : { order: "desc" as const }),
+          },
+          { signal },
+        );
+        signal.throwIfAborted();
+        if (page.data.length > 64) return "unknown";
+        for (const message of page.data) {
+          if (message.type === "user") {
+            if (message.id !== task.inputID) return "superseded";
+            return proof.finish(message.time.created) ? "placed" : "unknown";
+          }
+          const candidate = proof.track(message);
+          if (
+            message.type === "shell" ||
+            (message.type === "synthetic" &&
+              !taskScoped(message, task) &&
+              !isNativeInstructionContext(message) &&
+              !candidate)
+          )
+            return "superseded";
+        }
+        const next = page.cursor.next;
+        if (!next || seen.has(next)) return "unknown";
+        seen.add(next);
+        cursor = next;
+      }
+      return "unknown";
+    }
     return "placed";
   } catch {
     return "unknown";
@@ -327,7 +377,9 @@ export async function verifyResult(
 ): Promise<{ result: string; inputSha256: string }> {
   let cursor: string | undefined;
   let final: EvidenceMessage | undefined;
+  let unansweredShellCallback = false;
   const cursors = new Set<string>();
+  const shellContext = new ShellCompletionContext(workerAgent);
   for (let pageNumber = 0; pageNumber < 8; pageNumber++) {
     signal.throwIfAborted();
     const page = await api.message.list(
@@ -345,12 +397,17 @@ export async function verifyResult(
     for (const message of page.data) {
       if (message.id === task.inputID && message.type === "user") {
         const inputSha256 = verifyInput(message, task);
+        if (!shellContext.finish(message.time.created))
+          throw new CrewError(
+            "A shell callback lacks unique task-owned launch proof; reconciliation refused.",
+          );
         const result = (final?.content ?? [])
           .filter((part) => part.type === "text")
           .map((part) => part.text ?? "")
           .join("\n");
         if (
           !final ||
+          unansweredShellCallback ||
           final.id !== input.resultMessageID ||
           ![workerAgent, task.crewID].includes(final.agent ?? "") ||
           final.finish !== "stop" ||
@@ -368,15 +425,20 @@ export async function verifyResult(
           );
         return { result, inputSha256 };
       }
+      const shellCandidate = shellContext.track(message);
+      if (shellCandidate && !final) unansweredShellCallback = true;
       if (message.type === "assistant") {
         final ??= message;
       } else if (
         message.type !== "idle" &&
-        !isNativeInstructionContext(message)
+        !isNativeInstructionContext(message) &&
+        !shellCandidate
       ) {
         // Interleaved prompts, compaction or steering can change result lineage.
         throw new CrewError(
-          "Another input or control message follows this task; automatic evidence matching refused. Inspect the exact task history.",
+          message.type === "compaction"
+            ? "Compaction follows this task; explicit reconciliation still requires uninterrupted retained result evidence. No state changed."
+            : "Another input or control message follows this task; automatic evidence matching refused. Inspect the exact task history.",
         );
       }
     }

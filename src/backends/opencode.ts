@@ -24,6 +24,7 @@ import {
 import { type BackendConfig, secret } from "../config";
 import { isNativeInstructionContext } from "../crew/instruction-context";
 import { CrewReporting } from "../crew/report-rpc";
+import { ShellCompletionContext } from "../crew/shell-context";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
 import type {
   FleetReviewBinding,
@@ -560,6 +561,7 @@ export class OpenCodeBackend implements AgentBackend {
       text: string;
       unsafeTools: boolean;
     }[] = [];
+    let shellContext = new ShellCompletionContext(binding.reviewer.agent);
     let cursor: string | undefined;
     const seen = new Set<string>();
     for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
@@ -571,6 +573,9 @@ export class OpenCodeBackend implements AgentBackend {
         },
         { signal },
       );
+      signal.throwIfAborted();
+      if (page.data.length > 100)
+        throw new Error("Native review history page exceeds bounds");
       for (const message of page.data) {
         if (message.id === binding.inputID) {
           if (
@@ -583,6 +588,10 @@ export class OpenCodeBackend implements AgentBackend {
           )
             throw new Error(
               "Native review input does not match immutable context",
+            );
+          if (!shellContext.finish(message.time.created))
+            throw new Error(
+              "Native review shell callback ownership unavailable",
             );
           const final = assistants[0];
           if (!final) return;
@@ -606,6 +615,7 @@ export class OpenCodeBackend implements AgentBackend {
             makers: assistants.reverse().map((m) => m.maker),
           };
         }
+        const shellCandidate = shellContext.track(message);
         if (message.type === "assistant") {
           if (assistants.length >= 100)
             throw new Error("Native review maker bound exceeded");
@@ -643,9 +653,12 @@ export class OpenCodeBackend implements AgentBackend {
           });
         } else if (
           ["user", "shell", "synthetic"].includes(message.type) &&
-          !isNativeInstructionContext(message)
-        )
+          !isNativeInstructionContext(message) &&
+          !shellCandidate
+        ) {
           assistants.length = 0;
+          shellContext = new ShellCompletionContext(binding.reviewer.agent);
+        }
       }
       const next = page.cursor.next;
       if (!next) return;

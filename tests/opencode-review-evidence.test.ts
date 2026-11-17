@@ -59,6 +59,7 @@ type Changes = {
   finish?: string;
   instruction?: "native" | "malformed";
   earlierTool?: string;
+  shellCallback?: "owned" | "missing" | "foreign";
 };
 function fixture(b: FleetReviewBinding, changes: Changes = {}) {
   const calls: { path: string; method: string }[] = [];
@@ -244,6 +245,59 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
                       },
                     ],
                   },
+                ]
+              : []),
+            ...(changes.shellCallback
+              ? [
+                  {
+                    id: "native-shell-callback",
+                    type: "synthetic",
+                    time: { created: 3 },
+                    description: "echo fixture",
+                    metadata: {
+                      source: "shell",
+                      jobID: "sh_review",
+                      shellID: "sh_review",
+                      state: "completed",
+                      truncated: false,
+                      exit: 0,
+                    },
+                    text: '<shell id="sh_review" state="completed" command="echo fixture">\nFixture output\n</shell>',
+                  },
+                  ...(changes.shellCallback === "missing"
+                    ? []
+                    : [
+                        {
+                          ...assistant,
+                          id: "native-shell-launch",
+                          agent:
+                            changes.shellCallback === "foreign"
+                              ? "other-agent"
+                              : b.reviewer.agent,
+                          time: { created: 1.5, completed: 4 },
+                          finish: "tool-calls",
+                          content: [
+                            {
+                              type: "tool",
+                              id: "call_shell",
+                              name: "shell",
+                              executed: false,
+                              state: {
+                                status: "completed",
+                                input: { command: "echo fixture" },
+                                content: [
+                                  { type: "text", text: "Background command" },
+                                ],
+                                metadata: {
+                                  status: "running",
+                                  shellID: "sh_review",
+                                  truncated: false,
+                                },
+                              },
+                            },
+                          ],
+                        },
+                      ]),
                 ]
               : []),
             ...(changes.mixed
@@ -463,6 +517,22 @@ for (const changes of [
     const f = fixture(b, changes);
     try {
       await expect(f.backend.readReview(b, signal())).rejects.toThrow();
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const callback of ["owned", "missing", "foreign"] as const)
+  test(`native shell callback cannot launder unsafe or unowned review tools: ${callback}`, async () => {
+    const b = binding();
+    const f = fixture(b, { shellCallback: callback });
+    try {
+      await expect(f.backend.readReview(b, signal())).rejects.toThrow(
+        callback === "owned"
+          ? "outside the read-only review boundary"
+          : "shell callback ownership",
+      );
+      expect(f.calls.every((call) => call.method === "GET")).toBe(true);
     } finally {
       await f.close();
     }
