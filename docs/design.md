@@ -25,6 +25,9 @@ interactive and scripted operation. `service.ts` produces Linux user units.
 `slack.ts` owns one outbound connection and API client per registration.
 `routing.ts` validates Slack payloads, checks identity and access, and builds
 conversation keys. `gateway.ts` runs independent workers.
+Captain-addressed [meta commands](meta-commands.md) are handled locally at Slack
+admission, after access checks and before a captain job is queued. The command
+table owns dispatch and help; settings reuse their existing storage owners.
 `attachment-delivery.ts` publishes the files of a stored reply. `store.ts` owns
 the queue, delivery cursor, and session mappings. `runtime.ts` owns startup,
 the exclusive process lock, cancellation, and resource cleanup.

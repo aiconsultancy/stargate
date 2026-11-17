@@ -220,6 +220,21 @@ export class TranscriptConflict extends Error {
   }
 }
 
+export interface MetaReceipt {
+  registration: string;
+  message: string;
+  channel: string;
+  thread: string;
+  user: string;
+  at: number;
+  command: string;
+  state: "pending" | "applied";
+  oldDelayMs: number | null;
+  newDelayMs: number | null;
+  reply: string | null;
+  delivered: number;
+}
+
 export class Store {
   private readonly db: Database;
   constructor(path: string) {
@@ -249,6 +264,14 @@ export class Store {
       );
       CREATE TABLE IF NOT EXISTS ignored_events (
         botKey TEXT NOT NULL, eventId TEXT NOT NULL, PRIMARY KEY(botKey, eventId)
+      );
+      CREATE TABLE IF NOT EXISTS meta_receipts (
+        registration TEXT NOT NULL, message TEXT NOT NULL,
+        channel TEXT NOT NULL, thread TEXT NOT NULL, user TEXT NOT NULL,
+        at INTEGER NOT NULL, command TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending', oldDelayMs INTEGER,
+        newDelayMs INTEGER, reply TEXT, delivered INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(registration,message)
       );
       CREATE TABLE IF NOT EXISTS captain_cursors (
         botKey TEXT NOT NULL, session_id TEXT NOT NULL, cursor TEXT,
@@ -2061,6 +2084,65 @@ export class Store {
       WHERE s.session_id=? AND j.botKey=? LIMIT 1`)
         .get(sessionID, botKey) !== null
     );
+  }
+
+  metaReceipt(registration: string, message: string): MetaReceipt | null {
+    return this.db
+      .query<MetaReceipt, [string, string]>(
+        "SELECT * FROM meta_receipts WHERE registration=? AND message=?",
+      )
+      .get(registration, message);
+  }
+
+  /** Claim before touching the shared waiting file; pending never replays. */
+  claimMeta(
+    input: Pick<
+      MetaReceipt,
+      | "registration"
+      | "message"
+      | "channel"
+      | "thread"
+      | "user"
+      | "at"
+      | "command"
+    >,
+  ): boolean {
+    return (
+      this.db
+        .query(`INSERT OR IGNORE INTO meta_receipts
+      (registration,message,channel,thread,user,at,command) VALUES (?,?,?,?,?,?,?)`)
+        .run(
+          input.registration,
+          input.message,
+          input.channel,
+          input.thread,
+          input.user,
+          input.at,
+          input.command,
+        ).changes === 1
+    );
+  }
+
+  applyMeta(
+    registration: string,
+    message: string,
+    reply: string,
+    oldDelayMs: number | null = null,
+    newDelayMs: number | null = null,
+  ) {
+    const changed = this.db
+      .query(`UPDATE meta_receipts SET state='applied',
+      reply=?,oldDelayMs=?,newDelayMs=? WHERE registration=? AND message=? AND state='pending'`)
+      .run(reply, oldDelayMs, newDelayMs, registration, message).changes;
+    if (changed !== 1) throw new Error("Meta command claim unavailable");
+  }
+
+  deliverMeta(registration: string, message: string) {
+    this.db
+      .query(
+        "UPDATE meta_receipts SET delivered=1 WHERE registration=? AND message=? AND state='applied'",
+      )
+      .run(registration, message);
   }
 
   close() {

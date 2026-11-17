@@ -29,6 +29,7 @@ import { fleetResultSource } from "./fleet/results";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
 import { textMentionNote } from "./mentions";
+import { MetaCommands, type MetaOptions, metaCandidate } from "./meta-commands";
 import { type NotificationReader, notificationNote } from "./notifications";
 import {
   botSender,
@@ -289,6 +290,7 @@ export function slackTransport(
 }
 
 export class Gateway {
+  private readonly meta: MetaCommands;
   private readonly activity: ActivityDelivery;
   private readonly cancellations = new Map<number, AbortController>();
   /** Conversations needing catch-up, with read-retry backoff state. */
@@ -325,7 +327,9 @@ export class Gateway {
     transport?: GatewayTransport,
     /** Separate Slack preferences, never a reply-delivery access rule. */
     private readonly notifications?: NotificationReader,
+    metaOptions?: MetaOptions,
   ) {
+    this.meta = new MetaCommands(store, slack, metaOptions);
     this.bot = "slack" in config ? config : undefined;
     const selected =
       transport ?? (this.bot ? slackTransport(this.bot, identity) : undefined);
@@ -416,6 +420,7 @@ export class Gateway {
   }
 
   accept(body: unknown, peer?: PeerSender, resumesThread = false) {
+    if (metaCandidate(body, this.identity)) return false;
     const bot = this.bot;
     if (!bot) return false;
     const routed = this.route(body, peer);
@@ -547,6 +552,16 @@ export class Gateway {
   async receive(body: unknown, open: () => boolean = () => true) {
     const bot = this.bot;
     if (!bot || !open()) return false;
+    const meta = this.meta.receive(
+      body,
+      bot,
+      this.identity,
+      () => open() && this.bot === bot,
+    );
+    if (meta !== false) {
+      await meta;
+      return false;
+    }
     const sender = botSender(body);
     if (sender && bot.access.peerCaptains && this.peers) {
       const verified = await this.peers
