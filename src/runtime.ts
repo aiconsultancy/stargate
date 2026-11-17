@@ -373,6 +373,24 @@ export function serve(
                 }
               }
             : undefined,
+          {
+            listMutes: () => {
+              const preferences = new NotificationStore(
+                join(config.dataDirectory, "notifications.sqlite"),
+              );
+              try {
+                const result = preferences.operate(
+                  notificationKey(currentBot, identity),
+                  { op: "list" },
+                  { id: "meta-list", caller: "gateway", now: Date.now },
+                );
+                if (result.op !== "list") throw new Error("Expected mute list");
+                return result;
+              } finally {
+                preferences.close();
+              }
+            },
+          },
         );
         const cron = new CronScheduler(
           bot,

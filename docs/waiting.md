@@ -22,6 +22,11 @@ tool output or claim that a particular check has completed.
 
 ## Change delay through a captain
 
+An allowed human can also send `@your-captain /config waiting 3` or
+`@your-captain /config waiting off` in Slack. The gateway writes this same
+override without starting a captain turn. See [meta commands](meta-commands.md)
+for access checks, current-value reads and reserved settings.
+
 With the trusted captain/crew plugin enabled, ask the captain:
 
 - “Change your waiting response time to 3 seconds.”
