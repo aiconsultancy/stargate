@@ -171,9 +171,24 @@ const invalid: Array<[string, Partial<EvidenceMessage>]> = [
     { text: `Instructions from: /other/AGENTS.md\nNew task` },
   ],
   [
-    "extra text header",
+    "missing declared second block",
     {
-      text: `${context.text}\n\nInstructions from: /other/AGENTS.md\nNew task`,
+      metadata: {
+        instruction: {
+          paths: [path, "/fixture/worker/project/other/AGENTS.md"],
+        },
+      },
+      description: "Loaded nested/AGENTS.md, other/AGENTS.md",
+    },
+  ],
+  [
+    "noncanonical absolute path",
+    {
+      metadata: {
+        instruction: { paths: ["/fixture/worker/project/nested/../AGENTS.md"] },
+      },
+      description: "Loaded AGENTS.md",
+      text: "Instructions from: /fixture/worker/project/nested/../AGENTS.md\nFixture",
     },
   ],
   ["wrong user type", { type: "user" }],
@@ -227,6 +242,23 @@ test("ordered native multi-file and Windows paths match, ambiguous formats fail 
       text: "x".repeat(1024 * 1024 + 1),
     }),
   ).toBe(false);
+});
+
+test("literal instruction headers inside a file body remain opaque context", async () => {
+  const quoted = {
+    ...context,
+    text: `${context.text}\n\nDocumentation example:\nInstructions from: /example/AGENTS.md\nquoted content`,
+  };
+  expect(isNativeInstructionContext(quoted)).toBe(true);
+  const reader = api([input, quoted, answer]);
+  expect(await readTaskResult(reader, task, signal())).toBe(
+    "Fixture retained final",
+  );
+  expect(
+    (await verifyResult(reader, task, reconciliation, execution, signal()))
+      .result,
+  ).toBe("Fixture retained final");
+  expect(await observePlacement(reader, task, signal())).toBe("placed");
 });
 
 test("instruction context does not hide a later real assignment or wrong retained envelope", async () => {

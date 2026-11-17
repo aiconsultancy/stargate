@@ -57,6 +57,8 @@ type Changes = {
   mixed?: boolean;
   tool?: string;
   finish?: string;
+  instruction?: "native" | "malformed";
+  earlierTool?: string;
 };
 function fixture(b: FleetReviewBinding, changes: Changes = {}) {
   const calls: { path: string; method: string }[] = [];
@@ -166,7 +168,12 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
           type: "assistant",
           agent: b.reviewer.agent,
           model: { providerID: "unit", id: "gpt" },
-          time: { created: 2, ...(changes.pending ? {} : { completed: 3 }) },
+          time: {
+            created: changes.instruction ? 4 : 2,
+            ...(changes.pending
+              ? {}
+              : { completed: changes.instruction ? 5 : 3 }),
+          },
           finish: changes.finish ?? "stop",
           ...(changes.failed
             ? { error: { message: "provider rejected inference" } }
@@ -205,6 +212,40 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
                 ]
               : []),
             assistant,
+            ...(changes.instruction
+              ? [
+                  {
+                    id: "native-instructions",
+                    type: "synthetic",
+                    time: { created: 3 },
+                    metadata: {
+                      instruction: {
+                        paths: [`${b.reviewer.directory}/nested/AGENTS.md`],
+                      },
+                    },
+                    description: "Loaded nested/AGENTS.md",
+                    text:
+                      changes.instruction === "native"
+                        ? `Instructions from: ${b.reviewer.directory}/nested/AGENTS.md\n# Fixture instructions`
+                        : "Unrelated steering",
+                  },
+                  {
+                    ...assistant,
+                    id: "before-native-instructions",
+                    time: { created: 2, completed: 3 },
+                    finish: "tool-calls",
+                    content: [
+                      {
+                        type: "tool",
+                        id: "call_read",
+                        name: changes.earlierTool ?? "read",
+                        input: {},
+                        state: { status: "completed", output: "fixture" },
+                      },
+                    ],
+                  },
+                ]
+              : []),
             ...(changes.mixed
               ? [
                   {
@@ -397,3 +438,32 @@ test("native proof refuses mutating tools and unsuccessful final states for crew
     }
   }
 });
+
+test("native review preserves all makers and readonly tool checks across instruction context", async () => {
+  const b = binding();
+  const f = fixture(b, { instruction: "native" });
+  try {
+    const result = await f.backend.readReview(b, signal());
+    expect(result?.resultText).toBe(f.resultText);
+    expect(result?.makers.map((m) => m.messageID)).toEqual([
+      "before-native-instructions",
+      "assistant-review",
+    ]);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const changes of [
+  { instruction: "malformed" as const },
+  { instruction: "native" as const, earlierTool: "bash" },
+])
+  test(`native review rejects unknown steering or unsafe pre-context tool: ${JSON.stringify(changes)}`, async () => {
+    const b = binding();
+    const f = fixture(b, changes);
+    try {
+      await expect(f.backend.readReview(b, signal())).rejects.toThrow();
+    } finally {
+      await f.close();
+    }
+  });

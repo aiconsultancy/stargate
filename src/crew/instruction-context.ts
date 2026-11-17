@@ -41,7 +41,7 @@ function describes(path: string, description: string): boolean {
 
 /** OpenCode 2.2.7 SessionInstructions.load wire shape, read from trusted history.
  * File contents remain opaque context, never a new assignment or authority.
- * This recognizes a native format; it does not authenticate repository text.
+ * This recognises a native format; it does not authenticate repository text.
  */
 export function isNativeInstructionContext(
   message: InstructionRecord,
@@ -65,18 +65,20 @@ export function isNativeInstructionContext(
     !paths.every((path, index) => describes(path, descriptions[index] ?? ""))
   )
     return false;
-  const headers = [
-    ...message.text.matchAll(/^Instructions from: ([^\n]*)\n/gmu),
-  ];
-  return (
-    headers.length === paths.length &&
-    headers.every(
-      (header, index) =>
-        header[1] === paths[index] &&
-        (index === 0
-          ? header.index === 0
-          : message.text?.slice((header.index ?? 0) - 2, header.index) ===
-            "\n\n"),
-    )
-  );
+  // File bodies are opaque; a quoted header inside one is ordinary content.
+  // Only the metadata-declared block markers must appear in their native order.
+  let cursor = 0;
+  for (const [index, path] of paths.entries()) {
+    const header = `Instructions from: ${path}\n`;
+    if (index === 0) {
+      if (!message.text.startsWith(header)) return false;
+      cursor = header.length;
+    } else {
+      const marker = `\n\n${header}`;
+      const found = message.text.indexOf(marker, cursor);
+      if (found < 0) return false;
+      cursor = found + marker.length;
+    }
+  }
+  return true;
 }

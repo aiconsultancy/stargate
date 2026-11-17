@@ -31,7 +31,10 @@ the native `Loaded ...` description. Malformed or ambiguous records and other
 synthetic, user or shell input remain task boundaries. This recognises the
 native history format, not authenticity of repository content; instruction text
 never grants approval or changes the original task/session binding. History is
-read without rewriting, resubmitting or replaying work.
+read without rewriting, resubmitting or replaying work. Native review evidence
+uses the same classifier and retains every original-turn maker and read-only
+tool check across context records. File contents stay opaque, including quoted
+`Instructions from:` examples; they are never parsed as an additional block.
 
 Normal skill, compaction and model records do not prevent recovery. Only visible
 answer text is stored, up to 64,000 characters, as for Pi worker results. Stargate
