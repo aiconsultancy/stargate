@@ -101,12 +101,32 @@ contains identifiers and the digest, not the diff. Authenticated coordinator
 intake adds the exact private context to the retained native input. Ordinary
 chat or a copied dispatch cannot establish this binding.
 
-Context must be well-formed UTF-8, at most 256,000 bytes, with structurally
-complete unified diff hunks. Missing, oversized, binary or ambiguous context is
-refused; nothing is truncated. The external integration must independently
+Context must be well-formed UTF-8 with structurally complete unified diff hunks.
+There is no default PR-size eligibility limit. Optional operator configuration
+`reviews.maxDiffBytes` accepts a positive safe integer; absent or `null` disables
+that policy. A configured limit counts UTF-8 bytes and is checked before dispatch,
+coordinator intake and native review admission. It is retained with a new native
+binding and checked again when reading native evidence. Green-specific values
+do not belong in this generic configuration.
+
+The existing local HTTP request capacity remains 1,000,000 bytes, including JSON
+framing and escaping. Exceeding it is a technical transport failure, not a claim
+that the PR is ineligible. Missing, binary, partial or ambiguous context is
+refused; nothing is truncated or automatically filtered. The external integration must independently
 verify that the diff covers the _whole_ PR, including all files and line totals.
 The gateway cannot establish completeness against a remote service it does not
 contact.
+
+New review prompts ask the actual reviewer to choose and state a risk-based
+scope. A reviewer may skip mechanical generated sections, but must identify
+the files/sections and reasons in its summary/findings and assess semantic
+migration/schema changes and generated consistency. The full-diff digest proves
+which immutable context was supplied; it does not prove every line was
+scrutinised. Do not claim full coverage for omitted material. Model context,
+timeout or transport failures cannot become approving proof and are not
+automatically retried. Existing pending reviews keep their original prompt
+bytes. This version still supplies the full diff; manifest/chunk retrieval for
+larger contexts is a separate extension.
 
 The coordinator invokes `fleet_review` with
 `{"op":"start","reviewID":"...","reviewerAgent":"..."}` for each configured

@@ -106,19 +106,36 @@ function completeReviewDiff(text: string): boolean {
     (fileContent || metadata)
   );
 }
+/** Existing local HTTP capacity; this is transport framing, not PR eligibility. */
+export const FLEET_REVIEW_TRANSPORT_BYTES = 1_000_000;
+export const reviewDiffLimitSchema = z
+  .number()
+  .int()
+  .positive()
+  .safe()
+  .nullable()
+  .optional();
+export function assertReviewDiffLimit(
+  text: string,
+  limit?: number | null,
+): void {
+  const selected = reviewDiffLimitSchema.parse(limit);
+  if (selected != null && Buffer.byteLength(text, "utf8") > selected)
+    throw new FleetError(
+      "Review diff exceeds the operator-configured optional byte limit",
+    );
+}
 export const reviewContextTextSchema = z
   .string()
   .min(1)
-  .max(256000)
   .refine(
     (text) =>
       text.isWellFormed() &&
-      Buffer.byteLength(text, "utf8") <= 256000 &&
       text.startsWith("diff --git ") &&
       !text.includes("\0") &&
       !/^GIT binary patch$|^Binary files .+ differ$/m.test(text) &&
       completeReviewDiff(text),
-    "A complete bounded UTF-8 textual diff is required; binary or partial review is unsupported",
+    "A complete UTF-8 textual diff is required; binary or partial review is unsupported",
   );
 export const reviewAssignmentSchema = reviewTargetSchema.extend({
   context: reviewContextTextSchema,
@@ -183,6 +200,8 @@ export const fleetControlSchema = z
       .strictObject({
         repositories: z.array(reviewRepositorySchema).min(1),
         reviewers: z.array(reviewAgentSchema).min(1),
+        /** Absent/null disables PR-size policy; HTTP/model limits remain real. */
+        maxDiffBytes: reviewDiffLimitSchema,
       })
       .optional(),
   })
@@ -330,6 +349,8 @@ export const nativeMakerSchema = z.strictObject({
 });
 export type NativeMaker = z.infer<typeof nativeMakerSchema>;
 export const reviewContextSchema = reviewTargetSchema.extend({
+  /** Old retained contexts keep their exact original native prompt. */
+  promptVersion: z.literal(2).optional(),
   id: identifier,
   authorShip: identifier,
   coordinatorShip: identifier,
@@ -338,17 +359,30 @@ export const reviewContextSchema = reviewTargetSchema.extend({
   contextDigest: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type FleetReviewContext = z.infer<typeof reviewContextSchema>;
-export const reviewBindingSchema = z.strictObject({
-  id: identifier,
-  nonce: z.string().regex(/^[a-f0-9]{32}$/),
-  context: reviewContextSchema,
-  contextText: reviewContextTextSchema,
-  reviewerShip: identifier,
-  reviewer: reviewAgentSchema,
-  sessionID: identifier,
-  inputID: identifier,
-  createdAt: z.iso.datetime(),
-});
+export const reviewBindingSchema = z
+  .strictObject({
+    id: identifier,
+    nonce: z.string().regex(/^[a-f0-9]{32}$/),
+    context: reviewContextSchema,
+    contextText: reviewContextTextSchema,
+    maxDiffBytes: reviewDiffLimitSchema,
+    reviewerShip: identifier,
+    reviewer: reviewAgentSchema,
+    sessionID: identifier,
+    inputID: identifier,
+    createdAt: z.iso.datetime(),
+  })
+  .superRefine((binding, context) => {
+    if (
+      binding.maxDiffBytes != null &&
+      Buffer.byteLength(binding.contextText, "utf8") > binding.maxDiffBytes
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["contextText"],
+        message: "Review diff exceeds its retained optional byte limit",
+      });
+  });
 export type FleetReviewBinding = z.infer<typeof reviewBindingSchema>;
 export const reviewVerdictSchema = reviewTargetSchema.extend({
   contextDigest: z.string().regex(/^[a-f0-9]{64}$/),

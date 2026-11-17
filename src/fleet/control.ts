@@ -1,6 +1,11 @@
 import { createServer, type Server } from "node:http";
 import { z } from "zod";
-import { close, readBody, sendJson } from "../teams/http-util";
+import {
+  BodyTooLargeError,
+  close,
+  readBody,
+  sendJson,
+} from "../teams/http-util";
 import {
   listenOnUnixSocket,
   type Ownership,
@@ -15,6 +20,7 @@ import {
 } from "./permissions";
 import {
   type DispatchInput,
+  FLEET_REVIEW_TRANSPORT_BYTES,
   type FleetCaller,
   type FleetCompletion,
   type FleetControlConfig,
@@ -118,6 +124,7 @@ export class FleetControl {
       this.options.sessionID,
       this.options.account,
       dispatchID,
+      this.options.config.reviews?.maxDiffBytes,
     );
     if (!assignment) return;
     if (
@@ -126,7 +133,11 @@ export class FleetControl {
       )
     )
       throw new FleetError("Review repository is not permitted");
-    return reviewContextPrompt(assignment.context, assignment.text);
+    return reviewContextPrompt(
+      assignment.context,
+      assignment.text,
+      this.options.config.reviews?.maxDiffBytes,
+    );
   }
   async pollReviews(signal: AbortSignal) {
     await this.reviews?.poll(signal);
@@ -254,6 +265,9 @@ export class FleetControl {
       text: input.text,
       ...(origin ? { origin } : {}),
       ...(input.review ? { review: input.review } : {}),
+      ...(input.review && this.options.config.reviews?.maxDiffBytes != null
+        ? { maxDiffBytes: this.options.config.reviews.maxDiffBytes }
+        : {}),
     });
     if (!reserved.created) return reserved.result;
     // This label reports real transport identity and immutable evidence. Rank,
@@ -351,7 +365,10 @@ export class FleetControl {
           }
           const parsed = requestSchema.safeParse(
             JSON.parse(
-              await readBody(request, this.reviews ? 1_000_000 : 32_768),
+              await readBody(
+                request,
+                this.reviews ? FLEET_REVIEW_TRANSPORT_BYTES : 32_768,
+              ),
             ),
           );
           if (!parsed.success)
@@ -415,11 +432,13 @@ export class FleetControl {
                       };
           sendJson(response, 200, { result });
         } catch (error) {
-          sendJson(response, 400, {
+          sendJson(response, error instanceof BodyTooLargeError ? 413 : 400, {
             error:
-              error instanceof FleetError
-                ? error.message
-                : "Fleet operation unavailable; raw details withheld.",
+              error instanceof BodyTooLargeError
+                ? "Fleet control JSON exceeds its technical transport capacity; the PR is not declared ineligible"
+                : error instanceof FleetError
+                  ? error.message
+                  : "Fleet operation unavailable; raw details withheld.",
           });
         }
       })();

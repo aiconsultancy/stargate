@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import {
+  assertReviewDiffLimit,
   type DispatchResult,
   type FleetCompletion,
   FleetError,
@@ -26,6 +27,7 @@ import {
   fleetOriginSchema,
   reviewBindingSchema,
   reviewContextSchema,
+  reviewContextTextSchema,
   reviewProofSchema,
   sourceSchema,
   type VerifiedSource,
@@ -203,7 +205,12 @@ export class FleetLedger {
     text: string;
     origin?: FleetOrigin;
     review?: FleetReviewAssignment;
+    maxDiffBytes?: number | null;
   }): { created: boolean; result: DispatchResult } {
+    if (input.review) {
+      reviewContextTextSchema.parse(input.review.context);
+      assertReviewDiffLimit(input.review.context, input.maxDiffBytes);
+    }
     const fingerprint = createHash("sha256")
       .update(JSON.stringify(input))
       .digest("hex");
@@ -248,6 +255,7 @@ export class FleetLedger {
               "Review coordination requires another ship and a durable dispatch",
             );
           result.review = reviewContextSchema.parse({
+            promptVersion: 2,
             id: result.dispatchID,
             repository: input.review.repository,
             pullRequest: input.review.pullRequest,
@@ -583,7 +591,12 @@ export class FleetLedger {
     };
   }
 
-  reviewContext(sessionID: string, ship: string, reviewID: string) {
+  reviewContext(
+    sessionID: string,
+    ship: string,
+    reviewID: string,
+    maxDiffBytes?: number | null,
+  ) {
     const row = this.db
       .query<{ context: string; text: string }, [string]>(
         "SELECT context,text FROM fleet_review_requests WHERE id=?",
@@ -596,6 +609,7 @@ export class FleetLedger {
       context.coordinatorShip !== ship.toLowerCase()
     )
       return;
+    assertReviewDiffLimit(row.text, maxDiffBytes);
     return { context, text: row.text };
   }
 
@@ -606,6 +620,7 @@ export class FleetLedger {
     reviewer: FleetReviewAgent;
     origin: FleetOrigin;
     repositories: readonly string[];
+    maxDiffBytes?: number | null;
   }): { created: boolean; record: ReviewRecord } {
     return this.db
       .transaction(() => {
@@ -616,6 +631,7 @@ export class FleetLedger {
           .get(input.reviewID);
         if (!request)
           throw new FleetError("Structured review assignment unavailable");
+        assertReviewDiffLimit(request.text, input.maxDiffBytes);
         const context = reviewContextSchema.parse(JSON.parse(request.context));
         if (!input.repositories.includes(context.repository))
           throw new FleetError("Review repository is not permitted");
@@ -668,6 +684,9 @@ export class FleetLedger {
           nonce: randomUUID().replaceAll("-", ""),
           context,
           contextText: request.text,
+          ...(input.maxDiffBytes != null
+            ? { maxDiffBytes: input.maxDiffBytes }
+            : {}),
           reviewerShip: ship,
           reviewer: input.reviewer,
           sessionID:
