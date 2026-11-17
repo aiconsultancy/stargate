@@ -330,6 +330,7 @@ export class Gateway {
     if (
       selected.questions &&
       backend.pendingQuestions &&
+      backend.questionState &&
       backend.questionBelongsToInput &&
       backend.replyQuestion &&
       backend.questionInputSettled
@@ -341,6 +342,7 @@ export class Gateway {
         () => this.transport.questions,
         (job) => this.allowed(job),
         (session) => this.settle(session),
+        this.questionLifetime.signal,
       );
     this.activity = new ActivityDelivery(
       backend,
@@ -503,7 +505,22 @@ export class Gateway {
   stopTurn(conversation: string, thread: string) {
     const id = this.store.cancelTurn(this.key, conversation, thread);
     if (id === undefined) return false;
-    this.cancellations.get(id)?.abort();
+    const active = this.cancellations.get(id);
+    if (active) active.abort();
+    else
+      void this.questions
+        ?.stop(
+          id,
+          AbortSignal.any([
+            this.questionLifetime.signal,
+            AbortSignal.timeout(5000),
+          ]),
+        )
+        .catch(() =>
+          this.log.warn(
+            "Recovered native Stop outcome unavailable; not replayed",
+          ),
+        );
     return true;
   }
 
@@ -648,8 +665,11 @@ export class Gateway {
         )) ?? [];
     } catch {
       this.log.warn(
-        "Native clarification recovery unavailable; ordinary recovery retained",
+        "Native clarification recovery unavailable; native work left untouched",
       );
+      // A later offer's failed read must not discard already-verified holds.
+      // Abort startup before ordinary recovery can interrupt/reset any input.
+      throw new Error("Native clarification recovery unavailable");
     }
     const retainedSessions = new Set(
       retainedQuestions.map((input) => {

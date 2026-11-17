@@ -157,7 +157,7 @@ function within(parent: string, child: string): boolean {
   );
 }
 
-/** The configured path must be its own worktree root of the team project. */
+/** Resolve and validate the configured team project checkout. */
 export async function projectRepository(
   directory: string,
   signal: AbortSignal,
@@ -185,6 +185,7 @@ export async function projectRepository(
   return { directory: root, common };
 }
 
+/** The configured path must be its own worktree root of the team project. */
 export async function workspaceRoot(
   configured: string,
   captainDirectory: string,

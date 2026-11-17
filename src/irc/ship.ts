@@ -268,11 +268,22 @@ function shipTransport(
   said: (channel: string, after: number, except: string) => string[] = () => [],
   sessionReady?: GatewayTransport["sessionReady"],
 ): GatewayTransport {
+  const authorized: GatewayTransport["allowed"] = (user, channel, job) =>
+    ircAllowed(config, member, user, channel, client.fold) &&
+    ircResultJobAllowed(config, member, client.nick, user, job, client.fold);
   return {
     ...(config.features.questions
       ? {
           questions: {
             account: member.account,
+            authorized: (job) => authorized(job.user, job.channel, job),
+            ready: (job) =>
+              client.registered &&
+              (!client.isChannel(job.channel) || client.inChannel(job.channel)),
+            matchesTarget: (target: string) =>
+              [member.account, client.nick].some(
+                (name) => client.fold(name) === client.fold(target),
+              ),
             human: (user: string) => questionHuman(config, user, client.fold),
             publish: async (job, text, allowed) => {
               if (!client.hasCap("message-tags"))
@@ -311,15 +322,7 @@ function shipTransport(
       : {}),
     key: member.key,
     allowed: (user, channel, job) =>
-      ircAllowed(config, member, user, channel, client.fold) &&
-      ircResultJobAllowed(
-        config,
-        member,
-        client.nick,
-        user,
-        job,
-        client.fold,
-      ) &&
+      authorized(user, channel, job) &&
       (config.access.channelRequests !== "nick-mention" ||
         !client.isChannel(channel) ||
         client.inChannel(channel)),
@@ -494,10 +497,29 @@ export class IrcShip {
     if (this.started) return;
     this.started = true;
     this.open = open;
+    if (
+      this.config.features.questions ||
+      this.config.access.humanWakeChannels?.length
+    )
+      this.track(this.maintain(this.controller.signal));
     if (this.audit) this.track(this.audit.run(this.controller.signal));
     if (this.link && this.config.crewMessaging.ircCopies)
       this.track(this.copies(this.link, this.controller.signal));
     for (const registration of this.current) this.run(registration);
+  }
+
+  /** Bounded, indexed retention batches; never run synchronous cleanup on intake. */
+  private async maintain(signal: AbortSignal) {
+    while (!signal.aborted) {
+      await delay(60_000, undefined, { signal }).catch(() => {});
+      if (signal.aborted) return;
+      try {
+        for (const registration of this.current)
+          this.store.pruneIrcHistory(registration.key, Date.now());
+      } catch {
+        this.log.warn("IRC history cleanup unavailable");
+      }
+    }
   }
 
   /** Count a loop until it ends, so `close` waits for it. */
@@ -734,7 +756,18 @@ export class IrcShip {
           if (!replay && !strict) this.remember(identity, client, message);
           // A replayed reaction is old intent: it never stops a turn.
           if (message.command === "TAGMSG") {
-            if (!replay && !strict) this.stop(registration, message);
+            if (
+              !replay &&
+              (!strict ||
+                (this.config.features.questions &&
+                  !message.tags.has("bot") &&
+                  questionHuman(
+                    this.config,
+                    message.tags.get("account") ?? "",
+                    client.fold,
+                  )))
+            )
+              this.stop(registration, message);
           } else this.receive(identity, client, message, filehost, replay);
         },
         sent: (sent) => {
@@ -743,15 +776,25 @@ export class IrcShip {
         published: ({ target, msgid, request, root }) => {
           if (
             detached() ||
-            identity.role !== "captain" ||
-            !this.config.access.humanWakeChannels?.length ||
-            !client.isChannel(target) ||
+            (identity.role !== "captain" && !this.config.features.questions) ||
+            (!this.config.access.humanWakeChannels?.length &&
+              !this.config.features.questions) ||
             this.isAuditChannel(client, target)
+          )
+            return;
+          const recipient = client.isChannel(target)
+            ? target
+            : this.config.features.questions
+              ? client.knownAccount(target)
+              : undefined;
+          if (
+            !recipient ||
+            (!client.isChannel(target) && !client.holds(recipient, target))
           )
             return;
           this.store.ircPublished(
             identity.key,
-            client.fold(target),
+            client.fold(recipient),
             msgid,
             request,
             root,
@@ -900,16 +943,40 @@ export class IrcShip {
     ) {
       // Never a turn: answer with the ship channel, act on nothing.
       this.advance(member, client, message);
-      this.redirect(member, client, message);
+      if (!replay) this.redirect(member, client, message);
       return;
     }
-    const admission = routeIrcMessage(message, {
+    const control = questionControl(message.params[1] ?? "");
+    const ownControl =
+      control &&
+      [member.account, client.nick].some(
+        (name) => client.fold(name) === client.fold(control.target),
+      );
+    // Account aliases are valid only for controls. Normal strict requests still
+    // require the current nick; all original identity/thread tags remain intact.
+    const routed = ownControl
+      ? {
+          ...message,
+          params: [
+            message.params[0] ?? "",
+            `${client.nick}: answer ${control.token}`,
+          ],
+        }
+      : message;
+    const admission = routeIrcMessage(routed, {
       config: this.config,
       member,
       currentNick: client.nick,
       sent: (msgid) => client.sent(msgid),
       joined: (channel) => client.inChannel(channel),
-      anchor: (msgid) => client.anchor(msgid),
+      anchor: (msgid) =>
+        (ownControl
+          ? this.store.ircThreadRoot(
+              member.key,
+              client.fold(message.params[0] ?? ""),
+              msgid,
+            )
+          : undefined) ?? client.anchor(msgid),
       threadRoot: (channel, msgid) =>
         this.store.ircThreadRoot(member.key, channel, msgid),
       participating: (channel, root) =>
@@ -919,7 +986,6 @@ export class IrcShip {
       fold: client.fold,
       filehost: this.config.features.filesIn ? filehost() : undefined,
     });
-    const control = questionControl(message.params[1] ?? "");
     if (control) {
       // Every ship suppresses the reserved namespace, even when not its target.
       if (
@@ -1428,12 +1494,18 @@ export class IrcShip {
   private stop(registration: IrcRegistration, message: IrcMessage) {
     if (!this.open() || !this.config.features.reactions) return;
     const client = registration.client;
+    const target = message.params[0] ?? "";
+    const channel = client.fold(
+      client.isChannel(target) ? target : (message.tags.get("account") ?? ""),
+    );
     const stop = routeIrcStop(message, {
       config: this.config,
       member: registration,
       currentNick: client.nick,
       fold: client.fold,
-      anchor: (msgid) => client.requestAnchor(msgid),
+      anchor: (msgid) =>
+        this.store.ircRequestAnchor(registration.key, channel, msgid) ??
+        client.requestAnchor(msgid),
     });
     if (!stop) return;
     if (registration.stopTurn?.(stop.conversation, stop.thread))

@@ -660,7 +660,10 @@ This bridge is **off by default**. Enable it for an IRC registration with:
 
 Enabling it also requires a `fleetPolicy` with an explicit, nonempty
 `humanAccounts` list. A broad IRC access allow-list and absence of a bot tag do
-not prove that an account is human. The same human policy is checked again when
+not prove that an account is human. Stable current access/human policy is separate from live IRC registration and
+channel readiness. Readiness gates publication; a disconnect or a not-yet-joined
+startup cannot discard native ownership or permanently deny an outcome notice.
+The same human policy is checked again when
 a source is admitted and when a reply is received, including after reload.
 
 Stargate reads the native form APIs; it does not ask a model to invent a question
@@ -678,37 +681,120 @@ request. In that same thread, the original requester can send:
 ```text
 galactica: answer <token from the question> 1
 galactica: cancel-question <token from the question>
+galactica: renew-question <expired token from the question>
 ```
 
 One string field accepts a displayed choice number, or free text when the native
 field allows it. A multiple-choice field accepts comma-separated numbers.
 Several fields require a JSON object using the displayed field keys and native
 option values, for example `galactica: answer <token> {"q0":"wait"}`. The token
-lasts 30 minutes. No default or previous answer is shown or submitted. Hidden,
+lasts 30 minutes from its first publication attempt. A disconnected ship waits
+until it can attempt publication before starting that window; a lost
+acknowledgement does not extend a token that may already have been seen.
+No default or previous answer is shown or submitted. Hidden,
 conditional, authentication, credential-bearing and unsupported fields are not
 bridged; use the native operator interface for those forms. Never send credentials
 in an IRC answer.
 
-The target bot, current allow-list, authenticated original account, channel,
+Controls display the stable authenticated bot account, so a temporary fallback
+nick cannot make a printed command stale. Intake also accepts the current nick.
+The target bot (its account or current nick under the server's casemapping), current allow-list, authenticated original account, channel,
 thread, token, form fingerprint and native input must all still match. A nick
-alone proves no identity. All ships reserve targeted `answer` and
-`cancel-question` controls before ordinary intake, so another captain does not
+alone proves no identity. Tokens accept either hex case. All ships reserve targeted `answer` and
+`cancel-question` and `renew-question` controls, including unmistakably malformed
+near-token-length hex/punctuation variants (at least 24 hex characters), before ordinary intake, so another captain does not
 treat the control as a new prompt. These decisions answer a clarification only;
 they never grant tool permission or generic human approval.
+Ordinary requests such as `galactica: answer Bob's question` remain model prompts,
+including when the question bridge is disabled. The question's server message ID
+is stored against its original thread, so replying to the question still works
+after a restart without relying on the connection's in-memory echo cache.
 
 Question offers and spent tokens survive a restart. A native reply attempt is
 recorded before its API call. If the outcome is uncertain, that token stays spent
 and no answer is automatically retried; an operator must inspect OpenCode.
-Expired tokens are not renewed automatically. Publishing can repeat the same
+Legacy attempted rows with no persisted outcome remain uncertain: an old inline
+notification is not durable proof that the native reply succeeded.
+Polling never renews expired offers or reposts a waiting question unattended.
+The original human may send `renew-question` with the expired token in the same
+thread. An expired, never-attempted offer can then receive a fresh token only after the still-pending
+native form, original input and current human access are revalidated. The renewed
+offer is posted explicitly; the old token no longer works. Expiry never answers or
+cancels native work. Spent or uncertain attempts are never renewed. Publishing can repeat the same
 offer after a lost acknowledgement; this is not an exactly-once delivery claim.
+Renewal and ordinary polling share one in-flight offer publication.
+Native reply outcomes and notification delivery are stored separately. A failed
+confirmation retries the notice, not the native reply. Concurrent answer/poll
+paths share one in-flight notice; a restart after a lost acknowledgement can
+still repeat a notice. Failed notices back off exponentially up to one minute,
+rather than repeating on every poll. An API deadline still
+produces an uncertainty notice while the gateway and original source remain authorised.
+
+One unavailable native session does not prevent the others from being polled.
+Transient failures use exponential retry delays up to one minute. A verified
+missing session suppresses polling for at most one minute; the cache is also
+cleared when the session leaves the active list, including an empty list. A matching native
+session-not-found result closes its offers and releases an otherwise orphaned
+recovery hold as interrupted work, never as a successful completion. Cancelled
+requesters receive no outcome notice. Notices denied by a later access/human
+policy change are suppressed without publication, while their native outcomes
+and any recovery holds remain durable. Their spent records remain durable without
+repeated native polling once no recovery hold remains. A cancelled recovered
+waiter still preserves its unknown native work until real settlement or verified
+session loss, including after another restart. Only an already-established hold
+with exact historical source/native evidence receives that exception; it restores
+no reply or notice authority. A new cancellation without that established hold
+keeps ordinary Stop and recovery behaviour. Cancelling a chat request never
+fabricates a native form answer.
+A filtered or temporarily unreadable question is not proof that its native form
+has ended. Unsupported owned question forms produce a fixed operator-required
+notice without revealing their fields, values, defaults or answers. Native form
+state is checked independently before an offer closes. Immutable ancestry is
+cached in a bounded process-local map; live form, tool and original input state
+are still checked before an answer.
+
+Settled question/source proofs and IRC thread membership metadata are retained
+for 30 days. An IRC background task runs indexed cleanup once per minute,
+removing at most 256 rows per table/registration in each batch; intake never
+runs this cleanup. Active work and recovery
+holds are retained; outcome notices for settled work share the 30-day window. Historical source
+proofs are removed with spent offer metadata, so pruning cannot make an old
+question eligible for a fresh answer. Existing thread membership and ancestry
+retention timestamps refresh on continuing admitted/verified publication
+activity; a thread does not expire merely because its first participation is old.
+Existing parent mappings remain available while recent participation keeps their
+exact bot/channel/root active, including across restart. Inactive threads still
+use the 30-day retention window. An inactive thread older than this history window
+may require a fresh explicit mention to establish participation again.
 
 Ordinary interrupted-work recovery remains unchanged. Its only exception is an
 already-persisted offer whose exact native form is still pending and whose
 original human/input binding can be revalidated. Stargate keeps that native
-waiter and holds new inputs until the native execution settles. The existing
+waiter and holds new inputs until the native execution settles. An admitted native reply attempt or persisted native outcome also proves its
+original input for restart recovery, even when its form is already resolved
+before the first restart. This does not resubmit a reply or prompt. Once established,
+the exact historical source/input hold survives later restarts even when its
+form has resolved or disappeared while the input is still busy. A failed
+settlement read also leaves the hold intact; only verified input settlement or
+explicit session loss releases it. This restores no answer or notice authority. If any question-recovery lookup
+fails or times out during startup, the gateway fails startup before ordinary
+interruption or job reset. A failed read for another offer cannot discard a
+known hold; native work and durable job state stay untouched. The existing
 transcript outbox then delivers the continuation to the original source, without
 re-prompting the agent or selecting an intervening human request. A form that
 was never durably observed does not receive this exception.
+
+An authenticated human Stop on the original request, or its durably correlated
+bot clarification message, invokes the adapter's
+exact-input interruption even for a recovered waiter with no local worker.
+With questions enabled, strict IRC mode accepts these fresh reactions only from
+explicit human accounts, without a bot tag; replayed reactions remain ignored.
+The gateway durably claims the Stop attempt before calling the input-scoped API.
+The adapter revalidates native session/input ownership; there is no fallback to
+interrupting an uncertain whole session. A failed/uncertain Stop is not blindly
+replayed after restart. An old cancellation flag, expiry, reconnect or outcome
+notification is never a new approval to issue native Stop. Native settlement
+still determines when the held queue is released.
 
 ## Presence
 

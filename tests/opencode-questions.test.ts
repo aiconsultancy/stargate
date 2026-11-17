@@ -57,17 +57,33 @@ function fixture() {
   let idle = false;
   let laterInput = false;
   let failWrite = false;
+  let historyReads = 0;
+  let formFailure = 0;
+  let missingSession = false;
   const writes: { method: string; path: string; body: unknown }[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const path = new URL(request.url).pathname;
+      if (missingSession)
+        return Response.json(
+          { _tag: "SessionNotFoundError", sessionID: session, message: "gone" },
+          { status: 404 },
+        );
       if (
         path === `/api/session/${session}/form/${formID}` &&
         request.method === "GET"
-      )
+      ) {
+        if (formFailure)
+          return Response.json(
+            formFailure === 404
+              ? { _tag: "FormNotFoundError", id: formID }
+              : { _tag: "ServiceUnavailableError", message: "Unavailable" },
+            { status: formFailure },
+          );
         return Response.json({ data: form });
+      }
       if (path === `/api/session/${session}/form`)
         return Response.json({ data: [form] });
       if (
@@ -95,7 +111,8 @@ function fixture() {
             time: { created: 1 },
           },
         });
-      if (path === `/api/session/${session}/message`)
+      if (path === `/api/session/${session}/message`) {
+        historyReads++;
         return Response.json({
           data: [
             ...(laterInput
@@ -118,6 +135,7 @@ function fixture() {
           ],
           cursor: {},
         });
+      }
       if (path === `/api/session/${session}/inbox`)
         return Response.json({ data: queued ? [{ id: input }] : [] });
       if (path === "/api/session/active")
@@ -150,6 +168,15 @@ function fixture() {
   cleanup.push(() => server.stop(true));
   return {
     backend,
+    get historyReads() {
+      return historyReads;
+    },
+    missingSession() {
+      missingSession = true;
+    },
+    failForm(status: number) {
+      formFailure = status;
+    },
     form,
     tool,
     message,
@@ -179,7 +206,7 @@ test("native questions bind exact form, running tool and delivered input, never 
   const questions = await f.list();
   expect(questions).toHaveLength(1);
   const q = questions[0];
-  if (!q) throw new Error("Missing native question");
+  if (!q || "unsupported" in q) throw new Error("Missing native question");
   expect(q).toMatchObject({
     id: formID,
     sessionID: session,
@@ -214,7 +241,7 @@ test("native questions bind exact form, running tool and delivered input, never 
 test("native cancellation uses form cancel, with no prompt or permission endpoint", async () => {
   const f = fixture();
   const q = (await f.list())[0];
-  if (!q) throw new Error("Missing question");
+  if (!q || "unsupported" in q) throw new Error("Missing question");
   await f.backend.replyQuestion(q, null, AbortSignal.timeout(3000));
   expect(f.writes).toEqual([
     {
@@ -271,7 +298,13 @@ for (const change of [
         f.form.title = "Supply your API key";
         break;
     }
-    expect(await f.list()).toEqual([]);
+    const pending = await f.list();
+    if (["hidden", "default", "sensitive"].includes(change)) {
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({ unsupported: true, inputID: input });
+      expect(pending[0]).not.toHaveProperty("fields");
+      expect(pending[0]).not.toHaveProperty("title");
+    } else expect(pending).toEqual([]);
     expect(f.writes).toHaveLength(0);
   });
 }
@@ -279,7 +312,7 @@ for (const change of [
 test("native form mutation or already-completed race cannot reuse an earlier question", async () => {
   const f = fixture();
   const q = (await f.list())[0];
-  if (!q) throw new Error("Missing question");
+  if (!q || "unsupported" in q) throw new Error("Missing question");
   f.form.title = "Different question";
   expect(
     await f.backend.questionBelongsToInput(
@@ -312,4 +345,82 @@ test("recovery release requires native idle, delivered input and no queued copy"
     true,
   );
   expect(await f.backend.pendingQuestions("ses_other", signal)).toEqual([]);
+});
+
+test("repeated native checks reuse immutable ancestry but still reject a queued original input", async () => {
+  const f = fixture();
+  const q = (await f.list())[0];
+  if (!q || "unsupported" in q) throw new Error("Missing question");
+  const initial = f.historyReads;
+  expect(initial).toBeGreaterThan(0);
+  for (let i = 0; i < 5; i++) {
+    expect(await f.list()).toHaveLength(1);
+    expect(
+      await f.backend.questionBelongsToInput(
+        session,
+        formID,
+        input,
+        q.fingerprint,
+        AbortSignal.timeout(3000),
+      ),
+    ).toBe(true);
+  }
+  expect(f.historyReads).toBe(initial);
+  f.queued(true);
+  expect(await f.list()).toEqual([]);
+  await expect(
+    f.backend.replyQuestion(q, { q0: "wait" }, AbortSignal.timeout(3000)),
+  ).rejects.toThrow();
+  expect(f.writes).toEqual([]);
+});
+
+test("native form presence is authoritative even when its question ownership is filtered", async () => {
+  const f = fixture();
+  f.tool.state.status = "completed";
+  expect(await f.list()).toEqual([]);
+  expect(
+    await f.backend.questionState(session, formID, AbortSignal.timeout(3000)),
+  ).toBe("pending");
+  f.form.state.status = "answered";
+  expect(
+    await f.backend.questionState(session, formID, AbortSignal.timeout(3000)),
+  ).toBe("resolved");
+  expect(
+    await f.backend.questionState(
+      "ses_other",
+      formID,
+      AbortSignal.timeout(3000),
+    ),
+  ).toBe("unknown");
+});
+
+test("only a matching native form-not-found error proves absence; outages stay unknown", async () => {
+  const f = fixture();
+  f.failForm(404);
+  expect(
+    await f.backend.questionState(session, formID, AbortSignal.timeout(3000)),
+  ).toBe("resolved");
+  f.failForm(503);
+  await expect(
+    f.backend.questionState(session, formID, AbortSignal.timeout(3000)),
+  ).rejects.toBeDefined();
+});
+
+test("matching native session-not-found is terminal metadata, not a repeated form polling error", async () => {
+  const f = fixture();
+  f.missingSession();
+  expect(await f.list()).toEqual([]);
+  expect(
+    await f.backend.questionState(session, formID, AbortSignal.timeout(3000)),
+  ).toBe("missing-session");
+  expect(
+    await f.backend.questionBelongsToInput(
+      session,
+      formID,
+      input,
+      "a".repeat(64),
+      AbortSignal.timeout(3000),
+    ),
+  ).toBe(false);
+  expect(f.writes).toEqual([]);
 });

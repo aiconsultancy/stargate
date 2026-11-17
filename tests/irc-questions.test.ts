@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,9 +17,14 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
-async function fixture(multiline = false, questions = true) {
+async function fixture(
+  multiline = false,
+  questions = true,
+  options: { wake?: boolean; nick?: string; crew?: boolean } = {},
+) {
   const server = new FakeIrcServer({
-    accounts: { captain: "fixture", other: "fixture" },
+    accounts: { captain: "fixture", other: "fixture", worker: "fixture" },
+    isupport: ["CASEMAPPING=rfc1459"],
   });
   if (multiline)
     server.caps.push("draft/multiline=max-bytes=4096,max-lines=100");
@@ -34,13 +40,16 @@ async function fixture(multiline = false, questions = true) {
       id: account,
       server: { host: "127.0.0.1", port: server.port, tls: false },
       account,
+      ...(account === "captain" && options.nick ? { nick: options.nick } : {}),
       passwordEnv: "IRC_FIXTURE",
       channels: ["#ship"],
       features: { questions },
       access: {
         allowedAccounts: ["jac", "other-human", "captain", "other"],
         channelRequests: "nick-mention",
-        humanWakeChannels: [{ channel: "#ship", replies: "all" }],
+        ...(options.wake === false
+          ? {}
+          : { humanWakeChannels: [{ channel: "#ship", replies: "all" }] }),
         peerCaptains: [account === "captain" ? "other" : "captain"],
       },
       fleetPolicy: {
@@ -50,6 +59,23 @@ async function fixture(multiline = false, questions = true) {
         assignedCheckout: "/project",
         capabilities: ["read_code"],
       },
+      ...(account === "captain" && options.crew
+        ? {
+            crew: [
+              {
+                id: "worker",
+                account: "worker",
+                passwordEnv: "IRC_WORKER_FIXTURE",
+                channels: ["#ship"],
+                backend: {
+                  type: "opencode",
+                  url: "http://127.0.0.1:4096",
+                  directory: "/project",
+                },
+              },
+            ],
+          }
+        : {}),
       backend: {
         type: "opencode",
         url: "http://127.0.0.1:4096",
@@ -89,15 +115,19 @@ async function fixture(multiline = false, questions = true) {
   const ships: IrcShip[] = [];
   const gateways: Gateway[] = [];
   const configs: ReturnType<typeof config>[] = [];
+  const backends: AgentBackend[] = [];
   for (const account of ["captain", "other"]) {
     const cfg = config(account);
     configs.push(cfg);
     const ship = await IrcShip.create(cfg, store, log, {
-      env: { IRC_FIXTURE: "fixture" },
+      env: { IRC_FIXTURE: "fixture", IRC_WORKER_FIXTURE: "fixture" },
       timing: { intervalMs: 1, burst: 100 },
       readyMs: 2000,
     });
-    const primary = ship.registrations[0];
+    const primary =
+      options.crew && account === "captain"
+        ? ship.registrations.find((r) => r.role === "crew")
+        : ship.registrations[0];
     if (!primary) throw new Error("No registration");
     const backend: AgentBackend = {
       sessionID: `ses_${account}`,
@@ -124,6 +154,9 @@ async function fixture(multiline = false, questions = true) {
       },
       async pendingQuestions() {
         return account === "captain" && pending ? [q] : [];
+      },
+      async questionState() {
+        return pending ? "pending" : "resolved";
       },
       async questionBelongsToInput(s, id, input, hash) {
         return (
@@ -171,6 +204,7 @@ async function fixture(multiline = false, questions = true) {
           }
         : {}),
     };
+    backends.push(backend);
     const gateway = new Gateway(
       primary.settings,
       primary.identity,
@@ -199,7 +233,10 @@ async function fixture(multiline = false, questions = true) {
     await Promise.all(ships.map((s) => s.close()));
   });
   await until(
-    () => ships.every((s) => s.registrations[0]?.client.inChannel("#ship")),
+    () =>
+      ships.every((s) =>
+        s.registrations.every((r) => r.client.inChannel("#ship")),
+      ),
     3000,
     "question ships joined",
   );
@@ -221,7 +258,11 @@ async function fixture(multiline = false, questions = true) {
       .map(([k, v]) => `${k}=${v}`)
       .join(";")} :jac!u@fixture PRIVMSG #ship :${text}`;
     const marker = `question-control-${++sequence}`;
-    for (const account of ["captain", "other"]) {
+    for (const account of [
+      "captain",
+      "other",
+      ...(options.crew ? ["worker"] : []),
+    ]) {
       server.sendTo(account, line);
       server.sendTo(account, `PING :${marker}`);
     }
@@ -229,12 +270,49 @@ async function fixture(multiline = false, questions = true) {
   };
   return {
     server,
+    path,
     store,
     prompts,
     replies,
     send,
     ships,
     gateways,
+    async restartTransport() {
+      const old = ships[0];
+      const cfg = configs[0];
+      const backend = backends[0];
+      if (!old || !cfg || !backend) throw new Error("Missing transport");
+      await old.close();
+      const fresh = await IrcShip.create(cfg, store, log, {
+        env: { IRC_FIXTURE: "fixture", IRC_WORKER_FIXTURE: "fixture" },
+        timing: { intervalMs: 1, burst: 100 },
+        readyMs: 2000,
+      });
+      const registration = options.crew
+        ? fresh.registrations.find((r) => r.role === "crew")
+        : fresh.registrations[0];
+      if (!registration) throw new Error("Missing renewed registration");
+      const renewedGateway = new Gateway(
+        registration.settings,
+        registration.identity,
+        store,
+        backend,
+        registration.delivery,
+        log,
+        undefined,
+        undefined,
+        registration.transport,
+      );
+      registration.answerQuestion = (input, control) =>
+        renewedGateway.answerQuestion(input, control);
+      ships[0] = fresh;
+      fresh.start(() => true);
+      await until(
+        () => registration.client.inChannel("#ship"),
+        3000,
+        "fresh transport joined",
+      );
+    },
     dropHumanPolicy() {
       for (const cfg of configs) {
         delete cfg.fleetPolicy;
@@ -451,3 +529,180 @@ test("removing explicit human authority blocks untagged bot and original-human r
   expect(f.replies).toEqual([]);
   expect(f.store.questionByToken(key, offer.token)?.state).toBe("offered");
 }, 10_000);
+
+test("ordinary answer requests remain prompts when questions are disabled", async () => {
+  const f = await fixture(false, false);
+  const at = f.send(
+    "other: answer Bob's question about the deploy",
+    "ordinary-answer",
+  );
+  await f.received(at);
+  await until(
+    () => f.prompts.includes("other"),
+    3000,
+    "ordinary answer prompt admitted",
+  );
+  expect(f.replies).toEqual([]);
+});
+
+for (const target of ["captain", "CAP{TAIN}"]) {
+  test(`question controls accept actual account/current RFC1459 nick (${target}) without borrowing authority`, async () => {
+    const f = await fixture(false, true, { wake: false, nick: "Cap[tain]" });
+    f.send("Cap[tain]: investigate", "m1");
+    const key = f.ships[0]?.registrations[0]?.key;
+    if (!key) throw new Error("No registration");
+    await until(
+      () => f.store.questionOffers(key)[0]?.notified === 1,
+      5000,
+      "question offered to current nick",
+    );
+    const offer = f.store.questionOffers(key)[0];
+    if (!offer) throw new Error("No offer");
+    expect(
+      f.server
+        .received("captain")
+        .some((line) => line.includes(`captain: answer ${offer.token}`)),
+    ).toBe(true);
+    f.send(
+      `${target}: answer ${offer.token.toUpperCase()} 1`,
+      "wrong-human",
+      "other-human",
+      "m1",
+    );
+    const at = f.send(
+      `${target}: answer ${offer.token.toUpperCase()} 1`,
+      "valid",
+      "jac",
+      "m1",
+    );
+    await f.received(at);
+    await until(() => f.replies.length === 1, 3000, "alias control answered");
+    expect(f.replies).toEqual([{ q0: "wait" }]);
+  }, 10_000);
+}
+
+test("question replies resolve durable own-publication anchors after transport restart without humanWake", async () => {
+  const f = await fixture(false, true, { wake: false });
+  f.send("captain: investigate", "m1");
+  const key = f.ships[0]?.registrations[0]?.key;
+  if (!key) throw new Error("No registration");
+  await until(
+    () => f.store.questionOffers(key)[0]?.notified === 1,
+    5000,
+    "question published",
+  );
+  const offer = f.store.questionOffers(key)[0];
+  if (!offer) throw new Error("No offer");
+  const received = lineOf(f.server.received("captain"), "PRIVMSG").find((m) =>
+    m.params[1]?.includes("OpenCode needs clarification"),
+  );
+  if (!received) throw new Error("No question line");
+  // The actual server echo ID is correlated by the client, then durably stored.
+  const database = new Database(f.path, { readonly: true });
+  const questionID = database
+    .query<{ msgid: string }, [string]>(
+      "SELECT msgid FROM irc_thread_messages WHERE botKey=? AND root='m1' ORDER BY rowid LIMIT 1",
+    )
+    .get(key)?.msgid;
+  database.close();
+  if (!questionID) throw new Error("No question echo ID");
+  await until(
+    () => f.store.ircThreadRoot(key, "#ship", questionID) === "m1",
+    2000,
+    "question anchor persisted",
+  );
+  await f.restartTransport();
+  expect(
+    f.ships[0]?.registrations[0]?.client.anchor(questionID),
+  ).toBeUndefined();
+  const at = f.send(
+    `captain: answer ${offer.token} 1`,
+    "after-restart",
+    "jac",
+    questionID,
+  );
+  await f.received(at);
+  await until(
+    () => f.replies.length === 1,
+    3000,
+    "restarted thread control accepted",
+  );
+  expect(f.replies).toEqual([{ q0: "wait" }]);
+}, 12_000);
+
+test("unmistakably malformed token controls never reach models, even with questions off", async () => {
+  const f = await fixture(false, false);
+  for (const token of [
+    "a".repeat(31),
+    "B".repeat(33),
+    `${"abcd".repeat(6)}…`,
+  ]) {
+    const at = f.send(
+      `captain: answer ${token} {"q0":"wait"}`,
+      `malformed-${token.length}`,
+    );
+    await f.received(at);
+  }
+  expect(f.prompts).toEqual([]);
+  expect(f.replies).toEqual([]);
+});
+
+test("crew question publication anchors survive a new IRC connection", async () => {
+  const f = await fixture(false, true, { wake: false, crew: true });
+  f.send("worker: investigate", "m1");
+  const worker = f.ships[0]?.registrations.find((r) => r.role === "crew");
+  if (!worker) throw new Error("No crew");
+  await until(
+    () => f.store.questionOffers(worker.key)[0]?.notified === 1,
+    5000,
+    "crew question offered",
+  );
+  const offer = f.store.questionOffers(worker.key)[0];
+  if (!offer) throw new Error("No offer");
+  const db = new Database(f.path, { readonly: true });
+  const questionID = db
+    .query<{ msgid: string }, [string]>(
+      "SELECT msgid FROM irc_thread_messages WHERE botKey=? AND root='m1' ORDER BY rowid LIMIT 1",
+    )
+    .get(worker.key)?.msgid;
+  db.close();
+  expect(questionID).toBeDefined();
+  if (!questionID) throw new Error("No durable crew echo anchor");
+  await f.restartTransport();
+  const fresh = f.ships[0]?.registrations.find((r) => r.role === "crew");
+  expect(fresh?.client.anchor(questionID)).toBeUndefined();
+  const at = f.send(
+    `worker: answer ${offer.token} 1`,
+    "crew-answer",
+    "jac",
+    questionID,
+  );
+  await f.received(at);
+  await until(
+    () => f.replies.length === 1,
+    3000,
+    "crew answer uses durable root",
+  );
+  expect(f.replies).toEqual([{ q0: "wait" }]);
+}, 12_000);
+
+test("short hex-like prose remains ordinary while punctuated full tokens stay reserved", async () => {
+  const f = await fixture(false, false);
+  for (const [index, word] of ["2025...", "decade…", "faded…"].entries())
+    f.send(`other: answer ${word}`, `prose-${index}`);
+  await until(
+    () => f.prompts.length === 3,
+    4000,
+    "ordinary short prose admitted",
+  );
+  const count = f.prompts.length;
+  for (const [index, punctuation] of [",", ".", ":"].entries()) {
+    const at = f.send(
+      `other: answer ${"a".repeat(32)}${punctuation} 1`,
+      `punctuated-${index}`,
+    );
+    await f.received(at);
+  }
+  expect(f.prompts).toHaveLength(count);
+  expect(f.replies).toEqual([]);
+});
