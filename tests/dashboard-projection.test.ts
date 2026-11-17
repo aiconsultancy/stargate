@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 import type { AgentBackend } from "../src/backend";
 import type { CrewStatus } from "../src/crew-status";
 import { CronStore } from "../src/cron-store";
@@ -88,6 +90,14 @@ test("four people retain twenty project contexts and independent active/history 
     people: { total: 4, busy: 1 },
   });
   expect(JSON.stringify(status)).toBe(snapshot);
+  expect(
+    dashboardCrewSummary({
+      ...status,
+      busy: 0,
+      members: status.members.map((context) => ({ ...context, current: null })),
+    }).people?.busy,
+  ).toBe(0); // Queued-only work is not a current task.
+
   expect(
     dashboardCrewSummary({ ...status, total: 40, truncated: true }).people,
   ).toEqual({ total: 4, busy: 1, partial: true });
@@ -262,4 +272,247 @@ test("different tenants, endpoints or unpinned backends never acquire a display 
       (ship) => !ship.captain,
     ),
   ).toBe(true);
+});
+
+test("a fleet request reads shared captain crew once and retries only a failed exact alias", async () => {
+  const store = new Store(":memory:");
+  const cron = new CronStore(":memory:");
+  cleanup.push(store, cron);
+  const irc = registration("captain", "irc");
+  const teams = registration("captain-teams", "teams");
+  let primaryCalls = 0;
+  let aliasCalls = 0;
+  let fail = false;
+  irc.backend.crewStatus = async () => {
+    primaryCalls++;
+    if (fail) throw new Error("Fixture unavailable");
+    return roster();
+  };
+  teams.backend.crewStatus = async () => {
+    aliasCalls++;
+    return roster();
+  };
+  const ships = [teams, irc];
+  const source = dashboardSource(ships, store, cron);
+  expect(
+    (await source.fleet(signal)).ships.every(
+      (ship) => ship.crew?.people?.total === 4,
+    ),
+  ).toBe(true);
+  expect([primaryCalls, aliasCalls]).toEqual([1, 0]);
+  fail = true;
+  expect(
+    (await source.fleet(signal)).ships.every(
+      (ship) => ship.crew?.people?.total === 4,
+    ),
+  ).toBe(true);
+  expect([primaryCalls, aliasCalls]).toEqual([2, 1]);
+  // The grouping is rebuilt after a live registration reload.
+  ships.splice(0, 1);
+  expect((await source.fleet(signal)).ships[0]?.captain).toBeUndefined();
+});
+
+/** Execute the real page functions with a small DOM fixture; no browser/provider. */
+async function page() {
+  const html = await readFile(
+    new URL("../templates/dashboard/index.html", import.meta.url),
+    "utf8",
+  );
+  const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1];
+  if (!script) throw new Error("Missing dashboard script");
+  class Element {
+    children: Element[] = [];
+    dataset: { focus?: string; section?: string; context?: string } = {};
+    attributes: Record<string, string> = {};
+    listeners = new Map<string, (event: { preventDefault(): void }) => void>();
+    open = false;
+    className = "";
+    private value = "";
+    constructor(readonly tagName: string) {}
+    get textContent(): string {
+      return (
+        this.value + this.children.map((child) => child.textContent).join("")
+      );
+    }
+    set textContent(value: string) {
+      this.value = value;
+      this.children = [];
+    }
+    get childNodes() {
+      return this.children;
+    }
+    append(...nodes: Element[]) {
+      this.children.push(...nodes);
+    }
+    replaceChildren(...nodes: Element[]) {
+      this.children = nodes;
+      this.value = "";
+    }
+    setAttribute(key: string, value: string) {
+      this.attributes[key] = value;
+    }
+    addEventListener(
+      key: string,
+      value: (event: { preventDefault(): void }) => void,
+    ) {
+      this.listeners.set(key, value);
+    }
+    all(): Element[] {
+      return this.children.flatMap((child) => [child, ...child.all()]);
+    }
+    querySelectorAll(selector: string) {
+      return this.all().filter((node) =>
+        selector === "[data-focus]"
+          ? node.dataset.focus
+          : node.tagName === "details" && node.dataset.section,
+      );
+    }
+    contains(node: unknown) {
+      return this === node || this.all().includes(node as Element);
+    }
+    focus() {
+      document.activeElement = this;
+    }
+    click() {
+      this.listeners.get("click")?.({ preventDefault() {} });
+    }
+  }
+  const main = new Element("main");
+  const breadcrumbs = new Element("nav");
+  const document = {
+    activeElement: null as Element | null,
+    title: "",
+    createElement: (tag: string) => new Element(tag),
+    createTextNode: (value: string) => {
+      const node = new Element("text");
+      node.textContent = value;
+      return node;
+    },
+    getElementById: (id: string) => (id === "content" ? main : new Element(id)),
+  };
+  const ui = runInNewContext(
+    `${script.slice(0, script.lastIndexOf('refresh.addEventListener("click"'))}\n({ renderFleet, renderShip, renderCrew, replaceView, projectLabel });`,
+    {
+      document,
+      window: { scrollX: 0, scrollY: 0, scrollTo() {} },
+      AbortController,
+      Node: Element,
+    },
+  ) as {
+    renderFleet(data: unknown): void;
+    renderShip(data: unknown): void;
+    renderCrew(data: unknown): Element;
+    replaceView(nodes: Element[]): void;
+    projectLabel(context: unknown): string;
+  };
+  return { ui, main, document, breadcrumbs };
+}
+
+test("page retains exact context activity beyond a truncated page and registration focus", async () => {
+  const { ui, main, document } = await page();
+  const captain = { key: "shared", id: "captain", name: "IRC Captain" };
+  const irc = {
+    id: "captain",
+    name: "IRC Captain",
+    captain,
+    transport: "irc",
+    crew: null,
+    queue: {},
+    cronjobs: 0,
+  };
+  const teams = {
+    ...irc,
+    id: "captain-teams",
+    name: "Teams Captain",
+    transport: "teams",
+    crew: { total: 42, busy: 1, people: { total: 20, busy: 0, partial: true } },
+  };
+  const fleet = { ships: [irc, teams] };
+  ui.renderFleet(fleet);
+  const fields = main.all().filter((node) => node.tagName === "dl")[0];
+  const values = fields?.children ?? [];
+  const value = (label: string) =>
+    values[values.findIndex((node) => node.textContent === label) + 1]
+      ?.textContent;
+  expect(value("Recorded current contexts")).toBe("1");
+  expect(value("Crew with current recorded tasks")).toBe("at least 0");
+  const alias = main
+    .all()
+    .find((node) => node.dataset.focus === "registration-captain-teams");
+  alias?.focus();
+  ui.renderFleet(fleet);
+  expect(document.activeElement).not.toBe(alias);
+  expect(document.activeElement?.dataset.focus).toBe(
+    "registration-captain-teams",
+  );
+});
+
+test("project labels never infer a crew checkout from the captain directory; polls respect explicit choices", async () => {
+  const { ui, main } = await page();
+  expect(ui.projectLabel({ project: "default" })).toBe("Default project");
+  expect(ui.projectLabel({})).toBe("Default project");
+  expect(ui.projectLabel({ project: "desktop" })).toBe("desktop");
+  const status = roster();
+  const context = status.members[0];
+  if (!context) throw new Error("Missing fixture context");
+  // A legacy gateway response without crewMembers still preserves all contexts.
+  const data = {
+    crew: status,
+    bot: { backend: { directory: "/unrelated/captain" } },
+  };
+  const render = () => {
+    ui.replaceView([ui.renderCrew(data)]);
+    const details = main
+      .all()
+      .find((node) => node.dataset.context === "project-7-default-stamets");
+    if (!details) throw new Error("Missing context");
+    return details;
+  };
+  expect(render().open).toBe(false);
+  context.current = { ...task };
+  expect(render().open).toBe(true);
+  context.current = null;
+  expect(render().open).toBe(false);
+  context.queuedCount = 1;
+  expect(render().open).toBe(true);
+  context.queuedCount = 0;
+  context.lastOutcome = { ...task, status: "uncertain" };
+  const uncertain = render();
+  expect(uncertain.open).toBe(true);
+  uncertain.children[0]?.click();
+  expect(render().open).toBe(false);
+  const closed = render();
+  closed.children[0]?.click();
+  context.lastOutcome = null;
+  expect(render().open).toBe(true);
+  expect(main.all().filter((node) => node.dataset.context)).toHaveLength(20);
+  expect(main.textContent).not.toContain("captain (default)");
+});
+
+test("selected registration heading, title, breadcrumb and focus remain consistent", async () => {
+  const store = new Store(":memory:");
+  const cron = new CronStore(":memory:");
+  cleanup.push(store, cron);
+  const irc = registration("captain", "irc");
+  const teams = registration("captain-teams", "teams");
+  irc.bot.displayName = "IRC Captain";
+  teams.bot.displayName = "Teams Captain";
+  const data = await dashboardSource([irc, teams], store, cron).ship(
+    "captain-teams",
+    signal,
+  );
+  const { ui, main, document, breadcrumbs } = await page();
+  ui.renderShip(data);
+  expect(main.children[0]?.textContent).toBe("Teams Captain");
+  expect(document.title).toBe("Teams Captain | Stargate");
+  expect(breadcrumbs.textContent).toBe("Fleet / Teams Captain");
+  const alias = main
+    .all()
+    .find((node) => node.dataset.focus === "registration-captain-teams");
+  expect(alias?.attributes["aria-current"]).toBe("page");
+  alias?.focus();
+  ui.renderShip(data);
+  expect(document.activeElement?.dataset.focus).toBe(
+    "registration-captain-teams",
+  );
 });

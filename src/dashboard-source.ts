@@ -132,50 +132,65 @@ export function dashboardSource(
   const agent = (ship: DashboardShip) =>
     ship.bot.backend.type === "opencode" ? ship.bot.backend.agent : undefined;
 
-  // Group display aliases only when their native execution identity is exact.
-  // Repeated transports are ambiguous (including different tenants), so keep
-  // every registration separate rather than guessing a captain relationship.
-  function captain(ship: DashboardShip): DashboardCaptain | undefined {
-    if (ship.bot.backend.type !== "opencode" || !ship.backend.sessionID)
-      return undefined;
-    const pinned = ship.backend.sessionID;
-    const fingerprint = backendFingerprint(ship.bot);
-    const matches = ships.filter(
-      (other) =>
-        other.bot.backend.type === "opencode" &&
-        other.backend.sessionID === pinned &&
-        backendFingerprint(other.bot) === fingerprint,
-    );
-    const kind = (value: DashboardShip) => value.transport?.kind ?? "slack";
-    if (
-      matches.length < 2 ||
-      new Set(matches.map(kind)).size !== matches.length
-    )
-      return undefined;
-    const ordered = [...matches].sort((a, b) =>
-      a.bot.id.localeCompare(b.bot.id),
-    );
-    const primary =
-      ordered.find((entry) => entry.transport?.kind === "irc") ?? ordered[0];
-    if (!primary) return undefined;
-    return {
-      key: createHash("sha256")
-        .update(
-          JSON.stringify([
-            fingerprint,
-            pinned,
-            ordered.map((entry) => entry.key),
-          ]),
-        )
-        .digest("hex"),
-      id: primary.bot.id,
-      name: name(primary),
-      registrations: ordered.map((entry) => ({
-        id: entry.bot.id,
-        name: name(entry),
-        transport: kind(entry),
-      })),
-    };
+  // Rebuild once per request: reloads can replace the live registrations.
+  function captains() {
+    const buckets = new Map<
+      string,
+      { pinned: string; fingerprint: string; members: DashboardShip[] }
+    >();
+    for (const ship of ships) {
+      if (ship.bot.backend.type !== "opencode" || !ship.backend.sessionID)
+        continue;
+      const pinned = ship.backend.sessionID;
+      const fingerprint = backendFingerprint(ship.bot);
+      const key = JSON.stringify([pinned, fingerprint]);
+      const bucket = buckets.get(key);
+      if (bucket) bucket.members.push(ship);
+      else buckets.set(key, { pinned, fingerprint, members: [ship] });
+    }
+    const groups = new Map<
+      DashboardShip,
+      { view: DashboardCaptain; members: DashboardShip[] }
+    >();
+    const kind = (ship: DashboardShip) => ship.transport?.kind ?? "slack";
+    for (const { pinned, fingerprint, members } of buckets.values()) {
+      // Keep ambiguous same-kind/tenant registrations separate defensively.
+      if (
+        members.length < 2 ||
+        new Set(members.map(kind)).size !== members.length
+      )
+        continue;
+      const ordered = [...members].sort((a, b) =>
+        a.bot.id.localeCompare(b.bot.id),
+      );
+      const primary =
+        ordered.find((entry) => entry.transport?.kind === "irc") ?? ordered[0];
+      if (!primary) continue;
+      const view: DashboardCaptain = {
+        key: createHash("sha256")
+          .update(
+            JSON.stringify([
+              fingerprint,
+              pinned,
+              ordered.map((entry) => entry.key),
+            ]),
+          )
+          .digest("hex"),
+        id: primary.bot.id,
+        name: name(primary),
+        registrations: ordered.map((entry) => ({
+          id: entry.bot.id,
+          name: name(entry),
+          transport: kind(entry),
+        })),
+      };
+      const group = {
+        view,
+        members: [primary, ...ordered.filter((entry) => entry !== primary)],
+      };
+      for (const member of members) groups.set(member, group);
+    }
+    return groups;
   }
 
   async function crew(
@@ -291,11 +306,35 @@ export function dashboardSource(
 
   return {
     async fleet(signal) {
+      const groups = captains();
+      const reads = new Map<
+        DashboardShip | DashboardCaptain,
+        ReturnType<typeof crew>
+      >();
+      function sharedCrew(ship: DashboardShip) {
+        const group = groups.get(ship);
+        const key = group?.view ?? ship;
+        const existing = reads.get(key);
+        if (existing !== undefined) return existing;
+        const read = (async () => {
+          let last: Awaited<ReturnType<typeof crew>> = { status: null };
+          // One successful read per pinned captain. Retry an exact alias only
+          // after a failure; queue and transcript ownership are never shared.
+          for (const member of group?.members ?? [ship]) {
+            const result = await crew(member, signal);
+            if (result.status) return result;
+            if (result.error) last = result;
+          }
+          return last;
+        })();
+        reads.set(key, read);
+        return read;
+      }
       const summaries = await Promise.all(
         ships.map(async (ship): Promise<ShipSummary> => {
-          const { status } = await crew(ship, signal);
+          const { status } = await sharedCrew(ship);
           const named = agent(ship);
-          const captainView = captain(ship);
+          const captainView = groups.get(ship)?.view;
           return {
             id: ship.bot.id,
             name: name(ship),
@@ -331,7 +370,7 @@ export function dashboardSource(
             ? bot.backend.model
             : undefined;
       const report = bot.cronjobs?.dailyReport;
-      const captainView = captain(ship);
+      const captainView = captains().get(ship)?.view;
       return {
         generatedAt: now(),
         id: bot.id,

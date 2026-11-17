@@ -111,7 +111,9 @@ The browser shows one captain card with explicit registration links. Existing
 registration IDs, routes, mapped conversation histories and queue counts remain
 separate; choosing a registration never unions its transcript scope with another.
 The shared pinned root remains visible to both. The dashboard reuses the running backends and connections and starts
-no model work. IRC access/roster reloads update the same view; removed crew
+no model work. One successful crew read per logical captain serves its registration
+rows on each fleet request; an exact alias is retried only after a failed or
+unavailable read. IRC access/roster reloads update the same view; removed crew
 registrations disappear after the committed reload.
 
 IRC detail reports server, port, TLS, network, real account/nick, joined channels
@@ -143,11 +145,14 @@ into a new human approval.
 
 A configured person appears once in the crew list. Expand their labelled
 repository contexts to see independent current, queued and recent tasks. The
-default context uses the configured backend directory's name; other contexts use
-their configured project keys. Four people across five repositories are four
-crew members and twenty project contexts, not twenty people. A person with tasks
-in two repositories counts once in the people recorded-task count and twice in the
-legacy context busy count. These counters describe stored coordinator state,
+default context reads ‘Default project’; crew status does not expose its checkout
+directory, which can differ from the captain directory. Other contexts use their
+configured project keys. Four people across five repositories are four
+crew members and twenty project contexts, not twenty people. A person with current tasks
+in two repositories counts once in the current-task people count and twice in the
+legacy busy-context count. Queued-only tasks do not count as current tasks. The
+fleet card also shows the engine’s exact busy-context aggregate, including
+contexts beyond the visible page; legacy partial counts remain marked as lower bounds. These counters describe stored coordinator state,
 not proof that native inference is running. Truncated pages mark people counts as lower bounds.
 
 A crew profile does not imply that a native worker session has already been
@@ -155,7 +160,10 @@ created in every project. An unprovisioned context reads "No worker session yet"
 a ready reservation reads "Recorded". "Live status: Not checked" replaces the
 raw `observed: false` flag. Stored task state does not prove current execution.
 Project summaries keep activity and last outcomes visible; expanding a context
-retains its task history. Viewing this page never provisions missing workers.
+retains its task history. Active, queued and uncertain contexts expand automatically as polling updates them,
+unless the viewer has explicitly opened or closed that context. Registration
+links retain keyboard focus across refreshes. Viewing this page never provisions
+missing workers.
 
 ## Session history
 

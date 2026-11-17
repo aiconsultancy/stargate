@@ -102,6 +102,7 @@
       let entries = [];
       let entryCursor;
       let treeNodes = new Map();
+      const contextChoices = new Map();
 
       function text(value) {
         if (value === null || value === undefined || value === "") return "none";
@@ -207,7 +208,7 @@
       }
       function viewState() {
         return {
-          open: new Map(Array.from(main.querySelectorAll("details[data-section]"), node => [node.dataset.section, node.open])),
+          open: new Map(Array.from(main.querySelectorAll("details[data-section]")).filter(node => !node.dataset.context).map(node => [node.dataset.section, node.open])),
           focused: main.contains(document.activeElement) ? document.activeElement?.dataset.focus : undefined,
           x: window.scrollX, y: window.scrollY,
         };
@@ -250,16 +251,20 @@
           const a = link(ship.captain?.name ?? ship.name, shipHash(ship.id));
           a.dataset.focus = `ship-${ship.id}`;
           heading.append(a);
-          const people = ship.crew?.people;
+          const crew = ship.crew ?? registrations.find(item => item.crew)?.crew;
+          const people = crew?.people;
           card.append(heading, fields([
             ["Backend", ship.backend], ["Agent", ship.agent],
-            ["Crew members", ship.crew ? partial(people?.total, people?.partial) : "Not available"],
-            ["Crew with recorded tasks", ship.crew ? partial(people?.busy, people?.partial) : "Not available"],
-            ["Project contexts", ship.crew?.total],
+            ["Crew members", crew ? partial(people?.total, people?.partial) : "Not available"],
+            ["Crew with current recorded tasks", crew ? partial(people?.busy, people?.partial) : "Not available"],
+            ["Recorded current contexts", crew ? partial(crew.busy, crew.busyPartial) : "Not available"],
+            ["Project contexts", crew?.total],
           ]));
           for (const registration of registrations) {
             const label = registrationLabel(registration.transport);
-            card.append(link(`${label} (${registration.id})`, shipHash(registration.id)),
+            const registrationLink = link(`${label} (${registration.id})`, shipHash(registration.id));
+            registrationLink.dataset.focus = `registration-${registration.id}`;
+            card.append(registrationLink,
               counts(registration.queue), el("p", `Cronjobs: ${registration.cronjobs}`, "muted"));
           }
           cards.append(card);
@@ -295,10 +300,9 @@
         }
         return [...people.values()];
       }
-      function projectLabel(context, data) {
-        if (context.project && context.project !== "default") return context.project;
-        const directory = data.bot.backend.directory?.split(/[\\/]/).filter(Boolean).at(-1);
-        return directory ? `${directory} (default)` : "Default project";
+      function projectLabel(context) {
+        // Crew status exposes the project key, not its checkout directory.
+        return context.project && context.project !== "default" ? context.project : "Default project";
       }
       function contextState(context) {
         if (context.current) return `Recorded task: ${context.current.status}`;
@@ -323,12 +327,18 @@
             const memberKey = `project-${project.length}-${project}-${person.id}`;
             const details = el("details");
             details.dataset.section = `context-${memberKey}`;
-            details.open = Boolean(context.current || context.queuedCount || context.lastOutcome?.status === "uncertain");
-            const summary = el("summary", `${projectLabel(context, data)}: ${contextState(context)}`);
+            details.dataset.context = memberKey;
+            details.open = contextChoices.get(memberKey) ?? Boolean(context.current || context.queuedCount || context.lastOutcome?.status === "uncertain");
+            const summary = el("summary", `${projectLabel(context)}: ${contextState(context)}`);
             summary.dataset.focus = `context-${memberKey}`;
+            summary.addEventListener("click", event => {
+              event.preventDefault();
+              details.open = !details.open;
+              contextChoices.set(memberKey, details.open);
+            });
             details.append(summary, fields([
-              ["Project", projectLabel(context, data)], ["Backend", context.backend],
-              ["Worker session", context.provisioned === "ready" ? "Recorded" : context.provisioned === "pending" ? "Starting" : "Not created"],
+              ["Project", projectLabel(context)], ["Backend", context.backend],
+              ["Worker session", context.provisioned === "ready" ? "Recorded" : context.provisioned === "pending" ? "Pending" : "Not created"],
               ["Live status", context.observed ? "Observed" : "Not checked"],
               ["Queued", context.queuedCount], ["Recent tasks", context.recentCount],
             ]), el("h3", "Current recorded task"), taskFields(context.current),
@@ -347,6 +357,7 @@
         const registrations = data.captain?.registrations ?? [{ id: data.id, transport: data.bot.transport?.kind ?? "slack" }];
         for (const registration of registrations) {
           const item = link(`${registrationLabel(registration.transport)} (${registration.id})`, shipHash(registration.id));
+          item.dataset.focus = `registration-${registration.id}`;
           if (registration.id === data.id) item.setAttribute("aria-current", "page");
           node.append(item, document.createTextNode(" "));
         }
@@ -501,7 +512,7 @@
         breadcrumbs.replaceChildren(link("Fleet", "#/"), document.createTextNode(" / "), el("span", data.name));
         // Reuse session nodes so polling preserves loaded children and controls.
         const sessions = renderSessions(data);
-        replaceView([el("h1", data.captain?.name ?? data.name), updated(data.generatedAt), renderRegistrations(data), renderCrew(data),
+        replaceView([el("h1", data.name), updated(data.generatedAt), renderRegistrations(data), renderCrew(data),
           renderBot(data.bot), renderQueue(data.queue), renderCron(data.cron, data.bot.transport), sessions], saved);
       }
       function partDetails(label, body) {
@@ -635,6 +646,7 @@
         entries = [];
         entryCursor = undefined;
         treeNodes = new Map();
+        contextChoices.clear();
         try {
           const parts = (location.hash || "#/").slice(1).split("/");
           if (parts.length === 2 && parts[1] === "") route = { kind: "fleet" };
