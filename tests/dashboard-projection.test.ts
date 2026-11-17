@@ -318,7 +318,7 @@ async function page() {
     new URL("../templates/dashboard/index.html", import.meta.url),
     "utf8",
   );
-  const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1];
+  const script = /<script>([\s\S]*?)<\/script>/i.exec(html)?.[1];
   if (!script) throw new Error("Missing dashboard script");
   class Element {
     children: Element[] = [];
