@@ -247,6 +247,28 @@ test("invalid and repeated parameters fail before reading the source", async () 
   expect(f.calls).toEqual([]);
 });
 
+test("history query bounds count Unicode code points", async () => {
+  const f = fixture();
+  const emoji = (count: number) => encodeURIComponent("😀".repeat(count));
+  for (const path of [
+    `/api/ships/a/sessions?parent=${emoji(512)}&cursor=${emoji(4096)}`,
+    `/api/ships/a/entries?session=${emoji(512)}&cursor=${emoji(4096)}`,
+  ])
+    expect((await f.get(path)).status, path.slice(0, 40)).toBe(200);
+  expect(f.calls).toHaveLength(2);
+  for (const path of [
+    `/api/ships/a/sessions?parent=${emoji(513)}`,
+    `/api/ships/a/sessions?parent=a&cursor=${emoji(4097)}`,
+    `/api/ships/a/entries?session=${emoji(513)}`,
+    `/api/ships/a/entries?session=a&cursor=${emoji(4097)}`,
+  ]) {
+    const response = await f.get(path);
+    expect(response.status, path.slice(0, 40)).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid request" });
+  }
+  expect(f.calls).toHaveLength(2);
+});
+
 test("external assets and event handlers throw during handler creation", () => {
   const f = fixture();
   for (const asset of [

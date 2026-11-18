@@ -15,6 +15,7 @@ import {
   type TaskRecord,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { Predicate, Schema } from "effect";
 import {
   mapPiHistory,
   piSessionHistory,
@@ -157,7 +158,7 @@ test("Pi summary hides reasoning and tool bodies; full clips every body", () => 
     output: long.slice(0, HISTORY_TEXT),
     truncated: true,
   });
-  historyEntryPageSchema.parse({ entries: full });
+  Schema.decodeUnknownSync(historyEntryPageSchema)({ entries: full });
 });
 
 test("Pi ambiguous or unpaired results remain tool entries", () => {
@@ -215,7 +216,7 @@ test("Pi clips non-BMP text within the wire bound without splitting characters",
     ],
     "full",
   );
-  historyEntryPageSchema.parse({ entries });
+  Schema.decodeUnknownSync(historyEntryPageSchema)({ entries });
   expect(entries[0]?.parts[0]).toEqual({
     type: "text",
     text: `x${"😀".repeat((HISTORY_TEXT - 2) / 2)}`,
@@ -286,7 +287,7 @@ test("Pi native pagination supports both orders and cursor retains original orde
           },
           signal,
         );
-        historyEntryPageSchema.parse(page);
+        Schema.decodeUnknownSync(historyEntryPageSchema)(page);
         ids.push(...page.entries.map(({ id }) => id));
         cursor = page.cursor;
       } while (cursor);
@@ -424,6 +425,143 @@ test("Pi history refuses stores that need a schema migration", async () => {
     expect(db.query("SELECT * FROM durable_schema").all()).toEqual(before);
   } finally {
     db.close();
+    await f.close();
+  }
+});
+
+test("Pi history forwards only canonical numeric IDs and exact JSON cursors", async () => {
+  const f = await fixture();
+  const opened: number[] = [];
+  const history = piSessionHistory({
+    conversation(id, context) {
+      opened.push(id);
+      return f.harness.conversation(id, context);
+    },
+  });
+  const signal = new AbortController().signal;
+  try {
+    expect(
+      await history.describe(
+        [
+          "0",
+          f.id,
+          String(Number.MAX_SAFE_INTEGER),
+          `0${f.id}`,
+          "00",
+          "9007199254740992",
+          "9".repeat(400),
+          "1.5",
+          "-1",
+          "+1",
+          "1e3",
+          ` ${f.id}`,
+          `pi:${f.id}`,
+        ],
+        signal,
+      ),
+    ).toEqual([{ id: f.id, harness: "pi-durable", kind: "conversation" }]);
+    expect(opened).toEqual([0, Number(f.id), Number.MAX_SAFE_INTEGER]);
+    await expect(history.describe([f.id, ""], signal)).rejects.toThrow(
+      "Pi history unavailable",
+    );
+    const read = (sessionID: string, cursor?: unknown) =>
+      history.entries(
+        {
+          sessionID,
+          limit: 2,
+          order: "asc",
+          detail: "summary",
+          ...(cursor === undefined
+            ? {}
+            : {
+                cursor: Buffer.from(JSON.stringify(cursor)).toString(
+                  "base64url",
+                ),
+              }),
+        },
+        signal,
+      );
+    await expect(read(`0${f.id}`)).rejects.toThrow("Pi history unavailable");
+    const first = await read(f.id);
+    if (!first.cursor) throw new Error("Missing cursor");
+    const cursor: unknown = JSON.parse(
+      Buffer.from(first.cursor, "base64url").toString("utf8"),
+    );
+    if (
+      !Predicate.hasProperty(cursor, "page") ||
+      !Predicate.isObject(cursor.page)
+    )
+      throw new Error("Unexpected cursor");
+    const next = await read(f.id, cursor);
+    expect(next.entries).toHaveLength(2);
+    const nested = { list: [1, null, "x", true, { deep: [] }] };
+    expect(
+      await read(f.id, { ...cursor, page: { ...cursor.page, nested } }),
+    ).toEqual(next);
+    for (const invalid of [
+      { ...cursor, extra: true },
+      { sessionID: f.id },
+      { ...cursor, sessionID: Number(f.id) },
+      { ...cursor, sessionID: "999" },
+      { ...cursor, page: [] },
+      { ...cursor, page: null },
+      { ...cursor, page: "after" },
+      [],
+    ])
+      await expect(
+        read(f.id, invalid),
+        JSON.stringify(invalid),
+      ).rejects.toThrow("Pi history unavailable");
+  } finally {
+    await f.close();
+  }
+});
+
+test("Pi history cursor JSON __proto__ keys keep the base pagination outcome", async () => {
+  const f = await fixture();
+  const history = piSessionHistory(f.harness);
+  const signal = new AbortController().signal;
+  // Raw JSON text keeps __proto__ as an own key, as a client would send it.
+  const read = (cursor: string) =>
+    history.entries(
+      {
+        sessionID: f.id,
+        limit: 2,
+        order: "asc",
+        detail: "summary",
+        cursor: Buffer.from(cursor).toString("base64url"),
+      },
+      signal,
+    );
+  try {
+    const start = await history.entries(
+      { sessionID: f.id, limit: 2, order: "asc", detail: "summary" },
+      signal,
+    );
+    if (!start.cursor) throw new Error("Missing cursor");
+    const { page } = JSON.parse(
+      Buffer.from(start.cursor, "base64url").toString("utf8"),
+    );
+    const next = await read(JSON.stringify({ sessionID: f.id, page }));
+    expect(next.entries).toHaveLength(2);
+    const session = `"sessionID":"${f.id}"`;
+    const own = `"after":${page.after},"order":"${page.order}"`;
+    for (const cursor of [
+      `{${session},"page":{${own},"__proto__":{"after":0,"order":"descending"}}}`,
+      `{${session},"page":{${own},"__proto__":1}}`,
+      `{${session},"page":{${own},"x":{"__proto__":{"a":1}}}}`,
+    ])
+      expect(await read(cursor), cursor).toEqual(next);
+    for (const cursor of [
+      `{${session},"page":{"__proto__":{${own}}}}`,
+      `{${session},"page":{"__proto__":1}}`,
+      `{${session},"page":{${own}},"__proto__":{"x":1}}`,
+      `{"page":{${own}},"__proto__":{${session}}}`,
+    ])
+      await expect(read(cursor), cursor).rejects.toThrow(
+        "Pi history unavailable",
+      );
+  } finally {
     await f.close();
   }
 });

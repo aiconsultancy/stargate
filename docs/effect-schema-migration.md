@@ -7,9 +7,9 @@ This migration does not upgrade Effect or the SDKs.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**. Three single-schema PRs
-and the native backend batch are merged. That leaves 14 component batches. One
-contingency split can bring the total to 19, still below 20. Report a proposed
+The revised target is **18 migration PRs in total**. Five migration PRs are
+merged. That leaves 13 component batches. One contingency split can bring the
+total to 19, still below 20. Report a proposed
 budget change before opening another PR; do not weaken verification to fit it.
 
 This replaces the original estimate of approximately 410 one-schema PRs. The
@@ -29,21 +29,18 @@ Completed:
 - [OpenCode pairing-response schema](https://github.com/aiconsultancy/stargate/pull/44).
 - [Azure transcript-response schema](https://github.com/aiconsultancy/stargate/pull/45).
 - [Remaining native backend validators](https://github.com/aiconsultancy/stargate/pull/48).
+- [Shared tool envelopes, journal and project selection](https://github.com/aiconsultancy/stargate/pull/49).
 
 ## Remaining component batches
 
-The numbers include the four completed PRs. File names identify primary scope,
+The numbers include the five completed PRs. File names identify primary scope,
 not a restriction against updating a coupled consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
 
-5. Shared tool validation and SDK integration. Replace `crew/tool-input.ts`,
-   `crew/project-options.ts` and the schema conversion in `crew/pi-extension.ts`.
-   Preserve object-root advertisements, strict operation validation, defaults,
-   input transforms and project selection. Include `crew/journal.ts`, project-key
-   validation and Pi history input as the first real callers. Keep legacy SDK
-   registration only for unmigrated tools; remove it with the final consumer.
 6. Pi and session history. Migrate `backends/pi-durable.ts`,
    `backends/pi-history.ts`, `session-history.ts` and their history consumers.
+   Include history RPC codecs and HTTP validation; leave unrelated reporting
+   operations for their own batches.
 7. Configuration and provisioning. Migrate `config.ts`, `provision.ts` and the
    schema definitions composed into configuration, including provider, activity,
    mention, transcription, waiting and component settings. Include affected
@@ -123,6 +120,12 @@ its dialect, definitions, required fields and coercion against that existing SDK
 boundary as well as the Effect decoder. The old Pi advertisements require some
 fields whose decoders have defaults. Preserve that native acceptance; do not
 silently fix an advertisement/default mismatch during this migration.
+
+OpenCode RPC decodes Effect codecs with default options. Strict history objects
+must reject unknown keys at that boundary, before a decoder can strip them.
+Check nested input and output objects through the installed client as well as
+direct decoders. Use Effect's Standard Schema adapter where client types require
+it; verify that the installed SDK still recognizes the underlying Effect codec.
 
 The Claude SDK's `tool()` helper requires a Zod raw shape, but Stargate's current
 Claude backend does not call it. Its transitive Zod dependency remains SDK-owned.

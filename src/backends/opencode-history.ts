@@ -8,6 +8,7 @@ import {
   type SessionMessageAssistantTool,
   type SessionMessageInfo,
 } from "@opencode/client";
+import { Schema } from "effect";
 import { CrewReporting } from "../crew/report-rpc";
 import {
   clipHistory,
@@ -73,6 +74,13 @@ export interface OpenCodeHistoryClient {
   };
   rpc(definition: typeof CrewReporting): OpenCodeHistoryReporting;
 }
+
+const decodeDescribe = Schema.decodeUnknownSync(historyDescribeInputSchema);
+const decodeChildren = Schema.decodeUnknownSync(historyChildrenInputSchema);
+const decodeEntries = Schema.decodeUnknownSync(historyEntriesInputSchema);
+const decodeSessions = Schema.decodeUnknownSync(historySessionsSchema);
+const decodeSessionPage = Schema.decodeUnknownSync(historySessionPageSchema);
+const decodeEntryPage = Schema.decodeUnknownSync(historyEntryPageSchema);
 
 const FAILURE =
   "Session history unavailable or cancelled; raw details withheld.";
@@ -254,7 +262,7 @@ export class OpenCodeHistory implements SessionHistory {
     return this.read(
       signal,
       async () =>
-        historySessionsSchema.parse(
+        decodeSessions(
           await this.client
             .rpc(CrewReporting)
             .historyRoots({}, this.request(signal)),
@@ -267,10 +275,10 @@ export class OpenCodeHistory implements SessionHistory {
     signal: AbortSignal,
   ): Promise<HistorySession[]> {
     return this.read(signal, async () => {
-      const input = historyDescribeInputSchema.parse({ ids });
+      const input = decodeDescribe({ ids });
       const piIDs = input.ids.filter((id) => id.startsWith(piHistoryPrefix));
       const sessions = piIDs.length
-        ? historySessionsSchema.parse(
+        ? decodeSessions(
             await this.client
               .rpc(CrewReporting)
               .historyDescribe({ ids: piIDs }, this.request(signal)),
@@ -307,7 +315,7 @@ export class OpenCodeHistory implements SessionHistory {
         sessions.push(...batch.filter((session) => session !== undefined));
       }
       const found = new Map(sessions.map((session) => [session.id, session]));
-      return historySessionsSchema.parse({
+      return decodeSessions({
         sessions: input.ids.flatMap((id) => {
           const session = found.get(id);
           return session ? [session] : [];
@@ -318,9 +326,9 @@ export class OpenCodeHistory implements SessionHistory {
 
   children(input: HistoryChildrenInput, signal: AbortSignal) {
     return this.read(signal, async () => {
-      const request = historyChildrenInputSchema.parse(input);
+      const request = decodeChildren(input);
       if (request.parentID.startsWith(piHistoryPrefix))
-        return historySessionPageSchema.parse(
+        return decodeSessionPage(
           await this.client
             .rpc(CrewReporting)
             .historyChildren(request, this.request(signal)),
@@ -337,7 +345,7 @@ export class OpenCodeHistory implements SessionHistory {
         { signal },
       );
       if (page.data.length > request.limit) throw new Error(FAILURE);
-      return historySessionPageSchema.parse({
+      return decodeSessionPage({
         sessions: page.data.map(sessionInfo),
         ...(page.cursor.next != null && { cursor: page.cursor.next }),
       });
@@ -346,9 +354,9 @@ export class OpenCodeHistory implements SessionHistory {
 
   entries(input: HistoryEntriesInput, signal: AbortSignal) {
     return this.read(signal, async () => {
-      const request = historyEntriesInputSchema.parse(input);
+      const request = decodeEntries(input);
       if (request.sessionID.startsWith(piHistoryPrefix))
-        return historyEntryPageSchema.parse(
+        return decodeEntryPage(
           await this.client
             .rpc(CrewReporting)
             .historyEntries(request, this.request(signal)),
@@ -364,7 +372,7 @@ export class OpenCodeHistory implements SessionHistory {
         { signal },
       );
       if (page.data.length > request.limit) throw new Error(FAILURE);
-      return historyEntryPageSchema.parse({
+      return decodeEntryPage({
         entries: page.data.flatMap((message) => {
           const result = entry(message, request.detail === "full");
           return result ? [result] : [];

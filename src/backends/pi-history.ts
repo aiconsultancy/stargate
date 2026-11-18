@@ -14,9 +14,10 @@ import {
 } from "@earendil-works/pi-durable";
 import { CURRENT_SQLITE_SCHEMA_VERSION } from "@earendil-works/pi-durable/storage/sqlite";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { z } from "zod";
+import { Result, Schema, SchemaTransformation } from "effect";
 import {
   clipHistory,
+  exactStruct,
   HISTORY_PARTS,
   HISTORY_TEXT,
   type HistoryEntriesInput,
@@ -30,19 +31,28 @@ import {
 } from "../session-history";
 
 const unavailable = "Pi history unavailable or cancelled.";
-const numericID = z
-  .string()
-  .regex(/^(0|[1-9]\d*)$/)
-  .transform(Number)
-  .pipe(z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER));
-const cursorSchema = z.strictObject({
-  sessionID: z.string(),
-  page: z.record(z.string(), z.json()),
-});
+const decodeDescribe = Schema.decodeUnknownSync(historyDescribeInputSchema);
+const decodeChildren = Schema.decodeUnknownSync(historyChildrenInputSchema);
+const decodeEntries = Schema.decodeUnknownSync(historyEntriesInputSchema);
+// Canonical decimal only; Pi Durable's backend accepts leading zeros.
+const numericID = Schema.String.check(Schema.isPattern(/^(0|[1-9]\d*)$/)).pipe(
+  Schema.decodeTo(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    SchemaTransformation.transform({ decode: Number, encode: String }),
+  ),
+);
+const decodeNumericID = Schema.decodeUnknownSync(numericID);
+const checkNumericID = Schema.decodeUnknownResult(numericID);
+const decodeCursor = Schema.decodeUnknownSync(
+  exactStruct({
+    sessionID: Schema.String,
+    page: Schema.Record(Schema.String, Schema.MutableJson),
+  }),
+);
 
 function clipBody(text: string): ReturnType<typeof clipHistory> {
   const clipped = clipHistory(text);
-  // Zod's wire bound counts UTF-16 units; do not split a surrogate pair.
+  // Also cap UTF-16 units; do not split a surrogate pair.
   return clipped.text.length > HISTORY_TEXT
     ? {
         text: clipped.text
@@ -204,7 +214,7 @@ export function piSessionHistory(
   const conversation = (id: string, signal: AbortSignal) => {
     signal.throwIfAborted();
     return harness.conversation(
-      numericID.parse(id) as ConversationId,
+      decodeNumericID(id) as ConversationId,
       withAbortSignal(signal, BACKGROUND_CONTEXT),
     );
   };
@@ -222,10 +232,10 @@ export function piSessionHistory(
     roots: (signal) => safe(signal, async () => []),
     describe: (ids, signal) =>
       safe(signal, async () => {
-        historyDescribeInputSchema.parse({ ids });
+        decodeDescribe({ ids });
         const sessions: HistorySession[] = [];
         for (const id of ids) {
-          if (!numericID.safeParse(id).success) continue;
+          if (Result.isFailure(checkNumericID(id))) continue;
           try {
             if (await conversation(id, signal))
               sessions.push({
@@ -242,7 +252,7 @@ export function piSessionHistory(
       }),
     children: (input, signal) =>
       safe(signal, async () => {
-        historyChildrenInputSchema.parse(input);
+        decodeChildren(input);
         if (!(await conversation(input.parentID, signal)) || input.cursor)
           throw new Error(unavailable);
         // greybeard: no fork scan on this surface; crew owns recorded children.
@@ -250,11 +260,11 @@ export function piSessionHistory(
       }),
     entries: (raw, signal) =>
       safe(signal, async () => {
-        const input = historyEntriesInputSchema.parse(raw);
+        const input = decodeEntries(raw);
         const native = await conversation(input.sessionID, signal);
         if (!native) throw new Error(unavailable);
         const cursor = input.cursor
-          ? cursorSchema.parse(
+          ? decodeCursor(
               JSON.parse(
                 Buffer.from(input.cursor, "base64url").toString("utf8"),
               ),

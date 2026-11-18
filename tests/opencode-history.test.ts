@@ -4,6 +4,7 @@ import type {
   SessionMessageAssistantTool,
   SessionMessageInfo,
 } from "@opencode/client";
+import { Schema } from "effect";
 import {
   OpenCodeHistory,
   type OpenCodeHistoryClient,
@@ -115,7 +116,10 @@ function fixture() {
   const history = new OpenCodeHistory(client, "/captain");
   const entries = (input: Partial<HistoryEntriesInput> = {}) =>
     history.entries(
-      historyEntriesInputSchema.parse({ sessionID: "native", ...input }),
+      Schema.decodeUnknownSync(historyEntriesInputSchema)({
+        sessionID: "native",
+        ...input,
+      }),
       signal,
     );
   return {
@@ -405,7 +409,9 @@ describe("OpenCode fleet history", () => {
       { ...base, id: "idle", type: "idle", outcome: "succeeded" },
     ];
     const page = await f.entries();
-    expect(historyEntryPageSchema.safeParse(page).success).toBe(true);
+    expect(() =>
+      Schema.decodeUnknownSync(historyEntryPageSchema)(page),
+    ).not.toThrow();
     expect(
       page.entries.map((entry) => [entry.id, entry.role, entry.parts]),
     ).toEqual([
@@ -623,7 +629,9 @@ describe("OpenCode fleet history", () => {
           expect(part.truncated).toBe(true);
         }
       }
-    expect(historyEntryPageSchema.safeParse(page).success).toBe(true);
+    expect(() =>
+      Schema.decodeUnknownSync(historyEntryPageSchema)(page),
+    ).not.toThrow();
   });
 
   test("message cursor passes through unchanged without conflicting order", async () => {
