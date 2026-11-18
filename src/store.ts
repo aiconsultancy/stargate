@@ -8,7 +8,18 @@ import {
   type NativeMaker,
   nativeMakerSchema,
 } from "./fleet/protocol";
+import {
+  type IrcBurstMessage,
+  ircBurstEligible,
+  ircBurstLimits,
+  ircBurstMessageSchema,
+  ircBurstText,
+} from "./irc/burst";
 import { validMsgid } from "./irc/protocol";
+import {
+  type NotificationContext,
+  notificationContextSchema,
+} from "./notifications";
 import type { QuestionOffer } from "./questions";
 import { failureText, type RequestFailure } from "./request-failure";
 import type { ReplyChunk } from "./slack-format";
@@ -43,6 +54,8 @@ export type Incoming = {
   notBefore?: number | null;
   /** Only trusted gateway intake/result recovery supplies this correlation. */
   fleet?: FleetJob;
+  /** Trusted Slack ingress classification; absent on legacy/scheduled/native jobs. */
+  notification?: NotificationContext;
 };
 
 /**
@@ -102,18 +115,37 @@ export type Job = Incoming & {
   makers?: NativeMaker[];
 };
 
-type StoredJob = Omit<Job, "deferDelivery" | "fleet" | "makers"> & {
+type StoredJob = Omit<
+  Job,
+  "deferDelivery" | "fleet" | "makers" | "notification"
+> & {
   deferDelivery: number;
   fleet_context: string | null;
   makers: string | null;
   fleet_exported: number;
+  notification_context: string | null;
+  notification_held: number;
 };
 
 function decodeStoredJob(row: StoredJob): Job {
-  const { fleet_context, makers, fleet_exported: _exported, ...job } = row;
+  const {
+    fleet_context,
+    makers,
+    fleet_exported: _exported,
+    notification_context,
+    notification_held: _notificationHeld,
+    ...job
+  } = row;
   return {
     ...job,
     deferDelivery: row.deferDelivery === 1,
+    ...(notification_context
+      ? {
+          notification: notificationContextSchema.parse(
+            JSON.parse(notification_context),
+          ),
+        }
+      : {}),
     ...(fleet_context
       ? { fleet: fleetJobSchema.parse(JSON.parse(fleet_context)) }
       : {}),
@@ -188,6 +220,21 @@ export class TranscriptConflict extends Error {
   }
 }
 
+export interface MetaReceipt {
+  registration: string;
+  message: string;
+  channel: string;
+  thread: string;
+  user: string;
+  at: number;
+  command: string;
+  state: "pending" | "applied";
+  oldDelayMs: number | null;
+  newDelayMs: number | null;
+  reply: string | null;
+  delivered: number;
+}
+
 export class Store {
   private readonly db: Database;
   constructor(path: string) {
@@ -218,6 +265,14 @@ export class Store {
       CREATE TABLE IF NOT EXISTS ignored_events (
         botKey TEXT NOT NULL, eventId TEXT NOT NULL, PRIMARY KEY(botKey, eventId)
       );
+      CREATE TABLE IF NOT EXISTS meta_receipts (
+        registration TEXT NOT NULL, message TEXT NOT NULL,
+        channel TEXT NOT NULL, thread TEXT NOT NULL, user TEXT NOT NULL,
+        at INTEGER NOT NULL, command TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending', oldDelayMs INTEGER,
+        newDelayMs INTEGER, reply TEXT, delivered INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(registration,message)
+      );
       CREATE TABLE IF NOT EXISTS captain_cursors (
         botKey TEXT NOT NULL, session_id TEXT NOT NULL, cursor TEXT,
         owner INTEGER, PRIMARY KEY(botKey, session_id)
@@ -225,6 +280,15 @@ export class Store {
       CREATE TABLE IF NOT EXISTS irc_cursors (
         botKey TEXT NOT NULL, target TEXT NOT NULL, time TEXT NOT NULL,
         PRIMARY KEY(botKey, target)
+      );
+      CREATE TABLE IF NOT EXISTS irc_bursts (
+        job INTEGER PRIMARY KEY REFERENCES jobs(id), policy TEXT NOT NULL,
+        deadline INTEGER NOT NULL, maximum INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS irc_burst_messages (
+        botKey TEXT NOT NULL, eventId TEXT NOT NULL,
+        job INTEGER NOT NULL REFERENCES jobs(id), ordinal INTEGER NOT NULL,
+        message TEXT NOT NULL, PRIMARY KEY(botKey,eventId), UNIQUE(job,ordinal)
       );
       CREATE TABLE IF NOT EXISTS irc_thread_messages (
         botKey TEXT NOT NULL, channel TEXT NOT NULL, msgid TEXT NOT NULL,
@@ -281,6 +345,8 @@ export class Store {
     column("jobs", "sender", "TEXT");
     column("jobs", "gate", "TEXT");
     column("jobs", "textMention", "TEXT");
+    column("jobs", "notification_context", "TEXT");
+    column("jobs", "notification_held", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "received", "INTEGER");
     column("jobs", "replyParent", "TEXT");
     column("jobs", "fleet_context", "TEXT");
@@ -340,15 +406,18 @@ export class Store {
   enqueue(input: Incoming): boolean {
     if (
       this.db
-        .query("SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?")
-        .get(input.botKey, input.eventId) !== null
+        .query(
+          `SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?
+           UNION ALL SELECT 1 FROM irc_burst_messages WHERE botKey=? AND eventId=? LIMIT 1`,
+        )
+        .get(input.botKey, input.eventId, input.botKey, input.eventId) !== null
     )
       return false;
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at,fleet_context)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt,$fleet)`)
+      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at,fleet_context,notification_context)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt,$fleet,$notification)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -363,6 +432,11 @@ export class Store {
           $sender: input.sender ?? null,
           $gate: input.gate ?? null,
           $textMention: input.textMention ?? null,
+          $notification: input.notification
+            ? JSON.stringify(
+                notificationContextSchema.parse(input.notification),
+              )
+            : null,
           $received: input.received ?? null,
           $retryAt: input.notBefore ?? 0,
           $fleet: input.fleet
@@ -734,7 +808,7 @@ export class Store {
         [string, string]
       >(`SELECT s.session_id AS session, s.cursor, j.channel, j.thread, j.replyParent, j.user,j.deferDelivery
       FROM sessions s JOIN jobs j ON j.conversation=s.conversation
-      WHERE j.botKey=? AND s.conversation=? AND (j.gate IS NULL OR j.gate='admitted')
+      WHERE j.botKey=? AND s.conversation=? AND (j.gate IS NULL OR j.gate='admitted') AND j.failure IS NOT 'muted'
       ORDER BY j.id DESC LIMIT 1`)
       .get(botKey, conversation);
     return (
@@ -830,7 +904,7 @@ export class Store {
           .query(`UPDATE jobs SET status=${storedReplyStatus},
           sent=CASE WHEN deferDelivery=1 THEN COALESCE(json_array_length(response),0) ELSE sent END,
           attempts=0,retry_at=0
-          WHERE botKey=? AND conversation=? AND eventId=? AND status='failed'`)
+          WHERE botKey=? AND conversation=? AND eventId=? AND status='failed' AND failure IS NOT 'muted'`)
           .run(input.botKey, input.conversation, eventId).changes;
       for (const reply of input.replies) {
         queued += this.db
@@ -861,30 +935,39 @@ export class Store {
 
   ready(botKey: string, now: number, limit: number, serial = false): Job[] {
     return this.db
-      .query<StoredJob, [string, number, number]>(`SELECT * FROM jobs j
+      .query<StoredJob, (string | number)[]>(`SELECT * FROM jobs j
       WHERE botKey = ? AND status IN ('queued','responding') AND retry_at <= ?
       AND NOT EXISTS (SELECT 1 FROM jobs earlier
         WHERE earlier.conversation=j.conversation AND earlier.id < j.id
-         AND earlier.status IN (${unfinishedJobs}))
+         AND earlier.status IN (${unfinishedJobs})
+         AND NOT (j.notification_context IS NULL AND earlier.status='queued'
+           AND earlier.notification_held=1 AND (earlier.retry_at>? OR j.status='responding')))
+      AND NOT (j.notification_held=1 AND EXISTS (SELECT 1 FROM jobs later
+        WHERE later.conversation=j.conversation AND later.id>j.id
+        AND later.status IN ('running','responding')))
       ${
         serial
           ? `AND (j.status!='queued' OR NOT EXISTS
         (SELECT 1 FROM jobs pending WHERE pending.botKey=j.botKey
-        AND pending.id<j.id AND pending.status IN (${pendingJobs})))`
+        AND pending.id<j.id AND pending.status IN (${pendingJobs})
+        AND NOT (j.notification_context IS NULL AND pending.status='queued'
+          AND pending.notification_held=1 AND pending.retry_at>?)))`
           : ""
       }
       ORDER BY id LIMIT ?`)
-      .all(botKey, now, limit)
+      .all(botKey, now, now, ...(serial ? [now] : []), limit)
       .map(decodeStoredJob);
   }
 
-  running(id: number) {
+  running(id: number, expectedText?: string) {
     return (
       this.db
         .query(
-          "UPDATE jobs SET status='running' WHERE id=? AND status='queued' AND cancel_requested=0",
+          `UPDATE jobs SET status='running',notification_held=0
+           WHERE id=$id AND status='queued' AND cancel_requested=0
+             AND ($expected IS NULL OR text=$expected)`,
         )
-        .run(id).changes > 0
+        .run({ $id: id, $expected: expectedText ?? null }).changes > 0
     );
   }
 
@@ -959,10 +1042,13 @@ export class Store {
   jobByEvent(botKey: string, eventId: string): Job | null {
     return decodeJob(
       this.db
-        .query<StoredJob, [string, string]>(
-          "SELECT * FROM jobs WHERE botKey=? AND eventId=?",
+        .query<StoredJob, [string, string, string, string]>(
+          `SELECT * FROM jobs WHERE botKey=? AND eventId=?
+           UNION ALL SELECT j.* FROM irc_burst_messages b JOIN jobs j
+             ON j.id=b.job AND j.botKey=b.botKey
+           WHERE b.botKey=? AND b.eventId=? LIMIT 1`,
         )
-        .get(botKey, eventId),
+        .get(botKey, eventId, botKey, eventId),
     );
   }
 
@@ -1018,6 +1104,195 @@ export class Store {
         this.joinIrcThread(input.botKey, input.channel, root);
       return true;
     })();
+  }
+
+  /**
+   * Coalesce only consecutively admitted human messages before work starts.
+   * Original sources remain durable; event aliases never invent a native input.
+   * Host receive time owns the deadline, not sender-controlled server-time tags.
+   */
+  enqueueIrcBurst(
+    input: Incoming,
+    options: {
+      quietMs: number;
+      policy: string;
+      source: string;
+      originalText: string;
+      invited: boolean;
+      /** Preserve the preexisting humanWakeChannels-only intake bookkeeping. */
+      trackThreads: boolean;
+      now?: number;
+    },
+  ): boolean {
+    const ordinary = (job: Incoming) =>
+      options.trackThreads
+        ? this.enqueueIrcHuman(job, options.invited)
+        : this.enqueue(job);
+    if (
+      !Number.isInteger(options.quietMs) ||
+      options.quietMs < 1 ||
+      options.quietMs > 5000 ||
+      !ircBurstEligible(input)
+    )
+      return ordinary(input);
+    const now = options.now ?? Date.now();
+    const message: IrcBurstMessage = {
+      eventId: input.eventId,
+      thread: input.thread,
+      source: options.source,
+      text: input.text,
+      originalText: options.originalText,
+      received: input.received ?? now,
+      files: [...(input.files ?? [])],
+    };
+    // An individually large message still follows ordinary admission intact.
+    if (
+      message.files.length > ircBurstLimits.files ||
+      Buffer.byteLength(JSON.stringify(message)) > ircBurstLimits.bytes
+    )
+      return ordinary(input);
+    if (!ircBurstMessageSchema.safeParse(message).success)
+      return ordinary(input);
+    return this.db.transaction(() => {
+      if (
+        this.jobByEvent(input.botKey, input.eventId) ||
+        this.db
+          .query("SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?")
+          .get(input.botKey, input.eventId) !== null
+      )
+        return false;
+      const latest = this.db
+        .query<StoredJob, [string]>(
+          `SELECT * FROM jobs WHERE botKey=? AND text!=''
+           AND COALESCE(json_extract(fleet_context,'$.kind'),'')!='result'
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .get(input.botKey);
+      const burst = latest
+        ? this.db
+            .query<
+              { policy: string; deadline: number; maximum: number },
+              [number]
+            >("SELECT policy,deadline,maximum FROM irc_bursts WHERE job=?")
+            .get(latest.id)
+        : null;
+      if (
+        latest &&
+        burst &&
+        latest.status === "queued" &&
+        !latest.input &&
+        latest.user === input.user &&
+        latest.channel === input.channel &&
+        latest.conversation === input.conversation &&
+        (latest.replyParent ?? null) === (input.replyParent ?? null) &&
+        (latest.textMention ?? null) === (input.textMention ?? null) &&
+        burst.policy === options.policy &&
+        now < burst.deadline &&
+        now < burst.maximum
+      ) {
+        const messages = this.ircBurstMessages(latest.id);
+        const combined = [...messages, message];
+        const files = [...new Set(combined.flatMap((item) => item.files))];
+        const text = ircBurstText(combined);
+        if (
+          combined.length <= ircBurstLimits.messages &&
+          files.length <= ircBurstLimits.files &&
+          Buffer.byteLength(JSON.stringify(combined)) <= ircBurstLimits.bytes &&
+          Buffer.byteLength(text) <= ircBurstLimits.bytes
+        ) {
+          const deadline = Math.min(now + options.quietMs, burst.maximum);
+          const changed = this.db
+            .query(
+              `UPDATE jobs SET text=?,input_files=?,retry_at=MAX(retry_at,?)
+               WHERE id=? AND status='queued' AND input IS NULL AND cancel_requested=0`,
+            )
+            .run(
+              text,
+              files.length ? JSON.stringify(files) : null,
+              Math.max(deadline, input.notBefore ?? 0),
+              latest.id,
+            ).changes;
+          if (changed) {
+            this.db
+              .query("UPDATE irc_bursts SET deadline=? WHERE job=?")
+              .run(deadline, latest.id);
+            this.saveIrcBurstMessage(
+              latest.id,
+              combined.length - 1,
+              input.botKey,
+              message,
+            );
+            if (options.trackThreads) {
+              const root = latest.replyParent ?? latest.thread;
+              this.ircThreadMessage(
+                input.botKey,
+                input.channel,
+                input.thread,
+                root,
+                latest.thread,
+              );
+              if (options.invited)
+                this.joinIrcThread(input.botKey, input.channel, root);
+            }
+            return true;
+          }
+        }
+      }
+      const deadline = now + options.quietMs;
+      if (
+        !ordinary({
+          ...input,
+          notBefore: Math.max(deadline, input.notBefore ?? 0),
+        })
+      )
+        return false;
+      const job = this.jobByEvent(input.botKey, input.eventId);
+      if (!job) throw new Error("IRC burst job was not persisted");
+      this.db
+        .query(
+          "INSERT INTO irc_bursts(job,policy,deadline,maximum) VALUES(?,?,?,?)",
+        )
+        .run(job.id, options.policy, deadline, now + ircBurstLimits.waitMs);
+      this.saveIrcBurstMessage(job.id, 0, input.botKey, message);
+      return true;
+    })();
+  }
+
+  /** Original accepted text and source labels, retained across restarts. */
+  ircBurstMessages(job: number): IrcBurstMessage[] {
+    return this.db
+      .query<{ message: string }, [number]>(
+        "SELECT message FROM irc_burst_messages WHERE job=? ORDER BY ordinal",
+      )
+      .all(job)
+      .map(({ message }) => ircBurstMessageSchema.parse(JSON.parse(message)));
+  }
+
+  /** Stop can resolve a grouped member without changing ordinary thread state. */
+  ircBurstRequest(
+    botKey: string,
+    channel: string,
+    msgid: string,
+  ): string | undefined {
+    return this.db
+      .query<{ thread: string }, [string, string, string]>(
+        `SELECT j.thread FROM irc_burst_messages b JOIN jobs j ON j.id=b.job AND j.botKey=b.botKey
+         WHERE b.botKey=? AND b.eventId=? AND j.channel=?`,
+      )
+      .get(botKey, `${channel}:${msgid}`, channel)?.thread;
+  }
+
+  private saveIrcBurstMessage(
+    job: number,
+    ordinal: number,
+    botKey: string,
+    message: IrcBurstMessage,
+  ) {
+    this.db
+      .query(
+        "INSERT INTO irc_burst_messages(botKey,eventId,job,ordinal,message) VALUES(?,?,?,?,?)",
+      )
+      .run(botKey, message.eventId, job, ordinal, JSON.stringify(message));
   }
 
   ircThreadRoot(
@@ -1282,6 +1557,27 @@ export class Store {
         this.db.query("DELETE FROM delivery_units WHERE job=?").run(id);
       return changed;
     })();
+  }
+
+  /** Intentional notification suppression, never cancellation or reply delivery. */
+  suppressNotification(id: number) {
+    return (
+      this.db
+        .query(`UPDATE jobs SET status='failed',failure='muted'
+      WHERE id=? AND status='queued'
+      AND json_extract(notification_context,'$.wake')='ordinary'`)
+        .run(id).changes === 1
+    );
+  }
+
+  /** A preference-store fault backs off only chat; exempt native/cron work may pass. */
+  holdNotification(id: number, until: number) {
+    return (
+      this.db
+        .query(`UPDATE jobs SET notification_held=1,retry_at=?
+      WHERE id=? AND status='queued' AND notification_context IS NOT NULL`)
+        .run(until, id).changes === 1
+    );
   }
 
   /**
@@ -1788,6 +2084,73 @@ export class Store {
       WHERE s.session_id=? AND j.botKey=? LIMIT 1`)
         .get(sessionID, botKey) !== null
     );
+  }
+
+  metaReceipt(registration: string, message: string): MetaReceipt | null {
+    return this.db
+      .query<MetaReceipt, [string, string]>(
+        "SELECT * FROM meta_receipts WHERE registration=? AND message=?",
+      )
+      .get(registration, message);
+  }
+
+  /** Claim before touching the shared waiting file; pending never replays. */
+  claimMeta(
+    input: Pick<
+      MetaReceipt,
+      | "registration"
+      | "message"
+      | "channel"
+      | "thread"
+      | "user"
+      | "at"
+      | "command"
+    >,
+  ): boolean {
+    return (
+      this.db
+        .query(`INSERT OR IGNORE INTO meta_receipts
+      (registration,message,channel,thread,user,at,command) VALUES (?,?,?,?,?,?,?)`)
+        .run(
+          input.registration,
+          input.message,
+          input.channel,
+          input.thread,
+          input.user,
+          input.at,
+          input.command,
+        ).changes === 1
+    );
+  }
+
+  applyMeta(
+    registration: string,
+    message: string,
+    reply: string,
+    oldDelayMs: number | null = null,
+    newDelayMs: number | null = null,
+  ) {
+    const changed = this.db
+      .query(`UPDATE meta_receipts SET state='applied',
+      reply=?,oldDelayMs=?,newDelayMs=? WHERE registration=? AND message=? AND state='pending'`)
+      .run(reply, oldDelayMs, newDelayMs, registration, message).changes;
+    if (changed !== 1) throw new Error("Meta command claim unavailable");
+  }
+
+  deliverMeta(registration: string, message: string) {
+    this.db
+      .query(
+        "UPDATE meta_receipts SET delivered=1 WHERE registration=? AND message=?",
+      )
+      .run(registration, message);
+  }
+
+  /** Only a fresh claim proven to have made no write can be released. */
+  releaseMetaClaim(registration: string, message: string) {
+    this.db
+      .query(`DELETE FROM meta_receipts WHERE registration=? AND message=?
+      AND state='pending' AND delivered=0 AND reply IS NULL`)
+      .run(registration, message);
   }
 
   close() {

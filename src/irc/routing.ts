@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { maxAttachments } from "../attachments";
-import { defaultAllCallWords, type IrcConfig } from "../config";
+import {
+  defaultAllCallWords,
+  effectiveIrcConfig,
+  type IrcConfig,
+} from "../config";
 import { fleetAuthority } from "../fleet-policy";
 import { findMention } from "../mentions";
 import { peerTurnsPerHour } from "../peers";
@@ -110,6 +114,7 @@ export function ircAllowed(
   channel: string,
   caseFold: Fold = rfc1459,
 ) {
+  config = effectiveIrcConfig(config);
   const access = config.access;
   if (
     config.fleetPolicy &&
@@ -146,14 +151,16 @@ function withoutAddress(
   text: string,
   nicks: readonly string[],
   caseFold: Fold,
+  allowAt = false,
 ) {
   for (const nick of nicks) {
-    const prefix = text.slice(0, nick.length);
+    const offset = allowAt && text.startsWith("@") ? 1 : 0;
+    const prefix = text.slice(offset, offset + nick.length);
     if (
       caseFold(prefix) === caseFold(nick) &&
-      /^[:,]\s*/.test(text.slice(nick.length))
+      /^[:,]\s*/.test(text.slice(offset + nick.length))
     )
-      return text.slice(nick.length).replace(/^[:,]\s*/, "");
+      return text.slice(offset + nick.length).replace(/^[:,]\s*/, "");
   }
   return text;
 }
@@ -176,13 +183,25 @@ function addressedToFleetPeer(
     ]),
   ].filter((name) => !own.has(caseFold(name)));
   const body = text.trim();
-  return withoutAddress(body, peers, caseFold) !== body;
+  // A leading list of explicit @mentions may intentionally address several
+  // agents (for example one atomic fleet notice). Prose after it is not a list.
+  const invited: string[] = [];
+  let remainder = body;
+  for (;;) {
+    const next = new RegExp(
+      `^@([${nickCharacters}]+)(?:[:,]?\\s+|[:,]$|$)`,
+    ).exec(remainder);
+    if (!next?.[1]) break;
+    invited.push(caseFold(next[1]));
+    remainder = remainder.slice(next[0].length);
+  }
+  if (invited.some((name) => own.has(name))) return false;
+  return withoutAddress(body, peers, caseFold, true) !== body;
 }
 
 /**
- * Recheck trusted persisted correlation, never marker text, before work
- * and delivery. This also refuses ordinary peer jobs queued by an older
- * results-mode gateway without deleting their records.
+ * Recheck trusted persisted correlation and ordinary explicit peer addressing
+ * before work and delivery. Reserved dispatch labels never become peer chat.
  */
 export function ircResultJobAllowed(
   config: IrcConfig,
@@ -191,7 +210,8 @@ export function ircResultJobAllowed(
   account: string,
   job:
     | Readonly<
-        Pick<Incoming, "fleet"> & Partial<Pick<Incoming, "text" | "channel">>
+        Pick<Incoming, "fleet"> &
+          Partial<Pick<Incoming, "text" | "channel" | "sender" | "textMention">>
       >
     | undefined,
   caseFold: Fold = rfc1459,
@@ -199,8 +219,35 @@ export function ircResultJobAllowed(
   if (!config.fleetControl?.results) return true;
   if (!config.fleetPolicy) return false;
   const authority = fleetAuthority(config.fleetPolicy, account);
-  if (authority === "agent")
-    return job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result";
+  if (authority === "agent") {
+    if (job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result")
+      return true;
+    // @ cannot be an all-call/text alias. Intake stores the exact admitted
+    // connection nick in this existing durable mention field; reconnects and
+    // fallback nick recovery must not erase an accepted recipient.
+    const captured =
+      job?.sender === "captain" && job.textMention?.startsWith("@")
+        ? job.textMention.slice(1)
+        : undefined;
+    const aliases = captured ? [captured] : [currentNick];
+    return (
+      effectiveIrcConfig(config).access.peerCaptains.some(
+        (peer) => caseFold(peer) === caseFold(account),
+      ) &&
+      typeof job?.text === "string" &&
+      !/\[fleet_dispatch\b/i.test(job.text) &&
+      aliases.some((nick) =>
+        mentions(caseFold(job.text ?? ""), caseFold(nick)),
+      ) &&
+      !addressedToFleetPeer(
+        config,
+        member,
+        captured ?? member.nick,
+        job.text,
+        caseFold,
+      )
+    );
+  }
   return (
     authority === "human" &&
     (job?.fleet?.kind === "result" ||
@@ -235,7 +282,8 @@ export function routeIrcMessage(
   message: IrcMessage,
   context: IrcRouteContext,
 ): IrcAdmission | undefined {
-  const { config, member } = context;
+  const config = effectiveIrcConfig(context.config);
+  const { member } = context;
   const caseFold = context.fold;
   if (message.command !== "PRIVMSG") return;
   const account = message.tags.get("account");
@@ -319,7 +367,7 @@ export function routeIrcMessage(
     if (hasReply && !humanWake && !currentMention) return;
   }
   if (
-    human &&
+    (human || fleetPeer) &&
     !humanWake &&
     !(protectedHuman && currentMention) &&
     addressedToFleetPeer(config, member, context.currentNick, body, caseFold)
@@ -355,12 +403,17 @@ export function routeIrcMessage(
     !strict && !direct && config.access.allCallWords.length
       ? findMention([body], config.access.allCallWords)
       : undefined;
-  const mention = allCall ?? named;
+  const recipient =
+    fleetPeer && config.fleetControl?.results
+      ? nicks.find((nick) => mentions(caseFold(body), caseFold(nick)))
+      : undefined;
+  const mention = recipient ? `@${recipient}` : (allCall ?? named);
   const content = withoutAddress(body, nicks, caseFold).trim();
   if (!content) return;
   // Recovery must see the same recipient as intake, including nested
   // addresses such as `captain: vance: ...`; historical rows stay intact.
-  const text = config.fleetControl?.results && human ? body : content;
+  const text =
+    config.fleetControl?.results && (human || fleetPeer) ? body : content;
   const ship = shipAccounts(config, caseFold);
   const sender = ship.has(user)
     ? ("crew" as const)
@@ -422,7 +475,8 @@ export type IrcStopContext = Pick<
  * undoes anything.
  */
 export function routeIrcStop(message: IrcMessage, context: IrcStopContext) {
-  const { config, member } = context;
+  const config = effectiveIrcConfig(context.config);
+  const { member } = context;
   const caseFold = context.fold;
   if (message.command !== "TAGMSG") return;
   const react = message.tags.get("+draft/react");

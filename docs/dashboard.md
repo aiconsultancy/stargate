@@ -1,8 +1,9 @@
 # Fleet dashboard
 
-The dashboard is a read-only web page for the operator. It shows every bot
-registration in one Stargate process as a ship, including Slack, IRC captains
-and crew, and Teams:
+The dashboard is a read-only web page for the operator. Its fleet overview
+shows captains and their Slack, IRC or Teams registrations. Registrations that
+unambiguously share one pinned OpenCode root appear on one captain card, with
+separate links and queue counts for each transport:
 
 - the captain and crew, with current, queued and recent tasks;
 - the Stargate registration: its real transport identity, access rules and backend;
@@ -100,16 +101,32 @@ curl --unix-socket /srv/stargate/.stargate/dashboard.sock http://stargate/api/fl
 
 Each configured registration has its own dashboard ID and existing queue/session
 namespace. An IRC and Teams registration may deliberately share a pinned native
-root; they remain separate dashboard registrations and their mapped conversation
-histories and queue counts are not combined. The shared pinned root is visible
-to both. The dashboard reuses the running backends and connections and starts
-no model work. IRC access/roster reloads update the same view; removed crew
+root. Their fleet rows carry an additive logical-captain display group only when
+the pinned root and full backend fingerprint match and each transport kind is
+unique. Repeated same-kind registrations, including different Teams tenants,
+remain separate rather than guessing a relationship. The group key also binds
+the registrations' existing identity namespaces.
+
+The browser shows one captain card with explicit registration links. Existing
+registration IDs, routes, mapped conversation histories and queue counts remain
+separate; choosing a registration never unions its transcript scope with another.
+The shared pinned root remains visible to both. The dashboard reuses the running backends and connections and starts
+no model work. One successful crew read per logical captain serves its registration
+rows on each fleet request; an exact alias is retried only after a failed or
+unavailable read. IRC access/roster reloads update the same view; removed crew
 registrations disappear after the committed reload.
 
 IRC detail reports server, port, TLS, network, real account/nick, joined channels
 and account/channel policy. Teams reports tenant and bot application IDs plus
 its configured user/channel policy. Neither invents Slack app or workspace IDs.
 Existing Slack detail and its `bot.slack` metadata are unchanged.
+
+The JSON API retains its existing paths and registration rows, including both
+aliases of a shared captain. Fleet crew `total` and `busy` remain context counts;
+additive `people` counts describe distinct visible crew. Detail retains the raw
+`crew` response and adds grouped `crewMembers` without dropping any context or
+task. Optional `captain` metadata supplies the display grouping and registration
+links; it grants no session ownership or cross-tenant access.
 
 The JSON API retains its existing paths. Non-Slack fleet summaries add
 `transport: "irc"` or `"teams"`; their detail uses `bot.transport` with the
@@ -123,6 +140,30 @@ trust arbitrary peers. Keep unavailable gateways explicit and preserve the
 owner's history checks, GET/HEAD-only methods, no-store headers and CSP. Do not
 forward browser credentials to a native engine or convert dashboard identity
 into a new human approval.
+
+## Crew members and project contexts
+
+A configured person appears once in the crew list. Expand their labelled
+repository contexts to see independent current, queued and recent tasks. The
+default context reads ‘Default project’; crew status does not expose its checkout
+directory, which can differ from the captain directory. Other contexts use their
+configured project keys. Four people across five repositories are four
+crew members and twenty project contexts, not twenty people. A person with current tasks
+in two repositories counts once in the current-task people count and twice in the
+legacy busy-context count. Queued-only tasks do not count as current tasks. The
+fleet card also shows the engine’s exact busy-context aggregate, including
+contexts beyond the visible page; legacy partial counts remain marked as lower bounds. These counters describe stored coordinator state,
+not proof that native inference is running. Truncated pages mark people counts as lower bounds.
+
+A crew profile does not imply that a native worker session has already been
+created in every project. An unprovisioned context reads "No worker session yet";
+a ready reservation reads "Recorded". "Live status: Not checked" replaces the
+raw `observed: false` flag. Stored task state does not prove current execution.
+Project summaries keep activity and last outcomes visible; expanding a context
+retains its task history. Active, queued and uncertain contexts expand automatically as polling updates them,
+unless the viewer has explicitly opened or closed that context. Registration
+links retain keyboard focus across refreshes. Viewing this page never provisions
+missing workers.
 
 ## Session history
 

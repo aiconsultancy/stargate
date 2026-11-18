@@ -375,7 +375,9 @@ export class CrewMessaging {
         ({ id }) => id === member,
       );
       if (member !== captain && !definition)
-        throw new CrewError("Unknown configured mail recipient.");
+        throw new CrewError(
+          "Unknown configured mail recipient. Mail addresses this captain and configured crew only; use fleet_status and fleet_dispatch for a configured fleet peer.",
+        );
       if (definition?.backend?.tools === "none") {
         receipts.push({
           to: member,

@@ -161,12 +161,14 @@ describe("dashboard source", () => {
     expect((await f.source.fleet(signal)).ships[0]?.crew).toEqual({
       total: 36,
       busy: 1,
+      people: { total: 20, busy: 0, partial: true },
     });
     f.setCrewStatus({ total: 36, truncated: true, members });
     expect((await f.source.fleet(signal)).ships[0]?.crew).toEqual({
       total: 36,
       busy: 0,
       busyPartial: true,
+      people: { total: 20, busy: 0, partial: true },
     });
   });
   test("fleet and ship views report state without prompt or reply text", async () => {
@@ -200,7 +202,7 @@ describe("dashboard source", () => {
         id: "helper",
         name: "helper",
         backend: "opencode",
-        crew: { total: 2, busy: 1 },
+        crew: { total: 2, busy: 1, people: { total: 2, busy: 1 } },
         queue: { queued: 2, running: 0, responding: 0, done: 0, failed: 0 },
         cronjobs: 1,
       },

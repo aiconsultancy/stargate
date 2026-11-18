@@ -169,6 +169,8 @@ export type FleetReviewAgent = z.infer<typeof reviewAgentSchema>;
 export const fleetTargetSchema = z.strictObject({
   id: identifier,
   account: identifier,
+  /** Explicit routing metadata; omitted/unknown roles never add channel joins. */
+  role: z.enum(["captain", "rear_admiral", "crew"]).optional(),
   channel: z.string().regex(/^#[^\s,\p{Cc}]{1,190}$/u),
   sessionID: identifier,
 });

@@ -9,6 +9,8 @@ import { type BotConfig, botSchema } from "../src/config";
 import { maintenanceSchema } from "../src/nightly/config";
 import { readReady } from "../src/nightly/ready";
 import { queueNotice } from "../src/nightly/report";
+import { NotificationStore } from "../src/notification-store";
+import { notificationKey } from "../src/notifications";
 import { botKey, conversationKey } from "../src/routing";
 import {
   lockInstance,
@@ -143,6 +145,67 @@ function status(path: string, key: string, id: number) {
 async function directory() {
   return mkdtemp(join(tmpdir(), "stargate-runtime-"));
 }
+
+test("pinned Slack runtime reads persisted notification preferences before model admission", async () => {
+  const dataDirectory = await directory();
+  const controller = new AbortController();
+  let running: Promise<void> | undefined;
+  try {
+    const config = bot();
+    if (config.backend.type !== "opencode")
+      throw new Error("Expected OpenCode");
+    config.backend.sessionID = "ses_captain";
+    config.access.textMentions = { channels: ["C123"], names: ["helper"] };
+    const preferences = new NotificationStore(
+      join(dataDirectory, "notifications.sqlite"),
+    );
+    preferences.operate(
+      notificationKey(config, identity),
+      { op: "mute", scope: "thread", channel: "C123", thread_ts: "1.000" },
+      { id: "runtime-mute", caller: "ses_captain", now: Date.now() },
+    );
+    preferences.close();
+    const f = harness();
+    const invoked = Promise.withResolvers<void>();
+    const prompts: string[] = [];
+    f.dependencies.backend = async () => ({
+      sessionID: "ses_captain",
+      async createSession() {
+        return "ses_captain";
+      },
+      async prompt(_session, text) {
+        prompts.push(text);
+        invoked.resolve();
+        return "Answer.";
+      },
+      async close() {},
+    });
+    running = Effect.runPromise(
+      serve(
+        { dataDirectory, bots: [config] },
+        silent,
+        controller.signal,
+        f.dependencies,
+      ),
+    );
+    await f.started;
+    expect(await f.intake().accept(event("helper inspect"))).toBe(false);
+    const request = event("<@UBOT> inspect", "2.000");
+    expect(
+      await f.intake().accept({
+        ...request,
+        event: { ...request.event, thread_ts: "1.000" },
+      }),
+    ).toBe(true);
+    await invoked.promise;
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("[Notification wake:");
+  } finally {
+    controller.abort();
+    await running;
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
 
 test("shutdown closes intake before workers drain and backends close", async () => {
   const dataDirectory = await directory();

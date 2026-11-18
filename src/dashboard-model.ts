@@ -36,15 +36,39 @@ export type DashboardTransport =
     }
   | { kind: "teams"; tenantId: string; botClientId: string };
 
+export type DashboardCaptain = {
+  /** Display grouping only; never an alias for session or queue ownership. */
+  key: string;
+  id: string;
+  name: string;
+  registrations: {
+    id: string;
+    name: string;
+    transport: "slack" | DashboardTransport["kind"];
+  }[];
+};
+export type DashboardCrewMember = {
+  id: string;
+  name: string;
+  contexts: CrewStatus["members"];
+};
+
 export type ShipSummary = {
-  /** Configured bot ID; one bot registration is one ship. */
+  /** Configured registration ID; existing routes keep their own scope. */
   id: string;
   name: string;
   backend: "opencode" | "pi-durable" | "claude" | "codex" | "module";
   transport?: DashboardTransport["kind"];
   agent?: string;
   /** Null when this backend has no crew or its status read failed. */
-  crew: { total: number; busy: number; busyPartial?: true } | null;
+  crew: {
+    /** Legacy totals count member/project contexts, not distinct people. */
+    total: number;
+    busy: number;
+    busyPartial?: true;
+    people?: { total: number; busy: number; partial?: true };
+  } | null;
+  captain?: DashboardCaptain;
   queue: QueueCounts;
   cronjobs: number;
 };
@@ -95,6 +119,8 @@ export type ShipView = {
   };
   /** Null when unavailable; `crewError` then holds a safe reason. */
   crew: CrewStatus | null;
+  crewMembers?: DashboardCrewMember[];
+  captain?: DashboardCaptain;
   crewError?: string;
   queue: { counts: QueueCounts; recent: JobView[] };
   cron: {

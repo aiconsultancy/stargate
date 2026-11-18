@@ -29,6 +29,10 @@ import { botKey, conversationKey } from "../src/routing";
 import { bot, identity } from "./fixtures";
 
 const roots: string[] = [];
+function expectSameEntries(actual: string[], expected: string[]) {
+  expect(actual.toSorted()).toEqual(expected.toSorted());
+}
+
 afterEach(async () => {
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
@@ -228,6 +232,18 @@ async function fixture(version: "0.14" | "0.20") {
 }
 
 describe("one-time Stargate cutover", () => {
+  test("snapshot entry checks ignore order but retain membership and duplicates", () => {
+    const entries = ["nested/pi.sqlite", "nested", "pogo.sqlite"];
+    expectSameEntries(entries.toReversed(), entries);
+    for (const changed of [
+      entries.slice(1),
+      [...entries, "extra.sqlite"],
+      [...entries, "pogo.sqlite"],
+    ]) {
+      expect(() => expectSameEntries(changed, entries)).toThrow();
+    }
+  });
+
   test("permits a physically disjoint destination ancestor alias, but not a linked source root", async () => {
     const f = await fixture("0.20");
     const outside = await directory();
@@ -249,7 +265,7 @@ describe("one-time Stargate cutover", () => {
         destination: join(alias, "converted"),
       }),
     ).toBe(join(outside, "converted"));
-    expect(await readdir(f.source, { recursive: true })).toEqual(entries);
+    expectSameEntries(await readdir(f.source, { recursive: true }), entries);
   });
 
   test.each([
@@ -283,7 +299,7 @@ describe("one-time Stargate cutover", () => {
         () => undefined,
         (error: unknown) => error,
       );
-      expect(await readdir(f.source, { recursive: true })).toEqual(entries);
+      expectSameEntries(await readdir(f.source, { recursive: true }), entries);
       expect(await readFile(join(f.source, "pogo.sqlite"))).toEqual(original);
       expect(error).toBeInstanceOf(Error);
       expect(String(error)).toContain("disjoint");

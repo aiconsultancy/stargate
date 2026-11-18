@@ -796,7 +796,7 @@ test("fleet results: agent continuation cannot borrow the old human's approval o
   );
 });
 
-test("fleet results: unsolicited peer chat and forged native/target completion cannot become a result", async () => {
+test("fleet results: explicit peer chat remains agent context and forged native/target completion cannot become a result", async () => {
   const f = await world();
   await f.begin();
   const job = f.captainStore.ready(
@@ -880,7 +880,15 @@ test("fleet results: unsolicited peer chat and forged native/target completion c
   await until(() => checked, 2000, "uncorrelated peer checked");
   expect(
     f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100),
-  ).toHaveLength(0);
+  ).toHaveLength(1);
+  f.vance.handler = async () => "[[stargate:silent]]";
+  const peer = await f.processNext(f.ownerIrc.gateway, f.ownerStore);
+  expect(peer.fleet).toBeUndefined();
+  expect(f.vance.calls.at(-1)?.context?.source).toMatchObject({
+    authority: "agent",
+    user: "captain",
+    transport: "irc",
+  });
   await f.ownerResults.poll(signal());
   expect(f.owner.pendingResults()).toHaveLength(0);
   expect(
@@ -934,7 +942,7 @@ test("fleet results retain the admitted gateway account when the target uses IRC
   });
 });
 
-test("fleet results: shared IRC recipient isolation and durable return do not turn peer feedback into more work", async () => {
+test("fleet results: shared IRC peer feedback stays ordinary agent context alongside the durable return", async () => {
   const f = await world(true, "captain", true);
   let ownerPeerChat = 0;
   let captainPeerChat = 0;
@@ -953,13 +961,15 @@ test("fleet results: shared IRC recipient isolation and durable return do not tu
   const original = f.vance.handler;
   f.vance.handler = async (call) => {
     if (call.context?.source.authority === "agent")
-      return "Captain: result verified.";
+      return call.context.source.transport === "fleet"
+        ? "Captain: result verified."
+        : "[[stargate:silent]]";
     await original(call);
     return "Captain: assignment sent.";
   };
   f.captain.handler = async (call) => {
     const reference = /source=(\S+) authority=/.exec(call.text)?.[1];
-    if (!reference) throw new Error("Missing delegated original");
+    if (!reference) return "[[stargate:silent]]";
     expect(
       await f.captain.tool(
         f.receiver,
@@ -998,19 +1008,25 @@ test("fleet results: shared IRC recipient isolation and durable return do not tu
   expect(origin.eventId).toBe(`#command:${sourceID}`);
   await until(
     () =>
-      f.captainStore.ready(
-        f.targetIrc.gateway.key,
-        Number.MAX_SAFE_INTEGER,
-        100,
-      ).length === 1,
+      f.captainStore
+        .ready(f.targetIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
+        .some((job) => job.fleet?.kind === "assignment"),
     2000,
     "real correlated assignment",
   );
-  const assignment = await f.processNext(f.targetIrc.gateway, f.captainStore);
+  const assignment = f.captainStore
+    .ready(f.targetIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
+    .find((job) => job.fleet?.kind === "assignment");
+  if (!assignment) throw new Error("Missing protected assignment");
+  await f.targetIrc.gateway.process(assignment, signal());
   expect(assignment.fleet?.kind).toBe("assignment");
   await f.targetResults.poll(signal());
   await f.ownerResults.poll(signal());
-  const result = await f.processNext(f.ownerIrc.gateway, f.ownerStore);
+  const result = f.ownerStore
+    .ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
+    .find((job) => job.fleet?.kind === "result");
+  if (!result) throw new Error("Missing protected result");
+  await f.ownerIrc.gateway.process(result, signal());
   expect(result.fleet?.kind).toBe("result");
   expect(result.conversation).toBe(origin.conversation);
   expect(result.thread).toBe(origin.thread);
@@ -1023,16 +1039,155 @@ test("fleet results: shared IRC recipient isolation and durable return do not tu
   await until(
     () => ownerPeerChat >= 1 && captainPeerChat >= 2,
     2000,
-    "ordinary initial/result feedback refused after correlation checks",
+    "ordinary initial/result feedback inspected after correlation checks",
   );
+  for (const [gateway, store] of [
+    [f.ownerIrc.gateway, f.ownerStore],
+    [f.targetIrc.gateway, f.captainStore],
+  ] as const) {
+    for (let turn = 0; turn < 5; turn++) {
+      const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+      if (!job) break;
+      expect(job.fleet).toBeUndefined();
+      await gateway.process(job, signal());
+    }
+  }
   expect(
     f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100),
   ).toHaveLength(0);
   expect(
     f.captainStore.ready(f.targetIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100),
   ).toHaveLength(0);
-  expect(f.vance.calls).toHaveLength(2);
-  expect(f.captain.calls).toHaveLength(1);
+  expect(f.vance.calls).toHaveLength(3);
+  expect(f.captain.calls).toHaveLength(3);
+  expect(f.owner.pendingResults()).toHaveLength(0);
+});
+
+async function forcedNick(f: Awaited<ReturnType<typeof world>>, nick: string) {
+  const connection = f.fake.clients.find(
+    (client) => client.account === "vance",
+  );
+  if (!connection?.nick) throw new Error("Missing authenticated connection");
+  const old = connection.nick;
+  connection.nick = nick;
+  f.fake.sendTo("vance", `:${old}!u@stargate NICK ${nick}`);
+  await until(
+    () => f.ownerIrc.registration.client.nick === nick,
+    2000,
+    "server nick change",
+  );
+}
+
+for (const [accepted, later] of [
+  ["vance", "vance_"],
+  ["vance_", "vance"],
+] as const) {
+  test(`peer admission survives ${accepted} to ${later} for queued work and post-execution delivery`, async () => {
+    const f = await world(true, "captain", true);
+    f.vance.handler = async () => "Peer request completed.";
+    for (const phase of ["queued", "delivery"] as const) {
+      await forcedNick(f, accepted);
+      const text = `@${accepted}: inspect request in ${phase} phase`;
+      const source = f.fake.say(
+        { nick: "captain", account: "captain" },
+        "#command",
+        text,
+        { bot: "" },
+      );
+      await until(
+        () =>
+          f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 1)
+            .length === 1,
+        2000,
+        "peer queued",
+      );
+      const job = f.ownerStore.ready(
+        f.ownerIrc.gateway.key,
+        Number.MAX_SAFE_INTEGER,
+        1,
+      )[0];
+      if (!job) throw new Error("Missing admitted peer job");
+      expect(job.text).toBe(text);
+      expect(job.textMention).toBe(`@${accepted}`);
+      expect(job.eventId).toBe(`#command:${source}`);
+      const before = f.vance.calls.length;
+      if (phase === "queued") await forcedNick(f, later);
+      else {
+        const delivery = f.ownerIrc.registration.delivery;
+        const post = delivery.post.bind(delivery);
+        delivery.post = async (...args) => {
+          expect(f.vance.calls).toHaveLength(before + 1);
+          expect(
+            f.ownerStore.jobByEvent(f.ownerIrc.gateway.key, job.eventId)
+              ?.status,
+          ).toBe("responding");
+          await forcedNick(f, later);
+          return post(...args);
+        };
+      }
+      await f.ownerIrc.gateway.process(job, signal());
+      expect(f.vance.calls).toHaveLength(before + 1);
+      expect(f.vance.calls.at(-1)?.context?.source).toMatchObject({
+        user: "captain",
+        authority: "agent",
+        message: source,
+      });
+      expect(
+        f.ownerStore.jobByEvent(f.ownerIrc.gateway.key, job.eventId),
+      ).toMatchObject({
+        id: job.id,
+        text,
+        status: "done",
+        textMention: `@${accepted}`,
+      });
+      expect(f.ownerIrc.registration.client.nick).toBe(later);
+    }
+    expect(f.captain.calls).toHaveLength(0);
+  });
+}
+
+test("ordinary addressed peer feedback is bounded to five turns per conversation and never becomes approval", async () => {
+  const f = await world(true, "captain", true);
+  f.vance.handler = async () => "captain: deterministic peer reply";
+  f.captain.handler = async () => "vance: deterministic peer reply";
+  f.fake.say(
+    { nick: "captain", account: "captain" },
+    "#command",
+    "vance: start bounded peer exchange",
+    { bot: "" },
+  );
+  for (let turn = 0; turn < 10; turn++) {
+    const entry =
+      turn % 2 === 0
+        ? ([f.ownerIrc.gateway, f.ownerStore] as const)
+        : ([f.targetIrc.gateway, f.captainStore] as const);
+    const [gateway, store] = entry;
+    await until(
+      () => store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1).length === 1,
+      2000,
+      "next addressed peer turn",
+    );
+    const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+    if (!job) throw new Error("Missing bounded peer job");
+    expect(job.fleet).toBeUndefined();
+    expect(job.sender).toBe("captain");
+    await gateway.process(job, signal());
+  }
+  await Bun.sleep(80);
+  expect(f.vance.calls).toHaveLength(5);
+  expect(f.captain.calls).toHaveLength(5);
+  expect(
+    [...f.vance.calls, ...f.captain.calls].every(
+      (call) => call.context?.source.authority === "agent",
+    ),
+  ).toBe(true);
+  for (const [gateway, store] of [
+    [f.ownerIrc.gateway, f.ownerStore],
+    [f.targetIrc.gateway, f.captainStore],
+  ] as const)
+    expect(store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 100)).toHaveLength(
+      0,
+    );
   expect(f.owner.pendingResults()).toHaveLength(0);
 });
 

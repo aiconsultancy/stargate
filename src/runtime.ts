@@ -45,6 +45,8 @@ import { controlInteractions } from "./interactions";
 import { type IrcRegistration, IrcShip } from "./irc/ship";
 import { MaintenanceOutbox } from "./nightly/outbox";
 import { writeReady } from "./nightly/ready";
+import { NotificationStore } from "./notification-store";
+import { notificationKey } from "./notifications";
 import { PairingUI } from "./pairing";
 import { PeerDirectory } from "./peers";
 import { QuotaReader } from "./quota";
@@ -354,6 +356,41 @@ export function serve(
                 identity.team,
               )
             : undefined,
+          undefined,
+          bot.backend.type === "opencode" && bot.backend.sessionID
+            ? (channel, thread) => {
+                const preferences = new NotificationStore(
+                  join(config.dataDirectory, "notifications.sqlite"),
+                );
+                try {
+                  return preferences.status(
+                    notificationKey(currentBot, identity),
+                    channel,
+                    thread,
+                  );
+                } finally {
+                  preferences.close();
+                }
+              }
+            : undefined,
+          {
+            listMutes: () => {
+              const preferences = new NotificationStore(
+                join(config.dataDirectory, "notifications.sqlite"),
+              );
+              try {
+                const result = preferences.operate(
+                  notificationKey(currentBot, identity),
+                  { op: "list" },
+                  { id: "meta-list", caller: "gateway", now: Date.now },
+                );
+                if (result.op !== "list") throw new Error("Expected mute list");
+                return result;
+              } finally {
+                preferences.close();
+              }
+            },
+          },
         );
         const cron = new CronScheduler(
           bot,

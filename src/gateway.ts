@@ -29,6 +29,8 @@ import { fleetResultSource } from "./fleet/results";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
 import { textMentionNote } from "./mentions";
+import { MetaCommands, type MetaOptions, metaCandidate } from "./meta-commands";
+import { type NotificationReader, notificationNote } from "./notifications";
 import {
   botSender,
   type PeerDirectory,
@@ -223,7 +225,7 @@ export type GatewayConfig =
 /** Immutable access context; scheduled/catch-up scopes may have no job. */
 export type GatewayAccessContext = Readonly<
   Pick<Incoming, "user" | "channel" | "sender" | "fleet"> &
-    Partial<Pick<Incoming, "text">>
+    Partial<Pick<Incoming, "text" | "eventId">>
 >;
 
 /** Transport rules the gateway applies to every job of one registration. */
@@ -288,6 +290,7 @@ export function slackTransport(
 }
 
 export class Gateway {
+  private readonly meta: MetaCommands;
   private readonly activity: ActivityDelivery;
   private readonly cancellations = new Map<number, AbortController>();
   /** Conversations needing catch-up, with read-retry backoff state. */
@@ -302,6 +305,8 @@ export class Gateway {
   private transport: GatewayTransport;
   private paused = false;
   private active = 0;
+  private notificationFault = false;
+  private mutedAdmissions = 0;
   /** Every job a worker holds, with the transport rules of its start. */
   private readonly turnPolicies = new Map<number, GatewayTransport>();
   readonly key: string;
@@ -320,7 +325,11 @@ export class Gateway {
     private readonly peers?: PeerDirectory,
     /** Defaults to Slack rules for a Slack `BotConfig`. */
     transport?: GatewayTransport,
+    /** Separate Slack preferences, never a reply-delivery access rule. */
+    private readonly notifications?: NotificationReader,
+    metaOptions?: MetaOptions,
   ) {
+    this.meta = new MetaCommands(store, slack, metaOptions);
     this.bot = "slack" in config ? config : undefined;
     const selected =
       transport ?? (this.bot ? slackTransport(this.bot, identity) : undefined);
@@ -411,9 +420,10 @@ export class Gateway {
   }
 
   accept(body: unknown, peer?: PeerSender, resumesThread = false) {
+    if (metaCandidate(body, this.identity)) return false;
     const bot = this.bot;
     if (!bot) return false;
-    const routed = routeEvent(body, bot, this.identity, peer);
+    const routed = this.route(body, peer);
     if (!routed) return false;
     const followed = resumesThread || this.store.follows(routed.conversation);
     // A voice message in a thread the bot follows keeps today's behaviour,
@@ -440,6 +450,100 @@ export class Gateway {
     return this.store.enqueue(input);
   }
 
+  private route(body: unknown, peer?: PeerSender) {
+    const bot = this.bot;
+    if (!bot) return;
+    let muted = false;
+    try {
+      const routed = routeEvent(
+        body,
+        bot,
+        this.identity,
+        peer,
+        this.notifications
+          ? (channel, thread) => {
+              const state = this.notifications?.(channel, thread);
+              if (!state) throw new Error("Notification reader unavailable");
+              this.notificationFault = false;
+              muted = state.mode === "addressed-only";
+              return state;
+            }
+          : undefined,
+      );
+      if (!routed && muted) {
+        this.mutedAdmissions = Math.min(
+          Number.MAX_SAFE_INTEGER,
+          this.mutedAdmissions + 1,
+        );
+        // Bounded counters, no persistent row or message body for ignored traffic.
+        if (
+          this.mutedAdmissions === 1 ||
+          Number.isInteger(Math.log2(this.mutedAdmissions))
+        )
+          this.log.debug(
+            { count: this.mutedAdmissions },
+            "Muted Slack notification not admitted",
+          );
+      }
+      return routed;
+    } catch {
+      this.notificationUnavailable();
+      // Transient preference faults must not ACK and lose the live event.
+      throw new Error("Notification preferences unavailable; retry admission.");
+    }
+  }
+
+  private notificationUnavailable() {
+    if (!this.notificationFault)
+      this.log.warn(
+        "Notification preferences unavailable; Slack chat admission held",
+      );
+    this.notificationFault = true;
+  }
+
+  private notificationDispatch(job: Job): Job | undefined {
+    if (
+      job.status !== "queued" ||
+      !job.notification ||
+      !this.notifications ||
+      job.channel.startsWith("D")
+    )
+      return job;
+    try {
+      const state = this.notifications(job.channel, job.thread);
+      this.notificationFault = false;
+      if (
+        state.mode === "addressed-only" &&
+        job.notification.wake === "ordinary"
+      ) {
+        if (!this.store.suppressNotification(job.id)) this.refused(job, "mute");
+        return;
+      }
+      return {
+        ...job,
+        notification: {
+          wake: job.notification.wake,
+          ...(state.mode === "addressed-only" &&
+          job.notification.wake !== "ordinary"
+            ? {
+                note: notificationNote(
+                  job.channel,
+                  job.thread,
+                  job.notification.wake,
+                  state,
+                ),
+              }
+            : {}),
+        },
+      };
+    } catch {
+      this.notificationUnavailable();
+      // Keep the queued row; neither fail open nor turn a storage fault into a mute.
+      this.store.holdNotification(job.id, Date.now() + 5000);
+      return;
+    }
+  }
+
   /**
    * Slack intake. A bot message is admitted only after Slack's directory
    * proves a peer captain; a failed or slow lookup admits nothing. `open` is
@@ -448,6 +552,16 @@ export class Gateway {
   async receive(body: unknown, open: () => boolean = () => true) {
     const bot = this.bot;
     if (!bot || !open()) return false;
+    const meta = this.meta.receive(
+      body,
+      bot,
+      this.identity,
+      () => open() && this.bot === bot,
+    );
+    if (meta !== false) {
+      await meta;
+      return false;
+    }
     const sender = botSender(body);
     if (sender && bot.access.peerCaptains && this.peers) {
       const verified = await this.peers
@@ -457,7 +571,7 @@ export class Gateway {
       return this.accept(body, verified ? sender : undefined);
     }
     if (bot.resumeSlackThreads && this.slack.threadContext && !sender) {
-      const input = routeEvent(body, bot, this.identity);
+      const input = this.route(body);
       if (!input) return false;
       const before = input.eventId.slice(input.channel.length + 1);
       if (
@@ -1179,14 +1293,19 @@ export class Gateway {
         this.refused(held, "finish");
       return;
     }
+    const pending = this.notificationDispatch(held);
+    if (!pending) return;
     // A transcript held only in this call; a restart transcribes again.
     let heard: Awaited<ReturnType<typeof transcribeMedia>> | undefined;
     if (held.status === "queued" && held.gate === "spoken") {
       heard = await this.hear(held, shutdown, { config, bot, transcriber });
       if (!heard) return;
     }
+    const classified =
+      held.gate === "spoken" ? this.notificationDispatch(pending) : pending;
+    if (!classified) return;
     const job: Job =
-      held.gate === "spoken" ? { ...held, gate: "admitted" } : held;
+      held.gate === "spoken" ? { ...classified, gate: "admitted" } : classified;
     const readReceipt = async (active: boolean) => {
       if (
         bot?.slackReadReceipts &&
@@ -1210,7 +1329,9 @@ export class Gateway {
     let output: ReplyChunk[];
     let failure = job.failure ?? undefined;
     if (job.status === "queued") {
-      if (!this.store.running(job.id)) return;
+      // Intake may have extended a queued IRC burst after ready() returned.
+      // Refuse a stale snapshot; the next poll reads its full text and files.
+      if (!this.store.running(job.id, job.text)) return;
       await readReceipt(true);
       // Ends before delivery, so a typing indicator never outlasts the turn.
       const typing = new AbortController();
@@ -1296,6 +1417,8 @@ export class Gateway {
           const pinned = this.backend.sessionID;
           session = pinned ? undefined : this.store.session(job.conversation);
           let text = job.text;
+          if (job.notification?.note)
+            text = `${job.notification.note}\n\n${text}`;
           const instructions = transport.instructions?.(job);
           if (instructions) text = `${instructions}\n\n${text}`;
           // Chat messages only. Digest runs have no thread.
@@ -1640,7 +1763,7 @@ export class Gateway {
   }
 
   /** The store refused a transition: the job is not in the expected status. */
-  private refused(job: Job, transition: "finish" | "sent" | "retry") {
+  private refused(job: Job, transition: "finish" | "sent" | "retry" | "mute") {
     this.log.error(
       { job: job.id, transition },
       "Job transition refused; nothing was written",

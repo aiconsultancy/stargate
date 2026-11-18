@@ -1784,7 +1784,7 @@ export class CrewEngine {
       ? await this.inspectionAPI({ ...caller, signal }).catch(() => null)
       : null;
     let placement: Placement = api
-      ? await observePlacement(api, task, signal)
+      ? await observePlacement(api, task, signal, member.agent ?? task.crewID)
       : "unknown";
     let withdrawn = false;
     if (placement === "queued" && api?.session.inbox.cancel) {
@@ -1794,7 +1794,12 @@ export class CrewEngine {
           { signal },
         )
         .catch(() => {});
-      placement = await observePlacement(api, task, signal);
+      placement = await observePlacement(
+        api,
+        task,
+        signal,
+        member.agent ?? task.crewID,
+      );
       withdrawn = placement === "absent";
     }
     const settled = async (ms: number) => {
@@ -1867,7 +1872,12 @@ export class CrewEngine {
       () => null,
     );
     const placement = api
-      ? await observePlacement(api, task, signal)
+      ? await observePlacement(
+          api,
+          task,
+          signal,
+          this.member(task.crewID).agent ?? task.crewID,
+        )
       : "unknown";
     caller.signal.throwIfAborted();
     const admitted = placement === "queued" || placement === "placed";
@@ -2189,7 +2199,12 @@ export class CrewEngine {
         // A lost receipt is not a lost input: correlate the persisted inputID.
         const api = await this.inspectionAPI(caller).catch(() => null);
         const placement = api
-          ? await observePlacement(api, task, caller.signal)
+          ? await observePlacement(
+              api,
+              task,
+              caller.signal,
+              member.agent ?? task.crewID,
+            )
           : "unknown";
         if (placement === "queued" || placement === "placed") {
           this.state.running(task.id);

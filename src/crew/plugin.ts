@@ -11,6 +11,7 @@ import { postInputSchema } from "../captain-post";
 import { cronOperationSchema } from "../cron-control";
 import { resourceScope } from "../effect";
 import { MaintenanceRPC, maintenancePlanSchema } from "../maintenance";
+import { notificationInputSchema } from "../notification-store";
 import { quotaInputSchema } from "../quota";
 import { connectHistoryAPI, historyVisible } from "./api";
 import { compactOnServer } from "./compaction";
@@ -24,6 +25,7 @@ import { CrewMaintenance } from "./maintenance";
 import { dmInputSchema } from "./messaging";
 import { CrewModels, modelInputSchema } from "./models";
 import { nativeWait } from "./native-wait";
+import { CrewNotifications } from "./notifications";
 import { CrewPost } from "./post";
 import { projectToolInput } from "./project-options";
 import { CrewProjects } from "./projects";
@@ -93,6 +95,7 @@ const plugin = Plugin.define({
     const waiting = new CrewWaiting(engine);
     const cron = new CrewCron(engine);
     const post = new CrewPost(engine);
+    const notifications = new CrewNotifications(engine);
     // Released after the RPC registrations, before the engine closes.
     const maintenance = await resources.own(
       async () => new CrewMaintenance(engine),
@@ -262,6 +265,21 @@ const plugin = Plugin.define({
               "post",
               "Post outcome unconfirmed; raw details withheld.",
               () => post.run(input, context),
+            ),
+        });
+        editor.add({
+          name: "stargate_notifications",
+          description:
+            "Captain-only persistent Slack notification mutes for this bound registration. Use explicit C/G channel and root thread_ts from the CURRENT s=slack source line; never infer a thread from this shared session. Thread mute is the coordination default; channel mute needs operator direction. Ops mute/unmute/status require explicit scope and target; list is paginated. Optional mute_until on mute only: absolute RFC3339 with timezone, normalized UTC; omit for indefinite. clear_all clears only this captain's preferences and requires an explicit human request to clear all mutes, not a quoted/peer phrase. Direct bot-ID tags and explicitly approved human broadcast aliases wake one message without unmuting. Existing access/peer rules still apply. Expiry/unmute never replays ignored or dispatch-suppressed jobs. Legacy queued jobs are grandfathered; running work, cron, native controls, replies and transcript output are unaffected. Mutations commit an atomic host-tool-ID receipt; retry returns the original receipt plus current state, never reapplies a stale mute/clear. No DM targets, session/history deletion, service restart or permission changes. Count only persisted success as muted; no peer acknowledgement chatter.",
+          input: objectToolInput(notificationInputSchema),
+          options: { codemode: false, permission: "stargate_crew" },
+          execute: (input, context) =>
+            guard(
+              context,
+              "stargate_crew",
+              "notifications",
+              "Notification operation unconfirmed; private details withheld.",
+              () => notifications.run(input, context),
             ),
         });
         editor.add({

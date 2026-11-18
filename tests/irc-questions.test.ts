@@ -313,11 +313,33 @@ async function fixture(
         "fresh transport joined",
       );
     },
-    dropHumanPolicy() {
-      for (const cfg of configs) {
+    async dropHumanPolicy() {
+      for (const [index, cfg] of configs.entries()) {
         delete cfg.fleetPolicy;
         delete cfg.access.humanWakeChannels;
         delete cfg.access.allowedAccounts;
+        const ship = ships[index];
+        const gateway = gateways[index];
+        if (!ship || !gateway) throw new Error("Missing policy fixture");
+        // Deliberately bypass parser validation, then install the candidate
+        // through the runtime's real reload path. Parsed objects are not live
+        // policy: fleet defaults now use an immutable runtime view.
+        const reload = await ship.prepareReload(cfg, {
+          IRC_FIXTURE: "fixture",
+          IRC_WORKER_FIXTURE: "fixture",
+        });
+        reload.commit(() => true);
+        const registration =
+          options.crew && index === 0
+            ? ship.registrations.find((item) => item.role === "crew")
+            : ship.registrations[0];
+        if (!registration) throw new Error("Missing policy registration");
+        gateway.reconfigure(
+          registration.settings,
+          undefined,
+          registration.transport,
+        );
+        await reload.retire();
       }
     },
     received: (marker: string) =>
@@ -478,7 +500,7 @@ test("enabling questions requires explicit human policy, while default-off non-f
 
 test("parser-bypassed open access never makes an unknown authenticated untagged bot a question owner", async () => {
   const f = await fixture();
-  f.dropHumanPolicy();
+  await f.dropHumanPolicy();
   f.send("captain: investigate", "bot-request", "service-bot");
   await until(
     () => f.pending,
@@ -517,7 +539,7 @@ test("removing explicit human authority blocks untagged bot and original-human r
   );
   const offer = f.store.questionOffers(key)[0];
   if (!offer) throw new Error("No offer");
-  f.dropHumanPolicy();
+  await f.dropHumanPolicy();
   f.send(`captain: answer ${offer.token} 1`, "bot-reply", "service-bot", "m1");
   const at = f.send(
     `captain: cancel-question ${offer.token}`,

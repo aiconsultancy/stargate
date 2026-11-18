@@ -1,7 +1,7 @@
 # OpenCode captain/crew profiles
 
 Stargate's **opt-in OpenCode agent profile** uses CLIProxyAPI and a Slack-facing
-captain. Without `--team`, the starter captain is Bowser. It does not change
+captain. New ships require an explicit `--team`, including a Pi helper. It does not change
 the gateway's fail-closed permission defaults. Use this profile only for
 trusted Slack users: the coding
 crew can edit files and run commands under the OpenCode service's OS account.
@@ -74,9 +74,18 @@ thread with `stargate_post`, instead of asking an operator to relay. It uses the
 until the bot sets `captainPost`. Crew cannot use it. See
 [captain posts](../captain-post.md).
 
+The bound root Slack captain can use `stargate_notifications` to mute its own
+registration's threads or channels. The tool uses the existing `cron` binding
+and normal tool permissions; it does not grant new global permissions. See
+[notification muting](../notifications.md) for targets, wakes and limits.
+
 Copy [`team.example.json`](../../team.example.json), a portable Galactica team
-with captain `adama` and four workers, including researcher `gaeta` and ship
-maintenance worker `bosun`:
+with captain `adama`, four OpenCode workers and a tools-off Pi helper, `twiki`.
+Choose ship-specific names and verify the helper's provider endpoint, model and
+credential reference before provisioning. The example is not a ready worker:
+`STARGATE_PI_HELPER_API_KEY` must be supplied securely in the OpenCode plugin
+host's environment. Setup does not read another ship's credentials, configure
+a provider, or select a paid/native fallback.
 
 ```sh
 stargate crew init --team team.example.json --id galactica \
@@ -231,8 +240,26 @@ only during an operator-approved rollout.
 
 ## Pi Durable crew
 
+A new ship's `crew init` requires at least one Pi member with an explicit
+`backend.model` and `backend.provider` (`baseURL` and `apiKeyEnv`). Missing
+configuration fails before setup writes files or creates worktrees. The
+runtime's legacy Bowser starter roster and existing team schemas stay unchanged;
+this setup rule does not append members to an implicit existing roster. Existing
+profiles use the approved append-only procedure below, not `crew init` to
+overwrite their overlays.
+
+The standard helper starts with `tools: "none"` for captain-supplied reports.
+The captain supplies status, results and journal excerpts in the assignment;
+the helper cannot inspect crew state or use Mesij itself. Add host coding tools
+only through an explicit approved opt-in. A role or `permissionProfile` does not
+enable Pi tools. No schedule, extra Slack app or IRC account is created.
+Verify proxy model availability and the credential reference's presence in the
+actual plugin host before `ensure`; a generated profile is not proof of durable
+session readiness or a successful model request.
+
 A crew member can opt into Pi Durable with `backend`. Other members remain
-OpenCode workers. For example, add this member to the team's `crew` array:
+OpenCode workers. For a separately approved coding-enabled helper, add this
+member to the team's `crew` array (not the default tools-off pattern):
 
 ```json
 {
