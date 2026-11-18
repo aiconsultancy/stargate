@@ -641,3 +641,31 @@ Human viewing is supported through OpenCode's session selector or
 its crew owns an active task. Never use `--standalone` to find these sessions.
 
 [compaction]: https://opencode.ai/v2/docs/compaction
+
+### Resume a retained OpenCode task
+
+Resume is off by default. Set `exclusiveWorkerInput: true` in the crew
+plugin options or `STARGATE_CREW_EXCLUSIVE_INPUT=1` in the OpenCode service
+environment only for a protected deployment where Stargate owns worker
+input. Restrict native API access and credentials to the service and its
+trusted operator, and coordinate any operator writes outside the resume
+window. The environment setting applies to every crew project inside that
+OpenCode process. A flag alone does not restrict native OpenCode clients. Use a
+separate managed worker session from any interactive OpenCode session.
+
+If status reports an owned task as `uncertain` and the worker is idle, inspect
+that exact task with `stargate_crew`. Use `op: "resume"` with its `taskID` and
+an `expected` object containing `workerSessionID`, `originCaptainID`, `inputID`
+and the inspected `execution.time.idle` as `idleAt`. Keep the project selector
+when the task belongs to another configured workspace.
+
+Stargate checks the worker and original assignment, refuses pending native work
+or a later unrelated input, and reports any retained final answer for collection.
+Otherwise it records one attempt for that idle boundary and sends a continuation
+to the original session. The worker reads task mail and resumes from its saved
+progress. Use `status` on the same task to observe the run or collect the result.
+If admission is uncertain, inspect the existing session before taking another
+action. An exact retry for the same idle boundary uses the same native message
+ID, which OpenCode admits once. Stargate queues the continuation so it cannot
+steer an active turn.
+This operation applies to OpenCode crew tasks.

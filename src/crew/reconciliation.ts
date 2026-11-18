@@ -11,6 +11,7 @@ import type { CrewSession } from "./engine";
 import { isNativeInstructionContext } from "./instruction-context";
 import {
   crewMessageMetadataKey,
+  isTaskResume,
   taskEnvelopePayload,
 } from "./message-protocol";
 import {
@@ -41,6 +42,19 @@ export const reconcileInputSchema = z.strictObject({
   resultSha256: z.string().regex(/^[a-f0-9]{64}$/),
   reason: z.string().trim().min(1).max(2000),
 });
+/** Captain continuation of one verified, idle native assignment. */
+export const resumeInputSchema = z.strictObject({
+  op: z.literal("resume"),
+  taskID: z.string().startsWith("task_").max(100),
+  expected: z.strictObject({
+    workerSessionID: id,
+    originCaptainID: id,
+    inputID: id,
+    idleAt: z.number().int().safe().positive(),
+  }),
+});
+export type ResumeInput = z.infer<typeof resumeInputSchema>;
+
 /** Captain override for blocked slots. Copy expected fields from inspect. */
 export const abandonInputSchema = z.strictObject({
   op: z.literal("abandon"),
@@ -223,11 +237,29 @@ async function* newest(
   throw new CrewError("History bound exceeded.");
 }
 
+/** Check native admission before a same-boundary retry; never submit a new ID. */
+export async function resumeAdmitted(
+  api: CrewInspectionAPI,
+  sessionID: string,
+  messageID: string,
+  idleAt: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const inbox = await api.session.inbox.list({ sessionID }, { signal });
+  if (inbox.some(({ id }) => id === messageID)) return true;
+  for await (const message of newest(api, sessionID, "synthetic", signal)) {
+    if (message.time.created < idleAt) return false;
+    if (message.id === messageID) return true;
+  }
+  return false;
+}
+
 /** Same rule as result recovery: steering marked for this task and captain. */
 function taskScoped(message: EvidenceMessage, task: PlacementTask): boolean {
   const notice = message.metadata?.[crewMessageMetadataKey];
   if (typeof notice !== "object" || notice === null) return false;
   const value = notice as Record<string, unknown>;
+  if ("resumeIdleAt" in value) return isTaskResume(message, task);
   return (
     value["taskID"] === task.id &&
     value["originCaptainID"] === task.originCaptainID &&
@@ -304,14 +336,25 @@ export async function observePlacement(
   }
 }
 
+export function idleBoundary(
+  execution: ExecutionInspection,
+): number | undefined {
+  const time = execution.time;
+  if (
+    execution.state === "idle" &&
+    !execution.pendingInputs &&
+    !execution.pendingForms &&
+    !execution.pendingPermissions &&
+    time?.idle !== undefined &&
+    time.idle >= (time.busy ?? 0)
+  )
+    return time.idle;
+  return undefined;
+}
+
 export function requireQuiescent(execution: ExecutionInspection): void {
   if (
-    execution.state !== "idle" ||
-    execution.pendingInputs ||
-    execution.pendingForms ||
-    execution.pendingPermissions ||
-    execution.time?.idle === undefined ||
-    execution.time.idle < (execution.time.busy ?? 0) ||
+    idleBoundary(execution) === undefined ||
     execution.outcome !== "succeeded"
   )
     throw new CrewError(
@@ -419,6 +462,7 @@ export async function verifyResult(
       } else if (
         message.type !== "idle" &&
         !isNativeInstructionContext(message) &&
+        !isTaskResume(message, task) &&
         !shellCandidate
       ) {
         // Interleaved prompts, compaction or steering can change result lineage.

@@ -205,6 +205,14 @@ export class CrewState {
         CREATE TABLE IF NOT EXISTS worker_controls (
           crewID TEXT PRIMARY KEY REFERENCES peers(crewID), token TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS task_resume_attempts (
+          taskID TEXT NOT NULL REFERENCES tasks(id),
+          idleAt INTEGER NOT NULL,
+          requestedBy TEXT NOT NULL,
+          requestedAt INTEGER NOT NULL,
+          admitted INTEGER NOT NULL DEFAULT 0 CHECK(admitted IN (0,1)),
+          PRIMARY KEY (taskID, idleAt)
+        );
         CREATE TABLE IF NOT EXISTS task_reconciliations (
           taskID TEXT PRIMARY KEY REFERENCES tasks(id),
           workerSessionID TEXT NOT NULL, originCaptainID TEXT NOT NULL,
@@ -697,6 +705,57 @@ export class CrewState {
       .immediate();
   }
 
+  resumeBoundaries(taskID: string, unconfirmedOnly = false): number[] {
+    return this.db
+      .query<{ idleAt: number }, [string, number]>(
+        "SELECT idleAt FROM task_resume_attempts WHERE taskID=? AND (?=0 OR admitted=0)",
+      )
+      .all(taskID, Number(unconfirmedOnly))
+      .map(({ idleAt }) => idleAt);
+  }
+
+  confirmResumeAttempt(taskID: string, idleAt: number): void {
+    this.db
+      .query(
+        "UPDATE task_resume_attempts SET admitted=1 WHERE taskID=? AND idleAt=?",
+      )
+      .run(taskID, idleAt);
+  }
+
+  resumeAttempted(taskID: string, idleAt: number): boolean {
+    return (
+      this.db
+        .query("SELECT 1 FROM task_resume_attempts WHERE taskID=? AND idleAt=?")
+        .get(taskID, idleAt) !== null
+    );
+  }
+
+  /** Record the identity before admission or a retry of that same input. */
+  recordResumeAttempt(
+    task: CrewTask,
+    token: string,
+    idleAt: number,
+    captainID: string,
+  ): void {
+    this.db
+      .transaction(() => {
+        const control = this.db
+          .query<{ token: string }, [string]>(
+            "SELECT token FROM worker_controls WHERE crewID=?",
+          )
+          .get(task.crewID);
+        if (control?.token !== token || !this.unchangedTask(task))
+          throw new CrewError(
+            "Task ownership changed before resume; inspect again.",
+          );
+        this.db
+          .query(`INSERT OR IGNORE INTO task_resume_attempts
+        (taskID,idleAt,requestedBy,requestedAt) VALUES (?,?,?,?)`)
+          .run(task.id, idleAt, captainID, Date.now());
+      })
+      .immediate();
+  }
+
   private insertControl(crewID: string): string {
     const token = randomUUID();
     this.db
@@ -745,6 +804,10 @@ export class CrewState {
         )
           throw new CrewError(
             "Task ownership or state changed; inspect again. Nothing abandoned.",
+          );
+        if (this.resumeBoundaries(task.id, true).length)
+          throw new CrewError(
+            "Resume admission is still unconfirmed. Inspect status before releasing the task.",
           );
         const control = this.db
           .query<{ token: string }, [string]>(
@@ -1156,14 +1219,15 @@ export class CrewState {
   /** Exact native evidence (own input queued or placed, worker active) shows
    * an uncertain task is still admitted. CAS; never while a control is held.
    */
-  readmit(expected: CrewTask): CrewTask {
+  readmit(expected: CrewTask, controlToken?: string): CrewTask {
     return this.db
       .transaction(() => {
         const changed = this.db
           .query(`UPDATE tasks SET status='running'
             WHERE id=? AND crewID=? AND workerSessionID=? AND originCaptainID=?
             AND inputID=? AND status='uncertain' AND released=0 AND notifying=0
-            AND NOT EXISTS (SELECT 1 FROM worker_controls WHERE crewID=?)`)
+            AND NOT EXISTS (SELECT 1 FROM task_resume_attempts WHERE taskID=tasks.id AND admitted=0)
+            AND NOT EXISTS (SELECT 1 FROM worker_controls WHERE crewID=? AND token IS NOT ?)`)
           .run(
             expected.id,
             expected.crewID,
@@ -1171,6 +1235,7 @@ export class CrewState {
             expected.originCaptainID,
             expected.inputID,
             expected.crewID,
+            controlToken ?? null,
           );
         const task = this.task(expected.id) ?? expected;
         if (changed.changes) {
@@ -1322,7 +1387,8 @@ export class CrewState {
     return (
       this.db
         .query(`UPDATE tasks SET released=1
-      WHERE id=? AND status='completed' AND notifying=0`)
+      WHERE id=? AND status='completed' AND notifying=0
+          AND NOT EXISTS (SELECT 1 FROM task_resume_attempts WHERE taskID=tasks.id AND admitted=0)`)
         .run(id).changes === 1
     );
   }
