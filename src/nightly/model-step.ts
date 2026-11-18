@@ -1,4 +1,9 @@
 import { readFile } from "node:fs/promises";
+import {
+  catalogRefs,
+  globalCatalogPath,
+  upgradeGlobalCatalog,
+} from "./catalog";
 import type { MaintenanceConfig } from "./config";
 import type { Crew } from "./crews";
 import { reasonOf } from "./exec";
@@ -15,9 +20,9 @@ import {
   upgradeProfiles,
   upgradeTeamFile,
 } from "./models";
-import type { OpenCodeControl } from "./opencode";
+import { type OpenCodeControl, openCodeCallMs } from "./opencode";
 import type { ModelChange } from "./report";
-import { formatRef, type ModelRef } from "./versions";
+import { formatRef, type ModelRef, parseModel } from "./versions";
 
 export type Session = {
   id: string;
@@ -38,17 +43,21 @@ export type ModelInputs = {
   }[];
   live: { session: Session; model: ModelRef }[];
   refs: ModelRef[];
+  directories?: string[];
+  globalCatalog?: { path: string; text: string; families: string[] };
 };
 
 export type ModelWork = {
   upgrades: Map<string, string>;
-  files: { path: string; text: string }[];
+  files: { path: string; text: string; expected?: string }[];
   profileLinks: { path: string; target: string }[];
   /** New agents routed by the selected profile, verified after reload. */
   agents: { name: string; model: string }[];
   sessions: { session: Session; from: ModelRef; to: ModelRef }[];
   /** Planned and skipped entries for the report. */
   changes: ModelChange[];
+  /** Pending declarations must be verified live after the OpenCode restart. */
+  catalogChecks?: { directories: (string | undefined)[]; refs: ModelRef[] };
 };
 
 export async function readModelInputs(input: {
@@ -60,6 +69,17 @@ export async function readModelInputs(input: {
 }): Promise<ModelInputs> {
   const { settings } = input;
   const refs: ModelRef[] = [];
+  const globalCatalog = settings.updateGlobalCatalog
+    ? {
+        path: globalCatalogPath(settings),
+        text: await readFile(globalCatalogPath(settings), "utf8"),
+        families: settings.families,
+      }
+    : undefined;
+  if (globalCatalog)
+    refs.push(
+      ...catalogRefs(globalCatalog.text, settings.families, settings.providers),
+    );
   let snapshot: ProfilesSnapshot | undefined;
   if (settings.agentProfiles) {
     snapshot = await readProfiles(settings.agentProfiles);
@@ -99,6 +119,10 @@ export async function readModelInputs(input: {
     documents,
     live,
     refs,
+    directories: input.crews.flatMap((crew) =>
+      crew.roots.map((root) => root.directory),
+    ),
+    ...(globalCatalog ? { globalCatalog } : {}),
   };
 }
 
@@ -125,6 +149,19 @@ export async function selectModelUpgrades(input: {
     inputs.providers,
   );
   const rejected: ModelChange[] = [];
+  for (const id of catalog) {
+    const match = /^(.*)-(?:fast|ultrafast)$/.exec(id);
+    const family = match?.[1] ? parseModel(match[1]) : null;
+    if (family && settings.families.includes(family.family))
+      rejected.push({
+        scope: "catalog",
+        target: "proxy-new-product",
+        from: match?.[1] ?? id,
+        to: id,
+        status: "skipped",
+        reason: "new-product",
+      });
+  }
   if (!input.probe) {
     const upgrades = new Map<string, string>();
     for (const [from, list] of candidates)
@@ -136,6 +173,14 @@ export async function selectModelUpgrades(input: {
     (id) => probeModel(proxy, id, signal),
     settings.probes,
   );
+  const additions = inputs.globalCatalog
+    ? upgradeGlobalCatalog(
+        inputs.globalCatalog.text,
+        chosen,
+        inputs.globalCatalog.families,
+        inputs.providers,
+      ).additions
+    : [];
   for (const miss of failed)
     rejected.push({
       scope: "catalog",
@@ -160,13 +205,20 @@ export async function selectModelUpgrades(input: {
       );
       const ok =
         !!models &&
-        needed.every((ref) =>
-          models.some(
-            (model) =>
-              model.providerID === ref.providerID &&
-              model.id === to &&
-              (!ref.variant || model.variants.includes(ref.variant)),
-          ),
+        needed.every(
+          (ref) =>
+            models.some(
+              (model) =>
+                model.providerID === ref.providerID &&
+                model.id === to &&
+                (!ref.variant || model.variants.includes(ref.variant)),
+            ) ||
+            additions.some(
+              (addition) =>
+                addition.to.providerID === ref.providerID &&
+                addition.to.id === to &&
+                (!ref.variant || addition.variants.includes(ref.variant)),
+            ),
         );
       if (ok) continue;
       chosen.delete(from);
@@ -210,6 +262,41 @@ export function buildModelWork(
   };
   if (!upgrades.size) return work;
   const { providers } = inputs;
+  if (inputs.globalCatalog) {
+    const catalog = upgradeGlobalCatalog(
+      inputs.globalCatalog.text,
+      upgrades,
+      inputs.globalCatalog.families,
+      providers,
+    );
+    if (catalog.additions.length) {
+      work.files.push({
+        path: inputs.globalCatalog.path,
+        text: catalog.text,
+        expected: inputs.globalCatalog.text,
+      });
+      for (const addition of catalog.additions)
+        work.changes.push({
+          scope: "catalog",
+          target: inputs.globalCatalog.path,
+          from: formatRef(addition.from),
+          to: formatRef(addition.to),
+          status: "planned",
+        });
+      work.catalogChecks = {
+        directories: [undefined, ...(inputs.directories ?? [])],
+        refs: [
+          ...catalog.additions.map((addition) => addition.to),
+          ...inputs.refs.flatMap((ref) => {
+            const to = upgrades.get(ref.id);
+            return to && providers.includes(ref.providerID)
+              ? [{ ...ref, id: to }]
+              : [];
+          }),
+        ],
+      };
+    }
+  }
   if (inputs.snapshot) {
     try {
       const result = upgradeProfiles(inputs.snapshot, upgrades, providers);
@@ -301,6 +388,30 @@ export async function applyLiveModels(
   clock: { now(): number; until: number },
 ): Promise<{ ok: boolean; skipped: Session[] }> {
   const skipped: Session[] = [];
+  for (const directory of work.catalogChecks?.directories ?? []) {
+    const remaining = clock.until - clock.now();
+    if (remaining < openCodeCallMs) return { ok: false, skipped };
+    const catalogSignal = AbortSignal.any([
+      signal,
+      AbortSignal.timeout(remaining),
+    ]);
+    const catalog = await opencode
+      .catalog(directory, catalogSignal)
+      .catch(() => null);
+    if (
+      clock.now() >= clock.until ||
+      !catalog ||
+      !work.catalogChecks?.refs.every((ref) =>
+        catalog.some(
+          (model) =>
+            model.providerID === ref.providerID &&
+            model.id === ref.id &&
+            (!ref.variant || model.variants.includes(ref.variant)),
+        ),
+      )
+    )
+      return { ok: false, skipped };
+  }
   for (const item of work.sessions) {
     if (clock.now() >= clock.until) {
       skipped.push(item.session);

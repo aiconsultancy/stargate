@@ -99,6 +99,7 @@ export const reasons = [
   "migration-required",
   "probe-failed",
   "catalog-missing",
+  "new-product",
   "config-format",
   "session-switch-failed",
   "command-failed",

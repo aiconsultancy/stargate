@@ -271,6 +271,7 @@ export const maintenanceSchema = z
             "claude-sonnet",
             "claude-haiku",
             "gpt-sol",
+            "gpt-astra",
             "gpt-terra",
             "gpt-luna",
           ]),
@@ -282,6 +283,10 @@ export const maintenanceSchema = z
           .default(["openai-proxy", "claude-proxy"]),
         /** Global child-agent profiles, e.g. ~/.config/opencode/agent-profiles. */
         agentProfiles: absolutePath.optional(),
+        /** Opt-in additive declarations in the global OpenCode configuration. */
+        updateGlobalCatalog: z.boolean().default(false),
+        /** Defaults to $XDG_CONFIG_HOME/opencode/opencode.json (or ~/.config). */
+        globalConfigFile: absolutePath.optional(),
         /** Team JSON files whose captain/crew models follow upgrades. */
         teamFiles: z.array(absolutePath).max(20).default([]),
         /** Maximum candidates probed per model family and run. */
