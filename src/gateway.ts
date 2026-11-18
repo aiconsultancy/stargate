@@ -63,6 +63,7 @@ import {
   routeEvent,
   transcriptChunks,
 } from "./routing";
+import type { SocketRequest } from "./slack";
 import { type ReplyChunk, replyText, type SlackContent } from "./slack-format";
 import {
   type CaptainCursor,
@@ -162,6 +163,12 @@ export interface SlackDelivery {
   ): Promise<string>;
   threadContext?(input: ThreadContextRequest): Promise<ThreadContext>;
   readReceipt?(channel: string, ts: string, active: boolean): Promise<void>;
+  ephemeral?(
+    channel: string,
+    user: string,
+    thread: string,
+    text: string,
+  ): Promise<void>;
   post(
     channel: string,
     thread: string,
@@ -542,6 +549,23 @@ export class Gateway {
       this.store.holdNotification(job.id, Date.now() + 5000);
       return;
     }
+  }
+
+  /** Configuration buttons share the typed-command owner and intake binding. */
+  async configInteraction(
+    body: unknown,
+    ack: SocketRequest["ack"],
+    open: () => boolean = () => true,
+  ) {
+    const bot = this.bot;
+    if (!bot) return false;
+    return this.meta.interactive(
+      body,
+      bot,
+      this.identity,
+      () => open() && this.bot === bot,
+      ack,
+    );
   }
 
   /**

@@ -81,6 +81,11 @@ the read-only `@captain /health` command. See [health configuration and
 coverage](meta-commands.md#health-configuration-and-coverage). Missing telemetry
 is `unknown`; the gateway never runs a remote snapshot producer on demand.
 
+`bots[].configPanelEnabled` defaults to `false`. Opting in changes Slack
+`/config` replies to an interactive panel; typed settings commands remain.
+See [configuration panels](meta-commands.md#optional-configuration-panel) for
+staleness, access and Slack app prerequisites. This field requires a restart.
+
 Use SIGHUP for the live changes below. Other changes require a restart.
 
 ## Reload configuration without restarting

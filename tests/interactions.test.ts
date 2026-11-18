@@ -1,6 +1,41 @@
 import { expect, test } from "bun:test";
 import { controlInteractions } from "../src/interactions";
 
+test("configuration buttons use the existing interaction path without consuming Stop or cron", async () => {
+  const calls: string[] = [];
+  const handler = {
+    async command() {},
+    async interactive() {
+      calls.push("cron");
+    },
+  };
+  const controls = controlInteractions(
+    handler,
+    handler,
+    (body) => {
+      if (body === "stop") {
+        calls.push("stop");
+        return true;
+      }
+      return false;
+    },
+    undefined,
+    async (body, ack) => {
+      if (body !== "panel") return false;
+      calls.push("panel");
+      await ack();
+      return true;
+    },
+  );
+  const ack = async () => {
+    calls.push("ack");
+  };
+  await controls.interactive("panel", ack);
+  await controls.interactive("stop", ack);
+  await controls.interactive("other", ack);
+  expect(calls).toEqual(["panel", "ack", "stop", "ack", "cron"]);
+});
+
 test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay private", async () => {
   const calls: string[] = [];
   const interaction = (name: string) => ({

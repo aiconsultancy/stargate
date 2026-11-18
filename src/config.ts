@@ -303,6 +303,8 @@ export const botSchema = z.strictObject({
   backend: backendSchema,
   /** Read-only health reporting; remote health uses a cached snapshot only. */
   health: healthConfigSchema.optional(),
+  /** Opt-in Slack configuration buttons; typed commands remain the default. */
+  configPanelEnabled: z.boolean().default(false),
   cronjobs: cronjobsSchema.optional(),
   /** Captain `stargate_post` to allowed channels; absent is off. */
   captainPost: captainPostSchema.optional(),
