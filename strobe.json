@@ -1,0 +1,5 @@
+{
+  "$schema": "./node_modules/@hona/strobe/schema/strobe.v1.json",
+  "build": { "command": "bun install --frozen-lockfile --ignore-scripts" },
+  "unit": "ms"
+}
