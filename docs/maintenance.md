@@ -568,6 +568,12 @@ transport states. State changes do not advance the original startup timestamp.
 Maintenance rejects a new-format record with no connected transport. See
 [connection readiness](operations.md#boot-time-network-failures-and-connection-readiness).
 
+For the first upgrade that adds transport fields, run the managed updater
+using the new verified release/checkout's maintenance CLI. Older CLIs strictly
+decode the record and can reject the new fields, causing a readiness rollback.
+Do not use an old nightly CLI for that first upgrade or bypass managed release
+switching. Subsequent updates can use the upgraded maintenance CLI normally.
+
 ## CLIProxyAPI
 
 The proxy unit must run a stable symlink, not a versioned path, so that a

@@ -71,6 +71,13 @@ count; older records without the field show unknown. These are the last
 observed states, not proof of a currently live process after an abrupt crash.
 Normal shutdown records closed connections.
 
+**First upgrade:** older maintenance CLIs strictly decode `ready.json` and
+reject the added transport fields. Run the first managed update from this
+version's verified release tree or checkout, using its maintenance CLI. An old
+nightly CLI could otherwise reject readiness and roll back the upgrade. Keep
+the existing managed installer and recovery path; do not change release links
+by hand. This upgrade instruction does not authorise a release or installation.
+
 For service ordering, the usual unit hints are:
 
 ```ini
