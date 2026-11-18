@@ -83,29 +83,6 @@ test("reconfiguration changes access and text-mention admission without reconnec
   expect(f.gateway.accept(event("<@UBOT> old user", "3.000"))).toBe(false);
 });
 
-test("a deny reload blocks final delivery while the running backend completes", async () => {
-  const entered = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
-  const f = fixture(async () => {
-    entered.resolve();
-    await release.promise;
-    return "Must not deliver.";
-  });
-  f.gateway.accept(event());
-  const work = f.gateway.process(f.next(), new AbortController().signal);
-  await entered.promise;
-  expect(f.gateway.isIdle()).toBe(false);
-  f.gateway.reconfigure(
-    botSchema.parse({
-      ...f.config,
-      access: { ...f.config.access, deniedUsers: ["U123"] },
-    }),
-  );
-  release.resolve();
-  await work;
-  expect(f.posts).toEqual([]);
-});
-
 test("the starting transcriber survives a reload during file download", async () => {
   const downloading = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();

@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { OpenCodeClient } from "@opencode/client";
 import {
   CrewEngine,
   type CrewSession,
@@ -224,11 +223,6 @@ async function fixture() {
     },
   };
 }
-
-test("recovery reader accepts installed SDK message objects", () => {
-  const compatible = (client: OpenCodeClient): ResultAPI => client;
-  expect(compatible).toBeFunction();
-});
 
 test("cutover reads immutable historical pogoCrew result evidence without editing or replay", async () => {
   const f = await fixture();

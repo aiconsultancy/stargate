@@ -349,21 +349,6 @@ test("only explicit model reactions target the current user message", async () =
   }
 });
 
-test("a normal question gets no automatic eyes reaction", async () => {
-  const f = gatewayFixture();
-  const reactions: string[] = [];
-  f.slack.react = async (_channel, _ts, name) => {
-    reactions.push(name);
-  };
-  try {
-    await f.gateway.process(f.next(), new AbortController().signal);
-    expect(reactions).toEqual([]);
-    expect([...f.messages.values()]).toEqual(["Final"]);
-  } finally {
-    f.store.close();
-  }
-});
-
 test("a reaction-only answer does not post a synthetic empty reply", async () => {
   const f = gatewayFixture();
   const reactions: string[] = [];

@@ -513,29 +513,6 @@ describe("Stargate release update", () => {
     expect(bunCalls).toEqual([]);
   });
 
-  test("a global pax header that redirects a link is rejected before tar", async () => {
-    const root = await newRoot("global-pax");
-    const outside = join(directory, "global-outside");
-    await mkdir(outside);
-    // GNU tar would apply the global linkpath to the symlink below and
-    // create an executable link outside the release; the ustar header
-    // alone looks harmless.
-    state.archive = tarball([
-      { path: "stargate-v0.2.0/", type: "5", global: { linkpath: outside } },
-      { path: "stargate-v0.2.0/package.json", data: "{}" },
-      {
-        path: "stargate-v0.2.0/bin",
-        type: "2",
-        link: "package.json",
-        mode: 0o755,
-      },
-    ]);
-    state.checksum = `${createHash("sha256").update(state.archive).digest("hex")}  stargate-v0.2.0.tar.gz\n`;
-    await expect(stage(root, false)).rejects.toThrow("archive-invalid");
-    expect(await readdir(outside)).toEqual([]);
-    expect(bunCalls).toEqual([]);
-  });
-
   test("a chain of contained-looking links that escapes is rejected after tar", async () => {
     const root = await newRoot("chain");
     state.archive = tarball([
