@@ -5,6 +5,8 @@ after its mention:
 
 ```text
 @your-captain /help
+@your-captain /health
+@your-captain /health host
 @your-captain /config
 @your-captain /config waiting 3
 @your-captain /config waiting off
@@ -21,6 +23,8 @@ is unavailable. Replies stay in the message's thread.
 | Command after the mention        | Result                                                                                                                             |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `/help`                          | Lists commands from the same table that dispatches them.                                                                           |
+| `/health`                        | Shows a read-only health summary.                                                                                                  |
+| `/health <section>`              | Shows detail for `host`, `agents`, `stargate`, `opencode`, `proxy`, `services` or `starfleet`.                                     |
 | `/config`                        | Lists supported settings and their current values.                                                                                 |
 | `/config waiting <seconds\|off>` | Sets the waiting-response delay. Whole seconds from 0 to 3600 are accepted; `off` disables it. Zero means immediate, not disabled. |
 | `/config mutes`                  | Reads this bot registration's saved thread and channel mutes. It changes no mute.                                                  |
@@ -37,6 +41,106 @@ captain tool, not another copy of the setting. See [waiting responses](waiting.m
 for workspace sharing, supported OpenCode registrations and the effect on
 subsequent turns. Each command change records its time, Slack user and message
 reference. Its reply names the old value, new value and person who changed it.
+
+## Health reporting
+
+`/health` uses the same allowed-human checks as configuration commands. It
+does not wake crew, submit a model request, repair a service or create a captain
+turn. Summary and detail replies stay below 3,000 characters. `✓` means an
+observed healthy value, `⚠` means unknown or degraded, and `✗` means an observed
+failure. An unreadable or unsupported value is `unknown`, not evidence of health.
+
+Health reads reuse the capability report behind `stargate status` and the
+existing read-only crew-reporting and quota interfaces. Crew task ownership is
+not proof of native session execution: a running local task does not prove that
+the worker is making progress. Task IDs and times can appear; task text, prompts,
+message bodies, credentials and raw provider errors cannot.
+
+The initial health summary has no expand buttons. NET-1714 adds those later.
+
+### Health configuration and coverage
+
+The optional `health` object belongs to one Slack bot registration. Its paths
+are absolute. Changing it follows the normal restart-only configuration policy;
+the health command never changes it.
+
+```json
+{
+  "health": {
+    "opencodeDataDirectory": "/srv/opencode/data",
+    "crewWorktreesDirectory": "/srv/crew",
+    "starfleetSnapshotFile": "/srv/stargate-health/starfleet.json",
+    "stalledAfterSeconds": 1800,
+    "snapshotMaxAgeSeconds": 900
+  }
+}
+```
+
+The two disk paths are optional: if absent, those disk values are `unknown`.
+Root and Stargate disk reads need no extra path. The Stargate disk uses the
+configured maintenance installation root, or the data directory when that root
+is not configured. The stall limit
+defaults to 1,800 seconds; snapshot freshness defaults to 900 seconds. Both
+limits accept whole seconds from 60 to 86,400.
+
+- **Host:** OS load, core count, memory, swap, uptime and filesystem capacity
+  and inodes. Process samples use numeric IDs and fixed labels, never command
+  lines. CPU rates and disk growth require an earlier in-memory observation;
+  the first observation is `unknown`. The process scan is bounded, not a full
+  process inventory. Missing reboot/time-sync markers remain `unknown`.
+- **Agents:** canonical crew task ownership, provisioning, queues and task
+  times, plus pinned captain readiness. Native activity and a stall verdict
+  remain `unknown` without a reliable last-activity source; old task timestamps
+  alone do not prove a stall.
+- **Stargate:** readiness version/time, configured unit state, scheduled-run
+  metadata and the latest maintenance report. Current Slack/IRC connection
+  state, last delivery, last-hour delivery/refusal counters and the latest
+  release comparison remain `unknown` without a telemetry source.
+- **OpenCode:** existing status reads, server version, server-wide active
+  session count and location-scoped pending forms, permissions and MCP counts.
+  These reads do not submit work or approve requests. Failed reads are
+  independently `unknown`. Existing incident evidence retains its 24-hour
+  window; it is not relabelled as a last-hour counter.
+- **Proxy:** the configured unit state and the existing quota reader's
+  provider/window percentages, observation and reset times. Quota is not token
+  usage or proof that a model can run. Expired or inactive windows do not prove
+  available allowance. Request/error/latency and cache-warming metrics remain
+  `unknown` without a supported telemetry reader.
+- **Services:** Sourcebot health, mirror refresh/index age, Caddy route probes,
+  Tailscale state/peer count and failed units/timers are explicitly `unknown`
+  in this slice. The gateway does not guess endpoints or discover credentials.
+- **Starfleet:** only the cached snapshot described below. No request runs
+  Azure CLI, an SSH command or the remote inspection route.
+
+### Proposed Starfleet snapshot producer
+
+The gateway reads a regular, private, owner-matching file no larger than 64 KiB.
+It rejects symbolic links, malformed or foreign schemas, future observations
+and observations older than `snapshotMaxAgeSeconds`. Replies mark the source
+`remote`, show the observation age and label stale current state `unknown`.
+
+```json
+{
+  "schema": "stargate.health.starfleet.v1",
+  "observedAt": "2026-11-18T03:00:00Z",
+  "services": {
+    "avondale": "active",
+    "stargate": "active",
+    "opencode": "unknown",
+    "proxy": "unknown"
+  }
+}
+```
+
+Each service accepts only `active`, `inactive`, `failed` or `unknown`. There
+are no free-text output, command or credential fields.
+
+Proposed producer, **not implemented here**: an independently approved scheduler
+uses the existing read-only Starfleet inspection route, extracts only these
+service states, and atomically publishes a mode-`0600` file owned by the gateway
+user in a private local directory. On probe failure it publishes `unknown`
+with the actual observation time; it must not refresh old success timestamps.
+The gateway neither starts this producer nor grants its credentials or access.
 
 ## Access and refusal
 

@@ -31,7 +31,20 @@ async function check(
   }
 }
 
-async function capabilities(bot: BotConfig, env: NodeJS.ProcessEnv) {
+export type OpenCodeHealth = {
+  version: string | null;
+  activeSessions: number | null;
+  pendingForms: number | null;
+  pendingPermissions: number | null;
+  mcpConnected: number | null;
+  mcpFailed: number | null;
+};
+
+async function capabilities(
+  bot: BotConfig,
+  env: NodeJS.ProcessEnv,
+  details?: OpenCodeHealth,
+) {
   const checks = {
     backendRead: unknown("unsupported backend"),
     backendWait: unknown("not tested; no work submitted"),
@@ -62,9 +75,86 @@ async function capabilities(bot: BotConfig, env: NodeJS.ProcessEnv) {
     ),
   });
   checks.backendRead = await check(async (signal) => {
-    await client.server.info({ signal });
+    const info = await client.server.info({ signal });
+    if (details) {
+      const version = z
+        .string()
+        .regex(/^[0-9][0-9A-Za-z.+-]{0,79}$/)
+        .safeParse(info.version);
+      details.version = version.success ? version.data : null;
+    }
     return true;
   });
+  if (details && checks.backendRead.state === "available") {
+    const count = async (work: (signal: AbortSignal) => Promise<number>) => {
+      try {
+        return await work(AbortSignal.timeout(5000));
+      } catch {
+        return null;
+      }
+    };
+    const location = { location: { directory: config.directory } };
+    const [active, forms, permissions, mcp] = await Promise.all([
+      count(
+        async (signal) =>
+          Object.keys(
+            z
+              .record(z.string(), z.unknown())
+              .parse(await client.session.active({ signal })),
+          ).length,
+      ),
+      count(
+        async (signal) =>
+          z
+            .array(z.unknown())
+            .parse((await client.form.list(location, { signal })).data).length,
+      ),
+      count(
+        async (signal) =>
+          z
+            .array(z.unknown())
+            .parse(
+              (await client.permission.request.list(location, { signal })).data,
+            ).length,
+      ),
+      (async () => {
+        try {
+          const result = await client.mcp.list(location, {
+            signal: AbortSignal.timeout(5000),
+          });
+          return z
+            .array(
+              z.object({
+                status: z.object({
+                  status: z.enum([
+                    "connected",
+                    "pending",
+                    "disabled",
+                    "failed",
+                    "needs_auth",
+                  ]),
+                }),
+              }),
+            )
+            .parse(result.data);
+        } catch {
+          return null;
+        }
+      })(),
+    ]);
+    details.activeSessions = active;
+    details.pendingForms = forms;
+    details.pendingPermissions = permissions;
+    details.mcpConnected =
+      mcp?.filter((server) => server.status.status === "connected").length ??
+      null;
+    details.mcpFailed =
+      mcp?.filter(
+        (server) =>
+          server.status.status === "failed" ||
+          server.status.status === "needs_auth",
+      ).length ?? null;
+  }
   if (checks.backendRead.state === "available")
     checks.backendRead.reason =
       "server metadata read succeeded; request execution not tested";
@@ -296,20 +386,42 @@ export async function statusReport(
   } catch {
     env = {};
   }
+  return botStatusReport(bot, env, logPath, now);
+}
+
+/** Shared read-only report for the CLI and an already-validated gateway bot. */
+export async function botStatusReport(
+  bot: BotConfig,
+  env: NodeJS.ProcessEnv,
+  logPath?: string,
+  now = Date.now(),
+  detailed = false,
+) {
+  const openCode: OpenCodeHealth | undefined = detailed
+    ? {
+        version: null,
+        activeSessions: null,
+        pendingForms: null,
+        pendingPermissions: null,
+        mcpConnected: null,
+        mcpFailed: null,
+      }
+    : undefined;
   const [checks, history] = await Promise.all([
-    capabilities(bot, env),
-    incidents(logPath, botID, now),
+    capabilities(bot, env, openCode),
+    incidents(logPath, bot.id, now),
   ]);
   if (history.state !== "unknown")
     checks.failureReporting = available("log readable; coverage incomplete");
   return {
     generatedAt: new Date(now).toISOString(),
-    bot: botID,
+    bot: bot.id,
     window: {
       from: new Date(now - windowMs).toISOString(),
       to: new Date(now).toISOString(),
     },
     checks,
+    ...(openCode ? { openCode } : {}),
     history,
   };
 }

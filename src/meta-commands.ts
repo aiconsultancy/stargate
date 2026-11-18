@@ -82,6 +82,7 @@ function unsafeMetadata(raw: unknown, depth = 0): boolean {
 
 export interface MetaOptions {
   listMutes?: () => NotificationPage | Promise<NotificationPage>;
+  health?: (section?: string) => Promise<string>;
   now?: () => number;
 }
 type Context = {
@@ -124,6 +125,21 @@ const commands: readonly Command[] = [
     pattern: /^\/help$/,
     async run() {
       return { reply: help() };
+    },
+  },
+  {
+    syntax: "/health [host|agents|stargate|opencode|proxy|services|starfleet]",
+    pattern: /^\/health(?: (.*))?$/,
+    async run({ options }, match) {
+      try {
+        return {
+          reply:
+            (await options.health?.(match[1])) ??
+            "⚠ Health: unknown (reader unavailable).",
+        };
+      } catch {
+        return { reply: "⚠ Health: unknown (read failed)." };
+      }
     },
   },
   {

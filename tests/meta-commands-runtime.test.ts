@@ -79,6 +79,15 @@ test("runtime binds /config mutes to this registration's existing preferences st
           backendCalls.push("prompt");
           throw new Error("Backend down");
         },
+        async quota() {
+          backendCalls.push("quota");
+          return {
+            status: "not-configured",
+            observedAt: 1,
+            cached: false,
+            accounts: [],
+          };
+        },
         async close() {},
       }),
     };
@@ -96,6 +105,11 @@ test("runtime binds /config mutes to this registration's existing preferences st
     expect(posts[0]).toContain("C123 thread 1.000: active");
     expect(posts[0]).not.toContain("CSECRET");
     expect(backendCalls).toEqual([]);
+    await accept(event("<@UBOT> /health proxy", "2.000"));
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toMatch(/proxy/i);
+    expect(posts[1]).toContain("unknown");
+    expect(backendCalls).toEqual(["quota"]);
   } finally {
     controller.abort();
     await running;

@@ -254,6 +254,67 @@ test("/config mutes is a local read, not a captain request or setting mutation",
   ).toBe(false);
 });
 
+for (const section of [
+  undefined,
+  "host",
+  "agents",
+  "stargate",
+  "opencode",
+  "proxy",
+  "services",
+  "starfleet",
+]) {
+  test(`/health ${section ?? "summary"} reads locally without a captain turn`, async () => {
+    const reads: (string | undefined)[] = [];
+    const f = await fixture({
+      health: async (requested) => {
+        reads.push(requested);
+        return `⚠ ${requested ?? "summary"}: unknown`;
+      },
+    });
+    await f.gateway.receive(
+      event(`<@UBOT> /health${section ? ` ${section}` : ""}`),
+    );
+    expect(reads).toEqual([section]);
+    expect(reply(f)).toBe(`⚠ ${section ?? "summary"}: unknown`);
+    noCaptainWork(f);
+  });
+}
+
+test("/health source failure is unknown without raw errors or a captain turn", async () => {
+  const f = await fixture({
+    health: async () => {
+      throw new Error("secret-health-source");
+    },
+  });
+  await f.gateway.receive(event("<@UBOT> /health"));
+  expect(reply(f)).toContain("unknown");
+  expect(reply(f)).not.toContain("secret-health-source");
+  noCaptainWork(f);
+});
+
+test("/health refuses peer bots before reading any health source", async () => {
+  let reads = 0;
+  const f = await fixture({
+    health: async () => {
+      reads++;
+      return "unexpected";
+    },
+  });
+  f.config.access.peerCaptains = true;
+  await f.gateway.receive({
+    ...event("<@UBOT> /health"),
+    event: {
+      ...event("<@UBOT> /health").event,
+      bot_id: "BPEER",
+      user: "UPEER",
+    },
+  });
+  expect(reads).toBe(0);
+  expect(f.delivered).toEqual([]);
+  noCaptainWork(f);
+});
+
 for (const command of ["/config system1 on", "/config system1 off"]) {
   test(`${command} is reserved, not implemented or sent to a model`, async () => {
     const f = await fixture();

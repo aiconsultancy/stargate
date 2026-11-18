@@ -3,7 +3,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/cli";
-import { statusReport, summarizeLog } from "../src/status-report";
+import {
+  botStatusReport,
+  statusReport,
+  summarizeLog,
+} from "../src/status-report";
 import { bot } from "./fixtures";
 
 const now = Date.parse("2026-11-16T12:00:00Z");
@@ -14,6 +18,119 @@ const line = (time: number, extra: object = {}) =>
     msg: "Agent request failed or timed out",
     ...extra,
   });
+
+test("detailed shared status returns only OpenCode counts and version from read-only calls", async () => {
+  const calls: string[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname;
+      calls.push(`${request.method} ${path}`);
+      if (path === "/api/info")
+        return Response.json({
+          version: "2.5.1",
+          pid: 1,
+          urls: [],
+          paths: { tmp: "/" },
+        });
+      if (path === "/api/session/active")
+        return Response.json({ data: { ses_test: { type: "running" } } });
+      if (path === "/api/form" || path === "/api/permission/request")
+        return Response.json({
+          data: [{ sessionID: "ses_test", prompt: "secret-prompt" }],
+        });
+      if (path === "/api/mcp")
+        return Response.json({
+          data: [
+            { name: "private-server", status: { status: "connected" } },
+            {
+              name: "private-server-2",
+              status: { status: "failed", error: "secret-error" },
+            },
+          ],
+        });
+      return new Response("unknown", { status: 404 });
+    },
+  });
+  try {
+    const registration = bot();
+    if (registration.backend.type !== "opencode")
+      throw new Error("Invalid fixture");
+    registration.backend = {
+      ...registration.backend,
+      url: server.url.href,
+      sessionID: undefined,
+    };
+    const result = await botStatusReport(
+      registration,
+      {},
+      undefined,
+      now,
+      true,
+    );
+    expect(result.openCode).toEqual({
+      version: "2.5.1",
+      activeSessions: 1,
+      pendingForms: 1,
+      pendingPermissions: 1,
+      mcpConnected: 1,
+      mcpFailed: 1,
+    });
+    expect(calls).toHaveLength(5);
+    expect(calls.every((call) => call.startsWith("GET "))).toBe(true);
+    expect(JSON.stringify(result)).not.toMatch(
+      /secret-|private-server|ses_test/,
+    );
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("unreadable OpenCode detail stays unknown without losing observed version", async () => {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      if (new URL(request.url).pathname === "/api/info")
+        return Response.json({
+          version: "2.5.1",
+          pid: 1,
+          urls: [],
+          paths: { tmp: "/" },
+        });
+      return new Response("secret-upstream", { status: 503 });
+    },
+  });
+  try {
+    const registration = bot();
+    if (registration.backend.type !== "opencode")
+      throw new Error("Invalid fixture");
+    registration.backend = {
+      ...registration.backend,
+      url: server.url.href,
+      sessionID: undefined,
+    };
+    const result = await botStatusReport(
+      registration,
+      {},
+      undefined,
+      now,
+      true,
+    );
+    expect(result.openCode).toEqual({
+      version: "2.5.1",
+      activeSessions: null,
+      pendingForms: null,
+      pendingPermissions: null,
+      mcpConnected: null,
+      mcpFailed: null,
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-upstream");
+  } finally {
+    await server.stop(true);
+  }
+});
 test("groups a bounded window without exposing injected fields or inferring recovery", () => {
   const text = [
     line(now - 1000, {
