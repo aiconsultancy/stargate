@@ -1,5 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { Result, Schema } from "effect";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import {
   HISTORY_PAGE,
@@ -13,11 +14,12 @@ import {
   type CrewOptions,
   crewOptionsSchema,
 } from "./engine";
-import { projectSelectionSchema } from "./project-options";
+import { effectProjectKeySchema } from "./project-options";
 import { CrewError } from "./state";
 import { defaultTeam } from "./team";
 import { projectRepository, workspaceRoot } from "./workspace";
 
+const decodeProjectKey = Schema.decodeUnknownResult(effectProjectKeySchema);
 type Factory = (options: CrewOptions) => Promise<CrewEngine>;
 const within = (parent: string, child: string) => {
   const path = relative(parent, child);
@@ -168,13 +170,11 @@ export class CrewProjects {
     const input = { ...record };
     delete input["project"];
     const requested =
-      project === undefined
-        ? undefined
-        : projectSelectionSchema.safeParse(project);
-    if (requested && !requested.success)
+      project === undefined ? undefined : decodeProjectKey(project);
+    if (requested && Result.isFailure(requested))
       throw new CrewError("Invalid crew project key.");
     const owner = this.owner(caller.sessionID);
-    const key = requested?.data ?? owner ?? "default";
+    const key = requested?.success ?? owner ?? "default";
     if (owner && key !== owner)
       throw new CrewError("Workers cannot select another project context.");
     const engine = this.get(key);

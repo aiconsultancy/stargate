@@ -22,6 +22,7 @@ import type {
   SessionPromptInput,
   SessionSyntheticInput,
 } from "@opencode/client";
+import { Result, Schema } from "effect";
 import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
@@ -85,6 +86,10 @@ import {
   workspaceInputSchemas,
   workspaceRoot,
 } from "./workspace";
+
+const decodeJournalInput = Schema.decodeUnknownResult(journalInputSchema, {
+  onExcessProperty: "error",
+});
 
 const directory = z
   .string()
@@ -893,8 +898,9 @@ export class CrewEngine {
 
   async journal(raw: unknown, caller: CrewCaller) {
     caller = this.logicalCaller(caller);
-    const input = journalInputSchema.safeParse(raw);
-    if (!input.success) throw new CrewError("Invalid stargate_journal input.");
+    const input = decodeJournalInput(raw);
+    if (Result.isFailure(input))
+      throw new CrewError("Invalid stargate_journal input.");
     await this.authorize(caller);
     const task = this.mailTask(caller);
     const captainID =
@@ -904,13 +910,13 @@ export class CrewEngine {
     const store = this.state.reporting.journal;
     // A pinned team has one captain; its lineage shares one journal context.
     const lineage = this.state.captainLineage(captainID);
-    if (input.data.op === "read")
+    if (input.success.op === "read")
       return {
         ...store.read(
           lineage ? null : captainID,
-          input.data.after,
-          input.data.limit,
-          captainID ? input.data.member : caller.agent,
+          input.success.after,
+          input.success.limit,
+          captainID ? input.success.member : caller.agent,
         ),
         entry: undefined,
       };
@@ -922,7 +928,7 @@ export class CrewEngine {
         captainID: this.state.captainRoute(captainID),
         taskID: task?.id ?? null,
         kind: "note",
-        text: input.data.text,
+        text: input.success.text,
       },
       `${caller.sessionID}:${caller.id}`,
     );

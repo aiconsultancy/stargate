@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { Plugin as EffectPlugin } from "@opencode/plugin/effect";
 import { Agent, Session, SessionMessage } from "@opencode/schema";
 import { Tool } from "@opencode/schema/tool";
-import { Effect, Exit, Schema, Scope } from "effect";
+import { Effect, Exit, Result, Schema, Scope } from "effect";
 import {
   CrewEngine,
   type CrewOptions,
@@ -20,9 +20,16 @@ import {
   type CrewSessions,
   crewInputSchema,
 } from "../src/crew/engine";
+import { journalInputSchema } from "../src/crew/journal";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import plugin from "../src/crew/plugin";
-import { projectsSchema, projectToolInput } from "../src/crew/project-options";
+import {
+  effectProjectKeySchema,
+  effectProjectToolInput,
+  projectKeySchema,
+  projectsSchema,
+  projectToolInput,
+} from "../src/crew/project-options";
 import { CrewProjects } from "../src/crew/projects";
 import { teamSchema } from "../src/crew/team";
 import { crewStatusSchema } from "../src/crew-status";
@@ -496,6 +503,57 @@ test("tool schema accepts keys only and original strict operation constraints re
     ).toBe(false);
 });
 
+test("Effect project envelope separates selection from strict operation decoding", () => {
+  const tool = effectProjectToolInput(journalInputSchema);
+  const decode = Schema.decodeUnknownSync(tool);
+  expect(decode({ op: "read" })).toEqual({ op: "read" });
+  expect(
+    decode({ op: "append", project: "stargate", text: "  note  " }),
+  ).toEqual({
+    op: "append",
+    project: "stargate",
+    text: "  note  ",
+  });
+  for (const input of [
+    { op: "read", text: "wrong branch", project: "stargate" },
+    { op: "append", project: "stargate" },
+    { op: "read", extra: true },
+    { op: "read", project: "../escape" },
+    { op: "read", project: null },
+  ])
+    expect(() => decode(input)).toThrow();
+  for (const [key, accepted] of [
+    ["default", true],
+    ["a", true],
+    ["a".repeat(48), true],
+    ["a-b_2", true],
+    ["a".repeat(49), false],
+    ["A", false],
+    ["__proto__", false],
+    ["prototype", false],
+    ["constructor", false],
+    ["../escape", false],
+    ["a\n", false],
+    ["", false],
+  ] as const) {
+    expect(
+      Result.isSuccess(Schema.decodeUnknownResult(effectProjectKeySchema)(key)),
+    ).toBe(accepted);
+    expect(projectKeySchema.safeParse(key).success).toBe(accepted);
+  }
+  const json = Schema.toJsonSchemaDocument(tool, {
+    onExcessProperty: "error",
+  }).schema;
+  expect(json["type"]).toBe("object");
+  expect(json["required"]).toEqual(["op"]);
+  expect(json["properties"]).toHaveProperty("project", {
+    type: "string",
+    pattern: "^[a-z][a-z0-9_-]{0,47}$",
+    description:
+      "Configured repository key, never a path. Captain omission uses default; worker omission uses its persisted native context.",
+  });
+});
+
 test("status and history identify all project contexts while legacy output stays unchanged", async () => {
   const f = await fixture();
   const projects = await CrewProjects.open(f.options, f.factory);
@@ -677,6 +735,7 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
   const scope = Effect.runSync(Scope.make());
   type Registered = {
     name: string;
+    input: Tool.ValueSchema;
     execute: (
       input: unknown,
       context: Tool.Context,
@@ -780,6 +839,32 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
       resources: ["roster"],
       source: { type: "tool", messageID: "msg_project", id: "call_project" },
     });
+    const journal = tools.get("stargate_journal");
+    if (!journal || !Schema.isSchema(journal.input))
+      throw new Error("Journal requires a native Effect input codec");
+    const parseJournal = Schema.decodeUnknownSync(journal.input);
+    const note = {
+      op: "append",
+      project: "stargate",
+      text: "  Project note  ",
+    };
+    expect(parseJournal(note)).toEqual(note);
+    const appended = await Effect.runPromise(
+      journal.execute(parseJournal(note), context),
+    );
+    expect(JSON.parse(String(appended.content))).toMatchObject({
+      entry: { text: "Project note", member: "captain" },
+    });
+    const page = await Effect.runPromise(
+      journal.execute(
+        parseJournal({ op: "read", project: "stargate" }),
+        context,
+      ),
+    );
+    expect(JSON.parse(String(page.content))).toMatchObject({
+      entries: [{ text: "Project note" }],
+    });
+    expect(() => parseJournal({ op: "read", text: "wrong branch" })).toThrow();
     deny = true;
     await expect(
       Effect.runPromise(

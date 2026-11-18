@@ -1,10 +1,12 @@
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { Effect, Predicate, Schema } from "effect";
 import { z } from "zod";
 import { quotaInputSchema } from "../quota";
 import { crewInputSchema } from "./engine";
 import { journalInputSchema } from "./journal";
 import { dmInputSchema, mailInputSchema } from "./messaging";
 import { CrewError } from "./state";
+import { effectToolInputFields } from "./tool-input";
 
 const outputLimit = 50 * 1024;
 
@@ -18,17 +20,50 @@ export type PiCrewBinding = {
     signal: AbortSignal,
   ): Promise<unknown>;
 };
-const history = z.strictObject({
-  limit: z.number().int().min(1).max(50).default(20),
-  cursor: z.record(z.string(), z.json()).optional(),
+// Pi validates JavaScript arguments before execute. A structural JSON schema
+// rejects undefined cursor values there; opaque MutableJson advertises {}.
+const historyJson: Schema.Codec<Schema.MutableJson> = Schema.suspend(() =>
+  Schema.Union([
+    Schema.String,
+    Schema.Finite,
+    Schema.Boolean,
+    Schema.Null,
+    Schema.mutable(Schema.Array(historyJson)),
+    Schema.Record(Schema.String, historyJson),
+  ]),
+);
+const history = Schema.Struct({
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 })).pipe(
+    Schema.withDecodingDefault(Effect.succeed(20)),
+  ),
+  cursor: Schema.optional(Schema.Record(Schema.String, historyJson)),
 });
+const decodeHistory = Schema.decodeUnknownSync(history, {
+  onExcessProperty: "error",
+});
+const decodeJournal = Schema.decodeUnknownSync(journalInputSchema, {
+  onExcessProperty: "error",
+});
+// Pi's legacy advertisement required defaulted fields. Handler defaults do not
+// authorize accepting their omission at the native JSON Schema boundary.
+const historyParameters = effectParameters(
+  Schema.Struct(
+    effectToolInputFields(
+      history.mapFields((fields) => ({
+        ...fields,
+        limit: Schema.toType(fields.limit),
+      })),
+    ),
+  ),
+);
+const journalParameters = journalToolParameters();
 
 /** Thin native bindings. Each invocation is tied to the saved member conversation. */
 export function piCrewExtension(
   binding: PiCrewBinding,
   readHistory: (
     id: string,
-    input: z.infer<typeof history>,
+    input: typeof history.Type,
     signal: AbortSignal,
   ) => Promise<unknown>,
 ) {
@@ -69,27 +104,33 @@ export function piCrewExtension(
       description:
         "Read paginated immutable history of this Pi conversation through the existing native runtime. No other conversations, no agent work.",
     },
-  ].map(({ name, schema, description }) =>
-    defineTool({
+  ].map(({ name, schema, description }) => {
+    const parameters = Schema.isSchema(schema)
+      ? name === "pi_history"
+        ? historyParameters
+        : journalParameters
+      : z.toJSONSchema(schema);
+    return defineTool({
       name,
       description,
-      parameters: z.toJSONSchema(schema),
+      parameters,
       replay: "unsafe",
       async execute(raw, api, context) {
         try {
           binding.authorize(String(api.conversationId));
-          const input = schema.parse(raw);
           const signal = context.abortSignal ?? new AbortController().signal;
           const result =
             name === "pi_history"
               ? await readHistory(
                   String(api.conversationId),
-                  history.parse(input),
+                  decodeHistory(raw),
                   signal,
                 )
               : await binding.run(
                   name,
-                  input,
+                  Schema.isSchema(schema)
+                    ? decodeJournal(raw)
+                    : schema.parse(raw),
                   String(api.conversationId),
                   String(api.taskId),
                   signal,
@@ -114,7 +155,50 @@ export function piCrewExtension(
         }
       },
       outputLimits: { maxBytes: outputLimit, maxLines: 200 },
-    }),
-  );
+    });
+  });
   return defineExtension({ name: "stargate.crew", tools });
+}
+
+function effectParameters(schema: Schema.Constraint) {
+  const document = Schema.toJsonSchemaDocument(schema, {
+    onExcessProperty: "error",
+  });
+  return { ...document.schema, $defs: document.definitions };
+}
+
+function journalToolParameters() {
+  const schema = Schema.Union(
+    journalInputSchema.members.map((member) =>
+      Schema.Struct(
+        effectToolInputFields(
+          member.mapFields((fields) =>
+            Object.fromEntries(
+              Object.entries(fields).map(([name, field]) => [
+                name,
+                Schema.toType(field),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  const document = Schema.toJsonSchemaDocument(schema, {
+    onExcessProperty: "error",
+  });
+  const branches = document.schema["anyOf"];
+  const append = Array.isArray(branches) ? branches[0] : undefined;
+  const properties = Predicate.isObject(append)
+    ? append["properties"]
+    : undefined;
+  const text = Predicate.isObject(properties) ? properties["text"] : undefined;
+  if (!Predicate.isObject(text))
+    throw new Error(
+      "Journal tool advertisement requires an append text schema.",
+    );
+  // Zod advertised trim's length bounds but no whitespace restriction. Keep
+  // the decoded bounds/required fields; only the handler applies trimming.
+  delete text["pattern"];
+  return { ...document.schema, $defs: document.definitions };
 }
