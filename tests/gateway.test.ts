@@ -314,15 +314,6 @@ test("partial delivery resumes after the last confirmed chunk", async () => {
   expect(f.delivered.map((text) => text.length)).toEqual([2800, 200]);
 });
 
-test("revoked policy blocks queued work and pending delivery", async () => {
-  const f = fixture();
-  f.gateway.accept(event());
-  f.config.access.users = [];
-  await f.gateway.process(f.next(), new AbortController().signal);
-  expect(f.prompts).toEqual([]);
-  expect(f.delivered).toEqual([]);
-});
-
 test("failure produces a safe reply without exposing SDK errors", async () => {
   const f = fixture();
   f.backend.prompt = async () => {

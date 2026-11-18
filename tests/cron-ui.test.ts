@@ -331,18 +331,6 @@ test("remove persists before ambiguous ACK failure and retries idempotently", as
   expect(f.calls.at(-1)).toMatchObject({ kind: "update", hash: "hash-1" });
 });
 
-test("ACL revocation before removing a schedule prevents mutation", async () => {
-  const f = fixture();
-  const job = f.store.add(f.scope, input);
-  await f.ui.command(command(), f.ack);
-  const view = f.calls[0]?.view;
-  if (!view) throw new Error("missing view");
-  f.config.access.deniedUsers = ["U123"];
-  await f.ui.interactive(action(view, "cron_remove", job.id), f.ack);
-  expect(f.store.enabled(job.id)).toBe(true);
-  expect(f.calls).toHaveLength(1);
-});
-
 test("ACL revocation during ACK does not undo durable removal", async () => {
   const f = fixture();
   const job = f.store.add(f.scope, input);

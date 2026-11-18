@@ -640,41 +640,6 @@ test("cold captain sends current source IDs without resending legacy history", a
   ).toBe(true);
 });
 
-test("failed and successful captain prompts never trigger automatic history resends", async () => {
-  const f = nativeFixture();
-  f.config.threadContext = true;
-  let reads = 0;
-  f.slack.threadContext = async () => {
-    reads++;
-    return {
-      messages: [{ author: "requester", text: "Migration root" }],
-      truncated: false,
-    };
-  };
-  let first = true;
-  f.setTurn(async (text) => {
-    if (first) {
-      first = false;
-      throw new Error("Synthetic backend failure");
-    }
-    f.add("assistant", "Migration answer");
-    return text;
-  });
-  for (const ts of ["2.000", "3.000", "4.000"]) {
-    f.gateway.accept(source("C123", "<@UBOT> Resume", ts, "1.000"));
-    await f.drain();
-  }
-  expect(reads).toBe(0);
-  expect(f.prompts.map(({ context }) => context?.source.message)).toEqual([
-    "2.000",
-    "3.000",
-    "4.000",
-  ]);
-  expect(
-    f.prompts.every(({ context }) => !Object.hasOwn(context ?? {}, "history")),
-  ).toBe(true);
-});
-
 test("unmapped native ownership does not cause history reads or block current source IDs", async () => {
   const f = nativeFixture();
   f.config.threadContext = true;

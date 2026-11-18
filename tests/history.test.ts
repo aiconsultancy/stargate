@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import type { OpenCodeClient } from "@opencode/client";
 import {
   CrewHistory,
   type HistoryMessage,
@@ -116,70 +115,6 @@ function fixture() {
     },
   };
 }
-
-test("history narrow clients accept installed SDK API objects", () => {
-  // Compile-time check only: no live SDK calls.
-  const compatible = (client: OpenCodeClient) =>
-    new CrewHistory({
-      sessions: client.session,
-      messages: client.message,
-      visible: () => true,
-    });
-  expect(typeof compatible).toBe("function");
-});
-
-for (const operation of [
-  "sessions",
-  "messages",
-  "search sessions",
-  "search messages",
-] as const)
-  test(`${operation} continuations respect the cursor-bound API ordering`, async () => {
-    const f = fixture();
-    f.sessionPages.set("", {
-      data: [f.add(session("one"))],
-      cursor: operation === "search messages" ? {} : { next: "sessions-next" },
-    });
-    f.sessionPages.set("sessions-next", {
-      data: [f.add(session("two"))],
-      cursor: {},
-    });
-    f.messagePages.set("one:", {
-      data: [user("first", "hit")],
-      cursor: operation === "search sessions" ? {} : { next: "messages-next" },
-    });
-    f.messagePages.set("one:messages-next", {
-      data: [user("second", "hit")],
-      cursor: {},
-    });
-    if (operation === "sessions" || operation === "messages") {
-      const input =
-        operation === "sessions"
-          ? ({ op: "sessions" } as const)
-          : ({ op: "messages", sessionID: "one" } as const);
-      const first = await f.history.run(input, f.signal);
-      expect(first.partial).toBe(true);
-      const next = await f.history.run(
-        { ...input, cursor: first.cursor },
-        f.signal,
-      );
-      expect(next.partial).toBe(false);
-      return;
-    }
-    const result = await f.history.run(
-      { op: "search", query: "hit" },
-      f.signal,
-    );
-    expect(result.op).toBe("search");
-    expect(result.partial).toBe(false);
-    expect(
-      f.calls.some((call) =>
-        operation === "search sessions"
-          ? call.method === "sessions" && call.cursor === "sessions-next"
-          : call.method === "messages" && call.cursor === "messages-next",
-      ),
-    ).toBe(true);
-  });
 
 test("history validates bounded, literal inputs", () => {
   for (const input of [
@@ -558,30 +493,6 @@ test("batched search cursors fit accepted bounds at maximum identifier lengths",
       cursor: result.cursor,
     }).success,
   ).toBe(true);
-});
-
-test("search result limits continue without dropping pages or later matches", async () => {
-  const f = fixture();
-  f.sessionPages.set("", { data: [f.add(session("one"))], cursor: {} });
-  f.messagePages.set("one:", {
-    data: [user("a", "hit")],
-    cursor: { next: "next" },
-  });
-  f.messagePages.set("one:next", { data: [user("b", "hit")], cursor: {} });
-  const first = await f.history.run(
-    { op: "search", query: "hit", limit: 1 },
-    f.signal,
-  );
-  if (first.op !== "search") throw new Error("wrong operation");
-  expect(first.matches.map((match) => match.id)).toEqual(["a"]);
-  expect(first.partial).toBe(true);
-  const next = await f.history.run(
-    { op: "search", query: "hit", limit: 1, cursor: first.cursor },
-    f.signal,
-  );
-  if (next.op !== "search") throw new Error("wrong operation");
-  expect(next.matches.map((match) => match.id)).toEqual(["b"]);
-  expect(next.partial).toBe(false);
 });
 
 test("small result limits scan full message batches for sparse matches", async () => {

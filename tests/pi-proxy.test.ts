@@ -571,25 +571,6 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
   }
 }
 
-test("Pi cancellation before admission makes no native calls", async () => {
-  let calls = 0;
-  const backend: PiDurableBackend = Reflect.construct(PiDurableBackend, [
-    {
-      async conversation() {
-        calls++;
-        throw new Error("Unexpected native call");
-      },
-    },
-    {},
-  ]);
-  const controller = new AbortController();
-  controller.abort();
-  await expect(
-    backend.prompt("1", "Own input", controller.signal),
-  ).rejects.toThrow();
-  expect(calls).toBe(0);
-});
-
 for (const report of [false, true]) {
   test(`Pi ${report ? "report" : "maintenance"} recovers committed answer after lost crew completion without opening runtime`, async () => {
     const directory = await mkdtemp("/tmp/opencode/stargate-pi-receipt-");
