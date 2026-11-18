@@ -361,8 +361,13 @@ export function createHealthReader(
         "⚠ last delivered unknown; last-hour delivery errors unknown; last-hour refused messages unknown; latest release version unknown",
       );
       rows.stargate.push(
-        `⚠ gateway uptime ${number((sources.uptime ?? process.uptime)())}s; Slack/IRC connection unknown; last alert ${alert ? "present; state unknown" : "unknown"}`,
+        `⚠ gateway uptime ${number((sources.uptime ?? process.uptime)())}s; ${valid && r.transports ? `transports ${r.transports.filter((transport) => transport.state === "connected").length}/${r.transports.length} connected` : "Slack/IRC connection unknown"}; last alert ${alert ? "present; state unknown" : "unknown"}`,
       );
+      if (valid && r.transports)
+        for (const transport of r.transports.slice(0, 30))
+          rows.stargate.push(
+            `${transport.state === "connected" ? "✓" : "✗"} ${transport.kind} ${transport.id.replace(/[^a-zA-Z0-9:_-]/g, "?").slice(0, 80)}: ${transport.state}; observed ${date(r.transportObservedAt ?? r.readyAt)}`,
+          );
       const report = parsed(
         z.object({
           reports: z

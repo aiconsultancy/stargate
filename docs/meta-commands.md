@@ -202,9 +202,12 @@ limits accept whole seconds from 60 to 86,400.
   remain `unknown` without a reliable last-activity source; old task timestamps
   alone do not prove a stall.
 - **Stargate:** readiness version/time, configured unit state, scheduled-run
-  metadata and the latest maintenance report. Current Slack/IRC connection
-  state, last delivery, last-hour delivery/refusal counters and the latest
-  release comparison remain `unknown` without a telemetry source.
+  metadata and the latest maintenance report. New readiness records supply
+  per-transport connection states and a connected count; old records report
+  connection state as `unknown`. These are the gateway's last observations,
+  not proof of a live process after an abrupt crash. Last delivery, last-hour
+  delivery/refusal counters and the latest release comparison remain `unknown`
+  without a telemetry source. See [connection readiness](operations.md#boot-time-network-failures-and-connection-readiness).
 - **OpenCode:** existing status reads, server version, server-wide active
   session count and location-scoped pending forms, permissions and MCP counts.
   These reads do not submit work or approve requests. Failed reads are

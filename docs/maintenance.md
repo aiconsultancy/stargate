@@ -560,8 +560,13 @@ OpenCode server, unless the crew plugin is unchanged (see
 [gateway-only update](#gateway-only-update)). `.staging-*` and `.failed-*` directories are this tool's own
 temporary folders; pruning removes them.
 
-The gateway writes `<dataDirectory>/ready.json` after every bot connected. The
-record holds the process, time and release version from `.stargate-release.json`.
+The gateway writes `<dataDirectory>/ready.json` only after transport connection:
+Slack registrations finish connecting, IRC-only gateways wait for registration,
+and Teams-only gateways wait for their listener. The record holds the process,
+startup time and release version from `.stargate-release.json`, plus observed
+transport states. State changes do not advance the original startup timestamp.
+Maintenance rejects a new-format record with no connected transport. See
+[connection readiness](operations.md#boot-time-network-failures-and-connection-readiness).
 
 ## CLIProxyAPI
 
@@ -1292,8 +1297,8 @@ how to resume from the journal. For existing profiles, use
   operator must review any capability changes separately.
 - With the flag enabled, proxy discovery is repeated after a proxy update
   and newly declared models are checked after the OpenCode restart.
-- The readiness record proves that every bot connected, not that a model call
-  works. Plugin activity proves that OpenCode loaded the plugin, not that
+- The readiness record shows startup completion and the last transport states,
+  not that a model call works. Plugin activity proves that OpenCode loaded the plugin, not that
   every crew tool works.
 - `stargate.json` `backend.model` is not upgraded (it would change the bot key);
   only pinned captain sessions, crew sessions and profiles move. Sessions

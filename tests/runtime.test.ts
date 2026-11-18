@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { watch } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +21,7 @@ import {
   serve,
 } from "../src/runtime";
 import { handleSlackRequest } from "../src/slack";
+import type { ConnectionState } from "../src/slack-connection";
 import { Store } from "../src/store";
 import { scopedUpdate } from "../src/update-notice";
 import { bot, event, identity } from "./fixtures";
@@ -442,6 +444,138 @@ test("a startup failure releases bots that already connected", async () => {
     expect(f.intake().open()).toBe(false);
     lockInstance(join(dataDirectory, "instance.sqlite")).close();
   } finally {
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("ready waits for connection and records later outages and recovery", async () => {
+  const dataDirectory = await directory();
+  const f = harness();
+  const make = f.dependencies.slack;
+  const connect = Promise.withResolvers<void>();
+  let state: ConnectionState = "connecting";
+  f.dependencies.connectionTiming = { outageMs: 200, pollMs: 2 };
+  f.dependencies.slack = (bot, log) => {
+    const slack = make(bot, log);
+    return {
+      ...slack,
+      get connectionState() {
+        return state;
+      },
+      async start(...args) {
+        await connect.promise;
+        state = "connected";
+        await slack.start(...args);
+      },
+    };
+  };
+  const controller = new AbortController();
+  const running = Effect.runPromise(
+    serve(
+      { dataDirectory, bots: [bot()] },
+      silent,
+      controller.signal,
+      f.dependencies,
+    ),
+  );
+  try {
+    await Bun.sleep(10);
+    expect(await readReady(dataDirectory)).toBeNull();
+    connect.resolve();
+    await f.started;
+    const waitState = async (expected: ConnectionState) => {
+      for (let i = 0; i < 100; i++) {
+        const record = await readReady(dataDirectory);
+        if (record?.transports?.[0]?.state === expected) return record;
+        await Bun.sleep(2);
+      }
+      throw new Error(`Missing transport state ${expected}`);
+    };
+    const first = await waitState("connected");
+    state = "reconnecting";
+    expect((await waitState("reconnecting")).readyAt).toBe(first.readyAt);
+    state = "connected";
+    expect((await waitState("connected")).readyAt).toBe(first.readyAt);
+  } finally {
+    controller.abort();
+    await running;
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("an exhausted post-start transport exits the runtime as a failure", async () => {
+  const dataDirectory = await directory();
+  const f = harness();
+  const make = f.dependencies.slack;
+  const failed = Promise.withResolvers<void>();
+  f.dependencies.slack = (bot, log) => ({
+    ...make(bot, log),
+    watch: () => failed.promise,
+  });
+  const running = Effect.runPromise(
+    serve(
+      { dataDirectory, bots: [bot()] },
+      silent,
+      new AbortController().signal,
+      f.dependencies,
+    ),
+  );
+  const result = running.catch((error: unknown) => error);
+  await f.started;
+  failed.reject(new Error("Slack connection unavailable"));
+  expect(await result).toBeInstanceOf(RuntimeStopped);
+  expect((await readReady(dataDirectory))?.transports?.[0]?.state).toBe(
+    "closed",
+  );
+  await rm(dataDirectory, { recursive: true, force: true });
+});
+
+test("a disconnect during initial readiness I/O is not lost by the observer", async () => {
+  const dataDirectory = await directory();
+  const f = harness();
+  const make = f.dependencies.slack;
+  let state: ConnectionState = "connected";
+  f.dependencies.connectionTiming = { outageMs: 1000, pollMs: 2 };
+  f.dependencies.slack = (bot, log) => ({
+    ...make(bot, log),
+    get connectionState() {
+      return state;
+    },
+  });
+  let changed = false;
+  const watcher = watch(dataDirectory, (_event, file) => {
+    if (!changed && file?.startsWith("ready.json.tmp-")) {
+      changed = true;
+      state = "reconnecting";
+    }
+  });
+  const controller = new AbortController();
+  const running = Effect.runPromise(
+    serve(
+      { dataDirectory, bots: [bot()] },
+      silent,
+      controller.signal,
+      f.dependencies,
+    ),
+  );
+  try {
+    await f.started;
+    for (
+      let i = 0;
+      i < 100 &&
+      (await readReady(dataDirectory))?.transports?.[0]?.state !==
+        "reconnecting";
+      i++
+    )
+      await Bun.sleep(2);
+    expect(changed).toBe(true);
+    expect((await readReady(dataDirectory))?.transports?.[0]?.state).toBe(
+      "reconnecting",
+    );
+  } finally {
+    controller.abort();
+    await running;
+    watcher.close();
     await rm(dataDirectory, { recursive: true, force: true });
   }
 });
