@@ -1,18 +1,30 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { Effect, Schema } from "effect";
 import { redactCredentials } from "../credentials";
 
-export const journalInputSchema = z.discriminatedUnion("op", [
-  z.strictObject({
-    op: z.literal("append"),
-    text: z.string().trim().min(1).max(64000),
+export const journalInputSchema = Schema.Union([
+  Schema.Struct({
+    op: Schema.Literal("append"),
+    text: Schema.Trim.check(
+      Schema.isMinCodePoints(1),
+      Schema.isMaxCodePoints(64000),
+    ),
   }),
-  z.strictObject({
-    op: z.literal("read"),
-    after: z.number().int().safe().nonnegative().default(0),
-    member: z.string().min(1).max(64).optional(),
-    limit: z.number().int().min(1).max(100).default(20),
+  Schema.Struct({
+    op: Schema.Literal("read"),
+    after: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+      Schema.withDecodingDefault(Effect.succeed(0)),
+    ),
+    member: Schema.optional(
+      Schema.String.check(
+        Schema.isMinCodePoints(1),
+        Schema.isMaxCodePoints(64),
+      ),
+    ),
+    limit: Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: 100 }),
+    ).pipe(Schema.withDecodingDefault(Effect.succeed(20))),
   }),
 ]);
 export type JournalEntry = {

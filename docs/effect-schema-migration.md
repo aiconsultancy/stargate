@@ -7,8 +7,8 @@ This migration does not upgrade Effect or the SDKs.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**, including the three
-single-schema PRs already merged. That leaves 15 component batches. One
+The revised target is **18 migration PRs in total**. Three single-schema PRs
+and the native backend batch are merged. That leaves 14 component batches. One
 contingency split can bring the total to 19, still below 20. Report a proposed
 budget change before opening another PR; do not weaken verification to fit it.
 
@@ -28,16 +28,14 @@ Completed:
 - [Claude session UUID schema](https://github.com/aiconsultancy/stargate/pull/43).
 - [OpenCode pairing-response schema](https://github.com/aiconsultancy/stargate/pull/44).
 - [Azure transcript-response schema](https://github.com/aiconsultancy/stargate/pull/45).
+- [Remaining native backend validators](https://github.com/aiconsultancy/stargate/pull/48).
 
 ## Remaining component batches
 
-The numbers include the three completed PRs. File names identify primary scope,
+The numbers include the four completed PRs. File names identify primary scope,
 not a restriction against updating a coupled consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
 
-4. Native backend boundaries. Replace remaining private Claude, Codex, OpenCode
-   and Azure response, CLI-frame and saved-record validators. Update this policy
-   and plan in the same PR.
 5. Shared tool validation and SDK integration. Replace `crew/tool-input.ts`,
    `crew/project-options.ts` and the schema conversion in `crew/pi-extension.ts`.
    Preserve object-root advertisements, strict operation validation, defaults,
@@ -99,6 +97,10 @@ edge inputs. Compare acceptance, decoded output, defaults, transforms, missing
 versus null values, strict or stripped object keys, issue paths and safe errors.
 Preserve synchronous behavior and cancellation where applicable.
 
+Check string length units against the installed validator. Zod 4.6.7 counts
+Unicode code points for journal text and member limits, not UTF-16 code units.
+Preserve those accepted inputs when selecting Effect string checks.
+
 The first UUID migration preserves the existing case-sensitive max-UUID rule.
 Effect's general UUID check also accepts uppercase or mixed-case max UUIDs;
 the old Zod boundary accepted that sentinel only in lowercase. Ordinary UUIDs
@@ -116,9 +118,11 @@ main. Failed checks or unresolved review threads stop advancement.
 ## SDK boundaries and dependency removal
 
 OpenCode's installed tool interface accepts Effect codecs directly. Pi Durable
-accepts JSON Schema and validates it before execution. Verify the generated
-input schema's dialect and definitions, and ensure it does not reject values
-that the authoritative Effect decoder accepts.
+accepts JSON Schema and validates and coerces arguments before execution. Verify
+its dialect, definitions, required fields and coercion against that existing SDK
+boundary as well as the Effect decoder. The old Pi advertisements require some
+fields whose decoders have defaults. Preserve that native acceptance; do not
+silently fix an advertisement/default mismatch during this migration.
 
 The Claude SDK's `tool()` helper requires a Zod raw shape, but Stargate's current
 Claude backend does not call it. Its transitive Zod dependency remains SDK-owned.

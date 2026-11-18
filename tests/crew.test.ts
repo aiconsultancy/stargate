@@ -1114,7 +1114,7 @@ test("host-bound journal notes work without a task and isolate captain roots", a
   try {
     const caller = { ...f.captain(), id: "journal-call" };
     const first = await f.engine.journal(
-      { op: "append", text: "Checks passed" },
+      { op: "append", text: "  Checks passed  \n" },
       caller,
     );
     expect(
@@ -1130,7 +1130,23 @@ test("host-bound journal notes work without a task and isolate captain roots", a
       member: "bowser",
       taskID: null,
       kind: "note",
+      text: "Checks passed",
     });
+    for (const input of [
+      { op: "read", text: "secret wrong-branch value" },
+      { op: "read", after: -1 },
+      { op: "append", text: "  " },
+      { op: "append", text: "note", unexpected: true },
+    ])
+      await expect(
+        f.engine.journal(input, {
+          ...caller,
+          sessionID: "unauthorized",
+        }),
+      ).rejects.toThrow("Invalid stargate_journal input.");
+    expect(
+      (await f.engine.journal({ op: "read" }, f.captain())).entries,
+    ).toHaveLength(1);
   } finally {
     await f.close();
   }

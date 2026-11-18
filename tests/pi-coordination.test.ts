@@ -1,9 +1,11 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { z } from "zod";
 import { PiDurableBackend } from "../src/backends/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
+import { piCrewExtension } from "../src/crew/pi-extension";
 import { CrewError } from "../src/crew/state";
 
 function completion(
@@ -35,6 +37,113 @@ function completion(
     { headers: { "content-type": "text/event-stream" } },
   );
 }
+
+test("Pi preserves required default fields and native argument coercion", () => {
+  const extension = piCrewExtension(
+    { authorize() {}, async run() {} },
+    async () => ({}),
+  );
+  for (const name of ["pi_history", "stargate_journal", "stargate_quota"]) {
+    const tool = extension.tools?.find((tool) => tool.name === name);
+    if (!tool) throw new Error(`Missing registered tool: ${name}`);
+    if (name !== "stargate_journal")
+      expect(tool.parameters).toHaveProperty("type", "object");
+    expect(tool.replay).toBe("unsafe");
+    const input =
+      name === "stargate_journal"
+        ? { op: "read", after: 0, limit: "2", member: null }
+        : name === "pi_history"
+          ? { limit: "2", cursor: null }
+          : {};
+    const parsed = validateToolArguments(tool, {
+      type: "toolCall",
+      id: "fixture-call",
+      name,
+      arguments: input,
+    });
+    expect(parsed).toEqual(
+      name === "stargate_journal"
+        ? { op: "read", after: 0, limit: 2, member: "null" }
+        : name === "pi_history"
+          ? { limit: 2 }
+          : {},
+    );
+    if (name !== "stargate_quota")
+      for (const arguments_ of name === "pi_history"
+        ? [{}, { cursor: {} }]
+        : [{ op: "read" }, { op: "read", after: 0 }, { op: "read", limit: 20 }])
+        expect(() => {
+          validateToolArguments(tool, {
+            type: "toolCall",
+            id: "fixture-omission",
+            name,
+            arguments: arguments_,
+          });
+        }).toThrow("Validation failed for tool");
+    if (name === "pi_history") {
+      const arguments_ = {
+        limit: 20,
+        cursor: { nested: [1, "2", null, { done: false }] },
+      };
+      expect(
+        validateToolArguments(tool, {
+          type: "toolCall",
+          id: "fixture-cursor",
+          name,
+          arguments: arguments_,
+        }),
+      ).toEqual(arguments_);
+      expect(
+        validateToolArguments(tool, {
+          type: "toolCall",
+          id: "fixture-integer-coercion",
+          name,
+          arguments: { limit: 1.5 },
+        }),
+      ).toEqual({ limit: 1 });
+      for (const arguments_ of [
+        { limit: 0 },
+        { limit: 51 },
+        { limit: 20, cursor: [] },
+      ])
+        expect(() => {
+          validateToolArguments(tool, {
+            type: "toolCall",
+            id: "fixture-history-bound",
+            name,
+            arguments: arguments_,
+          });
+        }).toThrow("Validation failed for tool");
+    }
+    if (name === "stargate_journal") {
+      for (const text of ["  note  ", "  ", "😀".repeat(64000)]) {
+        const arguments_ = { op: "append", text };
+        expect(
+          validateToolArguments(tool, {
+            type: "toolCall",
+            id: "fixture-raw-text",
+            name,
+            arguments: arguments_,
+          }),
+        ).toEqual(arguments_);
+      }
+      for (const arguments_ of [
+        { op: "read", after: Number.MAX_SAFE_INTEGER + 1, limit: 20 },
+        { op: "read", after: 0, limit: 101 },
+        { op: "append", text: "note", after: 0 },
+        { op: "append", text: `${"😀".repeat(64000)}x` },
+      ])
+        expect(() => {
+          validateToolArguments(tool, {
+            type: "toolCall",
+            id: "fixture-journal-bound",
+            name,
+            arguments: arguments_,
+          });
+        }).toThrow("Validation failed for tool");
+    }
+  }
+});
 
 test("real Pi crew extension reads only native self history and deduplicates DM admission", async () => {
   const directory = await mkdtemp("/tmp/opencode/stargate-pi-coordination-");
@@ -231,6 +340,57 @@ for (const tools of ["coding", "none"] as const) {
 
 for (const scenario of [
   {
+    title: "journal read retains explicit native default fields",
+    name: "stargate_journal",
+    args: { op: "read", after: 0, limit: 20 },
+    input: { op: "read", after: 0, limit: 20 },
+    result: { entries: [], nextAfter: 0 },
+    error: null,
+  },
+  {
+    title: "journal append trims before the crew handler",
+    name: "stargate_journal",
+    args: { op: "append", text: "  milestone \n" },
+    input: { op: "append", text: "milestone" },
+    result: { entries: [], nextAfter: 1 },
+    error: null,
+  },
+  {
+    title: "journal wrong-branch arguments fail before crew execution",
+    name: "stargate_journal",
+    args: { op: "read", after: 0, limit: 20, text: "wrong branch" },
+    input: null,
+    result: { entries: [], nextAfter: 0 },
+    error: "Validation failed for tool",
+  },
+  {
+    title:
+      "journal whitespace fails authoritative decode with a sanitized error",
+    name: "stargate_journal",
+    args: { op: "append", text: "  " },
+    input: null,
+    result: { entries: [], nextAfter: 0 },
+    error:
+      "Crew operation unavailable or unconfirmed; do not replay uncertain work.",
+  },
+  {
+    title: "journal unknown keys fail before crew execution",
+    name: "stargate_journal",
+    args: { op: "read", after: 0, limit: 20, unexpected: true },
+    input: null,
+    result: { entries: [], nextAfter: 0 },
+    error: "Validation failed for tool",
+  },
+  {
+    title: "authorization precedes journal decoding",
+    name: "stargate_journal",
+    args: { op: "append", text: "  " },
+    input: null,
+    denied: true,
+    result: { entries: [], nextAfter: 0 },
+    error: "Saved member conversation required.",
+  },
+  {
     title: "journal page over 16 KB remains valid JSON",
     name: "stargate_journal",
     args: { op: "read", after: 0, limit: 20 },
@@ -285,6 +445,7 @@ for (const scenario of [
       },
     });
     let backend: PiDurableBackend | undefined;
+    const inputs: unknown[] = [];
     try {
       backend = await PiDurableBackend.open(
         piDurableBackendSchema.parse({
@@ -297,8 +458,12 @@ for (const scenario of [
         {
           dataDirectory: directory,
           crew: {
-            authorize() {},
-            async run() {
+            authorize() {
+              if ("denied" in scenario && scenario.denied)
+                throw new CrewError("Saved member conversation required.");
+            },
+            async run(_name, input) {
+              inputs.push(input);
               if (scenario.result === null)
                 throw new CrewError(scenario.error ?? "");
               return scenario.result;
@@ -323,11 +488,14 @@ for (const scenario of [
         expect(output).not.toContain("nextAfter");
         expect(output).not.toContain('"entries"');
         expect(output).not.toContain('"messages"');
+        expect(output).not.toContain("private wrong-branch value");
       } else
         expect(JSON.parse(output)).toMatchObject({
-          nextAfter: 31,
+          nextAfter: scenario.result?.nextAfter,
           entries: scenario.result?.entries,
         });
+      if ("input" in scenario)
+        expect(inputs).toEqual(scenario.input === null ? [] : [scenario.input]);
     } finally {
       await backend?.close();
       await server.stop(true);
@@ -355,7 +523,7 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
             "Finished",
             requests.length === 2,
             "pi_history",
-            '{"limit":4}',
+            '{"limit":"4","cursor":null}',
           );
     },
   });

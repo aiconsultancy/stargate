@@ -1,12 +1,32 @@
 import { isAbsolute, resolve } from "node:path";
+import {
+  Predicate,
+  Result,
+  Schema,
+  SchemaAST,
+  SchemaTransformation,
+} from "effect";
 import { z } from "zod";
 import { agentIDSchema } from "./team";
-import { objectToolInput } from "./tool-input";
+import {
+  type EffectToolInput,
+  effectToolInputFields,
+  objectToolInput,
+} from "./tool-input";
 
+const projectKeyPattern = /^[a-z][a-z0-9_-]{0,47}$/u;
+export const effectProjectKeySchema = Schema.String.check(
+  Schema.makeFilter(
+    (key) => !["__proto__", "prototype", "constructor"].includes(key),
+  ),
+  Schema.isPattern(projectKeyPattern),
+);
+const decodeProject = Schema.decodeUnknownResult(effectProjectKeySchema);
+// Narrow bridge for the remaining Zod configuration and tool envelopes.
 export const projectKeySchema = z
   .string()
-  .regex(/^[a-z][a-z0-9_-]{0,47}$/)
-  .refine((key) => !["__proto__", "prototype", "constructor"].includes(key));
+  .regex(projectKeyPattern)
+  .refine((key) => Result.isSuccess(decodeProject(key)));
 export const projectSelectionSchema = projectKeySchema;
 const directory = z
   .string()
@@ -57,7 +77,7 @@ export function projectToolInput(
     schema instanceof z.ZodObject ? schema : objectToolInput(schema);
   const shape: Record<string, z.ZodType> = {
     ...object.shape,
-    project: projectSelectionSchema
+    project: projectKeySchema
       .describe(
         "Configured repository key, never a path. Captain omission uses default; worker omission uses its persisted native context.",
       )
@@ -74,4 +94,35 @@ export function projectToolInput(
           message: issue.message,
         });
   });
+}
+
+/** Project selection stays outside the original strict operation validator. */
+export function effectProjectToolInput(schema: EffectToolInput) {
+  const advertised = Schema.Struct({
+    ...effectToolInputFields(schema),
+    project: Schema.optionalKey(
+      effectProjectKeySchema.annotate({
+        description:
+          "Configured repository key, never a path. Captain omission uses default; worker omission uses its persisted native context.",
+      }),
+    ),
+  });
+  const decode = Schema.decodeUnknownResult(schema, {
+    onExcessProperty: "error",
+  });
+  const selection = Schema.decodeUnknownResult(
+    Schema.Struct({ project: Schema.optional(effectProjectKeySchema) }),
+  );
+  return Schema.declare<Record<string, unknown>>(Predicate.isObject, {
+    toCodecJson: () =>
+      new SchemaAST.Link(advertised.ast, SchemaTransformation.passthrough()),
+  }).check(
+    Schema.makeFilter((raw) => {
+      const project = selection(raw);
+      if (Result.isFailure(project)) return project.failure.issue;
+      const { project: _project, ...input } = raw;
+      const result = decode(input);
+      return Result.isFailure(result) ? result.failure.issue : undefined;
+    }),
+  );
 }

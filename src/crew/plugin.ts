@@ -27,7 +27,7 @@ import { CrewModels, modelInputSchema } from "./models";
 import { nativeWait } from "./native-wait";
 import { CrewNotifications } from "./notifications";
 import { CrewPost } from "./post";
-import { projectToolInput } from "./project-options";
+import { effectProjectToolInput, projectToolInput } from "./project-options";
 import { CrewProjects } from "./projects";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
@@ -304,7 +304,7 @@ const plugin = Plugin.define({
           name: "stargate_journal",
           description:
             "Append concise milestones, checks, blockers, outcomes or native-workaround notes; no tool transcripts or secrets. Read scoped journal pages by ID with nextAfter. Identity, time and task come from the host.",
-          input: projectToolInput(journalInputSchema),
+          input: effectProjectToolInput(journalInputSchema),
           options: { codemode: false, permission: "stargate_crew" },
           execute: (input, context) =>
             guard(
