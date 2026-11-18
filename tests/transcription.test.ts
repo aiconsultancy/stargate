@@ -191,6 +191,15 @@ test("Azure provider sends the audio with a cached managed-identity token and no
   expect(f.requests.at(-1)?.authorization).toBe(`Bearer ${secretToken}-2`);
 });
 
+test("Azure preserves raw transcript strings and accepts extra provider fields", async () => {
+  const f = provider();
+  const file = { data: audio, mime: "audio/mp4", extension: "m4a" };
+  for (const text of ["", "  \t\n", "Unicode 🦘\nsecond line\u0000"]) {
+    f.state.body = { text, extra: "ignored provider metadata" };
+    expect(await f.transcriber.transcribe(file, signal())).toBe(text);
+  }
+});
+
 test("provider failures are one fixed error, drop a refused token and honour cancellation", async () => {
   const f = provider();
   const file = { data: audio, mime: "audio/mp4", extension: "m4a" };
@@ -198,9 +207,15 @@ test("provider failures are one fixed error, drop a refused token and honour can
     [500, undefined],
     [401, undefined],
     [200, { transcript: "wrong shape" }],
+    [200, {}],
+    [200, { text: null }],
+    [200, { text: 42 }],
+    [200, { text: {} }],
+    [200, null],
+    [200, []],
   ] as const) {
     f.state.status = status;
-    if (body) f.state.body = body;
+    if (body !== undefined) f.state.body = body;
     const error = await f.transcriber
       .transcribe(file, signal())
       .catch((e: unknown) => e);
