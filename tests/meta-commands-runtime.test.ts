@@ -4,17 +4,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import pino from "pino";
+import { z } from "zod";
 import { NotificationStore } from "../src/notification-store";
 import { notificationKey } from "../src/notifications";
 import { type RuntimeDependencies, type SlackApp, serve } from "../src/runtime";
+import type { SlackInteractions } from "../src/slack";
+import { resolveWaiting } from "../src/waiting";
 import { bot, event, identity } from "./fixtures";
 
-test("runtime binds /config mutes to this registration's existing preferences store", async () => {
+test("runtime binds registration-scoped reads and authenticated panel actions without captain work", async () => {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-meta-runtime-"));
   const controller = new AbortController();
   let running: Promise<void> | undefined;
   try {
     const config = bot();
+    config.configPanelEnabled = true;
+    if (config.backend.type !== "opencode") throw new Error("Invalid fixture");
+    config.backend.directory = dataDirectory;
+    config.backend.agent = "captain";
     const preferences = new NotificationStore(
       join(dataDirectory, "notifications.sqlite"),
     );
@@ -44,6 +51,8 @@ test("runtime binds /config mutes to this registration's existing preferences st
     const started =
       Promise.withResolvers<(body: unknown) => boolean | Promise<boolean>>();
     const posts: string[] = [];
+    const updates: { ts: string; text: string; content: unknown }[] = [];
+    let interactions: SlackInteractions | undefined;
     const backendCalls: string[] = [];
     const dependencies: RuntimeDependencies = {
       slack: () =>
@@ -51,13 +60,32 @@ test("runtime binds /config mutes to this registration's existing preferences st
           async identity() {
             return identity;
           },
-          async start(accept) {
+          async start(accept, _log, controls) {
+            interactions = controls;
             started.resolve(accept);
           },
           async close() {},
           async post(_channel, _thread, text) {
             posts.push(text);
             return "9.000";
+          },
+          async update(_channel, ts, text, _stop, content) {
+            updates.push({ ts, text, content });
+            return true;
+          },
+          async userInfo(user) {
+            return {
+              ok: true,
+              user: {
+                id: user,
+                team_id: identity.team,
+                is_bot: false,
+                deleted: false,
+              },
+            };
+          },
+          async ephemeral() {
+            throw new Error("Unexpected panel refusal");
           },
           async announce() {
             return "9.000";
@@ -109,6 +137,57 @@ test("runtime binds /config mutes to this registration's existing preferences st
     expect(posts).toHaveLength(2);
     expect(posts[1]).toMatch(/proxy/i);
     expect(posts[1]).toContain("unknown");
+    expect(backendCalls).toEqual(["quota"]);
+    await accept(event("<@UBOT> /config", "3.000"));
+    const content = z
+      .object({
+        blocks: z.array(
+          z.object({
+            type: z.string(),
+            elements: z
+              .array(
+                z.object({
+                  action_id: z.string(),
+                  value: z.string(),
+                  text: z.object({ text: z.string() }),
+                }),
+              )
+              .optional(),
+          }),
+        ),
+      })
+      .parse(updates.at(-1)?.content);
+    const button = content.blocks
+      .flatMap((block) => block.elements ?? [])
+      .find((item) => item.text.text === "3s");
+    if (!button || !interactions) throw new Error("Panel binding unavailable");
+    let acks = 0;
+    await interactions.interactive(
+      {
+        type: "block_actions",
+        api_app_id: config.slack.appId,
+        team: { id: identity.team },
+        user: { id: "U123" },
+        channel: { id: "C123" },
+        container: { type: "message", channel_id: "C123", message_ts: "9.000" },
+        message: { user: identity.user, ts: "9.000", thread_ts: "3.000" },
+        actions: [
+          {
+            type: "button",
+            action_id: button.action_id,
+            value: button.value,
+            action_ts: "1795003200.001",
+          },
+        ],
+      },
+      async () => {
+        acks++;
+      },
+    );
+    expect(acks).toBe(1);
+    expect((await resolveWaiting(config)).delayMs).toBe(3000);
+    expect(updates.at(-1)?.ts).toBe("9.000");
+    expect(updates.at(-1)?.text).toContain("U123");
     expect(backendCalls).toEqual(["quota"]);
   } finally {
     controller.abort();

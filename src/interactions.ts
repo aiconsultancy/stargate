@@ -27,6 +27,10 @@ export function controlInteractions(
   pairing: SlackInteractions,
   cancel: (body: unknown) => boolean,
   crew?: SlackInteractions,
+  config?: (
+    body: unknown,
+    ack: Parameters<SlackInteractions["interactive"]>[1],
+  ) => Promise<boolean>,
 ): SlackInteractions {
   return {
     async command(body, ack) {
@@ -55,6 +59,7 @@ export function controlInteractions(
     async interactive(body, ack) {
       if (pairingAction.safeParse(body).success)
         await pairing.interactive(body, ack);
+      else if (config && (await config(body, ack))) return;
       else if (cancel(body)) await ack();
       else await cron.interactive(body, ack);
     },

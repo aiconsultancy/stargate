@@ -1,10 +1,25 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { BotConfig } from "./config";
+import {
+  buildConfigPanel,
+  type ConfigPanelRow,
+  configActionCandidate,
+  configActionPrefix,
+  configActionSchema,
+  configPanelRefused,
+  configPanelStale,
+  configPanelUnavailable,
+  configReplyTarget,
+  configSnapshotSchema,
+  readConfigSnapshot,
+  sameConfigSnapshot,
+} from "./config-panel";
 import type { SlackDelivery } from "./gateway";
 import type { NotificationPage } from "./notification-store";
 import { notificationKey } from "./notifications";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
-import type { Store } from "./store";
+import type { ConfigPanelRecord, Store } from "./store";
 import { resolveWaiting, saveWaitingDelay } from "./waiting";
 
 const envelope = z.object({
@@ -84,12 +99,15 @@ export interface MetaOptions {
   listMutes?: () => NotificationPage | Promise<NotificationPage>;
   health?: (section?: string) => Promise<string>;
   now?: () => number;
+  /** Authenticated directory evidence, not a payload's omission of is_bot. */
+  isHuman?: (user: string) => Promise<boolean>;
 }
 type Context = {
   bot: BotConfig;
   user: string;
   options: MetaOptions;
   open: () => boolean;
+  beforeWrite?: () => Promise<void>;
 };
 type Outcome = {
   reply: string;
@@ -99,6 +117,7 @@ type Outcome = {
 type Command = {
   syntax: string;
   pattern: RegExp;
+  panel?: ConfigPanelRow;
   run(context: Context, match: RegExpMatchArray): Promise<Outcome>;
 };
 const unavailable = "Waiting settings unavailable for this registration.";
@@ -107,6 +126,9 @@ const unconfirmed =
 function seconds(value: number | null) {
   return value === null ? "off" : `${value / 1000} seconds`;
 }
+
+/** A snapshot mismatch is proven before the shared waiting write. */
+class ConfigSnapshotChanged extends Error {}
 
 async function mutePage(
   options: MetaOptions,
@@ -155,7 +177,17 @@ const commands: readonly Command[] = [
   {
     syntax: "/config waiting <0..3600|off>",
     pattern: /^\/config waiting (off|\d+)$/,
-    async run({ bot, user, open }, match) {
+    panel: {
+      id: "waiting",
+      title: "waiting",
+      value: (snapshot) => seconds(snapshot.delayMs),
+      actions: [
+        { id: "waiting_off", label: "Off", command: "/config waiting off" },
+        { id: "waiting_3", label: "3s", command: "/config waiting 3" },
+        { id: "waiting_10", label: "10s", command: "/config waiting 10" },
+      ],
+    },
+    async run({ bot, user, open, beforeWrite }, match) {
       const value = match[1];
       const count = value === "off" ? null : Number(value);
       if (count !== null && (!Number.isSafeInteger(count) || count > 3600))
@@ -164,6 +196,7 @@ const commands: readonly Command[] = [
         return { reply: unavailable };
       const oldDelayMs = (await resolveWaiting(bot)).delayMs;
       const newDelayMs = count === null ? null : count * 1000;
+      await beforeWrite?.();
       assertOpen(open);
       await saveWaitingDelay(
         bot.backend.directory,
@@ -181,6 +214,12 @@ const commands: readonly Command[] = [
   {
     syntax: "/config mutes",
     pattern: /^\/config mutes$/,
+    panel: {
+      id: "mutes",
+      title: "mutes (read-only)",
+      value: (snapshot) => snapshot.mutes,
+      actions: [],
+    },
     async run({ options }) {
       const page = await mutePage(options);
       if (!page) {
@@ -206,6 +245,15 @@ const commands: readonly Command[] = [
   {
     syntax: "/config system1 <on|off>",
     pattern: /^\/config system1(?: (.*))?$/,
+    panel: {
+      id: "system1",
+      title: "System One",
+      value: () => "not available yet (NET-1709)",
+      actions: [
+        { id: "system1_on", label: "On", command: "/config system1 on" },
+        { id: "system1_off", label: "Off", command: "/config system1 off" },
+      ],
+    },
     async run(_context, match) {
       return {
         reply:
@@ -218,6 +266,10 @@ const commands: readonly Command[] = [
 ];
 function help(): string {
   return `Valid commands:\n${commands.map((command) => command.syntax).join("\n")}`;
+}
+
+export function configPanelRows(): readonly ConfigPanelRow[] {
+  return commands.flatMap((command) => (command.panel ? [command.panel] : []));
 }
 
 /** Per-registration serialisation is independent of the model worker queue. */
@@ -239,6 +291,255 @@ export class MetaCommands {
     const next = this.tail.then(() => this.handle(raw, bot, identity, open));
     this.tail = next.catch(() => {});
     return next.then(() => true);
+  }
+
+  /** ACK never waits behind a health read, directory lookup or Slack update. */
+  async interactive(
+    raw: unknown,
+    bot: BotConfig,
+    identity: Identity,
+    open: () => boolean,
+    ack: (payload?: Record<string, unknown>) => Promise<void>,
+  ): Promise<boolean> {
+    if (!configActionCandidate(raw)) return false;
+    assertOpen(open);
+    await ack();
+    const next = this.tail.then(() =>
+      this.handleInteractive(raw, bot, identity, open),
+    );
+    this.tail = next.catch(() => {});
+    await next;
+    return true;
+  }
+
+  private async snapshot(bot: BotConfig) {
+    return readConfigSnapshot(bot, await mutePage(this.options));
+  }
+
+  private view(panel: ConfigPanelRecord) {
+    return buildConfigPanel(configPanelRows(), {
+      ...panel,
+      snapshot: configSnapshotSchema.parse(JSON.parse(panel.snapshot)),
+    });
+  }
+
+  private async refuse(
+    raw: unknown,
+    bot: BotConfig,
+    identity: Identity,
+    open: () => boolean,
+    text: string,
+  ) {
+    assertOpen(open);
+    const target = configReplyTarget(raw, bot, identity.team);
+    if (
+      target &&
+      isAllowedChannel(bot, target.channel.id) &&
+      target.user.id !== identity.user &&
+      target.user.id !== "USLACKBOT"
+    ) {
+      await this.slack.ephemeral?.(
+        target.channel.id,
+        target.user.id,
+        target.message.thread_ts,
+        text,
+      );
+    }
+  }
+
+  private async handleInteractive(
+    raw: unknown,
+    bot: BotConfig,
+    identity: Identity,
+    open: () => boolean,
+  ) {
+    assertOpen(open);
+    const reject = (text = configPanelRefused) =>
+      this.refuse(raw, bot, identity, open, text);
+    const parsed = configActionSchema.safeParse(raw);
+    if (!parsed.success || !bot.configPanelEnabled || !this.slack.update)
+      return reject();
+    const body = parsed.data;
+    const action = body.actions[0];
+    if (
+      !action ||
+      body.api_app_id !== bot.slack.appId ||
+      body.team.id !== identity.team ||
+      body.user.id === identity.user ||
+      body.user.id === "USLACKBOT" ||
+      body.message.user !== identity.user ||
+      body.container.channel_id !== body.channel.id ||
+      body.container.message_ts !== body.message.ts ||
+      !isAllowedUser(bot, body.user.id) ||
+      !isAllowedChannel(bot, body.channel.id)
+    )
+      return reject();
+    let human = false;
+    try {
+      human = (await this.options.isHuman?.(body.user.id)) === true;
+    } catch {
+      /* Fail closed. */
+    }
+    assertOpen(open);
+    if (!human) return reject();
+    const [nonce = "", rawRevision = ""] = action.value.split(":");
+    const revision = Number(rawRevision);
+    const registration = notificationKey(bot, identity);
+    const panel = this.store.configPanel(registration, nonce);
+    if (
+      !panel ||
+      panel.ts !== body.message.ts ||
+      panel.channel !== body.channel.id ||
+      panel.thread !== body.message.thread_ts
+    )
+      return reject();
+    const at = (this.options.now ?? Date.now)();
+    if (panel.createdAt > at || at - panel.createdAt > 86_400_000)
+      return reject(configPanelStale);
+    const entry = commands.find((command) =>
+      command.panel?.actions.some(
+        (candidate) =>
+          `${configActionPrefix}${candidate.id}` === action.action_id,
+      ),
+    );
+    const choice = entry?.panel?.actions.find(
+      (candidate) =>
+        `${configActionPrefix}${candidate.id}` === action.action_id,
+    );
+    if (!entry || !choice) return reject(`Unknown config action. ${help()}`);
+    const message = `panel:${nonce}:${revision}:${action.action_ts}`;
+    const receipt = this.store.metaReceipt(registration, message);
+    if (receipt) {
+      if (receipt.user !== body.user.id || receipt.command !== entry.syntax)
+        return reject();
+      if (receipt.state === "pending") return reject(unconfirmed);
+      if (
+        receipt.oldDelayMs === null &&
+        receipt.newDelayMs === null &&
+        entry.panel?.id !== "waiting"
+      ) {
+        return reject(receipt.reply ?? unconfirmed);
+      }
+      if (
+        panel.revision !== revision + 1 ||
+        !(await this.matchesSnapshot(bot, panel))
+      )
+        return reject(configPanelStale);
+      assertOpen(open);
+      if (!receipt.delivered) await this.updatePanel(panel, open);
+      this.store.deliverMeta(registration, message);
+      return;
+    }
+    if (
+      panel.revision !== revision ||
+      !(await this.matchesSnapshot(bot, panel))
+    )
+      return reject(configPanelStale);
+    if (this.store.pendingConfigPanel(registration, nonce))
+      return reject(unconfirmed);
+    const match = entry.pattern.exec(choice.command);
+    if (!match) return reject();
+    assertOpen(open);
+    if (
+      !this.store.claimMeta({
+        registration,
+        message,
+        channel: panel.channel,
+        thread: panel.thread,
+        user: body.user.id,
+        at,
+        command: entry.syntax,
+      })
+    )
+      return reject(unconfirmed);
+    let outcome: Outcome;
+    let next: ConfigPanelRecord | undefined;
+    try {
+      outcome = await entry.run(
+        {
+          bot,
+          user: body.user.id,
+          options: this.options,
+          open,
+          beforeWrite: async () => {
+            if (!(await this.matchesSnapshot(bot, panel)))
+              throw new ConfigSnapshotChanged();
+            assertOpen(open);
+          },
+        },
+        match,
+      );
+      if (
+        outcome.oldDelayMs !== undefined &&
+        outcome.newDelayMs !== undefined
+      ) {
+        const snapshot = await this.snapshot(bot);
+        // A tool can write after our file rename. Retain our outcome, but never
+        // attribute that newer value to this actor or repaint it as our change.
+        snapshot.delayMs = outcome.newDelayMs;
+        next = {
+          ...panel,
+          revision: revision + 1,
+          snapshot: JSON.stringify(snapshot),
+          user: body.user.id,
+          at,
+        };
+        this.store.applyConfigPanel(
+          next,
+          message,
+          outcome.reply,
+          outcome.oldDelayMs,
+          outcome.newDelayMs,
+        );
+      } else this.store.applyMeta(registration, message, outcome.reply);
+    } catch (error) {
+      if (
+        error instanceof MetaAdmissionChanged ||
+        error instanceof ConfigSnapshotChanged
+      ) {
+        this.store.releaseMetaClaim(registration, message);
+        if (error instanceof MetaAdmissionChanged) throw error;
+        return reject(configPanelStale);
+      }
+      // The file may have changed; retain pending and never write on a retry.
+      return reject(unconfirmed);
+    }
+    assertOpen(open);
+    if (next) {
+      if (!(await this.matchesSnapshot(bot, next)))
+        return reject(configPanelStale);
+      await this.updatePanel(next, open);
+    } else await reject(outcome.reply);
+    this.store.deliverMeta(registration, message);
+  }
+
+  private async matchesSnapshot(
+    bot: BotConfig,
+    panel: ConfigPanelRecord,
+  ): Promise<boolean> {
+    try {
+      return sameConfigSnapshot(
+        configSnapshotSchema.parse(JSON.parse(panel.snapshot)),
+        await this.snapshot(bot),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private async updatePanel(panel: ConfigPanelRecord, open: () => boolean) {
+    assertOpen(open);
+    if (!panel.ts || !this.slack.update)
+      throw new Error(configPanelUnavailable);
+    const content = this.view(panel);
+    const updated = await this.slack.update(
+      panel.channel,
+      panel.ts,
+      content.text,
+      undefined,
+      content,
+    );
+    if (updated === false) throw new Error(configPanelUnavailable);
   }
 
   private async handle(
@@ -287,6 +588,7 @@ export class MetaCommands {
       at,
       command: entry?.syntax ?? "unknown",
     });
+    let publishPanel = false;
     if (fresh) {
       let outcome: Outcome;
       try {
@@ -298,6 +600,30 @@ export class MetaCommands {
                 match,
               )
             : { reply: help() };
+        if (
+          commandText === "/config" &&
+          bot.configPanelEnabled &&
+          this.slack.update
+        ) {
+          const snapshot = await this.snapshot(bot);
+          assertOpen(open);
+          const panel: ConfigPanelRecord = {
+            nonce: randomUUID(),
+            registration,
+            message,
+            channel: event.channel,
+            thread: event.thread_ts ?? event.ts,
+            ts: null,
+            createdAt: at,
+            revision: 0,
+            snapshot: JSON.stringify(snapshot),
+            user: event.user,
+            at,
+          };
+          this.store.createConfigPanel(panel);
+          outcome = { reply: this.view(panel).text };
+          publishPanel = true;
+        }
       } catch (error) {
         if (error instanceof MetaAdmissionChanged) {
           this.store.releaseMetaClaim(registration, message);
@@ -325,6 +651,34 @@ export class MetaCommands {
     if (!receipt || receipt.user !== event.user) return;
     assertOpen(open);
     if (receipt.delivered) return;
+    const panel = this.store.configPanelForMessage(registration, message);
+    if (panel) {
+      if (!bot.configPanelEnabled || !this.slack.update) return;
+      if (!panel.ts) {
+        // Never republish after a crash/ambiguous post. No unbound controls exist.
+        if (!publishPanel) return;
+        const ts = await this.slack.post(
+          panel.channel,
+          panel.thread,
+          `${receipt.reply ?? configPanelUnavailable}\n${configPanelUnavailable}`,
+          undefined,
+          { allowed: open },
+        );
+        if (typeof ts !== "string" || !/^\d{1,16}\.\d{1,6}$/.test(ts)) {
+          this.store.deliverMeta(registration, message);
+          return;
+        }
+        this.store.bindConfigPanel(registration, panel.nonce, ts);
+        panel.ts = ts;
+      }
+      assertOpen(open);
+      if (!(await this.matchesSnapshot(bot, panel))) {
+        assertOpen(open);
+        await this.slack.update(panel.channel, panel.ts, configPanelStale);
+      } else await this.updatePanel(panel, open);
+      this.store.deliverMeta(registration, message);
+      return;
+    }
     await this.slack.post(
       receipt.channel,
       receipt.thread,

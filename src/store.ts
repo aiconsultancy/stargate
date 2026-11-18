@@ -235,6 +235,21 @@ export interface MetaReceipt {
   delivered: number;
 }
 
+/** One message-bound config panel. The snapshot contains hashes/status only. */
+export interface ConfigPanelRecord {
+  nonce: string;
+  registration: string;
+  message: string;
+  channel: string;
+  thread: string;
+  ts: string | null;
+  createdAt: number;
+  revision: number;
+  snapshot: string;
+  user: string;
+  at: number;
+}
+
 export class Store {
   private readonly db: Database;
   constructor(path: string) {
@@ -272,6 +287,13 @@ export class Store {
         state TEXT NOT NULL DEFAULT 'pending', oldDelayMs INTEGER,
         newDelayMs INTEGER, reply TEXT, delivered INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY(registration,message)
+      );
+      CREATE TABLE IF NOT EXISTS config_panels (
+        nonce TEXT PRIMARY KEY, registration TEXT NOT NULL, message TEXT NOT NULL,
+        channel TEXT NOT NULL, thread TEXT NOT NULL, ts TEXT,
+        createdAt INTEGER NOT NULL, revision INTEGER NOT NULL,
+        snapshot TEXT NOT NULL, user TEXT NOT NULL, at INTEGER NOT NULL,
+        UNIQUE(registration,message)
       );
       CREATE TABLE IF NOT EXISTS captain_cursors (
         botKey TEXT NOT NULL, session_id TEXT NOT NULL, cursor TEXT,
@@ -2092,6 +2114,94 @@ export class Store {
         "SELECT * FROM meta_receipts WHERE registration=? AND message=?",
       )
       .get(registration, message);
+  }
+
+  configPanel(registration: string, nonce: string): ConfigPanelRecord | null {
+    return this.db
+      .query<ConfigPanelRecord, [string, string]>(
+        "SELECT * FROM config_panels WHERE registration=? AND nonce=?",
+      )
+      .get(registration, nonce);
+  }
+
+  configPanelForMessage(
+    registration: string,
+    message: string,
+  ): ConfigPanelRecord | null {
+    return this.db
+      .query<ConfigPanelRecord, [string, string]>(
+        "SELECT * FROM config_panels WHERE registration=? AND message=?",
+      )
+      .get(registration, message);
+  }
+
+  createConfigPanel(panel: ConfigPanelRecord) {
+    this.db
+      .query(`INSERT INTO config_panels
+      (nonce,registration,message,channel,thread,ts,createdAt,revision,snapshot,user,at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(
+        panel.nonce,
+        panel.registration,
+        panel.message,
+        panel.channel,
+        panel.thread,
+        panel.ts,
+        panel.createdAt,
+        panel.revision,
+        panel.snapshot,
+        panel.user,
+        panel.at,
+      );
+  }
+
+  bindConfigPanel(registration: string, nonce: string, ts: string) {
+    const changed = this.db
+      .query(`UPDATE config_panels SET ts=?
+      WHERE registration=? AND nonce=? AND ts IS NULL`)
+      .run(ts, registration, nonce).changes;
+    if (changed !== 1) throw new Error("Config panel binding unavailable");
+  }
+
+  pendingConfigPanel(registration: string, nonce: string): boolean {
+    return (
+      this.db
+        .query(`SELECT 1 FROM meta_receipts
+      WHERE registration=? AND message LIKE ? AND state='pending' LIMIT 1`)
+        .get(registration, `panel:${nonce}:%`) !== null
+    );
+  }
+
+  /** Applied receipt and next revision become durable together, before delivery. */
+  applyConfigPanel(
+    panel: ConfigPanelRecord,
+    message: string,
+    reply: string,
+    oldDelayMs: number | null,
+    newDelayMs: number | null,
+  ) {
+    this.db.transaction(() => {
+      const changed = this.db
+        .query(`UPDATE config_panels SET
+        revision=?,snapshot=?,user=?,at=? WHERE registration=? AND nonce=? AND revision=?`)
+        .run(
+          panel.revision,
+          panel.snapshot,
+          panel.user,
+          panel.at,
+          panel.registration,
+          panel.nonce,
+          panel.revision - 1,
+        ).changes;
+      if (changed !== 1) throw new Error("Config panel revision changed");
+      this.applyMeta(
+        panel.registration,
+        message,
+        reply,
+        oldDelayMs,
+        newDelayMs,
+      );
+    })();
   }
 
   /** Claim before touching the shared waiting file; pending never replays. */
