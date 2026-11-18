@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { Schema } from "effect";
 import { CrewHistoryRPC } from "../src/crew/history-rpc";
 import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
 import { CrewError, CrewState, type Peer } from "../src/crew/state";
@@ -143,7 +144,7 @@ test("history RPC mixed roots are pure provisioned-state reads", async () => {
   try {
     const before = f.snapshot();
     const page = await f.rpc.historyRoots(signal());
-    historySessionPageSchema.parse(page);
+    Schema.decodeUnknownSync(historySessionPageSchema)(page);
     expect(
       page.sessions.map(({ id, harness, kind, member }) => ({
         id,
@@ -270,6 +271,36 @@ test("history RPC pages recorded task/report children, excludes main and duplica
     ).toEqual({ sessions: [] });
     expect(f.reads).toEqual([]);
     expect(f.snapshot()).toEqual(before);
+  } finally {
+    await f.close();
+  }
+});
+
+test("history RPC children cursors are exact string records", async () => {
+  const f = await fixture();
+  try {
+    const root = f.root("twiki");
+    const encode = (value: unknown) =>
+      Buffer.from(JSON.stringify(value)).toString("base64url");
+    const children = (cursor: string) =>
+      f.rpc.historyChildren({ parentID: root, limit: 1, cursor }, signal());
+    expect(
+      (await children(encode({ parentID: root, after: "18" }))).sessions,
+    ).toMatchObject([{ id: `${root}~19` }]);
+    expect(
+      (await children(encode({ parentID: root, after: "" }))).sessions,
+    ).toMatchObject([{ id: `${root}~18` }]);
+    for (const cursor of [
+      encode({ parentID: root, after: "18", extra: true }),
+      encode({ parentID: root, after: 18 }),
+      encode({ parentID: root }),
+      encode({ parentID: f.root("r2d2"), after: "18" }),
+      encode([root, "18"]),
+      encode(null),
+      "not-json",
+    ])
+      await expect(children(cursor), cursor).rejects.toThrow(unavailable);
+    expect(f.reads).toEqual([]);
   } finally {
     await f.close();
   }

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { chmod, lstat, unlink } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname } from "node:path";
+import { Option, Schema } from "effect";
 import type { Logger } from "pino";
 import { dashboardBranding, isDashboardFavicon } from "./dashboard-branding";
 import type { DashboardSource } from "./dashboard-model";
@@ -16,6 +17,9 @@ import {
   type SocketIdentity,
   unlinkOwnSocket,
 } from "./teams/unix-socket";
+
+const decodeChildren = Schema.decodeUnknownOption(historyChildrenInputSchema);
+const decodeEntries = Schema.decodeUnknownOption(historyEntriesInputSchema);
 
 type Options = {
   source: DashboardSource;
@@ -172,11 +176,11 @@ function createDashboard(options: Options) {
       return error(400, "Invalid request");
     }
     const query = Object.fromEntries(url.searchParams);
-    const children = historyChildrenInputSchema.safeParse({
+    const children = decodeChildren({
       parentID: query["parent"],
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
     });
-    const entries = historyEntriesInputSchema.safeParse({
+    const entries = decodeEntries({
       sessionID: query["session"],
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
       ...(query["order"] !== undefined ? { order: query["order"] } : {}),
@@ -190,8 +194,8 @@ function createDashboard(options: Options) {
         : {}),
     });
     if (
-      (kind === "sessions" && !children.success) ||
-      (kind === "entries" && !entries.success)
+      (kind === "sessions" && Option.isNone(children)) ||
+      (kind === "entries" && Option.isNone(entries))
     ) {
       return error(400, "Invalid request");
     }
@@ -207,21 +211,21 @@ function createDashboard(options: Options) {
         case "fleet":
           return options.source.fleet(signal);
         case "sessions":
-          if (children.success)
+          if (Option.isSome(children))
             return options.source.children(
               id,
               {
-                parentID: children.data.parentID,
-                ...(children.data.cursor === undefined
+                parentID: children.value.parentID,
+                ...(children.value.cursor === undefined
                   ? {}
-                  : { cursor: children.data.cursor }),
+                  : { cursor: children.value.cursor }),
               },
               signal,
             );
           break;
         case "entries":
-          if (entries.success)
-            return options.source.entries(id, entries.data, signal);
+          if (Option.isSome(entries))
+            return options.source.entries(id, entries.value, signal);
           break;
         default:
           return options.source.ship(id, signal);

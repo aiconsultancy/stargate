@@ -1,5 +1,6 @@
-import { z } from "zod";
+import { Schema } from "effect";
 import {
+  exactStruct,
   HISTORY_PAGE,
   type HistoryChildrenInput,
   type HistoryEntriesInput,
@@ -14,10 +15,12 @@ import { CrewError, type CrewState } from "./state";
 import type { CrewMember, Team } from "./team";
 
 const unavailable = "Pi history unavailable or cancelled.";
-const childrenCursor = z.strictObject({
-  parentID: z.string(),
-  after: z.string(),
-});
+const decodeChildrenCursor = Schema.decodeUnknownSync(
+  exactStruct({ parentID: Schema.String, after: Schema.String }),
+);
+const decodeDescribe = Schema.decodeUnknownSync(historyDescribeInputSchema);
+const decodeChildren = Schema.decodeUnknownSync(historyChildrenInputSchema);
+const decodeEntries = Schema.decodeUnknownSync(historyEntriesInputSchema);
 
 /** Root: pi:<peer session>. Child: pi:<peer session>~<native numeric ID>.
  * Peer IDs are generated ses_<uuid>, never contain '~'. IDs stay below 512
@@ -96,7 +99,7 @@ export class CrewHistoryRPC {
 
   historyDescribe(ids: readonly string[], signal: AbortSignal) {
     return this.safe(signal, async () => {
-      historyDescribeInputSchema.parse({ ids });
+      decodeDescribe({ ids });
       const sessions: HistorySession[] = [];
       for (const id of ids) {
         const owned = this.authorized(id);
@@ -119,11 +122,11 @@ export class CrewHistoryRPC {
 
   historyChildren(raw: HistoryChildrenInput, signal: AbortSignal) {
     return this.safe(signal, async () => {
-      const input = historyChildrenInputSchema.parse(raw);
+      const input = decodeChildren(raw);
       const owned = this.authorized(input.parentID);
       if (!owned) throw new CrewError(unavailable);
       const cursor = input.cursor
-        ? childrenCursor.parse(
+        ? decodeChildrenCursor(
             JSON.parse(Buffer.from(input.cursor, "base64url").toString("utf8")),
           )
         : undefined;
@@ -165,7 +168,7 @@ export class CrewHistoryRPC {
 
   historyEntries(raw: HistoryEntriesInput, signal: AbortSignal) {
     return this.safe(signal, async () => {
-      const input = historyEntriesInputSchema.parse(raw);
+      const input = decodeEntries(raw);
       const owned = this.authorized(input.sessionID);
       if (!owned) throw new CrewError(unavailable);
       return this.pi.readHistory(owned.member, signal, (history, call) =>
