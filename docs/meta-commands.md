@@ -18,17 +18,19 @@ is unavailable. Replies stay in the message's thread.
 
 ## Commands
 
-| Command after the mention                      | Result                                                                                                                             |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `/help`                                        | Lists commands from the same table that dispatches them.                                                                           |
-| `/config`                                      | Lists supported settings and their current values.                                                                                 |
-| `/config waiting <seconds\|off>`               | Sets the waiting-response delay. Whole seconds from 0 to 3600 are accepted; `off` disables it. Zero means immediate, not disabled. |
-| `/config mutes`                                | Reads this bot registration's saved thread and channel mutes. It changes no mute.                                                  |
-| `/config enable system one message filtering`  | Reserved: replies `not available yet (NET-1709)`.                                                                                  |
-| `/config disable system one message filtering` | Reserved: replies `not available yet (NET-1709)`.                                                                                  |
+| Command after the mention        | Result                                                                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `/help`                          | Lists commands from the same table that dispatches them.                                                                           |
+| `/config`                        | Lists supported settings and their current values.                                                                                 |
+| `/config waiting <seconds\|off>` | Sets the waiting-response delay. Whole seconds from 0 to 3600 are accepted; `off` disables it. Zero means immediate, not disabled. |
+| `/config mutes`                  | Reads this bot registration's saved thread and channel mutes. It changes no mute.                                                  |
+| `/config system1 on`             | Reserved: replies `not available yet (NET-1709)`.                                                                                  |
+| `/config system1 off`            | Reserved: replies `not available yet (NET-1709)`.                                                                                  |
 
-The two reserved commands also accept `routing` instead of `filtering`. They
-do not enable a filter or route a message to a decision model.
+The reserved System One commands do not enable a filter or route a message to
+a decision model. Missing or invalid values reply `valid values: on, off`.
+There are no long-form aliases. Both `/help` and `/config` list the supported
+syntax from the same command table.
 
 The waiting command uses the same private workspace override as the existing
 captain tool, not another copy of the setting. See [waiting responses](waiting.md)
