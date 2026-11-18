@@ -85,7 +85,9 @@ cleanup completes before the owning scope closes.
 
 ### What stays Promise-based
 
-These modules keep plain TypeScript, Zod, Bun SQLite and `AbortSignal`:
+These modules keep plain TypeScript, Bun SQLite and `AbortSignal`. Validation
+now follows the separate [Effect Schema migration](effect-schema-migration.md);
+the original lifecycle adoption retained Zod to limit its scope.
 
 - Pure logic: routing, access, chunking, formatting, reaction parsing,
   configuration schemas, cron validation.
