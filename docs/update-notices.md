@@ -18,7 +18,11 @@ worker is created or woken. Unpinned Slack sessions receive the notice just
 before their next normal turn, not during startup. Existing transport intake,
 permissions and task ownership remain authoritative.
 
-OpenCode uses a synthetic inbox entry with `delivery: queue` and `resume: false`.
+OpenCode sessions use a local context queue in the existing crew store.
+The existing session context hook consumes it at the next model request
+that normal work already started. It creates no native inbox input or
+transcript boundary: a passive notice cannot block uncertain-task
+reconciliation or invalidate result lineage.
 A busy turn is not interrupted. An idle session does not start a model turn
 because of the notice. The notice is information, not an assignment: it asks
 for no acknowledgement and grants no permission to repeat work or change

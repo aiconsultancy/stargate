@@ -280,8 +280,8 @@ test("conversation eval: exported plugin wires cancellable native wait through i
           expect(observers).toBe(0);
           expect(unexpected).toEqual([]);
           expect(historyRequests).toEqual([]);
-          // Every registration is released once (the IRC RPC added one).
-          expect(disposed).toBe(6);
+          // Every registration is released once, including passive context.
+          expect(disposed).toBe(7);
         }
       }
     }
@@ -1631,6 +1631,7 @@ test("update notices queue once behind busy OpenCode crew without interrupting, 
     ).task;
     if (!task) throw new Error("Missing task");
     const before = f.calls.length;
+    const nativeHistory = structuredClone(f.history.get(task.workerSessionID));
     const snapshot = buildUpdateSnapshot(
       "0.37.0",
       { notifications: { updateNotice: true } },
@@ -1644,15 +1645,12 @@ test("update notices queue once behind busy OpenCode crew without interrupting, 
     expect(first).toEqual([
       { sessionID: task.workerSessionID, status: "queued" },
     ]);
-    expect(f.calls.slice(before).map((call) => call.method)).toEqual([
-      "synthetic",
-    ]);
-    expect(f.synthetics.at(-1)).toMatchObject({
-      sessionID: task.workerSessionID,
-      delivery: "queue",
-      resume: false,
-      description: "Stargate update notice",
-    });
+    expect(f.calls.slice(before)).toEqual([]);
+    expect(f.synthetics).toEqual([]);
+    const system: { type: "text"; text: string }[] = [];
+    f.engine.updateNoticeContext(task.workerSessionID, "mario", system);
+    expect(system[0]?.text).toContain("Stargate update notice");
+    expect(f.history.get(task.workerSessionID)).toEqual(nativeHistory);
     expect(f.engine.state.task(task.id)?.status).toBe("running");
     const repeat = await f.engine.updateNotice(
       snapshot,
@@ -1660,7 +1658,71 @@ test("update notices queue once behind busy OpenCode crew without interrupting, 
       new AbortController().signal,
     );
     expect(repeat[0]?.status).toBe("unchanged");
-    expect(f.calls.slice(before)).toHaveLength(1);
+    expect(f.calls.slice(before)).toHaveLength(0);
+    f.engine.updateNoticeContext(task.workerSessionID, "mario", system);
+    expect(system).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("passive notices preserve uncertain reconciliation and later legitimate dispatch", async () => {
+  const f = await fixture(undefined, undefined, true);
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Original work" },
+        f.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    const input = uncertainResult(f, task);
+    await f.engine.updateNotice(
+      buildUpdateSnapshot("0.37.0", {}, "- New notices"),
+      {},
+      new AbortController().signal,
+    );
+    expect(await f.engine.run(input, f.captain())).toMatchObject({
+      status: "reconciled",
+    });
+    expect(
+      (
+        await f.engine.run(
+          { op: "dispatch", crew: "mario", text: "Next legitimate work" },
+          f.captain(),
+        )
+      ).task,
+    ).toMatchObject({ status: "running" });
+  } finally {
+    await f.close();
+  }
+});
+
+test("captain context admission verifies native identity and leaves native history unchanged", async () => {
+  const f = await fixture(undefined, undefined, true);
+  try {
+    const input = {
+      sessionID: "ses_captaina",
+      id: "msg_update",
+      text: "Stargate update notice: passive only",
+    };
+    expect(
+      await f.engine.queueCaptainNotice(input, new AbortController().signal),
+    ).toEqual({ id: input.id, sessionID: input.sessionID });
+    expect(f.calls).toEqual([]);
+    const system: { type: "text"; text: string }[] = [];
+    f.engine.updateNoticeContext(input.sessionID, "foreign", system);
+    expect(system).toEqual([]);
+    f.engine.updateNoticeContext(input.sessionID, "bowser", system);
+    expect(system).toEqual([{ type: "text", text: input.text }]);
+    f.engine.updateNoticeContext(input.sessionID, "bowser", system);
+    expect(system).toHaveLength(1);
+    await expect(
+      f.engine.queueCaptainNotice(
+        { ...input, sessionID: "ses_foreign" },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow();
   } finally {
     await f.close();
   }

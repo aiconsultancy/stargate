@@ -14,7 +14,7 @@ const session = {
   permissions: [{ action: "*", resource: "*", effect: "allow" }],
 };
 
-test("update notice admission is a queued synthetic with resume false, never an interrupt or prompt", async () => {
+test("update notice admission queues local context via RPC, never native input", async () => {
   const requests: { path: string; body: unknown }[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -24,8 +24,8 @@ test("update notice admission is a queued synthetic with resume false, never an 
       const body: unknown =
         request.method === "GET" ? undefined : await request.json();
       requests.push({ path, body });
-      if (path.endsWith("/synthetic"))
-        return Response.json({ data: { id: "msg_update", sessionID } });
+      if (path.endsWith("/queueUpdateNotice"))
+        return Response.json({ output: { id: "msg_update", sessionID } });
       if (path === `/api/session/${sessionID}`)
         return Response.json({ data: session });
       return new Response("Tool RPC unavailable", { status: 404 });
@@ -50,20 +50,16 @@ test("update notice admission is a queued synthetic with resume false, never an 
       new AbortController().signal,
     );
     expect(
-      requests.filter((request) => request.path.endsWith("/synthetic")),
+      requests.filter((request) => request.path.endsWith("/queueUpdateNotice")),
     ).toEqual([
       {
-        path: `/api/session/${sessionID}/synthetic`,
-        body: {
-          id: "msg_update",
-          text: "Context only",
-          description: "Stargate update notice",
-          delivery: "queue",
-          resume: false,
-          metadata: { stargateUpdateNotice: true },
-        },
+        path: "/api/rpc/stargate.crew.reporting/queueUpdateNotice",
+        body: { input: { sessionID, id: "msg_update", text: "Context only" } },
       },
     ]);
+    expect(
+      requests.some((request) => request.path.endsWith("/synthetic")),
+    ).toBe(false);
     expect(
       requests.some((request) => /interrupt|prompt/.test(request.path)),
     ).toBe(false);

@@ -26,6 +26,28 @@ export const CrewReporting = Rpc.define({
   id: "stargate.crew.reporting",
   events: {},
   methods: {
+    queueUpdateNotice: {
+      input: portable(
+        Schema.toStandardJSONSchemaV1(
+          Schema.Struct({
+            sessionID: Schema.String.check(
+              Schema.isMinLength(1),
+              Schema.isMaxLength(256),
+            ),
+            id: Schema.String.check(
+              Schema.isMinLength(1),
+              Schema.isMaxLength(256),
+            ),
+            text: Schema.String.check(Schema.isMaxLength(6000)),
+          }),
+        ),
+      ),
+      output: portable(
+        Schema.toStandardJSONSchemaV1(
+          Schema.Struct({ id: Schema.String, sessionID: Schema.String }),
+        ),
+      ),
+    },
     updateTools: {
       input: Schema.toStandardSchemaV1(
         Schema.toStandardJSONSchemaV1(Schema.Struct({})),

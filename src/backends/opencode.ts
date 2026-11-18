@@ -857,18 +857,12 @@ export class OpenCodeBackend implements AgentBackend {
     text: string,
     signal: AbortSignal,
   ) {
-    const receipt = await this.client.session.synthetic(
-      {
-        sessionID,
-        id,
-        text,
-        description: "Stargate update notice",
-        delivery: "queue",
-        resume: false,
-        metadata: { stargateUpdateNotice: true },
-      },
-      { signal },
-    );
+    const receipt = await this.client
+      .rpc(CrewReporting)
+      .queueUpdateNotice(
+        { sessionID, id, text },
+        { location: { directory: this.config.directory }, signal },
+      );
     if (receipt.id !== id || receipt.sessionID !== sessionID)
       throw new Error("Update notice identity changed");
   }

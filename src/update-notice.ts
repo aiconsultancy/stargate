@@ -213,6 +213,64 @@ export class UpdateNotices {
     db.exec(
       "CREATE TABLE IF NOT EXISTS update_notice_state (scope TEXT NOT NULL, sessionID TEXT NOT NULL, id TEXT NOT NULL, token TEXT NOT NULL, snapshot TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, acknowledged TEXT, PRIMARY KEY(scope,sessionID))",
     );
+    db.exec(
+      "CREATE TABLE IF NOT EXISTS update_notice_context (id TEXT PRIMARY KEY, scope TEXT NOT NULL, sessionID TEXT NOT NULL, text TEXT NOT NULL)",
+    );
+  }
+
+  /** Local context queue, not a native inbox input: never affects task lineage or idle guards. */
+  queueExternalContext(
+    sessionID: string,
+    id: string,
+    text: string,
+    scope: string,
+  ) {
+    this.db
+      .query(
+        "INSERT OR IGNORE INTO update_notice_context (id,scope,sessionID,text) VALUES (?,?,?,?)",
+      )
+      .run(id, scope, sessionID, text);
+  }
+
+  queueContext(sessionID: string, id: string, scope: string) {
+    this.db
+      .transaction(() => {
+        const written = this.db
+          .query(
+            "INSERT OR IGNORE INTO update_notice_context SELECT id,scope,sessionID,text FROM update_notice_state WHERE scope=? AND sessionID=? AND id=?",
+          )
+          .run(scope, sessionID, id);
+        if (written.changes !== 1)
+          throw new Error("Update context intent missing");
+        this.db
+          .query(
+            "UPDATE update_notice_state SET status='queued',acknowledged=snapshot WHERE scope=? AND sessionID=? AND id=?",
+          )
+          .run(scope, sessionID, id);
+      })
+      .immediate();
+  }
+
+  consumeContext(
+    sessionID: string,
+    scope: string,
+    append: (text: string) => void,
+  ) {
+    this.db
+      .transaction(() => {
+        const pending = this.db
+          .query<{ id: string; text: string }, [string, string]>(
+            "SELECT id,text FROM update_notice_context WHERE scope=? AND sessionID=? ORDER BY rowid LIMIT 10",
+          )
+          .all(scope, sessionID);
+        for (const notice of pending) {
+          append(notice.text);
+          this.db
+            .query("DELETE FROM update_notice_context WHERE id=?")
+            .run(notice.id);
+        }
+      })
+      .immediate();
   }
   async deliver(
     sessionID: string,

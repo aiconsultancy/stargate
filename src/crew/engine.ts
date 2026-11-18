@@ -652,29 +652,12 @@ export class CrewEngine {
                 Schema.decodeUnknownSync(
                   Schema.Struct({ stored: Schema.Literal(true) }),
                 )(receipt);
-              } else {
-                const receipt = Schema.decodeUnknownSync(
-                  Schema.Struct({
-                    id: Schema.String,
-                    sessionID: Schema.String,
-                  }),
-                )(
-                  await this.sessions.synthetic(
-                    {
-                      sessionID: peer.sessionID,
-                      id,
-                      text,
-                      description: "Stargate update notice",
-                      delivery: "queue",
-                      resume: false,
-                      metadata: { stargateUpdateNotice: true },
-                    },
-                    { signal },
-                  ),
+              } else
+                this.state.updateNotices.queueContext(
+                  peer.sessionID,
+                  id,
+                  this.options.namespace,
                 );
-                if (receipt.id !== id || receipt.sessionID !== peer.sessionID)
-                  throw new Error("Update notice identity changed");
-              }
             },
             this.options.namespace,
           ),
@@ -684,6 +667,67 @@ export class CrewEngine {
       }
     }
     return receipts;
+  }
+
+  /** Consume only for this roster's native worker, at an already-running model context boundary. */
+  updateNoticeContext(
+    sessionID: string,
+    agent: string,
+    system: { type: "text"; text: string }[],
+  ) {
+    if (
+      agent ===
+        (this.options.team.captain.agent ?? this.options.team.captain.id) &&
+      !this.state.peerBySession(sessionID)
+    ) {
+      this.state.updateNotices.consumeContext(
+        sessionID,
+        this.options.namespace,
+        (text) => system.push({ type: "text", text }),
+      );
+      return;
+    }
+    const peer = this.state.peerBySession(sessionID);
+    const member = this.options.team.crew.find(
+      (member) => member.id === peer?.crewID,
+    );
+    if (
+      peer?.status !== "ready" ||
+      !member ||
+      member.backend ||
+      agent !== (member.agent ?? member.id)
+    )
+      return;
+    this.state.updateNotices.consumeContext(
+      sessionID,
+      this.options.namespace,
+      (text) => system.push({ type: "text", text }),
+    );
+  }
+
+  async queueCaptainNotice(
+    input: { sessionID: string; id: string; text: string },
+    signal: AbortSignal,
+  ) {
+    const session = await this.sessions.get(
+      { sessionID: input.sessionID },
+      { signal },
+    );
+    if (
+      session.id !== input.sessionID ||
+      session.agent !==
+        (this.options.team.captain.agent ?? this.options.team.captain.id) ||
+      session.location.directory !== this.options.captainDirectory ||
+      this.state.peerBySession(session.id)
+    )
+      throw new Error("Update notice captain identity changed");
+    this.state.updateNotices.queueExternalContext(
+      session.id,
+      input.id,
+      input.text,
+      this.options.namespace,
+    );
+    return { id: input.id, sessionID: session.id };
   }
 
   /** Same captain context: equal IDs, or both lineage of the pinned root. */

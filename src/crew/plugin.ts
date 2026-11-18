@@ -158,6 +158,14 @@ const plugin = Plugin.define({
           },
         ),
       );
+      await ctx.session.hook("context", async (event) => {
+        for (const selected of projects.contexts.values())
+          selected.updateNoticeContext(
+            event.sessionID,
+            event.agent,
+            event.system,
+          );
+      });
       const register: typeof ctx.rpc.register = (definition, handlers) =>
         resources.own(
           () => ctx.rpc.register(definition, handlers),
@@ -205,6 +213,10 @@ const plugin = Plugin.define({
         updateTools: (_input, context) =>
           report(context.signal, async () =>
             noticeTools(await ctx.tool.list()),
+          ),
+        queueUpdateNotice: (input, context) =>
+          report(context.signal, () =>
+            engine.queueCaptainNotice(input, context.signal),
           ),
         updateNotice: (input, context) =>
           report(context.signal, async () => {
