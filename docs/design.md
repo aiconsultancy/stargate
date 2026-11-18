@@ -418,8 +418,23 @@ Slack owner. Crew tasks retain the exact originating captain input resolved
 from the dispatch tool's message ancestry, including while queued. Captain-bound
 crew wakes queue rather than steer another source's active turn. Their metadata
 selects that retained input only for the exact originating captain session.
-Missing or foreign origins clear Slack ownership and stay in native history;
-ordinary shell-completion synthetics retain the existing continuation behavior.
+Missing or foreign origins clear Slack ownership and stay in native history.
+OpenCode shell-completion metadata supplies a shell/job ID, not an original
+input ID. A bounded same-session history read resolves the unique earlier
+native `shell` tool result with that ID and matching command, then folds its
+original input ancestry, including earlier shell and crew wakes. The existing
+durable input/job mapping selects the original registration and conversation;
+neither quoted source lines nor shell markup selects a destination. Missing,
+foreign, conflicting or ambiguous shell ancestry stays native-only, never on
+the latest chat. The reader keeps at most 10,000 compact records and launch
+witnesses, hashing commands rather than retaining tool output. Exceeding that
+bound also stays native-only. Read failures retain the delivery cursor for
+retry; they do not replay work. Adjacent mixed-origin wakes remain native-only.
+Unrecognised synthetic inputs, including completions without metadata, clear
+ownership. Recognised native instruction loads, restart notices and the exact
+native output-limit continuation remain context-only records; their text never
+selects a source. The output-limit continuation must be synthetic, with the
+verified exact text, no description and absent or empty metadata.
 A queued job never selects a destination before its input appears in history.
 
 Old tasks keep a null origin; activation never guesses or backfills their source.

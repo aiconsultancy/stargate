@@ -522,7 +522,7 @@ test("transcript attributes settled text to only preceding window inputs", async
       { id: "user-one", type: "user" },
       assistant("answer-one", "First answer"),
       { id: "crew-dm", type: "synthetic" },
-      assistant("answer-dm", "Same owner"),
+      assistant("answer-dm", "Unproven synthetic owner"),
       { id: "ui-shell", type: "shell" },
       assistant("shell-answer", "Native shell owner"),
       { id: "user-two", type: "user" },
@@ -542,7 +542,12 @@ test("transcript attributes settled text to only preceding window inputs", async
           created: 10,
           input: "user-one",
         },
-        { id: "answer-dm", text: "Same owner", created: 10, input: "user-one" },
+        {
+          id: "answer-dm",
+          text: "Unproven synthetic owner",
+          created: 10,
+          input: "crew-dm",
+        },
         {
           id: "shell-answer",
           text: "Native shell owner",
@@ -602,7 +607,16 @@ test.each(["user", "shell"])(
             return Response.json({
               data: [
                 assistant("own-two", "Own second"),
-                { id: "crew-dm", type: "synthetic" },
+                {
+                  id: "crew-dm",
+                  type: "synthetic",
+                  metadata: {
+                    pogoCrew: {
+                      originCaptainID: sessionID,
+                      originInputID: input,
+                    },
+                  },
+                },
                 assistant("own-one", "Own first"),
                 { id: input, type: "user" },
               ],

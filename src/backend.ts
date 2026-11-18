@@ -60,7 +60,7 @@ export type TranscriptEntry = {
   id: string;
   text: string;
   created: number;
-  /** Proven origin; unknown or mixed adjacent crew batches clear ownership. */
+  /** Proven origin; unknown or mixed adjacent native wakes clear ownership. */
   input?: string;
 };
 
@@ -73,7 +73,7 @@ export type TranscriptEntry = {
 export type Transcript = {
   cursor: string;
   entries: TranscriptEntry[];
-  /** Last proven/unmapped boundary; absent inherits owner. Crew cursors re-anchor. */
+  /** Last proven/unmapped boundary; absent inherits owner. Synthetic cursors re-anchor. */
   input?: string;
   pending?: true;
 };
