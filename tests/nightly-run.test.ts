@@ -188,9 +188,7 @@ const api = Bun.serve({
         return fixture.proxyDown(fixture)
           ? new Response("down", { status: 503 })
           : Response.json({
-              data: ["gpt-6.1-sol", "gpt-6.2-sol", "claude-opus-5-5"].map(
-                (id) => ({ id }),
-              ),
+              data: fixture.proxyModelIDs().map((id) => ({ id })),
             });
       case "/v1/responses": {
         const body = (await request.json()) as { model: string };
@@ -224,6 +222,7 @@ type Fixture = {
   proxyDown: (f: Fixture) => boolean;
   probeOK: (model: string) => boolean;
   probes: string[];
+  proxyModelIDs: () => string[];
   gateway: string;
   stopFails: boolean;
   badCliVersion: string | null;
@@ -244,6 +243,7 @@ const fixture: Fixture = {
   proxyDown: () => false,
   probeOK: () => true,
   probes: [],
+  proxyModelIDs: () => ["gpt-6.1-sol", "gpt-6.2-sol", "claude-opus-5-5"],
   gateway: "active",
   stopFails: false,
   badCliVersion: null,
@@ -528,6 +528,7 @@ beforeEach(() => {
     proxyDown: () => false,
     probeOK: () => true,
     probes: [],
+    proxyModelIDs: () => ["gpt-6.1-sol", "gpt-6.2-sol", "claude-opus-5-5"],
     gateway: "active",
     stopFails: false,
     badCliVersion: null,
@@ -1257,6 +1258,224 @@ describe("nightly maintenance run", () => {
     }
   });
 
+  test("global catalog opt-in plans additions without probing or writing, and default stays off", async () => {
+    const globalConfigFile = join(base, `catalog-${crypto.randomUUID()}.json`);
+    const { config, path } = await install({
+      components: {
+        stargate: false,
+        cliproxyapi: false,
+        agentClis: false,
+        models: true,
+      },
+      models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
+    });
+    const original = `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }], limit: { context: 1234 } } } } } }, null, 2)}\n`;
+    await writeFile(globalConfigFile, original);
+    const planned = await run(config, path, "plan");
+    expect(planned.report.models).toContainEqual(
+      expect.objectContaining({
+        scope: "catalog",
+        to: "openai-proxy/gpt-6.2-sol",
+        status: "planned",
+      }),
+    );
+    expect(await readFile(globalConfigFile, "utf8")).toBe(original);
+    expect(fixture.probes).toEqual([]);
+    if (!config.maintenance?.models) throw new Error("Missing models");
+    config.maintenance.models.updateGlobalCatalog = false;
+    const disabled = await run(config, path, "plan");
+    expect(
+      disabled.report.models.some(
+        (change) => change.scope === "catalog" && change.status === "planned",
+      ),
+    ).toBe(false);
+    expect(await readFile(globalConfigFile, "utf8")).toBe(original);
+    expect(
+      configSchema.parse({
+        dataDirectory: config.dataDirectory,
+        bots: config.bots,
+        maintenance: { ...config.maintenance, models: {} },
+      }).maintenance?.models?.updateGlobalCatalog,
+    ).toBe(false);
+    expect(config.maintenance.models.families).toContain("gpt-astra");
+  });
+
+  test("global catalog symlink target is added before restart and session upgrade; failed live verification restores it", async () => {
+    for (const succeeds of [true, false]) {
+      const globalConfigFile = join(base, `global-${crypto.randomUUID()}.json`);
+      const target = `${globalConfigFile}.target`;
+      const original = `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }], limit: { context: 1234 } } } } } }, null, 2)}\n`;
+      await writeFile(target, original);
+      await symlink(target, globalConfigFile);
+      const { config, path } = await install({
+        components: {
+          stargate: false,
+          cliproxyapi: false,
+          agentClis: false,
+          models: true,
+        },
+        models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
+      });
+      const beforeCatalog = opencode.catalog;
+      const beforeSwitch = opencode.switchModel;
+      let sawAdditionAtRestart = false;
+      opencode.catalog = async () => {
+        const added = JSON.parse(await readFile(target, "utf8")).providers[
+          "openai-proxy"
+        ].models["gpt-6.2-sol"];
+        return [
+          { providerID: "openai-proxy", id: "gpt-6.1-sol", variants: ["high"] },
+          ...(succeeds && added && fixture.openCodeRestarts
+            ? [
+                {
+                  providerID: "openai-proxy",
+                  id: "gpt-6.2-sol",
+                  variants: ["high"],
+                },
+              ]
+            : []),
+        ];
+      };
+      fixture.onCommand = async (command) => {
+        if (command.includes("restart opencode2.service"))
+          sawAdditionAtRestart ||= (await readFile(target, "utf8")).includes(
+            "gpt-6.2-sol",
+          );
+      };
+      opencode.switchModel = async (id, model, signal) => {
+        if (model.id === "gpt-6.2-sol") expect(succeeds).toBe(true);
+        await beforeSwitch(id, model, signal);
+      };
+      try {
+        const { report } = await run(config, path);
+        expect(sawAdditionAtRestart).toBe(true);
+        expect(await readlink(globalConfigFile)).toBe(target);
+        expect(fixture.probes).toContain("responses:gpt-6.2-sol");
+        expect(statusOf(report, "models")).toBe(
+          succeeds ? "updated" : "rolled-back",
+        );
+        const after = await readFile(target, "utf8");
+        if (succeeds) {
+          const models = JSON.parse(after).providers["openai-proxy"].models;
+          expect(models["gpt-6.2-sol"]).toEqual(models["gpt-6.1-sol"]);
+          expect(report.models).toContainEqual(
+            expect.objectContaining({
+              scope: "catalog",
+              to: "openai-proxy/gpt-6.2-sol",
+              status: "applied",
+            }),
+          );
+          expect(fixture.sessions.get("ses_captain")?.id).toBe("gpt-6.2-sol");
+        } else {
+          expect(after).toBe(original);
+          expect(fixture.sessions.get("ses_captain")?.id).toBe("gpt-6.1-sol");
+        }
+      } finally {
+        opencode.catalog = beforeCatalog;
+        opencode.switchModel = beforeSwitch;
+      }
+    }
+  });
+
+  test("global catalog changed after planning is preserved instead of overwritten", async () => {
+    const globalConfigFile = join(
+      base,
+      `edited-catalog-${crypto.randomUUID()}.json`,
+    );
+    const original = `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }] } } } } }, null, 2)}\n`;
+    await writeFile(globalConfigFile, original);
+    const { config, path } = await install({
+      components: {
+        stargate: false,
+        cliproxyapi: false,
+        agentClis: false,
+        models: true,
+      },
+      models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
+    });
+    const edited = original.replace(
+      '"id": "high"',
+      '"id": "high", "settings": { "reasoningEffort": "high" }',
+    );
+    fixture.onCommand = async (command) => {
+      if (command.includes("stop stargate.service"))
+        await writeFile(globalConfigFile, edited);
+    };
+    const { report } = await run(config, path);
+    expect(await readFile(globalConfigFile, "utf8")).toBe(edited);
+    expect(
+      report.components.find((component) => component.id === "models"),
+    ).toMatchObject({ status: "rolled-back", reason: "external-change" });
+    expect(fixture.sessions.get("ses_captain")?.id).toBe("gpt-6.1-sol");
+  });
+
+  test("global catalog discovers newly served models after proxy update in the same run", async () => {
+    const globalConfigFile = join(
+      base,
+      `proxy-catalog-${crypto.randomUUID()}.json`,
+    );
+    await writeFile(
+      globalConfigFile,
+      `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }] } } } } }, null, 2)}\n`,
+    );
+    const { config, path } = await install({
+      components: {
+        stargate: false,
+        cliproxyapi: true,
+        agentClis: false,
+        models: true,
+      },
+      models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
+    });
+    fixture.proxyModelIDs = () =>
+      fixture.commands.some((command) =>
+        command.join(" ").includes("restart cpa.service"),
+      )
+        ? ["gpt-6.1-sol", "gpt-6.2-sol"]
+        : ["gpt-6.1-sol"];
+    const { report } = await run(config, path);
+    expect(statusOf(report, "cliproxyapi")).toBe("updated");
+    expect(statusOf(report, "models")).toBe("updated");
+    expect(await readFile(globalConfigFile, "utf8")).toContain("gpt-6.2-sol");
+    expect(fixture.sessions.get("ses_captain")?.id).toBe("gpt-6.2-sol");
+  });
+
+  test("global catalog failed probe and unknown families never write; suffixed products are reported only", async () => {
+    const globalConfigFile = join(
+      base,
+      `failed-catalog-${crypto.randomUUID()}.json`,
+    );
+    const original = `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }] }, "gpt-6-mystery": {} } } } }, null, 2)}\n`;
+    await writeFile(globalConfigFile, original);
+    const { config, path } = await install({
+      components: {
+        stargate: false,
+        cliproxyapi: false,
+        agentClis: false,
+        models: true,
+      },
+      models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
+    });
+    fixture.proxyModelIDs = () => [
+      "gpt-6.2-sol",
+      "gpt-7-mystery",
+      "gpt-6.2-sol-fast",
+      "gpt-6.2-sol-ultrafast",
+    ];
+    fixture.probeOK = () => false;
+    const { report } = await run(config, path);
+    expect(await readFile(globalConfigFile, "utf8")).toBe(original);
+    expect(fixture.probes).toEqual(["responses:gpt-6.2-sol"]);
+    expect(
+      report.models
+        .filter((change) => change.reason === "new-product")
+        .map((change) => change.to),
+    ).toEqual(["gpt-6.2-sol-fast", "gpt-6.2-sol-ultrafast"]);
+    expect(report.models.some((change) => change.to.includes("mystery"))).toBe(
+      false,
+    );
+  });
+
   test("new child agents must load from the selected profile", async () => {
     const profiles = join(base, `profiles-${crypto.randomUUID()}`);
     const agent = (model: string, disabled = false) =>
@@ -1304,6 +1523,11 @@ describe("nightly maintenance run", () => {
       join(profiles, "03-other", "sol-6-1-xhigh-subagent.md"),
       agent("openai-proxy/gpt-6.1-sol#xhigh"),
     );
+    const globalConfigFile = join(profiles, "global.json");
+    await writeFile(
+      globalConfigFile,
+      `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }, { id: "xhigh" }] } } } } }, null, 2)}\n`,
+    );
     const { config, path } = await install({
       components: {
         stargate: false,
@@ -1311,7 +1535,12 @@ describe("nightly maintenance run", () => {
         agentClis: false,
         models: true,
       },
-      models: { agentProfiles: profiles, teamFiles: [] },
+      models: {
+        agentProfiles: profiles,
+        updateGlobalCatalog: true,
+        globalConfigFile,
+        teamFiles: [],
+      },
     });
     // Only the selected profile's route must load. The unselected profile's
     // renamed agent (sol-6-2-xhigh) is not in the live catalog and is not
@@ -1329,6 +1558,20 @@ describe("nightly maintenance run", () => {
     ];
     const good = await run(config, path);
     expect(good.report.outcome).toBe("completed");
+    expect(good.report.models).toContainEqual(
+      expect.objectContaining({
+        scope: "catalog",
+        status: "applied",
+        to: "openai-proxy/gpt-6.2-sol",
+      }),
+    );
+    expect(good.report.models).toContainEqual(
+      expect.objectContaining({
+        scope: "agent-profile",
+        status: "applied",
+        to: "openai-proxy/gpt-6.2-sol#high",
+      }),
+    );
     expect(
       await readFile(
         join(profiles, "01-blended", "sol-6-2-high-subagent.md"),
@@ -1490,6 +1733,54 @@ describe("nightly maintenance run", () => {
     expect(
       report.models.filter((m) => m.scope === "captain-session"),
     ).toHaveLength(1);
+  });
+
+  test("catalog verification stops within the reserved live phase before switching sessions", async () => {
+    let time = 0;
+    let calls = 0;
+    const control = {
+      ...opencode,
+      catalog: async () => {
+        calls++;
+        time += 10_000;
+        return [
+          { providerID: "openai-proxy", id: "gpt-6.2-sol", variants: [] },
+        ];
+      },
+      switchModel: async () => {
+        throw new Error("Must not switch after catalog timeout");
+      },
+    } satisfies OpenCodeControl;
+    const data = await mkdtemp(join(base, "catalog-cap-"));
+    const journal = Journal.create(data, crypto.randomUUID());
+    const result = await applyLiveModels(
+      {
+        upgrades: new Map(),
+        files: [],
+        profileLinks: [],
+        agents: [],
+        changes: [],
+        sessions: [
+          {
+            session: { id: "ses_captain", scope: "captain-session" },
+            from: { providerID: "openai-proxy", id: "gpt-6.1-sol" },
+            to: { providerID: "openai-proxy", id: "gpt-6.2-sol" },
+          },
+        ],
+        catalogChecks: {
+          directories: Array.from({ length: 31 }, (_, i) => `/crew/${i}`),
+          refs: [{ providerID: "openai-proxy", id: "gpt-6.2-sol" }],
+        },
+      },
+      control,
+      journal,
+      AbortSignal.timeout(5000),
+      { now: () => time, until: 300_000 },
+    );
+    expect(result.ok).toBe(false);
+    expect(time).toBeLessThanOrEqual(300_000);
+    expect(calls).toBeLessThanOrEqual(30);
+    expect(journal.empty).toBe(true);
   });
 
   test("the session phase stops at its cap; the rest stay valid and are reported", async () => {

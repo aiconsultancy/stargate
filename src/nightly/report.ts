@@ -42,7 +42,7 @@ export const componentSchema = z.strictObject({
     .optional(),
 });
 export const modelChangeSchema = z.strictObject({
-  /** `catalog`: a candidate rejected before any change (probe or catalog). */
+  /** `catalog`: an additive provider declaration or a rejected/reported candidate. */
   scope: z.enum([
     "catalog",
     "agent-profile",

@@ -618,8 +618,61 @@ downgrade. The newest candidate must:
 3. already be in OpenCode's live model catalog, globally and at every captain
    and crew location, with each variant in use (`#high`, ...).
 
-Stargate does not edit OpenCode provider declarations. A model that the proxy
-offers but OpenCode does not list is reported as `catalog-missing`.
+By default, Stargate does not edit OpenCode provider declarations. A model
+that the proxy offers but OpenCode does not list is reported as
+`catalog-missing`. Default families include `gpt-astra` as well as `gpt-sol`,
+`gpt-terra`, `gpt-luna` and the three Claude families above. Suffixed products
+ending in `-fast` or `-ultrafast` are reported with `new-product`, but are
+never selected for an upgrade.
+
+### Opt-in global catalogue additions
+
+`maintenance.models.updateGlobalCatalog` defaults to **false**. Set it to
+`true` only after release approval to enable additive global declarations:
+
+```json
+{
+  "models": {
+    "updateGlobalCatalog": true
+  }
+}
+```
+
+The fragment belongs inside `maintenance`; model maintenance also needs
+`components.models` and the proxy settings. The global file defaults to
+`$XDG_CONFIG_HOME/opencode/opencode.json`, or
+`~/.config/opencode/opencode.json` without `XDG_CONFIG_HOME`.
+`models.globalConfigFile` can name another absolute path.
+
+For each configured provider and known family, the newest existing global
+declaration supplies the template. A newer exact family member listed by
+the proxy must pass the existing probe before it is added. All template
+settings and variants are copied; existing declarations and unrelated
+configuration are preserved. Unknown families and suffixed products are
+not added. `maintenance plan` lists the proposed catalogue additions without
+probing, writing files or restarting services.
+
+The file uses OpenCode V2's `providers` object; model `variants` are arrays
+of entries with an `id`. Legacy V1 provider or variant shapes are not converted.
+An explicit `modelID` on the new entry is set to the probed model's ID;
+copying the old API identity would send requests to the old model.
+
+The global catalogue is written first, followed by profiles and team files
+in the same transaction. A proxy update refreshes discovery in the same run.
+After OpenCode restarts, the model and each variant in use must appear in
+the global and captain/crew location catalogues before sessions move.
+Catalogue checks share the bounded live-session phase; an incomplete check
+rolls the model changes back instead of exceeding that phase.
+Failure restores the backed-up files with the run's existing journal and
+rollback mechanism. Symlinks stay links: atomic writes and restoration
+resolve and replace the contents of the target, not the link. A global file
+changed since planning is not overwritten. Like other model JSON files,
+the global file must use the canonical two-space layout.
+
+The private report lists each catalogue addition (`scope: catalog`) and
+each profile route moved (`scope: agent-profile`), with planned, applied
+or rolled-back status. The flag does not change `stargate.json`, and this
+change does not enable it on any host automatically.
 
 Changed places, keeping provider prefixes and variants:
 
@@ -1222,11 +1275,12 @@ how to resume from the journal. For existing profiles, use
   events only for a short time. The stop covers only the restarts.
 - Pi workers' models (`backend.model`) are not upgraded: they are part of the
   crew identity.
-- Model upgrades do not edit OpenCode provider declarations; a model that
-  OpenCode does not list stays `catalog-missing` until the provider
-  configuration includes it.
-- Model probes and the OpenCode catalog are checked once per run; a model that
-  appears only after tonight's OpenCode restart moves the next night.
+- Without `models.updateGlobalCatalog`, model upgrades do not edit provider
+  declarations; missing declarations stay `catalog-missing`. The opt-in path
+  copies existing family settings, not new model-specific capabilities; an
+  operator must review any capability changes separately.
+- With the flag enabled, proxy discovery is repeated after a proxy update
+  and newly declared models are checked after the OpenCode restart.
 - The readiness record proves that every bot connected, not that a model call
   works. Plugin activity proves that OpenCode loaded the plugin, not that
   every crew tool works.

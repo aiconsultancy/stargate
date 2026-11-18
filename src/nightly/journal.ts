@@ -12,6 +12,7 @@ import {
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import type { Config } from "../config";
+import { globalCatalogPath } from "./catalog";
 import { discoverCrews } from "./crews";
 import { type CommandRunner, type Reason, StepError } from "./exec";
 import { atomicWrite, readOptional, replaceLink } from "./files";
@@ -403,8 +404,10 @@ export class FileChanges {
     );
   }
 
-  async write(path: string, content: string) {
+  async write(path: string, content: string, expected?: string) {
     const old = await readOptional(path);
+    if (expected !== undefined && old !== expected)
+      throw new StepError("external-change");
     await this.record({ kind: "file", path, old, written: sha256(content) });
     await atomicWrite(path, content);
   }
@@ -441,6 +444,8 @@ async function managedTargets(config: Config) {
   const files = new Set(
     (m?.models?.teamFiles ?? []).map((path) => resolve(path)),
   );
+  if (m?.models?.updateGlobalCatalog)
+    files.add(resolve(globalCatalogPath(m.models)));
   for (const crew of await discoverCrews(config).catch(() => []))
     for (const root of crew.roots) files.add(resolve(root.configPath));
   const profiles = m?.models?.agentProfiles

@@ -1415,12 +1415,20 @@ export async function runMaintenance(
       signal.throwIfAborted();
 
       const restartNeeded =
-        !gatewayOnly && (cliChanged || !!staged || !!work?.files.length);
+        !gatewayOnly &&
+        (cliChanged ||
+          !!staged ||
+          !!work?.files.length ||
+          !!inputs?.globalCatalog);
       const needed = applyBudgetMs({
         proxy: !!proxyDigest,
         restart: restartNeeded,
         release: !!staged,
-        live: !!(work?.sessions.length || work?.agents.length),
+        live: !!(
+          work?.sessions.length ||
+          work?.agents.length ||
+          inputs?.globalCatalog
+        ),
       });
       if (toClose() < needed) throw new Defer("deadline");
 
@@ -1460,7 +1468,27 @@ export async function runMaintenance(
             after: proxy.candidate.version,
           });
           // Models chosen through the old proxy must still answer.
-          if (work && inputs && work.upgrades.size && m.proxy) {
+          if (inputs?.globalCatalog && m.models) {
+            const selected = await selectModelUpgrades({
+              inputs,
+              settings: m.models,
+              proxy: m.proxy,
+              crews,
+              probe: true,
+              connect: deps.connect,
+              signal,
+            });
+            work = buildModelWork(inputs, selected.upgrades);
+            rec.models.push(...selected.rejected);
+            rec.replanModels(work.changes);
+            rec.update("models", {
+              status:
+                work.files.length || work.sessions.length
+                  ? "planned"
+                  : "unchanged",
+              candidate: [...work.upgrades.values()].join(",") || null,
+            });
+          } else if (work && inputs && work.upgrades.size && m.proxy) {
             const kept = new Map<string, string>();
             for (const [from, to] of work.upgrades) {
               if (await probeModel(m.proxy, to, signal)) kept.set(from, to);
@@ -1513,21 +1541,19 @@ export async function runMaintenance(
           try {
             const changes = new FileChanges(backup);
             for (const file of files.files)
-              await changes.write(file.path, file.text);
+              await changes.write(file.path, file.text, file.expected);
             for (const link of files.profileLinks)
               await changes.link(link.path, link.target);
             rec.step("model-configs", "ok");
-          } catch {
+          } catch (error) {
             signal.throwIfAborted();
+            const reason = reasonOf(error);
             const restored = await undoJournal(journal, ctx, ["files"]);
-            rec.step("model-configs", "failed", "config-format");
-            rec.markModels(
-              restored ? "rolled-back" : "failed",
-              "config-format",
-            );
+            rec.step("model-configs", "failed", reason);
+            rec.markModels(restored ? "rolled-back" : "failed", reason);
             rec.update("models", {
               status: restored ? "rolled-back" : "failed",
-              reason: "config-format",
+              reason,
             });
             work = undefined;
           }
