@@ -18,6 +18,11 @@ import {
 import type { SlackDelivery } from "./gateway";
 import type { NotificationPage } from "./notification-store";
 import { notificationKey } from "./notifications";
+import {
+  type QuestionSettings,
+  resolveQuestionSettings,
+  saveQuestionSettings,
+} from "./question-settings";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
 import type { ConfigPanelRecord, Store } from "./store";
 import { resolveWaiting, saveWaitingDelay } from "./waiting";
@@ -113,6 +118,7 @@ type Outcome = {
   reply: string;
   oldDelayMs?: number | null;
   newDelayMs?: number | null;
+  questions?: QuestionSettings;
 };
 type Command = {
   syntax: string;
@@ -125,6 +131,31 @@ const unconfirmed =
   "Command outcome unconfirmed; use /config to read current settings. Do not replay the change.";
 function seconds(value: number | null) {
   return value === null ? "off" : `${value / 1000} seconds`;
+}
+function questionTimeout(value: number) {
+  return value === 3_600_000 ? "1h" : `${value / 60_000}m`;
+}
+
+async function changeQuestions(
+  { bot, user, open, beforeWrite }: Context,
+  change: Partial<QuestionSettings>,
+): Promise<Outcome> {
+  if (bot.backend.type !== "opencode" || !bot.backend.agent)
+    return { reply: "Question settings unavailable for this registration." };
+  const previous = await resolveQuestionSettings(bot);
+  const questions = { ...previous, ...change };
+  await beforeWrite?.();
+  assertOpen(open);
+  await saveQuestionSettings(
+    bot.backend.directory,
+    bot.backend.agent,
+    questions,
+    AbortSignal.timeout(5000),
+  );
+  return {
+    reply: `questions: ${questions.enabled ? "on" : "off"}; timeout: ${questionTimeout(questions.timeoutMs)}; answer: ${questions.answer}; changed by ${user}.`,
+    questions,
+  };
 }
 
 /** A snapshot mismatch is proven before the shared waiting write. */
@@ -171,8 +202,9 @@ const commands: readonly Command[] = [
     pattern: /^\/config$/,
     async run({ bot, options }) {
       const page = await mutePage(options);
+      const questions = await resolveQuestionSettings(bot);
       return {
-        reply: `waiting: ${seconds((await resolveWaiting(bot)).delayMs)}\nmutes (read-only): ${page ? `${page.counts.channel} channels, ${page.counts.thread} threads` : "unavailable"}\n${help()}`,
+        reply: `waiting: ${seconds((await resolveWaiting(bot)).delayMs)}\nquestions: ${questions.enabled ? "on" : "off"}; timeout: ${questionTimeout(questions.timeoutMs)}; answer: ${questions.answer}\nmutes (read-only): ${page ? `${page.counts.channel} channels, ${page.counts.thread} threads` : "unavailable"}\n${help()}`,
       };
     },
   },
@@ -211,6 +243,80 @@ const commands: readonly Command[] = [
         oldDelayMs,
         newDelayMs,
       };
+    },
+  },
+  {
+    syntax: "/config questions <on|off>",
+    pattern: /^\/config questions (on|off)$/,
+    panel: {
+      id: "questions",
+      title: "questions",
+      value: (snapshot) => (snapshot.questions.enabled ? "on" : "off"),
+      actions: [
+        { id: "questions_on", label: "On", command: "/config questions on" },
+        { id: "questions_off", label: "Off", command: "/config questions off" },
+      ],
+    },
+    async run(context, match) {
+      return changeQuestions(context, { enabled: match[1] === "on" });
+    },
+  },
+  {
+    syntax: "/config questions timeout <5m|15m|1h>",
+    pattern: /^\/config questions timeout (5m|15m|1h)$/,
+    panel: {
+      id: "questions_timeout",
+      title: "questions timeout",
+      value: (snapshot) => questionTimeout(snapshot.questions.timeoutMs),
+      actions: [
+        {
+          id: "questions_timeout_5m",
+          label: "5m",
+          command: "/config questions timeout 5m",
+        },
+        {
+          id: "questions_timeout_15m",
+          label: "15m",
+          command: "/config questions timeout 15m",
+        },
+        {
+          id: "questions_timeout_1h",
+          label: "1h",
+          command: "/config questions timeout 1h",
+        },
+      ],
+    },
+    async run(context, match) {
+      return changeQuestions(context, {
+        timeoutMs:
+          match[1] === "5m" ? 300_000 : match[1] === "1h" ? 3_600_000 : 900_000,
+      });
+    },
+  },
+  {
+    syntax: "/config questions answer <requester|allowed>",
+    pattern: /^\/config questions answer (requester|allowed)$/,
+    panel: {
+      id: "questions_answer",
+      title: "questions answer",
+      value: (snapshot) => snapshot.questions.answer,
+      actions: [
+        {
+          id: "questions_answer_requester",
+          label: "Requester",
+          command: "/config questions answer requester",
+        },
+        {
+          id: "questions_answer_allowed",
+          label: "Allowed",
+          command: "/config questions answer allowed",
+        },
+      ],
+    },
+    async run(context, match) {
+      return changeQuestions(context, {
+        answer: match[1] === "allowed" ? "allowed" : "requester",
+      });
     },
   },
   {
@@ -418,7 +524,8 @@ export class MetaCommands {
       if (
         receipt.oldDelayMs === null &&
         receipt.newDelayMs === null &&
-        entry.panel?.id !== "waiting"
+        entry.panel?.id !== "waiting" &&
+        !entry.syntax.startsWith("/config questions ")
       ) {
         return reject(receipt.reply ?? unconfirmed);
       }
@@ -472,13 +579,16 @@ export class MetaCommands {
         match,
       );
       if (
-        outcome.oldDelayMs !== undefined &&
-        outcome.newDelayMs !== undefined
+        (outcome.oldDelayMs !== undefined &&
+          outcome.newDelayMs !== undefined) ||
+        outcome.questions !== undefined
       ) {
         const snapshot = await this.snapshot(bot);
         // A tool can write after our file rename. Retain our outcome, but never
         // attribute that newer value to this actor or repaint it as our change.
-        snapshot.delayMs = outcome.newDelayMs;
+        if (outcome.newDelayMs !== undefined)
+          snapshot.delayMs = outcome.newDelayMs;
+        if (outcome.questions) snapshot.questions = outcome.questions;
         next = {
           ...panel,
           revision: revision + 1,
@@ -490,8 +600,8 @@ export class MetaCommands {
           next,
           message,
           outcome.reply,
-          outcome.oldDelayMs,
-          outcome.newDelayMs,
+          outcome.oldDelayMs ?? null,
+          outcome.newDelayMs ?? null,
         );
       } else this.store.applyMeta(registration, message, outcome.reply);
     } catch (error) {

@@ -5,22 +5,25 @@ import {
   isFormNotFoundError,
   isSessionNotFoundError,
   OpenCode,
+  type OpenCodeClient,
   type SessionMessageInfo,
 } from "@opencode/client";
 import { SessionMessage } from "@opencode/schema";
 import { Option, Schema } from "effect";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
 import { type Attachment, checkAttachments } from "../attachments";
-import {
-  type AgentBackend,
-  latestInput,
-  type PromptSourceContext,
-  sourceLine,
-  type TextSink,
-  type Transcript,
-  type TranscriptEntry,
-  TranscriptUnavailable,
+import type {
+  AgentBackend,
+  PromptSourceContext,
+  TextSink,
+  Transcript,
+  TranscriptEntry,
 } from "../backend";
+import {
+  latestInput,
+  sourceLine,
+  TranscriptUnavailable,
+} from "../backend-values";
 import { type BackendConfig, secret } from "../config";
 import { isNativeInstructionContext } from "../crew/instruction-context";
 import { CrewReporting } from "../crew/report-rpc";
@@ -761,7 +764,10 @@ export class OpenCodeBackend implements AgentBackend {
   private readonly pairingClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
   private readonly inputs = new Map<string, string>();
-  constructor(private readonly config: Config) {
+  constructor(
+    private readonly config: Config,
+    verifiedClient?: OpenCodeClient,
+  ) {
     const options = {
       baseUrl: config.url,
       headers: Object.fromEntries(
@@ -771,7 +777,7 @@ export class OpenCodeBackend implements AgentBackend {
         ]),
       ),
     };
-    this.client = OpenCode.make(options);
+    this.client = verifiedClient ?? OpenCode.make(options);
     // A quiet wait can exceed Bun's HTTP idle timeout. Keep the caller's
     // Stop/deadline signal; leave other requests and pairing policy unchanged.
     this.waitForIdle = OpenCode.make({

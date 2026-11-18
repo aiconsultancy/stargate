@@ -28,6 +28,11 @@ conversation keys. `gateway.ts` runs independent workers.
 Captain-addressed [meta commands](meta-commands.md) are handled locally at Slack
 admission, after access checks and before a captain job is queued. The command
 table owns dispatch and help; settings reuse their existing storage owners.
+Opt-in OpenCode clarification controls also bypass that queue: the original
+turn is waiting on its native form. The gateway binds each offer to its exact
+input, running question tool, form fingerprint and posted Slack message.
+Durable one-shot claims prevent a repeated interaction from replaying a native
+answer or cancellation. These controls never approve tool permissions.
 `attachment-delivery.ts` publishes the files of a stored reply. `store.ts` owns
 the queue, delivery cursor, and session mappings. `runtime.ts` owns startup,
 the exclusive process lock, cancellation, and resource cleanup.

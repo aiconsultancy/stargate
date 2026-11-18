@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { OpenCode } from "@opencode/client";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
 
@@ -11,7 +12,7 @@ const input = "msg_original";
 const assistant = "msg_question";
 const formID = "frm_question";
 
-function fixture() {
+function fixture(injected = false) {
   const form = {
     id: formID,
     sessionID: session,
@@ -159,12 +160,15 @@ function fixture() {
   });
   const config = backendSchema.parse({
     type: "opencode",
-    url: server.url.href,
+    url: injected ? "http://127.0.0.1:1" : server.url.href,
     directory: "/workspace",
     sessionID: session,
   });
   if (config.type !== "opencode") throw new Error("Invalid native fixture");
-  const backend = new OpenCodeBackend(config);
+  const backend = new OpenCodeBackend(
+    config,
+    injected ? OpenCode.make({ baseUrl: server.url.href }) : undefined,
+  );
   cleanup.push(() => server.stop(true));
   return {
     backend,
@@ -448,4 +452,24 @@ test("matching native session-not-found is terminal metadata, not a repeated for
     ),
   ).toBe(false);
   expect(f.writes).toEqual([]);
+});
+
+test("crew form adapter uses its verified injected client, not fallback service configuration", async () => {
+  const f = fixture(true);
+  const questions = await f.list();
+  const question = questions[0];
+  if (!question || "unsupported" in question)
+    throw new Error("Missing owned question");
+  await f.backend.replyQuestion(
+    question,
+    { q0: "wait" },
+    AbortSignal.timeout(3000),
+  );
+  expect(f.writes).toEqual([
+    {
+      method: "POST",
+      path: `/api/session/${session}/form/${formID}/reply`,
+      body: { answer: { q0: "wait" } },
+    },
+  ]);
 });

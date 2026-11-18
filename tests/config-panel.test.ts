@@ -12,6 +12,10 @@ import {
   type MetaOptions,
 } from "../src/meta-commands";
 import { notificationKey } from "../src/notifications";
+import {
+  resolveQuestionSettings,
+  saveQuestionSettings,
+} from "../src/question-settings";
 import { Store } from "../src/store";
 import { resolveWaiting, waitingSettingsPath } from "../src/waiting";
 import { bot, event, identity } from "./fixtures";
@@ -21,6 +25,118 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 const now = Date.parse("2026-11-18T12:00:00Z");
+
+test("question buttons persist, repaint and do not replay after restart", async () => {
+  const f = await fixture();
+  await f.publish();
+  const raw = f.press("stargate_config_questions_on");
+  await f.click(raw);
+  expect((await resolveQuestionSettings(f.config)).enabled).toBe(true);
+  expect(f.panel().text).toContain("questions: on");
+  f.reopen();
+  await f.click(raw);
+  expect(f.replies).toEqual([]);
+  await f.click(
+    f.press(
+      "stargate_config_questions_timeout_1h",
+      f.panel(),
+      "1795003200.002",
+    ),
+  );
+  await f.click(
+    f.press(
+      "stargate_config_questions_answer_allowed",
+      f.panel(),
+      "1795003200.003",
+    ),
+  );
+  expect(await resolveQuestionSettings(f.config)).toEqual({
+    enabled: true,
+    timeoutMs: 3_600_000,
+    answer: "allowed",
+  });
+});
+
+test("same-value question replacement invalidates panels including waiting actions", async () => {
+  const f = await fixture();
+  if (f.config.backend.type !== "opencode")
+    throw new Error("Expected OpenCode");
+  const settings = await resolveQuestionSettings(f.config);
+  await saveQuestionSettings(
+    f.config.backend.directory,
+    "adama",
+    settings,
+    AbortSignal.timeout(5000),
+  );
+  await f.publish();
+  await saveQuestionSettings(
+    f.config.backend.directory,
+    "adama",
+    settings,
+    AbortSignal.timeout(5000),
+  );
+  await f.click();
+  expect(await f.delay()).toBe(5000);
+  expect(f.replies.at(-1)).toContain("stale");
+});
+
+test("typed question commands preserve other settings and reject invalid values", async () => {
+  const f = await fixture();
+  let sequence = 10;
+  for (const command of [
+    "on",
+    "timeout 5m",
+    "timeout 15m",
+    "timeout 1h",
+    "answer allowed",
+    "off",
+    "answer requester",
+  ]) {
+    await f.meta.receive(
+      event(`<@UBOT> /config questions ${command}`, `${sequence++}.000`),
+      f.config,
+      identity,
+      () => true,
+    );
+  }
+  const expected = {
+    enabled: false,
+    timeoutMs: 3_600_000,
+    answer: "requester",
+  } as const;
+  expect(await resolveQuestionSettings(f.config)).toEqual(expected);
+  for (const command of ["yes", "timeout 0", "timeout 2h", "answer everyone"]) {
+    await f.meta.receive(
+      event(`<@UBOT> /config questions ${command}`, `${sequence++}.000`),
+      f.config,
+      identity,
+      () => true,
+    );
+    expect(await resolveQuestionSettings(f.config)).toEqual(expected);
+    expect(f.posts.at(-1)?.text).toContain("Valid commands");
+  }
+});
+
+test("question update failure resumes persisted receipt without a second write", async () => {
+  const f = await fixture();
+  await f.publish();
+  const raw = f.press("stargate_config_questions_on");
+  const update = f.slack.update;
+  if (!update) throw new Error("Expected update");
+  f.slack.update = async () => {
+    throw new Error("private failure");
+  };
+  await expect(f.click(raw)).rejects.toThrow();
+  expect((await resolveQuestionSettings(f.config)).enabled).toBe(true);
+  const snapshot = await readConfigSnapshot(f.config, undefined);
+  f.reopen();
+  f.slack.update = update;
+  await f.click(raw);
+  expect(f.panel().text).toContain("questions: on");
+  expect(
+    (await readConfigSnapshot(f.config, undefined)).questionsFingerprint,
+  ).toBe(snapshot.questionsFingerprint);
+});
 
 test("panel snapshot refuses symbolic or oversized waiting files without following arbitrary content", async () => {
   const f = await fixture();
@@ -224,7 +340,7 @@ async function fixture(options: MetaOptions = {}) {
   };
 }
 
-test("flag off preserves the existing exact text and default configuration", async () => {
+test("panel flag off lists question settings and typed commands", async () => {
   const f = await fixture();
   f.config.configPanelEnabled = false;
   await f.meta.receive(
@@ -234,18 +350,18 @@ test("flag off preserves the existing exact text and default configuration", asy
     () => true,
   );
   expect(f.posts[0]?.text).toBe(
-    "waiting: 5 seconds\nmutes (read-only): 0 channels, 0 threads\nValid commands:\n/help\n/health [host|agents|stargate|opencode|proxy|services|starfleet]\n/config\n/config waiting <0..3600|off>\n/config mutes\n/config system1 <on|off>",
+    "waiting: 5 seconds\nquestions: off; timeout: 15m; answer: requester\nmutes (read-only): 0 channels, 0 threads\nValid commands:\n/help\n/health [host|agents|stargate|opencode|proxy|services|starfleet]\n/config\n/config waiting <0..3600|off>\n/config questions <on|off>\n/config questions timeout <5m|15m|1h>\n/config questions answer <requester|allowed>\n/config mutes\n/config system1 <on|off>",
   );
   expect(f.posts[0]?.content).toBeUndefined();
   expect(f.updates).toEqual([]);
   expect(bot().configPanelEnabled).toBe(false);
 });
 
-test("enabled panel has exactly three table-derived rows and bounded plain controls", async () => {
+test("enabled panel has six table-derived rows and bounded plain controls", async () => {
   const f = await fixture();
   const panel = await f.publish();
   const sections = panel.blocks.filter((block) => block.type === "section");
-  expect(sections).toHaveLength(3);
+  expect(sections).toHaveLength(6);
   expect(sections.map((block) => block.text.text).join("\n")).toContain(
     "System One",
   );
@@ -266,6 +382,13 @@ test("enabled panel has exactly three table-derived rows and bounded plain contr
     "10s",
     "On",
     "Off",
+    "5m",
+    "15m",
+    "1h",
+    "Requester",
+    "Allowed",
+    "On",
+    "Off",
   ]);
   for (const block of panel.blocks) {
     if (block.type === "actions")
@@ -276,6 +399,9 @@ test("enabled panel has exactly three table-derived rows and bounded plain contr
   expect(f.posts[0]).toMatchObject({ channel: "C123", thread: "1.000" });
   expect(configPanelRows().map((row) => row.title)).toEqual([
     "waiting",
+    "questions",
+    "questions timeout",
+    "questions answer",
     "mutes (read-only)",
     "System One",
   ]);
@@ -291,6 +417,8 @@ test("pure builder accepts only table-derived controls and produces a valid synt
       snapshot: {
         delayMs: null,
         waitingFingerprint: "synthetic",
+        questions: { enabled: false, timeoutMs: 900_000, answer: "requester" },
+        questionsFingerprint: "synthetic",
         mutes: "0 channels, 0 threads",
         mutesFingerprint: "synthetic",
       },
@@ -298,7 +426,7 @@ test("pure builder accepts only table-derived controls and produces a valid synt
   );
   expect(panel.text).toContain("waiting: off");
   expect(panel.blocks.filter((block) => block.type === "section")).toHaveLength(
-    3,
+    6,
   );
 });
 

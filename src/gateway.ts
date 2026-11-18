@@ -40,6 +40,7 @@ import {
   peerTurnsPerHour,
   peerWindowMs,
 } from "./peers";
+import { resolveQuestionSettings } from "./question-settings";
 import {
   type QuestionPort,
   Questions,
@@ -65,6 +66,7 @@ import {
 } from "./routing";
 import type { SocketRequest } from "./slack";
 import { type ReplyChunk, replyText, type SlackContent } from "./slack-format";
+import { SlackQuestionControls } from "./slack-questions";
 import {
   type CaptainCursor,
   type CaptainTranscript,
@@ -318,6 +320,7 @@ export class Gateway {
   private readonly turnPolicies = new Map<number, GatewayTransport>();
   readonly key: string;
   private readonly questions: Questions | undefined;
+  private readonly slackQuestions: SlackQuestionControls | undefined;
   private readonly questionLifetime = new AbortController();
   constructor(
     private config: GatewayConfig,
@@ -347,8 +350,31 @@ export class Gateway {
     if (!selected) throw new Error("Gateway transport is required");
     this.transport = selected;
     this.key = selected.key;
+    if (this.bot && config.backend.type === "opencode") {
+      this.slackQuestions = new SlackQuestionControls(
+        store,
+        slack,
+        () => this.bot,
+        identity,
+        async (user) => (await metaOptions?.isHuman?.(user)) === true,
+        async () =>
+          this.bot
+            ? resolveQuestionSettings(this.bot)
+            : {
+                enabled: false,
+                timeoutMs: 900_000,
+                answer: "requester" as const,
+              },
+        async (job, token, answer, user) => {
+          await this.answerQuestion(
+            { ...job, user },
+            { target: identity.user, token, answer },
+          );
+        },
+      );
+    }
     if (
-      selected.questions &&
+      (selected.questions || this.slackQuestions) &&
       backend.pendingQuestions &&
       backend.questionState &&
       backend.questionBelongsToInput &&
@@ -359,7 +385,7 @@ export class Gateway {
         this.key,
         store,
         backend,
-        () => this.transport.questions,
+        () => this.questionPort(),
         (job) => this.allowed(job),
         (session) => this.settle(session),
         this.questionLifetime.signal,
@@ -379,6 +405,30 @@ export class Gateway {
       log,
       { store },
     );
+  }
+
+  private questionPort(): QuestionPort | undefined {
+    if (!this.slackQuestions || !this.bot) return this.transport.questions;
+    const bot = this.bot;
+    const ui = this.slackQuestions;
+    return {
+      account: this.identity.user,
+      human: (user) =>
+        /^[UW][A-Z0-9]+$/.test(user) &&
+        user !== this.identity.user &&
+        user !== "USLACKBOT",
+      authorized: (job) => this.allowed(job),
+      settings: () => resolveQuestionSettings(bot),
+      answerAllowed: async (user, job) => this.allowed({ ...job, user }),
+      publishQuestion: (job, offer, question, allowed) =>
+        ui.publishQuestion(job, offer, question, allowed),
+      publish: async (job, text, allowed) => {
+        if (!allowed()) return;
+        await this.slack.post(job.channel, job.thread, text, undefined, {
+          allowed,
+        });
+      },
+    };
   }
 
   /** Replace future-turn settings; existing turns hold immutable references. */
@@ -458,7 +508,10 @@ export class Gateway {
       this.log.warn("Peer captain thread limit reached; message not admitted");
       return false;
     }
-    return this.store.enqueue(input);
+    const accepted = this.store.enqueue(input);
+    if (accepted && this.slackQuestions && !input.sender && !input.fleet)
+      this.store.recordQuestionSource(input);
+    return accepted;
   }
 
   private route(body: unknown, peer?: PeerSender) {
@@ -563,6 +616,14 @@ export class Gateway {
   ) {
     const bot = this.bot;
     if (!bot) return false;
+    if (
+      await this.slackQuestions?.interactive(
+        body,
+        ack,
+        () => open() && this.bot === bot,
+      )
+    )
+      return true;
     return this.meta.interactive(
       body,
       bot,
@@ -580,6 +641,11 @@ export class Gateway {
   async receive(body: unknown, open: () => boolean = () => true) {
     const bot = this.bot;
     if (!bot || !open()) return false;
+    const question = this.slackQuestions?.receive(
+      body,
+      () => open() && this.bot === bot,
+    );
+    if (question && (await question)) return false;
     const meta = this.meta.receive(
       body,
       bot,

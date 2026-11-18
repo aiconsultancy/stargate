@@ -58,7 +58,14 @@ const original: Incoming = {
   text: "Please investigate",
 };
 
-async function fixture(source = true) {
+async function fixture(
+  source = true,
+  settings?: {
+    enabled: boolean;
+    timeoutMs: number;
+    answer: "requester" | "allowed";
+  },
+) {
   const dir = await mkdtemp(join(tmpdir(), "stargate-questions-"));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, "state.sqlite");
@@ -154,9 +161,15 @@ async function fixture(source = true) {
       backend,
       () => ({
         account: "captain",
+        ...(settings
+          ? {
+              settings: async () => settings,
+              answerAllowed: async (user: string) => user === "allowed",
+            }
+          : {}),
         authorized: () => allowed,
         ready: () => connected,
-        human: (user) => user === "jac",
+        human: (user) => user === "jac" || user === "allowed",
         async publish(_job, text, guard) {
           if (!guard()) throw new Error("Denied");
           publicationAttempts.push(text);
@@ -789,7 +802,7 @@ for (const postForm of [false, true]) {
         note: () => undefined,
         questions: {
           account: "captain",
-          human: (user) => user === "jac",
+          human: (user) => user === "jac" || user === "allowed",
           async publish(_job, text, allowed) {
             if (allowed()) f.published.push(text);
           },
@@ -1283,7 +1296,7 @@ test("established cancelled native waiter survives another actual gateway restar
       note: () => undefined,
       questions: {
         account: "captain",
-        human: (user) => user === "jac",
+        human: (user) => user === "jac" || user === "allowed",
         async publish(_job, text, allowed) {
           if (allowed()) f.published.push(text);
         },
@@ -1471,7 +1484,7 @@ for (const failure of ["read-error", "timeout"] as const) {
         note: () => undefined,
         questions: {
           account: "captain",
-          human: (user) => user === "jac",
+          human: (user) => user === "jac" || user === "allowed",
           async publish() {
             throw new Error("No recovery notice or native reply");
           },
@@ -1804,7 +1817,7 @@ for (const closed of [false, true]) {
 }
 
 for (const uncertain of [false, true]) {
-  test(`fresh Stop interrupts only a recovered exact input once (${uncertain ? "uncertain response" : "success"})`, async () => {
+  test(`fresh Stop interrupts only a recovered exact input once (${uncertain === true ? "uncertain response" : "success"})`, async () => {
     const f = await fixture();
     await f.poll();
     f.restart();
@@ -2067,3 +2080,85 @@ for (const botReply of [false, true]) {
     }
   }, 10_000);
 }
+
+test("configurable question bridge stays off and admits only configured answer policy", async () => {
+  const settings = {
+    enabled: false,
+    timeoutMs: 300_000,
+    answer: "requester" as "requester" | "allowed",
+  };
+  const f = await fixture(true, settings);
+  await f.poll();
+  expect(f.published).toHaveLength(0);
+  expect(f.store.questionOffers(original.botKey)).toHaveLength(0);
+  settings.enabled = true;
+  await f.poll();
+  expect(f.published).toHaveLength(1);
+  await f.answer({ user: "allowed" });
+  expect(f.decisions).toHaveLength(0);
+  settings.answer = "allowed";
+  await f.answer({ user: "allowed" });
+  expect(f.decisions).toEqual([{ q0: "wait" }]);
+});
+
+test("configured expiry cancels native form once instead of blocking the waiter", async () => {
+  const f = await fixture(true, {
+    enabled: true,
+    timeoutMs: 300_000,
+    answer: "requester",
+  });
+  const clock = spyOn(Date, "now").mockReturnValue(1_000_000);
+  try {
+    await f.poll();
+    expect(f.offer().expires).toBe(1_300_000);
+    clock.mockReturnValue(1_300_001);
+    await f.poll();
+    await f.poll();
+    expect(f.decisions).toEqual([null]);
+    expect(f.published.join("\n")).toContain("timed out");
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test("disabling question controls during native validation prevents the answer", async () => {
+  const settings = {
+    enabled: true,
+    timeoutMs: 300_000,
+    answer: "requester" as const,
+  };
+  const f = await fixture(true, settings);
+  await f.poll();
+  const validate = f.backend.questionBelongsToInput;
+  f.backend.questionBelongsToInput = async (...args) => {
+    settings.enabled = false;
+    return (await validate?.(...args)) ?? false;
+  };
+  await f.answer();
+  expect(f.decisions).toEqual([]);
+  expect(f.offer().state).toBe("offered");
+});
+
+test("uncertain timeout cancellation is consumed, not replayed on another poll", async () => {
+  const f = await fixture(true, {
+    enabled: true,
+    timeoutMs: 300_000,
+    answer: "requester",
+  });
+  f.failReply();
+  const clock = spyOn(Date, "now").mockReturnValue(1_000_000);
+  try {
+    await f.poll();
+    const token = f.offer().token;
+    clock.mockReturnValue(1_300_001);
+    await f.poll();
+    await f.poll();
+    expect(f.decisions).toEqual([null]);
+    expect(f.store.questionByToken(original.botKey, token)?.outcome).toBe(
+      "uncertain",
+    );
+    expect(f.published.join("\n")).toContain("outcome is uncertain");
+  } finally {
+    clock.mockRestore();
+  }
+});

@@ -11,7 +11,6 @@ import type {
   FleetReviewEvidence,
   NativeMaker,
 } from "./fleet/protocol";
-import { validMsgid } from "./irc/protocol";
 import type { MaintenanceWatch } from "./maintenance";
 import type {
   NativeQuestion,
@@ -21,6 +20,12 @@ import type {
 import type { QuotaSnapshot } from "./quota";
 import type { SessionHistory } from "./session-history";
 import type { UpdateReceipt, UpdateSnapshot } from "./update-notice";
+
+export {
+  latestInput,
+  sourceLine,
+  TranscriptUnavailable,
+} from "./backend-values";
 
 /** Model-visible source identity only; never repeat chat history here. */
 export type PromptSourceContext = {
@@ -39,12 +44,6 @@ export type PromptSourceContext = {
     sender?: "captain" | "crew";
   };
 };
-
-/** Compact source identity; IRC optionally adds `;r=<encoded thread root>`. */
-export function sourceLine({ source }: PromptSourceContext) {
-  const value = encodeURIComponent;
-  return `s=${source.transport ?? "slack"};c=${value(source.channel)};t=${value(source.thread)};m=${value(source.message)};u=${value(source.user)}${source.sender ? `;k=${source.sender}` : ""}${source.authority ? `;a=${source.authority}` : ""}${source.reference ? `;e=${value(source.reference)}` : ""}${source.transport === "irc" && validMsgid(source.replyParent) ? `;r=${value(source.replyParent)}` : ""}`;
-}
 
 export type PendingPermission = {
   id: string;
@@ -78,23 +77,6 @@ export type Transcript = {
   input?: string;
   pending?: true;
 };
-
-/**
- * Permanent transcript failures: the mapped session or the stored cursor no
- * longer exists. Transient read errors stay ordinary errors.
- */
-export class TranscriptUnavailable extends Error {
-  constructor(readonly reason: "session" | "cursor") {
-    super(
-      reason === "session"
-        ? "Mapped session no longer exists"
-        : "Transcript cursor is not in session history",
-    );
-  }
-}
-
-/** `after` value for messages after this adapter's latest prompt input. */
-export const latestInput = "\u0000latest-input";
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {

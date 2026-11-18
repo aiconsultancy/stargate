@@ -11,6 +11,9 @@ after its mention:
 @your-captain /config waiting 3
 @your-captain /config waiting off
 @your-captain /config mutes
+@your-captain /config questions on
+@your-captain /config questions timeout 15m
+@your-captain /config questions answer requester
 ```
 
 These are ordinary Slack messages, not app-owned slash commands such as
@@ -20,16 +23,19 @@ is unavailable. Replies stay in the message's thread.
 
 ## Commands
 
-| Command after the mention        | Result                                                                                                                             |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `/help`                          | Lists commands from the same table that dispatches them.                                                                           |
-| `/health`                        | Shows a read-only health summary.                                                                                                  |
-| `/health <section>`              | Shows detail for `host`, `agents`, `stargate`, `opencode`, `proxy`, `services` or `starfleet`.                                     |
-| `/config`                        | Lists supported settings and their current values.                                                                                 |
-| `/config waiting <seconds\|off>` | Sets the waiting-response delay. Whole seconds from 0 to 3600 are accepted; `off` disables it. Zero means immediate, not disabled. |
-| `/config mutes`                  | Reads this bot registration's saved thread and channel mutes. It changes no mute.                                                  |
-| `/config system1 on`             | Reserved: replies `not available yet (NET-1709)`.                                                                                  |
-| `/config system1 off`            | Reserved: replies `not available yet (NET-1709)`.                                                                                  |
+| Command after the mention                       | Result                                                                                                                             |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `/help`                                         | Lists commands from the same table that dispatches them.                                                                           |
+| `/health`                                       | Shows a read-only health summary.                                                                                                  |
+| `/health <section>`                             | Shows detail for `host`, `agents`, `stargate`, `opencode`, `proxy`, `services` or `starfleet`.                                     |
+| `/config`                                       | Lists supported settings and their current values.                                                                                 |
+| `/config waiting <seconds\|off>`                | Sets the waiting-response delay. Whole seconds from 0 to 3600 are accepted; `off` disables it. Zero means immediate, not disabled. |
+| `/config mutes`                                 | Reads this bot registration's saved thread and channel mutes. It changes no mute.                                                  |
+| `/config questions <on\|off>`                   | Enables or disables native OpenCode clarification controls. Default: off.                                                          |
+| `/config questions timeout <5m\|15m\|1h>`       | Sets the answer window from first publication. Default: 15 minutes.                                                                |
+| `/config questions answer <requester\|allowed>` | Limits answers to the requester or permits other allowed humans. Default: requester.                                               |
+| `/config system1 on`                            | Reserved: replies `not available yet (NET-1709)`.                                                                                  |
+| `/config system1 off`                           | Reserved: replies `not available yet (NET-1709)`.                                                                                  |
 
 The reserved System One commands do not enable a filter or route a message to
 a decision model. Missing or invalid values reply `valid values: on, off`.
@@ -64,6 +70,8 @@ When enabled, `/config` posts a Block Kit panel in the same thread:
 - **Waiting delay:** Off, 3 s and 10 s use the same setting and writer as
   typed commands and `stargate_waiting`.
 - **Mutes:** current status only. The panel does not change a mute.
+- **Questions:** On/Off, 5 min/15 min/1 h, and Requester/Allowed use the same
+  persisted settings and command table as the typed question commands.
 
 The command table supplies the panel controls, typed command dispatch and
 help. Typed commands remain available; the IRC path does not change. Successful
@@ -94,6 +102,54 @@ These are prerequisites, not evidence of the installed app's current settings.
 No app settings, OAuth grants or live configuration are changed by this feature.
 An operator must verify each installed app before enabling the flag. Slack
 does not guarantee ephemeral notice delivery across client reloads or sessions.
+
+## OpenCode clarification questions
+
+Question controls are off by default. An allowed human can enable them with
+`@your-captain /config questions on`, without starting a captain turn. Settings
+persist privately per captain workspace and identity, like the waiting delay.
+The configuration panel is optional: typed commands work when
+`configPanelEnabled` is false. Invalid or unreadable settings disable controls.
+Turning controls off also refuses existing controls; resolve pending forms in
+OpenCode's native interface.
+
+When enabled, the gateway posts supported native question forms in the
+request's Slack thread. Single-choice fields use option buttons. Multiple-choice
+fields use checkboxes and Submit. A native field that permits custom answers
+also offers **Type your own**. Follow its private reply instructions; do not
+send credentials. Native forms that prohibit custom answers do not gain that
+permission through Slack.
+Forms with several fields display one field at a time. Saved answers survive
+gateway restarts; the gateway sends the complete answer only after the last
+field. An older field's controls cannot change a later answer.
+
+An answer bypasses the ordinary captain queue and goes to the exact pending
+native form. Ordinary messages remain queued behind the waiting turn; they are
+not inferred to be answers. The requester policy accepts only the original
+requester. The allowed policy also accepts other humans permitted by the
+captain's current user and channel rules. Denies, human verification and the
+exact app, workspace, thread, posted message and form binding still apply.
+Peer bots cannot answer, including otherwise trusted peer captains.
+
+The timeout starts at the first publication attempt. On expiry, the gateway
+makes one cancellation attempt against the same native form. OpenCode delivers
+that cancellation to the waiting question tool. A failed or interrupted native
+write is uncertain, not retried automatically; inspect OpenCode before trying
+another answer. Restart recovery retains the original input and does not replay
+a native answer. A transport acknowledgement loss can repeat a notice; it does
+not provide exactly-once Slack delivery.
+
+Only an input owned by the original chat request is eligible for Slack
+publication. Crew forms are handled through their originating captain, never
+published as that captain's Slack request. IRC retains its existing opt-in
+numbered-list and token reply controls; Slack settings do not enable IRC.
+
+These controls are clarification only, not permission approvals. Authentication,
+sensitive, unsupported or ambiguous native forms remain in OpenCode's native
+interface. The existing turn deadline still applies; selecting a question
+timeout longer than the remaining turn budget does not extend that deadline.
+Installed Slack prerequisites are the same as the configuration panel above.
+Unit and local HTTP tests do not prove acceptance on a real Slack client.
 
 ## Health reporting
 

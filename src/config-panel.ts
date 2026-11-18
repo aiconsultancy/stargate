@@ -4,6 +4,12 @@ import { lstat, open } from "node:fs/promises";
 import { z } from "zod";
 import type { BotConfig } from "./config";
 import type { NotificationPage } from "./notification-store";
+import {
+  decodeQuestionSettings,
+  type QuestionSettings,
+  questionSettingsPath,
+  resolveQuestionSettings,
+} from "./question-settings";
 import type { SlackPanelContent } from "./slack-format";
 import { resolveWaiting, waitingSettingsPath } from "./waiting";
 
@@ -18,6 +24,16 @@ export const configPanelUnavailable =
 export const configSnapshotSchema = z.strictObject({
   delayMs: z.number().int().min(0).max(3_600_000).nullable(),
   waitingFingerprint: z.string(),
+  // Existing panel boundary remains Zod until its component migration.
+  questions: z.custom<QuestionSettings>((value) => {
+    try {
+      decodeQuestionSettings(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }),
+  questionsFingerprint: z.string(),
   mutes: z.string(),
   mutesFingerprint: z.string(),
 });
@@ -77,10 +93,13 @@ function hash(value: string | Uint8Array) {
 }
 
 /** Stat identity detects same-value writes, including atomic replacement/ABA. */
-async function waitingFingerprint(bot: BotConfig): Promise<string> {
+async function settingsFingerprint(
+  bot: BotConfig,
+  settingsPath: (directory: string, agent: string) => string,
+): Promise<string> {
   if (bot.backend.type !== "opencode" || !bot.backend.agent)
     return "unsupported";
-  const path = waitingSettingsPath(bot.backend.directory, bot.backend.agent);
+  const path = settingsPath(bot.backend.directory, bot.backend.agent);
   try {
     const file = await open(
       path,
@@ -117,10 +136,14 @@ export async function readConfigSnapshot(
   bot: BotConfig,
   page: NotificationPage | undefined,
 ): Promise<ConfigPanelSnapshot> {
-  const before = await waitingFingerprint(bot);
+  const before = await settingsFingerprint(bot, waitingSettingsPath);
+  const questionsBefore = await settingsFingerprint(bot, questionSettingsPath);
   const waiting = await resolveWaiting(bot);
-  const after = await waitingFingerprint(bot);
-  if (before !== after) throw new Error(configPanelStale);
+  const questions = await resolveQuestionSettings(bot);
+  const after = await settingsFingerprint(bot, waitingSettingsPath);
+  const questionsAfter = await settingsFingerprint(bot, questionSettingsPath);
+  if (before !== after || questionsBefore !== questionsAfter)
+    throw new Error(configPanelStale);
   // Only the current registration's safe status projection is retained, not reasons.
   const mutes = page
     ? `${page.counts.channel} channels, ${page.counts.thread} threads`
@@ -139,6 +162,8 @@ export async function readConfigSnapshot(
   return {
     delayMs: waiting.delayMs,
     waitingFingerprint: after,
+    questions,
+    questionsFingerprint: questionsAfter,
     mutes,
     mutesFingerprint: hash(JSON.stringify(safePage)),
   };
@@ -151,6 +176,10 @@ export function sameConfigSnapshot(
   return (
     left.delayMs === right.delayMs &&
     left.waitingFingerprint === right.waitingFingerprint &&
+    left.questions.enabled === right.questions.enabled &&
+    left.questions.timeoutMs === right.questions.timeoutMs &&
+    left.questions.answer === right.questions.answer &&
+    left.questionsFingerprint === right.questionsFingerprint &&
     left.mutesFingerprint === right.mutesFingerprint
   );
 }
