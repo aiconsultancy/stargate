@@ -200,6 +200,31 @@ function fixture() {
   };
 }
 
+test("OpenCode boundary corpus: question origin is strict at both object levels", async () => {
+  const f = fixture();
+  const origin = f.form.metadata;
+  for (const [metadata, accepted] of [
+    [origin, true],
+    [{ ...origin, extra: true }, false],
+    [{ ...origin, tool: { ...origin.tool, extra: true } }, false],
+    [{ ...origin, tool: { ...origin.tool, id: "" } }, false],
+    [{ ...origin, tool: { ...origin.tool, messageID: "" } }, false],
+    [{ ...origin, tool: { ...origin.tool, id: null } }, false],
+    [{ ...origin, tool: {} }, false],
+    [{ tool: origin.tool }, false],
+    [null, false],
+    [[], false],
+  ] as const) {
+    Object.defineProperty(f.form, "metadata", {
+      value: metadata,
+      writable: true,
+    });
+    const questions = await f.list();
+    expect(questions).toHaveLength(accepted ? 1 : 0);
+    if (accepted) expect(questions[0]).toMatchObject({ inputID: input });
+  }
+});
+
 test("native questions bind exact form, running tool and delivered input, never a later human", async () => {
   const f = fixture();
   f.later(true);

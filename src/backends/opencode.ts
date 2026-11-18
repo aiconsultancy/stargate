@@ -8,8 +8,7 @@ import {
   type SessionMessageInfo,
 } from "@opencode/client";
 import { SessionMessage } from "@opencode/schema";
-import { Schema } from "effect";
-import { z } from "zod";
+import { Option, Schema } from "effect";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
 import { type Attachment, checkAttachments } from "../attachments";
 import {
@@ -61,25 +60,37 @@ import {
 import { OpenCodeHistory } from "./opencode-history";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
-const pinnedSessionSchema = z.object({
-  id: z.string(),
-  parentID: z.string().optional(),
-  fork: z.unknown().optional(),
-  agent: z.string().optional(),
-  location: z.object({ directory: z.string() }),
-  permissions: z
-    .array(
-      z.object({
-        action: z.string(),
-        resource: z.string(),
-        effect: z.enum(["allow", "deny", "ask"]),
+const pinnedSessionSchema = Schema.Struct({
+  id: Schema.String,
+  parentID: Schema.optional(Schema.String),
+  fork: Schema.optional(Schema.Unknown),
+  agent: Schema.optional(Schema.String),
+  location: Schema.Struct({ directory: Schema.String }),
+  permissions: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        action: Schema.String,
+        resource: Schema.String,
+        effect: Schema.Literals(["allow", "deny", "ask"]),
       }),
-    )
-    .optional(),
+    ),
+  ),
 });
-const readyAgentSchema = z.object({
-  location: z.object({ directory: z.string() }),
-  data: z.object({ id: z.string() }),
+const readyAgentSchema = Schema.Struct({
+  location: Schema.Struct({ directory: Schema.String }),
+  data: Schema.Struct({ id: Schema.String }),
+});
+const decodePinnedSession = Schema.decodeUnknownSync(pinnedSessionSchema);
+const decodeReadyAgent = Schema.decodeUnknownSync(readyAgentSchema);
+const questionOriginSchema = Schema.Struct({
+  kind: Schema.Literal("question"),
+  tool: Schema.Struct({
+    messageID: Schema.NonEmptyString,
+    id: Schema.NonEmptyString,
+  }),
+});
+const decodeQuestionOrigin = Schema.decodeUnknownOption(questionOriginSchema, {
+  onExcessProperty: "error",
 });
 const agentReadyMs = 30_000;
 const agentReadyPollMs = 250;
@@ -168,28 +179,20 @@ export class OpenCodeBackend implements AgentBackend {
       form.state.status !== "pending"
     )
       return;
-    const origin = z
-      .strictObject({
-        kind: z.literal("question"),
-        tool: z.strictObject({
-          messageID: z.string().min(1),
-          id: z.string().min(1),
-        }),
-      })
-      .safeParse(form.metadata);
-    if (!origin.success) return;
+    const origin = decodeQuestionOrigin(form.metadata);
+    if (Option.isNone(origin)) return;
     const message = await this.client.session.message.get(
-      { sessionID, messageID: origin.data.tool.messageID },
+      { sessionID, messageID: origin.value.tool.messageID },
       { signal },
     );
     if (
-      message.id !== origin.data.tool.messageID ||
+      message.id !== origin.value.tool.messageID ||
       message.type !== "assistant" ||
       message.time.completed !== undefined
     )
       return;
     const tools = message.content.filter(
-      (p) => p.type === "tool" && p.id === origin.data.tool.id,
+      (p) => p.type === "tool" && p.id === origin.value.tool.id,
     );
     const tool = tools[0];
     if (
@@ -862,7 +865,7 @@ export class OpenCodeBackend implements AgentBackend {
     if (this.sessionID !== undefined) {
       signal.throwIfAborted();
       try {
-        const session = pinnedSessionSchema.parse(
+        const session = decodePinnedSession(
           await this.client.session.get(
             { sessionID: this.sessionID },
             { signal },
@@ -930,7 +933,7 @@ export class OpenCodeBackend implements AgentBackend {
           continue;
         }
         ready.throwIfAborted();
-        const agent = readyAgentSchema.parse(result);
+        const agent = decodeReadyAgent(result);
         if (
           agent.data.id !== agentID ||
           agent.location.directory !== this.config.directory

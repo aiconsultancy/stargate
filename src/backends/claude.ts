@@ -23,8 +23,7 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Schema } from "effect";
-import { z } from "zod";
+import { Option, Schema } from "effect";
 import { type Attachment, checkAttachments } from "../attachments";
 import {
   type AgentBackend,
@@ -164,62 +163,79 @@ export function claudeInputContent(
 }
 
 // Only main-thread frames count; subagent frames carry a parent tool ID.
-const streamFrame = z.object({
-  type: z.literal("stream_event"),
-  parent_tool_use_id: z.null(),
-  event: z.unknown(),
+const streamFrame = Schema.Struct({
+  type: Schema.Literal("stream_event"),
+  parent_tool_use_id: Schema.Null,
+  event: Schema.Unknown,
 });
-const streamEvent = z.union([
-  z.object({
-    type: z.literal("message_start"),
-    message: z.object({ id: z.string() }),
+const streamEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("message_start"),
+    message: Schema.Struct({ id: Schema.String }),
   }),
-  z.object({
-    type: z.literal("content_block_start"),
-    index: z.number().int().nonnegative(),
-    content_block: z.object({ type: z.string(), text: z.string().optional() }),
+  Schema.Struct({
+    type: Schema.Literal("content_block_start"),
+    index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    content_block: Schema.Struct({
+      type: Schema.String,
+      text: Schema.optional(Schema.String),
+    }),
   }),
-  z.object({
-    type: z.literal("content_block_delta"),
-    index: z.number().int().nonnegative(),
-    delta: z.object({ type: z.string(), text: z.string().optional() }),
-  }),
-]);
-const assistantFrame = z.object({
-  type: z.literal("assistant"),
-  parent_tool_use_id: z.null(),
-  message: z.object({
-    id: z.string(),
-    content: z.array(
-      z.object({ type: z.string(), text: z.string().optional() }),
-    ),
-  }),
-  error: z.string().optional(),
-});
-const initFrame = z.object({
-  type: z.literal("system"),
-  subtype: z.literal("init"),
-  session_id: z.string(),
-});
-const resultFrame = z.object({
-  type: z.literal("result"),
-  subtype: z.string(),
-  is_error: z.boolean(),
-  result: z.string().optional(),
-  api_error_status: z.number().nullable().optional(),
-});
-// Any frame of a tool call: this turn did work.
-const toolFrame = z.union([
-  z.object({ parent_tool_use_id: z.string() }),
-  z.object({
-    type: z.literal("assistant"),
-    message: z.object({
-      content: z
-        .array(z.object({ type: z.string() }))
-        .refine((blocks) => blocks.some((block) => block.type === "tool_use")),
+  Schema.Struct({
+    type: Schema.Literal("content_block_delta"),
+    index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    delta: Schema.Struct({
+      type: Schema.String,
+      text: Schema.optional(Schema.String),
     }),
   }),
 ]);
+const assistantFrame = Schema.Struct({
+  type: Schema.Literal("assistant"),
+  parent_tool_use_id: Schema.Null,
+  message: Schema.Struct({
+    id: Schema.String,
+    content: Schema.Array(
+      Schema.Struct({
+        type: Schema.String,
+        text: Schema.optional(Schema.String),
+      }),
+    ),
+  }),
+  error: Schema.optional(Schema.String),
+});
+const initFrame = Schema.Struct({
+  type: Schema.Literal("system"),
+  subtype: Schema.Literal("init"),
+  session_id: Schema.String,
+});
+const resultFrame = Schema.Struct({
+  type: Schema.Literal("result"),
+  subtype: Schema.String,
+  is_error: Schema.Boolean,
+  result: Schema.optional(Schema.String),
+  api_error_status: Schema.optional(Schema.NullOr(Schema.Finite)),
+});
+// Any frame of a tool call: this turn did work.
+const toolFrame = Schema.Union([
+  Schema.Struct({ parent_tool_use_id: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("assistant"),
+    message: Schema.Struct({
+      content: Schema.Array(Schema.Struct({ type: Schema.String })).check(
+        Schema.makeFilter((blocks) =>
+          blocks.some((block) => block.type === "tool_use"),
+        ),
+      ),
+    }),
+  }),
+]);
+const decodeStreamFrame = Schema.decodeUnknownOption(streamFrame);
+const decodeStreamEvent = Schema.decodeUnknownOption(streamEvent);
+const decodeAssistantFrame = Schema.decodeUnknownOption(assistantFrame);
+const decodeInitFrame = Schema.decodeUnknownOption(initFrame);
+const decodeResultFrame = Schema.decodeUnknownOption(resultFrame);
+const isToolFrame = Schema.is(toolFrame);
 
 /** Fixed causes only; raw SDK, CLI and provider text never leaves here. */
 const knownCauses = new Set([
@@ -292,18 +308,18 @@ export class ClaudeTurn {
 
   /** Returns true when the visible text may have changed. */
   add(raw: unknown): boolean {
-    if (toolFrame.safeParse(raw).success) this.worked = true;
-    const init = initFrame.safeParse(raw);
-    if (init.success) {
-      this.session = init.data.session_id;
+    if (isToolFrame(raw)) this.worked = true;
+    const init = decodeInitFrame(raw);
+    if (Option.isSome(init)) {
+      this.session = init.value.session_id;
       return false;
     }
-    const frame = streamFrame.safeParse(raw);
-    if (frame.success) {
-      const event = streamEvent.safeParse(frame.data.event);
-      if (!event.success) return false;
-      if (event.data.type === "message_start") {
-        this.streaming = event.data.message.id;
+    const frame = decodeStreamFrame(raw);
+    if (Option.isSome(frame)) {
+      const event = decodeStreamEvent(frame.value.event);
+      if (Option.isNone(event)) return false;
+      if (event.value.type === "message_start") {
+        this.streaming = event.value.message.id;
         this.seen(this.streaming);
         if (!this.streamed.has(this.streaming))
           this.streamed.set(this.streaming, new Map());
@@ -311,46 +327,46 @@ export class ClaudeTurn {
       }
       const blocks = this.streaming && this.streamed.get(this.streaming);
       if (!blocks) return false;
-      if (event.data.type === "content_block_start") {
-        if (event.data.content_block.type !== "text") return false;
-        blocks.set(event.data.index, event.data.content_block.text ?? "");
+      if (event.value.type === "content_block_start") {
+        if (event.value.content_block.type !== "text") return false;
+        blocks.set(event.value.index, event.value.content_block.text ?? "");
         return true;
       }
-      if (event.data.delta.type !== "text_delta" || !event.data.delta.text)
+      if (event.value.delta.type !== "text_delta" || !event.value.delta.text)
         return false;
       blocks.set(
-        event.data.index,
-        (blocks.get(event.data.index) ?? "") + event.data.delta.text,
+        event.value.index,
+        (blocks.get(event.value.index) ?? "") + event.value.delta.text,
       );
       return true;
     }
-    const assistant = assistantFrame.safeParse(raw);
-    if (assistant.success) {
-      const id = assistant.data.message.id;
-      if (assistant.data.error) {
+    const assistant = decodeAssistantFrame(raw);
+    if (Option.isSome(assistant)) {
+      const id = assistant.value.message.id;
+      if (assistant.value.error) {
         // Error text can quote the provider; only the fixed cause is kept.
-        this.failure = assistant.data.error;
+        this.failure = assistant.value.error;
         const shown = this.streamed.has(id) || this.complete.has(id);
         this.streamed.delete(id);
         this.complete.delete(id);
         return shown;
       }
       this.seen(id);
-      const texts = assistant.data.message.content.flatMap((block) =>
+      const texts = assistant.value.message.content.flatMap((block) =>
         block.type === "text" && block.text ? [block.text] : [],
       );
       if (!texts.length) return false;
       this.complete.set(id, [...(this.complete.get(id) ?? []), ...texts]);
       return true;
     }
-    const result = resultFrame.safeParse(raw);
-    if (result.success) {
-      const { subtype, is_error } = result.data;
+    const result = decodeResultFrame(raw);
+    if (Option.isSome(result)) {
+      const { subtype, is_error } = result.value;
       if (subtype === "success" && !is_error)
-        this.result = { ok: true, text: result.data.result ?? "" };
+        this.result = { ok: true, text: result.value.result ?? "" };
       else {
         const cause = this.failure ?? subtype;
-        const status = result.data.api_error_status;
+        const status = result.value.api_error_status;
         this.result = {
           ok: false,
           cause: knownCauses.has(cause) ? cause : "error",
@@ -497,10 +513,13 @@ type Run = {
 };
 
 /** A running CLI, kept on disk so a later process can stop what it left. */
-const recordSchema = z.strictObject({
-  pid: z.number().int().positive(),
-  turn: z.uuid(),
-  since: z.number().int().nonnegative(),
+const recordSchema = Schema.Struct({
+  pid: Schema.Int.check(Schema.isGreaterThan(0)),
+  turn: sessionIDSchema,
+  since: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+const decodeRecord = Schema.decodeUnknownSync(recordSchema, {
+  onExcessProperty: "error",
 });
 
 /**
@@ -809,9 +828,9 @@ export class ClaudeBackend implements AgentBackend {
   private async stopOrphan(id: string, signal: AbortSignal) {
     if (this.runs.get(id)?.process) return;
     const path = join(this.records, `${id}.json`);
-    let record: z.infer<typeof recordSchema>;
+    let record: typeof recordSchema.Type;
     try {
-      record = recordSchema.parse(JSON.parse(await readFile(path, "utf8")));
+      record = decodeRecord(JSON.parse(await readFile(path, "utf8")));
     } catch {
       return;
     }

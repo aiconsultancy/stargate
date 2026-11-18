@@ -163,6 +163,128 @@ test("missing, incompatible and failed pinned lookups never create a root", asyn
   }
 });
 
+test("OpenCode boundary corpus: pinned response strips keys and checks optional fields", async () => {
+  let response: unknown;
+  const paths: string[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname;
+      paths.push(path);
+      if (path.startsWith("/api/agent/"))
+        return Response.json({
+          location: { directory: "/captain", ignored: true },
+          data: { id: "captain", ignored: true },
+          ignored: true,
+        });
+      return Response.json({ data: response });
+    },
+  });
+  try {
+    const adapter = backend(server.url.href, { enforcePermissions: true });
+    const base = {
+      id: sessionID,
+      agent: "captain",
+      location: { directory: "/captain" },
+      permissions: [
+        { effect: "deny", extra: true, resource: "*", action: "*" },
+      ],
+    };
+    for (const [change, accepted] of [
+      [{ extra: true, location: { directory: "/captain", extra: true } }, true],
+      [{ parentID: undefined, fork: undefined }, true],
+      [{ parentID: null }, false],
+      [{ parentID: "" }, false],
+      [{ fork: null }, false],
+      [{ fork: false }, false],
+      [{ agent: null }, false],
+      [{ agent: undefined }, false],
+      [{ permissions: null }, false],
+      [
+        { permissions: [{ action: "*", resource: "*", effect: "bogus" }] },
+        false,
+      ],
+      [{ location: {} }, false],
+      [{ id: null }, false],
+    ] as const) {
+      response = { ...base, ...change };
+      const run = adapter.createSession({
+        key: "corpus",
+        title: "unused",
+        signal: AbortSignal.timeout(3000),
+      });
+      if (accepted) expect(await run).toBe(sessionID);
+      else
+        await expect(run).rejects.toThrow(
+          "Pinned OpenCode session unavailable or incompatible",
+        );
+    }
+    expect(
+      paths.every(
+        (path) =>
+          path.startsWith("/api/agent/") ||
+          path === `/api/session/${sessionID}`,
+      ),
+    ).toBe(true);
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("OpenCode boundary corpus: ready response rejects missing or mistyped fields", async () => {
+  let response: unknown;
+  let creates = 0;
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      if (new URL(request.url).pathname.startsWith("/api/agent/"))
+        return Response.json(response);
+      creates++;
+      return Response.json({ data: { id: "ses_created" } });
+    },
+  });
+  try {
+    const adapter = backend(server.url.href, {
+      sessionID: undefined,
+      enforcePermissions: true,
+    });
+    for (const [body, accepted] of [
+      [
+        {
+          data: { id: "captain", extra: true },
+          location: { directory: "/captain", extra: true },
+          extra: true,
+        },
+        true,
+      ],
+      [{ data: { id: null }, location: { directory: "/captain" } }, false],
+      [{ data: {}, location: { directory: "/captain" } }, false],
+      [{ data: { id: "captain" }, location: { directory: null } }, false],
+      [{ data: { id: "captain" } }, false],
+      [null, false],
+      [[], false],
+    ] as const) {
+      response = body;
+      const before = creates;
+      const run = adapter.createSession({
+        key: "corpus",
+        title: "unused",
+        signal: AbortSignal.timeout(3000),
+      });
+      if (accepted) expect(await run).toBe("ses_created");
+      else
+        await expect(run).rejects.toThrow(
+          "Configured OpenCode agent unavailable or incompatible; no session was created or reused",
+        );
+      expect(creates - before).toBe(accepted ? 1 : 0);
+    }
+  } finally {
+    await server.stop(true);
+  }
+});
+
 test("pinned lookup cancellation before and during GET never creates", async () => {
   const received = Promise.withResolvers<void>();
   const response = Promise.withResolvers<Response>();

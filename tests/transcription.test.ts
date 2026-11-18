@@ -200,6 +200,68 @@ test("Azure preserves raw transcript strings and accepts extra provider fields",
   }
 });
 
+test("Azure token expiry uses Number coercion and positive safe integers", async () => {
+  const file = { data: audio, mime: "audio/mp4", extension: "m4a" };
+  const providerConfig = transcriptionSchema.parse({
+    provider: {
+      type: "azure-openai",
+      endpoint: "http://127.0.0.1:1",
+      deployment: "fixture",
+      apiVersion: "2024-06-01",
+      auth: "managedIdentity",
+    },
+  }).provider;
+  for (const [expires_on, accepted, cached] of [
+    ["3600", true, true],
+    [" 0xE10 ", true, true],
+    ["3.6e3", true, true],
+    [true, true, false],
+    [[3600], true, true],
+    [Number.MAX_SAFE_INTEGER, true, true],
+    [null, false, false],
+    [false, false, false],
+    ["", false, false],
+    [[], false, false],
+    [{}, false, false],
+    ["Infinity", false, false],
+    ["NaN", false, false],
+    [0, false, false],
+    [-1, false, false],
+    [1.5, false, false],
+    [Number.MAX_SAFE_INTEGER + 1, false, false],
+  ] as const) {
+    let identities = 0;
+    const authorizations: (string | null)[] = [];
+    const transcriber = new AzureOpenAITranscriber(providerConfig, {
+      now: () => 0,
+      fetch: async (_url, init) => {
+        if (init?.method !== "POST") {
+          identities++;
+          return Response.json({
+            access_token: secretToken,
+            expires_on,
+            extra: "ignored",
+          });
+        }
+        authorizations.push(new Headers(init.headers).get("authorization"));
+        return Response.json({ text: "answer" });
+      },
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (accepted)
+        expect(await transcriber.transcribe(file, signal())).toBe("answer");
+      else
+        await expect(transcriber.transcribe(file, signal())).rejects.toThrow(
+          /^Transcription request failed$/,
+        );
+    }
+    expect(identities).toBe(cached ? 1 : 2);
+    expect(authorizations).toEqual(
+      accepted ? [`Bearer ${secretToken}`, `Bearer ${secretToken}`] : [],
+    );
+  }
+});
+
 test("provider failures are one fixed error, drop a refused token and honour cancellation", async () => {
   const f = provider();
   const file = { data: audio, mime: "audio/mp4", extension: "m4a" };
