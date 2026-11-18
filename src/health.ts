@@ -142,8 +142,9 @@ function parsed<T>(schema: z.ZodType<T>, value: unknown): T | null {
 export function createHealthReader(
   input: HealthReaderInput,
 ): (section?: string) => Promise<string> {
-  const readHost = createHostHealthReader(input.dataDirectory, () =>
-    healthConfigSchema.parse(input.bot().health ?? {}),
+  const readHost = createHostHealthReader(
+    input.maintenance?.stargate?.root ?? input.dataDirectory,
+    () => healthConfigSchema.parse(input.bot().health ?? {}),
   );
   return async (requested?: string) => {
     if (
@@ -311,7 +312,7 @@ export function createHealthReader(
     if (want("agents")) {
       const pin = s?.checks.pinnedSession.state ?? "unknown";
       rows.agents.push(
-        `${mark(pin)} captain pinned readiness ${pin}; activity unknown`,
+        `${mark(pin)} captain pinned readiness ${pin}; current task/queued tasks/running duration/last activity unknown`,
       );
       rows.agents.push(
         `⚠ native activity unknown; stalled unknown (no last-activity source; limit ${config.stalledAfterSeconds}s)`,

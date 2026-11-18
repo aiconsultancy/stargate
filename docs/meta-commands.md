@@ -77,7 +77,9 @@ the health command never changes it.
 ```
 
 The two disk paths are optional: if absent, those disk values are `unknown`.
-Root and Stargate data-directory disk reads need no extra path. The stall limit
+Root and Stargate disk reads need no extra path. The Stargate disk uses the
+configured maintenance installation root, or the data directory when that root
+is not configured. The stall limit
 defaults to 1,800 seconds; snapshot freshness defaults to 900 seconds. Both
 limits accept whole seconds from 60 to 86,400.
 
