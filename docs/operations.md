@@ -16,6 +16,7 @@ mention. For IRC, see [requests and replies](irc.md#access).
 | Inspect queue, sessions, or crew without starting work                        | [Dashboard](dashboard.md), [session history](session-history.md), [crew activity](crew-activity.md)        |
 | Read provider quota or pair OpenCode devices                                  | [Usage](usage.md), [device pairing](pairing.md)                                                            |
 | Read gateway settings or change a captain's waiting delay without a turn      | [Captain-addressed meta commands](meta-commands.md)                                                        |
+| Switch installed global OpenCode child-agent profiles                         | [Profile switching](agents/agent-profiles.md#switch-an-installed-profile)                                  |
 | Let a trusted captain send a message to another approved conversation         | [Captain posts](captain-post.md)                                                                           |
 
 ## Linux user service
