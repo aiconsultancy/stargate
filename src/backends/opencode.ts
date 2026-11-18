@@ -8,6 +8,7 @@ import {
   type SessionMessageInfo,
 } from "@opencode/client";
 import { SessionMessage } from "@opencode/schema";
+import { Schema } from "effect";
 import { z } from "zod";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
 import { type Attachment, checkAttachments } from "../attachments";
@@ -82,10 +83,13 @@ const readyAgentSchema = z.object({
 });
 const agentReadyMs = 30_000;
 const agentReadyPollMs = 250;
-const pairingCode = z.object({
-  code: z.string().regex(/^[A-Za-z0-9_-]{1,512}$/),
-  expires_in: z.number().int().positive().max(86_400),
+const pairingCode = Schema.Struct({
+  code: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,512}$/)),
+  expires_in: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: 86_400 }),
+  ),
 });
+const decodePairingCode = Schema.decodeUnknownSync(pairingCode);
 const settledEvents = [
   "session.execution.succeeded",
   "session.execution.failed",
@@ -789,7 +793,7 @@ export class OpenCodeBackend implements AgentBackend {
   async pair(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
-      const result = pairingCode.parse(
+      const result = decodePairingCode(
         await this.pairingClient.server.pair({ signal }),
       );
       signal.throwIfAborted();
