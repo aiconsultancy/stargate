@@ -10,6 +10,7 @@ import type { SlackDelivery } from "./gateway";
 import type { ReactionName } from "./reactions";
 import { failureContent, type RequestFailure } from "./request-failure";
 import type { Identity } from "./routing";
+import { retrySlack, SlackSocket } from "./slack-connection";
 import { SlackFiles, type SlackFilesFetch } from "./slack-files";
 import {
   prepareSlackReply,
@@ -78,6 +79,7 @@ export class SlackConnection implements SlackDelivery {
   private readonly socket;
   private readonly web;
   private readonly historyWeb: (signal: AbortSignal) => WebClient;
+  private handle?: (request: SocketRequest) => Promise<void>;
   private closing: Promise<void> | undefined;
   constructor(
     appToken: string,
@@ -124,11 +126,18 @@ export class SlackConnection implements SlackDelivery {
           }),
       });
     this.files = new SlackFiles(this.historyWeb, botToken, fileFetch);
-    this.socket = new SocketModeClient({
-      appToken,
-      logger,
-      clientOptions: options,
-    });
+    this.socket = new SlackSocket(() => {
+      const socket = new SocketModeClient({
+        appToken,
+        logger,
+        clientOptions: options,
+        autoReconnectEnabled: false,
+      });
+      socket.on("slack_event", async (request: SocketRequest) => {
+        await this.handle?.(request);
+      });
+      return socket;
+    }, log);
   }
 
   /** Slack `users.info`; the caller parses the untrusted result. */
@@ -136,8 +145,8 @@ export class SlackConnection implements SlackDelivery {
     return this.historyWeb(signal).users.info({ user });
   }
 
-  async identity(): Promise<Identity> {
-    const auth = await this.web.auth.test();
+  async identity(signal?: AbortSignal): Promise<Identity> {
+    const auth = await retrySlack(() => this.web.auth.test(), signal);
     if (!auth.team_id || !auth.user_id || !auth.bot_id)
       throw new Error("Slack requires a workspace bot token");
     return { team: auth.team_id, user: auth.user_id };
@@ -154,13 +163,20 @@ export class SlackConnection implements SlackDelivery {
     log: Logger,
     interactions?: SlackInteractions,
     open?: () => boolean,
+    signal?: AbortSignal,
   ) {
-    this.socket.on("slack_event", async (request: SocketRequest) => {
+    this.handle = async (request: SocketRequest) => {
       // handleSlackRequest catches errors without exposing SDK payloads.
       await handleSlackRequest(request, accept, log, interactions, open);
-    });
-    this.socket.on("error", () => log.error("Slack socket error"));
-    await this.socket.start();
+    };
+    await this.socket.start(signal);
+  }
+
+  get connectionState() {
+    return this.socket.state;
+  }
+  watch() {
+    return this.socket.watch();
   }
 
   private async send(
@@ -360,7 +376,7 @@ export class SlackConnection implements SlackDelivery {
 
   /** Idempotent: a repeated SDK disconnect can wait for an event that never comes. */
   close() {
-    this.closing ??= this.socket.disconnect();
+    this.closing ??= this.socket.close();
     return this.closing;
   }
 }

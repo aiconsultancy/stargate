@@ -28,7 +28,7 @@ import {
   type CommandRunner,
   processRunner,
 } from "../src/nightly/exec";
-import { readReady, writeReady } from "../src/nightly/ready";
+import { readReady, waitReady, writeReady } from "../src/nightly/ready";
 import {
   adoptRelease,
   githubHeaders,
@@ -645,6 +645,40 @@ describe("Stargate release update", () => {
     expect(await switchCurrent(root, "0.9.0")).toBe("old");
     expect(await writeReady(data, 2, made)).toBe("0.9.0");
     expect((await readReady(data))?.version).toBe("0.9.0");
+    await writeReady(
+      data,
+      3,
+      made,
+      [],
+      [{ kind: "slack", id: "captain", state: "reconnecting" }],
+    );
+    expect(
+      await waitReady(
+        data,
+        3,
+        "0.9.0",
+        0,
+        async () => {},
+        () => 4,
+      ),
+    ).toBe(false);
+    await writeReady(
+      data,
+      3,
+      made,
+      [],
+      [{ kind: "slack", id: "captain", state: "connected" }],
+    );
+    expect(
+      await waitReady(
+        data,
+        3,
+        "0.9.0",
+        0,
+        async () => {},
+        () => 4,
+      ),
+    ).toBe(true);
   });
 
   test("a named release is looked up by its tag and must be published", async () => {

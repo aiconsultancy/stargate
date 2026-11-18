@@ -10,6 +10,11 @@
 
 ### Changes
 
+- Retry Slack startup DNS/network failures and later disconnects with bounded
+  backoff. Require a connected transport before readiness and expose connection
+  states in the ready record and `/health`. Exhausted retries fail the service
+  so its manager can restart it. No new flag or default change.
+
 - Require manual dispatch and approval through the `release` environment before
   publishing. Merging a green PR no longer publishes a release. Main protection
   requires up-to-date Quality checks; use `gh pr merge --auto --squash`.
