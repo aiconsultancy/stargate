@@ -1056,6 +1056,140 @@ test("Codex failures carry a fixed cause, never CLI or provider text", async () 
   expect(turn.result).toEqual({ ok: false });
 });
 
+test("Codex frames keep optional text and errors without accepting malformed fields", () => {
+  for (const type of ["item.started", "item.updated", "item.completed"]) {
+    const turn = new CodexTurn();
+    turn.add({ type: "thread.started", thread_id: "", extra: "ignored" });
+    expect(turn.thread).toBe("");
+    turn.add({ type: "thread.started", thread_id: null });
+    expect(turn.thread).toBe("");
+    expect(
+      turn.add({ type, item: { id: "m", type: "agent_message", extra: 1 } }),
+    ).toBe(false);
+    expect(
+      turn.add({
+        type,
+        item: { id: "m", type: "agent_message", text: "visible", extra: 1 },
+      }),
+    ).toBe(true);
+    for (const item of [
+      { id: "m", type: "agent_message", text: null },
+      { id: "m", type: "agent_message", text: 1 },
+      { type: "agent_message", text: "hidden" },
+    ])
+      expect(turn.add({ type, item })).toBe(false);
+    expect(turn.answer()).toBe("visible");
+    turn.add({ type, item: { id: "tool", type: "command_execution" } });
+    expect(turn.worked).toBe(true);
+  }
+  for (const [fields, accepted] of [
+    [{}, true],
+    [{ message: undefined, error: undefined }, true],
+    [{ message: null }, false],
+    [{ error: null }, false],
+    [{ error: {} }, false],
+    [{ error: { message: 401 } }, false],
+  ] as const) {
+    const turn = new CodexTurn();
+    turn.add({ type: "turn.failed", ...fields, extra: 1 });
+    expect(turn.result).toEqual(accepted ? { ok: false } : undefined);
+    expect(turn.failure).toBeUndefined();
+    expect(turn.answer()).toBe("");
+  }
+  const turn = new CodexTurn();
+  turn.add({
+    type: "turn.failed",
+    message: "status 429 PRIVATE",
+    error: { message: "status 401 PRIVATE", extra: 1 },
+  });
+  expect(turn.failure).toEqual({ kind: "auth", status: 401 });
+  expect(turn.answer()).toBe("");
+});
+
+test("Codex recovery records preserve strict keys, UUID spelling and safe bounds", async () => {
+  const { backend, dataDirectory } = await open();
+  const id = await session(backend);
+  const path = join(dataDirectory, "codex-runs", `${id}.json`);
+  const record = { turn: crypto.randomUUID(), since: Number.MAX_SAFE_INTEGER };
+  for (const [change, accepted] of [
+    [{}, true],
+    [{ since: 0 }, true],
+    [{ turn: "ABCDEFAB-CDEF-4ABC-ABCD-ABCDEFABCDEF" }, true],
+    [{ turn: "00000000-0000-0000-0000-000000000000" }, true],
+    [{ turn: "ffffffff-ffff-ffff-ffff-ffffffffffff" }, true],
+    [{ turn: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF" }, false],
+    [{ turn: "Ffffffff-ffff-ffff-ffff-ffffffffffff" }, false],
+    [{ turn: "../unsafe" }, false],
+    [{ since: -1 }, false],
+    [{ since: 0.5 }, false],
+    [{ since: Number.MAX_SAFE_INTEGER + 1 }, false],
+    [{ since: null }, false],
+    [{ since: undefined }, false],
+    [{ extra: true }, false],
+  ] as const) {
+    const text = JSON.stringify({ ...record, ...change });
+    await writeFile(path, text);
+    await backend.interrupt(id, signal());
+    if (accepted) await expect(readFile(path)).rejects.toThrow();
+    else expect(await readFile(path, "utf8")).toBe(text);
+  }
+  const overflow = `{"turn":"${record.turn}","since":1e400}`;
+  await writeFile(path, overflow);
+  await backend.interrupt(id, signal());
+  expect(await readFile(path, "utf8")).toBe(overflow);
+});
+
+test("Codex conversation and stored thread UUIDs preserve spelling and reject extra keys", async () => {
+  const { backend, dataDirectory, runs } = await open();
+  const home = join(dataDirectory, "codex", "sessions");
+  await mkdir(home, { recursive: true });
+  const ids = [
+    "ABCDEFAB-CDEF-4ABC-ABCD-ABCDEFABCDEF",
+    "00000000-0000-0000-0000-000000000000",
+    "ffffffff-ffff-ffff-ffff-ffffffffffff",
+  ];
+  for (const id of ids) {
+    await writeFile(join(home, id), "existing session");
+    await writeFile(
+      join(dataDirectory, "codex-threads", `${id}.json`),
+      JSON.stringify({ thread: id }),
+    );
+    expect(await backend.prompt(id, "hello", signal())).toBe(
+      "Hello world\n\nDone.",
+    );
+  }
+  expect(
+    (await runs()).map((run) => run.argv[run.argv.indexOf("resume") + 1]),
+  ).toEqual(ids);
+  for (const id of [
+    "../unsafe",
+    "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",
+    "Ffffffff-ffff-ffff-ffff-ffffffffffff",
+    "12345678-1234-9234-8234-123456789abc",
+  ]) {
+    await expect(backend.prompt(id, "hello", signal())).rejects.toThrow(
+      "Codex conversation ID is not valid",
+    );
+    await expect(backend.interrupt(id, signal())).resolves.toBeUndefined();
+  }
+  const id = await session(backend);
+  for (const mapping of [
+    { thread: ids[0], extra: true },
+    { thread: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF" },
+    { thread: null },
+    {},
+  ]) {
+    await writeFile(
+      join(dataDirectory, "codex-threads", `${id}.json`),
+      JSON.stringify(mapping),
+    );
+    await expect(backend.prompt(id, "hello", signal())).rejects.toThrow(
+      "Codex thread mapping is unreadable",
+    );
+  }
+  expect(await runs()).toHaveLength(ids.length);
+});
+
 test.skipIf(process.platform !== "linux")(
   "interrupt stops what an earlier process's Codex turn left, and nothing else",
   async () => {

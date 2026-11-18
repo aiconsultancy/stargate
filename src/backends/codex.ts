@@ -18,7 +18,7 @@ import {
   type ThreadOptions,
   type UserInput,
 } from "@openai/codex-sdk";
-import { z } from "zod";
+import { Option, Schema } from "effect";
 import { type Attachment, checkAttachments } from "../attachments";
 import {
   type AgentBackend,
@@ -66,7 +66,13 @@ class CodexTurnError extends Error {}
 const crashed = { ran: true } as const;
 
 /** Conversation and thread IDs are UUIDs: never options, paths or flags. */
-const idSchema = z.uuid();
+const maximumID = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+const idSchema = Schema.String.check(
+  Schema.isUUID(),
+  // Zod accepted the max UUID only in lowercase; preserve existing ID spelling.
+  Schema.makeFilter((id) => id.toLowerCase() !== maximumID || id === maximumID),
+);
+const isID = Schema.is(idSchema);
 /** The turn marker variable of Codex children; see `TurnMarker`. */
 const turnVariable = "STARGATE_CODEX_TURN";
 /** The proxy key's variable in the Codex process; tool commands never get it. */
@@ -305,24 +311,27 @@ export function codexInput(
   return { text: parts.join("\n\n"), images };
 }
 
-const startedEvent = z.object({
-  type: z.literal("thread.started"),
-  thread_id: z.string(),
+const startedEvent = Schema.Struct({
+  type: Schema.Literal("thread.started"),
+  thread_id: Schema.String,
 });
-const itemEvent = z.object({
-  type: z.enum(["item.started", "item.updated", "item.completed"]),
-  item: z.object({
-    id: z.string(),
-    type: z.string(),
-    text: z.string().optional(),
+const itemEvent = Schema.Struct({
+  type: Schema.Literals(["item.started", "item.updated", "item.completed"]),
+  item: Schema.Struct({
+    id: Schema.String,
+    type: Schema.String,
+    text: Schema.optional(Schema.String),
   }),
 });
-const endEvent = z.object({
-  type: z.enum(["turn.completed", "turn.failed", "error"]),
+const endEvent = Schema.Struct({
+  type: Schema.Literals(["turn.completed", "turn.failed", "error"]),
   // `error` carries `message`; `turn.failed` carries `error.message`.
-  message: z.string().optional(),
-  error: z.object({ message: z.string() }).optional(),
+  message: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.Struct({ message: Schema.String })),
 });
+const decodeStartedEvent = Schema.decodeUnknownOption(startedEvent);
+const decodeItemEvent = Schema.decodeUnknownOption(itemEvent);
+const decodeEndEvent = Schema.decodeUnknownOption(endEvent);
 /** Items that mean the turn did work outside the model. */
 const workItems = new Set([
   "command_execution",
@@ -374,24 +383,24 @@ export class CodexTurn {
 
   /** Returns true when the visible text may have changed. */
   add(raw: unknown): boolean {
-    const started = startedEvent.safeParse(raw);
-    if (started.success) {
-      this.thread = started.data.thread_id;
+    const started = decodeStartedEvent(raw);
+    if (Option.isSome(started)) {
+      this.thread = started.value.thread_id;
       return false;
     }
-    const item = itemEvent.safeParse(raw);
-    if (item.success) {
-      const { id, type, text } = item.data.item;
+    const item = decodeItemEvent(raw);
+    if (Option.isSome(item)) {
+      const { id, type, text } = item.value.item;
       if (workItems.has(type)) this.worked = true;
       if (type !== "agent_message" || text === undefined) return false;
       if (this.messages.get(id) === text) return false;
       this.messages.set(id, text);
       return true;
     }
-    const end = endEvent.safeParse(raw);
-    if (end.success) {
-      this.result = { ok: end.data.type === "turn.completed" };
-      const message = end.data.error?.message ?? end.data.message;
+    const end = decodeEndEvent(raw);
+    if (Option.isSome(end)) {
+      this.result = { ok: end.value.type === "turn.completed" };
+      const message = end.value.error?.message ?? end.value.message;
       if (!this.result.ok && message)
         this.failure = codexFailureKind(message) ?? this.failure;
     }
@@ -414,11 +423,17 @@ type Run = {
 };
 
 /** A turn in progress, kept on disk so a later process can stop it. */
-const recordSchema = z.strictObject({
-  turn: z.uuid(),
-  since: z.number().int().nonnegative(),
+const recordSchema = Schema.Struct({
+  turn: idSchema,
+  since: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
-const threadSchema = z.strictObject({ thread: z.uuid() });
+const threadSchema = Schema.Struct({ thread: idSchema });
+const decodeRecord = Schema.decodeUnknownSync(recordSchema, {
+  onExcessProperty: "error",
+});
+const decodeThread = Schema.decodeUnknownSync(threadSchema, {
+  onExcessProperty: "error",
+});
 
 /**
  * Test seams: a fake CLI for the launcher to start (production uses the
@@ -520,7 +535,7 @@ export class CodexBackend implements AgentBackend {
   /** The Codex thread of a conversation in this namespace, if it started. */
   private async thread(id: string) {
     try {
-      return threadSchema.parse(
+      return decodeThread(
         JSON.parse(await readFile(join(this.threads, `${id}.json`), "utf8")),
       ).thread;
     } catch (error) {
@@ -540,10 +555,9 @@ export class CodexBackend implements AgentBackend {
   ): Promise<string> {
     signal.throwIfAborted();
     if (this.closed) throw new Error("Codex backend is closing");
-    const parsed = idSchema.safeParse(sessionId);
-    if (!parsed.success)
+    if (!isID(sessionId))
       throw new CodexTurnError("Codex conversation ID is not valid");
-    const id = parsed.data;
+    const id = sessionId;
     if (this.runs.has(id)) throw new CodexTurnError("Codex thread is busy");
     const input = codexInput(
       context ? `${sourceLine(context)}\n\n${text}` : text,
@@ -683,7 +697,7 @@ export class CodexBackend implements AgentBackend {
           live = false;
           const changed = turn.add(event);
           if (turn.thread !== undefined && turn.thread !== known) {
-            if (known !== undefined || !idSchema.safeParse(turn.thread).success)
+            if (known !== undefined || !isID(turn.thread))
               throw new CodexTurnError("Codex thread identity changed");
             // Synchronous: the mapping exists before the turn continues.
             writeFileSync(
@@ -764,9 +778,9 @@ export class CodexBackend implements AgentBackend {
    */
   private async stopOrphan(id: string, signal: AbortSignal) {
     const path = join(this.records, `${id}.json`);
-    let record: z.infer<typeof recordSchema>;
+    let record: typeof recordSchema.Type;
     try {
-      record = recordSchema.parse(JSON.parse(await readFile(path, "utf8")));
+      record = decodeRecord(JSON.parse(await readFile(path, "utf8")));
     } catch {
       return;
     }
@@ -781,15 +795,14 @@ export class CodexBackend implements AgentBackend {
   }
 
   async interrupt(sessionId: string, signal: AbortSignal) {
-    const id = idSchema.safeParse(sessionId);
-    if (!id.success) return;
-    const run = this.runs.get(id.data);
+    if (!isID(sessionId)) return;
+    const run = this.runs.get(sessionId);
     if (run) {
       run.controller.abort();
       await run.done;
       return;
     }
-    await this.stopOrphan(id.data, signal);
+    await this.stopOrphan(sessionId, signal);
   }
 
   async close() {

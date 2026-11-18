@@ -475,6 +475,160 @@ test("Claude failures carry fixed causes, never CLI or provider text", async () 
   expect(turn.result).toEqual({ ok: false, cause: "error" });
 });
 
+test("Claude frames preserve optional fields, safe indices and finite statuses", () => {
+  for (const [index, accepted] of [
+    [0, true],
+    [Number.MAX_SAFE_INTEGER, true],
+    [-1, false],
+    [0.5, false],
+    [Number.MAX_SAFE_INTEGER + 1, false],
+    [Number.NaN, false],
+    [Number.POSITIVE_INFINITY, false],
+    [Number.NEGATIVE_INFINITY, false],
+    ["0", false],
+  ] as const) {
+    const turn = new ClaudeTurn();
+    const frame = (event: unknown) => ({
+      type: "stream_event",
+      parent_tool_use_id: null,
+      event,
+      extra: "ignored",
+    });
+    turn.add(frame({ type: "message_start", message: { id: "m", extra: 1 } }));
+    expect(
+      turn.add(
+        frame({
+          type: "content_block_start",
+          index,
+          content_block: { type: "text", extra: 1 },
+        }),
+      ),
+    ).toBe(accepted);
+    expect(
+      turn.add(
+        frame({
+          type: "content_block_delta",
+          index,
+          delta: { type: "text_delta", text: "visible", extra: 1 },
+        }),
+      ),
+    ).toBe(accepted);
+    expect(turn.visible()).toBe(accepted ? "visible" : "");
+  }
+  for (const [status, accepted] of [
+    [undefined, true],
+    [null, true],
+    [429.5, true],
+    [Number.MAX_SAFE_INTEGER + 1, true],
+    [Number.NaN, false],
+    [Number.POSITIVE_INFINITY, false],
+    [Number.NEGATIVE_INFINITY, false],
+    ["429", false],
+  ] as const) {
+    const turn = new ClaudeTurn();
+    turn.add({
+      type: "result",
+      subtype: "rate_limit",
+      is_error: true,
+      api_error_status: status,
+      extra: "ignored",
+    });
+    expect(turn.result).toEqual(
+      accepted
+        ? {
+            ok: false,
+            cause: "rate_limit",
+            ...(typeof status === "number" ? { status } : {}),
+          }
+        : undefined,
+    );
+  }
+  for (const content of [
+    [{ type: "text", text: "visible", extra: "ignored" }, { type: "text" }],
+    [{ type: "text", text: null }],
+    [{ text: "missing type" }],
+  ]) {
+    const turn = new ClaudeTurn();
+    turn.add({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { id: "m", content },
+      extra: 1,
+    });
+    expect(turn.answer()).toBe(content[0]?.text === "visible" ? "visible" : "");
+  }
+});
+
+test("Claude work frames require a string parent or a tool-use block", () => {
+  for (const [raw, worked] of [
+    [{ parent_tool_use_id: "" }, true],
+    [{ parent_tool_use_id: null }, false],
+    [
+      {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", secret: "hidden" }] },
+      },
+      true,
+    ],
+    [{ type: "assistant", message: { content: [{ type: "text" }] } }, false],
+    [
+      { type: "assistant", message: { content: [{ type: "tool_use" }, {}] } },
+      false,
+    ],
+    [{ type: "assistant", message: { content: [] } }, false],
+  ] as const) {
+    const turn = new ClaudeTurn();
+    turn.add(raw);
+    expect(turn.worked).toBe(worked);
+    expect(turn.answer()).toBe("");
+  }
+  const turn = new ClaudeTurn();
+  turn.add({ type: "system", subtype: "init", session_id: "", extra: 1 });
+  expect(turn.session).toBe("");
+  turn.add({ type: "system", subtype: "init", session_id: null });
+  expect(turn.session).toBe("");
+});
+
+test("Claude recovery accepts only strict UUID records with safe integer bounds", async () => {
+  const { backend, dataDirectory } = await open();
+  const id = await session(backend);
+  const path = join(dataDirectory, "claude-runs", `${id}.json`);
+  const record = {
+    pid: Number.MAX_SAFE_INTEGER,
+    turn: crypto.randomUUID(),
+    since: Number.MAX_SAFE_INTEGER,
+  };
+  for (const [change, accepted] of [
+    [{}, true],
+    [{ pid: 1, since: 0 }, true],
+    [{ turn: "ABCDEFAB-CDEF-4ABC-ABCD-ABCDEFABCDEF" }, true],
+    [{ turn: "00000000-0000-0000-0000-000000000000" }, true],
+    [{ turn: "ffffffff-ffff-ffff-ffff-ffffffffffff" }, true],
+    [{ turn: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF" }, false],
+    [{ turn: "Ffffffff-ffff-ffff-ffff-ffffffffffff" }, false],
+    [{ turn: "../unsafe" }, false],
+    [{ pid: 0 }, false],
+    [{ pid: 1.5 }, false],
+    [{ pid: Number.MAX_SAFE_INTEGER + 1 }, false],
+    [{ since: -1 }, false],
+    [{ since: 0.5 }, false],
+    [{ since: Number.MAX_SAFE_INTEGER + 1 }, false],
+    [{ since: null }, false],
+    [{ since: undefined }, false],
+    [{ extra: true }, false],
+  ] as const) {
+    const text = JSON.stringify({ ...record, ...change });
+    await writeFile(path, text);
+    await backend.interrupt(id, signal());
+    if (accepted) await expect(readFile(path)).rejects.toThrow();
+    else expect(await readFile(path, "utf8")).toBe(text);
+  }
+  const overflow = `{"pid":1,"turn":"${record.turn}","since":1e400}`;
+  await writeFile(path, overflow);
+  await backend.interrupt(id, signal());
+  expect(await readFile(path, "utf8")).toBe(overflow);
+});
+
 test.skipIf(process.platform !== "linux")(
   "interrupt stops what an earlier process's turn left, and nothing else",
   async () => {

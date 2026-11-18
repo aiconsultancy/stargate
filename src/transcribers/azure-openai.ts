@@ -1,6 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { Schema } from "effect";
-import { z } from "zod";
+import { Schema, SchemaGetter } from "effect";
 import type { Transcriber, TranscriptionConfig } from "../transcription";
 
 type Fetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
@@ -14,10 +13,16 @@ const maxResponseBytes = 1024 * 1024;
 // A small deployment can admit one request each minute.
 const maxRetryAfterSeconds = 300;
 
-const tokenResponse = z.object({
-  access_token: z.string().min(1),
-  expires_on: z.coerce.number().int().positive(),
+const tokenResponse = Schema.Struct({
+  access_token: Schema.NonEmptyString,
+  expires_on: Schema.Unknown.pipe(
+    Schema.decodeTo(Schema.Int.check(Schema.isGreaterThan(0)), {
+      decode: SchemaGetter.transform((value) => Number(value)),
+      encode: SchemaGetter.passthroughSubtype<unknown, number>(),
+    }),
+  ),
 });
+const decodeTokenResponse = Schema.decodeUnknownSync(tokenResponse);
 const transcriptResponse = Schema.Struct({ text: Schema.String });
 const decodeTranscriptResponse = Schema.decodeUnknownSync(transcriptResponse);
 
@@ -74,7 +79,7 @@ export class AzureOpenAITranscriber implements Transcriber {
     });
     try {
       if (response.status !== 200) throw new Error("Identity token refused");
-      const token = tokenResponse.parse(await boundedJSON(response));
+      const token = decodeTokenResponse(await boundedJSON(response));
       const refreshAt = token.expires_on * 1000 - refreshMarginMs;
       // A token inside the margin serves this request and is not kept.
       if (refreshAt > this.now())

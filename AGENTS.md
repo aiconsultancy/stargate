@@ -77,8 +77,10 @@ selects a new session namespace; never reuse another backend's session ID.
 ## Engineering
 
 - Use strict TypeScript and Effect Schema at new or migrated input boundaries.
-  Migrate existing Zod schemas one type per PR, preserving validation and wire
-  formats. Keep remaining Zod consumers until their migration phase.
+  Migrate existing Zod schemas in component batches, preserving validation and
+  wire formats. Keep coupled schemas, direct consumers and parity tests together.
+  Follow the PR budget and batch order in `docs/effect-schema-migration.md`.
+  Keep remaining Zod consumers until their migration phase.
 - Prefer the installed Effect capability over another dependency when required
   behavior and security properties are equivalent. Do not remove SDK-required
   dependencies or change public behavior merely to reduce dependency count.
