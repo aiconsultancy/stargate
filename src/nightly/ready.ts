@@ -14,6 +14,15 @@ export const readySchema = z.strictObject({
   readyAt: z.number().int().positive(),
   /** Release version from `.stargate-release.json`, or null for a checkout. */
   version: z.string().nullable(),
+  updateNotices: z
+    .array(
+      z.strictObject({
+        sessionID: z.string().min(1).max(256),
+        status: z.enum(["queued", "mail", "unchanged", "uncertain"]),
+      }),
+    )
+    .max(1000)
+    .optional(),
 });
 export type Ready = z.infer<typeof readySchema>;
 
@@ -35,12 +44,14 @@ export async function writeReady(
   dataDirectory: string,
   now = Date.now(),
   directory = packageDirectory,
+  updateNotices: Ready["updateNotices"] = [],
 ) {
   const record: Ready = {
     schema: "stargate.ready.v1",
     pid: process.pid,
     readyAt: now,
     version: await runningVersion(directory),
+    ...(updateNotices.length ? { updateNotices } : {}),
   };
   const path = join(dataDirectory, "ready.json");
   const temp = `${path}.tmp-${process.pid}`;

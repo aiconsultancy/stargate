@@ -801,6 +801,7 @@ export async function runMaintenance(
     reason: Reason | undefined,
     checkpoint = false,
   ): Promise<RunResult> => {
+    const ready = await readReady(config.dataDirectory);
     const report: Report = {
       schema: reportSchemaID,
       runID,
@@ -814,6 +815,9 @@ export async function runMaintenance(
       components: rec.components,
       ...(cleanup ? { cleanup } : {}),
       models: rec.models,
+      ...(ready && ready.readyAt >= startedAt && ready.updateNotices
+        ? { updateNotices: ready.updateNotices }
+        : {}),
       steps: rec.steps,
       rollbacks: rec.rollbacks,
       restarts: rec.restarts,

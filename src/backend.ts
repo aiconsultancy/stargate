@@ -20,6 +20,7 @@ import type {
 } from "./questions";
 import type { QuotaSnapshot } from "./quota";
 import type { SessionHistory } from "./session-history";
+import type { UpdateReceipt, UpdateSnapshot } from "./update-notice";
 
 /** Model-visible source identity only; never repeat chat history here. */
 export type PromptSourceContext = {
@@ -97,6 +98,21 @@ export const latestInput = "\u0000latest-input";
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
+  updateNoticeContext?(
+    sessionID: string,
+    snapshot: UpdateSnapshot,
+    signal: AbortSignal,
+  ): Promise<UpdateSnapshot>;
+  queueUpdateNotice?(
+    sessionID: string,
+    id: string,
+    text: string,
+    signal: AbortSignal,
+  ): Promise<void>;
+  crewUpdateNotice?(
+    snapshot: UpdateSnapshot,
+    signal: AbortSignal,
+  ): Promise<UpdateReceipt[]>;
   pendingQuestions?(
     sessionID: string,
     signal: AbortSignal,

@@ -13,6 +13,7 @@ import {
   historySessionPageSchema,
   historySessionsSchema,
 } from "../session-history";
+import { updateSnapshotSchema } from "../update-notice";
 
 // Clients require Standard Schema definitions; OpenCode still decodes and
 // encodes these Effect codecs directly, without caller parse options.
@@ -25,6 +26,58 @@ export const CrewReporting = Rpc.define({
   id: "stargate.crew.reporting",
   events: {},
   methods: {
+    queueUpdateNotice: {
+      input: portable(
+        Schema.toStandardJSONSchemaV1(
+          Schema.Struct({
+            sessionID: Schema.String.check(
+              Schema.isMinLength(1),
+              Schema.isMaxLength(256),
+            ),
+            id: Schema.String.check(
+              Schema.isMinLength(1),
+              Schema.isMaxLength(256),
+            ),
+            text: Schema.String.check(Schema.isMaxLength(6000)),
+          }),
+        ),
+      ),
+      output: portable(
+        Schema.toStandardJSONSchemaV1(
+          Schema.Struct({ id: Schema.String, sessionID: Schema.String }),
+        ),
+      ),
+    },
+    updateTools: {
+      input: Schema.toStandardSchemaV1(
+        Schema.toStandardJSONSchemaV1(Schema.Struct({})),
+      ),
+      output: Schema.toStandardSchemaV1(
+        Schema.toStandardJSONSchemaV1(
+          Schema.Record(Schema.String, Schema.String),
+        ),
+      ),
+    },
+    updateNotice: {
+      input: Schema.toStandardSchemaV1(
+        Schema.toStandardJSONSchemaV1(updateSnapshotSchema),
+      ),
+      output: Schema.toStandardSchemaV1(
+        Schema.toStandardJSONSchemaV1(
+          Schema.Array(
+            Schema.Struct({
+              sessionID: Schema.String,
+              status: Schema.Literals([
+                "queued",
+                "mail",
+                "unchanged",
+                "uncertain",
+              ]),
+            }),
+          ),
+        ),
+      ),
+    },
     quota: { input: quotaInputSchema, output: quotaSnapshotSchema },
     status: { input: crewStatusInputSchema, output: crewStatusSchema },
     // Read-only operator history. Roots list every provisioned crew member.

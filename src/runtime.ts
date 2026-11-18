@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { chmod, mkdir } from "node:fs/promises";
+import { chmod, mkdir, readFile } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { parseEnv } from "node:util";
 import { Cause, Data, Deferred, Effect, FiberMap } from "effect";
@@ -46,7 +46,7 @@ import { createHealthReader } from "./health";
 import { controlInteractions } from "./interactions";
 import { type IrcRegistration, IrcShip } from "./irc/ship";
 import { MaintenanceOutbox } from "./nightly/outbox";
-import { writeReady } from "./nightly/ready";
+import { packageDirectory, runningVersion, writeReady } from "./nightly/ready";
 import { NotificationStore } from "./notification-store";
 import { notificationKey } from "./notifications";
 import { PairingUI } from "./pairing";
@@ -63,6 +63,11 @@ import { SlackConnection, type SlackInteractions } from "./slack";
 import { Store } from "./store";
 import { TeamsRegistration } from "./teams/registration";
 import { createTranscriber } from "./transcribers/azure-openai";
+import {
+  buildUpdateSnapshot,
+  type UpdateReceipt,
+  type UpdateSnapshot,
+} from "./update-notice";
 
 export async function loadEnvironment(configPath: string) {
   const file = Bun.file(`${configPath}.env`);
@@ -116,7 +121,8 @@ export type RuntimeDependencies = {
 };
 
 /** Programmatic callers may omit transports they do not use. */
-export type ServeConfig = Omit<Config, "irc" | "teams"> & {
+export type ServeConfig = Omit<Config, "irc" | "teams" | "notifications"> & {
+  notifications?: Config["notifications"];
   irc?: Config["irc"];
   teams?: Config["teams"];
 };
@@ -258,6 +264,37 @@ export function serve(
           }),
         );
       const workers: { key: string; work: Effect.Effect<void> }[] = [];
+      let updateSnapshot: UpdateSnapshot | undefined;
+      const updateTargets = new Map<AgentBackend, string>();
+      const noticeFor = (backend: AgentBackend, scope: string) => {
+        const owner = createHash("sha256").update(scope).digest("hex");
+        updateTargets.set(backend, owner);
+        return async (sessionID: string, signal: AbortSignal) => {
+          if (
+            !updateSnapshot ||
+            !backend.queueUpdateNotice ||
+            !backend.updateNoticeContext
+          )
+            return;
+          const bounded = AbortSignal.any([signal, AbortSignal.timeout(2000)]);
+          const selected = await backend.updateNoticeContext(
+            sessionID,
+            updateSnapshot,
+            bounded,
+          );
+          return store.updateNotices
+            .deliver(
+              sessionID,
+              selected,
+              "queued",
+              (id, text) =>
+                backend.queueUpdateNotice?.(sessionID, id, text, bounded) ??
+                Promise.reject(new Error("Update notice unsupported")),
+              owner,
+            )
+            .then(() => {});
+        };
+      };
       const botBindings = new Map<
         string,
         (
@@ -306,6 +343,12 @@ export function serve(
           undefined,
           undefined,
           registration.transport,
+          undefined,
+          undefined,
+          noticeFor(
+            resource.backend,
+            teams.backend.type === "opencode" ? teams.backend.url : teams.id,
+          ),
         );
         workers.push({
           key: registration.key,
@@ -426,6 +469,10 @@ export function serve(
               }
             },
           },
+          noticeFor(
+            backend,
+            bot.backend.type === "opencode" ? bot.backend.url : bot.id,
+          ),
         );
         const cron = new CronScheduler(
           bot,
@@ -584,6 +631,14 @@ export function serve(
               : undefined,
             undefined,
             registration.transport,
+            undefined,
+            undefined,
+            noticeFor(
+              resource.backend,
+              registration.backend.type === "opencode"
+                ? registration.backend.url
+                : registration.id,
+            ),
           );
           registration.stopTurn = (conversation, thread) =>
             gateway.stopTurn(conversation, thread);
@@ -819,6 +874,17 @@ export function serve(
       );
       // Registered after backends: shutdown interrupts every worker first.
       const fibers = yield* FiberMap.make<string, void>();
+      if (config.notifications?.updateNotice)
+        updateSnapshot = yield* Effect.promise(async () =>
+          buildUpdateSnapshot(
+            await runningVersion(),
+            config,
+            await readFile(
+              join(packageDirectory, "CHANGELOG.md"),
+              "utf8",
+            ).catch(() => ""),
+          ),
+        );
       for (const worker of workers)
         yield* FiberMap.run(fibers, worker.key, worker.work);
       if (reload) {
@@ -991,9 +1057,66 @@ export function serve(
       yield* Effect.addFinalizer(() => closeIntake());
       started = true;
       log.info("Stargate ready");
+      const updateReceipts: UpdateReceipt[] = [];
+      if (updateSnapshot)
+        yield* Effect.promise(async () => {
+          await Promise.all(
+            [...updateTargets].map(async ([backend, scope]) => {
+              const signal = AbortSignal.any([
+                requests.signal,
+                AbortSignal.timeout(10_000),
+              ]);
+              try {
+                if (
+                  backend.sessionID &&
+                  backend.queueUpdateNotice &&
+                  backend.updateNoticeContext &&
+                  updateSnapshot
+                ) {
+                  const selected = await backend.updateNoticeContext(
+                    backend.sessionID,
+                    updateSnapshot,
+                    signal,
+                  );
+                  updateReceipts.push(
+                    await store.updateNotices.deliver(
+                      backend.sessionID,
+                      selected,
+                      "queued",
+                      (id, text) =>
+                        backend.queueUpdateNotice?.(
+                          backend.sessionID ?? "",
+                          id,
+                          text,
+                          signal,
+                        ) ??
+                        Promise.reject(new Error("Update notice unsupported")),
+                      scope,
+                    ),
+                  );
+                }
+                if (
+                  backend.sessionID &&
+                  backend.crewUpdateNotice &&
+                  updateSnapshot
+                )
+                  updateReceipts.push(
+                    ...(await backend.crewUpdateNotice(updateSnapshot, signal)),
+                  );
+              } catch {
+                log.warn("Update notice unavailable");
+              }
+            }),
+          );
+        });
       // Readiness record for maintenance health checks; never fatal.
       yield* Effect.promise(() =>
-        writeReady(config.dataDirectory).then(
+        writeReady(
+          config.dataDirectory,
+          Date.now(),
+          packageDirectory,
+          updateReceipts,
+        ).then(
           (version) => {
             // Only matters where maintenance manages Stargate releases.
             if (version === null && config.maintenance?.stargate)

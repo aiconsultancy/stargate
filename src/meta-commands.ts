@@ -141,6 +141,8 @@ async function mutePage(
 }
 
 /** This table is the sole dispatch and help catalogue. No model fallback. */
+export const metaCommandSyntax = () =>
+  commands.map((command) => command.syntax);
 const commands: readonly Command[] = [
   {
     syntax: "/help",

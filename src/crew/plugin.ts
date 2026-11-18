@@ -13,6 +13,7 @@ import { resourceScope } from "../effect";
 import { MaintenanceRPC, maintenancePlanSchema } from "../maintenance";
 import { notificationInputSchema } from "../notification-store";
 import { quotaInputSchema } from "../quota";
+import { noticeTools } from "../update-notice";
 import { connectHistoryAPI, historyVisible } from "./api";
 import { compactOnServer } from "./compaction";
 import { CrewCron } from "./cron";
@@ -157,6 +158,14 @@ const plugin = Plugin.define({
           },
         ),
       );
+      await ctx.session.hook("context", async (event) => {
+        for (const selected of projects.contexts.values())
+          selected.updateNoticeContext(
+            event.sessionID,
+            event.agent,
+            event.system,
+          );
+      });
       const register: typeof ctx.rpc.register = (definition, handlers) =>
         resources.own(
           () => ctx.rpc.register(definition, handlers),
@@ -201,6 +210,24 @@ const plugin = Plugin.define({
           ),
       });
       await register(CrewReporting, {
+        updateTools: (_input, context) =>
+          report(context.signal, async () =>
+            noticeTools(await ctx.tool.list()),
+          ),
+        queueUpdateNotice: (input, context) =>
+          report(context.signal, () =>
+            engine.queueCaptainNotice(input, context.signal),
+          ),
+        updateNotice: (input, context) =>
+          report(context.signal, async () => {
+            const tools = noticeTools(await ctx.tool.list());
+            const receipts = [];
+            for (const selected of projects.contexts.values())
+              receipts.push(
+                ...(await selected.updateNotice(input, tools, context.signal)),
+              );
+            return receipts;
+          }),
         quota: (_input, context) =>
           report(context.signal, () => engine.quotas.read(context.signal)),
         status: (input, context) =>

@@ -111,6 +111,15 @@ export const reportSchema = z.strictObject({
   components: z.array(componentSchema).max(limits.components),
   cleanup: cleanupResultSchema.optional(),
   models: z.array(modelChangeSchema).max(limits.models),
+  updateNotices: z
+    .array(
+      z.strictObject({
+        sessionID: z.string().min(1).max(256),
+        status: z.enum(["queued", "mail", "unchanged", "uncertain"]),
+      }),
+    )
+    .max(1000)
+    .optional(),
   steps: z.array(stepSchema).max(limits.steps),
   rollbacks: z
     .array(
@@ -341,6 +350,10 @@ export function summary(report: Report, reportName: string) {
         `- model ${key}: ${entry.applied} applied${entry.other ? `, ${entry.other} not applied` : ""}`,
       ),
     );
+  for (const notice of (report.updateNotices ?? [])
+    .filter((notice) => notice.status !== "unchanged")
+    .slice(0, 8))
+    parts.push(line(`- update notice ${notice.sessionID}: ${notice.status}`));
   for (const note of (report.notes ?? []).slice(0, 5))
     parts.push(
       line(

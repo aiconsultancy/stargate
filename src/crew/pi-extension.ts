@@ -59,15 +59,8 @@ const historyParameters = effectParameters(
 const journalParameters = journalToolParameters();
 
 /** Thin native bindings. Each invocation is tied to the saved member conversation. */
-export function piCrewExtension(
-  binding: PiCrewBinding,
-  readHistory: (
-    id: string,
-    input: typeof history.Type,
-    signal: AbortSignal,
-  ) => Promise<unknown>,
-) {
-  const tools = [
+export function piCrewToolDefinitions() {
+  return [
     {
       name: "stargate_quota",
       schema: quotaInputSchema,
@@ -104,7 +97,18 @@ export function piCrewExtension(
       description:
         "Read paginated immutable history of this Pi conversation through the existing native runtime. No other conversations, no agent work.",
     },
-  ].map(({ name, schema, description }) => {
+  ];
+}
+
+export function piCrewExtension(
+  binding: PiCrewBinding,
+  readHistory: (
+    id: string,
+    input: typeof history.Type,
+    signal: AbortSignal,
+  ) => Promise<unknown>,
+) {
+  const tools = piCrewToolDefinitions().map(({ name, schema, description }) => {
     const parameters = Schema.isSchema(schema)
       ? name === "pi_history"
         ? historyParameters

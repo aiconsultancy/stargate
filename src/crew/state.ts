@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { redactCredentials } from "../credentials";
+import { UpdateNotices } from "../update-notice";
 import { canExpandCrew } from "./identity";
 import { IrcSessions } from "./irc";
 import { MemberActivityStore } from "./member-activity";
@@ -117,6 +118,7 @@ const controlID = (token: string) =>
   createHash("sha256").update(token).digest("hex");
 
 export class CrewState {
+  readonly updateNotices: UpdateNotices;
   readonly reporting: ReportingStore;
   readonly activity: MemberActivityStore;
   readonly mailRoutes: MailRoutes;
@@ -127,6 +129,7 @@ export class CrewState {
     /** Configured root of a pinned team; not part of the crew identity. */
     readonly captainSessionID?: string,
   ) {
+    this.updateNotices = new UpdateNotices(db);
     this.reporting = new ReportingStore(db, (id) => this.captainRoute(id));
     this.activity = new MemberActivityStore(db);
     this.mailRoutes = new MailRoutes(db);
