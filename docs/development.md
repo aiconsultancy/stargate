@@ -34,7 +34,8 @@ GitHub Actions runs this gate for pull requests and pushes to `main`, using
 pinned tools and frozen dependency installation. No Slack or provider credentials
 are required.
 
-TypeScript checks first-party source and tests. `skipLibCheck` remains enabled
+TypeScript checks first-party source, tests and performance benchmarks.
+`skipLibCheck` remains enabled
 because the installed SDK declarations have upstream type errors. It does not
 skip checks of SDK use in this code. Biome's `useLiteralKeys` style rule is off
 because it conflicts with `noPropertyAccessFromIndexSignature`; record keys use
@@ -81,6 +82,47 @@ will finish before merge. Major updates can still break behavior beyond the
 test coverage; failed checks and unresolved review threads require a maintainer.
 
 Dependabot does not update the tool pins in `mise.toml`; update them separately.
+
+## Performance measurements
+
+[Strobe](https://github.com/anomalyco/strobe) is pinned as a development
+dependency. It does not run in the gateway or require a global installation.
+The first benchmark measures `bun run src/main.ts --help`, including CLI
+startup. It checks the help output without starting bots, loading a live
+configuration or calling a provider. It does not measure gateway throughput.
+
+```sh
+mise run deps
+mise run perf-check
+git fetch origin main:refs/remotes/origin/main
+mise run perf-compare
+```
+
+`perf-check` runs each case once. A passing check proves the benchmark works;
+its timings are not a performance verdict. `perf-compare` measures base and
+head in alternating pairs and requires a decided verdict. Run it on a quiet,
+dedicated machine. Shared CI runners can refuse timing comparisons. Keep
+refusals and inconclusive results; do not repeat until a favourable result.
+Each variant installs its frozen lockfile without lifecycle scripts before
+measurement. The commands preserve the host power settings and do not reserve
+host CPUs. The smoke check has a two-minute setup-and-run cap.
+
+Read the reported verdict and warnings. A timed command can exit zero even
+when head is slower or worse. These optional tasks do not replace `check`,
+change existing performance limits or add a CI timing gate.
+
+Use `mise run strobe -- --help` for the pinned CLI. For example:
+
+```sh
+mise run strobe -- query exp_EXAMPLE insights
+mise run strobe -- report experiment exp_EXAMPLE --format pr
+```
+
+Replace `exp_EXAMPLE` with a handle returned by Strobe. Review generated reports
+before publishing them. Recordings and reports can contain local paths, process
+details or command output. Do not publish credentials or private work. Do not
+run `strobe up` or `update` as part of project setup: global daemon, MCP,
+profiler permissions and live-process profiling need separate operator approval.
 
 ## Test coverage
 
