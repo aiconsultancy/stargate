@@ -61,7 +61,7 @@ test("message evidence keeps one stable pogoCrew key, not the active session key
       message("wake", "synthetic", { stargateCrew: metadata.pogoCrew }),
       "captain",
     ),
-  ).toBeUndefined();
+  ).toBe("wake");
   expect(JSON.stringify(retained)).toBe(before);
 });
 
@@ -105,9 +105,57 @@ test("crew synthetic boundaries inherit only a proven same-captain origin", asyn
     );
   }
   expect(inputBoundary(message("shell", "shell"), "captain")).toBe("shell");
+  expect(inputBoundary(message("shell-done", "synthetic"), "captain")).toBe(
+    "shell-done",
+  );
+});
+
+test("only recognised native context records retain ownership without an origin", () => {
   expect(
-    inputBoundary(message("shell-done", "synthetic"), "captain"),
+    inputBoundary(
+      message("restart", "synthetic", { notice: "restart" }),
+      "captain",
+    ),
   ).toBeUndefined();
+  expect(
+    inputBoundary(
+      message("unknown", "synthetic", { notice: "other" }),
+      "captain",
+    ),
+  ).toBe("unknown");
+  expect(
+    inputBoundary(
+      {
+        ...message("instructions", "synthetic", {
+          instruction: { paths: ["/workspace/AGENTS.md"] },
+        }),
+        description: "Loaded AGENTS.md",
+        text: "Instructions from: /workspace/AGENTS.md\nOpaque context",
+      },
+      "captain",
+    ),
+  ).toBeUndefined();
+});
+
+test("native output-limit continuation stays neutral only with its exact native shape", () => {
+  const text =
+    "Your last response hit the output token limit (stop reason: length). Do not apologize, recap, or repeat yourself. Break the remaining work into smaller pieces.";
+  const continuation = { ...message("limit", "synthetic"), text };
+  expect(inputBoundary(continuation, "captain")).toBeUndefined();
+  expect(
+    inputBoundary({ ...continuation, metadata: {} }, "captain"),
+  ).toBeUndefined();
+  for (const invalid of [
+    { ...continuation, text: `${text}\n` },
+    { ...continuation, description: "Completion" },
+    { ...continuation, metadata: { source: "subagent" } },
+    { ...continuation, metadata: { source: "shell" } },
+    { ...continuation, text: "unknown context" },
+  ])
+    expect(inputBoundary(invalid, "captain")).toBe("limit");
+  expect(inputBoundary({ ...continuation, type: "user" }, "captain")).toBe(
+    "limit",
+  );
 });
 
 test("crew ancestry folds adjacent mixed wakes across pages without restoring ownership", async () => {
@@ -123,7 +171,7 @@ test("crew ancestry folds adjacent mixed wakes across pages without restoring ow
     const records = [
       message("tool", "assistant"),
       newer,
-      message("ordinary", "synthetic"),
+      message("ordinary", "system"),
       older,
       message("separator", "assistant"),
     ];
