@@ -2162,3 +2162,23 @@ test("uncertain timeout cancellation is consumed, not replayed on another poll",
     clock.mockRestore();
   }
 });
+
+test("disabled controls still release a recovered waiter when its native form settles", async () => {
+  const settings = {
+    enabled: true,
+    timeoutMs: 300_000,
+    answer: "requester" as const,
+  };
+  const f = await fixture(true, settings);
+  await f.poll();
+  f.restart();
+  const retained = await f.bridge.recover(AbortSignal.timeout(3000));
+  f.store.recover(original.botKey, retained);
+  settings.enabled = false;
+  f.complete();
+  await f.poll();
+  expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("done");
+  expect(f.store.questionOffers(original.botKey)).toEqual([]);
+  expect(f.decisions).toEqual([]);
+  expect(f.settled).toEqual(["ses_captain"]);
+});

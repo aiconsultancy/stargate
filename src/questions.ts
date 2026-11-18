@@ -511,9 +511,12 @@ export class Questions {
     )
       return;
     const settings = await this.port()?.settings?.();
-    if (settings && !settings.enabled) return;
+    // Disabling controls revokes publication and writes, not settlement reads.
+    // Recovered inputs have no live prompt worker to release their queue hold.
     const pending =
-      (await this.backend.pendingQuestions?.(session, signal)) ?? [];
+      settings && !settings.enabled
+        ? []
+        : ((await this.backend.pendingQuestions?.(session, signal)) ?? []);
     if (pending.length > 16)
       throw new Error("Too many native clarification questions");
     for (const raw of pending) {
