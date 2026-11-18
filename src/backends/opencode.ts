@@ -107,6 +107,8 @@ function publicEntry(message: SessionMessageInfo): TranscriptEntry | undefined {
 /** One assistant message of a turn: its public text and what else it did. */
 type Reply = {
   text: string;
+  /** Native completion, not just public text or an idle session. */
+  succeeded: boolean;
   /** The message has a tool call: the turn did work. */
   tools: boolean;
   error?: { type: string; status?: number | undefined };
@@ -1102,6 +1104,10 @@ export class OpenCodeBackend implements AgentBackend {
             ...(message.type === "assistant"
               ? {
                   reply: {
+                    succeeded:
+                      message.time?.completed !== undefined &&
+                      message.finish === "stop" &&
+                      message.error === undefined,
                     // Status and type only: the message can quote a provider.
                     ...(message.error
                       ? {
@@ -1129,7 +1135,13 @@ export class OpenCodeBackend implements AgentBackend {
               if (record.reply && owner === input.id)
                 replies.push(record.reply);
             }
-            const failed = replies.find((reply) => reply.error)?.error;
+            let failed: Reply["error"];
+            for (const reply of replies) {
+              // Only a later successful completion of this input supersedes
+              // an earlier failed attempt. A subsequent error still fails.
+              if (reply.error) failed ??= reply.error;
+              else if (reply.succeeded) failed = undefined;
+            }
             if (failed) {
               const kind = generationFailureKind(failed);
               throw kind
