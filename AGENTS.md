@@ -153,7 +153,9 @@ unrelated Promise code or upgrade Effect as part of a schema change.
 Use trunk-based development. Never commit directly to `main`. Branch from the
 latest `main` and keep branches short-lived. Keep each PR to one small change.
 After review is clear, use `gh pr merge --auto --squash` so the PR merges when
-required checks pass on its exact head. No human merge approval is required.
+required checks pass on its exact head with up-to-date `main` (strict branch
+protection). Auto-merge and automatic remote-branch deletion are enabled.
+No human merge approval is required.
 Do not stack PRs or keep long-lived branches;
 split a large feature into several PRs that each leave `main` working.
 Merge or rebase the latest `main` before review. If `main` moves, update the
@@ -173,6 +175,10 @@ default is off. Release approval includes a decision on which flags become on
 by default. The changelog lists new flags, their defaults, and each flag that
 the release turns on by default.
 
-Transition: until NET-1716 items 2–3 land, the workflow still auto-releases
-eligible merges and repository auto-merge setup is pending. The rules above
-state the approved policy; they do not claim those automation changes are live.
+Main pushes run Checks only; they never publish a release. The manual Release
+workflow defaults to a read-only preview. Publication requires `dry_run=false`
+and a person's approval through the `release` environment (reviewer: withakay).
+Before requesting approval, update `CHANGELOG.md`'s Unreleased Feature flags
+section: new flags with defaults, default changes, and flags enabled by default.
+Use explicit `none` entries when no flags change. Do not approve a deployment
+on the owner's behalf or bypass the environment gate.
