@@ -1,9 +1,11 @@
 import { Rpc } from "@opencode/plugin/rpc";
+import { Schema } from "effect";
 import { z } from "zod";
 import { activitySnapshotSchema } from "../activity";
 import { crewStatusInputSchema, crewStatusSchema } from "../crew-status";
 import { quotaInputSchema, quotaSnapshotSchema } from "../quota";
 import {
+  exactStruct,
   historyChildrenInputSchema,
   historyDescribeInputSchema,
   historyEntriesInputSchema,
@@ -12,6 +14,9 @@ import {
   historySessionsSchema,
 } from "../session-history";
 
+// Clients require Standard Schema definitions; OpenCode still decodes and
+// encodes these Effect codecs directly, without caller parse options.
+const portable = Schema.toStandardSchemaV1;
 const owner = z.strictObject({
   sessionID: z.string().min(1).max(100),
   id: z.string().min(1).max(100),
@@ -25,18 +30,21 @@ export const CrewReporting = Rpc.define({
     // Read-only operator history. Roots list every provisioned crew member.
     // Describe, children and entries serve only this team's `pi:` sessions;
     // callers read OpenCode sessions through the server API instead.
-    historyRoots: { input: z.strictObject({}), output: historySessionsSchema },
+    historyRoots: {
+      input: portable(exactStruct({})),
+      output: portable(historySessionsSchema),
+    },
     historyDescribe: {
-      input: historyDescribeInputSchema,
-      output: historySessionsSchema,
+      input: portable(historyDescribeInputSchema),
+      output: portable(historySessionsSchema),
     },
     historyChildren: {
-      input: historyChildrenInputSchema,
-      output: historySessionPageSchema,
+      input: portable(historyChildrenInputSchema),
+      output: portable(historySessionPageSchema),
     },
     historyEntries: {
-      input: historyEntriesInputSchema,
-      output: historyEntryPageSchema,
+      input: portable(historyEntriesInputSchema),
+      output: portable(historyEntryPageSchema),
     },
     start: {
       input: z.strictObject({

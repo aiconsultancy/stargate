@@ -948,6 +948,79 @@ test("Pi partial text excludes thinking and tools and tolerates missing or malfo
   ).toBe("Visible answer");
 });
 
+test("Pi live text decoding strips unknown keys and requires finite inputs", () => {
+  const view = (live: ConversationView["docs"][string]): ConversationView => ({
+    conversation: { id: 1 as ConversationId },
+    entries: [],
+    docs: { "pi.live": live },
+  });
+  const generation = {
+    message: {
+      content: [
+        { type: "text", text: "Visible", extra: true },
+        { type: "text" },
+      ],
+      extra: true,
+    },
+    extra: true,
+  };
+  for (const run of [{ inputs: [1.5, 0] }, { inputs: [], extra: true }])
+    expect(piPartialText(view({ run, generation, extra: true }))).toBe(
+      "Visible",
+    );
+  for (const live of [
+    { run: null, generation },
+    { run: { inputs: [Number.POSITIVE_INFINITY] }, generation },
+    { run: { inputs: [Number.NaN] }, generation },
+    { run: { inputs: ["1"] }, generation },
+    { generation: { message: { content: [{ type: "text", text: null }] } } },
+    { generation: { message: { content: [{ text: "missing type" }] } } },
+  ])
+    expect(piPartialText(view(live)), JSON.stringify(live)).toBe("");
+  // Non-object live state is outside the SDK type; pass it without a cast.
+  const untyped = (live: unknown): string =>
+    Reflect.apply(piPartialText, undefined, [
+      { conversation: { id: 1 }, entries: [], docs: { "pi.live": live } },
+    ]);
+  expect(untyped({ generation })).toBe("Visible");
+  for (const live of [[], null, "Visible", 1, true])
+    expect(untyped(live), JSON.stringify(live)).toBe("");
+});
+
+test("Pi conversation IDs accept decimal digits as safe integers", async () => {
+  const opened: number[] = [];
+  const harness = {
+    async conversation(id: number) {
+      opened.push(id);
+      return undefined;
+    },
+  };
+  const backend: PiDurableBackend = Reflect.construct(PiDurableBackend, [
+    harness,
+    {},
+  ]);
+  const signal = new AbortController().signal;
+  for (const id of ["0", "7", "007", String(Number.MAX_SAFE_INTEGER)])
+    await expect(backend.prompt(id, "hello", signal)).rejects.toThrow(
+      "Pi conversation not found",
+    );
+  for (const id of [
+    "9007199254740992",
+    "9".repeat(400),
+    "",
+    "-1",
+    "+1",
+    "1.5",
+    "1e3",
+    " 7",
+    "0x1",
+  ])
+    await expect(backend.prompt(id, "hello", signal), id).rejects.not.toThrow(
+      "Pi conversation not found",
+    );
+  expect(opened).toEqual([0, 7, 7, Number.MAX_SAFE_INTEGER]);
+});
+
 test("Pi ignores historical observer advances before attachment resolves", async () => {
   const id = 1 as ConversationId;
   const assistant = (entryId: number, text: string): EntryRecord => ({
