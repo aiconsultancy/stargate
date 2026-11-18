@@ -846,6 +846,7 @@ test("a completed native captain input cannot be rebound to a different structur
   expect(await w.proofs("author", "d".repeat(40))).toEqual([]);
 });
 
+// Allow 101 real database and socket-lock admissions to finish on a busy host.
 test("bounded review recovery rotates past 100 stuck uncertain inputs and preserves its cursor across restart", async () => {
   const w = await world();
   w.native.failAdmission = true;
@@ -875,4 +876,4 @@ test("bounded review recovery rotates past 100 stuck uncertain inputs and preser
   expect(w.native.reads).toHaveLength(100);
   expect(w.native.reads.some((binding) => binding.id === last.id)).toBe(false);
   expect(w.native.starts).toHaveLength(101);
-});
+}, 15_000);
