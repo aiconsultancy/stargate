@@ -141,9 +141,11 @@ SQLite, `bun:test`, and the existing Promise adapter contract.
 
 ## Git
 
-Use trunk-based development. Never commit directly to `main`. Branch from the latest `main`, keep each PR to
-one small change, and merge it as soon as its review is clean and Quality
-checks pass on the exact head. Do not stack PRs or keep long-lived branches;
+Use trunk-based development. Never commit directly to `main`. Branch from the
+latest `main` and keep branches short-lived. Keep each PR to one small change.
+After review is clear, use `gh pr merge --auto --squash` so the PR merges when
+required checks pass on its exact head. No human merge approval is required.
+Do not stack PRs or keep long-lived branches;
 split a large feature into several PRs that each leave `main` working.
 Merge or rebase the latest `main` before review. If `main` moves, update the
 branch and re-run checks; re-review only when the PR's own diff changed.
@@ -152,18 +154,16 @@ Preserve unrelated user changes. Use Conventional Commits, for example
 `fix: preserve reply progress after delivery failure`. Stage only intended
 project files and inspect the staged diff for credentials before committing.
 
-PRs are squash-merged (the repository allows nothing else) and the PR title
-always becomes the commit subject, so it must be a Conventional Commit. Not every merge releases. Release automation reads the
-subjects since the last tag:
+PRs use squash merge. The PR title becomes the commit subject and must be a
+Conventional Commit. Merge to `main` does not mean release-ready. Cut a release
+only through an explicit, human-approved release step. Do not edit the version
+in `package.json` or create tags by hand. See `docs/releases.md`.
 
-- `feat:` → minor; `fix:`, `perf:`, `revert:` or GitHub's `Revert "…"` and
-  the `(deps)` scope → patch (`(deps-dev)` does not release);
-- `!` after the type, or a `BREAKING CHANGE:` footer → major (minor before
-  1.0.0);
-- `docs:`, `test:`, `refactor:`, `chore:`, `ci:` and others → no release;
-  they ship with the next release.
+Design large features with a configuration enable flag from the start. The
+default is off. Release approval includes a decision on which flags become on
+by default. The changelog lists new flags, their defaults, and each flag that
+the release turns on by default.
 
-To cut a release when only non-releasing changes are waiting, run the Release
-workflow manually on `main` (`gh workflow run release.yml --ref main`).
-Do not edit the version in `package.json` or create tags by hand. See
-`docs/releases.md`.
+Transition: until NET-1716 items 2–3 land, the workflow still auto-releases
+eligible merges and repository auto-merge setup is pending. The rules above
+state the approved policy; they do not claim those automation changes are live.
