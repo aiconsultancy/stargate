@@ -29,7 +29,10 @@ compatibility layers to meet the estimate.
 5. Remove remaining first-party Zod use, obsolete adapters and the direct Zod
    dependency. SDK-owned transitive Zod can remain.
 
-Completed: [Claude session UUID schema](https://github.com/aiconsultancy/stargate/pull/43).
+Completed:
+
+- [Claude session UUID schema](https://github.com/aiconsultancy/stargate/pull/43).
+- [OpenCode pairing-response schema](https://github.com/aiconsultancy/stargate/pull/44).
 
 For mixed composition, add an adapter only when the selected schema requires
 one. It must delegate to the authoritative Effect decoder, not copy its rules.

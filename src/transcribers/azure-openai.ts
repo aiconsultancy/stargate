@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { Schema } from "effect";
 import { z } from "zod";
 import type { Transcriber, TranscriptionConfig } from "../transcription";
 
@@ -17,7 +18,8 @@ const tokenResponse = z.object({
   access_token: z.string().min(1),
   expires_on: z.coerce.number().int().positive(),
 });
-const transcriptResponse = z.object({ text: z.string() });
+const transcriptResponse = Schema.Struct({ text: Schema.String });
+const decodeTranscriptResponse = Schema.decodeUnknownSync(transcriptResponse);
 
 async function boundedJSON(response: Response): Promise<unknown> {
   const body = await response.arrayBuffer();
@@ -112,7 +114,7 @@ export class AzureOpenAITranscriber implements Transcriber {
         try {
           status = response.status;
           if (status === 200)
-            return transcriptResponse.parse(await boundedJSON(response)).text;
+            return decodeTranscriptResponse(await boundedJSON(response)).text;
           // The rate limit names its own delay; the caller's signal bounds
           // the total wait. Any other refusal is final.
           const after = response.headers.get("retry-after") ?? "";
