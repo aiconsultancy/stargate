@@ -161,7 +161,14 @@ const reviewers = [
     permissions: [],
   },
 ];
-async function world(enabled = true, coordinatorAccount = "peer") {
+async function world(
+  enabled = true,
+  coordinatorAccount = "peer",
+  reviewConfig: NonNullable<FleetControlOptions["config"]["reviews"]> = {
+    repositories: [target.repository],
+    reviewers,
+  },
+) {
   const directory = await realpath(
     await mkdtemp(join(tmpdir(), "stargate-review-")),
   );
@@ -190,9 +197,7 @@ async function world(enabled = true, coordinatorAccount = "peer") {
           sessionID: "ses_peer",
         },
       ],
-      ...(enabled
-        ? { reviews: { repositories: [target.repository], reviewers } }
-        : {}),
+      ...(enabled ? { reviews: reviewConfig } : {}),
     },
     sessionID: `ses_${ship}`,
     account: ship,
@@ -401,6 +406,59 @@ test("two attested native-family proofs share an independent reviewer ship and p
     (await raw(join(w.directory, "stranger.sock"), "GET", "/reviews/" + a.id))
       .status,
   ).toBe(404);
+});
+
+test("native crew review opens the protected directory for the assigned repository", async () => {
+  const repository = "example/another";
+  const reviewConfig = {
+    repositories: [target.repository, repository],
+    reviewers,
+    crewDirectories: {
+      [target.repository]: { gpt: "/project/gpt", claude: "/project/claude" },
+      [repository]: { gpt: "/another/gpt", claude: "/another/claude" },
+    },
+  };
+  const w = await world(true, "peer", reviewConfig);
+  const context = await w.begin({ repository });
+  await w.start(context.id);
+  expect(w.native.starts[0]?.reviewer.directory).toBe("/another/gpt");
+  expect(w.native.starts[0]?.context.repository).toBe(repository);
+  const captain = await w.start(context.id, "captain-peer");
+  expect(captain.sessionID).toBe("ses_peer");
+  expect(w.native.starts).toHaveLength(1);
+  await expect(w.begin({ repository: "example/third" })).rejects.toThrow(
+    "not permitted",
+  );
+});
+
+test("review configuration refuses incomplete directory maps and captain overrides", () => {
+  const config = {
+    socketPath: "/tmp/x",
+    statePath: "/tmp/state",
+    targets: [
+      { id: "peer", account: "peer", channel: "#peer", sessionID: "peer" },
+    ],
+    results: true,
+    reviews: { repositories: [target.repository], reviewers },
+  };
+  for (const assigned of [
+    { gpt: "/project/gpt" },
+    {
+      gpt: "/project/gpt",
+      claude: "/project/claude",
+      "captain-peer": "/foreign",
+    },
+  ]) {
+    expect(
+      fleetControlSchema.safeParse({
+        ...config,
+        reviews: {
+          ...config.reviews,
+          crewDirectories: { [target.repository]: assigned },
+        },
+      }).success,
+    ).toBe(false);
+  }
 });
 
 test("review evidence stays off by default and does not admit completion claims", async () => {

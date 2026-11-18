@@ -185,6 +185,9 @@ export const fleetControlSchema = z
       .strictObject({
         repositories: z.array(reviewRepositorySchema).min(1),
         reviewers: z.array(reviewAgentSchema).min(1),
+        crewDirectories: z
+          .record(reviewRepositorySchema, z.record(identifier, path))
+          .optional(),
       })
       .optional(),
   })
@@ -203,6 +206,29 @@ export const fleetControlSchema = z
           code: "custom",
           message: "Review agent IDs must be unique",
         });
+      const directories = config.reviews.crewDirectories;
+      if (directories) {
+        const crew = config.reviews.reviewers.filter(
+          (reviewer) => reviewer.kind === "crew",
+        );
+        if (
+          Object.keys(directories).length !==
+            config.reviews.repositories.length ||
+          !config.reviews.repositories.every((repository) => {
+            const assigned = directories[repository];
+            return (
+              assigned &&
+              Object.keys(assigned).length === crew.length &&
+              crew.every((reviewer) => Object.hasOwn(assigned, reviewer.agent))
+            );
+          })
+        )
+          context.addIssue({
+            code: "custom",
+            message:
+              "Review directories must bind each permitted repository to every configured crew reviewer",
+          });
+      }
     }
     if (
       new Set(config.targets.map((target) => target.id)).size !==
