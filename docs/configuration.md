@@ -76,6 +76,11 @@ The per-bot `concurrency` setting defaults to four. Ordinary thread turns run
 in order within a thread. Pinned captains handle turns in arrival order
 across all their sources.
 
+Slack registrations can set optional `health` paths and freshness limits for
+the read-only `@captain /health` command. See [health configuration and
+coverage](meta-commands.md#health-configuration-and-coverage). Missing telemetry
+is `unknown`; the gateway never runs a remote snapshot producer on demand.
+
 Use SIGHUP for the live changes below. Other changes require a restart.
 
 ## Reload configuration without restarting

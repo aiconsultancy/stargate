@@ -41,6 +41,7 @@ import { fleetRequestAction } from "./fleet/permissions";
 import { FleetResults, fleetOrigin } from "./fleet/results";
 import { sendFleetAssignment } from "./fleet-irc";
 import { Gateway, type SlackDelivery } from "./gateway";
+import { createHealthReader } from "./health";
 import { controlInteractions } from "./interactions";
 import { type IrcRegistration, IrcShip } from "./irc/ship";
 import { MaintenanceOutbox } from "./nightly/outbox";
@@ -374,6 +375,13 @@ export function serve(
               }
             : undefined,
           {
+            health: createHealthReader({
+              bot: () => currentBot,
+              dataDirectory: config.dataDirectory,
+              backend,
+              schedules: () => cronStore.report(botKey(currentBot, identity)),
+              maintenance: config.maintenance,
+            }),
             listMutes: () => {
               const preferences = new NotificationStore(
                 join(config.dataDirectory, "notifications.sqlite"),

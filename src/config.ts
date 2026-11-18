@@ -7,6 +7,7 @@ import { cronjobsSchema } from "./cronjob-config";
 import { validateFleetPermissions } from "./fleet/permissions";
 import { fleetControlSchema } from "./fleet/protocol";
 import { fleetPolicySchema } from "./fleet-policy";
+import { healthConfigSchema } from "./health-config";
 import { fold, widestFold } from "./irc/protocol";
 import { isLoopbackAddress } from "./loopback";
 import {
@@ -300,6 +301,8 @@ export const botSchema = z.strictObject({
     textMentions: textMentionRuleSchema.optional(),
   }),
   backend: backendSchema,
+  /** Read-only health reporting; remote health uses a cached snapshot only. */
+  health: healthConfigSchema.optional(),
   cronjobs: cronjobsSchema.optional(),
   /** Captain `stargate_post` to allowed channels; absent is off. */
   captainPost: captainPostSchema.optional(),
