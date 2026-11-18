@@ -59,12 +59,48 @@ test("SDK pairing uses existing authentication and only POST /api/pair; no redem
   }
 });
 
+test("pairing accepts code and expiry bounds while discarding unknown response fields", async () => {
+  const code = "A".repeat(512);
+  const cases = [
+    {
+      body: { code: "_", expires_in: 1, extra: "ignored" },
+      expected: { code: "_", expiresIn: 1 },
+    },
+    {
+      body: { code, expires_in: 86_400, extra: "ignored" },
+      expected: { code, expiresIn: 86_400 },
+    },
+  ];
+  for (const { body, expected } of cases) {
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => Response.json(body),
+    });
+    const adapter = backend(server.url.href);
+    try {
+      expect(await adapter.pair(new AbortController().signal)).toEqual(
+        expected,
+      );
+    } finally {
+      await adapter.close();
+      await server.stop(true);
+    }
+  }
+});
+
 test("pairing failures and invalid codes are sanitized, with no retry or redirect", async () => {
   for (const result of [
     { status: 401, body: { message: "PRIVATE failure" } },
     { status: 503, body: { code: "PRIVATE" } },
     { status: 200, body: { code: "PRIVATE", expires_in: 0 } },
+    { status: 200, body: { code: "PRIVATE", expires_in: -1 } },
+    { status: 200, body: { code: "PRIVATE", expires_in: 1.5 } },
+    { status: 200, body: { code: "PRIVATE", expires_in: 86_401 } },
+    { status: 200, body: { code: "", expires_in: 300 } },
+    { status: 200, body: { code: "P".repeat(513), expires_in: 300 } },
     { status: 200, body: { code: "PRIVATE/path", expires_in: 300 } },
+    { status: 200, body: { code: "PRIVATE\n", expires_in: 300 } },
     { status: 200, body: { code: "PRIVATE", expires_in: "300" } },
     { status: 302, body: null },
   ]) {
