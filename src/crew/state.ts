@@ -38,6 +38,20 @@ export type CrewTask = {
   notifying: number;
 };
 export type CrewNotice = { id: number; taskID: string; text: string };
+export type CrewQuestionOffer = {
+  token: string;
+  taskID: string;
+  workerSessionID: string;
+  inputID: string;
+  originCaptainID: string;
+  formID: string;
+  fingerprint: string;
+  questionJSON: string;
+  expires: number;
+  notified: number;
+  state: "offered" | "attempted";
+  outcome: "answered" | "cancelled" | "uncertain" | null;
+};
 export type TaskReconciliation = {
   taskID: string;
   workerSessionID: string;
@@ -204,6 +218,16 @@ export class CrewState {
           id TEXT PRIMARY KEY, taskID TEXT NOT NULL REFERENCES tasks(id),
           captainID TEXT NOT NULL, workerSessionID TEXT NOT NULL,
           receiptID TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS crew_questions (
+          token TEXT PRIMARY KEY, taskID TEXT NOT NULL REFERENCES tasks(id),
+          workerSessionID TEXT NOT NULL, inputID TEXT NOT NULL,
+          originCaptainID TEXT NOT NULL, formID TEXT NOT NULL,
+          fingerprint TEXT NOT NULL, questionJSON TEXT NOT NULL,
+          expires INTEGER NOT NULL, notified INTEGER NOT NULL DEFAULT 0,
+          state TEXT NOT NULL CHECK(state IN ('offered','attempted')),
+          outcome TEXT CHECK(outcome IN ('answered','cancelled','uncertain')),
+          UNIQUE(taskID,formID)
         );
         CREATE TABLE IF NOT EXISTS pi_peers (
           sessionID TEXT PRIMARY KEY REFERENCES peers(sessionID),
@@ -499,6 +523,85 @@ export class CrewState {
         "SELECT * FROM tasks WHERE crewID=? AND released=0",
       )
       .get(crewID);
+  }
+
+  offerCrewQuestion(offer: CrewQuestionOffer): CrewQuestionOffer | null {
+    this.db
+      .query(`INSERT OR IGNORE INTO crew_questions
+      (token,taskID,workerSessionID,inputID,originCaptainID,formID,
+       fingerprint,questionJSON,expires,notified,state,outcome)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(
+        offer.token,
+        offer.taskID,
+        offer.workerSessionID,
+        offer.inputID,
+        offer.originCaptainID,
+        offer.formID,
+        offer.fingerprint,
+        offer.questionJSON,
+        offer.expires,
+        offer.notified,
+        offer.state,
+        offer.outcome,
+      );
+    return this.db
+      .query<CrewQuestionOffer, [string, string]>(
+        "SELECT * FROM crew_questions WHERE taskID=? AND formID=?",
+      )
+      .get(offer.taskID, offer.formID);
+  }
+
+  crewQuestion(token: string): CrewQuestionOffer | null {
+    return this.db
+      .query<CrewQuestionOffer, [string]>(
+        "SELECT * FROM crew_questions WHERE token=?",
+      )
+      .get(token);
+  }
+
+  crewQuestionOffers(taskID: string): CrewQuestionOffer[] {
+    return this.db
+      .query<CrewQuestionOffer, [string]>(
+        `SELECT * FROM crew_questions WHERE taskID=?
+        ORDER BY CASE WHEN state='attempted' AND outcome IS NULL THEN 0
+          WHEN state='offered' THEN 1 ELSE 2 END,formID LIMIT 16`,
+      )
+      .all(taskID);
+  }
+
+  crewQuestionNotified(token: string) {
+    this.db
+      .query("UPDATE crew_questions SET notified=1 WHERE token=?")
+      .run(token);
+  }
+
+  /** The write lease survives crashes; native requests are never replayed. */
+  claimCrewQuestion(token: string, now: number, expired = false): boolean {
+    return (
+      this.db
+        .query(`UPDATE crew_questions SET state='attempted'
+      WHERE token=?1 AND state='offered' AND
+        (CASE WHEN ?3 THEN expires<=?2 ELSE expires>?2 END)
+      AND EXISTS (SELECT 1 FROM tasks t JOIN peers p ON p.crewID=t.crewID
+        AND p.sessionID=t.workerSessionID AND p.status='ready'
+        WHERE t.id=crew_questions.taskID AND t.released=0
+        AND t.status='running'
+        AND t.workerSessionID=crew_questions.workerSessionID
+        AND t.inputID=crew_questions.inputID
+        AND t.originCaptainID=crew_questions.originCaptainID)`)
+        .run(token, now, Number(expired)).changes === 1
+    );
+  }
+
+  crewQuestionOutcome(
+    token: string,
+    outcome: NonNullable<CrewQuestionOffer["outcome"]>,
+  ) {
+    this.db
+      .query(`UPDATE crew_questions SET outcome=?
+      WHERE token=? AND state='attempted' AND outcome IS NULL`)
+      .run(outcome, token);
   }
 
   reserveTask(

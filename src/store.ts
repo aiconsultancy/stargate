@@ -20,7 +20,7 @@ import {
   type NotificationContext,
   notificationContextSchema,
 } from "./notifications";
-import type { QuestionOffer } from "./questions";
+import type { NativeQuestion, QuestionOffer } from "./questions";
 import { failureText, type RequestFailure } from "./request-failure";
 import type { ReplyChunk } from "./slack-format";
 import { UpdateNotices } from "./update-notice";
@@ -291,6 +291,9 @@ export class Store {
         newDelayMs INTEGER, reply TEXT, delivered INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY(registration,message)
       );
+      CREATE TABLE IF NOT EXISTS slack_questions (
+        token TEXT PRIMARY KEY, ts TEXT NOT NULL, question TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS config_panels (
         nonce TEXT PRIMARY KEY, registration TEXT NOT NULL, message TEXT NOT NULL,
         channel TEXT NOT NULL, thread TEXT NOT NULL, ts TEXT,
@@ -359,6 +362,8 @@ export class Store {
       }
       return false;
     };
+    column("slack_questions", "progress", "TEXT NOT NULL DEFAULT '{}'");
+    column("slack_questions", "revision", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "question_stop_attempted", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "failure", "TEXT");
@@ -1972,13 +1977,66 @@ export class Store {
     })();
   }
 
-  startQuestionPublication(botKey: string, token: string) {
+  saveSlackQuestion(token: string, ts: string, question: NativeQuestion) {
+    this.db
+      .query(
+        "INSERT OR IGNORE INTO slack_questions(token,ts,question) VALUES(?,?,?)",
+      )
+      .run(token, ts, JSON.stringify(question));
+  }
+
+  slackQuestion(
+    token: string,
+  ):
+    | { ts: string; question: string; progress: string; revision: number }
+    | undefined {
+    return (
+      this.db
+        .query<
+          { ts: string; question: string; progress: string; revision: number },
+          [string]
+        >(
+          "SELECT ts,question,progress,revision FROM slack_questions WHERE token=?",
+        )
+        .get(token) ?? undefined
+    );
+  }
+
+  advanceSlackQuestion(
+    token: string,
+    revision: number,
+    progress: string,
+  ): boolean {
+    return (
+      this.db
+        .query(
+          "UPDATE slack_questions SET progress=?,revision=revision+1 WHERE token=? AND revision=? AND EXISTS(SELECT 1 FROM native_questions WHERE token=slack_questions.token AND state='offered' AND expires>?)",
+        )
+        .run(progress, token, revision, Date.now()).changes === 1
+    );
+  }
+
+  claimExpiredQuestion(token: string, now: number): boolean {
+    return (
+      this.db
+        .query(
+          "UPDATE native_questions SET state='attempted' WHERE token=? AND state='offered' AND expires<=?",
+        )
+        .run(token, now).changes === 1
+    );
+  }
+
+  startQuestionPublication(
+    botKey: string,
+    token: string,
+    timeoutMs = 1_800_000,
+  ) {
     const now = Date.now();
     this.db
       .query(
         "UPDATE native_questions SET publicationStarted=?,expires=? WHERE botKey=? AND token=? AND state='offered' AND notified=0 AND publicationStarted=0",
       )
-      .run(now, now + 1_800_000, botKey, token);
+      .run(now, now + timeoutMs, botKey, token);
     const offer = this.questionByToken(botKey, token);
     return offer?.state === "offered" && !offer.notified && offer.expires > now
       ? offer

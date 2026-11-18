@@ -1,4 +1,5 @@
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { Plugin } from "@opencode/plugin";
 import { Plugin as EffectPlugin } from "@opencode/plugin/effect";
 import { fromPromise } from "@opencode/plugin/promise/adapter";
@@ -7,9 +8,10 @@ import {
   Error as ToolError,
 } from "@opencode/plugin/promise/tool";
 import { Effect } from "effect";
+import { OpenCodeBackend } from "../backends/opencode";
 import { postInputSchema } from "../captain-post";
 import { cronOperationSchema } from "../cron-control";
-import { resourceScope } from "../effect";
+import { abortable, resourceScope } from "../effect";
 import { MaintenanceRPC, maintenancePlanSchema } from "../maintenance";
 import { notificationInputSchema } from "../notification-store";
 import { quotaInputSchema } from "../quota";
@@ -30,6 +32,7 @@ import { CrewNotifications } from "./notifications";
 import { CrewPost } from "./post";
 import { effectProjectToolInput, projectToolInput } from "./project-options";
 import { CrewProjects } from "./projects";
+import { CrewQuestions, crewQuestionInputSchema } from "./questions";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
 import { CrewError } from "./state";
@@ -94,6 +97,57 @@ const plugin = Plugin.define({
       return value;
     };
     const waiting = new CrewWaiting(engine);
+    const questions = new Map<CrewEngine, CrewQuestions>();
+    const questionsFor = (selected: CrewEngine) => {
+      let bridge = questions.get(selected);
+      if (bridge) return bridge;
+      bridge = new CrewQuestions(
+        selected,
+        async (task, signal) => {
+          const worker = await ctx.session.get(
+            { sessionID: task.workerSessionID },
+            { signal },
+          );
+          if (
+            worker.id !== task.workerSessionID ||
+            worker.parentID ||
+            !historyVisible(
+              {
+                ...selected.options,
+                team: { ...selected.options.team, historyScope: "team" },
+              },
+              selected.state.peer(task.crewID),
+              worker,
+            )
+          )
+            throw new CrewError("Native crew clarification identity changed.");
+          const client = await connectHistoryAPI(
+            selected.options.team,
+            worker,
+            signal,
+          );
+          return new OpenCodeBackend(
+            {
+              type: "opencode",
+              url: selected.options.team.historyAPI?.url ?? "http://localhost",
+              directory: worker.location.directory,
+              sessionID: worker.id,
+              headersEnv: {},
+              permissions: [],
+            },
+            client,
+          );
+        },
+        {
+          project:
+            [...projects.contexts].find(
+              ([, value]) => value === selected,
+            )?.[0] ?? "default",
+        },
+      );
+      questions.set(selected, bridge);
+      return bridge;
+    };
     const cron = new CrewCron(engine);
     const post = new CrewPost(engine);
     const notifications = new CrewNotifications(engine);
@@ -149,6 +203,34 @@ const plugin = Plugin.define({
       }
     };
     try {
+      for (const selected of projects.contexts.values()) {
+        const bridge = questionsFor(selected);
+        await resources.own(
+          async () => {
+            const stop = new AbortController();
+            const done = Effect.runPromise(
+              abortable(async (signal) => {
+                while (!signal.aborted) {
+                  try {
+                    await bridge.poll(
+                      AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+                    );
+                  } catch {
+                    // Only safe structured tool errors are exposed; no raw SDK logs.
+                  }
+                  await delay(3000, undefined, { signal }).catch(() => {});
+                }
+              }),
+              { signal: stop.signal },
+            ).catch(() => {});
+            return { stop, done };
+          },
+          async ({ stop, done }) => {
+            stop.abort();
+            await done;
+          },
+        );
+      }
       await ctx.session.hook(
         "context",
         workingAgreementContext(
@@ -264,6 +346,27 @@ const plugin = Plugin.define({
           ),
       });
       await ctx.tool.transform((editor) => {
+        editor.add({
+          name: "stargate_question",
+          description:
+            "Captain-only reply to an automatically routed native crew clarification. Use the exact token from the task's question notice. op=answer accepts a choice number, comma-separated multiple choices or JSON native field values; op=cancel cancels the native form. Only the originating captain can reply while that exact task/input/form remains active. Expired and attempted tokens cannot be reused, including after an uncertain native write. No Slack delivery or tool permission approval.",
+          input: effectProjectToolInput(crewQuestionInputSchema),
+          options: { codemode: false, permission: "stargate_crew" },
+          execute: (input, context) =>
+            guard(
+              context,
+              "stargate_crew",
+              "question",
+              "Crew clarification outcome unconfirmed; raw details withheld.",
+              async () => {
+                const selected = await projects.select(input, context);
+                return questionsFor(selected.engine).run(
+                  selected.input,
+                  context,
+                );
+              },
+            ),
+        });
         editor.add({
           name: "stargate_cron",
           description:
