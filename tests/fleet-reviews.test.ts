@@ -431,7 +431,8 @@ test("native crew review opens the protected directory for the assigned reposito
   );
 });
 
-test("review configuration refuses incomplete directory maps and captain overrides", () => {
+test("review configuration requires exactly the configured repositories and crew reviewers", () => {
+  const crew = { gpt: "/project/gpt", claude: "/project/claude" };
   const config = {
     socketPath: "/tmp/x",
     statePath: "/tmp/state",
@@ -439,25 +440,31 @@ test("review configuration refuses incomplete directory maps and captain overrid
       { id: "peer", account: "peer", channel: "#peer", sessionID: "peer" },
     ],
     results: true,
-    reviews: { repositories: [target.repository], reviewers },
-  };
-  for (const assigned of [
-    { gpt: "/project/gpt" },
-    {
-      gpt: "/project/gpt",
-      claude: "/project/claude",
-      "captain-peer": "/foreign",
+    reviews: {
+      repositories: [target.repository],
+      reviewers,
+      crewDirectories: { [target.repository]: crew },
     },
+  };
+  expect(fleetControlSchema.safeParse(config).success).toBe(true);
+  for (const crewDirectories of [
+    {},
+    { [target.repository]: { gpt: crew.gpt } },
+    {
+      [target.repository]: { ...crew, "captain-peer": "/foreign" },
+    },
+    { ...config.reviews.crewDirectories, "example/extra": crew },
   ]) {
-    expect(
-      fleetControlSchema.safeParse({
-        ...config,
-        reviews: {
-          ...config.reviews,
-          crewDirectories: { [target.repository]: assigned },
-        },
-      }).success,
-    ).toBe(false);
+    const result = fleetControlSchema.safeParse({
+      ...config,
+      reviews: { ...config.reviews, crewDirectories },
+    });
+    expect(result.error?.issues).toEqual([
+      expect.objectContaining({
+        message:
+          "Review directories must bind each permitted repository to every configured crew reviewer",
+      }),
+    ]);
   }
 });
 

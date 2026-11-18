@@ -46,9 +46,10 @@ For per-repository review workspaces, set `reviews.crewDirectories` to a map
 from each permitted `owner/repository` to a map of crew reviewer agent ID to
 its permanent directory. Include every crew reviewer for each repository.
 For example, `{"example/project":{"code-reviewer":"/srv/ship/review-code/project"}}`
-binds the reviewer above to that checkout. The gateway uses the repository
-from the recorded review assignment. Existing configurations can use a single
-`directory` per reviewer. Captain reviews always use their pinned native root.
+binds the reviewer above to that checkout. Each reviewer still needs a
+`directory`. When the map is set, the gateway selects the crew directory
+using the repository in the recorded assignment. Without the map it uses the
+reviewer's `directory`. Captain reviews always use their pinned native root.
 The `family` is an operator policy label: every actual native assistant maker
 must match that reviewer's exact approved provider/model selectors. Optional
 `variant` narrows a selector. A consumer must also check the actual maker
