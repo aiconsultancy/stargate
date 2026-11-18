@@ -3,7 +3,102 @@ import pino from "pino";
 import { stopBlock } from "../src/cancellation";
 import { crewStatusView } from "../src/crew-ui";
 import { handleSlackRequest, SlackConnection } from "../src/slack";
-import { replyText } from "../src/slack-format";
+import { replyText, type SlackPanelContent } from "../src/slack-format";
+
+test("trusted configuration blocks survive the existing post and update transport", async () => {
+  const calls: { path: string; data: URLSearchParams }[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      calls.push({
+        path: new URL(request.url).pathname,
+        data: new URLSearchParams(await request.text()),
+      });
+      return Response.json({ ok: true, ts: "2.000" });
+    },
+  });
+  const slack = new SlackConnection(
+    "fixture-app",
+    "fixture-bot",
+    pino({ enabled: false }),
+    { slackApiUrl: server.url.href },
+  );
+  const panel: SlackPanelContent = {
+    text: "Waiting delay: 5 seconds",
+    blocks: [
+      {
+        type: "section",
+        text: { type: "plain_text", text: "Waiting delay: 5 seconds" },
+      },
+      {
+        type: "actions",
+        block_id: "fixture-panel-0",
+        elements: [
+          {
+            type: "button",
+            action_id: "stargate_config_waiting_3",
+            value: "fixture-0",
+            text: { type: "plain_text", text: "3 s" },
+          },
+        ],
+      },
+    ],
+  };
+  try {
+    await slack.post("C123", "1.000", panel.text, undefined, undefined, panel);
+    await slack.update("C123", "2.000", panel.text, undefined, panel);
+    expect(calls.map((call) => call.path)).toEqual([
+      "/chat.postMessage",
+      "/chat.update",
+    ]);
+    for (const call of calls) {
+      expect(JSON.parse(call.data.get("blocks") ?? "null")).toEqual(
+        panel.blocks,
+      );
+      expect(call.data.get("text")).toBe(panel.text);
+    }
+    expect(calls[1]?.data.get("ts")).toBe("2.000");
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("configuration notices use literal ephemeral messages in the source thread", async () => {
+  const calls: URLSearchParams[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      expect(new URL(request.url).pathname).toBe("/chat.postEphemeral");
+      calls.push(new URLSearchParams(await request.text()));
+      return Response.json({ ok: true, message_ts: "2.000" });
+    },
+  });
+  const slack = new SlackConnection(
+    "fixture-app",
+    "fixture-bot",
+    pino({ enabled: false }),
+    { slackApiUrl: server.url.href },
+  );
+  try {
+    await slack.ephemeral(
+      "C123",
+      "U123",
+      "1.000",
+      "not available yet (NET-1709)",
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.get("user")).toBe("U123");
+    expect(calls[0]?.get("thread_ts")).toBe("1.000");
+    expect(calls[0]?.get("text")).toBe("not available yet (NET-1709)");
+    expect(JSON.parse(calls[0]?.get("blocks") ?? "null")[0].text.type).toBe(
+      "plain_text",
+    );
+  } finally {
+    await server.stop(true);
+  }
+});
 
 test("crew UI consumes trigger for loading modal and updates that private view without posting messages", async () => {
   const calls: { path: string; fields: URLSearchParams }[] = [];

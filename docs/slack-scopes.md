@@ -19,26 +19,32 @@ bot rejection and task-origin routing unchanged when expanding development acces
 
 The app-level Socket Mode token separately needs `connections:write`.
 
+The optional configuration panel (`bots[].configPanelEnabled`, default `false`)
+also needs `users:read` to verify human button actors. Missing scope fails
+closed; enabling the local flag does not add the OAuth grant. The optional
+peer-captain admission feature uses this scope too. Neither feature needs
+`users:read.email`. See [configuration panels](meta-commands.md#optional-configuration-panel).
+
 ## Broad development additions
 
 For a development/beta bot, this is a useful capability expansion rather than a
 minimum-permission profile. Preserve existing grants and add approved missing
 scopes; do not replace a broader installed app with the generated baseline.
 
-| Scope                               | Capability                                             | Stargate status                                                 |
-| ----------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------- |
-| `channels:read`, `groups:read`      | Discover joined conversations and metadata.            | Diagnostic/future tools.                                        |
-| `im:read`, `im:write`               | Inspect and open one-to-one DMs.                       | Future tools.                                                   |
-| `mpim:read`, `mpim:history`         | Inspect/read group DMs.                                | Needs `message.mpim` subscription and an explicit start policy. |
-| `users:read`, `users:read.email`    | Resolve people and email addresses.                    | Future tools; email requires both.                              |
-| `usergroups:read`                   | Resolve user groups and their members.                 | Future tools.                                                   |
-| `pins:read`, `pins:write`           | Inspect and manage pinned context.                     | Future tools; writes still need task authority.                 |
-| `chat:write.public`                 | Post to a permitted public channel without membership. | Affects delivery permission, not allowlists.                    |
-| `channels:join`                     | Explicitly join public channels.                       | Future tools.                                                   |
-| `reactions:read`, `emoji:read`      | Inspect reactions and available emoji.                 | Diagnostic/future tools.                                        |
-| `bookmarks:read`, `bookmarks:write` | Read/manage channel bookmarks.                         | Future tools.                                                   |
-| `canvases:read`, `canvases:write`   | Read/manage canvases.                                  | Future tools.                                                   |
-| `links:read`, `links:write`         | Receive/manage link unfurls.                           | Separate event/tool integration.                                |
+| Scope                               | Capability                                             | Stargate status                                                        |
+| ----------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `channels:read`, `groups:read`      | Discover joined conversations and metadata.            | Diagnostic/future tools.                                               |
+| `im:read`, `im:write`               | Inspect and open one-to-one DMs.                       | Future tools.                                                          |
+| `mpim:read`, `mpim:history`         | Inspect/read group DMs.                                | Needs `message.mpim` subscription and an explicit start policy.        |
+| `users:read`, `users:read.email`    | Resolve people and email addresses.                    | Optional peer admission and configuration panels; email requires both. |
+| `usergroups:read`                   | Resolve user groups and their members.                 | Future tools.                                                          |
+| `pins:read`, `pins:write`           | Inspect and manage pinned context.                     | Future tools; writes still need task authority.                        |
+| `chat:write.public`                 | Post to a permitted public channel without membership. | Affects delivery permission, not allowlists.                           |
+| `channels:join`                     | Explicitly join public channels.                       | Future tools.                                                          |
+| `reactions:read`, `emoji:read`      | Inspect reactions and available emoji.                 | Diagnostic/future tools.                                               |
+| `bookmarks:read`, `bookmarks:write` | Read/manage channel bookmarks.                         | Future tools.                                                          |
+| `canvases:read`, `canvases:write`   | Read/manage canvases.                                  | Future tools.                                                          |
+| `links:read`, `links:write`         | Receive/manage link unfurls.                           | Separate event/tool integration.                                       |
 
 An installed development bot may already have many of these. Audit the token's
 actual `x-oauth-scopes` response metadata, not only a source manifest. Do not

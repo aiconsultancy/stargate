@@ -377,7 +377,29 @@ export function slackContent(
   return { text: escaped(text), blocks: [block] };
 }
 
-export type SlackContent = ReturnType<typeof slackContent>;
+/** Literal controls built by trusted gateway UI, never classified model text. */
+export type SlackPanelContent = {
+  text: string;
+  blocks: (
+    | {
+        type: "section";
+        block_id?: string;
+        text: { type: "plain_text"; text: string; emoji?: boolean };
+      }
+    | {
+        type: "actions";
+        block_id: string;
+        elements: {
+          type: "button";
+          action_id: string;
+          value: string;
+          text: { type: "plain_text"; text: string; emoji?: boolean };
+          accessibility_label?: string;
+        }[];
+      }
+  )[];
+};
+export type SlackContent = ReturnType<typeof slackContent> | SlackPanelContent;
 export type ReplyChunk =
   | string
   | { text: string; content: SlackContent; source?: string };

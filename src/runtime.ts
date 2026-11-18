@@ -5,6 +5,7 @@ import { isAbsolute, join, relative } from "node:path";
 import { parseEnv } from "node:util";
 import { Cause, Data, Deferred, Effect, FiberMap } from "effect";
 import pino, { type Logger } from "pino";
+import { z } from "zod";
 import {
   type AgentBackend,
   type BackendContext,
@@ -382,6 +383,32 @@ export function serve(
               schedules: () => cronStore.report(botKey(currentBot, identity)),
               maintenance: config.maintenance,
             }),
+            isHuman: async (user) => {
+              try {
+                const result = z
+                  .object({
+                    ok: z.literal(true),
+                    user: z.object({
+                      id: z.literal(user),
+                      team_id: z.literal(identity.team),
+                      is_bot: z.literal(false),
+                      deleted: z.literal(false),
+                    }),
+                  })
+                  .safeParse(
+                    await slack.userInfo?.(
+                      user,
+                      AbortSignal.any([
+                        requests.signal,
+                        AbortSignal.timeout(2000),
+                      ]),
+                    ),
+                  );
+                return result.success;
+              } catch {
+                return false;
+              }
+            },
             listMutes: () => {
               const preferences = new NotificationStore(
                 join(config.dataDirectory, "notifications.sqlite"),
@@ -498,6 +525,7 @@ export function serve(
           pairing,
           (body) => gateway.cancel(body),
           crewUI,
+          (body, ack) => gateway.configInteraction(body, ack, () => open),
         );
         yield* Effect.promise(() =>
           slack.start(

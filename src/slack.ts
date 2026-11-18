@@ -207,6 +207,16 @@ export class SlackConnection implements SlackDelivery {
     return this.send(channel, "", text, "plain");
   }
 
+  async ephemeral(channel: string, user: string, thread: string, text: string) {
+    await this.web.chat.postEphemeral({
+      channel,
+      user,
+      thread_ts: thread,
+      ...slackContent(text, "plain"),
+      parse: "none",
+    });
+  }
+
   async failure(
     channel: string,
     thread: string,

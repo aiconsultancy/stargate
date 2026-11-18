@@ -42,6 +42,59 @@ for workspace sharing, supported OpenCode registrations and the effect on
 subsequent turns. Each command change records its time, Slack user and message
 reference. Its reply names the old value, new value and person who changed it.
 
+## Optional configuration panel
+
+`configPanelEnabled` is a per-bot configuration flag. It defaults to `false`.
+With the flag off, typed `/config` keeps its existing text reply. To opt in,
+set the following field inside one Slack bot registration:
+
+```json
+{ "configPanelEnabled": true }
+```
+
+This configuration field follows the normal restart-only policy. This change
+does not enable the flag in any running captain or make it default-on. Release
+notes must list this new flag and its `false` default; default-on activation
+needs the separate release decision described in `AGENTS.md`.
+
+When enabled, `/config` posts a Block Kit panel in the same thread:
+
+- **System One:** On and Off both answer exactly
+  `not available yet (NET-1709)`. They do not enable a decision model.
+- **Waiting delay:** Off, 3 s and 10 s use the same setting and writer as
+  typed commands and `stargate_waiting`.
+- **Mutes:** current status only. The panel does not change a mute.
+
+The command table supplies the panel controls, typed command dispatch and
+help. Typed commands remain available; the IRC path does not change. Successful
+button changes update the panel in place with the new value, actor and time.
+Button errors are private notices, not captain turns.
+
+A panel is stale after 24 hours, after a captured value changes, or when an
+older panel revision is pressed. Run `/config` again for a fresh panel. A
+retry of an applied press does not repeat the setting change. An uncertain
+write needs inspection rather than blind replay. External Slack delivery is
+not exactly-once.
+
+### Slack app prerequisites
+
+For each captain's Slack app, confirm **Interactivity & Shortcuts →
+Interactivity: On**, and retain **Socket Mode: On**. Socket Mode carries the
+button payloads through the same connection as Stop; no public Request URL or
+new slash command is needed. The generated Stargate manifest already sets
+`settings.interactivity.is_enabled: true` and `socket_mode_enabled: true`.
+
+The bot needs existing `chat:write` for panel posts, edits and private notices.
+Button presses also need `users:read` to confirm the actor is a human in the
+same workspace. If that lookup is missing or fails, the gateway refuses the
+press. User and channel deny rules still override wildcard allows; peer bots
+cannot press controls.
+
+These are prerequisites, not evidence of the installed app's current settings.
+No app settings, OAuth grants or live configuration are changed by this feature.
+An operator must verify each installed app before enabling the flag. Slack
+does not guarantee ephemeral notice delivery across client reloads or sessions.
+
 ## Health reporting
 
 `/health` uses the same allowed-human checks as configuration commands. It
