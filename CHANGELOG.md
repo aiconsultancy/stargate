@@ -2,11 +2,28 @@
 
 ## Unreleased
 
+### Feature flags
+
+- New flags: none.
+- Default changes: none.
+- Enabled by default: none.
+
+### Changes
+
+- Require manual dispatch and approval through the `release` environment before
+  publishing. Merging a green PR no longer publishes a release. Main protection
+  requires up-to-date Quality checks; use `gh pr merge --auto --squash`.
+
+## 0.38.0
+
 - Add per-captain OpenCode question controls (default **off**) through
   `/config questions on|off`. Slack uses buttons, checkboxes and custom replies;
   crew questions route to their originating captain. Timeout defaults to 15
   minutes; answer policy defaults to requester only. No flags become on by
   default. See [question controls](docs/meta-commands.md#opencode-clarification-questions).
+
+## 0.37.0
+
 - Add `notifications.updateNotice` (default **off**): passive queued update
   context for captains and OpenCode crew, plain mail for Pi crew, and a
   next-turn notice for unpinned Slack sessions. Notice receipts appear in

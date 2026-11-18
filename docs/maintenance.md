@@ -482,6 +482,12 @@ run lock and refuses while a run holds it.
 
 ## Stargate releases
 
+Main merges do not publish releases. The manual [release workflow](releases.md)
+requires a person's approval through the `release` environment. Maintenance
+continues to consume the published release feed; it does not install unreleased
+main commits. The Checks workflow still exercises the self-update environment
+on PRs and main pushes, independently of publication.
+
 Stargate publishes `vX.Y.Z` on [GitHub Releases](releases.md) with
 `stargate-vX.Y.Z.tar.gz` (a `git archive --prefix=stargate-vX.Y.Z/`) and
 `stargate-vX.Y.Z.tar.gz.sha256`. The release workflow does not publish artifact

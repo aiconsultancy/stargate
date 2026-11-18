@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { bumpFor, nextVersion, releaseNotes } from "../scripts/release-version";
+import {
+  bumpFor,
+  nextVersion,
+  releaseFlagNotes,
+  releaseNotes,
+} from "../scripts/release-version";
 
 test("conventional commit subjects select the bump", () => {
   expect(bumpFor("feat: add text mentions (#43)")).toBe("minor");
@@ -46,5 +51,26 @@ test("the first public release is v0.20.3; later releases follow the largest bum
 test("release notes list commit subjects", () => {
   expect(releaseNotes(["feat: a (#2)\n\nbody", "fix: b (#1)"])).toBe(
     "- feat: a (#2)\n- fix: b (#1)",
+  );
+});
+
+test("release flag notes require explicit new flags, defaults and default-on decisions", () => {
+  const flags =
+    "- New flags: `feature.example`, default off.\n- Default changes: none.\n- Enabled by default: none.";
+  expect(
+    releaseFlagNotes(
+      `# Changelog\n\n## Unreleased\n\n### Feature flags\n\n${flags}\n\n### Changes\n- A change\n\n## 0.38.1\nOld notes`,
+    ),
+  ).toBe(flags);
+  expect(() =>
+    releaseFlagNotes("## Unreleased\n- Missing flag decision"),
+  ).toThrow();
+  expect(() =>
+    releaseFlagNotes(
+      `## Unreleased\n### Feature flags\n${flags.replace("- Enabled by default: none.", "")}`,
+    ),
+  ).toThrow();
+  expect(releaseNotes(["fix: a"], flags)).toContain(
+    `## Feature flags\n\n${flags}`,
   );
 });

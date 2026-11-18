@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: checks-${{ github.event.pull_request.number || github.ref }}
-  # Never cancel a run on main: it may be publishing a release.
+  # Preserve main's exact-commit evidence for a later approved release.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -52,12 +52,3 @@ jobs:
       # would block every update.
       - name: Run tests in the self-update environment
         run: mise run test-release-env
-
-  release:
-    name: Release
-    needs: quality
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
-      checks: read
-    uses: ./.github/workflows/release.yml

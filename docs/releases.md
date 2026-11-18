@@ -1,56 +1,99 @@
 # Releases
 
 Stargate publishes releases on [GitHub][releases]. The public release
-sequence starts at `v0.20.3`. User-facing changes merged to `main` trigger
-releases through GitHub Actions.
+sequence starts at `v0.20.3`. Merging to `main` does **not** publish a release.
+Checks, including the self-update environment test, still run on each merge.
+The updater reads published GitHub releases, not commits on `main`; merged
+changes wait until a person approves a release.
 
-## How a release is made
+## Merge policy
 
-1. A PR is squash-merged into `main`; the repository allows no other merge
-   method. The PR title becomes the commit subject, also for one-commit PRs.
-2. The **Checks** workflow runs on `main`.
-3. When Checks succeeds, the **Release** workflow
-   (`.github/workflows/release.yml`) runs for that commit, if it is still the
-   head of `main`. A commit that is no longer the head is skipped; the next
-   release includes its changes.
-4. `scripts/release-version.ts` reads the commit subjects since the last
-   `vX.Y.Z` tag and selects the version:
+Use short-lived branches and ready PRs. After review is clear, enable
+`gh pr merge --auto --squash`. Main protection requires **Quality checks**
+with strict up-to-date checks. If main moves, update the branch and re-run
+checks. GitHub deletes the remote branch after merge.
 
-   | Commits since the last tag                                                | Bump       |
-   | ------------------------------------------------------------------------- | ---------- |
-   | Any `type!:` subject or `BREAKING CHANGE:` footer                         | major      |
-   | Any `feat:` subject                                                       | minor      |
-   | Any `fix:`, `perf:`, `revert:` or `Revert "…"` subject, or `(deps)` scope | patch      |
-   | Only other types (`docs:`, `test:`, `refactor:`, `chore:`…)               | no release |
+## Prepare release notes
 
-   Before `1.0.0`, a major bump increments the minor version. A revert is as
-   large as the change it reverts, and at least a patch. `(deps-dev)` updates
-   only change development tools, so they do not release. Commits that do not
-   release are included in the next release's notes.
-5. The workflow creates `stargate-vX.Y.Z.tar.gz` (a `git archive` of the commit)
-   and its SHA-256 file, and publishes the tag and release with the commit
-   subjects as notes. The workflow publishes checksums. The updater also
-   compares the unpacked tree against the tagged commit by default. Archive
-   and checksum names, archive root prefixes, and `.stargate-release.json`
-   metadata use Stargate only. Old updaters cannot install this format; use
-   the explicit [one-time bootstrap](hard-cutover.md#release-bootstrap).
-   Historical v0.20.3/v0.20.4 assets keep their original `pogo-vVERSION` names.
+Before dispatch, update `CHANGELOG.md` under `## Unreleased`. Each release
+has an explicit feature-flag decision, even when the answer is none:
 
-## Release manually
+```markdown
+## Unreleased
 
-To release changes that do not release on their own, run the Release workflow
-on `main`:
+### Feature flags
 
-```sh
-gh workflow run release.yml --repo aiconsultancy/stargate --ref main
+- New flags: `feature.example`, default off. (Use none if there are no new flags.)
+- Default changes: none.
+- Enabled by default: none.
+
+### Changes
+
+- Describe changes waiting for this release.
 ```
 
-It releases the head of `main` only after its Quality checks have passed, and
-bumps at least the patch version. With nothing new since the last tag, it does
-nothing.
+List every new flag with its default. For a default change, state the flag,
+old value and new value. List flags enabled by default in this release,
+or write `none`. Keep the section current for the complete unreleased range;
+after publication, move it under the released version and start a fresh
+Unreleased section. The version script refuses missing or incomplete flag
+sections. Published notes include commit subjects since the last tag and
+this flag section. Default changes require their own code/configuration
+change; approving a release does not toggle a host's settings.
 
-The version lives in the tag, not in `package.json`. CI never commits to
-`main`, so branch protection stays unchanged.
+## Preview and approve a release
+
+Only the **Release** workflow (`.github/workflows/release.yml`) publishes.
+It accepts manual dispatch on `main` only. Preview is the default:
+
+```sh
+gh workflow run release.yml --repo aiconsultancy/stargate --ref main -f dry_run=true
+```
+
+The read-only prepare job verifies current main and its successful **Quality
+checks**, computes the next version and writes the candidate commit and notes
+to the run summary. It does not create tags, assets, releases or deployments.
+Review the flag decisions in that summary. To request publication:
+
+```sh
+gh workflow run release.yml --repo aiconsultancy/stargate --ref main -f dry_run=false
+```
+
+The publish job waits for the **release** GitHub environment's required
+reviewer, **withakay (Jack)**. The environment permits protected branches;
+the workflow additionally restricts dispatch to main. A person approves in
+GitHub Actions. Agents must not approve on the owner's behalf. The owner
+may dispatch and approve their own run (`prevent_self_review=false`).
+
+After approval the job checks main and Quality checks again. If main advanced,
+it fails without publishing: preview and approve a new run. It recomputes the
+version and requires the prepared candidate version to match. Release runs
+are serialised; neither preview nor merge cancels an existing release run.
+
+`scripts/release-version.ts` selects the largest Conventional Commit bump
+since the latest `vX.Y.Z` tag:
+
+| Commits since the last tag                                     | Bump                       |
+| -------------------------------------------------------------- | -------------------------- |
+| Any `type!:` subject or `BREAKING CHANGE:` footer              | major                      |
+| Any `feat:` subject                                            | minor                      |
+| Any `fix:`, `perf:`, `revert:`, `Revert "…"` or `(deps)` scope | patch                      |
+| Only other types (`docs:`, `test:`, `refactor:`, `chore:`…)    | patch for a manual release |
+
+Before `1.0.0`, a major bump increments the minor version. A revert is as large
+as the change it reverts, and at least a patch. `(deps-dev)` does not select a
+bump; a manual release with commits waiting still forces at least a patch.
+Nothing new since the latest tag means no release. Do not change the version
+in `package.json` or create a tag by hand.
+
+The approved job creates `stargate-vX.Y.Z.tar.gz` (a `git archive` of the
+checked commit) and its SHA-256 file, then publishes both in the GitHub release.
+The asset names, archive root and checksums are unchanged. The updater also
+compares the unpacked tree against the tagged commit by default. Archive and
+checksum names, archive root prefixes, and `.stargate-release.json` metadata
+use Stargate only. Old updaters cannot install this format; use the explicit
+[one-time bootstrap](hard-cutover.md#release-bootstrap). Historical
+v0.20.3/v0.20.4 assets keep their original `pogo-vVERSION` names.
 
 ## Verify a release
 

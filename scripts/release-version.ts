@@ -68,10 +68,35 @@ export function nextVersion(
 }
 
 /** Release notes: one line per commit subject, newest first. */
-export function releaseNotes(messages: readonly string[]) {
-  return messages
+export function releaseNotes(messages: readonly string[], flags?: string) {
+  const changes = messages
     .map((message) => `- ${message.split("\n")[0]?.trim()}`)
     .join("\n");
+  return flags
+    ? `## Changes\n\n${changes}\n\n## Feature flags\n\n${flags}`
+    : changes;
+}
+
+/** Versioned release decisions; absence is not an implicit approval of defaults. */
+export function releaseFlagNotes(changelog: string) {
+  const unreleased = changelog
+    .split(/^## /m)
+    .find((section) => /^Unreleased\r?\n/.test(section));
+  const flags = unreleased
+    ?.split(/^### /m)
+    .find((section) => /^Feature flags\r?\n/.test(section))
+    ?.replace(/^Feature flags\r?\n/, "")
+    .trim();
+  if (
+    !flags ||
+    ["New flags", "Default changes", "Enabled by default"].some(
+      (label) => !new RegExp(`^- ${label}: \\S.*$`, "m").test(flags),
+    )
+  )
+    throw new Error(
+      "Unreleased Feature flags must list New flags, Default changes and Enabled by default (use none explicitly)",
+    );
+  return flags;
 }
 
 async function git(...args: string[]) {
@@ -99,8 +124,11 @@ if (import.meta.main) {
   console.log(`version=${version ?? ""}`);
   if (version) {
     const notes = last
-      ? releaseNotes(messages)
-      : "First public release of Stargate under the MIT License.";
+      ? releaseNotes(
+          messages,
+          releaseFlagNotes(await Bun.file("CHANGELOG.md").text()),
+        )
+      : `First public release of Stargate under the MIT License.\n\n## Feature flags\n\n${releaseFlagNotes(await Bun.file("CHANGELOG.md").text())}`;
     await Bun.write("release-notes.md", `${notes}\n`);
   }
 }
