@@ -58,6 +58,10 @@ lock close last. A failure after startup stops every bot and exits with code
 
 ## Live configuration reload
 
+Optional [session update notices](update-notices.md) reuse readiness, the
+registered tool list and existing gateway/crew stores. They queue passive
+context without starting work or bypassing task and permission checks.
+
 `config-reload.ts` reads a complete candidate with the CLI's schema and
 credential checks. It resolves the companion against a base environment captured
 before startup loading, without changing `process.env`. Reload requests are

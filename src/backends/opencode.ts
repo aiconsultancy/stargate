@@ -57,6 +57,7 @@ import {
   connectionFailure,
   statusKind,
 } from "../request-failure";
+import { scopedUpdate, type UpdateSnapshot } from "../update-notice";
 import { OpenCodeHistory } from "./opencode-history";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
@@ -823,6 +824,63 @@ export class OpenCodeBackend implements AgentBackend {
         "Crew status unavailable; check the captain location and crew plugin.",
       );
     }
+  }
+
+  async updateNoticeContext(
+    sessionID: string,
+    snapshot: UpdateSnapshot,
+    signal: AbortSignal,
+  ) {
+    const session = await this.client.session.get({ sessionID }, { signal });
+    if (
+      session.id !== sessionID ||
+      session.location.directory !== this.config.directory ||
+      (this.config.agent && session.agent !== this.config.agent)
+    )
+      throw new Error("Update notice session does not belong to this backend");
+    const tools = await this.client
+      .rpc(CrewReporting)
+      .updateTools(
+        {},
+        { location: { directory: this.config.directory }, signal },
+      )
+      .catch(() => null);
+    return scopedUpdate(snapshot, tools, {
+      model: session.model,
+      permissions: session.permissions,
+    });
+  }
+
+  async queueUpdateNotice(
+    sessionID: string,
+    id: string,
+    text: string,
+    signal: AbortSignal,
+  ) {
+    const receipt = await this.client.session.synthetic(
+      {
+        sessionID,
+        id,
+        text,
+        description: "Stargate update notice",
+        delivery: "queue",
+        resume: false,
+        metadata: { stargateUpdateNotice: true },
+      },
+      { signal },
+    );
+    if (receipt.id !== id || receipt.sessionID !== sessionID)
+      throw new Error("Update notice identity changed");
+  }
+
+  async crewUpdateNotice(snapshot: UpdateSnapshot, signal: AbortSignal) {
+    const receipts = await this.client
+      .rpc(CrewReporting)
+      .updateNotice(snapshot, {
+        location: { directory: this.config.directory },
+        signal,
+      });
+    return [...receipts];
   }
 
   async quota(signal: AbortSignal) {

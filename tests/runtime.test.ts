@@ -21,9 +21,130 @@ import {
 } from "../src/runtime";
 import { handleSlackRequest } from "../src/slack";
 import { Store } from "../src/store";
+import { scopedUpdate } from "../src/update-notice";
 import { bot, event, identity } from "./fixtures";
 
 const silent = pino({ level: "silent" });
+
+test("ready update notices are opt-in, persistent across restarts and included in readiness", async () => {
+  const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-update-ready-"));
+  let queued = 0;
+  let contexts = 0;
+  const configured = bot();
+  if (configured.backend.type !== "opencode")
+    throw new Error("Wrong fixture backend");
+  const pinned = {
+    ...configured,
+    backend: { ...configured.backend, sessionID: "ses_captain" },
+  };
+  try {
+    for (const [enabled, changed, expected, status] of [
+      [false, false, 0, undefined],
+      [true, false, 1, "queued"],
+      [true, false, 1, "unchanged"],
+      [true, true, 2, "queued"],
+    ] as const) {
+      const f = harness();
+      const make = f.dependencies.backend;
+      const dependencies: RuntimeDependencies = {
+        ...f.dependencies,
+        backend: async (config, context) => ({
+          ...(await make(config, context)),
+          sessionID: "ses_captain",
+          updateNoticeContext: async (_session, snapshot) => {
+            contexts++;
+            return scopedUpdate(snapshot, {}, {});
+          },
+          queueUpdateNotice: async () => {
+            queued++;
+          },
+        }),
+      };
+      const controller = new AbortController();
+      const before = Date.now();
+      const running = Effect.runPromise(
+        serve(
+          {
+            dataDirectory,
+            notifications: { updateNotice: enabled },
+            bots: [pinned],
+            maintenance: maintenanceSchema.parse({
+              models: { updateGlobalCatalog: changed },
+            }),
+          },
+          silent,
+          controller.signal,
+          dependencies,
+        ),
+      );
+      try {
+        await f.started;
+        for (let i = 0; i < 200; i++) {
+          const ready = await readReady(dataDirectory);
+          if (ready && ready.readyAt >= before) break;
+          await Bun.sleep(5);
+        }
+        expect(queued).toBe(expected);
+        const ready = await readReady(dataDirectory);
+        if (enabled)
+          expect(ready?.updateNotices?.[0]).toMatchObject({
+            sessionID: "ses_captain",
+            status,
+          });
+        else expect(contexts).toBe(0);
+      } finally {
+        controller.abort();
+        await running;
+      }
+    }
+  } finally {
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("unpinned Slack sessions get the notice only on their next normal turn", async () => {
+  const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-update-turn-"));
+  const order: string[] = [];
+  const f = harness();
+  const make = f.dependencies.backend;
+  const dependencies: RuntimeDependencies = {
+    ...f.dependencies,
+    backend: async (config, context) => ({
+      ...(await make(config, context)),
+      updateNoticeContext: async (_session, snapshot) =>
+        scopedUpdate(snapshot, {}, {}),
+      queueUpdateNotice: async () => {
+        order.push("notice");
+      },
+      prompt: async () => {
+        order.push("prompt");
+        return "Answer";
+      },
+    }),
+  };
+  const controller = new AbortController();
+  const running = Effect.runPromise(
+    serve(
+      { dataDirectory, notifications: { updateNotice: true }, bots: [bot()] },
+      silent,
+      controller.signal,
+      dependencies,
+    ),
+  );
+  try {
+    await f.started;
+    for (let i = 0; i < 100 && !(await readReady(dataDirectory)); i++)
+      await Bun.sleep(5);
+    expect(order).toEqual([]);
+    await f.intake().accept(event("<@UBOT> hello", "100.001"));
+    for (let i = 0; i < 200 && order.length < 2; i++) await Bun.sleep(5);
+    expect(order).toEqual(["notice", "prompt"]);
+  } finally {
+    controller.abort();
+    await running;
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
 
 type Turn = (bot: string, signal: AbortSignal) => Promise<string>;
 

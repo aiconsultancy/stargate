@@ -335,6 +335,10 @@ export class Gateway {
     /** Separate Slack preferences, never a reply-delivery access rule. */
     private readonly notifications?: NotificationReader,
     metaOptions?: MetaOptions,
+    private readonly updateNotice?: (
+      sessionID: string,
+      signal: AbortSignal,
+    ) => Promise<void>,
   ) {
     this.meta = new MetaCommands(store, slack, metaOptions);
     this.bot = "slack" in config ? config : undefined;
@@ -1620,6 +1624,9 @@ export class Gateway {
           }
           this.store.started(job.id);
           admitted = true;
+          await this.updateNotice?.(session, signal).catch(() =>
+            this.log.warn("Update notice unavailable"),
+          );
           const streamed = await this.backend.prompt(
             session,
             text,

@@ -23,6 +23,7 @@ import {
 import type { QuestionOffer } from "./questions";
 import { failureText, type RequestFailure } from "./request-failure";
 import type { ReplyChunk } from "./slack-format";
+import { UpdateNotices } from "./update-notice";
 
 export type Incoming = {
   eventId: string;
@@ -252,8 +253,10 @@ export interface ConfigPanelRecord {
 
 export class Store {
   private readonly db: Database;
+  readonly updateNotices: UpdateNotices;
   constructor(path: string) {
     this.db = new Database(path, { create: true, strict: true });
+    this.updateNotices = new UpdateNotices(this.db);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;

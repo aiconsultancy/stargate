@@ -597,6 +597,11 @@ neither is not updated.
 
 ## Model upgrades
 
+After a managed restart, optional [session update notices](update-notices.md)
+tell captains and crew what changed. `notifications.updateNotice` defaults off.
+The maintenance report includes receipts from the new readiness record; queued
+delivery does not prove that a model has read the notice.
+
 Known families and their version order:
 
 | Family          | Pattern                           | Order example                                                |

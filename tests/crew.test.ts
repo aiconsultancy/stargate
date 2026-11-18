@@ -43,6 +43,7 @@ import {
 import { CrewWaiting } from "../src/crew/waiting";
 import { Gateway } from "../src/gateway";
 import { Store } from "../src/store";
+import { buildUpdateSnapshot, noticeTools } from "../src/update-notice";
 import { waitingSettingsPath } from "../src/waiting";
 import { bot, event, identity } from "./fixtures";
 
@@ -1619,7 +1620,116 @@ test("broadcast returns partial receipts and Pi tools-none stores no unreadable 
   }
 });
 
-async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
+test("update notices queue once behind busy OpenCode crew without interrupting, creating or promoting work", async () => {
+  const f = await fixture(undefined, undefined, true);
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Keep working" },
+        f.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    const before = f.calls.length;
+    const snapshot = buildUpdateSnapshot(
+      "0.37.0",
+      { notifications: { updateNotice: true } },
+      "- New notices",
+    );
+    const first = await f.engine.updateNotice(
+      snapshot,
+      noticeTools([{ id: "stargate_crew", description: "Current tools" }]),
+      new AbortController().signal,
+    );
+    expect(first).toEqual([
+      { sessionID: task.workerSessionID, status: "queued" },
+    ]);
+    expect(f.calls.slice(before).map((call) => call.method)).toEqual([
+      "synthetic",
+    ]);
+    expect(f.synthetics.at(-1)).toMatchObject({
+      sessionID: task.workerSessionID,
+      delivery: "queue",
+      resume: false,
+      description: "Stargate update notice",
+    });
+    expect(f.engine.state.task(task.id)?.status).toBe("running");
+    const repeat = await f.engine.updateNotice(
+      snapshot,
+      noticeTools([{ id: "stargate_crew", description: "Current tools" }]),
+      new AbortController().signal,
+    );
+    expect(repeat[0]?.status).toBe("unchanged");
+    expect(f.calls.slice(before)).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Pi update notices use durable plain mail only, and failed mail is not reported as told", async () => {
+  const team = teamSchema.parse({
+    captain: { id: "bowser" },
+    crew: [
+      {
+        id: "twiki",
+        role: "Worker",
+        permissionProfile: "coding",
+        backend: {
+          type: "pi-durable",
+          model: "openai/gpt-6.1-sol",
+          tools: "coding",
+        },
+      },
+    ],
+  });
+  const f = await fixture(team, undefined, true);
+  try {
+    const peer = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const snapshot = buildUpdateSnapshot(
+      "0.37.0",
+      { notifications: { updateNotice: true } },
+      "- New tools",
+    );
+    const receipts = await f.engine.updateNotice(
+      snapshot,
+      {},
+      new AbortController().signal,
+    );
+    expect(receipts).toEqual([{ sessionID: peer.sessionID, status: "mail" }]);
+    expect(f.messages).toHaveLength(1);
+    expect(f.synthetics).toEqual([]);
+    expect(f.calls).toEqual([]);
+    expect(
+      (
+        await f.mailer.inbox(
+          { sessionID: peer.sessionID },
+          new AbortController().signal,
+        )
+      )[0]?.to,
+    ).toBe(peer.sessionID);
+    f.mailer.send = async () => {
+      throw new Error("secret transport failure");
+    };
+    expect(
+      (
+        await f.engine.updateNotice(
+          { ...snapshot, version: "0.38.0" },
+          {},
+          new AbortController().signal,
+        )
+      )[0]?.status,
+    ).toBe("uncertain");
+  } finally {
+    await f.close();
+  }
+});
+
+async function fixture(
+  team?: Team,
+  waitOptions?: CrewWaitOptions,
+  pin = false,
+) {
   const definition = team ?? defaultTeam;
   const directory = await mkdtemp("/tmp/opencode/stargate-crew-");
   const options: CrewOptions = {
@@ -1631,10 +1741,13 @@ async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
       definition.crew.map(({ id }) => [id, join(directory, id)]),
     ),
     mesijCommand: "/usr/bin/mesij",
+    ...(pin ? { captainSessionID: "ses_captaina" } : {}),
     ...(team ? { team } : {}),
   };
   const sessions = new Map<string, CrewSession>();
-  for (const id of ["ses_captain_a", "ses_captain_b"]) {
+  for (const id of pin
+    ? ["ses_captaina"]
+    : ["ses_captain_a", "ses_captain_b"]) {
     sessions.set(id, {
       id,
       agent: definition.captain.agent ?? definition.captain.id,
@@ -1729,6 +1842,7 @@ async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
       const { sessionID, text } = input;
       synthetics.push(input);
       calls.push({ method: "synthetic", sessionID, text });
+      return { id: input.id, sessionID };
     },
   };
   const mailer: Pick<MesijClient, "register" | "send" | "inbox"> = {
@@ -1816,7 +1930,7 @@ async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
   );
   let toolCall = 0;
   const captain = (
-    id = "ses_captain_a",
+    id = pin ? "ses_captaina" : "ses_captain_a",
     signal = new AbortController().signal,
   ) => ({
     sessionID: id,
