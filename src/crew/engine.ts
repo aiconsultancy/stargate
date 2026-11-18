@@ -213,10 +213,11 @@ export type CrewCaller = {
 };
 export type CrewSession = Pick<
   SessionInfo,
-  "id" | "parentID" | "agent" | "location" | "metadata" | "outcome"
+  "id" | "parentID" | "agent" | "location" | "metadata" | "outcome" | "model"
 > & {
   time?: Pick<SessionInfo["time"], "updated" | "busy" | "idle">;
 };
+export type WorkerModelPeer = Peer & Pick<CrewSession, "model">;
 export type ResultConnector = (
   session: CrewSession,
   signal: AbortSignal,
@@ -1289,10 +1290,37 @@ export class CrewEngine {
     return member;
   }
 
+  /** Read one existing own-roster model target, without ensure, prompt or control. */
+  async inspectWorkerModel(
+    crewID: string,
+    caller: CrewCaller,
+  ): Promise<WorkerModelPeer> {
+    caller = this.logicalCaller(caller);
+    caller.signal.throwIfAborted();
+    await this.captain(caller);
+    if (this.member(crewID).backend)
+      throw new CrewError(
+        "Live model inspection applies only to OpenCode workers.",
+      );
+    const peer = this.state.peer(crewID);
+    if (peer?.status !== "ready")
+      throw new CrewError(
+        "Worker is not provisioned; model inspection does not create sessions.",
+      );
+    const session = await this.sessions.get(
+      { sessionID: peer.sessionID },
+      { signal: caller.signal },
+    );
+    caller.signal.throwIfAborted();
+    this.validPeer(session, peer);
+    return { ...peer, ...(session.model ? { model: session.model } : {}) };
+  }
+
   async withWorkerControl<T>(
     crewID: string,
     caller: CrewCaller,
-    operation: (peer: Peer) => Promise<T>,
+    operation: (peer: WorkerModelPeer) => Promise<T>,
+    options: { requireReady?: boolean } = {},
   ): Promise<T> {
     caller = this.logicalCaller(caller);
     await this.captain(caller);
@@ -1300,7 +1328,17 @@ export class CrewEngine {
       throw new CrewError(
         "Pi worker compaction and live model switching are not supported.",
       );
-    const peer = await this.ensure(crewID, caller.signal);
+    // The controls table requires a peer row. Check cheaply before reserving,
+    // then recheck readiness and native identity while the guard is held.
+    if (options.requireReady && this.state.peer(crewID)?.status !== "ready")
+      throw new CrewError(
+        "Worker is not provisioned; this control does not create sessions.",
+      );
+    // Legacy switch/compact callers retain provisioning. Ready-only controls
+    // must not call ensure, even if a peer disappears before the guard is held.
+    let peer: WorkerModelPeer | undefined = options.requireReady
+      ? undefined
+      : await this.ensure(crewID, caller.signal);
     const active = this.state.activeTask(crewID);
     if (
       active &&
@@ -1310,6 +1348,21 @@ export class CrewEngine {
       throw new CrewError("This crew member is busy for another captain.");
     const token = this.state.reserveControl(crewID);
     try {
+      if (options.requireReady) {
+        const ready = this.state.peer(crewID);
+        if (ready?.status !== "ready")
+          throw new CrewError(
+            "Worker is not provisioned; this control does not create sessions.",
+          );
+        const session = await this.sessions.get(
+          { sessionID: ready.sessionID },
+          { signal: caller.signal },
+        );
+        this.validPeer(session, ready);
+        peer = { ...ready, ...(session.model ? { model: session.model } : {}) };
+      }
+      if (!peer)
+        throw new CrewError("Worker is not provisioned; control refused.");
       if (!(await this.idle(peer, caller.signal)))
         throw new CrewError("Worker is not idle; control refused.");
       caller.signal.throwIfAborted();

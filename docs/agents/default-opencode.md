@@ -454,9 +454,37 @@ The captain can read its current session model with
 connection and returns `sessionID` and `model: { providerID, id, variant }`.
 An absent variant returns `default/unspecified`, not an inferred reasoning level.
 If the session has no selected model, the tool reports an error instead of
-guessing. This operation supports only the caller's captain session. It does
+guessing. This operation supports the caller's configured captain or assigned worker session. It does
 not query the model catalog, create sessions, change models, or restart anything.
 Existing sessions need permission for the `stargate_model` operation `get`.
+
+Captains can inspect an existing own-roster worker with
+`stargate_model({"op":"inspect","target":"starbuck"})` without waking it or
+creating a session. To set only that worker's effort, use
+`stargate_model({"op":"effort","target":"starbuck","variant":"high"})`.
+Pass `project` with the exact configured project key for another project owned
+by this captain. Foreign captain roots, unknown crew/projects and worker callers
+are refused. The tool reads the worker's actual selected provider/model and
+validates the requested variant in that project's live enabled catalogue.
+It never changes provider/model, recreates a session, compacts, interrupts or
+forces active, uncertain or held work. Even an already-selected variant requires
+the same idle/control guard; use read-only `inspect` while the worker is busy.
+Refused effort requests are not queued or retained. Existing task state remains
+unchanged; an effort change needs a new explicit request after the worker is idle.
+A missing selected model and a selected provider outside the team's allowlist
+have distinct errors, without a guessed model or fallback. Read `inspect` after an unconfirmed
+SDK outcome before deciding what to do next. No fallback is applied.
+
+Native permissions must cover each tool operation. The generic trusted captain
+profile intentionally grants `stargate_model` on `*`; this existing wildcard
+already includes `inspect` and `effort`, as well as legacy `switch`. This feature
+does not narrow that public profile or rewrite existing session rules.
+Restricted profiles may instead grant explicit `list`, `inspect` and `effort`
+resources without allowing generic `switch`. Such explicit rules need their
+operator's reviewed commissioning/adoption procedure; an upgrade does not add
+missing explicit grants. Keep the actual task IDs, native session IDs and model evidence;
+never relabel old work or infer HIGH from a default/unspecified variant.
+Changes affect subsequent provider turns; they make no claim about prior work.
 
 The captain can discover models and switch its own or a worker's session model
 with `stargate_model`. Load `agent-profiles` before selecting a route. Optional
