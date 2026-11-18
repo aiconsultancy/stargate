@@ -152,7 +152,7 @@ async function fixture(crewCount = 1) {
         agent: input.agent,
         location: input.location,
         metadata: input.metadata,
-        model: input.model,
+        ...(input.model ? { model: input.model } : {}),
         permissions: input.permissions,
       };
       native.set(value.id, value);

@@ -25,6 +25,7 @@ import {
 } from "../src/crew/engine";
 import { CrewMaintenance } from "../src/crew/maintenance";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
+import { CrewModels, type ModelSessions } from "../src/crew/models";
 import { nativeWait } from "../src/crew/native-wait";
 import plugin from "../src/crew/plugin";
 import type {
@@ -4126,6 +4127,342 @@ test("unrelated lookup failures preserve the pending reservation without creatin
     expect(f.creations[0]?.id).toBe(pending.sessionID);
   } finally {
     f.client.get = get;
+    await f.close();
+  }
+});
+
+test("ready-only model inspection/control never reserve or create an unprovisioned or pending peer", async () => {
+  const f = await fixture(customTeam);
+  try {
+    for (const pending of [false, true]) {
+      if (pending) f.engine.state.reservePeer("builder");
+      const before = f.engine.state.peer("builder");
+      await expect(
+        f.engine.inspectWorkerModel("builder", f.captain()),
+      ).rejects.toThrow("not provisioned");
+      await expect(
+        f.engine.withWorkerControl(
+          "builder",
+          f.captain(),
+          async () => {
+            throw new Error("must not enter operation");
+          },
+          { requireReady: true },
+        ),
+      ).rejects.toThrow("does not create sessions");
+      expect(f.engine.state.peer("builder")).toEqual(before);
+      expect(f.engine.state.controlled("builder")).toBe(false);
+      expect(f.creations).toHaveLength(0);
+      expect(f.inputs).toHaveLength(0);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("ready-only inspection validates one existing native snapshot and refuses changed worker identity", async () => {
+  const f = await fixture(customTeam);
+  try {
+    await f.engine.run({ op: "ensure", crew: "builder" }, f.captain());
+    const peer = f.engine.state.peer("builder");
+    if (!peer) throw new Error("Missing peer");
+    const native = f.sessions.get(peer.sessionID);
+    if (!native) throw new Error("Missing native worker");
+    native.model = { providerID: "fixture", id: "builder", variant: "high" };
+    const original = structuredClone(native);
+    const reads: string[] = [];
+    const get = f.client.get.bind(f.client);
+    f.client.get = async (input, options) => {
+      reads.push(input.sessionID);
+      return get(input, options);
+    };
+    const inspected = await f.engine.inspectWorkerModel("builder", f.captain());
+    expect(inspected).toEqual({ ...peer, model: native.model });
+    expect(reads).toEqual(["ses_captain_a", peer.sessionID]);
+    for (const changed of [
+      { ...original, agent: "foreign" },
+      { ...original, location: { directory: "/foreign" } },
+      {
+        ...original,
+        metadata: { stargateCrew: { namespace: "foreign", crewID: "builder" } },
+      },
+      { ...original, parentID: "ses_foreign" },
+    ]) {
+      f.sessions.set(peer.sessionID, changed);
+      await expect(
+        f.engine.inspectWorkerModel("builder", f.captain()),
+      ).rejects.toThrow("identity changed");
+      await expect(
+        f.engine.withWorkerControl("builder", f.captain(), async () => {}, {
+          requireReady: true,
+        }),
+      ).rejects.toThrow("identity changed");
+      expect(f.engine.state.controlled("builder")).toBe(false);
+      expect(f.engine.state.peer("builder")).toEqual(peer);
+    }
+    expect(f.creations).toHaveLength(1);
+    expect(f.inputs).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test("ready-only model operations refuse Pi, unknown crew and foreign native captain roots", async () => {
+  const f = await fixture(
+    teamSchema.parse({
+      ...customTeam,
+      crew: customTeam.crew.map((member) =>
+        member.id === "builder"
+          ? {
+              ...member,
+              backend: {
+                type: "pi-durable",
+                model: "openai/test",
+                tools: "none",
+              },
+            }
+          : member,
+      ),
+    }),
+  );
+  const captain = f.sessions.get("ses_captain_a");
+  if (!captain) throw new Error("Missing captain fixture");
+  f.sessions.set("ses_captaina", { ...captain, id: "ses_captaina" });
+  const pinned = await CrewEngine.open(
+    { ...f.options, captainSessionID: "ses_captaina" },
+    f.client,
+    f.mailer,
+    f.agents,
+  );
+  try {
+    for (const op of [
+      () => f.engine.inspectWorkerModel("builder", f.captain()),
+      () =>
+        f.engine.withWorkerControl("builder", f.captain(), async () => {}, {
+          requireReady: true,
+        }),
+    ])
+      await expect(op()).rejects.toThrow(/Pi|OpenCode workers/);
+    await expect(
+      f.engine.inspectWorkerModel("foreign", f.captain()),
+    ).rejects.toThrow("Unknown configured crew");
+    await expect(
+      f.engine.withWorkerControl("foreign", f.captain(), async () => {}, {
+        requireReady: true,
+      }),
+    ).rejects.toThrow("Unknown configured crew");
+    await expect(
+      pinned.inspectWorkerModel("reader", f.captain("ses_captain_b")),
+    ).rejects.toThrow("configured");
+    await expect(
+      pinned.withWorkerControl(
+        "reader",
+        f.captain("ses_captain_b"),
+        async () => {},
+        { requireReady: true },
+      ),
+    ).rejects.toThrow("configured");
+    await expect(
+      pinned.inspectWorkerModel("reader", f.worker("ses_captaina")),
+    ).rejects.toThrow("captain sessions");
+    expect(f.engine.state.peer("builder")).toBeNull();
+    expect(f.engine.state.peer("reader")).toBeNull();
+    expect(f.creations).toHaveLength(0);
+  } finally {
+    await pinned.close();
+    await f.close();
+  }
+});
+
+function effortModels(f: Awaited<ReturnType<typeof fixture>>) {
+  let writes = 0;
+  let catalogues = 0;
+  let whileListing = async () => {};
+  const sessions: ModelSessions = {
+    get: (input, options) => f.client.get(input, options),
+    async switchModel({ sessionID, model }) {
+      const current = f.sessions.get(sessionID);
+      if (!current) throw new Error("Missing worker");
+      writes++;
+      current.model = model;
+    },
+    compact: (input, options) => f.client.compact(input, options),
+    interrupt: (input, options) => f.client.interrupt(input, options),
+  };
+  const tool = new CrewModels(
+    f.engine,
+    sessions,
+    {
+      async list() {
+        catalogues++;
+        await whileListing();
+        return {
+          data: [
+            {
+              providerID: "openai-proxy",
+              id: "model",
+              enabled: true,
+              variants: [{ id: "low" }, { id: "high" }],
+            },
+          ],
+        };
+      },
+    },
+    async () => {
+      throw new Error("Compaction forbidden");
+    },
+  );
+  return {
+    tool,
+    writes: () => writes,
+    catalogues: () => catalogues,
+    duringCatalogue: (fn: () => Promise<void>) => {
+      whileListing = fn;
+    },
+  };
+}
+
+test("effort real engine refuses held/running/uncertain/native-busy work including no-op without catalogue or queued requests", async () => {
+  const f = await fixture(customTeam);
+  try {
+    await f.engine.run({ op: "ensure", crew: "builder" }, f.captain());
+    const peer = f.engine.state.peer("builder");
+    const native = peer && f.sessions.get(peer.sessionID);
+    if (!peer || !native) throw new Error("Missing worker");
+    native.model = { providerID: "openai-proxy", id: "model", variant: "high" };
+    const models = effortModels(f);
+    const request = () =>
+      models.tool.run(
+        { op: "effort", target: "builder", variant: "high" },
+        f.captain(),
+      );
+    const control = f.engine.state.reserveControl("builder");
+    await expect(request()).rejects.toThrow("control already reserved");
+    expect(
+      await models.tool.run({ op: "inspect", target: "builder" }, f.captain()),
+    ).toMatchObject({ model: { variant: "high" } });
+    f.engine.state.releaseControl("builder", control);
+    f.busy.add(peer.sessionID);
+    await expect(request()).rejects.toThrow("not idle");
+    f.busy.delete(peer.sessionID);
+    const task = f.engine.state.reserveTask(
+      peer,
+      "ses_captain_a",
+      "Retained original work",
+    );
+    if (!task) throw new Error("Missing task");
+    f.engine.state.running(task.id);
+    const running = f.engine.state.task(task.id);
+    await expect(request()).rejects.toThrow("running or uncertain");
+    expect(f.engine.state.task(task.id)).toEqual(running);
+    f.engine.state.uncertain(task.id);
+    const uncertain = f.engine.state.task(task.id);
+    await expect(request()).rejects.toThrow("running or uncertain");
+    expect(f.engine.state.task(task.id)).toEqual(uncertain);
+    expect(models.writes()).toBe(0);
+    expect(models.catalogues()).toBe(0);
+    expect(native.model.variant).toBe("high");
+    expect(f.engine.state.controlled("builder")).toBe(false);
+    expect(f.inputs).toHaveLength(0);
+    expect(f.creations).toHaveLength(1);
+    const db = new Database(f.engine.state.path, { readonly: true });
+    try {
+      expect(
+        db
+          .query<{ count: number }, []>(
+            "SELECT COUNT(*) AS count FROM pending_tasks",
+          )
+          .get()?.count,
+      ).toBe(0);
+    } finally {
+      db.close();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("effort ready-only control excludes competing dispatch and retains session/model/metadata", async () => {
+  const f = await fixture(customTeam);
+  try {
+    await f.engine.run({ op: "ensure", crew: "builder" }, f.captain());
+    const peer = f.engine.state.peer("builder");
+    const native = peer && f.sessions.get(peer.sessionID);
+    if (!peer || !native) throw new Error("Missing worker");
+    native.model = { providerID: "openai-proxy", id: "model", variant: "low" };
+    const before = structuredClone(native);
+    const models = effortModels(f);
+    models.duringCatalogue(async () => {
+      expect(f.engine.state.controlled("builder")).toBe(true);
+      expect(
+        (
+          await f.engine.run(
+            { op: "dispatch", crew: "builder", text: "Must not start" },
+            f.captain(),
+          )
+        ).status,
+      ).toBe("busy");
+    });
+    expect(
+      await models.tool.run(
+        { op: "effort", target: "builder", variant: "high" },
+        f.captain(),
+      ),
+    ).toMatchObject({
+      status: "switched",
+      sessionID: peer.sessionID,
+      model: { providerID: "openai-proxy", id: "model", variant: "high" },
+    });
+    expect(native.id).toBe(before.id);
+    expect(native.agent).toBe(before.agent);
+    expect(native.location).toEqual(before.location);
+    expect(native.metadata).toEqual(before.metadata);
+    expect(f.engine.state.peer("builder")).toEqual(peer);
+    expect(models.writes()).toBe(1);
+    expect(models.catalogues()).toBe(1);
+    expect(f.engine.state.controlled("builder")).toBe(false);
+    expect(f.engine.state.activeTask("builder")).toBeNull();
+    expect(f.inputs).toHaveLength(0);
+    expect(f.creations).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("effort can update an idle provisioned worker with queued-only work without starting that work", async () => {
+  const f = await fixture(customTeam);
+  try {
+    await f.engine.run({ op: "ensure", crew: "builder" }, f.captain());
+    const peer = f.engine.state.peer("builder");
+    const native = peer && f.sessions.get(peer.sessionID);
+    if (!peer || !native) throw new Error("Missing worker");
+    native.model = { providerID: "openai-proxy", id: "model", variant: "low" };
+    f.busy.add(peer.sessionID);
+    const queued = await f.engine.run(
+      {
+        op: "dispatch",
+        crew: "builder",
+        text: "Existing queued work",
+        queue: true,
+      },
+      f.captain(),
+    );
+    expect(queued.status).toBe("queued");
+    if (!queued.task) throw new Error("Missing queued task");
+    f.busy.delete(peer.sessionID);
+    const models = effortModels(f);
+    expect(
+      await models.tool.run(
+        { op: "effort", target: "builder", variant: "high" },
+        f.captain(),
+      ),
+    ).toMatchObject({ status: "switched", sessionID: peer.sessionID });
+    expect(f.engine.state.task(queued.task.id)).toEqual(queued.task);
+    expect(f.engine.state.activeTask("builder")).toBeNull();
+    expect(f.inputs).toHaveLength(0);
+    expect(models.writes()).toBe(1);
+    expect(native.model.variant).toBe("high");
+  } finally {
     await f.close();
   }
 });

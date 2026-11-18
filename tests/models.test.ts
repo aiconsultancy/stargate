@@ -5,10 +5,14 @@ import {
   type ModelAuthority,
   type ModelSessions,
 } from "../src/crew/models";
+import { crewPermissions } from "../src/crew/policy";
+import { CrewError } from "../src/crew/state";
 import { defaultTeam } from "../src/crew/team";
 
 function fixture() {
   const calls: string[] = [];
+  const reads: string[] = [];
+  const controls: ({ requireReady?: boolean } | undefined)[] = [];
   let current = { providerID: "openai-proxy", id: "old" };
   const authority: ModelAuthority = {
     options: {
@@ -25,15 +29,29 @@ function fixture() {
       if (caller.agent === "mario" && caller.sessionID === "ses_mario") return;
       throw new Error("not configured caller");
     },
-    async withWorkerControl(crew, caller, operation) {
+    async inspectWorkerModel(crew, caller) {
       await this.captain(caller);
-      if (crew !== "mario") throw new Error("not configured");
+      if (crew !== "mario")
+        throw new CrewError("Unknown configured crew member.");
+      return {
+        crewID: crew,
+        sessionID: "ses_mario",
+        status: "ready",
+        ...(await sessions.get({ sessionID: "ses_mario" })),
+      };
+    },
+    async withWorkerControl(crew, caller, operation, options) {
+      await this.captain(caller);
+      if (crew !== "mario")
+        throw new CrewError("Unknown configured crew member.");
+      controls.push(options);
       calls.push("lock");
       try {
         return await operation({
           crewID: crew,
           sessionID: "ses_mario",
           status: "ready",
+          ...(await sessions.get({ sessionID: "ses_mario" })),
         });
       } finally {
         calls.push("unlock");
@@ -45,7 +63,8 @@ function fixture() {
       calls.push(`switch:${input.sessionID}`);
       current = input.model;
     },
-    async get() {
+    async get({ sessionID }) {
+      reads.push(sessionID);
       return { model: current };
     },
     async compact(input) {
@@ -84,7 +103,7 @@ function fixture() {
   const tool = new CrewModels(authority, sessions, models, async () => {
     calls.push("compacted");
   });
-  return { tool, calls, caller, sessions, models };
+  return { tool, calls, reads, controls, caller, sessions, models };
 }
 
 test("captain switches its session model without replacing the session", async () => {
@@ -264,4 +283,103 @@ test("worker cannot use model controls; abort and SDK failures do not expose det
       f.caller,
     ),
   ).rejects.toThrow("Model operation unavailable");
+});
+
+test("effort preserves the current provider/model/session and validates actual variants", async () => {
+  const f = fixture();
+  await f.sessions.switchModel({
+    sessionID: "ses_mario",
+    model: { providerID: "openai-proxy", id: "sol", variant: "low" },
+  });
+  f.calls.length = 0;
+  expect(
+    await f.tool.run(
+      { op: "effort", target: "mario", variant: "high" },
+      f.caller,
+    ),
+  ).toMatchObject({
+    sessionID: "ses_mario",
+    model: { providerID: "openai-proxy", id: "sol", variant: "high" },
+  });
+  expect(f.calls).toEqual(["lock", "switch:ses_mario", "unlock"]);
+  f.calls.length = 0;
+  expect(
+    await f.tool.run(
+      { op: "effort", target: "mario", variant: "high" },
+      f.caller,
+    ),
+  ).toMatchObject({ status: "unchanged" });
+  expect(f.calls).toEqual(["lock", "unlock"]);
+  await expect(
+    f.tool.run({ op: "effort", target: "mario", variant: "xhigh" }, f.caller),
+  ).rejects.toThrow("unavailable for the current model");
+  await expect(
+    f.tool.run(
+      { op: "effort", target: "mario", variant: "high", id: "different" },
+      f.caller,
+    ),
+  ).rejects.toThrow("Invalid stargate_model");
+});
+
+test("inspect is read-only and effort refuses unknown targets and foreign callers", async () => {
+  const f = fixture();
+  expect(
+    await f.tool.run({ op: "inspect", target: "mario" }, f.caller),
+  ).toMatchObject({ sessionID: "ses_mario", model: { id: "old" } });
+  expect(f.calls).toEqual([]);
+  for (const target of ["captain", "foreign"])
+    await expect(
+      f.tool.run({ op: "effort", target, variant: "high" }, f.caller),
+    ).rejects.toThrow("Unknown configured crew member");
+  await expect(
+    f.tool.run(
+      { op: "effort", target: "mario", variant: "high" },
+      { ...f.caller, agent: "foreign" },
+    ),
+  ).rejects.toThrow();
+  expect(f.calls).toEqual([]);
+});
+
+test("inspect reports the one authority-validated model snapshot without a second unvalidated read", async () => {
+  const f = fixture();
+  expect(
+    await f.tool.run({ op: "inspect", target: "mario" }, f.caller),
+  ).toMatchObject({ model: { id: "old", variant: "default/unspecified" } });
+  expect(f.reads).toEqual(["ses_mario"]);
+  expect(f.calls).toEqual([]);
+});
+
+test("effort requires ready-only control and reports missing model or outside provider without catalogue calls", async () => {
+  for (const current of [
+    undefined,
+    { providerID: "paid", id: "other", variant: "low" },
+  ]) {
+    const f = fixture();
+    f.sessions.get = async () => (current ? { model: current } : {});
+    f.models.list = async () => {
+      throw new Error("Catalogue must not be queried");
+    };
+    await expect(
+      f.tool.run({ op: "effort", target: "mario", variant: "high" }, f.caller),
+    ).rejects.toThrow(
+      current
+        ? "outside this team's allowed model providers"
+        : "Worker has no selected model",
+    );
+    expect(f.controls).toEqual([{ requireReady: true }]);
+    expect(f.calls).toEqual(["lock", "unlock"]);
+  }
+});
+
+test("generic trusted captain wildcard policy continues to authorise model operations", () => {
+  expect(crewPermissions("captain")).toContainEqual({
+    action: "stargate_model",
+    resource: "*",
+    effect: "allow",
+  });
+  expect(crewPermissions("coding")).toContainEqual({
+    action: "stargate_model",
+    resource: "get",
+    effect: "allow",
+  });
 });
