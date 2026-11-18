@@ -132,7 +132,7 @@ const commands: readonly Command[] = [
     async run({ bot, options }) {
       const page = await mutePage(options);
       return {
-        reply: `waiting: ${seconds((await resolveWaiting(bot)).delayMs)}\nmutes (read-only): ${page ? `${page.counts.channel} channels, ${page.counts.thread} threads` : "unavailable"}`,
+        reply: `waiting: ${seconds((await resolveWaiting(bot)).delayMs)}\nmutes (read-only): ${page ? `${page.counts.channel} channels, ${page.counts.thread} threads` : "unavailable"}\n${help()}`,
       };
     },
   },
@@ -187,19 +187,18 @@ const commands: readonly Command[] = [
       };
     },
   },
-  ...["enable", "disable"].flatMap((action) =>
-    ["filtering", "routing"].map(
-      (feature): Command => ({
-        syntax: `/config ${action} system one message ${feature}`,
-        pattern: new RegExp(
-          `^/config ${action} system one message ${feature}$`,
-        ),
-        async run() {
-          return { reply: "not available yet (NET-1709)" };
-        },
-      }),
-    ),
-  ),
+  {
+    syntax: "/config system1 <on|off>",
+    pattern: /^\/config system1(?: (.*))?$/,
+    async run(_context, match) {
+      return {
+        reply:
+          match[1] === "on" || match[1] === "off"
+            ? "not available yet (NET-1709)"
+            : "valid values: on, off",
+      };
+    },
+  },
 ];
 function help(): string {
   return `Valid commands:\n${commands.map((command) => command.syntax).join("\n")}`;

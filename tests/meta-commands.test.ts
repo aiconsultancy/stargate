@@ -254,12 +254,7 @@ test("/config mutes is a local read, not a captain request or setting mutation",
   ).toBe(false);
 });
 
-for (const command of [
-  "/config enable system one message filtering",
-  "/config disable system one message filtering",
-  "/config enable system one message routing",
-  "/config disable system one message routing",
-]) {
+for (const command of ["/config system1 on", "/config system1 off"]) {
   test(`${command} is reserved, not implemented or sent to a model`, async () => {
     const f = await fixture();
     await f.gateway.receive(event(`<@UBOT> ${command}`));
@@ -269,7 +264,33 @@ for (const command of [
   });
 }
 
+for (const value of ["", "enable", "ON", "on extra"]) {
+  test(`/config system1 ${value} lists valid values locally`, async () => {
+    const f = await fixture();
+    await f.gateway.receive(event(`<@UBOT> /config system1 ${value}`));
+    noCaptainWork(f);
+    expect(reply(f)).toBe("valid values: on, off");
+    expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
+  });
+}
+
+for (const command of ["/help", "/config"]) {
+  test(`${command} lists the short System One syntax without old aliases`, async () => {
+    const f = await fixture();
+    await f.gateway.receive(event(`<@UBOT> ${command}`));
+    noCaptainWork(f);
+    expect(reply(f)).toContain("/config system1 <on|off>");
+    expect(reply(f)).not.toContain("system one message");
+    expect(reply(f)).not.toContain("/config enable");
+    expect(reply(f)).not.toContain("/config disable");
+  });
+}
+
 for (const command of [
+  "/config enable system one message filtering",
+  "/config disable system one message filtering",
+  "/config enable system one message routing",
+  "/config disable system one message routing",
   "/unknown",
   "/settings",
   "/waiting 3",
