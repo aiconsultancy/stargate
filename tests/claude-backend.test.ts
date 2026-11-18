@@ -223,6 +223,57 @@ test("Claude resumes its own transcript and never another namespace's", async ()
   ).rejects.toThrow("Claude session ID is not valid");
 });
 
+test("Claude preserves supported UUID session IDs at the process boundary", async () => {
+  const { backend, runs } = await open();
+  const ids = [
+    "12345678-1234-1234-8234-123456789abc",
+    "12345678-1234-2234-9234-123456789abc",
+    "12345678-1234-3234-a234-123456789abc",
+    "12345678-1234-4234-b234-123456789abc",
+    "12345678-1234-5234-8234-123456789abc",
+    "12345678-1234-6234-8234-123456789abc",
+    "12345678-1234-7234-8234-123456789abc",
+    "12345678-1234-8234-8234-123456789abc",
+    "ABCDEFAB-CDEF-4ABC-ABCD-ABCDEFABCDEF",
+    "00000000-0000-0000-0000-000000000000",
+    "ffffffff-ffff-ffff-ffff-ffffffffffff",
+  ];
+  for (const id of ids)
+    expect(await backend.prompt(id, "hi", signal())).toBe(
+      "Hello world\n\nDone.",
+    );
+  expect(
+    (await runs()).map((run) =>
+      run.argv.find((argument) => argument.startsWith("--session-id=")),
+    ),
+  ).toEqual(ids.map((id) => `--session-id=${id}`));
+});
+
+test("Claude rejects unsupported UUID forms without launching the CLI", async () => {
+  const { backend, dataDirectory } = await open();
+  for (const id of [
+    "",
+    "../session",
+    "12345678-1234-0234-8234-123456789abc",
+    "12345678-1234-9234-8234-123456789abc",
+    "12345678-1234-4234-7234-123456789abc",
+    "12345678-1234-4234-c234-123456789abc",
+    "12345678123442348234123456789abc",
+    "12345678-1234-4234-8234-123456789abc\n",
+    " 12345678-1234-4234-8234-123456789abc",
+    "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",
+    "Ffffffff-ffff-ffff-ffff-ffffffffffff",
+  ]) {
+    await expect(backend.prompt(id, "hi", signal())).rejects.toThrow(
+      "Claude session ID is not valid",
+    );
+    await expect(backend.interrupt(id, signal())).resolves.toBeUndefined();
+  }
+  expect(await readdir(join(dataDirectory, "claude"))).not.toContain(
+    "fixture.jsonl",
+  );
+});
+
 test("Claude child receives only a minimal, explicit environment", async () => {
   const { backend, runs, dataDirectory } = await open();
   await backend.prompt(await session(backend), "hi", signal());

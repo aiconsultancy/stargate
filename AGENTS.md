@@ -76,7 +76,12 @@ selects a new session namespace; never reuse another backend's session ID.
 
 ## Engineering
 
-- Use strict TypeScript and existing Zod schemas at input boundaries.
+- Use strict TypeScript and Effect Schema at new or migrated input boundaries.
+  Migrate existing Zod schemas one type per PR, preserving validation and wire
+  formats. Keep remaining Zod consumers until their migration phase.
+- Prefer the installed Effect capability over another dependency when required
+  behavior and security properties are equivalent. Do not remove SDK-required
+  dependencies or change public behavior merely to reduce dependency count.
 - Reuse project helpers, Bun, or the standard library before adding packages.
 - Honour `AbortSignal`; cancelling a wait must also stop underlying agent work.
 - Keep SDK/runtime API usage consistent with installed dependency versions.
@@ -98,8 +103,10 @@ Follow its links when required. For APIs not covered there, search the installed
 source in `node_modules/effect/src`. Keep the existing SDK-aligned version;
 installing or loading a skill is not permission to upgrade Effect.
 
-Repository choices take precedence over greenfield examples: keep Zod, Bun
-SQLite, `bun:test`, and the existing Promise adapter contract.
+Repository choices take precedence over greenfield examples: use Effect Schema,
+Bun SQLite, `bun:test`, and the existing Promise adapter contract. Follow
+`docs/effect-schema-migration.md` for the incremental Zod migration; do not rewrite
+unrelated Promise code or upgrade Effect as part of a schema change.
 
 ## Safety and credentials
 

@@ -23,6 +23,7 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
+import { Schema } from "effect";
 import { z } from "zod";
 import { type Attachment, checkAttachments } from "../attachments";
 import {
@@ -60,7 +61,15 @@ class ClaudeTurnError extends Error {}
 const crashed = { ran: true } as const;
 
 /** Claude session IDs are UUIDs; anything else never reaches the filesystem. */
-const sessionIDSchema = z.uuid();
+const maximumSessionID = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+const sessionIDSchema = Schema.String.check(
+  Schema.isUUID(),
+  // Zod accepted the max UUID only in lowercase; preserve existing ID spelling.
+  Schema.makeFilter(
+    (id) => id.toLowerCase() !== maximumSessionID || id === maximumSessionID,
+  ),
+);
+const isSessionID = Schema.is(sessionIDSchema);
 
 /**
  * Non-secret routing variables. They are also passed as flag settings, the
@@ -578,10 +587,9 @@ export class ClaudeBackend implements AgentBackend {
   ): Promise<string> {
     signal.throwIfAborted();
     if (this.closed) throw new Error("Claude backend is closing");
-    const parsed = sessionIDSchema.safeParse(sessionId);
-    if (!parsed.success)
+    if (!isSessionID(sessionId))
       throw new ClaudeTurnError("Claude session ID is not valid");
-    const id = parsed.data;
+    const id = sessionId;
     if (this.runs.has(id)) throw new ClaudeTurnError("Claude session is busy");
     const content = claudeInputContent(
       context ? `${sourceLine(context)}\n\n${text}` : text,
@@ -826,16 +834,15 @@ export class ClaudeBackend implements AgentBackend {
   }
 
   async interrupt(sessionId: string, signal: AbortSignal) {
-    const id = sessionIDSchema.safeParse(sessionId);
-    if (!id.success) return;
-    const run = this.runs.get(id.data);
+    if (!isSessionID(sessionId)) return;
+    const run = this.runs.get(sessionId);
     if (run) {
       run.controller.abort();
       run.process?.kill("SIGTERM");
       await run.done;
       return;
     }
-    await this.stopOrphan(id.data, signal);
+    await this.stopOrphan(sessionId, signal);
   }
 
   async close() {
