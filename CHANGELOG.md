@@ -12,7 +12,9 @@
 
 - The Fleet API's `gateway.version` reports the installed release's version
   from `.stargate-release.json`, not the package version, which stays at
-  `0.1.0`. Source checkouts still report the package version.
+  `0.1.0`. A git checkout of a release reports its `vX.Y.Z` tag at HEAD
+  (fetch the tag, not only the commit); other source checkouts report the
+  package version.
 
 ## 0.40.0
 

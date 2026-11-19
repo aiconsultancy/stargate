@@ -219,7 +219,7 @@ export type V1Host = {
 };
 
 export type V1Gateway = {
-  /** The installed release's version, or the package version in a source checkout. */
+  /** The installed release's version, a release checkout's tag, or the package version. */
   version: string;
   /** Version reported by the connected OpenCode server; null when unknown. */
   opencodeVersion: string | null;
