@@ -42,6 +42,57 @@ login, ask your administrator about `loginctl enable-linger "$USER"`.
 Do not assume your shell's exported variables reach systemd: use the private
 companion file or configure the user-service environment explicitly.
 
+### Boot-time network failures and connection readiness
+
+Socket Mode and `auth.test` retry transient DNS and network failures with
+exponential backoff (1 second initially, capped at 30 seconds) for up to
+10 minutes per outage. Each Socket Mode attempt has a 30-second connection
+deadline and must receive Slack's `connected` event; a resolved SDK `start()`
+alone does not establish readiness. Authentication/permission errors are not
+retried. Reconnects use the same bounded owner after a later disconnect.
+The SDK's separate reconnect loop is disabled to avoid competing retries.
+Exhaustion fails startup or stops the running gateway with a non-zero exit,
+so `Restart=on-failure` can restart it. Shutdown cancels retries.
+
+Startup removes the previous `ready.json` after acquiring the instance lock.
+The new record is not written before transport connection: Slack registrations
+must finish connecting, IRC-only gateways wait for IRC registration, and
+Teams listener readiness counts for Teams-only gateways. IRC connection
+states are sampled without changing its existing reconnect protocol.
+If every transport remains disconnected for 10 minutes, the runtime fails.
+
+`ready.json` records each transport's kind, registration ID and state:
+`connecting`, `connected`, `reconnecting`, `failed` or `closed`, with
+`transportObservedAt`. States refresh on changes (normally within 250 ms).
+`readyAt` remains the original startup time, not a new startup after every
+reconnect. Maintenance rejects a new-format record with no connected
+transport. `/health stargate` displays the per-transport states and connected
+count; older records without the field show unknown. These are the last
+observed states, not proof of a currently live process after an abrupt crash.
+Normal shutdown records closed connections.
+
+**First upgrade:** older maintenance CLIs strictly decode `ready.json` and
+reject the added transport fields. Run the first managed update from this
+version's verified release tree or checkout, using its maintenance CLI. An old
+nightly CLI could otherwise reject readiness and roll back the upgrade. Keep
+the existing managed installer and recovery path; do not change release links
+by hand. This upgrade instruction does not authorise a release or installation.
+
+For service ordering, the usual unit hints are:
+
+```ini
+[Unit]
+After=network-online.target
+Wants=network-online.target
+```
+
+The generated user unit already includes `After=network-online.target`.
+The system's network-online target is not a dependable readiness barrier in
+the separate user service manager. Do not rely on adding `Wants` to fix DNS
+timing; application retries are the recovery mechanism. A running unit alone
+does not prove Slack is connected. Inspect `ready.json`, `/health` from a
+working transport, and the sanitised service log.
+
 The remaining examples use the linked `stargate` command. You can substitute
 `bun run src/main.ts` from the checkout.
 

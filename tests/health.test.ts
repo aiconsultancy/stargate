@@ -375,6 +375,29 @@ test("maintenance and cron render canonical states and no names or report text",
   expect(text).not.toContain(canary);
 });
 
+test("Stargate health exposes transport connection state, not process readiness alone", async () => {
+  const read = reader({
+    sources: {
+      ...sources,
+      ready: async () => ({
+        schema: "stargate.ready.v1",
+        pid: 1,
+        readyAt: now - 1000,
+        version: "0.38.1",
+        transportObservedAt: now,
+        transports: [
+          { kind: "slack", id: "captain", state: "reconnecting" },
+          { kind: "irc", id: "ship:chief", state: "connected" },
+        ],
+      }),
+    },
+  });
+  const text = await read("stargate");
+  expect(text).toContain("transports 1/2 connected");
+  expect(text).toContain("slack captain: reconnecting");
+  expect(text).toContain("irc ship:chief: connected");
+});
+
 test("OpenCode detail consumes optional canonical metadata without exposing ignored fields", async () => {
   const read = reader({
     sources: {
