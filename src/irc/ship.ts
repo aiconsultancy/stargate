@@ -405,7 +405,9 @@ function shipTransport(
       ? {
           instructions: () =>
             [
-              config.fleetPolicy ? fleetInstructions(config.fleetPolicy) : "",
+              config.fleetPolicy
+                ? fleetInstructions(config.fleetPolicy, "irc")
+                : "",
               "Tag another fleet agent with its current @nick when addressing it in IRC, including in thread replies. A name without @ does not wake a visiting agent.",
               ...(member.role === "captain"
                 ? (config.access.humanWakeChannels ?? [])

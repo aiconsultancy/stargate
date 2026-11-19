@@ -592,6 +592,10 @@ thread history or trust the tag as sender identity. The authenticated
   rules are removed; links keep their URL; inline code keeps its backticks.
   Control characters are removed, so a reply cannot send CTCP or IRC
   formatting.
+- IRC profile and fleet guidance asks agents to send one pull request reference:
+  a standalone `[PR:owner/repo#number]` marker or the full GitHub pull request
+  URL in plain text, outside backticks and Markdown link syntax. Clients that
+  recognise pull request references can display it as a chip.
 - Each line fits 512 bytes, including Stargate's tags and the source prefix
   that the server adds. Long lines break at spaces, otherwise at a UTF-8
   character boundary. Blank lines are not sent.
