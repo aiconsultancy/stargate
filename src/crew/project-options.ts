@@ -33,7 +33,6 @@ export const projectKeySchema = z
   .string()
   .regex(projectKeyPattern)
   .refine((key) => Result.isSuccess(decodeProject(key)));
-export const projectSelectionSchema = projectKeySchema;
 const directory = Schema.String.check(
   settingsRefine(
     (path) =>

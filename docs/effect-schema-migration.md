@@ -7,8 +7,8 @@ This migration does not upgrade Effect or the SDKs.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**. Eight migration PRs are
-merged. That leaves 10 component batches. One contingency split can bring the
+The revised target is **18 migration PRs in total**. Nine migration PRs are
+merged. That leaves nine component batches. One contingency split can bring the
 total to 19, still below 20. Report a proposed
 budget change before opening another PR; do not weaken verification to fit it.
 
@@ -33,6 +33,7 @@ Completed:
 - [Pi and shared session history](https://github.com/aiconsultancy/stargate/pull/51).
 - [Configuration, provisioning and composed settings](https://github.com/aiconsultancy/stargate/pull/66).
 - [Crew identities, teams, models and profiles](https://github.com/aiconsultancy/stargate/pull/67).
+- [Crew execution and recovery](https://github.com/aiconsultancy/stargate/pull/70).
 
 The first batch-6 timing pair failed at +18.27%. Its diagnostic pair measured
 +2.63% with retained coverage; this is not a performance repair. The earlier
@@ -40,18 +41,16 @@ batch-4 first-pair +10.9% failure also remains recorded.
 
 ## Remaining component batches
 
-The numbers include the eight completed PRs. File names identify primary scope,
+The numbers include the nine completed PRs. File names identify primary scope,
 not a restriction against updating a coupled consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
 
-9. Crew execution and recovery. Migrate `crew/engine.ts`,
-   `crew/reconciliation.ts`, `crew/workspace.ts`, `crew/result.ts`,
-   `crew/instruction-context.ts`, `crew/shell-context.ts`, `input-boundary.ts`
-   and `crew/recovery-rpc.ts`.
 10. Crew messages and RPC. Migrate `crew/mesij.ts`, `crew/messaging.ts`,
-    `crew/history.ts`, `crew/history-rpc.ts`, `crew/irc-rpc.ts`,
-    `crew/report-rpc.ts` and `crew/waiting.ts`. Keep request/response contracts
-    together with their SDK serialization and validation.
+    `crew/history.ts`, `crew/irc-rpc.ts`, local reporting methods in
+    `crew/report-rpc.ts`, activity entry/snapshot outputs and `crew/waiting.ts`.
+    Include engine's legacy inbox/mail parents and OpenCode/Pi/IRC consumers.
+    Reuse already-native history RPC, session history, journal and project
+    containers. Keep independent status/quota RPC schemas with batch 15.
 11. Fleet protocols. Migrate `fleet/` and remaining fleet policy schemas,
     including dispatch, review, verification, results and stored fleet records.
 12. Chat routing and interaction envelopes. Migrate `routing.ts`,
@@ -90,9 +89,9 @@ Migrated components use `settings-legacy.ts` only where an authoritative Effect 
 still embedded in a Zod container. It does not retain a second validation rule.
 Remove each bridge with its owning container:
 
-- Shared native task-ID/text primitives still embedded in engine inbox/mail
-  records: batch 10. Batch 9 removes the team/agent-ID and quota-configuration
-  bridges through direct composition in their migrated containers.
+- Engine inbox/mail now compose native task-ID/text primitives directly;
+  batch 10 removes their two bridges. Batch 9 removed the team/agent-ID and
+  quota-configuration bridges with their native parents.
 - Fleet identifiers, repositories and review-worker settings in runtime
   protocol/control records: batch 11.
 - Cron destination identifiers in `cron-control.ts`: batch 14.
@@ -124,6 +123,18 @@ crew's native adapters still use them. Recovery RPC
 uses native codecs through the installed Promise SDK's Standard Schema input
 contract; nested strictness does not depend on caller decode options. Resume
 remains a general crew operation, not an operator recovery RPC operation.
+
+Mail, history and DM use their own native SDK adapters, not the crew-operation
+adapter. OpenCode's DM object applies text trimming and its delivery default.
+Flattened mail/history unions apply field transforms but leave top-level branch
+defaults to handlers. Pi mail/DM explicitly select their own parameters and
+decoders; native argument coercion still precedes handler trimming. Mesij text
+remains untrimmed with a 65,536-code-point limit, distinct from crew send's
+trimmed 64,000-code-point limit. Strict old task envelopes and loose modern
+text envelopes remain separate. IRC/local-report RPC retain structured output
+and native nested-strict decoding/encoding. Quota's Zod project helper remains
+until batch 15; the unused project-selection alias is removed with IRC's native
+consumer. Batch 18 must retain/move the pure projectors these adapters use.
 
 ## Verification and merge
 

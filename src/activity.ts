@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-import { z } from "zod";
 import {
   settingsDefault,
   settingsPattern,
@@ -16,30 +15,43 @@ export const crewActivitySchema = settingsStruct({
 });
 export type CrewActivitySettings = typeof crewActivitySchema.Type;
 
-export const activityEntrySchema = z.strictObject({
-  id: z.number().int().nonnegative(),
-  taskID: z.string().min(1).max(100).optional(),
-  member: z.string().min(1).max(100),
-  kind: z.enum(["assignment", "update", "message", "result", "note"]),
-  text: z.string().max(1500),
+export const activityEntrySchema = settingsStruct({
+  id: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  taskID: Schema.optional(
+    Schema.String.check(Schema.isMinCodePoints(1), Schema.isMaxCodePoints(100)),
+  ),
+  member: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(100),
+  ),
+  kind: Schema.Literals(["assignment", "update", "message", "result", "note"]),
+  text: Schema.String.check(Schema.isMaxCodePoints(1500)),
 });
-export const activitySnapshotSchema = z.strictObject({
-  id: z.string().min(1).max(100),
-  revision: z.number().int().nonnegative(),
-  status: z.enum([
+export const activitySnapshotSchema = settingsStruct({
+  id: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(100),
+  ),
+  revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  status: Schema.Literals([
     "collecting",
     "summarizing",
     "complete",
     "unavailable",
     "cancelled",
   ]),
-  reporter: z.string().min(1).max(100),
-  summary: z.string().max(3000),
-  summaryCurrent: z.boolean().optional(),
-  entries: z.array(activityEntrySchema).max(8),
-  truncated: z.boolean(),
+  reporter: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(100),
+  ),
+  summary: Schema.String.check(Schema.isMaxCodePoints(3000)),
+  summaryCurrent: Schema.optional(Schema.Boolean),
+  entries: Schema.mutable(Schema.Array(activityEntrySchema)).check(
+    Schema.isMaxLength(8),
+  ),
+  truncated: Schema.Boolean,
 });
-export type ActivitySnapshot = z.infer<typeof activitySnapshotSchema>;
+export type ActivitySnapshot = typeof activitySnapshotSchema.Type;
 export type ActivityView = ActivitySnapshot & {
   detail: "summary" | "detailed";
 };

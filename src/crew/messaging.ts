@@ -1,33 +1,56 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { Result, Schema } from "effect";
+import {
+  settingsDefault,
+  settingsDiscriminatedUnion,
+  settingsPattern,
+  settingsStartsWith,
+  settingsStruct,
+} from "../settings-schema";
 import type { CrewCaller, CrewEngine } from "./engine";
 import type { MesijClient, MesijMessage } from "./mesij";
 import { CrewError } from "./state";
 
-const send = z.strictObject({
-  op: z.literal("send"),
-  to: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-  text: z.string().trim().min(1).max(64000),
-  taskID: z.string().startsWith("task_").max(100).optional(),
-  key: z.string().min(1).max(100).optional(),
-  replyTo: z
-    .string()
-    .regex(/^[a-f0-9]{32}$/)
-    .optional(),
+const taskID = Schema.String.check(
+  settingsStartsWith("task_"),
+  Schema.isMaxCodePoints(100),
+);
+const send = settingsStruct({
+  op: Schema.Literal("send"),
+  to: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  text: Schema.Trim.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(64000),
+  ),
+  taskID: Schema.optional(taskID),
+  key: Schema.optional(
+    Schema.String.check(Schema.isMinCodePoints(1), Schema.isMaxCodePoints(100)),
+  ),
+  replyTo: Schema.optional(
+    Schema.String.check(settingsPattern(/^[a-f0-9]{32}$/)),
+  ),
 });
-export const mailInputSchema = z.discriminatedUnion("op", [
+export const mailInputBranches = Schema.Union([
   send,
-  z.strictObject({
-    op: z.literal("inbox"),
-    taskID: z.string().startsWith("task_").max(100).optional(),
-    after: z.number().int().safe().nonnegative().optional(),
-    limit: z.number().int().min(1).max(100).default(20),
+  settingsStruct({
+    op: Schema.Literal("inbox"),
+    taskID: Schema.optional(taskID),
+    after: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    limit: Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: 100 }),
+    ).pipe(settingsDefault(20)),
   }),
 ]);
-export const dmInputSchema = send.extend({
-  delivery: z.enum(["steer", "queue"]).default("steer"),
+export const mailInputSchema = settingsDiscriminatedUnion(
+  "op",
+  mailInputBranches.members,
+);
+export const dmInputSchema = settingsStruct({
+  ...send.fields,
+  delivery: Schema.Literals(["steer", "queue"]).pipe(settingsDefault("steer")),
 });
+const inboxText = Schema.Struct({ text: Schema.String });
 export type MailRoute = {
   id: string;
   sender: string;
@@ -220,10 +243,10 @@ export class CrewMessaging {
 
   async run(raw: unknown, caller: CrewCaller, direct = false) {
     const parsed = direct
-      ? dmInputSchema.safeParse(raw)
-      : mailInputSchema.safeParse(raw);
-    if (!parsed.success) throw new CrewError("Invalid mail/DM input.");
-    const input = parsed.data;
+      ? Schema.decodeUnknownResult(dmInputSchema)(raw)
+      : Schema.decodeUnknownResult(mailInputSchema)(raw);
+    if (Result.isFailure(parsed)) throw new CrewError("Invalid mail/DM input.");
+    const input = parsed.success;
     caller = await this.engine.authorizeMail(caller);
     // A bound IRC session: member identity from the binding, no task, and
     // the pinned captain as its captain context.
@@ -311,17 +334,17 @@ export class CrewMessaging {
           (input.taskID && route.targetTaskID !== input.taskID)
         )
           return [];
-        const envelope = z
-          .object({ text: z.string() })
-          .safeParse(parseJSON(event.text));
-        return envelope.success
+        const envelope = Schema.decodeUnknownResult(inboxText)(
+          parseJSON(event.text),
+        );
+        return Result.isSuccess(envelope)
           ? [
               {
                 id: event.id,
                 sequence: event.sequence,
                 from:
                   memberOf(route.sender) ?? this.engine.options.team.captain.id,
-                text: envelope.data.text,
+                text: envelope.success.text,
                 ...(route.sourceTaskID
                   ? { sourceTaskID: route.sourceTaskID }
                   : {}),

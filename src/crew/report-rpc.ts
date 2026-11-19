@@ -1,6 +1,5 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
-import { z } from "zod";
 import { activitySnapshotSchema } from "../activity";
 import { crewStatusInputSchema, crewStatusSchema } from "../crew-status";
 import { quotaInputSchema, quotaSnapshotSchema } from "../quota";
@@ -13,14 +12,22 @@ import {
   historySessionPageSchema,
   historySessionsSchema,
 } from "../session-history";
+import { settingsPattern, settingsStruct } from "../settings-schema";
 import { updateSnapshotSchema } from "../update-notice";
+import { messagePortableSchema } from "./message-tool-input";
 
 // Clients require Standard Schema definitions; OpenCode still decodes and
 // encodes these Effect codecs directly, without caller parse options.
 const portable = Schema.toStandardSchemaV1;
-const owner = z.strictObject({
-  sessionID: z.string().min(1).max(100),
-  id: z.string().min(1).max(100),
+const owner = settingsStruct({
+  sessionID: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(100),
+  ),
+  id: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(100),
+  ),
 });
 export const CrewReporting = Rpc.define({
   id: "stargate.crew.reporting",
@@ -100,21 +107,39 @@ export const CrewReporting = Rpc.define({
       output: portable(historyEntryPageSchema),
     },
     start: {
-      input: z.strictObject({
-        sessionID: z.string().min(1).max(100),
-        requestID: z.string().min(1).max(100),
-        reporter: z
-          .string()
-          .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)
-          .optional(),
-      }),
-      output: activitySnapshotSchema,
+      input: messagePortableSchema(
+        settingsStruct({
+          sessionID: Schema.String.check(
+            Schema.isMinCodePoints(1),
+            Schema.isMaxCodePoints(100),
+          ),
+          requestID: Schema.String.check(
+            Schema.isMinCodePoints(1),
+            Schema.isMaxCodePoints(100),
+          ),
+          reporter: Schema.optional(
+            Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+          ),
+        }),
+      ),
+      output: messagePortableSchema(activitySnapshotSchema),
     },
     read: {
-      input: owner.extend({ passive: z.boolean().optional() }),
-      output: activitySnapshotSchema,
+      input: messagePortableSchema(
+        settingsStruct({
+          ...owner.fields,
+          passive: Schema.optional(Schema.Boolean),
+        }),
+      ),
+      output: messagePortableSchema(activitySnapshotSchema),
     },
-    finish: { input: owner, output: activitySnapshotSchema },
-    cancel: { input: owner, output: z.boolean() },
+    finish: {
+      input: messagePortableSchema(owner),
+      output: messagePortableSchema(activitySnapshotSchema),
+    },
+    cancel: {
+      input: messagePortableSchema(owner),
+      output: messagePortableSchema(Schema.Boolean),
+    },
   },
 });
