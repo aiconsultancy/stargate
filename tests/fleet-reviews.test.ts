@@ -161,7 +161,14 @@ const reviewers = [
     permissions: [],
   },
 ];
-async function world(enabled = true, coordinatorAccount = "peer") {
+async function world(
+  enabled = true,
+  coordinatorAccount = "peer",
+  reviewConfig: NonNullable<FleetControlOptions["config"]["reviews"]> = {
+    repositories: [target.repository],
+    reviewers,
+  },
+) {
   const directory = await realpath(
     await mkdtemp(join(tmpdir(), "stargate-review-")),
   );
@@ -190,9 +197,7 @@ async function world(enabled = true, coordinatorAccount = "peer") {
           sessionID: "ses_peer",
         },
       ],
-      ...(enabled
-        ? { reviews: { repositories: [target.repository], reviewers } }
-        : {}),
+      ...(enabled ? { reviews: reviewConfig } : {}),
     },
     sessionID: `ses_${ship}`,
     account: ship,
@@ -401,6 +406,66 @@ test("two attested native-family proofs share an independent reviewer ship and p
     (await raw(join(w.directory, "stranger.sock"), "GET", "/reviews/" + a.id))
       .status,
   ).toBe(404);
+});
+
+test("native crew review opens the protected directory for the assigned repository", async () => {
+  const repository = "example/another";
+  const reviewConfig = {
+    repositories: [target.repository, repository],
+    reviewers,
+    crewDirectories: {
+      [target.repository]: { gpt: "/project/gpt", claude: "/project/claude" },
+      [repository]: { gpt: "/another/gpt", claude: "/another/claude" },
+    },
+  };
+  const w = await world(true, "peer", reviewConfig);
+  const context = await w.begin({ repository });
+  await w.start(context.id);
+  expect(w.native.starts[0]?.reviewer.directory).toBe("/another/gpt");
+  expect(w.native.starts[0]?.context.repository).toBe(repository);
+  const captain = await w.start(context.id, "captain-peer");
+  expect(captain.sessionID).toBe("ses_peer");
+  expect(w.native.starts).toHaveLength(1);
+  await expect(w.begin({ repository: "example/third" })).rejects.toThrow(
+    "not permitted",
+  );
+});
+
+test("review configuration requires exactly the configured repositories and crew reviewers", () => {
+  const crew = { gpt: "/project/gpt", claude: "/project/claude" };
+  const config = {
+    socketPath: "/tmp/x",
+    statePath: "/tmp/state",
+    targets: [
+      { id: "peer", account: "peer", channel: "#peer", sessionID: "peer" },
+    ],
+    results: true,
+    reviews: {
+      repositories: [target.repository],
+      reviewers,
+      crewDirectories: { [target.repository]: crew },
+    },
+  };
+  expect(fleetControlSchema.safeParse(config).success).toBe(true);
+  for (const crewDirectories of [
+    {},
+    { [target.repository]: { gpt: crew.gpt } },
+    {
+      [target.repository]: { ...crew, "captain-peer": "/foreign" },
+    },
+    { ...config.reviews.crewDirectories, "example/extra": crew },
+  ]) {
+    const result = fleetControlSchema.safeParse({
+      ...config,
+      reviews: { ...config.reviews, crewDirectories },
+    });
+    expect(result.error?.issues).toEqual([
+      expect.objectContaining({
+        message:
+          "Review directories must bind each permitted repository to every configured crew reviewer",
+      }),
+    ]);
+  }
 });
 
 test("review evidence stays off by default and does not admit completion claims", async () => {

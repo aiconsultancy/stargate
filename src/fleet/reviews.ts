@@ -87,6 +87,7 @@ export class FleetReviews {
       reviewer,
       origin,
       repositories: this.options.config.repositories,
+      crewDirectories: this.options.config.crewDirectories,
     });
     if (
       !this.options.config.repositories.includes(

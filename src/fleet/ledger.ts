@@ -12,6 +12,7 @@ import { dirname, resolve } from "node:path";
 import {
   type DispatchResult,
   type FleetCompletion,
+  type FleetControlConfig,
   FleetError,
   type FleetOrigin,
   type FleetResultDelivery,
@@ -606,6 +607,9 @@ export class FleetLedger {
     reviewer: FleetReviewAgent;
     origin: FleetOrigin;
     repositories: readonly string[];
+    crewDirectories?: NonNullable<
+      FleetControlConfig["reviews"]
+    >["crewDirectories"];
   }): { created: boolean; record: ReviewRecord } {
     return this.db
       .transaction(() => {
@@ -663,13 +667,18 @@ export class FleetLedger {
           .get(input.reviewID, ship, input.reviewer.agent);
         if (previous)
           return { created: false, record: this.decodeReview(previous) };
+        const reviewer = input.reviewer;
+        const directory =
+          reviewer.kind === "crew" && input.crewDirectories
+            ? input.crewDirectories[context.repository]?.[reviewer.agent]
+            : reviewer.directory;
         const binding = reviewBindingSchema.parse({
           id: `proof_${randomUUID().replaceAll("-", "")}`,
           nonce: randomUUID().replaceAll("-", ""),
           context,
           contextText: request.text,
           reviewerShip: ship,
-          reviewer: input.reviewer,
+          reviewer: { ...reviewer, directory },
           sessionID:
             input.reviewer.kind === "captain"
               ? input.ownerSessionID
