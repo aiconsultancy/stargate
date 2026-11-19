@@ -112,6 +112,14 @@ results on the issue. Rear admirals skip peer FYIs that require no action and
 reply once to an actionable request. Formal assignments use their correlated
 results. The gateway still wakes an explicitly tagged visitor.
 
+`features.steerThreadFollowUps` defaults to `false`. When enabled, an admitted
+text reply in the exact active captain thread can steer its running OpenCode
+input instead of creating another queued turn. Another thread stays queued;
+definite native refusal falls back to the same queue. Stop and clarification
+controls stay separate. It uses the same gateway admission and receipt rules
+as [Slack follow-up steering](operations.md#follow-up-steering), not another
+scheduler. Enabling it does not change any Slack registration's flag.
+
 Stargate uses each of these only when the server offers it. A switch under
 `irc[].features` turns one off; the protocol switches below default to `true`.
 The separate [native clarification bridge](#native-clarification-questions),

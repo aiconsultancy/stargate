@@ -56,6 +56,19 @@ export type PendingPermission = {
 /** Latest complete visible text for this turn, not reasoning or tool output. */
 export type TextSink = (text: string) => void;
 
+/** Refused proves no native write occurred. Uncertain must never be replayed. */
+export type SteerResult = { status: "accepted" | "refused" | "uncertain" };
+export type SteerInput = {
+  sessionID: string;
+  inputID: string;
+  /** Durable, unique native synthetic ID allocated before admission. */
+  id: string;
+  text: string;
+  context: PromptSourceContext;
+  /** Recheck local source, input, access and Stop immediately before writing. */
+  allowed(): boolean;
+};
+
 /** Public text of one settled assistant message; never reasoning or tools. */
 export type TranscriptEntry = {
   id: string;
@@ -81,6 +94,10 @@ export type Transcript = {
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
+  /** Optional text-only delivery into this exact running native input. */
+  steer?(input: SteerInput, signal: AbortSignal): Promise<SteerResult>;
+  /** Read-only reconciliation, never resubmission after an ambiguous write. */
+  reconcileSteer?(input: SteerInput, signal: AbortSignal): Promise<SteerResult>;
   updateNoticeContext?(
     sessionID: string,
     snapshot: UpdateSnapshot,

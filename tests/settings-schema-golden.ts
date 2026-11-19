@@ -1,20 +1,21 @@
-// Generated from Zod 4.6.7 at 4ff23cb. The IRC and root fixtures also include the new IRC turn defaults.
+// Legacy Zod 4.6.7 corpus at4ff23cb, with approved IRC turn defaults and
+// NET-1736 default-off follow-up steering contracts recalculated below.
 export const settingsGolden = {
   configSchema: {
-    count: 6660,
-    hash: "949e8ce75be0d9933e0d17af3c866b10e93722fccd961a1633f43da4bbb23acf",
+    count: 6702,
+    hash: "16bb211b1f12ee6f3510cd5773e7df05c1526046f55fc8117ffdaa818ef1ad93",
   },
   botSchema: {
-    count: 2590,
-    hash: "3e5d0e48b1971c0153508dfa21050a085595a2f1d06a1f729d1b5c34d82c44ed",
+    count: 2646,
+    hash: "fc6cf1408d118fcdfb7195edaae7a964a45b9b40ccfbe33d14d45e2cd5be0083",
   },
   backendSchema: {
     count: 831,
     hash: "b54a366b9892b4d5dfa3a4b422ed54d701b04e74874a43b0f54feff3415dfad9",
   },
   ircSchema: {
-    count: 2936,
-    hash: "594ac6418caa3ad3dad914c318ce39401c1ba57c7e6a35d3e4b13c82426bef4e",
+    count: 2964,
+    hash: "961a9431362d584070f4e32a588c8c886e0397f9ef7095ee7f63dbae2b91fbba",
   },
   teamsSchema: {
     count: 580,
