@@ -1,9 +1,19 @@
-import { z } from "zod";
+import { Schema } from "effect";
 import { piCrewBackendSchema } from "../config";
 import { isLocalhost } from "../loopback";
-import { legacySetting } from "../settings-legacy";
+import { decodeSettings } from "../settings-errors";
+import {
+  settingsCheck,
+  settingsPattern,
+  settingsRecord,
+  settingsRefine,
+  settingsStruct,
+  settingsURL,
+} from "../settings-schema";
 
-export const agentIDSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+export const agentIDSchema = Schema.String.check(
+  settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+);
 export function agentIDForName(name: string): string {
   return name
     .trim()
@@ -11,59 +21,78 @@ export function agentIDForName(name: string): string {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
-const agentSchema = z.strictObject({
+const agentFields = {
   id: agentIDSchema,
-  agent: agentIDSchema.optional(),
-  name: z
-    .string()
-    .trim()
-    .min(1)
-    .max(100)
-    .regex(/^[^\r\n\0]+$/)
-    .optional(),
-  model: z
-    .string()
-    .regex(/^[^/\s#]+\/[^\s#]+(?:#[^\s#]+)?$/)
-    .optional(),
-  instructions: z.string().trim().min(1).max(64000).optional(),
+  agent: Schema.optional(agentIDSchema),
+  name: Schema.optional(
+    Schema.Trim.check(
+      Schema.isMinCodePoints(1),
+      Schema.isMaxCodePoints(100),
+      settingsPattern(/^[^\r\n\0]+$/),
+    ),
+  ),
+  model: Schema.optional(
+    Schema.String.check(settingsPattern(/^[^/\s#]+\/[^\s#]+(?:#[^\s#]+)?$/)),
+  ),
+  instructions: Schema.optional(
+    Schema.Trim.check(Schema.isMinCodePoints(1), Schema.isMaxCodePoints(64000)),
+  ),
+};
+const agentSchema = settingsStruct(agentFields);
+const historyAPISchema = settingsStruct({
+  url: settingsURL.check(
+    settingsRefine(
+      (value) => {
+        const url = new URL(value);
+        return (
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash &&
+          (url.protocol === "https:" ||
+            (url.protocol === "http:" && isLocalhost(url.hostname)))
+        );
+      },
+      { message: "Invalid input" },
+    ),
+  ),
+  headersEnv: Schema.optional(
+    settingsRecord(
+      Schema.String.check(settingsPattern(/^[a-zA-Z0-9-]+$/)),
+      Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/)),
+    ),
+  ),
 });
-const historyAPISchema = z.strictObject({
-  url: z.url().refine((value) => {
-    const url = new URL(value);
-    return (
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash &&
-      (url.protocol === "https:" ||
-        (url.protocol === "http:" && isLocalhost(url.hostname)))
-    );
-  }),
-  headersEnv: z
-    .record(
-      z.string().regex(/^[a-zA-Z0-9-]+$/),
-      z.string().regex(/^[A-Z_][A-Z0-9_]*$/),
-    )
-    .optional(),
-});
-export const teamSchema = z
-  .strictObject({
-    captain: agentSchema,
-    historyScope: z.enum(["team", "project", "server"]).optional(),
-    toolAccess: z.enum(["curated", "direct"]).optional(),
-    historyAPI: historyAPISchema.optional(),
-    modelProviders: z.array(z.string().min(1).max(100)).min(1).optional(),
-    crew: z
-      .array(
-        agentSchema.extend({
-          role: z.string().trim().min(1).max(1000),
-          permissionProfile: z.enum(["coding", "research"]),
-          backend: legacySetting(piCrewBackendSchema).optional(),
-        }),
-      )
-      .min(1),
-  })
-  .superRefine((team, context) => {
+export const teamSchema = settingsStruct({
+  captain: agentSchema,
+  historyScope: Schema.optional(Schema.Literals(["team", "project", "server"])),
+  toolAccess: Schema.optional(Schema.Literals(["curated", "direct"])),
+  historyAPI: Schema.optional(historyAPISchema),
+  modelProviders: Schema.optional(
+    Schema.mutable(
+      Schema.Array(
+        Schema.String.check(
+          Schema.isMinCodePoints(1),
+          Schema.isMaxCodePoints(100),
+        ),
+      ),
+    ).check(Schema.isMinLength(1)),
+  ),
+  crew: Schema.mutable(
+    Schema.Array(
+      settingsStruct({
+        ...agentFields,
+        role: Schema.Trim.check(
+          Schema.isMinCodePoints(1),
+          Schema.isMaxCodePoints(1000),
+        ),
+        permissionProfile: Schema.Literals(["coding", "research"]),
+        backend: Schema.optional(piCrewBackendSchema),
+      }),
+    ),
+  ).check(Schema.isMinLength(1)),
+}).check(
+  settingsCheck((team, context) => {
     for (const [index, agent] of [team.captain, ...team.crew].entries()) {
       if (agent.name && agent.id !== agentIDForName(agent.name))
         context.addIssue({
@@ -106,8 +135,9 @@ export const teamSchema = z
       }
       ids.add(member.id);
     }
-  });
-export type Team = z.infer<typeof teamSchema>;
+  }),
+);
+export type Team = typeof teamSchema.Type;
 export type CrewMember = Team["crew"][number];
 export type PermissionProfile = "captain" | CrewMember["permissionProfile"];
 
@@ -119,10 +149,12 @@ export function profileTeam(team: Team, ship: string): Team {
   ): T => {
     return {
       ...agent,
-      agent: agent.agent ?? agentIDSchema.parse(`${ship}-${role}-${agent.id}`),
+      agent:
+        agent.agent ??
+        decodeSettings(agentIDSchema, `${ship}-${role}-${agent.id}`),
     };
   };
-  return teamSchema.parse({
+  return decodeSettings(teamSchema, {
     ...team,
     captain: qualify(team.captain, "captain"),
     crew: team.crew.map((member) => qualify(member, "crew")),
@@ -135,7 +167,7 @@ export const defaultModelProviders = [
 ];
 
 /** Optional starter roster, never the runtime's authority or identity list. */
-export const defaultTeam: Team = teamSchema.parse({
+export const defaultTeam: Team = Schema.decodeUnknownSync(teamSchema)({
   captain: { id: "bowser", name: "Bowser" },
   crew: [
     {

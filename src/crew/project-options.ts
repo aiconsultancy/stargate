@@ -7,13 +7,16 @@ import {
   SchemaTransformation,
 } from "effect";
 import { z } from "zod";
-import { agentIDSchema } from "./team";
+import { legacySetting } from "../settings-legacy";
+import { agentIDSchema as nativeAgentIDSchema } from "./team";
 import {
   type EffectToolInput,
   effectToolInputFields,
   objectToolInput,
 } from "./tool-input";
 
+// Batch 9 removes this bridge with the project configuration container.
+const agentIDSchema = legacySetting(nativeAgentIDSchema);
 const projectKeyPattern = /^[a-z][a-z0-9_-]{0,47}$/u;
 export const effectProjectKeySchema = Schema.String.check(
   Schema.makeFilter(

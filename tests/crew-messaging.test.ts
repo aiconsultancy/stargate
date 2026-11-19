@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import {
   type CrewCaller,
   CrewEngine,
@@ -14,7 +15,7 @@ import { teamSchema } from "../src/crew/team";
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-mail-receipt-"));
-  const team = teamSchema.parse({
+  const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [{ id: "worker", role: "Builder", permissionProfile: "coding" }],
   });

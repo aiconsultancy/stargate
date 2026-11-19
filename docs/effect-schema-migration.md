@@ -7,8 +7,8 @@ This migration does not upgrade Effect or the SDKs.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**. Six migration PRs are
-merged. That leaves 12 component batches. One contingency split can bring the
+The revised target is **18 migration PRs in total**. Seven migration PRs are
+merged. That leaves 11 component batches. One contingency split can bring the
 total to 19, still below 20. Report a proposed
 budget change before opening another PR; do not weaken verification to fit it.
 
@@ -31,6 +31,7 @@ Completed:
 - [Remaining native backend validators](https://github.com/aiconsultancy/stargate/pull/48).
 - [Shared tool envelopes, journal and project selection](https://github.com/aiconsultancy/stargate/pull/49).
 - [Pi and shared session history](https://github.com/aiconsultancy/stargate/pull/51).
+- [Configuration, provisioning and composed settings](https://github.com/aiconsultancy/stargate/pull/66).
 
 The first batch-6 timing pair failed at +18.27%. Its diagnostic pair measured
 +2.63% with retained coverage; this is not a performance repair. The earlier
@@ -38,14 +39,10 @@ batch-4 first-pair +10.9% failure also remains recorded.
 
 ## Remaining component batches
 
-The numbers include the six completed PRs. File names identify primary scope,
+The numbers include the seven completed PRs. File names identify primary scope,
 not a restriction against updating a coupled consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
 
-7. Configuration and provisioning. Migrate `config.ts`, `provision.ts` and the
-   schema definitions composed into configuration, including provider, activity,
-   mention, transcription, waiting and component settings. Include affected
-   profile generation. Runtime operation schemas can remain for their own batch.
 8. Crew identity and profiles. Migrate `crew/team.ts`, `crew/identity.ts`,
    `crew/models.ts` and the remaining crew/profile settings and consumers.
 9. Crew execution and recovery. Migrate `crew/engine.ts`,
@@ -90,12 +87,13 @@ Remove the adapter when its remaining consumer migrates.
 
 ### Configuration settings composed into later batches
 
-Batch 7 uses `settings-legacy.ts` only where an authoritative Effect setting is
+Migrated components use `settings-legacy.ts` only where an authoritative Effect setting is
 still embedded in a Zod container. It does not retain a second validation rule.
 Remove each bridge with its owning container:
 
-- Pi crew backend in `crew/team.ts`: batch 8.
-- Nightly window in profile-generation options: batch 8.
+- Team and agent IDs in crew configuration, project worktrees, recovery and
+  workspace operation containers: batch 9. Batch 8 removes the Pi-team and
+  nightly-profile bridges through direct native composition.
 - Quota settings in `crew/engine.ts`: batch 9.
 - Fleet identifiers, repositories and review-worker settings in runtime
   protocol/control records: batch 11.

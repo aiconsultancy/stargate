@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { Schema } from "effect";
 import { checkCodexConfiguration } from "./backends/codex-paths";
 import { loadConfig } from "./config";
 import { teamSchema } from "./crew/team";
@@ -584,7 +585,7 @@ async function readMaintenanceWindow(path: string) {
 
 async function readTeamFile(path: string) {
   try {
-    return teamSchema.parse(await Bun.file(path).json());
+    return Schema.decodeUnknownSync(teamSchema)(await Bun.file(path).json());
   } catch {
     throw new Error(
       "Cannot load team file. Use valid team JSON without credentials.",

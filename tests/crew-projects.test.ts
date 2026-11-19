@@ -71,7 +71,7 @@ async function fixture(crewCount = 1) {
   );
   const captainDirectory = join(root, "captain");
   await mkdir(captainDirectory);
-  const team = teamSchema.parse({
+  const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain", agent: "build", model: "fixture/captain" },
     crew: Array.from({ length: crewCount }, (_, index) => ({
       id: index ? `worker${index + 1}` : "worker",

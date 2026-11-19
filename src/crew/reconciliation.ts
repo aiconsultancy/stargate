@@ -7,6 +7,7 @@ import type {
   SessionMessageInfo,
 } from "@opencode/client";
 import { z } from "zod";
+import { legacySetting } from "../settings-legacy";
 import type { CrewSession } from "./engine";
 import { isNativeInstructionContext } from "./instruction-context";
 import {
@@ -20,8 +21,10 @@ import {
   type ShellContextRecord,
 } from "./shell-context";
 import { CrewError, type CrewTask } from "./state";
-import { agentIDSchema } from "./team";
+import { agentIDSchema as nativeAgentIDSchema } from "./team";
 
+// Batch 9 owns the remaining recovery operation container.
+const agentIDSchema = legacySetting(nativeAgentIDSchema);
 const id = z.string().min(1).max(256);
 export const inspectInputSchema = z.strictObject({
   op: z.literal("inspect"),
