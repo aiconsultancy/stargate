@@ -79,7 +79,9 @@ An unpinned bot gets this line before the message instead:
 ```
 
 On IRC, `access.peerCaptains` is an explicit list of peer captain accounts
-with the same limit per channel or direct-message conversation. See
+with a default limit of 30 per receiving connection and channel or
+direct-message conversation in a rolling hour. Set `access.peerTurnsPerHour`
+to override it. See
 [IRC transport](irc.md#peer-captains).
 
 Generated captain instructions contain a "Peer captain messages" paragraph:

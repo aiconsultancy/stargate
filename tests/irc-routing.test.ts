@@ -461,14 +461,14 @@ test("irc limits: peers per conversation, ship messages per channel", async () =
   // People are never limited.
   for (let i = 0; i < 6; i++)
     expect(admit(captain, "jack", `h${i}`, at(5))).toBe(true);
-  // Peer captains: 5 per conversation per hour; another conversation is separate.
-  for (let i = 0; i < 5; i++)
+  // All peers share 30 turns per receiving connection and conversation.
+  for (let i = 0; i < 30; i++)
     expect(admit(captain, "defiant", `p${i}`, at(10 + i))).toBe(true);
-  expect(admit(captain, "defiant", "p5", at(20))).toBe(false);
-  expect(admit(captain, "defiant", "d0", at(20), "galactica", "hello")).toBe(
+  expect(admit(captain, "defiant", "p30", at(40))).toBe(false);
+  expect(admit(captain, "defiant", "d0", at(40), "galactica", "hello")).toBe(
     true,
   );
-  expect(admit(captain, "defiant", "p6", at(75))).toBe(true);
+  expect(admit(captain, "defiant", "p31", at(71))).toBe(true);
   // Duplicate delivery (chathistory replay) is deduplicated by event ID.
   expect(admit(captain, "jack", "h0", at(5))).toBe(false);
 });
@@ -625,6 +625,7 @@ test("irc config check: password references and caFile, values never printed", a
     ).text(),
   ).toContain("{{ircInstructions}}");
   expect(ircInstructions).toContain("s=irc");
+  expect(ircInstructions).toContain("The default IRC peer limit is 30 turns");
 });
 
 test("irc casemapping: rfc1459 by default, ascii and strict per ISUPPORT", () => {

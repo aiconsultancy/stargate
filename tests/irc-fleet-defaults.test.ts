@@ -187,13 +187,13 @@ test("results-mode peer context requires an enrolled explicit current nick and n
     expect(
       withinLimits(admission, config, {
         shipKeys: [member.key],
-        count: () => 4,
+        count: () => 29,
       }),
     ).toBe(true);
     expect(
       withinLimits(admission, config, {
         shipKeys: [member.key],
-        count: () => 5,
+        count: () => 30,
       }),
     ).toBe(false);
   }

@@ -117,9 +117,9 @@ There is no automatic file watcher.
 | `irc[].crew` additions                        | Validate credentials and stage the backend/worker before connecting                                                       |
 | `irc[].crew` removals                         | Refuse while any removed member has queued, running or responding work                                                    |
 
-`access.peerTurnsPerHour` is optional on Slack and IRC registrations. It defaults
-to 5; the range is 0–600, where 0 refuses peer turns. IRC's existing
-`access.shipTurnsPerAgentPerHour` remains live-safe.
+`access.peerTurnsPerHour` defaults to 5 per Slack thread or 30 per receiving
+IRC connection and conversation in a rolling hour. The range is 0–600, where
+0 refuses peer turns. IRC's `access.shipTurnsPerAgentPerHour` remains live-safe.
 
 Turns retain their starting execution and transcription settings. Delivery
 requires both the starting and current access policies: a new deny blocks the
