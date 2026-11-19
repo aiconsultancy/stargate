@@ -139,7 +139,8 @@ Queued turns use the configuration current when they start.
 All unlisted keys are restart-only. This includes transport additions/removals,
 Slack/IRC credentials, existing credential values, backends, server/bind settings,
 joined channels/JOIN/PART, existing crew-member fields, concurrency/timeouts,
-feature switches, cron/waiting/activity, dashboard, maintenance and state paths.
+feature switches, cron/waiting/activity, dashboard, Fleet API, maintenance and
+state paths.
 An invalid or mixed live/restart change is never partially applied. Environment
 variables keep precedence over the companion; values supplied by the service
 manager remain fixed for the process lifetime. Reload never mutates the process
@@ -153,6 +154,19 @@ crew-plugin team. Reload preserves existing queue/session namespaces. Re-adding
 an IRC member resumes its retained cursor/history, as after a restart. This is
 configuration reload only; code updates and service handover still require their
 separate maintenance procedure.
+
+## Fleet API
+
+The optional top-level `api` object enables the read-only
+[Fleet API](api.md). Omit it to keep the listener off. Every `api` setting
+requires a restart.
+
+| Field             | Default                                                                                                | Accepted values                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `listen`          | Port required                                                                                          | Private IPv4 literal as `host:port`, private IPv6 as `[address]:port`, or `:port` to use `127.0.0.1`. Ports are 1–65535. |
+| `allowedNetworks` | `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `::1/128`, `fc00::/7` | Nonempty list of CIDRs wholly contained in the default ranges. Bind addresses must also be in these ranges.              |
+| `corsOrigins`     | `["subspace://*", "https://subspace.*"]`                                                               | Exact serialized origins or hostname patterns with a whole-label `*`. An empty list disables CORS.                       |
+| `fleetName`       | Hostname                                                                                               | Nonempty display name.                                                                                                   |
 
 ## Backend configuration
 

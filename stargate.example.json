@@ -1,5 +1,6 @@
 {
   "dataDirectory": ".stargate",
+  "api": { "listen": "127.0.0.1:8484" },
   "bots": [
     {
       "id": "code-helper",

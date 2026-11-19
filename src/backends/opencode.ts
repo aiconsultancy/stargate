@@ -27,6 +27,7 @@ import {
   TranscriptUnavailable,
 } from "../backend-values";
 import { type BackendConfig, secret } from "../config";
+import { fleetCrewStatusSchema } from "../crew/fleet-status";
 import { isNativeInstructionContext } from "../crew/instruction-context";
 import { crewMessageMetadataKey } from "../crew/message-protocol";
 import { CrewReporting } from "../crew/report-rpc";
@@ -767,7 +768,7 @@ export class OpenCodeBackend implements AgentBackend {
   readonly history: OpenCodeHistory;
   private readonly client;
   private readonly waitForIdle;
-  private readonly pairingClient;
+  private readonly serverClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
   private readonly inputs = new Map<string, string>();
   constructor(
@@ -795,8 +796,8 @@ export class OpenCodeBackend implements AgentBackend {
       ),
     }).experimental.session.wait;
     this.history = new OpenCodeHistory(this.client, config.directory);
-    // Same endpoint and authentication; never follow a pairing redirect.
-    this.pairingClient = OpenCode.make({
+    // Same endpoint and authentication; never forward headers on redirects.
+    this.serverClient = OpenCode.make({
       ...options,
       fetch: Object.assign(
         (url: URL | RequestInfo, init?: RequestInit) =>
@@ -806,11 +807,15 @@ export class OpenCodeBackend implements AgentBackend {
     });
   }
 
+  async serverVersion(signal: AbortSignal) {
+    return (await this.serverClient.server.info({ signal })).version;
+  }
+
   async pair(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
       const result = decodePairingCode(
-        await this.pairingClient.server.pair({ signal }),
+        await this.serverClient.server.pair({ signal }),
       );
       signal.throwIfAborted();
       return { code: result.code, expiresIn: result.expires_in };
@@ -835,6 +840,22 @@ export class OpenCodeBackend implements AgentBackend {
       throw new Error(
         "Crew status unavailable; check the captain location and crew plugin.",
       );
+    }
+  }
+
+  async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+    try {
+      signal.throwIfAborted();
+      return fleetCrewStatusSchema.parse(
+        await this.client.rpc(CrewReporting).fleetStatus(input, {
+          location: { directory: this.config.directory },
+          signal,
+        }),
+      );
+    } catch {
+      signal.throwIfAborted();
+      // A plugin that predates fleet metadata still serves ordinary status.
+      return undefined;
     }
   }
 

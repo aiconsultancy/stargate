@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { redactCredentials } from "../credentials";
-import type { CrewStatusTask } from "../crew-status";
+import { type CrewStatusTask, crewAssignmentText } from "../crew-status";
 import type { CrewTask } from "./state";
 
 type Activity = Omit<CrewStatusTask, "id" | "status">;
@@ -34,7 +34,9 @@ export class MemberActivityStore {
         task.id,
         task.crewID,
         report ? "report" : "assignment",
-        report ? "Prepare crew activity report" : redactCredentials(text, 180),
+        report
+          ? "Prepare crew activity report"
+          : redactCredentials(crewAssignmentText(text), 180),
         task.status,
         now,
         now,

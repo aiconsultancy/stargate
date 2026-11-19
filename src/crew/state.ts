@@ -500,22 +500,31 @@ export class CrewState {
   }
 
   /** Distinct recorded task/report conversations; bounded keyset pagination. */
-  piHistoryConversations(sessionID: string, after: string, limit: number) {
+  piHistoryConversations(
+    sessionID: string,
+    after: string,
+    limit: number,
+    updatedSince: number | null = null,
+  ) {
     return this.db
       .query<
-        { conversationID: string; title: string },
-        [string, string, number]
+        { conversationID: string; title: string; updatedAt: number | null },
+        [string, string, number, number | null]
       >(
         `SELECT c.conversationID, MAX(CASE WHEN ${reportTask("t.id")}
-        THEN 'report' ELSE 'task' END) AS title
+        THEN 'report' ELSE 'task' END) AS title, MAX(a.updatedAt) AS updatedAt
       FROM pi_task_conversations c JOIN tasks t ON t.id=c.taskID
+      LEFT JOIN member_activity a ON a.taskID=t.id
       JOIN peers p ON p.sessionID=t.workerSessionID AND p.crewID=t.crewID
       JOIN pi_peers pi ON pi.sessionID=p.sessionID
       WHERE p.sessionID=?1 AND c.conversationID<>pi.conversationID
         AND c.conversationID>?2
-      GROUP BY c.conversationID ORDER BY c.conversationID LIMIT ?3`,
+      GROUP BY c.conversationID
+      HAVING ?4 IS NULL OR MAX(a.updatedAt)>=?4
+      ORDER BY CASE WHEN ?4 IS NOT NULL THEN MAX(a.updatedAt) END DESC,
+        c.conversationID LIMIT ?3`,
       )
-      .all(sessionID, after, limit);
+      .all(sessionID, after, limit, updatedSince);
   }
 
   task(id: string): CrewTask | null {

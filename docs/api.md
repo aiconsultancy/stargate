@@ -1,0 +1,135 @@
+# Fleet API v1
+
+Subspace Fleet Console uses the Fleet API to read registrations, crew activity,
+and host metrics. The API can start independently of the
+[Unix-socket dashboard](dashboard.md). It does not start agent work or change
+sessions, queues, or schedules.
+
+## Enable
+
+Add the top-level `api` object to your existing `stargate.json`, alongside your
+transport registrations.
+
+```json
+{
+  "api": {
+    "listen": "127.0.0.1:8484",
+    "allowedNetworks": ["127.0.0.0/8"],
+    "fleetName": "Example fleet"
+  }
+}
+```
+
+Run `stargate config check` and restart Stargate. A bind failure prevents
+startup. Omit `api` to turn the listener off. Use `:8484` to select the default
+loopback host, or `[::1]:8484` for IPv6 loopback. See the
+[configuration reference](configuration.md#fleet-api) for all settings and
+defaults. Every API setting requires a restart.
+
+The listener is private-network only because fleet and host metadata are
+operator data. It accepts literal loopback, RFC 1918, CGNAT (including
+Tailscale IPv4), and IPv6 loopback and ULA addresses. Public addresses and
+wildcard binds such as `0.0.0.0` and `::` are rejected. The CIDR allowlist checks
+the TCP peer address. With a local proxy or tunnel, allow its loopback
+address and enforce remote-client access at the proxy or tunnel.
+
+## Token
+
+Run `stargate api token [--config PATH]` as the service user. It prints the
+bearer token to stdout, creating it if needed. Startup also creates it if
+missing. The token is stored in `<dataDirectory>/api-token` with mode
+`0600`. Keep it private and enter it in Fleet Console.
+
+Run `stargate api token --rotate [--config PATH]` to replace the token. Restart
+Stargate to load the new value and reconnect clients with it. A running
+listener continues using the token it loaded at startup.
+
+## Private access from another machine
+
+Keep the bind on loopback for these setups. Stargate serves HTTP. The
+tunnel or proxy provides the encrypted client connection, and the bearer
+token is still required.
+
+- **Tailscale Serve.** On the gateway host, run
+  `tailscale serve --bg http://127.0.0.1:8484`. Point Fleet Console at the
+  HTTPS URL Serve reports and use tailnet access rules to limit who can
+  connect. Use Serve for tailnet-only access. [Tailscale Serve documentation](https://tailscale.com/docs/reference/tailscale-cli/serve)
+- **Cloudflare Tunnel and Access.** Create an Access application for an
+  HTTPS hostname such as `fleet.example.com` with an explicit allow policy.
+  Route it through a Tunnel to `http://127.0.0.1:8484` and enable Protect with
+  Access so the connector verifies the Access token. Keep the Stargate bearer
+  in the `Authorization` header. For clients using Access session cookies,
+  let Access handle preflight for the exact Space origin and allow
+  credentialed CORS on the proxy response. This requires a WebView that
+  can send the Access cookie with cross-origin requests.
+  [Access-protected applications](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)
+  [Access CORS](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/cors/)
+- **SSH local forwarding.** From the client machine, run
+  `ssh -N -L 127.0.0.1:8484:127.0.0.1:8484 operator@fleet.example.com`
+  and connect to `http://127.0.0.1:8484`.
+
+## Browser origins
+
+By default the API allows `subspace://*` for macOS Spaces and
+`https://subspace.*` for Windows Spaces. Each `*` matches one nonempty
+label using lowercase ASCII letters, digits, or hyphens. Set `corsOrigins`
+to the exact Space origin to narrow the allowlist, such as
+`["subspace://example-space"]`. Include the port when the serialized origin
+has a port. Matching origins receive CORS headers on responses, including
+event streams. An `OPTIONS` preflight for a matching origin allows `GET`,
+`Authorization`, and `Last-Event-ID` without a token.
+
+## Routes
+
+| Route                              | GET response                                                                          |
+| ---------------------------------- | ------------------------------------------------------------------------------------- |
+| `/api/v1/fleet`                    | Fleet overview with captain summaries, host metrics, and gateway version and features |
+| `/api/v1/ships/{id}`               | Ship detail, including crew members                                                   |
+| `/api/v1/ships/{id}/crew/{member}` | One member's detail                                                                   |
+| `/api/v1/events`                   | Server-sent events                                                                    |
+
+`HEAD` returns headers without a body. Unknown ships, members, and routes
+return 404. Missing or invalid tokens receive 401. Repeated authentication
+failures from a peer receive 429 with `Retry-After`. Responses include
+`Cache-Control: no-store`. Times are epoch milliseconds. Host uptime is in
+seconds, and CPU usage is a fraction that becomes available after the first
+five-second sample interval. The gateway caches the OpenCode V2 server version
+for ten minutes. If the probe fails or no OpenCode server is configured, the
+value is null.
+
+## Events
+
+Use a streaming browser `fetch` with an `Authorization` header. A connection
+gets one `fleet` event with host and gateway information, then one `ship`
+event per available ship detail. One shared poller reads the fleet every
+three seconds while clients are connected. It publishes changed fleet and
+ship summaries and `activity` transitions. The stream also sends `host`
+every ten seconds and `heartbeat` every fifteen seconds.
+
+A frame contains an `event:` line, one `data:` line with JSON, and a blank line.
+
+```text
+event: heartbeat
+data: {"at":1730000000000}
+
+```
+
+Up to eight clients can stream at once. Further connections receive 503,
+and streams that fall behind are closed. Reconnect for a new snapshot.
+There is no event replay.
+
+## Curl
+
+On the gateway host or through the SSH example:
+
+```sh
+token=$(stargate api token --config stargate.json)
+
+printf 'Authorization: Bearer %s\n' "$token" |
+  curl --fail --silent --show-error --header @- http://127.0.0.1:8484/api/v1/fleet
+
+printf 'Authorization: Bearer %s\n' "$token" |
+  curl --fail --no-buffer --header @- http://127.0.0.1:8484/api/v1/events
+
+unset token
+```

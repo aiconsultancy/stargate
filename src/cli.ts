@@ -1,8 +1,9 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Schema } from "effect";
+import { apiToken } from "./api/v1/token";
 import { checkCodexConfiguration } from "./backends/codex-paths";
 import { loadConfig } from "./config";
 import { teamSchema } from "./crew/team";
@@ -38,6 +39,7 @@ Commands:
   crew init         Install an OpenCode captain/crew profile
   cron              List, add, run, remove, or report cronjobs
   config check      Validate config, Slack token and IRC credential references
+  api token         Print the Fleet API bearer token
   maintenance       Nightly self-update and host maintenance (plan/run/timer)
   manifest          Print Slack manifest JSON and prefilled creation URL
   status            Read-only capability and recent incident report
@@ -133,6 +135,9 @@ Checks JSON/schema, Slack tokens and IRC password references from the
 environment and <config>.env, IRC caFile, and private IRC client PEM files.
 --schema-only  Check JSON/schema without requiring any credentials
 Does not contact Slack or IRC, or check provider credentials.`,
+  api: `Usage: stargate api token [--config PATH] [--rotate]\n${common}
+Print the Fleet API bearer token to stdout, creating it if missing.
+--rotate  Replace the token. Restart Stargate to use it.`,
   cron: `Usage: stargate cron <list|add|run|remove|report> --bot ID [options]
 --bot ID       Configured bot registration (required)
 --input PATH   Add only: JSON definition file, at most 64 KiB
@@ -184,6 +189,7 @@ function parseCli(args: string[]) {
     name: { type: "string" },
     json: { type: "boolean" },
     "schema-only": { type: "boolean" },
+    rotate: { type: "boolean" },
     id: { type: "string" },
     "app-id": { type: "string" },
     "app-token-env": { type: "string" },
@@ -282,6 +288,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
   ];
   const allowed = new Set([
     "config",
+    ...(command === "api" ? ["rotate"] : []),
     ...(command === "bot"
       ? p[1] === "provision"
         ? ["plan", "apply", "journal", "record-app", "json"]
@@ -491,6 +498,15 @@ export async function runCli(args: string[]): Promise<CliResult> {
       await checkCodexConfiguration(config, configPath);
     }
     console.log("Configuration valid.");
+  } else if (command === "api" && p[1] === "token" && p.length === 2) {
+    const config = await readConfiguration(configPath);
+    if (!config.api)
+      throw new Error("Enable api in the Stargate configuration first.");
+    const token = await apiToken(
+      resolve(dirname(configPath), config.dataDirectory),
+      v.rotate,
+    );
+    process.stdout.write(`${token}\n`);
   } else if (command === "manifest" && p.length === 1) {
     console.log(JSON.stringify(buildManifest(v.name), null, 2));
     if (!v.json)

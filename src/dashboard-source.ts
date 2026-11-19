@@ -6,7 +6,8 @@ import {
   type IrcConfig,
   type TeamsConfig,
 } from "./config";
-import type { CrewStatus } from "./crew-status";
+import type { FleetCrewStatus } from "./crew/fleet-status";
+import type { CrewStatus, CrewStatusInput } from "./crew-status";
 import type { CronStore } from "./cron-store";
 import type {
   DashboardCaptain,
@@ -112,7 +113,11 @@ const RECENT = 20;
 const ROOT_CACHE_MS = 10_000;
 /** Subagents of subagents are rare; a deeper chain is refused, not followed. */
 const MAX_DEPTH = 8;
-type CrewRead = { status: CrewStatus | null; error?: string };
+type CrewRead = {
+  status: CrewStatus | null;
+  error?: string;
+  metadata?: FleetCrewStatus["metadata"];
+};
 
 /**
  * Read-only composition of gateway state for the dashboard. This module owns
@@ -128,7 +133,7 @@ export function dashboardSource(
   >,
   cronStore: Pick<CronStore, "report" | "recentRuns">,
   now: () => number = Date.now,
-): DashboardSource {
+) {
   const crewRoots = new WeakMap<
     DashboardShip,
     { at: number; sessions: HistorySession[] }
@@ -203,10 +208,17 @@ export function dashboardSource(
   async function crew(
     ship: DashboardShip,
     signal: AbortSignal,
+    fleetInput?: CrewStatusInput,
   ): Promise<CrewRead> {
     if (!ship.backend.crewStatus) return { status: null };
     try {
-      return { status: await ship.backend.crewStatus({}, signal) };
+      if (fleetInput && ship.backend.fleetCrewStatus) {
+        const result = await ship.backend.fleetCrewStatus(fleetInput, signal);
+        if (result) return result;
+      }
+      return {
+        status: await ship.backend.crewStatus(fleetInput ?? {}, signal),
+      };
     } catch {
       signal.throwIfAborted();
       return { status: null, error: "Crew status unavailable." };
@@ -311,140 +323,179 @@ export function dashboardSource(
     };
   }
 
-  return {
-    async fleet(signal) {
-      const groups = captains();
-      const reads = new Map<
-        DashboardShip | DashboardCaptain,
-        Promise<CrewRead>
-      >();
-      function sharedCrew(ship: DashboardShip): Promise<CrewRead> {
-        const group = groups.get(ship);
-        const key = group?.view ?? ship;
-        const existing = reads.get(key);
-        if (existing !== undefined) return existing;
-        const read: Promise<CrewRead> = (async (): Promise<CrewRead> => {
-          let last: CrewRead = { status: null };
-          // One successful read per pinned captain. Retry an exact alias only
-          // after a failure; queue and transcript ownership are never shared.
-          for (const member of group?.members ?? [ship]) {
-            const result = await crew(member, signal);
-            if (result.status) return result;
-            if (result.error) last = result;
-          }
-          return last;
-        })();
-        reads.set(key, read);
-        return read;
-      }
-      const summaries = await Promise.all(
-        ships.map(async (ship): Promise<ShipSummary> => {
-          const { status } = await sharedCrew(ship);
+  async function readFleet(
+    signal: AbortSignal,
+    selected?: ReadonlySet<string>,
+  ) {
+    const groups = captains();
+    const reads = new Map<
+      DashboardShip | DashboardCaptain,
+      Promise<CrewRead>
+    >();
+    function sharedCrew(ship: DashboardShip): Promise<CrewRead> {
+      const group = groups.get(ship);
+      const key = group?.view ?? ship;
+      const existing = reads.get(key);
+      if (existing !== undefined) return existing;
+      const read: Promise<CrewRead> = (async (): Promise<CrewRead> => {
+        let last: CrewRead = { status: null };
+        // One successful read per pinned captain. Retry an exact alias only
+        // after a failure; queue and transcript ownership are never shared.
+        for (const member of group?.members ?? [ship]) {
+          const result = await crew(member, signal, selected ? {} : undefined);
+          if (result.status) return result;
+          if (result.error) last = result;
+        }
+        return last;
+      })();
+      reads.set(key, read);
+      return read;
+    }
+    const summaries = await Promise.all(
+      ships
+        .filter((ship) => !selected || selected.has(ship.bot.id))
+        .map(async (ship) => {
+          const read = await sharedCrew(ship);
           const named = agent(ship);
           const captainView = groups.get(ship)?.view;
-          return {
+          const summary: ShipSummary = {
             id: ship.bot.id,
             name: name(ship),
             backend: ship.bot.backend.type,
             ...(ship.transport ? { transport: ship.transport.kind } : {}),
             ...(named ? { agent: named } : {}),
-            crew: status && dashboardCrewSummary(status),
+            crew: read.status && dashboardCrewSummary(read.status),
             ...(captainView ? { captain: captainView } : {}),
             queue: store.queueCounts(ship.key),
             cronjobs: cronStore.report(ship.key).length,
           };
+          return {
+            summary,
+            ...(selected && read.status
+              ? { members: dashboardCrewMembers(read.status) }
+              : {}),
+            ...(read.error ? { error: read.error } : {}),
+            ...(read.metadata ? { metadata: read.metadata } : {}),
+          };
         }),
-      );
-      return { generatedAt: now(), ships: summaries };
+    );
+    return { generatedAt: now(), ships: summaries };
+  }
+
+  async function readShip(
+    id: string,
+    signal: AbortSignal,
+    fleetInput?: CrewStatusInput,
+  ) {
+    const ship = find(id);
+    if (!ship) return undefined;
+    const { bot } = ship;
+    const [{ status, error, metadata }, sessions] = await Promise.all([
+      crew(ship, signal, fleetInput),
+      roots(ship, signal),
+    ]);
+    const named = agent(ship);
+    const model =
+      bot.backend.type === "opencode"
+        ? bot.backend.model &&
+          `${bot.backend.model.providerID}/${bot.backend.model.id}`
+        : bot.backend.type === "pi-durable" ||
+            bot.backend.type === "claude" ||
+            bot.backend.type === "codex"
+          ? bot.backend.model
+          : undefined;
+    const report = bot.cronjobs?.dailyReport;
+    const captainView = captains().get(ship)?.view;
+    const view: ShipView = {
+      generatedAt: now(),
+      id: bot.id,
+      name: name(ship),
+      bot: {
+        id: bot.id,
+        ...(bot.slack
+          ? { slack: { appId: bot.slack.appId, ...ship.identity } }
+          : {}),
+        ...(ship.transport ? { transport: ship.transport } : {}),
+        ...(bot.access
+          ? {
+              access: {
+                users: bot.access.users,
+                channels: bot.access.channels,
+                deniedUsers: bot.access.deniedUsers,
+                deniedChannels: bot.access.deniedChannels,
+                ...(bot.access.mentionOnly !== undefined
+                  ? { mentionOnly: bot.access.mentionOnly }
+                  : {}),
+              },
+            }
+          : {}),
+        backend: {
+          type: bot.backend.type,
+          ...(bot.backend.type === "module"
+            ? {}
+            : { directory: bot.backend.directory }),
+          ...(named ? { agent: named } : {}),
+          ...(model ? { model } : {}),
+        },
+        concurrency: bot.concurrency,
+        turnTimeoutMs: bot.turnTimeoutMs,
+      },
+      crew: status,
+      ...(status ? { crewMembers: dashboardCrewMembers(status) } : {}),
+      ...(captainView ? { captain: captainView } : {}),
+      ...(error ? { crewError: error } : {}),
+      queue: {
+        counts: store.queueCounts(ship.key),
+        recent: store.recentJobs(ship.key, RECENT).map((job) => ({
+          id: job.id,
+          status: job.status,
+          channel: job.channel,
+          thread: job.thread,
+          user: job.user,
+          ...(job.failure ? { failure: job.failure } : {}),
+          deferred: job.deferDelivery === 1,
+        })),
+      },
+      cron: {
+        fileBacked: bot.cronjobs !== undefined,
+        ...(bot.cronjobs && report
+          ? {
+              dailyReport: {
+                channel: report.channel ?? bot.cronjobs.channel,
+                time: report.time,
+                timezone: report.timezone,
+              },
+            }
+          : {}),
+        jobs: cronStore.report(ship.key),
+        runs: cronStore.recentRuns(ship.key, RECENT),
+      },
+      ...sessions,
+    };
+    return { view, metadata };
+  }
+
+  return {
+    async fleet(signal) {
+      const fleet = await readFleet(signal);
+      return {
+        generatedAt: fleet.generatedAt,
+        ships: fleet.ships.map(({ summary }) => summary),
+      };
     },
 
     async ship(id, signal) {
-      const ship = find(id);
-      if (!ship) return undefined;
-      const { bot } = ship;
-      const [{ status, error }, sessions] = await Promise.all([
-        crew(ship, signal),
-        roots(ship, signal),
-      ]);
-      const named = agent(ship);
-      const model =
-        bot.backend.type === "opencode"
-          ? bot.backend.model &&
-            `${bot.backend.model.providerID}/${bot.backend.model.id}`
-          : bot.backend.type === "pi-durable" ||
-              bot.backend.type === "claude" ||
-              bot.backend.type === "codex"
-            ? bot.backend.model
-            : undefined;
-      const report = bot.cronjobs?.dailyReport;
-      const captainView = captains().get(ship)?.view;
-      return {
-        generatedAt: now(),
-        id: bot.id,
-        name: name(ship),
-        bot: {
-          id: bot.id,
-          ...(bot.slack
-            ? { slack: { appId: bot.slack.appId, ...ship.identity } }
-            : {}),
-          ...(ship.transport ? { transport: ship.transport } : {}),
-          ...(bot.access
-            ? {
-                access: {
-                  users: bot.access.users,
-                  channels: bot.access.channels,
-                  deniedUsers: bot.access.deniedUsers,
-                  deniedChannels: bot.access.deniedChannels,
-                  ...(bot.access.mentionOnly !== undefined
-                    ? { mentionOnly: bot.access.mentionOnly }
-                    : {}),
-                },
-              }
-            : {}),
-          backend: {
-            type: bot.backend.type,
-            ...(bot.backend.type === "module"
-              ? {}
-              : { directory: bot.backend.directory }),
-            ...(named ? { agent: named } : {}),
-            ...(model ? { model } : {}),
-          },
-          concurrency: bot.concurrency,
-          turnTimeoutMs: bot.turnTimeoutMs,
-        },
-        crew: status,
-        ...(status ? { crewMembers: dashboardCrewMembers(status) } : {}),
-        ...(captainView ? { captain: captainView } : {}),
-        ...(error ? { crewError: error } : {}),
-        queue: {
-          counts: store.queueCounts(ship.key),
-          recent: store.recentJobs(ship.key, RECENT).map((job) => ({
-            id: job.id,
-            status: job.status,
-            channel: job.channel,
-            thread: job.thread,
-            user: job.user,
-            ...(job.failure ? { failure: job.failure } : {}),
-            deferred: job.deferDelivery === 1,
-          })),
-        },
-        cron: {
-          fileBacked: bot.cronjobs !== undefined,
-          ...(bot.cronjobs && report
-            ? {
-                dailyReport: {
-                  channel: report.channel ?? bot.cronjobs.channel,
-                  time: report.time,
-                  timezone: report.timezone,
-                },
-              }
-            : {}),
-          jobs: cronStore.report(ship.key),
-          runs: cronStore.recentRuns(ship.key, RECENT),
-        },
-        ...sessions,
-      };
+      return (await readShip(id, signal))?.view;
     },
+
+    /** Internal reads. The dashboard HTTP routes use fleet and ship above. */
+    fleetWithCrew: (signal: AbortSignal, selected: ReadonlySet<string>) =>
+      readFleet(signal, selected),
+    shipWithCrew: (
+      id: string,
+      signal: AbortSignal,
+      input: CrewStatusInput = {},
+    ) => readShip(id, signal, input),
 
     async children(id, input, signal) {
       const ship = find(id);
@@ -455,7 +506,10 @@ export function dashboardSource(
       const page = await history.children(
         {
           parentID: input.parentID,
-          limit: HISTORY_PAGE,
+          limit: input.limit ?? HISTORY_PAGE,
+          ...(input.updatedSince !== undefined
+            ? { updatedSince: input.updatedSince }
+            : {}),
           ...(input.cursor ? { cursor: input.cursor } : {}),
         },
         signal,
@@ -474,5 +528,20 @@ export function dashboardSource(
         return undefined;
       return history.entries(input, signal);
     },
+  } satisfies DashboardSource & {
+    fleetWithCrew: (
+      signal: AbortSignal,
+      selected: ReadonlySet<string>,
+    ) => ReturnType<typeof readFleet>;
+    shipWithCrew: (
+      id: string,
+      signal: AbortSignal,
+      input?: CrewStatusInput,
+    ) => ReturnType<typeof readShip>;
   };
 }
+
+export type DashboardFleetSource = Pick<
+  ReturnType<typeof dashboardSource>,
+  "fleetWithCrew" | "shipWithCrew" | "children"
+>;

@@ -13,6 +13,8 @@ separate links and queue counts for each transport:
   for OpenCode and Pi Durable sessions.
 
 It starts no model work and changes no session, queue, schedule or file.
+For Subspace Fleet Console over a private network, enable the separate
+[Fleet API](api.md).
 
 ## Enable
 
@@ -24,8 +26,8 @@ Add one top-level setting to `stargate.json`, then restart Stargate:
 
 Stargate serves the page on a Unix socket, `<dataDirectory>/dashboard.sock`.
 The socket has mode `0600` in a directory with mode `0700`. Only the same
-operating-system user can connect. There is no TCP listener and no setting
-that creates one. A stale socket from an earlier run is replaced; the
+operating-system user can connect. The dashboard listens only on its Unix
+socket. A stale socket from an earlier run is replaced; the
 instance lock on the data directory proves that no other Stargate owns it.
 
 Startup fails when the socket cannot be created. Later request errors never

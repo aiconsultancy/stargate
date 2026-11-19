@@ -21,6 +21,7 @@ import {
   type IrcConfig,
 } from "./config";
 import { clientPem } from "./irc/client-pem";
+import { settingsIssues } from "./settings-schema";
 
 export function buildManifest(name = "Stargate") {
   if (!name.trim() || name.length > 80)
@@ -166,18 +167,22 @@ export async function checkCredentials(
 }
 
 export async function readConfiguration(path: string) {
+  const invalid =
+    "Cannot read a valid configuration. Check path, JSON, bot IDs, and allowlists.";
+  let input: unknown;
   try {
     if (!(await lstat(path)).isFile()) throw new Error("Not a regular file");
-    const parsed = Schema.decodeUnknownResult(configSchema)(
-      JSON.parse(await readFile(path, "utf8")),
-    );
-    if (Result.isFailure(parsed)) throw new Error("Invalid schema");
-    return parsed.success;
+    input = JSON.parse(await readFile(path, "utf8"));
   } catch {
-    throw new Error(
-      "Cannot read a valid configuration. Check path, JSON, bot IDs, and allowlists.",
-    );
+    throw new Error(invalid);
   }
+  const parsed = Schema.decodeUnknownResult(configSchema)(input);
+  if (Result.isSuccess(parsed)) return parsed.success;
+  const apiIssues = settingsIssues(parsed.failure.issue).issues.flatMap(
+    ({ path, message }) =>
+      path?.[0] === "api" ? [`${path.join(".")}: ${message}`] : [],
+  );
+  throw new Error(apiIssues.length ? apiIssues.join("\n") : invalid);
 }
 
 async function atomicWrite(path: string, contents: string) {
@@ -406,6 +411,9 @@ export async function setupWizard(configPath: string) {
     await addBot(configPath, bot, { app, bot: token });
     console.log(
       "Bot added. Credentials saved in the mode-0600 .env companion.",
+    );
+    console.log(
+      "If you enable the Fleet API, use stargate api token to retrieve its token.",
     );
   } finally {
     rl.close();
