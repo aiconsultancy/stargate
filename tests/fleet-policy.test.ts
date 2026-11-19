@@ -58,6 +58,15 @@ test("fleet controls are explicit and preserve human authority", () => {
   expect(fleetInstructions(policy)).toContain(
     "rank grants no human approval authority",
   );
+  expect(fleetInstructions(policy)).toContain(
+    "reviewability, complexity and business risk",
+  );
+  expect(fleetInstructions(policy)).toContain(
+    "Human-only approval and deployment gates still apply.",
+  );
+  expect(fleetInstructions({ ...policy, role: "captain" })).not.toContain(
+    "Recommend PR scope",
+  );
   const rules = fleetPermissions(policy);
   expect(rules[0]).toEqual({ action: "*", resource: "*", effect: "deny" });
   expect(

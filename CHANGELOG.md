@@ -11,6 +11,9 @@
 
 ### Changes
 
+- Guide new ships on choosing reviewable pull requests by complexity and
+  risk. Existing ships can add the guidance to their working agreement.
+
 - Allow longer IRC peer handoffs by default. Set `access.peerTurnsPerHour`
   to `5` to retain the previous default. Slack keeps its existing default.
 

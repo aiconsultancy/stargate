@@ -71,7 +71,7 @@ export function fleetInstructions(
         ]
       : []),
     policy.role === "rear_admiral"
-      ? "Coordinate captains, read code and use only the configured tools and capabilities. Human-only approval and deployment gates still apply."
+      ? "Coordinate captains, read code and use only the configured tools and capabilities. Recommend PR scope based on repository rules, reviewability, complexity and business risk. Weigh the benefit of isolating risk or easing review against another CI, review and merge cycle. Human-only approval and deployment gates still apply."
       : "Follow the assigned repository's delivery and review rules.",
   ].join("\n");
 }

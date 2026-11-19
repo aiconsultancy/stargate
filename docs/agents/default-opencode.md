@@ -38,6 +38,22 @@ may use Linear read/write tools for their assigned tasks, including ticket
 updates and comments. This is not permission for unrelated changes or
 workspace administration. Follow the target project's delivery rules.
 
+## Pull request scope
+
+A new ship's default `WAYS_OF_WORKING.md` gives captains and crew a shared
+delivery rule. Group related low-risk changes with their tests and docs when
+the project permits it and reviewers can verify them together. Lead with a
+complete, testable user-visible change where practical. Split when risk, rollback, reviewability or independent
+delivery justifies another build, review and merge cycle. Repository rules
+govern each PR. Report implementation, compilation, cache waits, tests,
+reviews and approvals separately in the delivery record. Fleet rear admirals
+consider the same trade-offs when advising captains.
+
+The initializer preserves an existing ship's agreement. Its captain or operator
+can add the [PR scope section](../../templates/ways-of-working.md#pull-request-scope)
+to that file separately. Captains and crew are instructed to reread the
+agreement when it changes.
+
 ## Generated prompt boundaries
 
 Generated captain and OpenCode crew definitions keep YAML frontmatter first.
