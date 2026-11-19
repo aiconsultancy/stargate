@@ -199,6 +199,7 @@ async function world(
   results = true,
   targetAccount = "captain",
   sharedCommand = false,
+  peerTurnsPerHour?: number,
 ) {
   const directory = await realpath(
     await mkdtemp(join(tmpdir(), "sg-fleet-result-")),
@@ -272,6 +273,7 @@ async function world(
       access: {
         allowedAccounts: ["operator", peer],
         peerCaptains: [peer],
+        peerTurnsPerHour,
         ...(sharedCommand && backend.account === "captain"
           ? { wakeChannels: ["#captain"] }
           : { channelRequests: "nick-mention" }),
@@ -1146,50 +1148,57 @@ for (const [accepted, later] of [
   });
 }
 
-test("ordinary addressed peer feedback is bounded to five turns per conversation and never becomes approval", async () => {
-  const f = await world(true, "captain", true);
-  f.vance.handler = async () => "captain: deterministic peer reply";
-  f.captain.handler = async () => "vance: deterministic peer reply";
-  f.fake.say(
-    { nick: "captain", account: "captain" },
-    "#command",
-    "vance: start bounded peer exchange",
-    { bot: "" },
-  );
-  for (let turn = 0; turn < 10; turn++) {
-    const entry =
-      turn % 2 === 0
-        ? ([f.ownerIrc.gateway, f.ownerStore] as const)
-        : ([f.targetIrc.gateway, f.captainStore] as const);
-    const [gateway, store] = entry;
-    await until(
-      () => store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1).length === 1,
-      2000,
-      "next addressed peer turn",
+test.each([
+  { scenario: "explicit override", configured: 3, limit: 3 },
+  { scenario: "default", configured: undefined, limit: 30 },
+])(
+  "ordinary addressed peer feedback follows the $scenario cap and grants no human approval",
+  async ({ configured, limit }) => {
+    const f = await world(true, "captain", true, configured);
+    f.vance.handler = async () => "captain: deterministic peer reply";
+    f.captain.handler = async () => "vance: deterministic peer reply";
+    f.fake.say(
+      { nick: "captain", account: "captain" },
+      "#command",
+      "vance: start bounded peer exchange",
+      { bot: "" },
     );
-    const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
-    if (!job) throw new Error("Missing bounded peer job");
-    expect(job.fleet).toBeUndefined();
-    expect(job.sender).toBe("captain");
-    await gateway.process(job, signal());
-  }
-  await Bun.sleep(80);
-  expect(f.vance.calls).toHaveLength(5);
-  expect(f.captain.calls).toHaveLength(5);
-  expect(
-    [...f.vance.calls, ...f.captain.calls].every(
-      (call) => call.context?.source.authority === "agent",
-    ),
-  ).toBe(true);
-  for (const [gateway, store] of [
-    [f.ownerIrc.gateway, f.ownerStore],
-    [f.targetIrc.gateway, f.captainStore],
-  ] as const)
-    expect(store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 100)).toHaveLength(
-      0,
-    );
-  expect(f.owner.pendingResults()).toHaveLength(0);
-});
+    for (let turn = 0; turn < limit * 2; turn++) {
+      const entry =
+        turn % 2 === 0
+          ? ([f.ownerIrc.gateway, f.ownerStore] as const)
+          : ([f.targetIrc.gateway, f.captainStore] as const);
+      const [gateway, store] = entry;
+      await until(
+        () => store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1).length === 1,
+        2000,
+        "next addressed peer turn",
+      );
+      const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+      if (!job) throw new Error("Missing bounded peer job");
+      expect(job.fleet).toBeUndefined();
+      expect(job.sender).toBe("captain");
+      await gateway.process(job, signal());
+    }
+    await Bun.sleep(80);
+    expect(f.vance.calls).toHaveLength(limit);
+    expect(f.captain.calls).toHaveLength(limit);
+    expect(
+      [...f.vance.calls, ...f.captain.calls].every(
+        (call) => call.context?.source.authority === "agent",
+      ),
+    ).toBe(true);
+    for (const [gateway, store] of [
+      [f.ownerIrc.gateway, f.ownerStore],
+      [f.targetIrc.gateway, f.captainStore],
+    ] as const)
+      expect(
+        store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 100),
+      ).toHaveLength(0);
+    expect(f.owner.pendingResults()).toHaveLength(0);
+  },
+  15_000,
+);
 
 test("fleet results: queued and recovered ordinary peer jobs are retained but refused before native work or delivery", async () => {
   const f = await world();

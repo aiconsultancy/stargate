@@ -5,10 +5,14 @@
 ### Feature flags
 
 - New flags: none.
-- Default changes: none.
+- Default changes: IRC's peer-turn limit rises from 5 to 30 per receiving
+  connection and conversation in a rolling hour.
 - Enabled by default: none.
 
 ### Changes
+
+- Allow longer IRC peer handoffs by default. Set `access.peerTurnsPerHour`
+  to `5` to retain the previous default. Slack keeps its existing default.
 
 - Retry Slack startup DNS/network failures and later disconnects with bounded
   backoff. Require a connected transport before readiness and expose connection

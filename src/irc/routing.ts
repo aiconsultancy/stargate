@@ -7,7 +7,7 @@ import {
 } from "../config";
 import { fleetAuthority } from "../fleet-policy";
 import { findMention } from "../mentions";
-import { peerTurnsPerHour } from "../peers";
+import { defaultIrcPeerTurnsPerHour, peerWindowMs } from "../peers";
 import type { Incoming, Job } from "../store";
 import { cleanText, fold, type IrcMessage, validMsgid } from "./protocol";
 
@@ -515,7 +515,7 @@ export type IrcLimits = {
   }): number;
 };
 
-export const ircWindowMs = 60 * 60_000;
+export const ircWindowMs = peerWindowMs;
 
 /**
  * Ship agents configured in a channel: the captain when it lists the
@@ -560,8 +560,8 @@ export function agentTurn(
 }
 
 /**
- * Peer captains: at most five messages per conversation (channel or direct
- * message) in a rolling hour. Ship accounts (captain and crew): at most
+ * Peer captains: up to the configured peer limit per receiving connection and
+ * conversation in a rolling hour. Ship accounts (captain and crew): at most
  * `shipTurnsPerAgentPerHour` × the ship agents configured in the channel,
  * per channel across the whole ship; in a direct message between two ship
  * agents, `shipTurnsPerAgentPerHour` × 2 for that conversation.
@@ -580,7 +580,7 @@ export function withinLimits(
         sender: "captain",
         since,
         scope: { conversation: admission.conversation },
-      }) < (config.access.peerTurnsPerHour ?? peerTurnsPerHour)
+      }) < (config.access.peerTurnsPerHour ?? defaultIrcPeerTurnsPerHour)
     );
   if (admission.sender === "crew") {
     // A channel's cap scales with the ship agents configured in it. A direct
@@ -660,7 +660,8 @@ text only: write short paragraphs and lists, no tables or headings.
 ;k=captain marks another fleet captain (peer rules apply). ;k=crew marks an
 account of this ship. [Admitted by text mention: WORD] with an all-call word
 (by default: all hands, all crew, everyone) is an all-call to every agent in
-that channel.
+that channel. The default IRC peer limit is ${defaultIrcPeerTurnsPerHour} turns per receiving
+connection and conversation in a rolling hour. Operators can override it.
 ${ircResponsePolicy}
 You coordinate the crew. Crew speak to you, not to each other. To give a crew
 member work or information, use stargate_dm when you need a reply now, stargate_mail

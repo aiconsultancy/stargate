@@ -509,9 +509,9 @@ const ircConfiguredSchema = z.strictObject({
         .array(mentionNameSchema)
         .max(20)
         .default([...defaultAllCallWords]),
-      /** Accounts of other fleet captains: peer rules, 5 per target an hour. */
+      /** Authenticated accounts of other fleet captains. */
       peerCaptains: z.array(ircAccount).max(50).optional(),
-      /** Peer turns per conversation/hour; absent keeps the default of five. */
+      /** Peer turns per receiving connection and conversation in a rolling hour; defaults to 30. */
       peerTurnsPerHour: z.number().int().min(0).max(600).optional(),
       /**
        * Ship (captain/crew) messages admitted per agent in a rolling hour.
