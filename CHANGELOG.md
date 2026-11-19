@@ -4,14 +4,8 @@
 
 ### Feature flags
 
-- New flags: `maintenance.drain.enabled` (default **off**), with
-  `maintenance.drain.deadlineMinutes` (default **10**, range 1–1440).
-- New flags: `slack.steerThreadFollowUps` and
-  `irc[].features.steerThreadFollowUps`, both default **off**. They deliver
-  same-thread follow-ups to a running OpenCode turn as steering input.
-- New flag: the top-level `api` object enables the Fleet API (default **off**).
-- Default changes: IRC's peer-turn limit rises from 5 to 30 per receiving
-  connection and conversation in a rolling hour.
+- New flags: none.
+- Default changes: none.
 - Enabled by default: none.
 
 ### Changes
@@ -20,9 +14,34 @@
   from `.stargate-release.json`, not the package version, which stays at
   `0.1.0`. Source checkouts still report the package version.
 
+## 0.40.0
+
+### Feature flags
+
+- New flag: the top-level `api` object enables the Fleet API (default **off**).
+- Default changes: none.
+- Enabled by default: none.
+
+### Changes
+
 - Add a private-network, read-only Fleet API with bearer authentication,
   host metrics and streamed fleet events for Subspace. See the
   [Fleet API setup guide](docs/api.md).
+
+## 0.39.0
+
+### Feature flags
+
+- New flags: `maintenance.drain.enabled` (default **off**), with
+  `maintenance.drain.deadlineMinutes` (default **10**, range 1–1440).
+- New flags: `slack.steerThreadFollowUps` and
+  `irc[].features.steerThreadFollowUps`, both default **off**. They deliver
+  same-thread follow-ups to a running OpenCode turn as steering input.
+- Default changes: IRC's peer-turn limit rises from 5 to 30 per receiving
+  connection and conversation in a rolling hour.
+- Enabled by default: none.
+
+### Changes
 
 - Opt-in maintenance restart drain: queue a passive notice for captains and
   crew, hold new work in existing durable queues, wait for idle or the drain
