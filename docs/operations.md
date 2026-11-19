@@ -43,6 +43,7 @@ A different thread or DM remains in the existing queue. A short queue notice
 explains that it is waiting behind another request. Idle captains retain normal
 turn admission. Stop buttons, local meta commands and clarification controls
 retain their own handling; they are never converted to steering input.
+An active maintenance drain also queues follow-ups instead of extending the turn.
 
 If native steering is definitely refused, for example while a form or permission
 prompt is pending, the follow-up goes into the normal queue with a notice.

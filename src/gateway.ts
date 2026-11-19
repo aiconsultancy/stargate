@@ -606,6 +606,7 @@ export class Gateway {
         ? this.transport.source({ ...owner, ...input })
         : undefined;
       const allowed = () =>
+        !this.drain?.held() &&
         this.allowed(input) &&
         this.backend.sessionID === receipt.sessionID &&
         (this.bot

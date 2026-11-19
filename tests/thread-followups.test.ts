@@ -5,6 +5,7 @@ import { join } from "node:path";
 import pino from "pino";
 import type { AgentBackend, SteerResult } from "../src/backend";
 import { Gateway, type SlackDelivery } from "../src/gateway";
+import type { DrainControl } from "../src/maintenance-drain";
 import { Store } from "../src/store";
 import { bot, event, identity } from "./fixtures";
 
@@ -14,7 +15,7 @@ afterEach(() => {
   for (const store of stores.splice(0)) store.close();
 });
 
-function fixture(enabled = true) {
+function fixture(enabled = true, drain?: DrainControl) {
   const config = bot();
   if (config.backend.type !== "opencode")
     throw new Error("Expected OpenCode config");
@@ -59,6 +60,13 @@ function fixture(enabled = true) {
     backend,
     slack,
     pino({ enabled: false }),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    drain,
   );
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
@@ -180,6 +188,18 @@ test("completed ownership and Stop during preflight prevent a native steer", asy
   await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
   expect(f.writes).toEqual([]);
   expect(f.store.queueCounts(f.gateway.key).queued).toBe(1);
+});
+
+test("a maintenance drain queues follow-ups instead of extending the running native turn", async () => {
+  let held = false;
+  const f = fixture(true, { held: () => held, tick() {}, attach() {} });
+  f.start();
+  f.gateway.accept(f.follow());
+  held = true;
+  await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
+  expect(f.writes).toEqual([]);
+  expect(f.store.queueCounts(f.gateway.key).queued).toBe(1);
+  expect(f.posts[0]?.text).toContain("queued");
 });
 
 test("files, denied users, bot senders and meta controls never steer", async () => {
