@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import { maxAttachments } from "./attachments";
 import type { BotConfig } from "./config";
 import { markdownChunks } from "./markdown-chunks";
@@ -10,32 +10,39 @@ import {
   notificationNote,
 } from "./notifications";
 import type { PeerSender } from "./peers";
+import { settingsDefault, settingsPattern } from "./settings-schema";
 
-const eventSchema = z.object({
-  type: z.enum(["app_mention", "message"]),
-  channel: z.string(),
-  user: z.string(),
-  text: z.string().max(40_000).default(""),
-  files: z
-    .array(z.object({ id: z.string().regex(/^F[A-Z0-9]+$/) }))
-    .max(maxAttachments)
-    .optional(),
-  ts: z.string().regex(/^\d+\.\d+$/),
-  thread_ts: z
-    .string()
-    .regex(/^\d+\.\d+$/)
-    .optional(),
-  channel_type: z.string().optional(),
-  bot_id: z.string().optional(),
-  subtype: z.string().optional(),
-  hidden: z.boolean().optional(),
+const eventSchema = Schema.Struct({
+  type: Schema.Literals(["app_mention", "message"]),
+  channel: Schema.String,
+  user: Schema.String,
+  text: Schema.String.check(Schema.isMaxCodePoints(40_000)).pipe(
+    settingsDefault(""),
+  ),
+  files: Schema.optional(
+    Schema.mutable(
+      Schema.Array(
+        Schema.Struct({
+          id: Schema.String.check(settingsPattern(/^F[A-Z0-9]+$/)),
+        }),
+      ),
+    ).check(Schema.isMaxLength(maxAttachments)),
+  ),
+  ts: Schema.String.check(settingsPattern(/^\d+\.\d+$/)),
+  thread_ts: Schema.optional(
+    Schema.String.check(settingsPattern(/^\d+\.\d+$/)),
+  ),
+  channel_type: Schema.optional(Schema.String),
+  bot_id: Schema.optional(Schema.String),
+  subtype: Schema.optional(Schema.String),
+  hidden: Schema.optional(Schema.Boolean),
 });
 
-export const envelopeSchema = z.object({
-  api_app_id: z.string(),
-  team_id: z.string(),
-  event_id: z.string(),
-  event: z.unknown(),
+export const envelopeSchema = Schema.Struct({
+  api_app_id: Schema.String,
+  team_id: Schema.String,
+  event_id: Schema.String,
+  event: Schema.optional(Schema.Unknown),
 });
 
 export type Identity = { team: string; user: string };
@@ -91,14 +98,14 @@ export function routeEvent(
   peer?: PeerSender,
   notifications?: NotificationReader,
 ) {
-  const parsed = envelopeSchema.safeParse(raw);
-  if (!parsed.success) return;
-  const body = parsed.data;
+  const parsed = Schema.decodeUnknownResult(envelopeSchema)(raw);
+  if (Result.isFailure(parsed)) return;
+  const body = parsed.success;
   if (body.api_app_id !== config.slack.appId || body.team_id !== identity.team)
     return;
-  const result = eventSchema.safeParse(body.event);
-  if (!result.success) return;
-  const event = result.data;
+  const result = Schema.decodeUnknownResult(eventSchema)(body.event);
+  if (Result.isFailure(result)) return;
+  const event = result.success;
   const captain =
     event.bot_id !== undefined &&
     config.access.peerCaptains &&

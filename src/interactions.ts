@@ -1,23 +1,28 @@
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import type { SlackInteractions } from "./slack";
 
-const commandName = z.object({
-  command: z.string(),
-  text: z.string().optional(),
+const commandName = Schema.Struct({
+  command: Schema.String,
+  text: Schema.optional(Schema.String),
 });
-const pairingAction = z.union([
-  z.object({ view: z.object({ callback_id: z.literal("stargate_pair") }) }),
-  z.object({
-    actions: z
-      .array(z.unknown())
-      .refine((actions) =>
-        actions.some(
-          (action) =>
-            z
-              .object({ action_id: z.literal("stargate_pair_generate") })
-              .safeParse(action).success,
+const pairingAction = Schema.Union([
+  Schema.Struct({
+    view: Schema.Struct({ callback_id: Schema.Literal("stargate_pair") }),
+  }),
+  Schema.Struct({
+    actions: Schema.mutable(Schema.Array(Schema.Unknown)).check(
+      Schema.makeFilter((actions) =>
+        actions.some((action) =>
+          Result.isSuccess(
+            Schema.decodeUnknownResult(
+              Schema.Struct({
+                action_id: Schema.Literal("stargate_pair_generate"),
+              }),
+            )(action),
+          ),
         ),
       ),
+    ),
   }),
 ]);
 
@@ -34,21 +39,21 @@ export function controlInteractions(
 ): SlackInteractions {
   return {
     async command(body, ack) {
-      const parsed = commandName.safeParse(body);
+      const parsed = Schema.decodeUnknownResult(commandName)(body);
       if (
-        parsed.success &&
-        parsed.data.command === "/stargate" &&
-        parsed.data.text === "pair"
+        Result.isSuccess(parsed) &&
+        parsed.success.command === "/stargate" &&
+        parsed.success.text === "pair"
       )
         await pairing.command(body, ack);
       else if (
-        parsed.success &&
-        parsed.data.command === "/stargate" &&
-        /^(?:crew|usage)(?:\s|$)/.test(parsed.data.text ?? "") &&
+        Result.isSuccess(parsed) &&
+        parsed.success.command === "/stargate" &&
+        /^(?:crew|usage)(?:\s|$)/.test(parsed.success.text ?? "") &&
         crew
       )
         await crew.command(body, ack);
-      else if (parsed.success && parsed.data.command === "/cron")
+      else if (Result.isSuccess(parsed) && parsed.success.command === "/cron")
         await cron.command(body, ack);
       else
         await ack({
@@ -57,7 +62,7 @@ export function controlInteractions(
         });
     },
     async interactive(body, ack) {
-      if (pairingAction.safeParse(body).success)
+      if (Result.isSuccess(Schema.decodeUnknownResult(pairingAction)(body)))
         await pairing.interactive(body, ack);
       else if (config && (await config(body, ack))) return;
       else if (cancel(body)) await ack();

@@ -283,7 +283,9 @@ export class SlackQuestionControls {
     const binding = this.store.slackQuestion(token);
     if (!owner || !binding) return;
     try {
-      const question = nativeQuestionSchema.parse(JSON.parse(binding.question));
+      const question = Schema.decodeUnknownSync(nativeQuestionSchema)(
+        JSON.parse(binding.question),
+      );
       if (
         !Number.isInteger(binding.revision) ||
         binding.revision < 0 ||
@@ -427,7 +429,7 @@ export class SlackQuestionControls {
       question.inputID !== offer.inputID
     )
       throw new Error("Clarification publication refused");
-    const trusted = nativeQuestionSchema.parse(question);
+    const trusted = Schema.decodeUnknownSync(nativeQuestionSchema)(question);
     if (trusted.fields.length > 1 && !this.slack.update)
       throw new Error("Clarification updates unavailable");
     const panel = buildQuestionBlocks(trusted, offer.token);

@@ -7,8 +7,8 @@ This migration does not upgrade Effect or the SDKs.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**. Ten migration PRs are
-merged. That leaves eight component batches. One contingency split can bring the
+The revised target is **18 migration PRs in total**. Eleven migration PRs are
+merged. That leaves seven component batches. One contingency split can bring the
 total to 19, still below 20. Report a proposed
 budget change before opening another PR; do not weaken verification to fit it.
 
@@ -35,6 +35,7 @@ Completed:
 - [Crew identities, teams, models and profiles](https://github.com/aiconsultancy/stargate/pull/67).
 - [Crew execution and recovery](https://github.com/aiconsultancy/stargate/pull/70).
 - [Crew messages, history and local RPC](https://github.com/aiconsultancy/stargate/pull/71).
+- [Fleet protocols](https://github.com/aiconsultancy/stargate/pull/72).
 
 The first batch-6 timing pair failed at +18.27%. Its diagnostic pair measured
 +2.63% with retained coverage; this is not a performance repair. The earlier
@@ -42,15 +43,10 @@ batch-4 first-pair +10.9% failure also remains recorded.
 
 ## Remaining component batches
 
-The numbers include the ten completed PRs. File names identify primary scope,
+The numbers include the eleven completed PRs. File names identify primary scope,
 not a restriction against updating a coupled consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
 
-11. Fleet protocols. Migrate runtime dispatch, review, verification, results and
-    stored fleet records in `fleet/`, including plugin options, tool/query
-    parents and actual direct consumers. Include fleet-only Store job/maker
-    decoding and writes. Reuse native fleet configuration and policy codecs;
-    leave unrelated queue-row validators with batch 12.
 12. Chat routing and interaction envelopes. Migrate `routing.ts`,
     `interactions.ts`, `cancellation.ts`, `meta-commands.ts`, `questions.ts`,
     `pairing.ts`, `peers.ts`, `thread-context.ts`, `crew-ui.ts`, `irc/` and

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import type { BotConfig } from "./config";
 import type { NotificationPage } from "./notification-store";
 import {
@@ -10,6 +10,11 @@ import {
   questionSettingsPath,
   resolveQuestionSettings,
 } from "./question-settings";
+import {
+  settingsPattern,
+  settingsStartsWith,
+  settingsStruct,
+} from "./settings-schema";
 import type { SlackPanelContent } from "./slack-format";
 import { resolveWaiting, waitingSettingsPath } from "./waiting";
 
@@ -21,23 +26,27 @@ export const configPanelRefused =
 export const configPanelUnavailable =
   "Config panel unavailable; use the typed /config commands.";
 
-export const configSnapshotSchema = z.strictObject({
-  delayMs: z.number().int().min(0).max(3_600_000).nullable(),
-  waitingFingerprint: z.string(),
-  // Existing panel boundary remains Zod until its component migration.
-  questions: z.custom<QuestionSettings>((value) => {
-    try {
-      decodeQuestionSettings(value);
-      return true;
-    } catch {
-      return false;
-    }
-  }),
-  questionsFingerprint: z.string(),
-  mutes: z.string(),
-  mutesFingerprint: z.string(),
+export const configSnapshotSchema = settingsStruct({
+  delayMs: Schema.NullOr(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 3_600_000 })),
+  ),
+  waitingFingerprint: Schema.String,
+  // Validate with the settings owner, but retain the original object and order.
+  questions: Schema.declare<QuestionSettings>(
+    (value): value is QuestionSettings => {
+      try {
+        decodeQuestionSettings(value);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  ),
+  questionsFingerprint: Schema.String,
+  mutes: Schema.String,
+  mutesFingerprint: Schema.String,
 });
-export type ConfigPanelSnapshot = z.infer<typeof configSnapshotSchema>;
+export type ConfigPanelSnapshot = typeof configSnapshotSchema.Type;
 export type ConfigPanelRow = {
   id: string;
   title: string;
@@ -126,7 +135,13 @@ async function settingsFingerprint(
       await file.close();
     }
   } catch (error) {
-    if (z.object({ code: z.literal("ENOENT") }).safeParse(error).success)
+    if (
+      Result.isSuccess(
+        Schema.decodeUnknownResult(
+          Schema.Struct({ code: Schema.Literal("ENOENT") }),
+        )(error),
+      )
+    )
       return "absent";
     throw error;
   }
@@ -184,46 +199,62 @@ export function sameConfigSnapshot(
   );
 }
 
-const timestamp = z.string().regex(/^\d{1,16}\.\d{1,6}$/);
-export const configActionSchema = z.object({
-  type: z.literal("block_actions"),
-  api_app_id: z.string(),
-  team: z.object({ id: z.string() }),
-  user: z.object({
-    id: z.string().regex(/^[UW][A-Z0-9]+$/),
-    is_bot: z.literal(false).optional(),
-    bot_id: z.never().optional(),
+const timestamp = Schema.String.check(settingsPattern(/^\d{1,16}\.\d{1,6}$/));
+export const configActionSchema = Schema.Struct({
+  type: Schema.Literal("block_actions"),
+  api_app_id: Schema.String,
+  team: Schema.Struct({ id: Schema.String }),
+  user: Schema.Struct({
+    id: Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
+    is_bot: Schema.optional(Schema.Literal(false)),
+    bot_id: Schema.optional(Schema.Never),
   }),
-  bot_id: z.never().optional(),
-  channel: z.object({ id: z.string().regex(/^[CGD][A-Z0-9]+$/) }),
-  container: z.object({
-    type: z.literal("message"),
-    channel_id: z.string(),
+  bot_id: Schema.optional(Schema.Never),
+  channel: Schema.Struct({
+    id: Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
+  }),
+  container: Schema.Struct({
+    type: Schema.Literal("message"),
+    channel_id: Schema.String,
     message_ts: timestamp,
-    is_ephemeral: z.literal(false).optional(),
+    is_ephemeral: Schema.optional(Schema.Literal(false)),
   }),
-  message: z.object({ user: z.string(), ts: timestamp, thread_ts: timestamp }),
-  actions: z
-    .array(
-      z.object({
-        type: z.literal("button"),
-        action_id: z.string().max(255).startsWith(configActionPrefix),
-        value: z.string().regex(/^[a-f0-9-]{36}:(?:0|[1-9]\d{0,8})$/),
+  message: Schema.Struct({
+    user: Schema.String,
+    ts: timestamp,
+    thread_ts: timestamp,
+  }),
+  actions: Schema.mutable(
+    Schema.Array(
+      Schema.Struct({
+        type: Schema.Literal("button"),
+        action_id: Schema.String.check(
+          Schema.isMaxCodePoints(255),
+          settingsStartsWith(configActionPrefix),
+        ),
+        value: Schema.String.check(
+          settingsPattern(/^[a-f0-9-]{36}:(?:0|[1-9]\d{0,8})$/),
+        ),
         action_ts: timestamp,
       }),
-    )
-    .length(1),
+    ),
+  ).check(Schema.isBetweenLength(1, 1)),
 });
 
 /** Only this namespace is consumed, even if its remaining payload is malformed. */
 export function configActionCandidate(raw: unknown): boolean {
-  const parsed = z.object({ actions: z.array(z.unknown()) }).safeParse(raw);
+  const parsed = Schema.decodeUnknownResult(
+    Schema.Struct({ actions: Schema.mutable(Schema.Array(Schema.Unknown)) }),
+  )(raw);
   return (
-    parsed.success &&
-    parsed.data.actions.some((entry) => {
-      const action = z.object({ action_id: z.string() }).safeParse(entry);
+    Result.isSuccess(parsed) &&
+    parsed.success.actions.some((entry) => {
+      const action = Schema.decodeUnknownResult(
+        Schema.Struct({ action_id: Schema.String }),
+      )(entry);
       return (
-        action.success && action.data.action_id.startsWith(configActionPrefix)
+        Result.isSuccess(action) &&
+        action.success.action_id.startsWith(configActionPrefix)
       );
     })
   );
@@ -231,14 +262,18 @@ export function configActionCandidate(raw: unknown): boolean {
 
 /** An ephemeral refusal must not turn untrusted routing fields into a sender. */
 export function configReplyTarget(raw: unknown, bot: BotConfig, team: string) {
-  const parsed = z
-    .object({
-      api_app_id: z.literal(bot.slack.appId),
-      team: z.object({ id: z.literal(team) }),
-      channel: z.object({ id: z.string().regex(/^[CGD][A-Z0-9]+$/) }),
-      user: z.object({ id: z.string().regex(/^[UW][A-Z0-9]+$/) }),
-      message: z.object({ thread_ts: timestamp }),
-    })
-    .safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
+  const parsed = Schema.decodeUnknownResult(
+    Schema.Struct({
+      api_app_id: Schema.Literal(bot.slack.appId),
+      team: Schema.Struct({ id: Schema.Literal(team) }),
+      channel: Schema.Struct({
+        id: Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
+      }),
+      user: Schema.Struct({
+        id: Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
+      }),
+      message: Schema.Struct({ thread_ts: timestamp }),
+    }),
+  )(raw);
+  return Result.isSuccess(parsed) ? parsed.success : undefined;
 }

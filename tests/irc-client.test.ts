@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import pino from "pino";
@@ -171,6 +171,62 @@ test("irc client: disconnect rejects a written send awaiting its labeled respons
   );
   fake.drop("galactica");
   expect(await outcome).toBeInstanceOf(IrcUnavailable);
+});
+
+test("irc client: disconnect rejects an unwritten unlabelled queued send", async () => {
+  const fake = server({
+    caps: ["sasl=PLAIN", "account-tag", "message-tags", "server-time"],
+  });
+  const { client, controller, running } = start(fake);
+  await client.waitReady(2000);
+  await until(() => client.inChannel("#galactica"), 2000, "join");
+  expect(client.hasCap("labeled-response")).toBe(false);
+  // Hold token refill, not real timers or the socket lifecycle.
+  const frozen = Date.now();
+  const now = spyOn(Date, "now").mockReturnValue(frozen);
+  try {
+    expect(client.join("#galactica")).toBe(true);
+    expect(client.join("#galactica")).toBe(true);
+    const text = "unwritten queued send at disconnect";
+    const outcome: {
+      state: "pending" | "resolved" | "rejected";
+      error?: unknown;
+    } = { state: "pending" };
+    void client.privmsg("#galactica", text, {}, undefined, "low").then(
+      () => {
+        outcome.state = "resolved";
+      },
+      (error: unknown) => {
+        outcome.state = "rejected";
+        outcome.error = error;
+      },
+    );
+    const background = Reflect.get(client, "background") as {
+      lines: string[];
+    }[];
+    expect(background).toHaveLength(1);
+    expect(
+      lineOf(background[0]?.lines ?? [], "PRIVMSG").map(({ params }) => params),
+    ).toEqual([["#galactica", text]]);
+    const written = () =>
+      lineOf(fake.received("galactica"), "PRIVMSG").some(
+        ({ params }) => params[1] === text,
+      );
+    expect(written()).toBe(false);
+    controller.abort();
+    fake.drop("galactica");
+    await running;
+    // Do not await the send: a missing disconnect callback leaves it pending.
+    expect(outcome.state).toBe("rejected");
+    expect(outcome.error).toBeInstanceOf(IrcUnavailable);
+    expect(background).toHaveLength(0);
+    expect(written()).toBe(false);
+  } finally {
+    now.mockRestore();
+    controller.abort();
+    fake.drop("galactica");
+    await running;
+  }
 });
 
 test("irc client: unlabeled servers resolve on write; throttle spaces lines", async () => {

@@ -1,55 +1,59 @@
 import { randomUUID } from "node:crypto";
+import { Result, Schema } from "effect";
 import type { Logger } from "pino";
-import { z } from "zod";
 import type { AgentBackend } from "./backend";
 import type { BotConfig } from "./config";
 import type { CronUIApi, CronView, SlackAck } from "./cron-ui";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
+import { settingsPattern, settingsUUID } from "./settings-schema";
 import { botDisplayName } from "./waiting";
 
-const id = z.string().min(1).max(255);
-const userId = z.string().regex(/^[UW][A-Z0-9]+$/);
-const channelId = z.string().regex(/^[CGD][A-Z0-9]+$/);
-const commandSchema = z.object({
-  command: z.literal("/stargate"),
-  text: z.literal("pair"),
+const id = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(255),
+);
+const userId = Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/));
+const channelId = Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/));
+const commandSchema = Schema.Struct({
+  command: Schema.Literal("/stargate"),
+  text: Schema.Literal("pair"),
   api_app_id: id,
   team_id: id,
   user_id: userId,
   channel_id: channelId,
   trigger_id: id,
-  user_name: z.string().optional(),
-  is_bot: z.literal(false).optional(),
-  bot_id: z.never().optional(),
+  user_name: Schema.optional(Schema.String),
+  is_bot: Schema.optional(Schema.Literal(false)),
+  bot_id: Schema.optional(Schema.Never),
 });
-const actionSchema = z.object({
-  type: z.literal("block_actions"),
+const actionSchema = Schema.Struct({
+  type: Schema.Literal("block_actions"),
   api_app_id: id,
-  team: z.object({ id }),
-  user: z.object({
+  team: Schema.Struct({ id }),
+  user: Schema.Struct({
     id: userId,
-    is_bot: z.literal(false).optional(),
-    bot_id: z.never().optional(),
+    is_bot: Schema.optional(Schema.Literal(false)),
+    bot_id: Schema.optional(Schema.Never),
   }),
-  bot_id: z.never().optional(),
-  channel: z.object({ id: channelId }).optional(),
-  container: z.object({ type: z.literal("view"), view_id: id }),
-  view: z.object({
+  bot_id: Schema.optional(Schema.Never),
+  channel: Schema.optional(Schema.Struct({ id: channelId })),
+  container: Schema.Struct({ type: Schema.Literal("view"), view_id: id }),
+  view: Schema.Struct({
     id,
     hash: id,
-    callback_id: z.literal("stargate_pair"),
-    private_metadata: z.uuid(),
+    callback_id: Schema.Literal("stargate_pair"),
+    private_metadata: settingsUUID,
   }),
-  actions: z
-    .array(
-      z.object({
-        type: z.literal("button"),
-        action_id: z.literal("stargate_pair_generate"),
-        value: z.literal("generate"),
-        url: z.never().optional(),
+  actions: Schema.mutable(
+    Schema.Array(
+      Schema.Struct({
+        type: Schema.Literal("button"),
+        action_id: Schema.Literal("stargate_pair_generate"),
+        value: Schema.Literal("generate"),
+        url: Schema.optional(Schema.Never),
       }),
-    )
-    .length(1),
+    ),
+  ).check(Schema.isBetweenLength(1, 1)),
 });
 
 const plain = (text: string) => ({
@@ -122,15 +126,15 @@ export class PairingUI {
       await ack(payload);
     };
     try {
-      const parsed = commandSchema.safeParse(body);
+      const parsed = Schema.decodeUnknownResult(commandSchema)(body);
       if (
-        !parsed.success ||
-        parsed.data.user_name === "slackbot" ||
+        Result.isFailure(parsed) ||
+        parsed.success.user_name === "slackbot" ||
         !this.allowed(
-          parsed.data.user_id,
-          parsed.data.channel_id,
-          parsed.data.api_app_id,
-          parsed.data.team_id,
+          parsed.success.user_id,
+          parsed.success.channel_id,
+          parsed.success.api_app_id,
+          parsed.success.team_id,
         )
       ) {
         await once({
@@ -150,7 +154,7 @@ export class PairingUI {
         });
         return;
       }
-      const data = parsed.data;
+      const data = parsed.success;
       const nonce = randomUUID();
       this.pending.set(nonce, {
         user: data.user_id,
@@ -192,8 +196,8 @@ export class PairingUI {
   async interactive(body: unknown, ack: SlackAck) {
     // Acknowledge before any network work, including error notices.
     // Consume the confirmation before ACK: a failed ACK must not replay minting.
-    const parsed = actionSchema.safeParse(body);
-    const data = parsed.success ? parsed.data : undefined;
+    const parsed = Schema.decodeUnknownResult(actionSchema)(body);
+    const data = Result.isSuccess(parsed) ? parsed.success : undefined;
     const pending = data && this.pending.get(data.view.private_metadata);
     const owned =
       data &&

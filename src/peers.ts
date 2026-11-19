@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { Result, Schema } from "effect";
 
 /**
  * Peer captains are other fleet captains' Slack bots. Stargate admits one only
@@ -43,19 +43,19 @@ export function isCaptainName(names: readonly (string | undefined)[]) {
   );
 }
 
-const userInfo = z.object({
-  ok: z.literal(true),
-  user: z.object({
-    id: z.string(),
-    team_id: z.string(),
-    is_bot: z.literal(true),
-    deleted: z.literal(false).optional(),
-    name: z.string().optional(),
-    real_name: z.string().optional(),
-    profile: z.object({
-      bot_id: z.string(),
-      real_name: z.string().optional(),
-      display_name: z.string().optional(),
+const userInfo = Schema.Struct({
+  ok: Schema.Literal(true),
+  user: Schema.Struct({
+    id: Schema.String,
+    team_id: Schema.String,
+    is_bot: Schema.Literal(true),
+    deleted: Schema.optional(Schema.Literal(false)),
+    name: Schema.optional(Schema.String),
+    real_name: Schema.optional(Schema.String),
+    profile: Schema.Struct({
+      bot_id: Schema.String,
+      real_name: Schema.optional(Schema.String),
+      display_name: Schema.optional(Schema.String),
     }),
   }),
 });
@@ -90,8 +90,10 @@ export class PeerDirectory {
       return cached.bot !== undefined && cached.bot === sender.bot;
     let bot: string | undefined;
     try {
-      const parsed = userInfo.safeParse(await this.lookup(sender.user, signal));
-      const user = parsed.success ? parsed.data.user : undefined;
+      const parsed = Schema.decodeUnknownResult(userInfo)(
+        await this.lookup(sender.user, signal),
+      );
+      const user = Result.isSuccess(parsed) ? parsed.success.user : undefined;
       bot =
         user &&
         user.id === sender.user &&

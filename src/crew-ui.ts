@@ -1,5 +1,5 @@
+import { Result, Schema } from "effect";
 import type { Logger } from "pino";
-import { z } from "zod";
 import type { AgentBackend } from "./backend";
 import type { BotConfig } from "./config";
 import { redactCredentials } from "./credentials";
@@ -11,27 +11,30 @@ import {
 import type { CronView, SlackAck } from "./cron-ui";
 import { formatQuota, type QuotaSnapshot, quotaSnapshotSchema } from "./quota";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
+import { settingsPattern } from "./settings-schema";
 
 export interface CrewUIApi {
   open(triggerID: string, view: CronView): Promise<string>;
   update(viewID: string, view: CronView): Promise<void>;
 }
-const id = z.string().min(1).max(255);
-const commandSchema = z.object({
-  command: z.literal("/stargate"),
-  text: z
-    .string()
-    .trim()
-    .max(100)
-    .regex(/^(?:crew(?:\s+[a-z0-9][a-z0-9_-]{0,63})?|usage)$/),
+const id = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(255),
+);
+const commandSchema = Schema.Struct({
+  command: Schema.Literal("/stargate"),
+  text: Schema.Trim.check(
+    Schema.isMaxCodePoints(100),
+    settingsPattern(/^(?:crew(?:\s+[a-z0-9][a-z0-9_-]{0,63})?|usage)$/),
+  ),
   api_app_id: id,
   team_id: id,
-  user_id: z.string().regex(/^[UW][A-Z0-9]+$/),
-  channel_id: z.string().regex(/^[CGD][A-Z0-9]+$/),
+  user_id: Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
+  channel_id: Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
   trigger_id: id,
-  user_name: z.string().optional(),
-  is_bot: z.literal(false).optional(),
-  bot_id: z.never().optional(),
+  user_name: Schema.optional(Schema.String),
+  is_bot: Schema.optional(Schema.Literal(false)),
+  bot_id: Schema.optional(Schema.Never),
 });
 const plain = (text: string) => ({
   type: "plain_text" as const,
@@ -180,7 +183,7 @@ export class CrewUI {
     this.config = config;
   }
 
-  private allowed(data: z.infer<typeof commandSchema>) {
+  private allowed(data: typeof commandSchema.Type) {
     return (
       !this.signal.aborted &&
       data.api_app_id === this.config.slack.appId &&
@@ -193,11 +196,11 @@ export class CrewUI {
   }
 
   async command(body: unknown, ack: SlackAck) {
-    const parsed = commandSchema.safeParse(body);
-    const usage = parsed.success && parsed.data.text === "usage";
+    const parsed = Schema.decodeUnknownResult(commandSchema)(body);
+    const usage = Result.isSuccess(parsed) && parsed.success.text === "usage";
     if (
-      !parsed.success ||
-      !this.allowed(parsed.data) ||
+      Result.isFailure(parsed) ||
+      !this.allowed(parsed.success) ||
       !(usage ? this.backend.quota : this.backend.crewStatus)
     ) {
       await ack({
@@ -208,7 +211,7 @@ export class CrewUI {
     }
     // ACK and consume the three-second trigger before reading any backend state.
     await ack();
-    const data = parsed.data;
+    const data = parsed.success;
     let viewID: string | undefined;
     try {
       viewID = await this.api.open(

@@ -3,7 +3,7 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Schema } from "effect";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 const question = (): NativeQuestion =>
-  nativeQuestionSchema.parse({
+  Schema.decodeUnknownSync(nativeQuestionSchema)({
     id: "frm_question",
     sessionID: "ses_captain",
     inputID: "msg_original",
@@ -849,7 +849,7 @@ for (const postForm of [false, true]) {
 
 test("question parser and render never select defaults or accept hidden/auth/external forms", () => {
   const q = question();
-  const free = nativeQuestionSchema.parse({
+  const free = Schema.decodeUnknownSync(nativeQuestionSchema)({
     ...q,
     fields: [{ key: "q0", type: "string", options: [], custom: true }],
   });
@@ -861,7 +861,7 @@ test("question parser and render never select defaults or accept hidden/auth/ext
   expect(() =>
     questionAnswer(q, '{"q0":"wait","foreign":"continue"}'),
   ).toThrow();
-  const many = nativeQuestionSchema.parse({
+  const many = Schema.decodeUnknownSync(nativeQuestionSchema)({
     ...q,
     fields: [{ ...q.fields[0], type: "multiselect", minItems: 1, maxItems: 2 }],
   });
@@ -874,10 +874,12 @@ test("question parser and render never select defaults or accept hidden/auth/ext
     { when: [{ key: "q1", op: "eq", value: true }] },
   ])
     expect(
-      nativeQuestionSchema.safeParse({
-        ...q,
-        fields: [{ ...q.fields[0], ...extra }],
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(nativeQuestionSchema)({
+          ...q,
+          fields: [{ ...q.fields[0], ...extra }],
+        }),
+      ),
     ).toBe(false);
   expect(questionText(q, "captain", "a".repeat(32))).not.toContain("default");
   expect(questionControl(`other: answer ${"a".repeat(32)} 1`)?.target).toBe(
