@@ -219,7 +219,7 @@ export type V1Host = {
 };
 
 export type V1Gateway = {
-  /** Package version of this Stargate. */
+  /** The installed release's version, or the package version in a source checkout. */
   version: string;
   /** Version reported by the connected OpenCode server; null when unknown. */
   opencodeVersion: string | null;

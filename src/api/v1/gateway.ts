@@ -1,3 +1,14 @@
+import packageManifest from "../../../package.json";
+import { runningVersion } from "../../nightly/ready";
+
+/**
+ * The version a fleet reports: the installed release's own record
+ * (`.stargate-release.json`), or the package version in a source checkout.
+ */
+export async function gatewayVersion(directory?: string): Promise<string> {
+  return (await runningVersion(directory)) ?? packageManifest.version;
+}
+
 const versionCacheMs = 10 * 60_000;
 const versionDeadlineMs = 1500;
 

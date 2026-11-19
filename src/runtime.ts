@@ -7,8 +7,8 @@ import { parseEnv } from "node:util";
 import { Cause, Data, Deferred, Effect, FiberMap } from "effect";
 import pino, { type Logger } from "pino";
 import { z } from "zod";
-import packageManifest from "../package.json";
 import { diffEvents } from "./api/v1/diff";
+import { gatewayVersion } from "./api/v1/gateway";
 import { createApiV1Source } from "./api/v1/projection";
 import { startApiV1Server } from "./api/v1/server";
 import {
@@ -984,7 +984,7 @@ export function serve(
         const api = config.api;
         const viewers = new AbortController();
         yield* Effect.acquireRelease(
-          Effect.promise(() =>
+          Effect.promise(async () =>
             startApiV1Server({
               config: api,
               dataDirectory: config.dataDirectory,
@@ -994,7 +994,7 @@ export function serve(
               }),
               diff: diffEvents,
               gateway: {
-                version: packageManifest.version,
+                version: await gatewayVersion(),
                 startedAt: Math.round(performance.timeOrigin),
                 opencodeVersion: (signal) => openCodeVersion(ships, signal),
               },
