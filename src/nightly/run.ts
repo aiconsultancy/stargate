@@ -6,11 +6,19 @@ import { basename, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { type Config, pinnedSessionIDs } from "../config";
+import {
+  claimMaintenanceDrain,
+  type MaintenanceDrain,
+  maintenanceDrainDirectory,
+  readDrainParticipants,
+  writeMaintenanceDrain,
+} from "../maintenance-drain";
 import { isAllowedChannel } from "../routing";
 import { type CleanupResult, runCleanup } from "./cleanup";
 import { cleanupProtection } from "./cleanup-protection";
 import { defaultCronHorizonMinutes, type MaintenanceConfig } from "./config";
 import { type Crew, crewDatabase, discoverCrews } from "./crews";
+import { waitForMaintenanceDrain } from "./drain";
 import {
   type CommandRunner,
   processRunner,
@@ -36,6 +44,7 @@ import {
 } from "./host";
 import {
   checkIdle,
+  describeRunningWork,
   type IdleResult,
   type IdleScope,
   queuedCrewTasks,
@@ -127,6 +136,8 @@ export type Dependencies = {
   undoOnExit?: boolean;
   /** Injectable filesystem boundary for orchestration tests. */
   cleanup?: typeof runCleanup;
+  /** Isolated barrier directory for tests; production uses the host/user scope. */
+  drainDirectory?: string;
 };
 export const defaultDependencies: Dependencies = {
   runner: processRunner,
@@ -795,12 +806,45 @@ export async function runMaintenance(
   const toClose = () => window.closes - clock.now();
   let attention = false;
   let cleanup: CleanupResult | undefined;
+  let drain: Report["drain"];
+  const drainDirectory = deps.drainDirectory ?? maintenanceDrainDirectory();
 
   const finish = async (
     result: Report["outcome"],
     reason: Reason | undefined,
     checkpoint = false,
   ): Promise<RunResult> => {
+    if (
+      drain &&
+      !checkpoint &&
+      ["draining", "restarting"].includes(drain.state.phase)
+    ) {
+      const completed =
+        !["failed", "deferred"].includes(result) &&
+        rec.restarts.some(
+          (item) => item.service === "gateway" && item.status === "ok",
+        );
+      drain.state = {
+        ...drain.state,
+        phase: completed ? "completed" : "aborted",
+      };
+      if (!completed && drain.outcome !== "deadline") drain.outcome = "aborted";
+      await writeMaintenanceDrain(drain.state, drainDirectory).catch(() => {
+        attention = true;
+      });
+      try {
+        const control = await deps.connect();
+        drain.notices.push(
+          ...((await control.maintenanceNotice?.(
+            drain.state,
+            AbortSignal.timeout(10_000),
+          )) ?? []),
+        );
+        drain.notices = drain.notices.slice(0, 1000);
+      } catch {
+        attention = true;
+      }
+    }
     const ready = await readReady(config.dataDirectory);
     const report: Report = {
       schema: reportSchemaID,
@@ -814,6 +858,7 @@ export async function runMaintenance(
       finishedAt: new Date(clock.now()).toISOString(),
       components: rec.components,
       ...(cleanup ? { cleanup } : {}),
+      ...(drain ? { drain } : {}),
       models: rec.models,
       ...(ready && ready.readyAt >= startedAt && ready.updateNotices
         ? { updateNotices: ready.updateNotices }
@@ -892,7 +937,7 @@ export async function runMaintenance(
     let crews: Crew[] = [];
     let crewsUnknown = false;
     try {
-      crews = await discoverCrews(config);
+      crews = await discoverCrews(config, m.drain.enabled);
     } catch {
       crewsUnknown = true;
     }
@@ -1213,6 +1258,7 @@ export async function runMaintenance(
     const afterIngress: UndoContext = {
       ...ctx,
       gate: async (step) => {
+        if (drain) return { idle: true };
         if (!(await ingressMayBeOpen(config, deps.runner)))
           return { idle: true };
         if (crewsUnknown) return { idle: false, reason: "idle-unknown" };
@@ -1301,7 +1347,7 @@ export async function runMaintenance(
 
     async function gate(name: string) {
       // The operator accepted the interruption.
-      if (update) return;
+      if (update || drain) return;
       if (crewsUnknown) throw new Defer("idle-unknown");
       const result = await checkIdle({
         ...idleInput(gateScope),
@@ -1335,7 +1381,117 @@ export async function runMaintenance(
       if (!m) return;
       // Crew profiles that cannot be read: the plugin check cannot run.
       if (crewsUnknown) throw new Defer("idle-unknown");
-      if (!update) {
+      if (m.drain.enabled) {
+        const startedAt = clock.now();
+        const state: MaintenanceDrain = {
+          schema: "stargate.maintenance.drain.v1",
+          runID,
+          pid: process.pid,
+          job: update
+            ? "operator-update"
+            : input.outsideWindow
+              ? "outside-window"
+              : "nightly",
+          services: [
+            "gateway",
+            ...(!gatewayOnly &&
+            (agentUpdates.length ||
+              staged ||
+              work?.files.length ||
+              inputs?.globalCatalog)
+              ? ["opencode" as const]
+              : []),
+            ...(proxyDigest ? ["cliproxyapi" as const] : []),
+          ],
+          startedAt,
+          deadlineAt: Math.min(
+            startedAt + m.drain.deadlineMinutes * 60_000,
+            window.deadline,
+          ),
+          phase: "draining",
+        };
+        await claimMaintenanceDrain(state, drainDirectory);
+        drain = { state, outcome: "aborted", notices: [] };
+        const local = () => ({
+          ...idleInput(),
+          pinnedSessions: [
+            ...new Set([
+              ...idleInput().pinnedSessions,
+              ...(drain?.notices.map((receipt) => receipt.sessionID) ?? []),
+            ]),
+          ],
+          draining: true,
+          now: clock.now(),
+        });
+        const targets = () => [
+          ...new Map([
+            ...readDrainParticipants(drainDirectory).map(
+              (participant) =>
+                [
+                  participant.dataDirectory,
+                  {
+                    ...local(),
+                    dataDirectory: participant.dataDirectory,
+                    crews: participant.crews,
+                    pinnedSessions: participant.pinnedSessions,
+                    drainUnknown: participant.unknown === true,
+                  },
+                ] as const,
+            ),
+            [config.dataDirectory, local()] as const,
+          ]).values(),
+        ];
+        let noticesConfirmed = false;
+        try {
+          const control = await deps.connect();
+          drain.notices = (
+            (await control.maintenanceNotice?.(
+              state,
+              AbortSignal.any([
+                signal,
+                AbortSignal.timeout(
+                  Math.max(1, Math.min(10_000, state.deadlineAt - clock.now())),
+                ),
+              ]),
+            )) ?? []
+          ).slice(0, 1000);
+          noticesConfirmed =
+            control.maintenanceNotice !== undefined &&
+            !drain.notices.some((receipt) => receipt.status === "uncertain");
+        } catch {
+          rec.step("drain-notice", "failed", "health-failed");
+        }
+        const result = await waitForMaintenanceDrain({
+          deadlineAt: state.deadlineAt,
+          pollMs: m.idle.pollSeconds * 1000,
+          clock,
+          signal,
+          targets,
+          announced: () =>
+            noticesConfirmed &&
+            readDrainParticipants(drainDirectory).every(
+              (participant) =>
+                participant.noticeRunID === runID &&
+                participant.noticePhase === "draining" &&
+                participant.noticeStatus === "queued",
+            ),
+          describe: async () =>
+            (await Promise.all(targets().map(describeRunningWork)))
+              .flat()
+              .slice(0, 1000),
+        });
+        drain.outcome = result.outcome;
+        drain.state = {
+          ...state,
+          phase: "restarting",
+          stragglers: result.stragglers,
+        };
+        await writeMaintenanceDrain(drain.state, drainDirectory);
+        rec.step(
+          result.outcome === "idle" ? "drain-idle" : "drain-deadline",
+          "ok",
+        );
+      } else if (!update) {
         // Gate 1: wait for idle, at most until the deadline.
         const idle = await waitForIdle(
           idleInput(gateScope),
@@ -1777,6 +1933,11 @@ export async function runMaintenance(
     attention = true;
     return await finish("failed", signal.aborted ? "aborted" : reasonOf(error));
   } finally {
+    if (drain && ["draining", "restarting"].includes(drain.state.phase))
+      await writeMaintenanceDrain(
+        { ...drain.state, phase: "aborted" },
+        drainDirectory,
+      ).catch(() => {});
     held?.close();
   }
 }

@@ -143,6 +143,14 @@ export class IrcSessions {
     );
   }
 
+  sessions() {
+    return this.db
+      .query<{ sessionID: string; crewID: string }, []>(
+        "SELECT sessionID,crewID FROM irc_sessions ORDER BY rowid",
+      )
+      .all();
+  }
+
   /** True when the session is now bound to `crewID` (new or unchanged). */
   bind(sessionID: string, crewID: string) {
     this.db

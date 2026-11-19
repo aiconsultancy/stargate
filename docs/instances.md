@@ -37,6 +37,11 @@ state, directories, gateway databases or Slack app credentials. Separate
 directories are logical isolation, not OS sandboxes. Configuring the same
 agent ID differently in two locations does not merge their sessions.
 
+Drain-aware gateways on the same host/user share only private maintenance
+barrier and participant metadata for [restart drain](maintenance.md#restart-drain).
+Their jobs, crew state and credentials remain separate. Upgrade all participants
+before enabling `maintenance.drain.enabled`; it defaults off.
+
 ## 1. Pin prerequisites
 
 Start in the approved Stargate checkout, not a dirty development tree:

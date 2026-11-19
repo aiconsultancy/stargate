@@ -12,6 +12,7 @@ import type {
   NativeMaker,
 } from "./fleet/protocol";
 import type { MaintenanceWatch } from "./maintenance";
+import type { MaintenanceDrain } from "./maintenance-drain";
 import type {
   NativeQuestion,
   PendingQuestion,
@@ -95,6 +96,15 @@ export interface AgentBackend {
     snapshot: UpdateSnapshot,
     signal: AbortSignal,
   ): Promise<UpdateReceipt[]>;
+  /** Passive maintenance-drain notice for the pin and ready crew contexts. */
+  maintenanceNotice?(
+    record: MaintenanceDrain,
+    signal: AbortSignal,
+  ): Promise<UpdateReceipt[]>;
+  /** Start held crew assignments after a drain; `remaining` are still held. */
+  resumeMaintenance?(
+    signal: AbortSignal,
+  ): Promise<{ resumed: number; remaining: number }>;
   pendingQuestions?(
     sessionID: string,
     signal: AbortSignal,

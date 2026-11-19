@@ -258,6 +258,12 @@ export class CrewState {
           taskID TEXT PRIMARY KEY REFERENCES tasks(id),
           conversationID TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS maintenance_queued_tasks (
+          taskID TEXT PRIMARY KEY, runID TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS drain_notice_receipts (
+          sessionID TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(sessionID,id)
+        );
       `);
       const legacyPeers = /CHECK\s*\(\s*crewID\s+IN\s*\(/i.test(
         db
@@ -1064,6 +1070,8 @@ export class CrewState {
     text: string,
     reportCaptureID?: string,
     originInputID: string | null = null,
+    /** Marks a task queued by a maintenance drain, for automatic resume. */
+    drainRunID?: string,
   ): CrewTask {
     return this.db
       .transaction(() => {
@@ -1118,6 +1126,12 @@ export class CrewState {
           );
         const task = this.task(id);
         if (!task) throw new CrewError("Queue reservation failed.");
+        if (drainRunID)
+          this.db
+            .query(
+              "INSERT OR IGNORE INTO maintenance_queued_tasks (taskID,runID) VALUES (?,?)",
+            )
+            .run(id, drainRunID);
         if (reportCaptureID) this.reporting.markReport(id, reportCaptureID);
         else this.reporting.assignment(task, text);
         this.activity.assignment(task, text, !!reportCaptureID);
@@ -1177,6 +1191,53 @@ export class CrewState {
       this.activity.phase(task, "cancelled");
     }
     return cancelled;
+  }
+
+  /** Drain-queued tasks still waiting, oldest first; spent marks are pruned. */
+  drainQueued(): CrewTask[] {
+    this.db
+      .query(
+        `DELETE FROM maintenance_queued_tasks WHERE taskID NOT IN
+         (SELECT id FROM pending_tasks WHERE ${queuedPendingTask})`,
+      )
+      .run();
+    return this.db
+      .query<CrewTask, []>(
+        `SELECT p.id,p.crewID,p.workerSessionID,p.originCaptainID,p.originInputID,p.inputID,p.status,p.result,p.released,p.notifying
+         FROM pending_tasks p JOIN maintenance_queued_tasks m ON m.taskID=p.id
+         WHERE p.status='queued' ORDER BY p.sequence`,
+      )
+      .all();
+  }
+
+  /**
+   * Passive context for one session, once per ID even after it was consumed.
+   * An unread older drain notice is withdrawn: only the newest phase remains.
+   */
+  queueDrainNotice(
+    sessionID: string,
+    id: string,
+    text: string,
+    scope: string,
+  ): "queued" | "unchanged" {
+    return this.db
+      .transaction(() => {
+        const first =
+          this.db
+            .query(
+              "INSERT OR IGNORE INTO drain_notice_receipts (sessionID,id) VALUES (?,?)",
+            )
+            .run(sessionID, id).changes === 1;
+        if (!first) return "unchanged" as const;
+        this.db
+          .query(
+            "DELETE FROM update_notice_context WHERE scope=? AND sessionID=? AND id LIKE 'drain\\_%' ESCAPE '\\'",
+          )
+          .run(scope, sessionID);
+        this.updateNotices.queueExternalContext(sessionID, id, text, scope);
+        return "queued" as const;
+      })
+      .immediate();
   }
 
   reserveControl(crewID: string): string {

@@ -21,6 +21,13 @@ mention. For IRC, see [requests and replies](irc.md#access).
 
 ## Linux user service
 
+Maintenance can opt into a [restart drain](maintenance.md#restart-drain) with
+`maintenance.drain.enabled` (default off). It queues advance context, holds new
+work in the existing queues, waits for idle or its deadline (default ten
+minutes), and reports remaining work before restarting. `/health stargate`
+shows the drain phase and outcome. This is separate from approval to install
+or restart services; merging code does neither.
+
 After verifying a foreground run, stop it and run these commands from the
 Stargate directory. Run them as the user who will own the service:
 

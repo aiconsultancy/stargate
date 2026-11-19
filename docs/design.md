@@ -61,6 +61,19 @@ abort and records an `interrupted` outcome. Backends, stores and the instance
 lock close last. A failure after startup stops every bot and exits with code
 1, so the service manager restarts Stargate.
 
+## Maintenance restart drain
+
+The optional [maintenance restart drain](maintenance.md#restart-drain) uses a
+same-user host barrier and private live-participant metadata under
+`~/.local/state/stargate/maintenance-drain`. Independent gateways retain their
+own databases. Their existing worker poll observes the barrier: admission
+pauses, intake persists accepted messages, and running work can finish.
+Crew admissions use the same barrier and retain held assignments in their
+existing pending-task table. This adds no scheduler or message queue.
+NET-1719 context queues carry advance/completion notices without native input
+or model execution; Pi notices use ordinary mail. Only drain-held assignments
+are automatically eligible after release, under their original ownership.
+
 ## Live configuration reload
 
 Optional [session update notices](update-notices.md) reuse readiness, the

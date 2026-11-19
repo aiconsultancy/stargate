@@ -46,6 +46,8 @@ import { Gateway, type SlackDelivery } from "./gateway";
 import { createHealthReader } from "./health";
 import { controlInteractions } from "./interactions";
 import { type IrcRegistration, IrcShip } from "./irc/ship";
+import { DrainRuntime } from "./maintenance-drain";
+import { discoverCrews } from "./nightly/crews";
 import { MaintenanceOutbox } from "./nightly/outbox";
 import type { Ready } from "./nightly/ready";
 import { packageDirectory, runningVersion, writeReady } from "./nightly/ready";
@@ -126,6 +128,8 @@ export type RuntimeDependencies = {
   irc?(config: IrcConfig, store: Store, log: Logger): Promise<IrcShip>;
   /** Short test-only outage/observation timings; never a host flag. */
   connectionTiming?: { outageMs: number; pollMs: number };
+  /** Host maintenance drain. Absent in tests, so nothing touches host state. */
+  drain?: { directory?: string };
 };
 
 /** Programmatic callers may omit transports they do not use. */
@@ -143,6 +147,7 @@ const defaults: RuntimeDependencies = {
       log,
     ),
   backend: createBackend,
+  drain: {},
 };
 
 const release = (log: Logger, name: string, close: () => unknown) =>
@@ -238,6 +243,36 @@ export function serve(
         ),
         (store) => Effect.sync(() => store.close()),
       );
+      // Registered before any worker starts; a failure never stops the gateway.
+      const drain = dependencies.drain
+        ? yield* Effect.acquireRelease(
+            Effect.promise(async () => {
+              const control = new DrainRuntime({
+                dataDirectory: config.dataDirectory,
+                pinnedSessions: () =>
+                  [
+                    ...config.bots.map((bot) => bot.backend),
+                    ...(config.teams ?? []).map((teams) => teams.backend),
+                    ...(config.irc ?? []).map((irc) => irc.backend),
+                  ].flatMap((backend) =>
+                    "sessionID" in backend && backend.sessionID
+                      ? [backend.sessionID]
+                      : [],
+                  ),
+                discover: () => discoverCrews(config as Config, true),
+                warn: (message) => log.warn(message),
+                ...(dependencies.drain?.directory
+                  ? { directory: dependencies.drain.directory }
+                  : {}),
+              });
+              await control.start().catch(() => {
+                log.warn("Maintenance drain registration unavailable");
+              });
+              return control;
+            }),
+            (control) => Effect.promise(() => control.close()),
+          )
+        : undefined;
       const cronStore = yield* Effect.acquireRelease(
         Effect.sync(
           () => new CronStore(join(config.dataDirectory, "cron.sqlite")),
@@ -369,6 +404,7 @@ export function serve(
             resource.backend,
             teams.backend.type === "opencode" ? teams.backend.url : teams.id,
           ),
+          drain,
         );
         workers.push({
           key: registration.key,
@@ -503,6 +539,7 @@ export function serve(
             backend,
             bot.backend.type === "opencode" ? bot.backend.url : bot.id,
           ),
+          drain,
         );
         const cron = new CronScheduler(
           bot,
@@ -680,6 +717,7 @@ export function serve(
                 ? registration.backend.url
                 : registration.id,
             ),
+            drain,
           );
           registration.stopTurn = (conversation, thread) =>
             gateway.stopTurn(conversation, thread);

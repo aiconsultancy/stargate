@@ -1,10 +1,18 @@
 import { OpenCode } from "@opencode/client";
 import { Service } from "@opencode/client/service";
+import { CrewReporting } from "../crew/report-rpc";
+import type { MaintenanceDrain } from "../maintenance-drain";
+import type { UpdateReceipt } from "../update-notice";
 import { StepError } from "./exec";
 import type { ModelRef } from "./versions";
 
 /** The OpenCode server operations maintenance needs; tests use a fake. */
 export interface OpenCodeControl {
+  /** Passive host-local context queues only: never sends a native input. */
+  maintenanceNotice?(
+    notice: MaintenanceDrain,
+    signal: AbortSignal,
+  ): Promise<UpdateReceipt[]>;
   /** IDs of sessions with a running turn. */
   active(signal: AbortSignal): Promise<string[]>;
   /** IDs of sessions with a pending form or permission request. */
@@ -78,6 +86,33 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
         }
       : null;
   return {
+    maintenanceNotice: (notice, signal) =>
+      guard(async () => {
+        const locations = await client.debug.location.list({
+          signal: bounded(signal),
+        });
+        const receipts: UpdateReceipt[] = [];
+        for (const directory of new Set(
+          locations.map((location) => location.directory),
+        )) {
+          signal.throwIfAborted();
+          // Most locations do not load Stargate's plugin. Never create one or
+          // start a model request merely to deliver a maintenance notice.
+          const result = await client
+            .rpc(CrewReporting)
+            .maintenanceNotice(notice, {
+              location: { directory },
+              signal: bounded(signal),
+            })
+            .catch(() => []);
+          receipts.push(...result);
+        }
+        return [
+          ...new Map(
+            receipts.map((receipt) => [receipt.sessionID, receipt]),
+          ).values(),
+        ].slice(0, 1000);
+      }),
     active: (signal) =>
       guard(async () =>
         Object.keys(await client.session.active({ signal: bounded(signal) })),

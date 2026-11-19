@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { queuedPendingTask, reportTask } from "../crew/pending";
 import { activeRuns } from "../cron-store";
+import type { MaintenanceDrain } from "../maintenance-drain";
 import { unfinishedJobs } from "../store";
 import { type Crew, crewDatabase, piDatabase } from "./crews";
 import type { Reason } from "./exec";
@@ -32,6 +33,9 @@ export type IdleInput = {
   scope: IdleScope;
   connect: () => Promise<OpenCodeControl>;
   signal: AbortSignal;
+  /** Admission is held by the maintenance barrier; queued work resumes later. */
+  draining?: boolean;
+  drainUnknown?: boolean;
   /**
    * Whether the gateway advances its cron schedules: a ready, live process.
    * Overdue schedules of a stopped or crash-looping gateway are not pending
@@ -64,6 +68,7 @@ const count = (db: Database, sql: string, ...args: number[]) =>
 
 /** Never interrupts or changes work: it only observes. Unknown is busy. */
 export async function checkIdle(input: IdleInput): Promise<IdleResult> {
+  if (input.drainUnknown) return { idle: false, reason: "idle-unknown" };
   try {
     const sessions = new Set(input.pinnedSessions);
     read(
@@ -72,7 +77,7 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
         if (
           count(
             db,
-            `SELECT COUNT(*) AS n FROM jobs WHERE status IN (${unfinishedJobs})`,
+            `SELECT COUNT(*) AS n FROM jobs WHERE status IN (${input.draining ? "'running','responding'" : unfinishedJobs})`,
           )
         )
           throw new Busy("busy-gateway");
@@ -106,7 +111,9 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
     let due = cron.due;
     if (cron.overdue && input.gatewayRunning && !(await input.gatewayRunning()))
       due -= cron.overdue;
-    if (due || cron.runs) throw new Busy("busy-cron");
+    // Scheduled inputs remain durable. Their actual execution is represented
+    // by a running gateway job, crew task or native session below.
+    if (!input.draining && (due || cron.runs)) throw new Busy("busy-cron");
     if (input.scope === "gateway") return { idle: true };
     for (const crew of input.crews) {
       // The captain is no peer row; its pin can exist in the plugin profile
@@ -124,10 +131,11 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
             // captain turn. An ordinary queued assignment starts only inside
             // a captain turn, which the session check below sees. Cancelled
             // rows are terminal.
-            count(
-              db,
-              `SELECT COUNT(*) AS n FROM pending_tasks WHERE ${queuedPendingTask} AND ${reportTask("pending_tasks.id")}`,
-            ) ||
+            (!input.draining &&
+              count(
+                db,
+                `SELECT COUNT(*) AS n FROM pending_tasks WHERE ${queuedPendingTask} AND ${reportTask("pending_tasks.id")}`,
+              )) ||
             count(db, "SELECT COUNT(*) AS n FROM worker_controls")
           )
             throw new Busy("busy-crew");
@@ -185,6 +193,116 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
     if (error instanceof Busy) return { idle: false, reason: error.reason };
     return { idle: false, reason: "idle-unknown" };
   }
+}
+
+/** Deadline evidence: identifiers and fixed reasons only, never inputs/results. */
+export async function describeRunningWork(
+  input: IdleInput,
+): Promise<NonNullable<MaintenanceDrain["stragglers"]>> {
+  const work: NonNullable<MaintenanceDrain["stragglers"]> = [];
+  const sessions = new Set(input.pinnedSessions);
+  const unknown = () => work.push({ reason: "idle-unknown" });
+  if (input.drainUnknown) unknown();
+  try {
+    read(
+      join(input.dataDirectory, "stargate.sqlite"),
+      (db) => {
+        for (const row of db
+          .query<{ id: string }, []>(
+            "SELECT DISTINCT session_id AS id FROM sessions",
+          )
+          .all())
+          sessions.add(row.id);
+        for (const row of db
+          .query<{ sessionID: string | null }, []>(
+            "SELECT DISTINCT s.session_id AS sessionID FROM jobs j LEFT JOIN sessions s ON s.conversation=j.conversation WHERE j.status IN ('running','responding')",
+          )
+          .all())
+          work.push({
+            ...(row.sessionID ? { sessionID: row.sessionID } : {}),
+            reason: "busy-gateway",
+          });
+      },
+      undefined,
+    );
+  } catch {
+    unknown();
+  }
+  for (const crew of input.crews) {
+    if (crew.captainSessionID) sessions.add(crew.captainSessionID);
+    try {
+      read(
+        crewDatabase(crew),
+        (db) => {
+          for (const row of db
+            .query<{ sessionID: string }, []>("SELECT sessionID FROM peers")
+            .all())
+            sessions.add(row.sessionID);
+          if (
+            count(
+              db,
+              "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='irc_sessions'",
+            )
+          )
+            for (const row of db
+              .query<{ sessionID: string }, []>(
+                "SELECT sessionID FROM irc_sessions",
+              )
+              .all())
+              sessions.add(row.sessionID);
+          for (const row of db
+            .query<{ taskID: string; sessionID: string }, []>(
+              "SELECT id AS taskID,workerSessionID AS sessionID FROM tasks WHERE status IN ('dispatching','running','cancelling')",
+            )
+            .all())
+            work.push({ ...row, reason: "busy-crew" });
+          if (count(db, "SELECT COUNT(*) AS n FROM worker_controls"))
+            work.push({ reason: "busy-crew" });
+        },
+        undefined,
+      );
+      for (const member of crew.piMembers)
+        read(
+          piDatabase(crew, member),
+          (db) => {
+            for (const row of db
+              .query<{ taskID: string }, []>(
+                "SELECT id AS taskID FROM tasks WHERE status<>'terminal'",
+              )
+              .all())
+              work.push({ ...row, reason: "busy-pi" });
+          },
+          undefined,
+        );
+    } catch {
+      unknown();
+    }
+  }
+  if (sessions.size) {
+    try {
+      const control = await input.connect();
+      const owned = async (id: string) => {
+        let current: string | undefined = id;
+        for (let depth = 0; current !== undefined && depth < 16; depth++) {
+          if (sessions.has(current)) return true;
+          current = await control.parent(current, input.signal);
+        }
+        if (current !== undefined) throw new Error("Session ancestry too deep");
+        return false;
+      };
+      for (const sessionID of await control.active(input.signal))
+        if (await owned(sessionID))
+          work.push({ sessionID, reason: "busy-opencode" });
+      for (const sessionID of await control.pendingInput(input.signal))
+        if (await owned(sessionID))
+          work.push({ sessionID, reason: "pending-input" });
+    } catch {
+      unknown();
+    }
+  }
+  return [
+    ...new Map(work.map((item) => [JSON.stringify(item), item])).values(),
+  ].slice(0, 1000);
 }
 
 export type QueuedCrewTask = {

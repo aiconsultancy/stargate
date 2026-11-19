@@ -65,6 +65,32 @@ function reader(extra: Partial<Parameters<typeof createHealthReader>[0]> = {}) {
   });
 }
 
+test("health shows current drain and deadline stragglers without private payloads", async () => {
+  const text = await reader({
+    sources: {
+      ...sources,
+      drain: async () => ({
+        schema: "stargate.maintenance.drain.v1",
+        runID: "run-health",
+        pid: process.pid,
+        job: "nightly",
+        services: ["gateway", "opencode"],
+        startedAt: now - 1000,
+        deadlineAt: now + 600_000,
+        phase: "draining",
+        stragglers: [
+          { taskID: "task_busy", sessionID: "ses_worker", reason: "busy-crew" },
+        ],
+      }),
+    },
+  })("stargate");
+  expect(text).toContain("restart drain draining");
+  expect(text).toContain("task_busy");
+  expect(text).toContain("ses_worker");
+  expect(text).toContain(new Date(now + 600_000).toISOString());
+  expect(text).not.toContain(canary);
+});
+
 test("strict health settings accept absolute paths and reject executable or relative settings", () => {
   expect(
     Schema.decodeUnknownSync(healthConfigSchema)({}).stalledAfterSeconds,

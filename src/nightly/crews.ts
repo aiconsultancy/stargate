@@ -3,6 +3,7 @@ import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { Config } from "../config";
+import { projectKeySchema } from "../crew/project-options";
 import { StepError } from "./exec";
 
 /**
@@ -36,6 +37,7 @@ const pluginOptions = z.object({
   captainDirectory: z.string().min(1),
   worktrees: z.record(z.string(), z.string()),
   captainSessionID: z.string().optional(),
+  projects: z.unknown().optional(),
   team: z
     .object({
       crew: z.array(
@@ -110,10 +112,15 @@ async function readPlugin(path: string) {
  * Fails closed with `idle-unknown` when a captain or crew profile exists but
  * cannot be read or parsed, or a configured OpenCode crew member has none.
  */
-export async function discoverCrews(config: Config): Promise<Crew[]> {
+export async function discoverCrews(
+  config: Config,
+  draining = false,
+): Promise<Crew[]> {
   const crews: Crew[] = [];
   const seen = new Set<string>();
-  for (const bot of config.bots) {
+  for (const bot of draining
+    ? [...config.bots, ...(config.teams ?? []), ...(config.irc ?? [])]
+    : config.bots) {
     if (bot.backend.type !== "opencode") continue;
     const captainPath = await profilePath(bot.backend.directory);
     if (!captainPath) continue;
@@ -125,34 +132,58 @@ export async function discoverCrews(config: Config): Promise<Crew[]> {
         .filter((member) => member.backend !== undefined)
         .map((member) => member.id),
     );
-    const roots: CrewRoot[] = [
+    const contexts = [
       {
-        directory: bot.backend.directory,
-        configPath: captainPath,
-        pluginPackage: captain.pluginPackage,
+        namespace: captain.options.namespace,
+        stateDirectory: captain.options.stateDirectory,
+        worktrees: captain.options.worktrees,
       },
     ];
-    for (const [id, directory] of Object.entries(captain.options.worktrees)) {
-      if (pi.has(id)) continue;
-      const path = await profilePath(directory);
-      const plugin = path ? await readPlugin(path) : undefined;
-      if (!path || !plugin) throw unknown();
-      roots.push({
-        directory,
-        configPath: path,
-        pluginPackage: plugin.pluginPackage,
+    if (draining && captain.options.projects !== undefined) {
+      const parsed = z
+        .record(
+          projectKeySchema,
+          z.object({ worktrees: z.record(z.string(), z.string()) }),
+        )
+        .safeParse(captain.options.projects);
+      if (!parsed.success) throw unknown();
+      for (const [key, project] of Object.entries(parsed.data))
+        contexts.push({
+          namespace: `${captain.options.namespace}:project:${key}`,
+          stateDirectory: join(captain.options.stateDirectory, "projects", key),
+          worktrees: project.worktrees,
+        });
+    }
+    for (const context of contexts) {
+      const roots: CrewRoot[] = [
+        {
+          directory: bot.backend.directory,
+          configPath: captainPath,
+          pluginPackage: captain.pluginPackage,
+        },
+      ];
+      for (const [id, directory] of Object.entries(context.worktrees)) {
+        if (pi.has(id)) continue;
+        const path = await profilePath(directory);
+        const plugin = path ? await readPlugin(path) : undefined;
+        if (!path || !plugin) throw unknown();
+        roots.push({
+          directory,
+          configPath: path,
+          pluginPackage: plugin.pluginPackage,
+        });
+      }
+      const pin = captain.options.captainSessionID ?? bot.backend.sessionID;
+      crews.push({
+        namespace: context.namespace,
+        captainDirectory: captain.options.captainDirectory,
+        stateDirectory: context.stateDirectory,
+        roots,
+        worktreeDirectories: Object.values(context.worktrees),
+        piMembers: [...pi],
+        ...(pin ? { captainSessionID: pin } : {}),
       });
     }
-    const pin = captain.options.captainSessionID ?? bot.backend.sessionID;
-    crews.push({
-      namespace: captain.options.namespace,
-      captainDirectory: captain.options.captainDirectory,
-      stateDirectory: captain.options.stateDirectory,
-      roots,
-      worktreeDirectories: Object.values(captain.options.worktrees),
-      piMembers: [...pi],
-      ...(pin ? { captainSessionID: pin } : {}),
-    });
   }
   return crews;
 }
