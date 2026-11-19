@@ -1,0 +1,508 @@
+import { describe, expect, test } from "bun:test";
+import { Schema } from "effect";
+import type { ApiV1Config } from "../src/api/v1/features";
+import { createApiV1Source } from "../src/api/v1/projection";
+import type { V1Git, V1QueueCounts, V1Task } from "../src/api/v1/types";
+import type { AgentBackend } from "../src/backend";
+import { configSchema } from "../src/config";
+import type { CrewStatus, CrewStatusInput } from "../src/crew-status";
+import { type DashboardShip, dashboardSource } from "../src/dashboard-source";
+import type {
+  HistoryChildrenInput,
+  HistorySession,
+} from "../src/session-history";
+import { bot, identity } from "./fixtures";
+
+const signal = new AbortController().signal;
+const privateProject = "/fictional/checkouts/project";
+
+function task(
+  id: string,
+  status: V1Task["status"],
+  extra: Partial<V1Task> = {},
+): V1Task {
+  return {
+    id,
+    status,
+    kind: "assignment",
+    summary: "Verify the change",
+    phase: "",
+    progress: "",
+    createdAt: null,
+    startedAt: null,
+    updatedAt: null,
+    finishedAt: null,
+    ...extra,
+  };
+}
+
+function context(
+  id: string,
+  extra: Partial<CrewStatus["members"][number]> = {},
+): CrewStatus["members"][number] {
+  return {
+    id,
+    name: id === "pilot" ? "Test Pilot" : id,
+    backend: "opencode",
+    provisioned: "ready",
+    observed: false,
+    current: null,
+    queuedCount: 0,
+    queued: [],
+    lastOutcome: null,
+    recent: [],
+    recentCount: 0,
+    ...extra,
+  };
+}
+
+function session(
+  id: string,
+  extra: Partial<HistorySession> = {},
+): HistorySession {
+  return { id, harness: "opencode", kind: "subagent", ...extra };
+}
+
+function fixture() {
+  let at = 4_000_000;
+  let config: ApiV1Config = Schema.decodeUnknownSync(configSchema)({
+    bots: [bot("captain")],
+    irc: [
+      {
+        id: "other",
+        server: { host: "irc.example.test", port: 6697, tls: true },
+        account: "other",
+        passwordEnv: "IRC_EXAMPLE_PASSWORD",
+        channels: ["#example"],
+        backend: {
+          type: "opencode",
+          directory: "/other",
+          url: "https://remote.example.test",
+        },
+        crew: [
+          {
+            id: "worker",
+            account: "worker",
+            passwordEnv: "IRC_WORKER_PASSWORD",
+            channels: ["#example"],
+            backend: {
+              type: "pi-durable",
+              model: "openai/local",
+              directory: "/other-worker",
+            },
+          },
+        ],
+      },
+    ],
+    teams: [
+      {
+        id: "admiral",
+        botClientId: "24651ef6-55ec-47a2-87bf-695f094ee7de",
+        tenantId: "70baf6be-37eb-4532-8000-f71944694e71",
+        socketPath: "/local/socket",
+        access: { users: ["edb029d2-beff-4c27-808f-eadd1aa996f9"] },
+        backend: {
+          type: "opencode",
+          directory: "/admiral",
+          url: "http://127.0.0.1:4096",
+        },
+        fleetPolicy: {
+          role: "rear_admiral",
+          humanAccounts: ["operator"],
+          assignedCheckout: "/admiral",
+          capabilities: ["dispatch"],
+        },
+      },
+    ],
+  });
+  const statuses = new Map<string, CrewStatus | Error>();
+  const queue = new Map<string, V1QueueCounts>();
+  const calls = {
+    status: [] as string[],
+    children: [] as string[],
+    git: [] as string[],
+  };
+  const roots = [
+    session("root-default", {
+      kind: "crew",
+      member: "pilot",
+      model: "test/fallback",
+    }),
+    session("root-ops", { kind: "crew", member: "pilot" }),
+    session("root-other", { kind: "crew", member: "other" }),
+  ];
+  const children = [
+    session("newest", { parentID: "root-ops", updatedAt: at, title: "Review" }),
+    session("second", {
+      parentID: "root-default",
+      updatedAt: at - 1,
+      title: "Authorization: Bearer fixture-value",
+    }),
+    session("third", { parentID: "root-ops", updatedAt: at - 2 }),
+    session("fourth", { parentID: "root-default", updatedAt: at - 3 }),
+    session("old", { parentID: "root-default", updatedAt: 500 }),
+    session("unknown-time", { parentID: "root-default" }),
+    session("unrelated", { parentID: "root-other", updatedAt: at }),
+  ];
+
+  function status(id: string, { member }: CrewStatusInput): CrewStatus {
+    calls.status.push(member ? `${id}/${member}` : id);
+    const found = statuses.get(id);
+    if (found instanceof Error) throw found;
+    if (!found) return { members: [], total: 0, truncated: false };
+    if (!member) return found;
+    const members = found.members.filter((context) => context.id === member);
+    return { members, total: members.length, truncated: false };
+  }
+  const ships: DashboardShip[] = [];
+  for (const entry of [
+    ...config.bots,
+    ...config.irc,
+    ...config.teams,
+    { ...bot(), id: "other-worker" },
+  ]) {
+    const id = entry.id;
+    const backend: AgentBackend = {
+      async createSession() {
+        throw new Error("Read attempted to create a session");
+      },
+      async prompt() {
+        throw new Error("Read attempted to prompt");
+      },
+      async close() {},
+      async crewStatus(input) {
+        return status(id, input);
+      },
+      ...(id === "captain"
+        ? {
+            async fleetCrewStatus(input: CrewStatusInput) {
+              const scoped = status(id, input);
+              return {
+                status: scoped,
+                metadata: {
+                  projectDirectory: privateProject,
+                  contexts: scoped.members.map((context) => ({
+                    member: context.id,
+                    project:
+                      context.project === "default"
+                        ? null
+                        : (context.project ?? null),
+                    directory: `${privateProject}-${context.id}-${context.project ?? "default"}`,
+                    role: "Flight testing",
+                    model: "test/custom",
+                  })),
+                },
+              };
+            },
+            history: {
+              async roots() {
+                return roots;
+              },
+              async describe() {
+                return [];
+              },
+              async children({
+                parentID,
+                updatedSince,
+                limit,
+              }: HistoryChildrenInput) {
+                calls.children.push(parentID);
+                expect(updatedSince).toBe(at - 3_600_000);
+                expect(limit).toBe(3);
+                return {
+                  sessions: children.filter(
+                    (child) => child.parentID === parentID,
+                  ),
+                };
+              },
+              async entries() {
+                throw new Error("Read attempted to access a transcript");
+              },
+            },
+          }
+        : {}),
+    };
+    const {
+      displayName,
+      backend: settings,
+      concurrency,
+      turnTimeoutMs,
+    } = entry;
+    ships.push({
+      bot: { id, displayName, backend: settings, concurrency, turnTimeoutMs },
+      identity,
+      key: id,
+      backend,
+    });
+  }
+  const now = () => at;
+  const counts = { queued: 0, running: 0, responding: 0, done: 0, failed: 0 };
+  const dashboard = dashboardSource(
+    ships,
+    {
+      queueCounts: (key) => queue.get(key) ?? counts,
+      recentJobs: () => [],
+      sessionIDs: () => [],
+      ownsSession: () => false,
+    },
+    { report: () => [], recentRuns: () => [] },
+    now,
+  );
+  const source = createApiV1Source({
+    config: () => config,
+    dashboard,
+    now,
+    git: async (directory): Promise<V1Git | null> => {
+      if (!directory) return null;
+      calls.git.push(directory);
+      return {
+        branch: "test/change",
+        head: "123abcd",
+        base: "origin/main",
+        ahead: 1,
+        behind: 0,
+        changedFiles: 0,
+        repository: "example/project",
+        checkedAt: at,
+      };
+    },
+    pullRequest: () => null,
+  });
+  return {
+    dashboard,
+    source,
+    calls,
+    statuses,
+    advance: () => ++at,
+    useConfig: (next: (current: ApiV1Config) => ApiV1Config) => {
+      config = next(config);
+    },
+    queue: (id: string, next: Partial<V1QueueCounts>) =>
+      queue.set(id, { ...counts, ...next }),
+    set: (id: string, members: CrewStatus["members"], truncated = false) =>
+      statuses.set(id, { members, total: members.length, truncated }),
+  };
+}
+
+describe("Fleet API projection", () => {
+  test("uses top-level registrations, splits the admiral and selects the longest known idle time", async () => {
+    const f = fixture();
+    f.useConfig((config) => ({
+      ...config,
+      api: { enabled: true, name: "Test Fleet" },
+    }));
+    f.set(
+      "captain",
+      [
+        context("pilot", {
+          project: "default",
+          lastOutcome: task("done-1", "completed", { finishedAt: 100 }),
+        }),
+        context("pilot", {
+          project: "ops",
+          lastOutcome: task("done-2", "completed", { finishedAt: 200 }),
+        }),
+        context("busy", {
+          current: task("running", "running"),
+          queuedCount: 1,
+        }),
+      ],
+      true,
+    );
+    f.set("other", [
+      context("remote", {
+        lastOutcome: task("done-3", "completed", { finishedAt: 150 }),
+      }),
+    ]);
+    const fleet = await f.source.fleet(signal);
+    expect(fleet.name).toBe("Test Fleet");
+    expect(fleet.admiral).toMatchObject({
+      id: "admiral",
+      role: "rear_admiral",
+      transport: "teams",
+    });
+    expect(fleet.ships.map((ship) => ship.id)).toEqual(["captain", "other"]);
+    expect(fleet.ships[0]).toMatchObject({
+      captain: { activity: "idle", since: null },
+      crew: { people: 2, busy: 1, queued: 1, partial: true },
+      repository: "example/project",
+    });
+    expect(fleet.ships[1]).toMatchObject({ available: true, repository: null });
+    expect(fleet.longestIdle).toEqual({
+      ship: "other",
+      member: "remote",
+      since: 150,
+    });
+    expect(f.calls.git).toEqual([privateProject]);
+    expect(f.calls.children).toEqual([]);
+    expect(f.calls.status).not.toContain("other-worker");
+    expect(JSON.stringify(fleet)).not.toContain(privateProject);
+
+    const queued = f.advance();
+    f.queue("captain", { queued: 2, responding: 1 });
+    expect((await f.source.fleet(signal)).ships[0]?.captain).toMatchObject({
+      activity: "queued",
+      since: queued,
+    });
+    f.advance();
+    expect((await f.source.ship("captain", signal))?.captain.since).toBe(
+      queued,
+    );
+    const running = f.advance();
+    f.queue("captain", { queued: 1, running: 1 });
+    expect((await f.source.ship("captain", signal))?.captain).toMatchObject({
+      activity: "running",
+      since: running,
+    });
+    await expect(f.source.ship("admiral", signal)).resolves.toBeUndefined();
+  });
+
+  test("projects every context, prioritizes activity and derives times without inventing idleSince", async () => {
+    const f = fixture();
+    const first = task("queued-1", "queued", { createdAt: 20 });
+    const second = task("queued-2", "queued", { createdAt: 10 });
+    f.set("captain", [
+      context("pilot", {
+        project: "default",
+        current: task("run", "dispatching", { createdAt: 40 }),
+      }),
+      context("pilot", {
+        project: "ops",
+        current: task("cancel", "cancelling", { createdAt: 15, startedAt: 30 }),
+      }),
+      context("pilot", {
+        project: "web",
+        queuedCount: 2,
+        queued: [first, second],
+      }),
+      context("pilot", {
+        project: "docs",
+        lastOutcome: task("uncertain", "uncertain", { updatedAt: 50 }),
+      }),
+      context("pilot", { project: "tools", provisioned: "pending" }),
+      context("new", { provisioned: "unprovisioned" }),
+    ]);
+    const ship = await f.source.ship("captain", signal);
+    expect(ship?.crewMembers[0]).toMatchObject({
+      role: "Flight testing",
+      model: "test/custom",
+      activity: "running",
+      since: 30,
+      idleSince: null,
+      contexts: [
+        { project: null, activity: "running" },
+        { project: "ops", activity: "running" },
+        { project: "web", activity: "queued" },
+        { project: "docs", activity: "uncertain" },
+        { project: "tools", activity: "unprovisioned", git: null },
+      ],
+    });
+    expect(ship?.crewMembers[1]).toMatchObject({
+      activity: "unprovisioned",
+      since: null,
+      idleSince: null,
+    });
+    f.advance();
+    f.set("captain", [
+      context("pilot", { queuedCount: 2, queued: [first, second] }),
+      context("pilot", {
+        project: "ops",
+        lastOutcome: task("uncertain", "uncertain"),
+      }),
+      context("pilot", { project: "web" }),
+    ]);
+    expect(
+      (await f.source.crew("captain", "pilot", signal))?.member,
+    ).toMatchObject({ activity: "queued", since: 10, idleSince: null });
+
+    const idle = f.advance();
+    f.set("captain", [
+      context("pilot"),
+      context("pilot", {
+        project: "ops",
+        current: task("stale", "uncertain", { updatedAt: 2 }),
+        lastOutcome: task("later", "completed", { finishedAt: 3 }),
+      }),
+      context("new"),
+    ]);
+    expect(
+      (await f.source.crew("captain", "pilot", signal))?.member,
+    ).toMatchObject({ activity: "idle", since: 3, idleSince: 3 });
+    expect(
+      (await f.source.crew("captain", "new", signal))?.member,
+    ).toMatchObject({ activity: "idle", since: idle, idleSince: null });
+
+    const uncertain = f.advance();
+    f.set("captain", [
+      context("pilot", { current: task("unknown", "uncertain") }),
+    ]);
+    expect(
+      (await f.source.crew("captain", "pilot", signal))?.member,
+    ).toMatchObject({
+      activity: "uncertain",
+      since: uncertain,
+      idleSince: null,
+    });
+    f.advance();
+    expect(
+      (await f.source.crew("captain", "pilot", signal))?.member.since,
+    ).toBe(uncertain);
+  });
+
+  test("uses only scoped roots, returns the newest three children and keeps paths private", async () => {
+    const f = fixture();
+    f.set("captain", [
+      context("pilot", {
+        project: "default",
+        current: task("task-1", "running", {
+          summary: "Authorization: Bearer fixture-value",
+        }),
+      }),
+      context("pilot", {
+        project: "ops",
+        current: task("task-2", "running", {
+          summary: `Configured Stargate project: ops.\nUse only your permanent worktree: "${privateProject}-pilot-ops`,
+          progress: `Working in ${privateProject}-pilot-ops`,
+        }),
+      }),
+    ]);
+    expect(await f.dashboard.ship("captain", signal)).not.toHaveProperty(
+      "metadata",
+    );
+    expect(JSON.stringify(await f.dashboard.fleet(signal))).not.toContain(
+      privateProject,
+    );
+    const detail = await f.source.crew("captain", "pilot", signal);
+    expect(detail?.member.subagents.map((child) => child.id)).toEqual([
+      "newest",
+      "second",
+      "third",
+    ]);
+    expect(f.calls.children.sort()).toEqual(["root-default", "root-ops"]);
+    expect(f.calls.status.at(-1)).toBe("captain/pilot");
+    expect(f.calls.git.sort()).toEqual([
+      `${privateProject}-pilot-default`,
+      `${privateProject}-pilot-ops`,
+    ]);
+    expect(JSON.stringify(detail)).not.toContain(privateProject);
+    expect(JSON.stringify(detail)).not.toContain("fixture-value");
+    expect(detail?.member.contexts[1]?.current).toMatchObject({
+      summary: "Project assignment",
+      progress: "Working in [checkout]",
+    });
+    await expect(
+      f.source.crew("other", "pilot", signal),
+    ).resolves.toBeUndefined();
+    f.statuses.set("other", new Error("Private failure details"));
+    expect((await f.source.fleet(signal)).ships[1]).toMatchObject({
+      available: false,
+      crew: null,
+      error: "Crew status unavailable.",
+    });
+    expect(await f.source.ship("other", signal)).toMatchObject({
+      available: false,
+      crew: null,
+      error: "Crew status unavailable.",
+    });
+  });
+});
