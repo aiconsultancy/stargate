@@ -8,7 +8,12 @@ import {
   fleetPolicySchema,
 } from "../src/fleet-policy";
 import { parseMessage } from "../src/irc/protocol";
-import { type IrcMember, routeIrcMessage } from "../src/irc/routing";
+import {
+  type IrcMember,
+  ircCrewInstructions,
+  ircInstructions,
+  routeIrcMessage,
+} from "../src/irc/routing";
 
 const policy = fleetPolicySchema.parse({
   role: "rear_admiral",
@@ -63,6 +68,18 @@ test("fleet controls are explicit and preserve human authority", () => {
       (rule) => rule.action === "fleet_dispatch" && rule.effect === "allow",
     ),
   ).toBe(true);
+});
+test("IRC fleet and profile instructions use one plain pull request reference", () => {
+  for (const guidance of [
+    fleetInstructions(policy, "irc"),
+    ircInstructions,
+    ircCrewInstructions,
+  ]) {
+    expect(guidance).toContain("[PR:owner/repo#number]");
+    expect(guidance).toContain("Use one form per reference");
+    expect(guidance).not.toContain("An ordinary Markdown link");
+  }
+  expect(fleetInstructions(policy)).toContain("An ordinary Markdown link");
 });
 test("authority is separate from source transport and sender rank", () => {
   expect(

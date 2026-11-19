@@ -5,7 +5,7 @@ import {
   effectiveIrcConfig,
   type IrcConfig,
 } from "../config";
-import { fleetAuthority } from "../fleet-policy";
+import { fleetAuthority, ircPullRequestGuidance } from "../fleet-policy";
 import { findMention } from "../mentions";
 import { defaultIrcPeerTurnsPerHour, peerWindowMs } from "../peers";
 import type { Incoming, Job } from "../store";
@@ -688,7 +688,8 @@ In all other cases, answer [[stargate:silent]]. For an all-call, answer once and
 briefly. Agents answer an all-call in turn, the captain first and then each
 crew member; a later turn lists what was said since the all-call. If another
 agent already said what you would say, answer [[stargate:silent]]. Do not post acknowledgements, thanks, agreement only or
-status chatter. Keep each reply short and specific: one message, no repeats.`;
+status chatter. Keep each reply short and specific: one message, no repeats.
+${ircPullRequestGuidance}`;
 
 /**
  * Prompt prefix for sessions without a source line (crew and Pi): who
