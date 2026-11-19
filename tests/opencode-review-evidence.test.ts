@@ -13,7 +13,7 @@ import { reviewContextPrompt, reviewNativePrompt } from "../src/fleet/reviews";
 const diff =
   "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n";
 function binding(kind: "crew" | "captain" = "crew"): FleetReviewBinding {
-  return reviewBindingSchema.parse({
+  return Schema.decodeUnknownSync(reviewBindingSchema)({
     id: "proof_" + "1".repeat(32),
     nonce: "2".repeat(32),
     context: {

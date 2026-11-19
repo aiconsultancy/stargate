@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import type { AgentBackend, PromptSourceContext } from "../backend";
 import { type ReplyChunk, replyText } from "../slack-format";
 import type { Job, Store } from "../store";
@@ -82,8 +82,12 @@ export class FleetResults {
               job.input,
               signal,
             );
-            const parsed = z.array(nativeMakerSchema).max(100).safeParse(value);
-            makers = parsed.success ? parsed.data : [];
+            const parsed = Schema.decodeUnknownResult(
+              Schema.mutable(Schema.Array(nativeMakerSchema)).check(
+                Schema.isMaxLength(100),
+              ),
+            )(value);
+            makers = Result.isSuccess(parsed) ? parsed.success : [];
           } catch {
             signal.throwIfAborted();
           }

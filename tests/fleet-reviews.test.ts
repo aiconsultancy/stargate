@@ -255,7 +255,7 @@ async function world(
   ) =>
     fleetRequest(
       join(directory, ship + ".sock"),
-      requestSchema.parse({
+      Schema.decodeUnknownSync(requestSchema)({
         operation,
         input,
         caller: {
@@ -268,16 +268,16 @@ async function world(
       signal(),
     );
   async function begin(overrides: Record<string, unknown> = {}, admit = true) {
-    const result = z
-      .object({ dispatchID: z.string(), review: reviewContextSchema })
-      .parse(
-        await call("author", "dispatch", {
-          target: "peer",
-          sourceReference: "human-source",
-          text: "Coordinate independent reviews",
-          review: { ...target, context: diff, ...overrides },
-        }),
-      );
+    const result = Schema.decodeUnknownSync(
+      Schema.Struct({ dispatchID: Schema.String, review: reviewContextSchema }),
+    )(
+      await call("author", "dispatch", {
+        target: "peer",
+        sourceReference: "human-source",
+        text: "Coordinate independent reviews",
+        review: { ...target, context: diff, ...overrides },
+      }),
+    );
     current = {
       ...current,
       eventId: `peer-event-${serial}`,
@@ -327,8 +327,11 @@ async function world(
       `/reviews?repository=${target.repository}&pullRequest=7&headSHA=${head}`,
     );
     expect(r.status).toBe(200);
-    return z.object({ proofs: z.array(reviewProofSchema) }).parse(r.body)
-      .proofs;
+    return Schema.decodeUnknownSync(
+      Schema.Struct({
+        proofs: Schema.mutable(Schema.Array(reviewProofSchema)),
+      }),
+    )(r.body).proofs;
   }
   return {
     directory,
@@ -401,7 +404,9 @@ test("two attested native-family proofs share an independent reviewer ship and p
   );
   expect(found.status).toBe(200);
   expect(
-    z.object({ proof: reviewProofSchema }).parse(found.body).proof.id,
+    Schema.decodeUnknownSync(Schema.Struct({ proof: reviewProofSchema }))(
+      found.body,
+    ).proof.id,
   ).toBe(a.id);
   expect(
     (await raw(join(w.directory, "stranger.sock"), "GET", "/reviews/" + a.id))
@@ -511,11 +516,13 @@ test("review evidence stays off by default and does not admit completion claims"
     ).status,
   ).toBe(404);
   expect(
-    requestSchema.safeParse({
-      operation: "completeReview",
-      caller: {},
-      input: { verdict: "approve" },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(requestSchema)({
+        operation: "completeReview",
+        caller: {},
+        input: { verdict: "approve" },
+      }),
+    ),
   ).toBe(false);
   expect(
     Result.isSuccess(
@@ -542,7 +549,12 @@ test("missing, binary, malformed, oversized and disallowed review context fails 
     "diff --git " + "x".repeat(256000),
   ])
     expect(
-      reviewAssignmentSchema.safeParse({ ...target, context }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(reviewAssignmentSchema)({
+          ...target,
+          context,
+        }),
+      ),
     ).toBe(false);
   await expect(w.begin({ repository: "other/project" })).rejects.toThrow(
     "not permitted",
@@ -636,6 +648,17 @@ test("proof reads are strict and cannot write arbitrary proof/verdict/family cla
     expect(
       (await raw(join(w.directory, "peer.sock"), "GET", path)).status,
     ).toBe(400);
+  for (const pullRequest of ["07", "0", "-1", "1e2", "9007199254740992"]) {
+    const response = await raw(
+      join(w.directory, "peer.sock"),
+      "GET",
+      `/reviews?repository=example/project&pullRequest=${pullRequest}&headSHA=${target.headSHA}`,
+    );
+    expect(response).toEqual({
+      status: 400,
+      body: { error: "Fleet operation unavailable; raw details withheld." },
+    });
+  }
   const bad = {
     operation: "review",
     caller: {
@@ -661,7 +684,7 @@ test("proof reads are strict and cannot write arbitrary proof/verdict/family cla
 });
 
 test("review context framing refuses digest substitution or ambiguous end markers", () => {
-  const context = reviewContextSchema.parse({
+  const context = Schema.decodeUnknownSync(reviewContextSchema)({
     ...target,
     id: "id",
     authorShip: "author",

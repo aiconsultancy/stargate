@@ -9,6 +9,7 @@ import {
   openSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { Schema } from "effect";
 import {
   type DispatchResult,
   type FleetCompletion,
@@ -143,7 +144,7 @@ export class FleetLedger {
   }
 
   record(ownerSessionID: string, input: FleetSource): VerifiedSource {
-    const source = sourceSchema.parse(input);
+    const source = Schema.decodeUnknownSync(sourceSchema)(input);
     const value = JSON.stringify(source);
     return this.db
       .transaction(() => {
@@ -153,7 +154,9 @@ export class FleetLedger {
           )
           .get(source.reference);
         if (old) {
-          const original = sourceSchema.parse(JSON.parse(old.value));
+          const original = Schema.decodeUnknownSync(sourceSchema)(
+            JSON.parse(old.value),
+          );
           if (
             old.ownerSessionID !== ownerSessionID ||
             old.value !==
@@ -189,7 +192,7 @@ export class FleetLedger {
         "Original source is unavailable to this pinned session.",
       );
     return {
-      ...sourceSchema.parse(JSON.parse(row.value)),
+      ...Schema.decodeUnknownSync(sourceSchema)(JSON.parse(row.value)),
       ownerSessionID: row.ownerSessionID,
       humanApproval: false,
     };
@@ -248,7 +251,7 @@ export class FleetLedger {
             throw new FleetError(
               "Review coordination requires another ship and a durable dispatch",
             );
-          result.review = reviewContextSchema.parse({
+          result.review = Schema.decodeUnknownSync(reviewContextSchema)({
             id: result.dispatchID,
             repository: input.review.repository,
             pullRequest: input.review.pullRequest,
@@ -296,7 +299,9 @@ export class FleetLedger {
             input.requestID,
           );
         if (input.origin && result.dispatchID) {
-          const origin = fleetOriginSchema.parse(input.origin);
+          const origin = Schema.decodeUnknownSync(fleetOriginSchema)(
+            input.origin,
+          );
           if (origin.sessionID !== input.ownerSessionID)
             throw new FleetError(
               "Fleet result origin does not match its owner pin",
@@ -344,7 +349,7 @@ export class FleetLedger {
     return outbox?.completion
       ? {
           ...result,
-          completion: fleetCompletionSchema.parse(
+          completion: Schema.decodeUnknownSync(fleetCompletionSchema)(
             JSON.parse(outbox.completion),
           ),
           resultQueued: outbox.acknowledged === 1,
@@ -435,7 +440,7 @@ export class FleetLedger {
     eventId: string,
     value: FleetCompletion,
   ) {
-    const completion = fleetCompletionSchema.parse(value);
+    const completion = Schema.decodeUnknownSync(fleetCompletionSchema)(value);
     return this.db
       .transaction(() => {
         const row = this.db
@@ -542,8 +547,12 @@ export class FleetLedger {
       )
       .all(sessionID)
       .map((row) => ({
-        origin: fleetOriginSchema.parse(JSON.parse(row.origin)),
-        completion: fleetCompletionSchema.parse(JSON.parse(row.completion)),
+        origin: Schema.decodeUnknownSync(fleetOriginSchema)(
+          JSON.parse(row.origin),
+        ),
+        completion: Schema.decodeUnknownSync(fleetCompletionSchema)(
+          JSON.parse(row.completion),
+        ),
       }));
   }
 
@@ -576,10 +585,16 @@ export class FleetLedger {
 
   private decodeReview(row: ReviewRow): ReviewRecord {
     return {
-      binding: reviewBindingSchema.parse(JSON.parse(row.binding)),
+      binding: Schema.decodeUnknownSync(reviewBindingSchema)(
+        JSON.parse(row.binding),
+      ),
       state: row.state,
       ...(row.proof
-        ? { proof: reviewProofSchema.parse(JSON.parse(row.proof)) }
+        ? {
+            proof: Schema.decodeUnknownSync(reviewProofSchema)(
+              JSON.parse(row.proof),
+            ),
+          }
         : {}),
     };
   }
@@ -591,7 +606,9 @@ export class FleetLedger {
       )
       .get(reviewID);
     if (!row) return;
-    const context = reviewContextSchema.parse(JSON.parse(row.context));
+    const context = Schema.decodeUnknownSync(reviewContextSchema)(
+      JSON.parse(row.context),
+    );
     if (
       context.coordinatorSessionID !== sessionID ||
       context.coordinatorShip !== ship.toLowerCase()
@@ -620,7 +637,9 @@ export class FleetLedger {
           .get(input.reviewID);
         if (!request)
           throw new FleetError("Structured review assignment unavailable");
-        const context = reviewContextSchema.parse(JSON.parse(request.context));
+        const context = Schema.decodeUnknownSync(reviewContextSchema)(
+          JSON.parse(request.context),
+        );
         if (!input.repositories.includes(context.repository))
           throw new FleetError("Review repository is not permitted");
         const ship = input.ship.toLowerCase();
@@ -672,7 +691,7 @@ export class FleetLedger {
           reviewer.kind === "crew" && input.crewDirectories
             ? input.crewDirectories[context.repository]?.[reviewer.agent]
             : reviewer.directory;
-        const binding = reviewBindingSchema.parse({
+        const binding = Schema.decodeUnknownSync(reviewBindingSchema)({
           id: `proof_${randomUUID().replaceAll("-", "")}`,
           nonce: randomUUID().replaceAll("-", ""),
           context,
@@ -767,7 +786,7 @@ export class FleetLedger {
   }
 
   completeReview(binding: FleetReviewBinding, proof: FleetReviewProof) {
-    const parsed = reviewProofSchema.parse(proof);
+    const parsed = Schema.decodeUnknownSync(reviewProofSchema)(proof);
     this.db
       .transaction(() => {
         const row = this.db
@@ -817,7 +836,9 @@ export class FleetLedger {
       )
       .get(id);
     if (!row?.proof) return;
-    const proof = reviewProofSchema.parse(JSON.parse(row.proof));
+    const proof = Schema.decodeUnknownSync(reviewProofSchema)(
+      JSON.parse(row.proof),
+    );
     return [
       proof.authorShip,
       proof.coordinatorShip,
@@ -847,6 +868,8 @@ export class FleetLedger {
         ship.toLowerCase(),
         ship.toLowerCase(),
       )
-      .map((row) => reviewProofSchema.parse(JSON.parse(row.proof)));
+      .map((row) =>
+        Schema.decodeUnknownSync(reviewProofSchema)(JSON.parse(row.proof)),
+      );
   }
 }

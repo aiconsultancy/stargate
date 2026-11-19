@@ -2,7 +2,11 @@ import { afterEach, expect, test } from "bun:test";
 import { Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import pino from "pino";
-import { IrcClient, type IrcClientOptions } from "../src/irc/client";
+import {
+  IrcClient,
+  type IrcClientOptions,
+  IrcUnavailable,
+} from "../src/irc/client";
 import { IrcDelivery } from "../src/irc/delivery";
 import { type IrcMessage, utf8Bytes } from "../src/irc/protocol";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
@@ -149,6 +153,24 @@ test("irc client: labeled sends confirm on echo and fail on errors", async () =>
     "+draft/reply": "m1",
   });
   expect(lineOf(fake.received("galactica"), "TAGMSG")).toHaveLength(1);
+});
+
+test("irc client: disconnect rejects a written send awaiting its labeled response", async () => {
+  const fake = server();
+  const { client } = start(fake);
+  await client.waitReady(2000);
+  await until(() => client.inChannel("#galactica"), 2000, "join");
+  fake.mute("galactica");
+  const outcome = client
+    .privmsg("#galactica", "awaiting confirmation")
+    .catch((error: unknown) => error);
+  await until(
+    () => lineOf(fake.received("galactica"), "PRIVMSG").length === 1,
+    2000,
+    "written before disconnect",
+  );
+  fake.drop("galactica");
+  expect(await outcome).toBeInstanceOf(IrcUnavailable);
 });
 
 test("irc client: unlabeled servers resolve on write; throttle spaces lines", async () => {

@@ -1,7 +1,6 @@
 import { createServer, type Server } from "node:http";
-import { Schema } from "effect";
-import { z } from "zod";
-import { legacySetting } from "../settings-legacy";
+import { Result, Schema, SchemaTransformation } from "effect";
+import { settingsPattern, settingsStruct } from "../settings-schema";
 import { close, readBody, sendJson } from "../teams/http-util";
 import {
   listenOnUnixSocket,
@@ -328,17 +327,23 @@ export class FleetControl {
               )
             )
               throw new FleetError("Invalid review proof lookup");
-            const target = z
-              .strictObject({
-                repository: legacySetting(reviewRepositorySchema),
-                pullRequest: z
-                  .string()
-                  .regex(/^[1-9][0-9]*$/)
-                  .transform(Number)
-                  .pipe(z.number().int().positive().safe()),
-                headSHA: z.string().regex(/^[a-f0-9]{40}$/),
-              })
-              .parse(Object.fromEntries(url.searchParams));
+            const target = Schema.decodeUnknownSync(
+              settingsStruct({
+                repository: reviewRepositorySchema,
+                pullRequest: Schema.String.check(
+                  settingsPattern(/^[1-9][0-9]*$/),
+                ).pipe(
+                  Schema.decodeTo(
+                    Schema.Int.check(Schema.isGreaterThan(0)),
+                    SchemaTransformation.transform({
+                      decode: Number,
+                      encode: String,
+                    }),
+                  ),
+                ),
+                headSHA: Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/)),
+              }),
+            )(Object.fromEntries(url.searchParams));
             const proofs = this.options.config.reviews?.repositories.includes(
               target.repository,
             )
@@ -351,14 +356,14 @@ export class FleetControl {
             sendJson(response, 404, { error: "Not found" });
             return;
           }
-          const parsed = requestSchema.safeParse(
+          const parsed = Schema.decodeUnknownResult(requestSchema)(
             JSON.parse(
               await readBody(request, this.reviews ? 1_000_000 : 32_768),
             ),
           );
-          if (!parsed.success)
+          if (Result.isFailure(parsed))
             throw new FleetError("Invalid fleet tool request.");
-          const value = parsed.data;
+          const value = parsed.success;
           if (value.caller.sessionID !== this.options.sessionID)
             throw new FleetError(
               "Fleet tool caller does not match this gateway's native session pin.",

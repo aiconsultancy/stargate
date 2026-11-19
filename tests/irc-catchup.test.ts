@@ -105,6 +105,15 @@ test("irc catch-up: messages sent while Stargate was stopped are admitted once",
     "cursor",
   );
   await first.close();
+  // CHATHISTORY AFTER excludes an event in the cursor's same millisecond.
+  await until(
+    () => {
+      const cursor = store.ircCursor(first.captain.key, "#galactica");
+      return cursor !== undefined && Date.now() > Date.parse(cursor);
+    },
+    3000,
+    "offline events after cursor",
+  );
   // Stargate is down: a mention and a direct message arrive.
   fake.say(
     { nick: "jack", account: "jack" },

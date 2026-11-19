@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { Schema } from "effect";
 import { z } from "zod";
 import type { PreparedAttachment, PublishedFile } from "./attachments";
 import { cancellationNotice } from "./cancellation";
@@ -148,10 +149,18 @@ function decodeStoredJob(row: StoredJob): Job {
         }
       : {}),
     ...(fleet_context
-      ? { fleet: fleetJobSchema.parse(JSON.parse(fleet_context)) }
+      ? {
+          fleet: Schema.decodeUnknownSync(fleetJobSchema)(
+            JSON.parse(fleet_context),
+          ),
+        }
       : {}),
     ...(makers
-      ? { makers: z.array(nativeMakerSchema).parse(JSON.parse(makers)) }
+      ? {
+          makers: Schema.decodeUnknownSync(
+            Schema.mutable(Schema.Array(nativeMakerSchema)),
+          )(JSON.parse(makers)),
+        }
       : {}),
   };
 }
@@ -470,7 +479,9 @@ export class Store {
           $received: input.received ?? null,
           $retryAt: input.notBefore ?? 0,
           $fleet: input.fleet
-            ? JSON.stringify(fleetJobSchema.parse(input.fleet))
+            ? JSON.stringify(
+                Schema.decodeUnknownSync(fleetJobSchema)(input.fleet),
+              )
             : null,
         }).changes > 0
     );
@@ -1103,7 +1114,13 @@ export class Store {
     this.db
       .query("UPDATE jobs SET makers=? WHERE id=? AND makers IS NULL")
       .run(
-        JSON.stringify(z.array(nativeMakerSchema).max(100).parse(makers)),
+        JSON.stringify(
+          Schema.decodeUnknownSync(
+            Schema.mutable(Schema.Array(nativeMakerSchema)).check(
+              Schema.isMaxLength(100),
+            ),
+          )(makers),
+        ),
         id,
       );
   }
