@@ -87,6 +87,8 @@ permissions control what the agent can do on the host.
   teams and [IRC](docs/irc.md) for IRC captain and crew accounts.
 - [CLIProxyAPI](docs/cliproxyapi.md), the [dashboard](docs/dashboard.md), and
   [nightly maintenance](docs/maintenance.md) each have separate setup.
+- The [Fleet API](docs/api.md) serves read-only fleet status and events to
+  Subspace over a private network.
 - See [architecture](docs/design.md), [development](docs/development.md), and
   [contributing](CONTRIBUTING.md) to work on Stargate.
 
