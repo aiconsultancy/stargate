@@ -7,6 +7,7 @@ import { z } from "zod";
 import { isNativeInstructionContext } from "./instruction-context";
 import {
   crewMessageMetadataKey,
+  isTaskResume,
   taskEnvelopePayload,
 } from "./message-protocol";
 import {
@@ -55,7 +56,10 @@ const urgency = z.object({
 });
 
 function matchesUrgency(message: ResultMessage, task: CrewTask): boolean {
-  const notice = urgency.safeParse(message.metadata?.[crewMessageMetadataKey]);
+  const metadata = message.metadata?.[crewMessageMetadataKey];
+  if (metadata && typeof metadata === "object" && "resumeIdleAt" in metadata)
+    return isTaskResume(message, task);
+  const notice = urgency.safeParse(metadata);
   return (
     notice.success &&
     !!(notice.data.sourceTaskID || notice.data.messageID) &&
@@ -86,6 +90,8 @@ function matchesInput(message: ResultMessage, task: CrewTask): boolean {
     return false;
   }
 }
+
+export class MissingTaskResult extends CrewError {}
 
 /** greybeard: scan only this task's retained turn; no semantic matching or replay. */
 export async function readTaskResult(
@@ -136,7 +142,7 @@ export async function readTaskResult(
           final.time.completed === undefined ||
           !result
         )
-          throw new CrewError(
+          throw new MissingTaskResult(
             "No completed visible worker answer follows this input. Resume the existing task session, then retry status; do not submit the assignment again.",
           );
         return result.slice(0, 64000);

@@ -337,6 +337,9 @@ test("ship records cover the configured roster and preserve operator notes", asy
     "utf8",
   );
   expect(agreement).toContain("applicable nested");
+  expect(agreement).toContain(
+    "## Pull request scope\n\nFollow the repository's scope, delivery, review and approval rules.",
+  );
   expect(agreement).toContain("## Requests and replies");
   expect(agreement).toContain("## Task-boundary improvement");
   await writeFile(log, "Verified lesson: preserve the original task ID.\n");

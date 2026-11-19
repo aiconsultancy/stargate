@@ -163,7 +163,7 @@ export function questionControl(text: string): QuestionControl | undefined {
       /^[a-f0-9]{24,128}[.,:;!?…)]*$/i.test(candidate)
     )
       return {
-        target: malformed[1] ?? "",
+        target: (malformed[1] ?? "").replace(/^@/, ""),
         token: "",
         answer: undefined,
         invalid: true,
@@ -171,7 +171,7 @@ export function questionControl(text: string): QuestionControl | undefined {
     return;
   }
   return {
-    target: match[1] ?? "",
+    target: (match[1] ?? "").replace(/^@/, ""),
     token: match[3]?.toLowerCase() ?? "",
     answer: match[2]?.toLowerCase() === "answer" ? match[4] : null,
     ...(match[2]?.toLowerCase() === "renew-question"

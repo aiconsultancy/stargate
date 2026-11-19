@@ -666,11 +666,11 @@ const ircConfiguredSchema = settingsStruct({
     allCallWords: Schema.mutable(Schema.Array(mentionNameSchema))
       .check(Schema.isMaxLength(20))
       .pipe(settingsDefault([...defaultAllCallWords])),
-    /** Accounts of other fleet captains: peer rules, 5 per target an hour. */
+    /** Authenticated accounts of other fleet captains. */
     peerCaptains: Schema.optional(
       Schema.mutable(Schema.Array(ircAccount)).check(Schema.isMaxLength(50)),
     ),
-    /** Peer turns per conversation/hour; absent keeps the default of five. */
+    /** Peer turns per receiving connection and conversation in a rolling hour; defaults to 30. */
     peerTurnsPerHour: Schema.optional(
       Schema.Finite.check(Schema.isInt())
         .check(Schema.isGreaterThanOrEqualTo(0))

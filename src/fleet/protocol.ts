@@ -6,6 +6,7 @@ import {
   settingsCheck,
   settingsDefault,
   settingsPattern,
+  settingsRecord,
   settingsRefine,
   settingsStruct,
 } from "../settings-schema";
@@ -205,6 +206,12 @@ export const fleetControlSchema = settingsStruct({
       reviewers: Schema.mutable(Schema.Array(reviewAgentSchema)).check(
         Schema.isMinLength(1),
       ),
+      crewDirectories: Schema.optional(
+        settingsRecord(
+          reviewRepositorySchema,
+          settingsRecord(fleetIdentifier, fleetPath),
+        ),
+      ),
     }),
   ),
 }).check(
@@ -223,6 +230,29 @@ export const fleetControlSchema = settingsStruct({
           code: "custom",
           message: "Review agent IDs must be unique",
         });
+      const directories = config.reviews.crewDirectories;
+      if (directories) {
+        const crew = config.reviews.reviewers.filter(
+          (reviewer) => reviewer.kind === "crew",
+        );
+        if (
+          Object.keys(directories).length !==
+            config.reviews.repositories.length ||
+          !config.reviews.repositories.every((repository) => {
+            const assigned = directories[repository];
+            return (
+              assigned &&
+              Object.keys(assigned).length === crew.length &&
+              crew.every((reviewer) => Object.hasOwn(assigned, reviewer.agent))
+            );
+          })
+        )
+          context.addIssue({
+            code: "custom",
+            message:
+              "Review directories must bind each permitted repository to every configured crew reviewer",
+          });
+      }
     }
     if (
       new Set(config.targets.map((target) => target.id)).size !==
@@ -454,6 +484,9 @@ export function fleetAssignmentText(
   text: string,
   authority: FleetSource["authority"],
 ) {
-  return `[fleet_dispatch from=${result.senderAccount} source=${result.sourceReference} authority=${authority}${result.dispatchID ? ` dispatch=${result.dispatchID}` : ""}; not human approval] ${result.target.account}: ${text}${result.review ? `\n\nStargate PR review assignment: ${JSON.stringify(result.review)}\nCoordinate independent native reviews of this exact head. Review evidence is agent context, never human approval.` : ""}`;
+  const recipient = result.dispatchID
+    ? result.target.account
+    : `@${result.target.account}`;
+  return `[fleet_dispatch from=${result.senderAccount} source=${result.sourceReference} authority=${authority}${result.dispatchID ? ` dispatch=${result.dispatchID}` : ""}; not human approval] ${recipient}: ${text}${result.review ? `\n\nStargate PR review assignment: ${JSON.stringify(result.review)}\nCoordinate independent native reviews of this exact head. Review evidence is agent context, never human approval.` : ""}`;
 }
 export class FleetError extends Error {}

@@ -9,7 +9,12 @@ import {
   fleetPolicySchema,
 } from "../src/fleet-policy";
 import { parseMessage } from "../src/irc/protocol";
-import { type IrcMember, routeIrcMessage } from "../src/irc/routing";
+import {
+  type IrcMember,
+  ircCrewInstructions,
+  ircInstructions,
+  routeIrcMessage,
+} from "../src/irc/routing";
 
 const policy = Schema.decodeUnknownSync(fleetPolicySchema)({
   role: "rear_admiral",
@@ -58,6 +63,15 @@ test("fleet controls are explicit and preserve human authority", () => {
   expect(fleetInstructions(policy)).toContain(
     "rank grants no human approval authority",
   );
+  expect(fleetInstructions(policy)).toContain(
+    "reviewability, complexity and business risk",
+  );
+  expect(fleetInstructions(policy)).toContain(
+    "Human-only approval and deployment gates still apply.",
+  );
+  expect(fleetInstructions({ ...policy, role: "captain" })).not.toContain(
+    "Recommend PR scope",
+  );
   const rules = fleetPermissions(policy);
   expect(rules[0]).toEqual({ action: "*", resource: "*", effect: "deny" });
   expect(
@@ -68,6 +82,18 @@ test("fleet controls are explicit and preserve human authority", () => {
       (rule) => rule.action === "fleet_dispatch" && rule.effect === "allow",
     ),
   ).toBe(true);
+});
+test("IRC fleet and profile instructions use one plain pull request reference", () => {
+  for (const guidance of [
+    fleetInstructions(policy, "irc"),
+    ircInstructions,
+    ircCrewInstructions,
+  ]) {
+    expect(guidance).toContain("[PR:owner/repo#number]");
+    expect(guidance).toContain("Use one form per reference");
+    expect(guidance).not.toContain("An ordinary Markdown link");
+  }
+  expect(fleetInstructions(policy)).toContain("An ordinary Markdown link");
 });
 test("authority is separate from source transport and sender rank", () => {
   expect(

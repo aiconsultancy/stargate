@@ -270,9 +270,11 @@ the request that dispatched them.
 
 ## Access
 
-`access.peerTurnsPerHour` overrides the default five peer-captain turns per
-conversation/hour (0–600; 0 refuses them). It reloads live with the other access
-settings and `shipTurnsPerAgentPerHour`.
+`access.peerTurnsPerHour` overrides the default of 30 peer turns per receiving
+connection and conversation in a rolling hour (0–600, with 0 refusing peer
+turns). It reloads live with the other access settings and
+`shipTurnsPerAgentPerHour`. Deployments that relied on the old default can
+keep it by setting `access.peerTurnsPerHour: 5` explicitly.
 
 - The sender's identity is the IRCv3 `account` tag, never the nick. A
   message without an account tag is ignored.
@@ -457,7 +459,10 @@ For a captain, trusted-human messages and valid replies in `home` wake it;
 command roots wake it, while command replies need confirmed participation or
 an explicit current-nick invitation. A rear admiral's `home` is its private
 coordination room: human messages and replies wake it there, and other joined
-rooms require a mention. Visitors require an exact current-nick mention.
+rooms require a mention. In a configured peer captain's channel or the fleet
+command channel outside the visitor's human wake list, type the current `@nick`
+of the visiting captain or rear admiral in each message, including replies. The
+gateway applies the same policy to queued visitor turns.
 Explicit `humanWakeChannels`, legacy `wakeChannels`, account allowlists, denies
 and peer caps remain authoritative. An explicit legacy wake list (including
 `[]`) prevents automatic human-wake and strict-mention defaults. Use
@@ -495,8 +500,8 @@ is explicit; a naming rule such as `*-captain` is not used, because the
 server operator assigns account names and an explicit list cannot match by
 accident. Peer messages follow the Slack peer rules: the source line ends
 with `;k=captain`, they carry no operator or Admiralty authority, and Stargate
-admits at most **5 per conversation (channel or direct message) in a
-rolling hour**. A peer list cannot contain this ship's own accounts.
+applies the configured IRC peer turn limit. A peer list cannot contain this
+ship's own accounts.
 
 When the optional `fleetPolicy` is configured, strict nick-mention mode admits
 bot-tagged context only from a real SASL account present in **both**
@@ -510,9 +515,10 @@ approval or Stop authority.
 When `fleetControl.results: true` enables the
 [correlated fleet result outbox](fleet-tools.md), ordinary authenticated,
 enrolled peers may still start a context turn with an exact current-nick mention.
-The existing peer limit remains **5 per channel or DM per rolling hour** by
-default; `access.peerTurnsPerHour` can explicitly set 0–600, including 0 to
-disable peer intake. Peers get no automatic human wake or human approval.
+Use `@nick` to address a visiting captain or rear admiral in the channels above.
+The default is **30 peer turns per receiving connection and channel or DM in
+a rolling hour**, shared by ordinary peer messages and correlated handoffs.
+Peers get no automatic human wake or human approval.
 Their original text and the exact admitted nick are retained. Execution and
 delivery recheck current identity/access/peer policy against that captured
 recipient, so a fallback nick or nick recovery does not discard accepted work.
@@ -527,10 +533,11 @@ declare completion or impersonate a human approval. Ordinary peer chat does not
 create a correlated assignment or completion receipt. Silent acknowledgements
 remain appropriate. Ordinary addressed replies, including acknowledgements,
 can start another peer turn. Two agents that keep addressing each other can
-therefore use up to five turns each per conversation in a rolling hour; the cap
-persists across restarts and is not a guarantee of zero feedback. Each joined
-channel is a separate conversation. No prose-based acknowledgement filter is
-used. Operators can explicitly narrow peers or lower the peer cap when needed.
+use up to the configured limit each per conversation in a rolling hour. The
+cap persists across restarts. Some feedback can still occur because peer
+admission does not filter acknowledgement prose. Each joined channel is a
+separate conversation. Operators can narrow the peer list, lower the cap or
+set it to 0 to disable peer intake.
 
 Outside protected human wake channels, an explicit leading address to a known
 other fleet agent (`vance:`, `vance,` or `@vance:`) prevents a results-mode human or peer message
@@ -585,6 +592,10 @@ thread history or trust the tag as sender identity. The authenticated
   rules are removed; links keep their URL; inline code keeps its backticks.
   Control characters are removed, so a reply cannot send CTCP or IRC
   formatting.
+- IRC profile and fleet guidance asks agents to send one pull request reference:
+  a standalone `[PR:owner/repo#number]` marker or the full GitHub pull request
+  URL in plain text, outside backticks and Markdown link syntax. Clients that
+  recognise pull request references can display it as a chip.
 - Each line fits 512 bytes, including Stargate's tags and the source prefix
   that the server adds. Long lines break at spaces, otherwise at a UTF-8
   character boundary. Blank lines are not sent.
@@ -803,6 +814,8 @@ galactica: answer <token from the question> 1
 galactica: cancel-question <token from the question>
 galactica: renew-question <expired token from the question>
 ```
+
+An explicit `@nick:` address works with the same token controls.
 
 One string field accepts a displayed choice number, or free text when the native
 field allows it. A multiple-choice field accepts comma-separated numbers.

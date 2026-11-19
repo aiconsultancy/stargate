@@ -41,6 +41,7 @@ import {
   ircAllowed,
   ircNote,
   ircResultJobAllowed,
+  requiresVisitorTag,
   routeIrcMessage,
   routeIrcStop,
   shipAccounts,
@@ -343,7 +344,11 @@ function shipTransport(
       )
     )
       return false;
-    if (!config.fleetControl?.results) return true;
+    if (
+      !config.fleetControl?.results &&
+      !requiresVisitorTag(config, member, channel, client.fold)
+    )
+      return true;
     // Recheck original addressing too: the JSON wrapper must not conceal a
     // source that a later policy would refuse before execution or delivery.
     return (
@@ -356,7 +361,7 @@ function shipTransport(
             member,
             client.nick,
             user,
-            { ...job, text },
+            { ...stored, text },
             client.fold,
           ),
         )
@@ -400,7 +405,10 @@ function shipTransport(
       ? {
           instructions: () =>
             [
-              config.fleetPolicy ? fleetInstructions(config.fleetPolicy) : "",
+              config.fleetPolicy
+                ? fleetInstructions(config.fleetPolicy, "irc")
+                : "",
+              "Tag another fleet agent with its current @nick when addressing it in IRC, including in thread replies. A name without @ does not wake a visiting agent.",
               ...(member.role === "captain"
                 ? (config.access.humanWakeChannels ?? [])
                 : []
@@ -1036,7 +1044,7 @@ export class IrcShip {
           ...message,
           params: [
             message.params[0] ?? "",
-            `${client.nick}: answer ${control.token}`,
+            `@${client.nick}: answer ${control.token}`,
           ],
         }
       : message;

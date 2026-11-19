@@ -16,6 +16,7 @@ import {
   type CrewSession,
   type CrewSessions,
 } from "../src/crew/engine";
+import { resumeMessageID } from "../src/crew/message-protocol";
 import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
 import type {
   CrewInspectionAPI,
@@ -47,7 +48,9 @@ function git(directory: string, ...args: string[]) {
   return run.stdout.toString().trim();
 }
 
-async function fixture(options: { repository?: boolean } = {}) {
+async function fixture(
+  options: { repository?: boolean; exclusiveWorkerInput?: boolean } = {},
+) {
   const base = await mkdtemp(join(tmpdir(), "stargate-admin-"));
   const project = join(base, "project");
   const worktrees = Object.fromEntries(
@@ -73,6 +76,7 @@ async function fixture(options: { repository?: boolean } = {}) {
   }
   const config = {
     namespace: "admin",
+    exclusiveWorkerInput: options.exclusiveWorkerInput ?? true,
     stateDirectory: join(base, "state"),
     captainDirectory: join(base, "captain"),
     projectDirectory: project,
@@ -106,6 +110,9 @@ async function fixture(options: { repository?: boolean } = {}) {
   const state = {
     placement: "placed" as "placed" | "queued",
     loseReceipt: false,
+    loseResumeReceipt: false,
+    queueResume: false,
+    beforeResumeAdmission: () => {},
     nativeDown: false,
     inspectionDown: false,
   };
@@ -167,8 +174,33 @@ async function fixture(options: { repository?: boolean } = {}) {
       busy.delete(sessionID);
       return { interrupted: true };
     },
-    async synthetic() {
+    async synthetic(input) {
       calls.push("synthetic");
+      if (state.loseResumeReceipt)
+        throw new Error("PRIVATE resume receipt lost");
+      if (
+        input.resume &&
+        input.description === "Captain resume of retained crew task"
+      ) {
+        if (!input.id) throw new Error("Resume requires a native message ID");
+        if (state.queueResume) {
+          inbox.set(input.sessionID, [
+            ...(inbox.get(input.sessionID) ?? []),
+            input.id,
+          ]);
+          return;
+        }
+        history.set(input.sessionID, [
+          ...(history.get(input.sessionID) ?? []),
+          {
+            type: "synthetic",
+            id: input.id,
+            time: { created: 15 },
+            metadata: input.metadata ?? {},
+          },
+        ]);
+        busy.add(input.sessionID);
+      }
     },
     async compact() {
       calls.push("compact");
@@ -204,6 +236,7 @@ async function fixture(options: { repository?: boolean } = {}) {
       // Native-like pages: newest first, optional type filter kept by cursor.
       async list(input) {
         if (state.inspectionDown) throw new Error("PRIVATE inspection outage");
+        if (!input.type && input.limit === 100) state.beforeResumeAdmission();
         const query = input.cursor
           ? pages.get(input.cursor)
           : { offset: 0, type: input.type };
@@ -320,6 +353,265 @@ const abandon = (
   reason: extra.reason ?? "Interrupted turn has no retained answer.",
   key: extra.key ?? "abandon-1",
   acknowledgeUnconfirmedStop: true as const,
+});
+
+function resumeInput(task: CrewTask) {
+  return {
+    op: "resume",
+    taskID: task.id,
+    expected: {
+      originCaptainID: task.originCaptainID,
+      workerSessionID: task.workerSessionID,
+      inputID: task.inputID,
+      idleAt: 1,
+    },
+  };
+}
+
+async function stuckTask(f: Fixture) {
+  const { task } = await f.dispatch("bosun", "Original assignment");
+  if (!task) throw new Error("No fixture task");
+  f.interrupted(task);
+  expect(
+    (await f.engine.run({ op: "status", taskID: task.id }, f.captain())).status,
+  ).toBe("uncertain");
+  return task;
+}
+
+function finalAnswer(f: Fixture, task: CrewTask) {
+  const session = f.sessions.get(task.workerSessionID);
+  if (!session) throw new Error("No fixture session");
+  f.busy.delete(task.workerSessionID);
+  session.outcome = "succeeded";
+  f.history.get(task.workerSessionID)?.push({
+    type: "assistant",
+    id: "msg_fixture_final",
+    agent: "bosun",
+    finish: "stop",
+    time: { created: 20, completed: 21 },
+    content: [{ type: "text", text: "Original task complete." }],
+  });
+}
+
+test("captain resumes the original worker, and the final answer completes that task", async () => {
+  const f = await fixture();
+  try {
+    const task = await stuckTask(f);
+    const queued = (await f.dispatch("bosun", "Next assignment", true)).task;
+    if (!queued) throw new Error("No queued fixture task");
+    expect(await f.engine.run(resumeInput(task), f.captain())).toMatchObject({
+      status: "resume-admitted",
+      task: {
+        status: "running",
+        id: task.id,
+        inputID: task.inputID,
+        workerSessionID: task.workerSessionID,
+      },
+    });
+    expect(f.prompts()).toBe(1);
+    expect(f.calls.filter((call) => call === "synthetic")).toHaveLength(1);
+    expect(
+      (await f.engine.run({ op: "status", taskID: task.id }, f.captain()))
+        .status,
+    ).toBe("running");
+    finalAnswer(f, task);
+    expect(
+      await f.engine.run({ op: "status", taskID: task.id }, f.captain()),
+    ).toMatchObject({
+      status: "completed",
+      task: { id: task.id, result: "Original task complete." },
+    });
+    expect(f.engine.state.queuedTasks("bosun").map((row) => row.id)).toEqual([
+      queued.id,
+    ]);
+    expect(f.prompts()).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a lost resume receipt consumes only the inspected idle boundary", async () => {
+  const f = await fixture();
+  try {
+    const task = await stuckTask(f);
+    const input = resumeInput(task);
+    f.state.loseResumeReceipt = true;
+    const failed = await f.engine.run(input, f.captain());
+    expect(failed.status).toBe("resume-uncertain");
+    expect(failed.diagnostic ?? "").not.toContain("PRIVATE");
+    f.state.loseResumeReceipt = false;
+    expect((await f.engine.run(input, f.captain())).status).toBe(
+      "resume-admitted",
+    );
+    f.busy.delete(task.workerSessionID);
+    f.engine.state.uncertain(task.id);
+    expect((await f.engine.run(input, f.captain())).status).toBe(
+      "resume-already-admitted",
+    );
+    const session = f.sessions.get(task.workerSessionID);
+    if (!session) throw new Error("No fixture session");
+    session.time = { updated: 2, idle: 2, busy: 2 };
+    expect((await f.engine.run(input, f.captain())).status).toBe(
+      "resume-already-admitted",
+    );
+    await expect(
+      f.engine.run(
+        {
+          ...input,
+          expected: { ...input.expected, idleAt: 3 },
+        },
+        f.captain(),
+      ),
+    ).rejects.toThrow("inspect again");
+    expect(f.calls.filter((call) => call === "synthetic")).toHaveLength(2);
+    expect(f.prompts()).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("abandon withdraws only this task's queued continuation", async () => {
+  const f = await fixture();
+  try {
+    const task = await stuckTask(f);
+    f.state.queueResume = true;
+    const result = await f.engine.run(resumeInput(task), f.captain());
+    if (!result.task) throw new Error("Missing admitted task");
+    const [continuation] = f.inbox.get(task.workerSessionID) ?? [];
+    if (!continuation) throw new Error("Missing queued continuation");
+    f.inbox.set(task.workerSessionID, [continuation, "unrelated-input"]);
+    const outcome = await f.engine.run(abandon(f, result.task), f.captain());
+    expect(outcome.status).toBe("abandoned");
+    expect(f.calls).toContain(`withdraw:${continuation}`);
+    expect(f.inbox.get(task.workerSessionID)).toEqual(["unrelated-input"]);
+    expect(f.prompts()).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an unconfirmed resume holds its slot until a late native admission is found", async () => {
+  const f = await fixture();
+  try {
+    const task = await stuckTask(f);
+    const uncertain = f.engine.state.task(task.id);
+    if (!uncertain) throw new Error("Missing uncertain task");
+    f.state.loseResumeReceipt = true;
+    expect((await f.engine.run(resumeInput(task), f.captain())).status).toBe(
+      "resume-uncertain",
+    );
+    await expect(
+      f.engine.run(abandon(f, uncertain), f.captain()),
+    ).rejects.toThrow("admission is still unconfirmed");
+    expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+    const continuation = resumeMessageID(task, 1);
+    f.inbox.set(task.workerSessionID, [continuation]);
+    expect(
+      (await f.engine.run(abandon(f, uncertain), f.captain())).status,
+    ).toBe("abandoned");
+    expect(f.calls).toContain(`withdraw:${continuation}`);
+    expect(f.inbox.get(task.workerSessionID)).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("resume defaults to off on shared native worker profiles", async () => {
+  const f = await fixture({ exclusiveWorkerInput: false });
+  try {
+    const task = await stuckTask(f);
+    await expect(f.engine.run(resumeInput(task), f.captain())).rejects.toThrow(
+      "exclusive Stargate input",
+    );
+    expect(f.calls).not.toContain("synthetic");
+  } finally {
+    await f.close();
+  }
+});
+
+test("resume rechecks the worker after history inspection and serializes captain controls", async () => {
+  const f = await fixture();
+  try {
+    const task = await stuckTask(f);
+    const input = resumeInput(task);
+    f.state.beforeResumeAdmission = () => {
+      f.busy.add(task.workerSessionID);
+    };
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow("busy");
+    expect(f.calls).not.toContain("synthetic");
+    f.busy.delete(task.workerSessionID);
+    f.state.beforeResumeAdmission = () => {};
+    const attempts = await Promise.allSettled([
+      f.engine.run(input, f.captain()),
+      f.engine.run(input, f.captain()),
+    ]);
+    expect(
+      attempts.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(f.calls.filter((call) => call === "synthetic")).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("resume refuses other captains, crew, changed bindings, and worker activity", async () => {
+  const f = await fixture();
+  try {
+    const task = await stuckTask(f);
+    const input = resumeInput(task);
+    await expect(
+      f.engine.run(input, f.captain("ses_captain_b")),
+    ).rejects.toThrow("does not own");
+    await expect(
+      f.engine.run(input, f.worker(task.workerSessionID, "bosun")),
+    ).rejects.toThrow("captain sessions");
+    await expect(
+      f.engine.run(
+        {
+          ...input,
+          expected: { ...input.expected, inputID: "foreign" },
+        },
+        f.captain(),
+      ),
+    ).rejects.toThrow("inspected worker");
+    f.busy.add(task.workerSessionID);
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow("busy");
+    f.busy.delete(task.workerSessionID);
+    f.inbox.set(task.workerSessionID, ["other-input"]);
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      "pending input",
+    );
+    f.inbox.delete(task.workerSessionID);
+    f.history.get(task.workerSessionID)?.push({
+      type: "user",
+      id: "later-input",
+      time: { created: 18 },
+    });
+    await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+      "no longer owns",
+    );
+    expect(f.calls).not.toContain("synthetic");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a retained final answer takes precedence over resume", async () => {
+  const f = await fixture();
+  try {
+    const task = await stuckTask(f);
+    finalAnswer(f, task);
+    expect((await f.engine.run(resumeInput(task), f.captain())).status).toBe(
+      "result-available",
+    );
+    expect(f.calls).not.toContain("synthetic");
+    expect(
+      (await f.engine.run({ op: "status", taskID: task.id }, f.captain()))
+        .status,
+    ).toBe("completed");
+  } finally {
+    await f.close();
+  }
 });
 
 test("captain recovers idle uncertain slots without replay, promotion or result loss", async () => {
