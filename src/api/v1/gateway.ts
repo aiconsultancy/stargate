@@ -1,12 +1,45 @@
 import packageManifest from "../../../package.json";
-import { runningVersion } from "../../nightly/ready";
+import { packageDirectory, runningVersion } from "../../nightly/ready";
+
+const releaseTag = /^v(\d+\.\d+\.\d+)$/;
+
+/** The release tag at HEAD of a git checkout, without its `v`; else null. */
+async function checkoutTagVersion(directory: string): Promise<string | null> {
+  try {
+    const child = Bun.spawn(
+      ["git", "-C", directory, "tag", "--points-at", "HEAD"],
+      { stdout: "pipe", stderr: "ignore", stdin: "ignore" },
+    );
+    const timer = setTimeout(() => child.kill(), 2000);
+    const [output, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      child.exited,
+    ]);
+    clearTimeout(timer);
+    if (code !== 0) return null;
+    const versions = output
+      .split("\n")
+      .map((tag) => releaseTag.exec(tag.trim())?.[1])
+      .filter((version): version is string => version !== undefined);
+    return versions.length === 1 ? (versions[0] ?? null) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The version a fleet reports: the installed release's own record
- * (`.stargate-release.json`), or the package version in a source checkout.
+ * (`.stargate-release.json`); else, in a git checkout of a release, the
+ * single `vX.Y.Z` tag at HEAD; else the package version.
  */
-export async function gatewayVersion(directory?: string): Promise<string> {
-  return (await runningVersion(directory)) ?? packageManifest.version;
+export async function gatewayVersion(
+  directory: string = packageDirectory,
+): Promise<string> {
+  return (
+    (await runningVersion(directory)) ??
+    (await checkoutTagVersion(directory)) ??
+    packageManifest.version
+  );
 }
 
 const versionCacheMs = 10 * 60_000;
