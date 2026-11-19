@@ -16,6 +16,10 @@
 
 ### Changes
 
+- The Fleet API's `gateway.version` reports the installed release's version
+  from `.stargate-release.json`, not the package version, which stays at
+  `0.1.0`. Source checkouts still report the package version.
+
 - Add a private-network, read-only Fleet API with bearer authentication,
   host metrics and streamed fleet events for Subspace. See the
   [Fleet API setup guide](docs/api.md).
