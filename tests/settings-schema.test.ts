@@ -136,6 +136,41 @@ test("review: configuration records preserve legacy shallow key handling", () =>
   ).toBe("Failure");
 });
 
+test("record validation retains independent key and value diagnostics", () => {
+  let message = "";
+  try {
+    decodeSettings(claudeBackendSchema, {
+      type: "claude",
+      directory: "/workspace",
+      model: "claude-sonnet-5-5",
+      provider: {
+        baseURL: "http://127.0.0.1:8317/v1",
+        apiKeyEnv: "TEST_KEY",
+      },
+      mcpServers: {
+        "bad name": { type: "http", url: "https://example.test" },
+        remote: {
+          type: "http",
+          url: "https://example.test",
+          headersHelper: "PRIVATE_DIAGNOSTIC_VALUE",
+        },
+        other: { type: "http", url: "PRIVATE_INVALID_URL" },
+      },
+    });
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    message = (error as Error).message;
+  }
+  expect(message).toContain('["mcpServers","bad name"]');
+  expect(message).toContain('["mcpServers","remote","headersHelper"]');
+  expect(message).toContain(
+    "Use an absolute executable and optional literal arguments",
+  );
+  expect(message).toContain('["mcpServers","other","url"]');
+  expect(message).not.toContain("PRIVATE_DIAGNOSTIC_VALUE");
+  expect(message).not.toContain("PRIVATE_INVALID_URL");
+});
+
 test("review: raw unknown keys survive structural child failures safely", () => {
   let parentCalls = 0;
   const child = settingsStruct({ value: Schema.String });

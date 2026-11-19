@@ -59,14 +59,13 @@ export function settingsRecord<
         encode: (input) => input,
       }),
     ),
-    // A constrained Record selects matching entries. Check every raw name first,
-    // then let the authoritative key codec apply its decoded transformation.
+    // Select every raw name, then validate and transform it with the key codec.
+    // Native record decoding retains independent key and value diagnostics.
     Schema.decodeTo(
-      Schema.Record(Schema.String, Schema.Unknown).check(
+      Schema.Record(Schema.String.pipe(Schema.decodeTo(key)), value).check(
         Schema.isPropertyNames(key),
       ),
     ),
-    Schema.decodeTo(Schema.Record(key, value)),
   );
 }
 
