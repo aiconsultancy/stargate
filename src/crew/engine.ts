@@ -19,6 +19,7 @@ import type {
   SessionGetInput,
   SessionInfo,
   SessionInterruptInput,
+  SessionListInput,
   SessionPromptInput,
   SessionSyntheticInput,
 } from "@opencode/client";
@@ -307,6 +308,10 @@ type RequestOptions = NonNullable<
 >;
 // Narrow SDK boundary keeps tests local and avoids fabricating full SDK objects.
 export interface CrewSessions {
+  list?(
+    input?: SessionListInput,
+    request?: RequestOptions,
+  ): Promise<{ data: CrewSession[]; cursor: { next?: string | null } }>;
   get(input: SessionGetInput, request?: RequestOptions): Promise<CrewSession>;
   create(
     input: SessionCreateInput,
@@ -816,7 +821,7 @@ export class CrewEngine {
   }
 
   /**
-   * Passive maintenance notice: queues context for the pin and every ready
+   * Passive maintenance notice: queues context for captain roots and every ready
    * OpenCode crew session, plain Mesij mail for Pi crew. It never provisions
    * a session, prompts, or touches a task. IDs are per run, phase and session.
    */
@@ -841,6 +846,36 @@ export class CrewEngine {
       });
     };
     if (captain) queue(captain);
+    else {
+      if (!this.sessions.list)
+        throw new Error("Maintenance captain discovery unavailable");
+      let cursor: string | undefined;
+      do {
+        const page = await this.sessions.list(
+          {
+            directory: this.options.captainDirectory,
+            parentID: null,
+            limit: 100,
+            ...(cursor ? { cursor } : {}),
+          },
+          { signal },
+        );
+        for (const session of page.data) {
+          if (
+            !session.parentID &&
+            [
+              this.options.team.captain.agent ?? this.options.team.captain.id,
+              this.options.team.captain.id,
+            ].includes(session.agent ?? "") &&
+            resolve(session.location.directory) ===
+              resolve(this.options.captainDirectory) &&
+            !this.state.peerBySession(session.id)
+          )
+            queue(session.id);
+        }
+        cursor = page.cursor.next ?? undefined;
+      } while (cursor);
+    }
     for (const irc of this.state.ircSessions.sessions())
       if (
         this.options.team.crew.some(
@@ -905,11 +940,11 @@ export class CrewEngine {
         workers.add(queued.crewID);
         const caller: CrewCaller = {
           sessionID: queued.originCaptainID,
-          agent:
-            this.options.team.captain.agent ?? this.options.team.captain.id,
+          agent: this.options.team.captain.id,
           signal,
         };
         try {
+          await this.captain(caller);
           if ((await this.promote(queued, caller)).status !== "queued")
             resumed++;
         } catch {

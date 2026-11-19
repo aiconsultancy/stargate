@@ -750,6 +750,8 @@ For a run that has prepared changes requiring a restart:
    context queues carry one non-interrupting notice per captain/OpenCode crew
    session; Pi workers receive ordinary mail. No synthetic model input is
    created and no new session is provisioned for a notice.
+   For an unpinned crew configuration, discovery includes existing captain
+   roots in its configured directory, not child sessions or other agents.
 2. Gate new captain turns and crew admissions. Slack/IRC/Teams intake still
    stores accepted messages in the existing gateway queue. Crew assignments
    remain in the existing pending-task queue. Running work can finish.
@@ -766,6 +768,8 @@ For a run that has prepared changes requiring a restart:
    Gateway inputs retain their stored order. Only assignments held by this
    drain are eligible for automatic resumption; unrelated queued or uncertain
    crew work keeps its existing ownership and recovery rules.
+   Resumption revalidates the original captain against the current pin and
+   native identity. Work whose captain is no longer authorised stays queued.
 
 The user-scoped barrier and live-participant metadata coordinate independent
 gateway installations; they contain no credentials or message payloads and do

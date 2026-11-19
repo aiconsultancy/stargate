@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -46,6 +47,21 @@ test("advance notice names the planned time and completion says restart complete
   expect(
     drainNoticeText({ ...notice, phase: "completed" }).toLowerCase(),
   ).toContain("restart complete");
+});
+
+test("the host control lock excludes another owner and releases without stale-file deletion", async () => {
+  const dir = await directory();
+  await mkdir(dir, { recursive: true });
+  const lock = new Database(join(dir, "drain.lock.sqlite"), { create: true });
+  try {
+    lock.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE;");
+    await expect(claimMaintenanceDrain(record(), dir)).rejects.toThrow();
+    expect(readMaintenanceDrain(dir)).toBeNull();
+  } finally {
+    lock.close();
+  }
+  await claimMaintenanceDrain(record(), dir);
+  expect(maintenanceDraining(dir)).toBe(true);
 });
 
 test("a newly claimed barrier takes effect even inside the same gateway poll tick", async () => {

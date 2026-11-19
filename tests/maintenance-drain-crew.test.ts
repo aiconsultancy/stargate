@@ -76,6 +76,12 @@ async function fixture(team: Team = defaultTeam, pin = false) {
   const busy = new Set<string>();
   let beforeIdle: (() => void) | undefined;
   const client: CrewSessions = {
+    async list(input) {
+      const data = [...sessions.values()];
+      return input?.cursor
+        ? { data: data.slice(1), cursor: {} }
+        : { data: data.slice(0, 1), cursor: { next: "page-2" } };
+    },
     async get({ sessionID }) {
       const session = sessions.get(sessionID);
       if (!session) throw { _tag: "Session.NotFoundError" };
@@ -171,6 +177,7 @@ async function fixture(team: Team = defaultTeam, pin = false) {
     busy,
     mail,
     captain,
+    sessions,
     setDrain(value: MaintenanceDrain | null) {
       drain = value;
     },
@@ -277,6 +284,54 @@ test("idle direct messages are deferred during a drain, never waking a session",
   );
   expect(receipt).toMatchObject({ stored: true, notification: "deferred" });
   expect(f.prompts).toHaveLength(before);
+});
+
+test("resumption leaves work queued when its original captain is no longer authorised", async () => {
+  const f = await fixture();
+  f.setDrain(record());
+  const held = await f.engine.run(
+    { op: "dispatch", crew: "mario", text: "retained assignment" },
+    f.captain(),
+  );
+  f.setDrain(null);
+  Object.assign(f.engine.options, { captainSessionID: "ses_captainb" });
+  expect(
+    await f.engine.resumeMaintenance(new AbortController().signal),
+  ).toEqual({
+    resumed: 0,
+    remaining: 1,
+  });
+  expect(f.engine.state.task(held.task?.id ?? "")?.status).toBe("queued");
+  expect(f.prompts).toHaveLength(0);
+});
+
+test("unpinned native captains receive passive context across every discovery page", async () => {
+  const f = await fixture();
+  f.sessions.set("ses_wrong", {
+    id: "ses_wrong",
+    agent: "bowser",
+    location: { directory: "/elsewhere" },
+  });
+  f.sessions.set("ses_child", {
+    id: "ses_child",
+    parentID: "ses_captaina",
+    agent: "bowser",
+    location: f.sessions.get("ses_captaina")?.location ?? { directory: "" },
+  });
+  const receipts = await f.engine.maintenanceNotice(
+    record(),
+    new AbortController().signal,
+  );
+  expect(receipts.map((receipt) => receipt.sessionID)).toEqual([
+    "ses_captaina",
+    "ses_captainb",
+  ]);
+  for (const id of ["ses_captaina", "ses_captainb"]) {
+    const system: { type: "text"; text: string }[] = [];
+    f.engine.updateNoticeContext(id, "bowser", system);
+    expect(system[0]?.text).toContain("draining");
+  }
+  expect(f.prompts).toHaveLength(0);
 });
 
 test("maintenance notices queue once per session and phase, supersede unread ones, and mail Pi crew", async () => {

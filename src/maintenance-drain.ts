@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, unlinkSync } from "node:fs";
 import {
@@ -103,7 +104,7 @@ export type DrainParticipant = {
 const decodeDrain = Schema.decodeUnknownResult(maintenanceDrainSchema);
 const decodeParticipant = Schema.decodeUnknownResult(participantFile);
 const markerName = "drain.json";
-const lockName = "drain.lock";
+const lockName = "drain.lock.sqlite";
 const activePhases = new Set<MaintenanceDrain["phase"]>([
   "draining",
   "restarting",
@@ -208,25 +209,20 @@ async function atomic(path: string, value: unknown) {
 async function locked<T>(directory: string, work: () => Promise<T>) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, lockName);
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const file = await open(path, "wx", 0o600);
-      await file.writeFile(String(process.pid));
-      await file.close();
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST")
-        throw new Error("Maintenance drain control unavailable");
-      const holder = Number(await readFile(path, "utf8").catch(() => "0"));
-      if (attempt > 0 || (holder > 0 && alive(holder)))
-        throw new Error("Maintenance drain control is busy");
-      await unlink(path).catch(() => {});
-    }
+  // As with the nightly run lock, SQLite owns exclusion and crash recovery.
+  // Never unlink a lock: another process may already hold its replacement.
+  await (await open(path, "a", 0o600)).close();
+  const lock = new Database(path, { create: true });
+  try {
+    lock.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE;");
+  } catch {
+    lock.close();
+    throw new Error("Maintenance drain control is busy");
   }
   try {
     return await work();
   } finally {
-    await unlink(path).catch(() => {});
+    lock.close();
   }
 }
 
