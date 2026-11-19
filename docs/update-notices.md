@@ -1,5 +1,11 @@
 # Session update notices
 
+The [restart drain](maintenance.md#restart-drain) also uses these local context
+queues for advance and completion notices. It has its own opt-in flag,
+`maintenance.drain.enabled`, and does not require `notifications.updateNotice`.
+Drain notices are deduplicated by run, phase and session; completion replaces
+unread advance context. They never create a synthetic native inbox input.
+
 `notifications.updateNotice` defaults to **false**. After a separately approved
 installation, an operator can enable it in the gateway configuration:
 

@@ -974,10 +974,17 @@ export class Store {
     })();
   }
 
-  ready(botKey: string, now: number, limit: number, serial = false): Job[] {
+  ready(
+    botKey: string,
+    now: number,
+    limit: number,
+    serial = false,
+    holdQueued = false,
+  ): Job[] {
     return this.db
       .query<StoredJob, (string | number)[]>(`SELECT * FROM jobs j
       WHERE botKey = ? AND status IN ('queued','responding') AND retry_at <= ?
+      ${holdQueued ? "AND status='responding'" : ""}
       AND NOT EXISTS (SELECT 1 FROM jobs earlier
         WHERE earlier.conversation=j.conversation AND earlier.id < j.id
          AND earlier.status IN (${unfinishedJobs})

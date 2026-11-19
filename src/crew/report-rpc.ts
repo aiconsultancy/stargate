@@ -2,6 +2,7 @@ import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
 import { activitySnapshotSchema } from "../activity";
 import { crewStatusInputSchema, crewStatusSchema } from "../crew-status";
+import { maintenanceDrainSchema } from "../maintenance-drain";
 import { quotaInputSchema, quotaSnapshotSchema } from "../quota";
 import {
   exactStruct,
@@ -82,6 +83,41 @@ export const CrewReporting = Rpc.define({
               ]),
             }),
           ),
+        ),
+      ),
+    },
+    // Passive: queues pin/crew contexts and Pi mail; never prompts or wakes.
+    maintenanceNotice: {
+      input: Schema.toStandardSchemaV1(
+        Schema.toStandardJSONSchemaV1(maintenanceDrainSchema),
+      ),
+      output: Schema.toStandardSchemaV1(
+        Schema.toStandardJSONSchemaV1(
+          Schema.Array(
+            Schema.Struct({
+              sessionID: Schema.String,
+              status: Schema.Literals([
+                "queued",
+                "mail",
+                "unchanged",
+                "uncertain",
+              ]),
+            }),
+          ),
+        ),
+      ),
+    },
+    // Starts only drain-queued crew tasks, through the existing promotion.
+    resumeMaintenance: {
+      input: Schema.toStandardSchemaV1(
+        Schema.toStandardJSONSchemaV1(Schema.Struct({})),
+      ),
+      output: Schema.toStandardSchemaV1(
+        Schema.toStandardJSONSchemaV1(
+          Schema.Struct({
+            resumed: Schema.Finite.check(Schema.isInt()),
+            remaining: Schema.Finite.check(Schema.isInt()),
+          }),
         ),
       ),
     },

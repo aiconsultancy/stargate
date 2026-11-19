@@ -28,6 +28,13 @@ import { abortable, runAbortable } from "./effect";
 import { fleetResultSource } from "./fleet/results";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
+import {
+  type DrainControl,
+  drainNoticeID,
+  drainNoticePhase,
+  drainNoticeText,
+  type MaintenanceDrain,
+} from "./maintenance-drain";
 import { textMentionNote } from "./mentions";
 import { MetaCommands, type MetaOptions, metaCandidate } from "./meta-commands";
 import { type NotificationReader, notificationNote } from "./notifications";
@@ -91,6 +98,7 @@ import {
   TranscriptionUnavailable,
   transcribeMedia,
 } from "./transcription";
+import type { UpdateReceipt } from "./update-notice";
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
 
 // Catch-up retries read history only; they never prompt the agent.
@@ -346,8 +354,20 @@ export class Gateway {
       sessionID: string,
       signal: AbortSignal,
     ) => Promise<void>,
+    /** Host-wide maintenance drain: holds new turns, never running work. */
+    private readonly drain?: DrainControl,
   ) {
     this.meta = new MetaCommands(store, slack, metaOptions);
+    drain?.attach({
+      broadcast: (record, signal) => this.broadcastDrain(record, signal),
+      ...(backend.resumeMaintenance
+        ? {
+            resume: (signal) =>
+              backend.resumeMaintenance?.(signal) ??
+              Promise.resolve({ remaining: 0 }),
+          }
+        : {}),
+    });
     this.bot = "slack" in config ? config : undefined;
     const selected =
       transport ?? (this.bot ? slackTransport(this.bot, identity) : undefined);
@@ -455,6 +475,47 @@ export class Gateway {
   /** Stop taking new slots while an idle roster member is detached. */
   pause(value = true) {
     this.paused = value;
+  }
+
+  /**
+   * Passive maintenance notice: the backend queues pin and crew contexts; each
+   * mapped, unpinned session is queued through the same validated API. A
+   * session that no longer validates is skipped, not reported as uncertain.
+   */
+  private async broadcastDrain(
+    record: MaintenanceDrain,
+    signal: AbortSignal,
+  ): Promise<UpdateReceipt[]> {
+    const receipts = [
+      ...((await this.backend.maintenanceNotice?.(record, signal)) ?? []),
+    ];
+    if (!this.backend.queueUpdateNotice || this.backend.sessionID)
+      return receipts;
+    const phase = drainNoticePhase(record);
+    const text = drainNoticeText(record);
+    const sessions = new Set<string>();
+    for (const conversation of this.store.transcripts(this.key)) {
+      const session = this.store.session(conversation);
+      if (session) sessions.add(session);
+    }
+    for (const sessionID of [...sessions].slice(0, 200)) {
+      signal.throwIfAborted();
+      try {
+        await this.backend.queueUpdateNotice(
+          sessionID,
+          drainNoticeID(record.runID, phase, sessionID),
+          text,
+          signal,
+        );
+        receipts.push({ sessionID, status: "queued" });
+      } catch {
+        signal.throwIfAborted();
+        this.log.warn(
+          "Maintenance notice skipped a session that no longer validates",
+        );
+      }
+    }
+    return receipts;
   }
 
   isIdle() {
@@ -935,14 +996,20 @@ export class Gateway {
   private poll(slots: FiberMap.FiberMap<string>) {
     const gateway = this;
     return Effect.gen(function* () {
+      gateway.drain?.tick();
       if (gateway.paused) return;
       const used = yield* FiberMap.size(slots);
-      const jobs = gateway.store.ready(
-        gateway.key,
-        Date.now(),
-        gateway.config.concurrency + used,
-        gateway.backend.sessionID !== undefined,
-      );
+      // Held: accepted jobs stay queued; responding deliveries may finish.
+      const hold = gateway.drain?.held() ?? false;
+      const jobs = gateway.store
+        .ready(
+          gateway.key,
+          Date.now(),
+          gateway.config.concurrency + used,
+          gateway.backend.sessionID !== undefined,
+          hold,
+        )
+        .filter((job) => !hold || job.status !== "queued");
       for (const job of jobs) {
         if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
         // One worker per job. A pinned turn holds the bot slot while it
@@ -1020,7 +1087,7 @@ export class Gateway {
   private startCatchUps(slots: FiberMap.FiberMap<string>) {
     const gateway = this;
     return Effect.gen(function* () {
-      if (gateway.paused) return;
+      if (gateway.paused || gateway.drain?.held()) return;
       const now = Date.now();
       for (const [conversation, retry] of gateway.settled) {
         if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
@@ -1429,6 +1496,8 @@ export class Gateway {
     if (job.status === "queued") {
       // Intake may have extended a queued IRC burst after ready() returned.
       // Refuse a stale snapshot; the next poll reads its full text and files.
+      // Re-check at the last moment: a drain can start after ready() returned.
+      if (this.drain?.held()) return;
       if (!this.store.running(job.id, job.text)) return;
       await readReceipt(true);
       // Only an accepted requester Stop aborts this controller.

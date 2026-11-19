@@ -47,6 +47,7 @@ import {
   type MaintenanceWatch,
   maintenanceNoticeSchema,
 } from "../maintenance";
+import type { MaintenanceDrain } from "../maintenance-drain";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
@@ -883,6 +884,25 @@ export class OpenCodeBackend implements AgentBackend {
         signal,
       });
     return [...receipts];
+  }
+
+  async maintenanceNotice(record: MaintenanceDrain, signal: AbortSignal) {
+    const receipts = await this.client
+      .rpc(CrewReporting)
+      .maintenanceNotice(record, {
+        location: { directory: this.config.directory },
+        signal,
+      });
+    return [...receipts];
+  }
+
+  async resumeMaintenance(signal: AbortSignal) {
+    return this.client
+      .rpc(CrewReporting)
+      .resumeMaintenance(
+        {},
+        { location: { directory: this.config.directory }, signal },
+      );
   }
 
   async quota(signal: AbortSignal) {

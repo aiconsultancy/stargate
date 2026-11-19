@@ -9,12 +9,16 @@ maintenance window. One `stargate maintenance run` per night:
    of the same family when the proxy offers one;
 4. writes a private JSON report and sends one summary to Slack.
 
-Every change waits for an idle boundary. Nothing interrupts active captain,
+By default, every change waits for an idle boundary. Nothing interrupts active captain,
 crew, Pi, cron or gateway work. A change that is not done before the window
 deadline waits for the next night. Each change has a health check and an
 automatic rollback.
 
 Maintenance is off by default. Every component is also off by default.
+
+An optional [restart drain](#restart-drain) announces a restart and stops new
+turns while current work finishes. At its deadline it reports remaining work
+and proceeds with the existing restart path, which can interrupt that work.
 
 ## Opt-in cleanup
 
@@ -183,6 +187,8 @@ Add a top-level `maintenance` section to `stargate.json`. The schema is strict;
 | Setting                                           | Default                                                             | Meaning                                                                                                             |
 | ------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `enabled`                                         | `false`                                                             | `run` refuses to start when false. `plan` and `update` always work.                                                 |
+| `drain.enabled`                                   | `false`                                                             | Announce and hold new work before a restarting run, including `update --now` and `run --outside-window`.            |
+| `drain.deadlineMinutes`                           | `10`                                                                | Maximum drain wait, 1–1440 minutes, bounded by this run's remaining apply window.                                   |
 | `installID`                                       | hash of host and config path                                        | Stable identity for jitter and reports.                                                                             |
 | `window.start`, `window.end`                      | `00:00`, `01:00`                                                    | Local wall-clock times; the end can be after midnight.                                                              |
 | `window.timeZone`                                 | `Europe/London`                                                     | IANA zone. Daylight saving time applies.                                                                            |
@@ -729,6 +735,59 @@ a differently formatted file is reported as `config-format` and left alone.
 A symlinked file (for example from a dotfiles repository) keeps its link; its
 real target receives the change.
 
+## Restart drain
+
+Set `maintenance.drain.enabled` to `true` only after every gateway and crew
+plugin on the same host/user has been upgraded to a drain-aware release.
+The flag defaults to **off**. This change does not enable it on this host.
+The owner makes that decision after release. A mixed-version host cannot
+guarantee that an old gateway or plugin stops admitting work.
+
+For a run that has prepared changes requiring a restart:
+
+1. Claim the private host/user drain barrier. Publish the job, affected
+   services and latest planned restart time. The existing NET-1719 local
+   context queues carry one non-interrupting notice per captain/OpenCode crew
+   session; Pi workers receive ordinary mail. No synthetic model input is
+   created and no new session is provisioned for a notice.
+   For an unpinned crew configuration, discovery includes existing captain
+   roots in its configured directory, not child sessions or other agents.
+2. Gate new captain turns and crew admissions. Slack/IRC/Teams intake still
+   stores accepted messages in the existing gateway queue. Crew assignments
+   remain in the existing pending-task queue. Running work can finish.
+3. Use the existing idle observer across live gateway participants. Queued
+   jobs, cron schedules and queued report tasks do not count as running while
+   admission is held. Running jobs, crew/Pi tasks, controllers, native turns
+   and forms still count. Wait for idle and notice acknowledgements, or until
+   `drain.deadlineMinutes` elapses (default 10). Report remaining task/session
+   identifiers and unknown observations; never copy prompts or results.
+4. Restart through the normal journalled path. A deadline permits the same
+   interruption the restart already performs; it does not make uncertain work
+   safe to replay. The barrier stays held throughout readiness and rollback.
+5. Record completion or abort, queue a completion notice and release admission.
+   Gateway inputs retain their stored order. Only assignments held by this
+   drain are eligible for automatic resumption; unrelated queued or uncertain
+   crew work keeps its existing ownership and recovery rules.
+   Resumption revalidates the original captain against the current pin and
+   native identity. Work whose captain is no longer authorised stays queued.
+
+The user-scoped barrier and live-participant metadata coordinate independent
+gateway installations; they contain no credentials or message payloads and do
+not own another scheduler or job queue. Existing polling observes the barrier.
+A dead maintenance owner cannot leave new work frozen indefinitely. No gateway
+clears a live owner's barrier merely because it has restarted.
+
+`/health stargate` shows the latest drain phase, job, services, deadline and
+bounded straggler identifiers. The private maintenance report records the
+state, idle/deadline/abort outcome and notice receipts. A failed or aborted
+restart is not described as a successful restart. Passive context is consumed
+only at a legitimate model boundary, not a promise that a session read it.
+
+Cleanup-only and read-only plan operations do not start a drain. With the flag
+off, the idle gates below and the immediate operator-update behaviour are
+unchanged. Installation, service restarts and live acceptance still require
+their own authorisation.
+
 ## Idle gate
 
 The gate has two scopes. The gateway scope is the first two conditions
@@ -1156,6 +1215,8 @@ What it does, in order:
 4. **Stops the gateway, switches `current`, restarts.** OpenCode restarts
    only when the crew plugin changed or its digest is unknown; see
    [gateway-only update](#gateway-only-update). The switch is journalled.
+   With `maintenance.drain.enabled`, the restart drain runs first; otherwise
+   `--now` retains its immediate, interruption-accepted behaviour.
 5. **Checks readiness.** The gateway must write `ready.json` with the new
    version. If it does not, the run records the release as known-bad,
    restores the previous release and restarts what the switch restarted,

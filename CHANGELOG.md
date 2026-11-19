@@ -4,12 +4,19 @@
 
 ### Feature flags
 
-- New flags: none.
+- New flags: `maintenance.drain.enabled` (default **off**), with
+  `maintenance.drain.deadlineMinutes` (default **10**, range 1–1440).
 - Default changes: IRC's peer-turn limit rises from 5 to 30 per receiving
   connection and conversation in a rolling hour.
 - Enabled by default: none.
 
 ### Changes
+
+- Opt-in maintenance restart drain: queue a passive notice for captains and
+  crew, hold new work in existing durable queues, wait for idle or the drain
+  deadline, report stragglers, and queue restart completion context before
+  resuming. Maintenance reports and `/health` show the drain state. No host
+  enables this flag automatically; release approval decides activation.
 
 - Guide new ships on choosing reviewable pull requests by complexity and
   risk. Existing ships can add the guidance to their working agreement.

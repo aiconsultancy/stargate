@@ -19,11 +19,18 @@ import type {
   SessionGetInput,
   SessionInfo,
   SessionInterruptInput,
+  SessionListInput,
   SessionPromptInput,
   SessionSyntheticInput,
 } from "@opencode/client";
 import { Predicate, Result, Schema } from "effect";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
+import {
+  drainNoticeID,
+  drainNoticePhase,
+  drainNoticeText,
+  type MaintenanceDrain,
+} from "../maintenance-drain";
 import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
 import {
   settingsCheck,
@@ -301,6 +308,10 @@ type RequestOptions = NonNullable<
 >;
 // Narrow SDK boundary keeps tests local and avoids fabricating full SDK objects.
 export interface CrewSessions {
+  list?(
+    input?: SessionListInput,
+    request?: RequestOptions,
+  ): Promise<{ data: CrewSession[]; cursor: { next?: string | null } }>;
   get(input: SessionGetInput, request?: RequestOptions): Promise<CrewSession>;
   create(
     input: SessionCreateInput,
@@ -408,6 +419,8 @@ export type CrewWaitOptions = {
   now?: () => number;
   wait?: (ms: number, signal: AbortSignal) => Promise<void>;
   windowMs?: number;
+  /** The active host maintenance drain, or null. Injected by the plugin. */
+  drain?: () => MaintenanceDrain | null;
 };
 
 export class CrewEngine {
@@ -419,6 +432,7 @@ export class CrewEngine {
   private readonly waitNow: () => number;
   private readonly waitPoll: NonNullable<CrewWaitOptions["wait"]>;
   private readonly waitWindowMs: number;
+  private readonly drain: () => MaintenanceDrain | null;
   private constructor(
     readonly options: CrewOptions & { team: NonNullable<CrewOptions["team"]> },
     readonly state: CrewState,
@@ -435,6 +449,7 @@ export class CrewEngine {
     this.waitPoll =
       waitOptions.wait ?? ((ms, signal) => delay(ms, undefined, { signal }));
     this.waitWindowMs = waitOptions.windowMs ?? crewWaitWindowMs;
+    this.drain = waitOptions.drain ?? (() => null);
     this.pi = new PiCrewWorkers(
       state,
       options.stateDirectory,
@@ -754,11 +769,12 @@ export class CrewEngine {
       return;
     }
     const peer = this.state.peerBySession(sessionID);
+    const ircMember = this.state.ircSessions.crewID(sessionID);
     const member = this.options.team.crew.find(
-      (member) => member.id === peer?.crewID,
+      (member) => member.id === (peer?.crewID ?? ircMember),
     );
     if (
-      peer?.status !== "ready" ||
+      (!ircMember && peer?.status !== "ready") ||
       !member ||
       member.backend ||
       agent !== (member.agent ?? member.id)
@@ -787,13 +803,156 @@ export class CrewEngine {
       this.state.peerBySession(session.id)
     )
       throw new Error("Update notice captain identity changed");
-    this.state.updateNotices.queueExternalContext(
-      session.id,
-      input.id,
-      input.text,
-      this.options.namespace,
-    );
+    if (input.id.startsWith("drain_"))
+      this.state.queueDrainNotice(
+        session.id,
+        input.id,
+        input.text,
+        this.options.namespace,
+      );
+    else
+      this.state.updateNotices.queueExternalContext(
+        session.id,
+        input.id,
+        input.text,
+        this.options.namespace,
+      );
     return { id: input.id, sessionID: session.id };
+  }
+
+  /**
+   * Passive maintenance notice: queues context for captain roots and every ready
+   * OpenCode crew session, plain Mesij mail for Pi crew. It never provisions
+   * a session, prompts, or touches a task. IDs are per run, phase and session.
+   */
+  async maintenanceNotice(
+    record: MaintenanceDrain,
+    signal: AbortSignal,
+  ): Promise<UpdateReceipt[]> {
+    const phase = drainNoticePhase(record);
+    const text = drainNoticeText(record);
+    const receipts: UpdateReceipt[] = [];
+    const captain = this.options.captainSessionID;
+    const queue = (sessionID: string) => {
+      const status = this.state.queueDrainNotice(
+        sessionID,
+        drainNoticeID(record.runID, phase, sessionID),
+        text,
+        this.options.namespace,
+      );
+      receipts.push({
+        sessionID,
+        status: status === "queued" ? "queued" : "unchanged",
+      });
+    };
+    if (captain) queue(captain);
+    else {
+      if (!this.sessions.list)
+        throw new Error("Maintenance captain discovery unavailable");
+      let cursor: string | undefined;
+      do {
+        const page = await this.sessions.list(
+          {
+            directory: this.options.captainDirectory,
+            parentID: null,
+            limit: 100,
+            ...(cursor ? { cursor } : {}),
+          },
+          { signal },
+        );
+        for (const session of page.data) {
+          if (
+            !session.parentID &&
+            [
+              this.options.team.captain.agent ?? this.options.team.captain.id,
+              this.options.team.captain.id,
+            ].includes(session.agent ?? "") &&
+            resolve(session.location.directory) ===
+              resolve(this.options.captainDirectory) &&
+            !this.state.peerBySession(session.id)
+          )
+            queue(session.id);
+        }
+        cursor = page.cursor.next ?? undefined;
+      } while (cursor);
+    }
+    for (const irc of this.state.ircSessions.sessions())
+      if (
+        this.options.team.crew.some(
+          (member) => member.id === irc.crewID && !member.backend,
+        )
+      )
+        queue(irc.sessionID);
+    for (const member of this.options.team.crew) {
+      signal.throwIfAborted();
+      const peer = this.state.peer(member.id);
+      if (peer?.status !== "ready") continue;
+      try {
+        if (!member.backend) {
+          queue(peer.sessionID);
+          continue;
+        }
+        // Pi crew read plain mail; it needs a pinned captain as the sender.
+        if (!captain) {
+          receipts.push({ sessionID: peer.sessionID, status: "uncertain" });
+          continue;
+        }
+        const receipt = await this.mail(
+          {
+            op: "send",
+            to: member.id,
+            text,
+            key: drainNoticeID(record.runID, phase, peer.sessionID),
+          },
+          {
+            sessionID: captain,
+            agent:
+              this.options.team.captain.agent ?? this.options.team.captain.id,
+            signal,
+          },
+        );
+        Schema.decodeUnknownSync(
+          Schema.Struct({ stored: Schema.Literal(true) }),
+        )(receipt);
+        receipts.push({ sessionID: peer.sessionID, status: "mail" });
+      } catch {
+        signal.throwIfAborted();
+        receipts.push({ sessionID: peer.sessionID, status: "uncertain" });
+      }
+    }
+    return receipts;
+  }
+
+  /**
+   * Start tasks that a drain queued, oldest first, one per worker per call,
+   * through the ordinary promotion. Other queued tasks are never advanced and
+   * active or uncertain work is never replayed: promotion refuses it.
+   */
+  async resumeMaintenance(
+    signal: AbortSignal,
+  ): Promise<{ resumed: number; remaining: number }> {
+    let resumed = 0;
+    if (!this.drain()) {
+      const workers = new Set<string>();
+      for (const queued of this.state.drainQueued()) {
+        signal.throwIfAborted();
+        if (workers.has(queued.crewID)) continue;
+        workers.add(queued.crewID);
+        const caller: CrewCaller = {
+          sessionID: queued.originCaptainID,
+          agent: this.options.team.captain.id,
+          signal,
+        };
+        try {
+          await this.captain(caller);
+          if ((await this.promote(queued, caller)).status !== "queued")
+            resumed++;
+        } catch {
+          signal.throwIfAborted();
+        }
+      }
+    }
+    return { resumed, remaining: this.state.drainQueued().length };
   }
 
   /** Same captain context: equal IDs, or both lineage of the pinned root. */
@@ -980,6 +1139,8 @@ export class CrewEngine {
     const busy =
       task && ["running", "dispatching"].includes(task.status) ? task : null;
     if (peer?.status !== "ready" && peer) return "unavailable";
+    // A drain never wakes an idle session; mail stays durable in its inbox.
+    if (!busy && this.drain()) return "deferred";
     if (
       peer &&
       (this.state.controlled(peer.crewID) ||
@@ -1045,6 +1206,7 @@ export class CrewEngine {
         if (!current || !["running", "dispatching"].includes(current.status))
           return "deferred";
       }
+      if (!busy && this.drain()) return "deferred";
       if (peer && this.member(peer.crewID).backend) {
         return await this.pi.notify(
           this.member(peer.crewID),
@@ -1960,6 +2122,10 @@ export class CrewEngine {
     caller: CrewCaller,
   ): Promise<CrewResult> {
     const task = this.ownedCaptainTask(input.taskID, caller);
+    if (this.drain())
+      throw new CrewError(
+        "Maintenance drain active; resume after maintenance completes.",
+      );
     if (!this.options.exclusiveWorkerInput)
       throw new CrewError(
         "Resume requires a protected worker profile with exclusive Stargate input.",
@@ -2506,6 +2672,26 @@ export class CrewEngine {
   ): Promise<CrewResult> {
     const messageID = caller.messageID;
     const originInputID = await this.dispatchOrigin(caller, messageID);
+    const held = this.drain();
+    if (held) {
+      // Queue durably, regardless of `queue`: never reserve or prompt a worker.
+      caller.signal.throwIfAborted();
+      const reserved =
+        this.state.peer(input.crew) ?? this.state.reservePeer(input.crew);
+      return {
+        status: "queued",
+        task: this.state.enqueue(
+          reserved,
+          caller.sessionID,
+          input.text,
+          undefined,
+          originInputID,
+          held.runID,
+        ),
+        diagnostic:
+          "Maintenance drain active: the assignment is queued durably and starts automatically under this captain after maintenance completes. Do not resubmit it.",
+      };
+    }
     const peer = await this.ensure(input.crew, caller.signal);
     const enqueue = () =>
       this.state.enqueue(
@@ -2563,6 +2749,21 @@ export class CrewEngine {
         : busy;
     }
     caller.signal.throwIfAborted();
+    const afterIdle = this.drain();
+    if (afterIdle)
+      return {
+        status: "queued",
+        task: this.state.enqueue(
+          peer,
+          caller.sessionID,
+          input.text,
+          undefined,
+          originInputID,
+          afterIdle.runID,
+        ),
+        diagnostic:
+          "Maintenance drain active; assignment queued durably. Do not resubmit.",
+      };
     const task = this.state.reserveTask(
       peer,
       caller.sessionID,
@@ -2628,6 +2829,7 @@ export class CrewEngine {
 
   private async promote(task: CrewTask, caller: CrewCaller): Promise<CrewTask> {
     caller.signal.throwIfAborted();
+    if (this.drain()) return task;
     const peer = await this.ensure(task.crewID, caller.signal);
     let active = this.state.activeTask(task.crewID);
     if (active) active = (await this.reconcileResult(active, caller)).task;
@@ -2635,6 +2837,7 @@ export class CrewEngine {
       return task;
     if (!(await this.idle(peer, caller.signal))) return task;
     caller.signal.throwIfAborted();
+    if (this.drain()) return task;
     const promoted = this.state.promote(task.id, active?.id ?? null);
     if (promoted) {
       const result = await this.admit(promoted.task, promoted.text, caller);

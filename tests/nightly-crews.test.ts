@@ -43,6 +43,32 @@ async function setup(name: string) {
 }
 
 describe("crew discovery fails closed", () => {
+  test("drain discovery includes configured project crew state without changing the legacy gate", async () => {
+    const { dir, captain, chief, profile, config } =
+      await setup("drain-projects");
+    const other = join(dir, "other-chief");
+    await mkdir(join(other, ".opencode"), { recursive: true });
+    const text = profile({
+      projects: {
+        other: {
+          projectDirectory: join(dir, "other"),
+          worktrees: { chief: other },
+        },
+      },
+    });
+    for (const directory of [captain, chief, other])
+      await writeFile(join(directory, ".opencode", "opencode.json"), text);
+    expect(await discoverCrews(config)).toHaveLength(1);
+    const crews = await discoverCrews(config, true);
+    expect(crews.map((crew) => crew.namespace)).toEqual([
+      "ship",
+      "ship:project:other",
+    ]);
+    expect(crews[1]?.stateDirectory).toBe(
+      join(captain, ".local/stargate-crew/projects/other"),
+    );
+    expect(crews[1]?.worktreeDirectories).toEqual([other]);
+  });
   test("follows a symlinked profile (dotfiles) to a real file", async () => {
     const { dir, captain, chief, profile, config } = await setup("symlink");
     await writeFile(join(dir, "captain.json"), profile());

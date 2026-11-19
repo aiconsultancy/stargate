@@ -118,6 +118,13 @@ export const defaultAgentPackages = [
 
 export const maintenanceSchema = settingsStruct({
   enabled: Schema.Boolean.pipe(settingsDefault(false)),
+  drain: settingsStruct({
+    enabled: Schema.Boolean.pipe(settingsDefault(false)),
+    deadlineMinutes: Schema.Finite.check(Schema.isInt())
+      .check(Schema.isGreaterThanOrEqualTo(1))
+      .check(Schema.isLessThanOrEqualTo(1440))
+      .pipe(settingsDefault(10)),
+  }).pipe(settingsDefault({ enabled: false, deadlineMinutes: 10 })),
   cleanup: Schema.optional(cleanupSchema),
   /** Stable identity for jitter and reports. Default: hash of host and config path. */
   installID: Schema.optional(
