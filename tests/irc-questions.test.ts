@@ -414,7 +414,7 @@ for (const multiline of [false, true]) {
     await f.received(rejectedAt);
     expect(f.replies).toEqual([]);
     expect(f.prompts.length).toBe(initialPrompts);
-    f.send(`captain: answer ${offer.token} 1`, "answer", "jac", "m1");
+    f.send(`@captain: answer ${offer.token} 1`, "answer", "jac", "m1");
     await until(
       () =>
         f.replies.length === 1 &&

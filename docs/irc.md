@@ -815,6 +815,8 @@ galactica: cancel-question <token from the question>
 galactica: renew-question <expired token from the question>
 ```
 
+An explicit `@nick:` address works with the same token controls.
+
 One string field accepts a displayed choice number, or free text when the native
 field allows it. A multiple-choice field accepts comma-separated numbers.
 Several fields require a JSON object using the displayed field keys and native
