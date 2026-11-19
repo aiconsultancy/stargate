@@ -14,12 +14,12 @@ import type { Plugin as EffectPlugin } from "@opencode/plugin/effect";
 import { Agent, Session, SessionMessage } from "@opencode/schema";
 import { Tool } from "@opencode/schema/tool";
 import { Effect, Exit, Result, Schema, Scope } from "effect";
+import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
 import {
   CrewEngine,
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
-  crewInputSchema,
 } from "../src/crew/engine";
 import { journalInputSchema } from "../src/crew/journal";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
@@ -29,7 +29,6 @@ import {
   effectProjectToolInput,
   projectKeySchema,
   projectsSchema,
-  projectToolInput,
 } from "../src/crew/project-options";
 import { CrewProjects } from "../src/crew/projects";
 import { teamSchema } from "../src/crew/team";
@@ -467,22 +466,22 @@ test("project validation rejects path/repository aliases and foreign worktrees b
   }
 });
 
-test("tool schema accepts keys only and original strict operation constraints remain enforced", () => {
-  const tool = projectToolInput(crewInputSchema);
+test("tool schema accepts keys only and original strict operation constraints remain enforced", async () => {
+  const tool = crewOpenCodeInput()["~standard"];
   expect(
-    tool.safeParse({
+    await tool.validate({
       op: "dispatch",
       crew: "worker",
       text: "task",
       project: "stargate",
-    }).success,
-  ).toBe(true);
+    }),
+  ).toHaveProperty("value");
   for (const value of [
     { op: "dispatch", crew: "worker", text: "task", directory: "/tmp/other" },
     { op: "dispatch", crew: "worker", text: "task", project: "../other" },
     { op: "dispatch", project: "stargate" },
   ])
-    expect(tool.safeParse(value).success).toBe(false);
+    expect(await tool.validate(value)).toHaveProperty("issues");
   for (const key of [
     "default",
     "constructor",
@@ -491,16 +490,18 @@ test("tool schema accepts keys only and original strict operation constraints re
     "../escape",
   ])
     expect(
-      projectsSchema.safeParse(
-        JSON.parse(
-          JSON.stringify({
-            [key]: {
-              projectDirectory: "/tmp/project",
-              worktrees: { worker: "/tmp/worker" },
-            },
-          }),
+      Result.isSuccess(
+        Schema.decodeUnknownResult(projectsSchema)(
+          JSON.parse(
+            JSON.stringify({
+              [key]: {
+                projectDirectory: "/tmp/project",
+                worktrees: { worker: "/tmp/worker" },
+              },
+            }),
+          ),
         ),
-      ).success,
+      ),
     ).toBe(false);
 });
 

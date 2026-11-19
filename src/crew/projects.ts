@@ -35,12 +35,12 @@ export class CrewProjects {
   private constructor(readonly contexts: ReadonlyMap<string, CrewEngine>) {}
 
   static async open(raw: unknown, factory: Factory): Promise<CrewProjects> {
-    const parsed = crewOptionsSchema.safeParse(raw);
-    if (!parsed.success)
+    const parsed = Schema.decodeUnknownResult(crewOptionsSchema)(raw);
+    if (Result.isFailure(parsed))
       throw new CrewError(
         "Invalid crew/project configuration; use exact configured repository keys and worktrees.",
       );
-    const { projects, ...base } = parsed.data;
+    const { projects, ...base } = parsed.success;
     const configurations = new Map<string, CrewOptions>([["default", base]]);
     if (projects && Object.keys(projects).length) {
       const team = base.team ?? defaultTeam;

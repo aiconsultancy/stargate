@@ -2,11 +2,13 @@ import { expect, test } from "bun:test";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
+import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
 import { crewInputSchema } from "../src/crew/engine";
 import { historyInputSchema } from "../src/crew/history";
 import { journalInputSchema } from "../src/crew/journal";
 import { mailInputSchema } from "../src/crew/messaging";
 import { modelInputSchema, modelToolInputSchema } from "../src/crew/models";
+import { projectToolInput } from "../src/crew/project-options";
 import * as toolInputs from "../src/crew/tool-input";
 import { objectToolInput } from "../src/crew/tool-input";
 import { cronOperationSchema } from "../src/cron-control";
@@ -14,7 +16,6 @@ import { notificationInputSchema } from "../src/notification-store";
 
 const schemas = {
   stargate_cron: cronOperationSchema,
-  stargate_crew: crewInputSchema,
   stargate_history: historyInputSchema,
   stargate_mail: mailInputSchema,
   stargate_notifications: notificationInputSchema,
@@ -151,8 +152,8 @@ test("notification union keeps explicit scoped requirements and input expiry rep
   });
 });
 
-test("original branch requirements, strictness and bounds remain enforced", () => {
-  const schema = objectToolInput(crewInputSchema);
+test("original branch requirements, strictness and bounds remain enforced", async () => {
+  const schema = crewOpenCodeInput()["~standard"];
   for (const input of [
     {},
     { op: "unknown" },
@@ -162,18 +163,34 @@ test("original branch requirements, strictness and bounds remain enforced", () =
     { op: "roster", unexpected: true },
     { op: "abandon", acknowledgeUnconfirmedStop: false },
   ]) {
-    expect(crewInputSchema.safeParse(input).success).toBe(false);
-    expect(schema.safeParse(input).success).toBe(false);
+    expect(
+      Result.isSuccess(Schema.decodeUnknownResult(crewInputSchema)(input)),
+    ).toBe(false);
+    expect(await schema.validate(input)).toHaveProperty("issues");
   }
-  expect(schema.safeParse({ op: "roster" }).success).toBe(true);
+  expect(await schema.validate({ op: "roster" })).toHaveProperty("value");
   expect(
-    schema.safeParse({ op: "dispatch", crew: "apollo", text: "check" }).success,
-  ).toBe(true);
+    await schema.validate({ op: "dispatch", crew: "apollo", text: "check" }),
+  ).toHaveProperty("value");
+});
+
+test("remaining Zod project envelopes retain branch requirements and field paths", () => {
+  const schema = projectToolInput(mailInputSchema);
+  const inbox = { op: "inbox", project: "stargate" };
+  expect(schema.parse(inbox)).toEqual(inbox);
+  const invalid = schema.safeParse({
+    op: "send",
+    text: "note",
+    project: "stargate",
+  });
+  if (invalid.success) throw new Error("Missing mail recipient accepted");
+  expect(invalid.error.issues).toContainEqual(
+    expect.objectContaining({ path: ["to"] }),
+  );
 });
 
 test("optional envelope fields do not inject another operation's defaults", async () => {
   for (const [original, input] of [
-    [crewInputSchema, { op: "ensure" }],
     [mailInputSchema, { op: "inbox" }],
     [cronOperationSchema, { op: "report" }],
     [historyInputSchema, { op: "sessions" }],
@@ -181,6 +198,10 @@ test("optional envelope fields do not inject another operation's defaults", asyn
     const adapted = objectToolInput(original).parse(input);
     expect(original.parse(adapted)).toEqual(original.parse(input));
   }
+  const crew = await crewOpenCodeInput()["~standard"].validate({
+    op: "ensure",
+  });
+  expect(crew).toEqual({ value: { op: "ensure" } });
   const input = { op: "get" };
   const adapted = await modelToolInputSchema["~standard"].validate(input);
   expect(adapted).toEqual({ value: input });

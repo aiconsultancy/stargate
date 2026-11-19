@@ -2,6 +2,7 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Effect, Predicate, Schema } from "effect";
 import { z } from "zod";
 import { quotaInputSchema } from "../quota";
+import { crewPiParameters } from "./crew-tool-input";
 import { crewInputSchema } from "./engine";
 import { journalInputSchema } from "./journal";
 import { dmInputSchema, mailInputSchema } from "./messaging";
@@ -44,6 +45,9 @@ const decodeHistory = Schema.decodeUnknownSync(history, {
 const decodeJournal = Schema.decodeUnknownSync(journalInputSchema, {
   onExcessProperty: "error",
 });
+// Resolve the circular engine import only when this crew tool is invoked.
+const decodeCrew = (raw: unknown) =>
+  Schema.decodeUnknownSync(crewInputSchema)(raw);
 // Pi's legacy advertisement required defaulted fields. Handler defaults do not
 // authorize accepting their omission at the native JSON Schema boundary.
 const historyParameters = effectParameters(
@@ -112,7 +116,9 @@ export function piCrewExtension(
     const parameters = Schema.isSchema(schema)
       ? name === "pi_history"
         ? historyParameters
-        : journalParameters
+        : name === "stargate_crew"
+          ? crewPiParameters()
+          : journalParameters
       : z.toJSONSchema(schema);
     return defineTool({
       name,
@@ -133,7 +139,9 @@ export function piCrewExtension(
               : await binding.run(
                   name,
                   Schema.isSchema(schema)
-                    ? decodeJournal(raw)
+                    ? name === "stargate_crew"
+                      ? decodeCrew(raw)
+                      : decodeJournal(raw)
                     : schema.parse(raw),
                   String(api.conversationId),
                   String(api.taskId),

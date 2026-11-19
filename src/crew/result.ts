@@ -3,7 +3,12 @@ import type {
   OpenCodeClient,
   SessionMessageInfo,
 } from "@opencode/client";
-import { z } from "zod";
+import { Result, Schema } from "effect";
+import {
+  settingsPattern,
+  settingsStartsWith,
+  settingsStruct,
+} from "../settings-schema";
 import { isNativeInstructionContext } from "./instruction-context";
 import {
   crewMessageMetadataKey,
@@ -39,32 +44,33 @@ export interface ResultAPI {
     }>;
   };
 }
-const envelope = z.strictObject({
-  taskID: z.string(),
-  crewID: z.string(),
-  originCaptainID: z.string(),
-  inputID: z.string(),
+const envelope = settingsStruct({
+  taskID: Schema.String,
+  crewID: Schema.String,
+  originCaptainID: Schema.String,
+  inputID: Schema.String,
 });
-const urgency = z.object({
-  taskID: z.string(),
-  sourceTaskID: z.string().startsWith("task_").optional(),
-  messageID: z
-    .string()
-    .regex(/^[a-f0-9]{32}$/)
-    .optional(),
-  originCaptainID: z.string(),
+const urgency = Schema.Struct({
+  taskID: Schema.String,
+  sourceTaskID: Schema.optional(
+    Schema.String.check(settingsStartsWith("task_")),
+  ),
+  messageID: Schema.optional(
+    Schema.String.check(settingsPattern(/^[a-f0-9]{32}$/)),
+  ),
+  originCaptainID: Schema.String,
 });
 
 function matchesUrgency(message: ResultMessage, task: CrewTask): boolean {
   const metadata = message.metadata?.[crewMessageMetadataKey];
   if (metadata && typeof metadata === "object" && "resumeIdleAt" in metadata)
     return isTaskResume(message, task);
-  const notice = urgency.safeParse(metadata);
+  const notice = Schema.decodeUnknownResult(urgency)(metadata);
   return (
-    notice.success &&
-    !!(notice.data.sourceTaskID || notice.data.messageID) &&
-    notice.data.taskID === task.id &&
-    notice.data.originCaptainID === task.originCaptainID
+    Result.isSuccess(notice) &&
+    !!(notice.success.sourceTaskID || notice.success.messageID) &&
+    notice.success.taskID === task.id &&
+    notice.success.originCaptainID === task.originCaptainID
   );
 }
 
@@ -72,7 +78,7 @@ function matchesInput(message: ResultMessage, task: CrewTask): boolean {
   const payload = taskEnvelopePayload(message.text);
   if (payload === undefined) return false;
   try {
-    const value = envelope.parse(JSON.parse(payload));
+    const value = Schema.decodeUnknownSync(envelope)(JSON.parse(payload));
     const metadata = message.metadata?.[crewMessageMetadataKey];
     return (
       value.taskID === task.id &&

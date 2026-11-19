@@ -3754,8 +3754,17 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
         f.options.captainDirectory,
       );
       const body = await request.json();
+      const decoded = await CrewRecovery.methods.run.input[
+        "~standard"
+      ].validate(body.input);
+      if (decoded.issues)
+        return Response.json({ _tag: "BadRequestError" }, { status: 400 });
       return Response.json({
-        output: await runRecoveryOperator(f.engine, body.input, request.signal),
+        output: await runRecoveryOperator(
+          f.engine,
+          decoded.value,
+          request.signal,
+        ),
       });
     },
   });
@@ -3766,6 +3775,24 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
     });
     const rpc = client.rpc(CrewRecovery);
     const options = { location: { directory: f.options.captainDirectory } };
+    // Portable SDK defaults must not strip nested recovery acknowledgements
+    // or expected identities before the authoritative strict decoder sees them.
+    for (const malformed of [
+      {
+        sessionID: "ses_captain_b",
+        request: { op: "inspect" as const, crew: "builder" },
+        extra: true,
+      },
+      {
+        sessionID: "ses_captain_b",
+        request: { op: "inspect" as const, crew: "builder", extra: true },
+      },
+      {
+        sessionID: "ses_captain_b",
+        request: { ...input, expected: { ...input.expected, extra: true } },
+      },
+    ])
+      await expect(rpc.run(malformed, options)).rejects.toBeDefined();
     const inspected = JSON.parse(
       await rpc.run(
         {

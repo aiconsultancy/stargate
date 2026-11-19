@@ -6,8 +6,13 @@ import type {
   SessionInboxCancelInput,
   SessionMessageInfo,
 } from "@opencode/client";
-import { z } from "zod";
-import { legacySetting } from "../settings-legacy";
+import { Schema } from "effect";
+import {
+  settingsDefault,
+  settingsPattern,
+  settingsStartsWith,
+  settingsStruct,
+} from "../settings-schema";
 import type { CrewSession } from "./engine";
 import { isNativeInstructionContext } from "./instruction-context";
 import {
@@ -21,65 +26,96 @@ import {
   type ShellContextRecord,
 } from "./shell-context";
 import { CrewError, type CrewTask } from "./state";
-import { agentIDSchema as nativeAgentIDSchema } from "./team";
+import { agentIDSchema } from "./team";
 
-// Batch 9 owns the remaining recovery operation container.
-const agentIDSchema = legacySetting(nativeAgentIDSchema);
-const id = z.string().min(1).max(256);
-export const inspectInputSchema = z.strictObject({
-  op: z.literal("inspect"),
+const id = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(256),
+);
+export const inspectInputSchema = settingsStruct({
+  op: Schema.Literal("inspect"),
   crew: agentIDSchema,
-  taskID: z.string().startsWith("task_").max(100).optional(),
-  requestStatus: z.strictObject({ key: z.string().min(1).max(100) }).optional(),
+  taskID: Schema.optional(
+    Schema.String.check(
+      settingsStartsWith("task_"),
+      Schema.isMaxCodePoints(100),
+    ),
+  ),
+  requestStatus: Schema.optional(
+    settingsStruct({
+      key: Schema.String.check(
+        Schema.isMinCodePoints(1),
+        Schema.isMaxCodePoints(100),
+      ),
+    }),
+  ),
 });
-export const reconcileInputSchema = z.strictObject({
-  op: z.literal("reconcile"),
-  taskID: z.string().startsWith("task_").max(100),
-  expected: z.strictObject({
-    status: z.literal("uncertain"),
+export const reconcileInputSchema = settingsStruct({
+  op: Schema.Literal("reconcile"),
+  taskID: Schema.String.check(
+    settingsStartsWith("task_"),
+    Schema.isMaxCodePoints(100),
+  ),
+  expected: settingsStruct({
+    status: Schema.Literal("uncertain"),
     workerSessionID: id,
     originCaptainID: id,
     inputID: id,
   }),
   resultMessageID: id,
-  resultSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  reason: z.string().trim().min(1).max(2000),
+  resultSha256: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
+  reason: Schema.Trim.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(2000),
+  ),
 });
 /** Captain continuation of one verified, idle native assignment. */
-export const resumeInputSchema = z.strictObject({
-  op: z.literal("resume"),
-  taskID: z.string().startsWith("task_").max(100),
-  expected: z.strictObject({
+export const resumeInputSchema = settingsStruct({
+  op: Schema.Literal("resume"),
+  taskID: Schema.String.check(
+    settingsStartsWith("task_"),
+    Schema.isMaxCodePoints(100),
+  ),
+  expected: settingsStruct({
     workerSessionID: id,
     originCaptainID: id,
     inputID: id,
-    idleAt: z.number().int().safe().positive(),
+    idleAt: Schema.Finite.check(Schema.isInt(), Schema.isGreaterThan(0)),
   }),
 });
-export type ResumeInput = z.infer<typeof resumeInputSchema>;
+export type ResumeInput = typeof resumeInputSchema.Type;
 
 /** Captain override for blocked slots. Copy expected fields from inspect. */
-export const abandonInputSchema = z.strictObject({
-  op: z.literal("abandon"),
-  taskID: z.string().startsWith("task_").max(100),
-  expected: z.strictObject({
-    status: z.enum(["dispatching", "running", "cancelling", "uncertain"]),
+export const abandonInputSchema = settingsStruct({
+  op: Schema.Literal("abandon"),
+  taskID: Schema.String.check(
+    settingsStartsWith("task_"),
+    Schema.isMaxCodePoints(100),
+  ),
+  expected: settingsStruct({
+    status: Schema.Literals([
+      "dispatching",
+      "running",
+      "cancelling",
+      "uncertain",
+    ]),
     workerSessionID: id,
     originCaptainID: id,
     inputID: id,
-    controlID: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
-      .nullable()
-      .default(null),
+    controlID: Schema.NullOr(
+      Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
+    ).pipe(settingsDefault(null)),
   }),
-  reason: z.string().trim().min(1).max(2000),
-  key: z.string().regex(/^[A-Za-z0-9._-]{1,100}$/),
-  acknowledgeUnconfirmedStop: z.literal(true),
+  reason: Schema.Trim.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(2000),
+  ),
+  key: Schema.String.check(settingsPattern(/^[A-Za-z0-9._-]{1,100}$/)),
+  acknowledgeUnconfirmedStop: Schema.Literal(true),
 });
-export type InspectInput = z.infer<typeof inspectInputSchema>;
-export type ReconcileInput = z.infer<typeof reconcileInputSchema>;
-export type AbandonInput = z.infer<typeof abandonInputSchema>;
+export type InspectInput = typeof inspectInputSchema.Type;
+export type ReconcileInput = typeof reconcileInputSchema.Type;
+export type AbandonInput = typeof abandonInputSchema.Type;
 type RequestOptions = NonNullable<
   Parameters<OpenCodeClient["session"]["get"]>[1]
 >;
@@ -365,7 +401,7 @@ export function requireQuiescent(execution: ExecutionInspection): void {
     );
 }
 
-const envelopeSchema = z.strictObject({
+const envelopeSchema = settingsStruct({
   taskID: id,
   crewID: id,
   originCaptainID: id,
@@ -375,7 +411,9 @@ function verifyInput(message: EvidenceMessage, task: CrewTask): string {
   try {
     const payload = taskEnvelopePayload(message.text);
     if (payload === undefined) throw new Error();
-    const envelope = envelopeSchema.parse(JSON.parse(payload));
+    const envelope = Schema.decodeUnknownSync(envelopeSchema)(
+      JSON.parse(payload),
+    );
     const metadata = message.metadata?.[crewMessageMetadataKey];
     if (
       envelope.taskID !== task.id ||

@@ -7,16 +7,19 @@ import {
   SchemaTransformation,
 } from "effect";
 import { z } from "zod";
-import { legacySetting } from "../settings-legacy";
-import { agentIDSchema as nativeAgentIDSchema } from "./team";
+import {
+  settingsCheck,
+  settingsRecord,
+  settingsRefine,
+  settingsStruct,
+} from "../settings-schema";
+import { agentIDSchema } from "./team";
 import {
   type EffectToolInput,
   effectToolInputFields,
   objectToolInput,
 } from "./tool-input";
 
-// Batch 9 removes this bridge with the project configuration container.
-const agentIDSchema = legacySetting(nativeAgentIDSchema);
 const projectKeyPattern = /^[a-z][a-z0-9_-]{0,47}$/u;
 export const effectProjectKeySchema = Schema.String.check(
   Schema.makeFilter(
@@ -31,46 +34,47 @@ export const projectKeySchema = z
   .regex(projectKeyPattern)
   .refine((key) => Result.isSuccess(decodeProject(key)));
 export const projectSelectionSchema = projectKeySchema;
-const directory = z
-  .string()
-  .refine(
+const directory = Schema.String.check(
+  settingsRefine(
     (path) =>
       isAbsolute(path) && !path.includes("\0") && resolve(path) === path,
-  );
-const projectRecordSchema = z
-  .record(
-    projectKeySchema,
-    z.strictObject({
+    { message: "Invalid input" },
+  ),
+);
+const projectRecordSchema = settingsRecord(
+  effectProjectKeySchema,
+  Schema.mutableKey(
+    settingsStruct({
       projectDirectory: directory,
-      worktrees: z.record(agentIDSchema, directory),
+      worktrees: settingsRecord(agentIDSchema, Schema.mutableKey(directory)),
     }),
-  )
-  .superRefine((projects, context) => {
+  ),
+).check(
+  settingsCheck((projects, context) => {
     if (Object.keys(projects).length > 8 || Object.hasOwn(projects, "default"))
       context.addIssue({
         code: "custom",
         message:
           "Configure at most eight additional projects; default is the existing context.",
       });
-  });
-export const projectsSchema = z.preprocess((value, context) => {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    (![Object.prototype, null].includes(Object.getPrototypeOf(value)) ||
-      Object.keys(value).some((key) =>
-        ["__proto__", "prototype", "constructor"].includes(key),
-      ))
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "Projects require safe own keys without prototype aliases.",
-    });
-    return z.NEVER;
-  }
-  return value;
-}, projectRecordSchema);
+  }),
+);
+export const projectsSchema = Schema.Unknown.check(
+  Schema.makeFilter((value) => {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      (![Object.prototype, null].includes(Object.getPrototypeOf(value)) ||
+        Object.keys(value).some((key) =>
+          ["__proto__", "prototype", "constructor"].includes(key),
+        ))
+    ) {
+      return "Projects require safe own keys without prototype aliases.";
+    }
+    return undefined;
+  }),
+).pipe(Schema.decodeTo(projectRecordSchema));
 
 /** Advertise an optional key without weakening the original strict operation. */
 export function projectToolInput(
