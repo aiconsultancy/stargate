@@ -1,4 +1,5 @@
-import { z } from "zod";
+import { Result, Schema } from "effect";
+import { settingsPattern, settingsStruct } from "../settings-schema";
 
 /** Minimal retained history fields; tool bodies and output remain opaque. */
 export interface ShellContextRecord {
@@ -18,35 +19,38 @@ export interface ShellContextRecord {
     state?: unknown;
   }>;
 }
-const shellID = z
-  .string()
-  .regex(/^sh_[A-Za-z0-9]+$/)
-  .max(256);
-const command = z.string().min(1).max(65536);
-const notice = z.strictObject({
-  source: z.literal("shell"),
+const shellID = Schema.String.check(
+  settingsPattern(/^sh_[A-Za-z0-9]+$/),
+  Schema.isMaxCodePoints(256),
+);
+const command = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(65536),
+);
+const notice = settingsStruct({
+  source: Schema.Literal("shell"),
   shellID,
   jobID: shellID,
-  state: z.enum(["completed", "cancelled", "error"]),
-  truncated: z.boolean().optional(),
-  exit: z.number().optional(),
-  signal: z.string().max(128).optional(),
-  timeout: z.boolean().optional(),
+  state: Schema.Literals(["completed", "cancelled", "error"]),
+  truncated: Schema.optional(Schema.Boolean),
+  exit: Schema.optional(Schema.Finite),
+  signal: Schema.optional(Schema.String.check(Schema.isMaxCodePoints(128))),
+  timeout: Schema.optional(Schema.Boolean),
 });
-const launch = z.object({
-  type: z.literal("tool"),
-  name: z.literal("shell"),
-  state: z.object({
-    status: z.literal("completed"),
-    input: z.object({ command }),
-    content: z
-      .array(z.object({ type: z.string() }))
-      .min(1)
-      .max(1000),
-    metadata: z.object({
+const launch = Schema.Struct({
+  type: Schema.Literal("tool"),
+  name: Schema.Literal("shell"),
+  state: Schema.Struct({
+    status: Schema.Literal("completed"),
+    input: Schema.Struct({ command }),
+    content: Schema.Array(Schema.Struct({ type: Schema.String })).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(1000),
+    ),
+    metadata: Schema.Struct({
       shellID,
-      status: z.literal("running"),
-      truncated: z.boolean(),
+      status: Schema.Literal("running"),
+      truncated: Schema.Boolean,
     }),
   }),
 });
@@ -59,15 +63,15 @@ function candidate(message: ShellContextRecord) {
     message.text.length > 1024 * 1024
   )
     return;
-  const metadata = notice.safeParse(message.metadata);
-  const description = command.safeParse(message.description);
+  const metadata = Schema.decodeUnknownResult(notice)(message.metadata);
+  const description = Schema.decodeUnknownResult(command)(message.description);
   if (
-    !metadata.success ||
-    !description.success ||
-    metadata.data.jobID !== metadata.data.shellID
+    Result.isFailure(metadata) ||
+    Result.isFailure(description) ||
+    metadata.success.jobID !== metadata.success.shellID
   )
     return;
-  const prefix = `<shell id="${metadata.data.jobID}" state="${metadata.data.state}" command="${description.data}">\n`;
+  const prefix = `<shell id="${metadata.success.jobID}" state="${metadata.success.state}" command="${description.success}">\n`;
   const suffix = "\n</shell>";
   if (
     !message.text.startsWith(prefix) ||
@@ -75,7 +79,7 @@ function candidate(message: ShellContextRecord) {
     message.text.length < prefix.length + suffix.length
   )
     return;
-  return { shellID: metadata.data.shellID, command: description.data };
+  return { shellID: metadata.success.shellID, command: description.success };
 }
 
 /** Wire recognition only; callers must still resolve task ownership. */
@@ -123,13 +127,13 @@ export class ShellCompletionContext {
     if (this.order > 10000) this.valid = false;
     if (message.type === "assistant") {
       for (const part of message.content ?? []) {
-        const parsed = launch.safeParse(part);
-        if (!parsed.success) continue;
+        const parsed = Schema.decodeUnknownResult(launch)(part);
+        if (Result.isFailure(parsed)) continue;
         if (++this.witnesses > 10000) {
           this.valid = false;
           break;
         }
-        const { metadata, input } = parsed.data.state;
+        const { metadata, input } = parsed.success.state;
         const entries = this.launches.get(metadata.shellID) ?? [];
         entries.push({
           shellID: metadata.shellID,

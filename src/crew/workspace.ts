@@ -2,40 +2,48 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, readFile, readlink, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { z } from "zod";
-import { legacySetting } from "../settings-legacy";
+import { Schema } from "effect";
+import {
+  settingsDefault,
+  settingsPattern,
+  settingsStartsWith,
+  settingsStruct,
+} from "../settings-schema";
 import { CrewError } from "./state";
-import { agentIDSchema as nativeAgentIDSchema } from "./team";
+import { agentIDSchema } from "./team";
 
-// Batch 9 owns the remaining workspace operation containers.
-const agentIDSchema = legacySetting(nativeAgentIDSchema);
-const expected = z.strictObject({
-  head: z.string().regex(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/),
-  fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-  taskID: z.string().startsWith("task_").max(100).nullable(),
+const expected = settingsStruct({
+  head: Schema.String.check(settingsPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/)),
+  fingerprint: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
+  taskID: Schema.NullOr(
+    Schema.String.check(
+      settingsStartsWith("task_"),
+      Schema.isMaxCodePoints(100),
+    ),
+  ),
 });
 /** Captain-only, configured worker worktree only. Copy expected from inspect. */
 export const workspaceInputSchemas = [
-  z.strictObject({
-    op: z.literal("workspace"),
+  settingsStruct({
+    op: Schema.Literal("workspace"),
     crew: agentIDSchema,
-    patch: z.boolean().default(false),
+    patch: Schema.Boolean.pipe(settingsDefault(false)),
   }),
-  z.strictObject({
-    op: z.literal("stash"),
+  settingsStruct({
+    op: Schema.Literal("stash"),
     crew: agentIDSchema,
     expected,
-    acknowledgeUnconfirmedExecution: z.literal(true).optional(),
+    acknowledgeUnconfirmedExecution: Schema.optional(Schema.Literal(true)),
   }),
-  z.strictObject({
-    op: z.literal("reset"),
+  settingsStruct({
+    op: Schema.Literal("reset"),
     crew: agentIDSchema,
     expected,
-    acknowledgeDiscard: z.literal(true),
-    acknowledgeUnconfirmedExecution: z.literal(true).optional(),
+    acknowledgeDiscard: Schema.Literal(true),
+    acknowledgeUnconfirmedExecution: Schema.optional(Schema.Literal(true)),
   }),
 ] as const;
-export type WorkspaceInput = z.infer<(typeof workspaceInputSchemas)[number]>;
+export type WorkspaceInput = (typeof workspaceInputSchemas)[number]["Type"];
 export type WorkspaceChange = {
   path: string;
   index: string;

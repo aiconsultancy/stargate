@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
-import { z } from "zod";
+import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
 import { crewInputSchema, crewOptionsSchema } from "../src/crew/engine";
 import { canExpandCrew, crewFingerprint } from "../src/crew/identity";
 import { modelInputSchema, modelToolInputSchema } from "../src/crew/models";
@@ -12,7 +12,6 @@ import { projectsSchema } from "../src/crew/project-options";
 import { inspectInputSchema } from "../src/crew/reconciliation";
 import { CrewState } from "../src/crew/state";
 import { profileTeam, teamSchema } from "../src/crew/team";
-import { objectToolInput } from "../src/crew/tool-input";
 import { workspaceInputSchemas } from "../src/crew/workspace";
 import { renderProfile } from "../src/profile";
 import { decodeSettings } from "../src/settings-errors";
@@ -32,7 +31,7 @@ const rawTeam = {
 const fingerprint =
   '{"version":2,"namespace":"fixture","projectDirectory":"/project","captain":{"id":"cain","directory":"/captain"},"crew":[{"id":"shaw","permissionProfile":"coding","directory":"/crew/shaw"},{"id":"twiki","permissionProfile":"research","directory":"/crew/twiki","backend":{"type":"pi-durable","model":"openai/fixture","systemPrompt":"You are a helpful assistant responding in Slack.","tools":"coding"}}]}';
 
-test("remaining Zod containers delegate team and agent-ID validation and advertisement", () => {
+test("crew containers compose native team and agent-ID validation and advertisement", () => {
   const options = {
     namespace: "fixture",
     stateDirectory: "/state",
@@ -42,33 +41,47 @@ test("remaining Zod containers delegate team and agent-ID validation and adverti
     worktrees: { shaw: "/crew/shaw", twiki: "/crew/twiki" },
     team: rawTeam,
   };
-  expect(crewOptionsSchema.parse(options).team).toEqual(
+  expect(Schema.decodeUnknownSync(crewOptionsSchema)(options).team).toEqual(
     Schema.decodeUnknownSync(teamSchema)(rawTeam),
   );
   expect(
-    crewOptionsSchema.safeParse({ ...options, team: { ...rawTeam, crew: [] } })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(crewOptionsSchema)({
+        ...options,
+        team: { ...rawTeam, crew: [] },
+      }),
+    ),
   ).toBe(false);
   expect(
-    projectsSchema.safeParse({
-      other: {
-        projectDirectory: "/other",
-        worktrees: { "bad name": "/other/bad" },
-      },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(projectsSchema)({
+        other: {
+          projectDirectory: "/other",
+          worktrees: { "bad name": "/other/bad" },
+        },
+      }),
+    ),
   ).toBe(false);
   for (const [schema, input] of [
     [crewInputSchema, { op: "dispatch", crew: "shaw", text: "fixture" }],
     [inspectInputSchema, { op: "inspect", crew: "shaw" }],
     [workspaceInputSchemas[0], { op: "workspace", crew: "shaw" }],
   ] as const) {
-    expect(schema.safeParse(input).success).toBe(true);
-    expect(schema.safeParse({ ...input, crew: "bad name" }).success).toBe(
-      false,
+    expect(Result.isSuccess(Schema.decodeUnknownResult(schema)(input))).toBe(
+      true,
     );
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(schema)({ ...input, crew: "bad name" }),
+      ),
+    ).toBe(false);
   }
   expect(
-    JSON.stringify(z.toJSONSchema(objectToolInput(crewInputSchema))),
+    JSON.stringify(
+      crewOpenCodeInput()["~standard"].jsonSchema.input({
+        target: "draft-2020-12",
+      }),
+    ),
   ).toContain('"pattern":"^[a-z0-9][a-z0-9_-]{0,63}$"');
 });
 

@@ -22,11 +22,21 @@ import type {
   SessionPromptInput,
   SessionSyntheticInput,
 } from "@opencode/client";
-import { Result, Schema } from "effect";
+import { Predicate, Result, Schema } from "effect";
 import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
 import { legacySetting } from "../settings-legacy";
+import {
+  settingsCheck,
+  settingsDefault,
+  settingsDiscriminatedUnion,
+  settingsPattern,
+  settingsRecord,
+  settingsRefine,
+  settingsStartsWith,
+  settingsStruct,
+} from "../settings-schema";
 import {
   noticeTools,
   scopedUpdate,
@@ -83,10 +93,10 @@ import {
   withdrawKey,
 } from "./state";
 import {
+  agentIDSchema,
   type CrewMember,
   defaultTeam,
-  agentIDSchema as nativeAgentIDSchema,
-  teamSchema as nativeTeamSchema,
+  teamSchema,
 } from "./team";
 import {
   inspectWorkspace,
@@ -99,44 +109,46 @@ import {
   workspaceRoot,
 } from "./workspace";
 
-// Batch 9 owns these remaining Zod configuration/operation containers.
-const agentIDSchema = legacySetting(nativeAgentIDSchema);
-const teamSchema = legacySetting(nativeTeamSchema);
 const decodeJournalInput = Schema.decodeUnknownResult(journalInputSchema, {
   onExcessProperty: "error",
 });
 
-const directory = z
-  .string()
-  .refine((value) => isAbsolute(value) && !value.includes("\0"));
-export const crewOptionsSchema = z
-  .strictObject({
-    namespace: z.string().min(1).max(256),
-    stateDirectory: directory,
-    captainDirectory: directory,
-    projectDirectory: directory,
-    worktrees: z.record(agentIDSchema, directory),
-    /** Additional configured repositories; omission preserves the existing team. */
-    projects: projectsSchema.optional(),
-    team: teamSchema.optional(),
-    quota: legacySetting(quotaConfigSchema).optional(),
-    cron: z
-      .strictObject({
-        configPath: directory,
-        bot: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-      })
-      .optional(),
-    allowCrewExpansion: z.boolean().optional(),
-    exclusiveWorkerInput: z.boolean().optional(),
-    mesijCommand: directory,
-    /** The one native captain root; earlier roots stay history. */
-    captainSessionID: z
-      .string()
-      .max(256)
-      .regex(/^ses_[A-Za-z0-9]+$/)
-      .optional(),
-  })
-  .superRefine((options, context) => {
+const directory = Schema.String.check(
+  settingsRefine((value) => isAbsolute(value) && !value.includes("\0"), {
+    message: "Invalid input",
+  }),
+);
+export const crewOptionsSchema = settingsStruct({
+  namespace: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(256),
+  ),
+  stateDirectory: directory,
+  captainDirectory: directory,
+  projectDirectory: directory,
+  worktrees: settingsRecord(agentIDSchema, Schema.mutableKey(directory)),
+  /** Additional configured repositories; omission preserves the existing team. */
+  projects: Schema.optional(projectsSchema),
+  team: Schema.optional(teamSchema),
+  quota: Schema.optional(quotaConfigSchema),
+  cron: Schema.optional(
+    settingsStruct({
+      configPath: directory,
+      bot: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+    }),
+  ),
+  allowCrewExpansion: Schema.optional(Schema.Boolean),
+  exclusiveWorkerInput: Schema.optional(Schema.Boolean),
+  mesijCommand: directory,
+  /** The one native captain root; earlier roots stay history. */
+  captainSessionID: Schema.optional(
+    Schema.String.check(
+      Schema.isMaxCodePoints(256),
+      settingsPattern(/^ses_[A-Za-z0-9]+$/),
+    ),
+  ),
+}).check(
+  settingsCheck((options, context) => {
     const team = options.team ?? defaultTeam;
     const ids = team.crew.map(({ id }) => id);
     if (
@@ -168,40 +180,83 @@ export const crewOptionsSchema = z
           });
       }
     }
-  });
-export type CrewOptions = z.infer<typeof crewOptionsSchema>;
-const taskID = z.string().startsWith("task_").max(100);
-const text = z.string().min(1).max(64000);
-export const crewInputSchema = z.discriminatedUnion("op", [
-  z.strictObject({ op: z.literal("roster") }),
+  }),
+);
+export type CrewOptions = typeof crewOptionsSchema.Type;
+const crewTaskID = Schema.String.check(
+  settingsStartsWith("task_"),
+  Schema.isMaxCodePoints(100),
+);
+const crewText = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(64000),
+);
+export const crewInputBranches = Schema.Union([
+  settingsStruct({ op: Schema.Literal("roster") }),
   inspectInputSchema,
   reconcileInputSchema,
   resumeInputSchema,
   abandonInputSchema,
   ...workspaceInputSchemas,
-  z.strictObject({ op: z.literal("ensure"), crew: agentIDSchema.optional() }),
-  z.strictObject({
-    op: z.literal("dispatch"),
+  settingsStruct({
+    op: Schema.Literal("ensure"),
+    crew: Schema.optional(agentIDSchema),
+  }),
+  settingsStruct({
+    op: Schema.Literal("dispatch"),
     crew: agentIDSchema,
-    text,
-    queue: z.boolean().default(false),
+    text: crewText,
+    queue: Schema.Boolean.pipe(settingsDefault(false)),
   }),
-  z.strictObject({
-    op: z.literal("wait"),
-    taskID,
-    afterNoticeID: z.number().int().nonnegative().default(0),
+  settingsStruct({
+    op: Schema.Literal("wait"),
+    taskID: crewTaskID,
+    afterNoticeID: Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isGreaterThanOrEqualTo(0),
+    ).pipe(settingsDefault(0)),
   }),
-  z.strictObject({ op: z.literal("status"), taskID }),
-  z.strictObject({ op: z.literal("complete"), taskID, result: text }),
-  z.strictObject({ op: z.literal("compact"), crew: agentIDSchema }),
-  z.strictObject({
-    op: z.literal("urgent"),
-    taskID,
+  settingsStruct({ op: Schema.Literal("status"), taskID: crewTaskID }),
+  settingsStruct({
+    op: Schema.Literal("complete"),
+    taskID: crewTaskID,
+    result: crewText,
+  }),
+  settingsStruct({ op: Schema.Literal("compact"), crew: agentIDSchema }),
+  settingsStruct({
+    op: Schema.Literal("urgent"),
+    taskID: crewTaskID,
     to: agentIDSchema,
-    text,
+    text: crewText,
   }),
 ]);
-export type CrewInput = z.infer<typeof crewInputSchema>;
+const crewBranchDecoders = new Map<
+  string,
+  (raw: unknown) => Result.Result<unknown, Schema.SchemaError>
+>(
+  crewInputBranches.members.map((member) => [
+    String(member.fields.op.ast.literal),
+    Schema.decodeUnknownResult(member, { errors: "all" }),
+  ]),
+);
+// Native union sentinel optimization can otherwise hide an invalid literal
+// acknowledgement behind a root error. Delegate to the known branch first.
+export const crewInputSchema = Schema.Unknown.check(
+  Schema.makeFilter((raw) => {
+    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string")
+      return undefined;
+    const decode = crewBranchDecoders.get(raw["op"]);
+    if (!decode) return undefined;
+    const result = decode(raw);
+    return Result.isFailure(result) ? result.failure.issue : undefined;
+  }),
+).pipe(
+  Schema.decodeTo(settingsDiscriminatedUnion("op", crewInputBranches.members)),
+);
+export type CrewInput = typeof crewInputSchema.Type;
+// Batch 10 owns the remaining Zod inbox/mail containers using these primitives.
+const taskID = legacySetting(crewTaskID);
+const text = legacySetting(crewText);
 const legacyMailInputSchema = z.discriminatedUnion("op", [
   z.strictObject({
     op: z.literal("inbox"),
@@ -499,12 +554,15 @@ export class CrewEngine {
     connectResults?: ResultConnector,
     waitOptions: CrewWaitOptions = {},
   ) {
-    const parsed = crewOptionsSchema.safeParse(input);
-    if (!parsed.success)
+    const parsed = Schema.decodeUnknownResult(crewOptionsSchema)(input);
+    if (Result.isFailure(parsed))
       throw new CrewError(
         "Invalid crew plugin options. Supply exact configured crew worktrees and distinct, non-nested absolute captain/worker directories.",
       );
-    const options = { ...parsed.data, team: parsed.data.team ?? defaultTeam };
+    const options = {
+      ...parsed.success,
+      team: parsed.success.team ?? defaultTeam,
+    };
     // Missing worktrees are permitted, but existing symlink ancestors must not
     // collapse separate configured paths into the same configuration tree.
     const physicalCaptain = await physicalDirectory(
@@ -519,11 +577,13 @@ export class CrewEngine {
       ),
     );
     if (
-      !crewOptionsSchema.safeParse({
-        ...options,
-        captainDirectory: physicalCaptain,
-        worktrees: physicalWorktrees,
-      }).success
+      Result.isFailure(
+        Schema.decodeUnknownResult(crewOptionsSchema)({
+          ...options,
+          captainDirectory: physicalCaptain,
+          worktrees: physicalWorktrees,
+        }),
+      )
     )
       throw new CrewError(
         "Captain and worker directories must be distinct and non-nested, including symbolic links.",
@@ -1207,12 +1267,12 @@ export class CrewEngine {
 
   async run(raw: unknown, caller: CrewCaller): Promise<CrewResult> {
     caller = this.logicalCaller(caller);
-    const parsed = crewInputSchema.safeParse(raw);
-    if (!parsed.success)
+    const parsed = Schema.decodeUnknownResult(crewInputSchema)(raw);
+    if (Result.isFailure(parsed))
       throw new CrewError(
         "Invalid stargate_crew input. Use the operation's declared fields.",
       );
-    const input = parsed.data;
+    const input = parsed.success;
     const deadline =
       input.op === "wait" ? this.waitNow() + this.waitWindowMs : 0;
     let authorized = false;

@@ -342,6 +342,30 @@ for (const tools of ["coding", "none"] as const) {
 
 for (const scenario of [
   {
+    title: "crew status uses its own native decoder rather than journal",
+    name: "stargate_crew",
+    args: { op: "status", taskID: "task_fixture" },
+    input: { op: "status", taskID: "task_fixture" },
+    result: { status: "running" },
+    error: null,
+  },
+  {
+    title: "crew wait keeps its native required numeric coercion",
+    name: "stargate_crew",
+    args: { op: "wait", taskID: "task_fixture", afterNoticeID: "2" },
+    input: { op: "wait", taskID: "task_fixture", afterNoticeID: 2 },
+    result: { status: "running" },
+    error: null,
+  },
+  {
+    title: "crew dispatch omission fails Pi before handler defaults",
+    name: "stargate_crew",
+    args: { op: "dispatch", crew: "worker", text: "fixture" },
+    input: null,
+    result: { status: "queued" },
+    error: "Validation failed for tool",
+  },
+  {
     title: "journal read retains explicit native default fields",
     name: "stargate_journal",
     args: { op: "read", after: 0, limit: 20 },
@@ -491,7 +515,9 @@ for (const scenario of [
         expect(output).not.toContain('"entries"');
         expect(output).not.toContain('"messages"');
         expect(output).not.toContain("private wrong-branch value");
-      } else
+      } else if (scenario.name === "stargate_crew")
+        expect(JSON.parse(output)).toEqual(scenario.result);
+      else
         expect(JSON.parse(output)).toMatchObject({
           nextAfter: scenario.result?.nextAfter,
           entries: scenario.result?.entries,

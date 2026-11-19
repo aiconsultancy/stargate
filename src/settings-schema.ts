@@ -1,5 +1,6 @@
 import {
   Effect,
+  RegExp as EffectRegExp,
   Predicate,
   Schema,
   SchemaAST,
@@ -169,6 +170,15 @@ export const settingsPattern = (
   Schema.isPattern(pattern, {
     toJsonSchema: () => ({ pattern: pattern.source }),
     ...annotations,
+  });
+
+/** Preserve the legacy prefix advertisement without changing native checking. */
+export const settingsStartsWith = (prefix: string) =>
+  Schema.isStartingWith(prefix, {
+    toJsonSchema: () => ({
+      format: "starts_with",
+      pattern: `^${EffectRegExp.escape(prefix)}.*`,
+    }),
   });
 
 export const settingsUUID = Schema.String.check(

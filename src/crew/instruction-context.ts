@@ -1,9 +1,17 @@
 import { posix, win32 } from "node:path";
-import { z } from "zod";
+import { Result, Schema } from "effect";
+import { settingsStruct } from "../settings-schema";
 
-const metadataSchema = z.strictObject({
-  instruction: z.strictObject({
-    paths: z.array(z.string().min(1).max(4096)).min(1).max(32),
+const metadataSchema = settingsStruct({
+  instruction: settingsStruct({
+    paths: Schema.mutable(
+      Schema.Array(
+        Schema.String.check(
+          Schema.isMinCodePoints(1),
+          Schema.isMaxCodePoints(4096),
+        ),
+      ),
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(32)),
   }),
 });
 
@@ -55,9 +63,9 @@ export function isNativeInstructionContext(
     !message.description.startsWith("Loaded ")
   )
     return false;
-  const parsed = metadataSchema.safeParse(message.metadata);
-  if (!parsed.success) return false;
-  const paths = parsed.data.instruction.paths;
+  const parsed = Schema.decodeUnknownResult(metadataSchema)(message.metadata);
+  if (Result.isFailure(parsed)) return false;
+  const paths = parsed.success.instruction.paths;
   if (new Set(paths).size !== paths.length) return false;
   const descriptions = message.description.slice("Loaded ".length).split(", ");
   if (
