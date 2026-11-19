@@ -37,6 +37,24 @@ govern implementation, checks, review, merge and deployment. Ship coordination
 does not replace them. A missing guide is a reported gap, not permission to
 invent project rules. Do not change a project's instructions for ship policy.
 
+## Pull request scope
+
+Follow the repository's scope, delivery, review and approval rules. Choose PR
+scope by reviewability, complexity and business and operational risk.
+
+Lead with a complete, testable user-visible change when practical. Include the
+code, tests and documentation needed for it to work. Where project rules allow,
+group related low-risk work when reviewers can verify it together. One PR can
+cover several related issues. Split when isolating risk, easing review or
+rollback, or delivering independently outweighs another build, review and
+merge cycle. Keep each increment usable and testable. Explain the verification
+and rollback plan for high-risk changes.
+
+Use the project's issue-linking conventions and close only issues this PR
+completes. In delivery records, separate implementation, compilation, cache
+waits, tests, reviews and approvals. Measure build time before recommending
+more capacity.
+
 ## Requests and replies
 
 - At assignment start, send the captain a concise acknowledgement with task ID,
