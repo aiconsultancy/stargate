@@ -6,6 +6,9 @@
 
 - New flags: `maintenance.drain.enabled` (default **off**), with
   `maintenance.drain.deadlineMinutes` (default **10**, range 1–1440).
+- New flags: `slack.steerThreadFollowUps` and
+  `irc[].features.steerThreadFollowUps`, both default **off**. They deliver
+  same-thread follow-ups to a running OpenCode turn as steering input.
 - Default changes: IRC's peer-turn limit rises from 5 to 30 per receiving
   connection and conversation in a rolling hour.
 - Enabled by default: none.
@@ -17,6 +20,11 @@
   deadline, report stragglers, and queue restart completion context before
   resuming. Maintenance reports and `/health` show the drain state. No host
   enables this flag automatically; release approval decides activation.
+
+- Add opt-in same-thread follow-up steering for running OpenCode turns. Other
+  threads retain queue isolation and receive a queue notice. Refused steering
+  falls back to the existing queue. Stop and local controls stay separate.
+  See [follow-up steering](docs/operations.md#follow-up-steering).
 
 - Guide new ships on choosing reviewable pull requests by complexity and
   risk. Existing ships can add the guidance to their working agreement.

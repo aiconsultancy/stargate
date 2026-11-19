@@ -33,6 +33,11 @@ turn is waiting on its native form. The gateway binds each offer to its exact
 input, running question tool, form fingerprint and posted Slack message.
 Durable one-shot claims prevent a repeated interaction from replaying a native
 answer or cancellation. These controls never approve tool permissions.
+Opt-in [follow-up steering](operations.md#follow-up-steering) uses the same
+gateway queue and native synthetic-input mechanism as crew steering. Only the
+exact thread owning the active input is eligible. Durable admission receipts
+separate accepted steering, definite refusal and uncertain native writes;
+another thread stays queued. No second scheduler selects follow-ups.
 `attachment-delivery.ts` publishes the files of a stored reply. `store.ts` owns
 the queue, delivery cursor, and session mappings. `runtime.ts` owns startup,
 the exclusive process lock, cancellation, and resource cleanup.

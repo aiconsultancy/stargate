@@ -372,6 +372,7 @@ export const botSchema = settingsStruct({
     ),
   ),
   slack: settingsStruct({
+    steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
     appId: Schema.String.check(settingsPattern(/^A[A-Z0-9]+$/)),
     appTokenEnv: envName,
     botTokenEnv: envName,
@@ -559,6 +560,7 @@ const ircCrewSchema = settingsStruct({
  * these switches can turn one off. The separate native-question bridge is opt-in.
  */
 const ircFeaturesSchema = settingsStruct({
+  steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
   /** Bridge native clarification forms to their original authenticated requester. */
   questions: Schema.Boolean.pipe(settingsDefault(false)),
   /** Download FILEHOST links in admitted messages as attachments. */
@@ -583,6 +585,7 @@ const ircFeaturesSchema = settingsStruct({
   readMarker: Schema.Boolean.pipe(settingsDefault(true)),
 });
 const ircFeatureDefaults = {
+  steerThreadFollowUps: false,
   questions: false,
   filesIn: true,
   filesOut: true,

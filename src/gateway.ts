@@ -18,6 +18,8 @@ import {
   type AgentBackend,
   latestInput,
   type PromptSourceContext,
+  type SteerInput,
+  type SteerResult,
   type Transcript,
   type TranscriptEntry,
   TranscriptUnavailable,
@@ -230,7 +232,7 @@ export interface SlackDelivery {
  */
 export type GatewayConfig =
   | BotConfig
-  | Pick<
+  | (Pick<
       BotConfig,
       | "id"
       | "displayName"
@@ -240,7 +242,7 @@ export type GatewayConfig =
       | "waiting"
       | "crewActivity"
       | "transcription"
-    >;
+    > & { steerThreadFollowUps?: boolean });
 
 /** Immutable access context; scheduled/catch-up scopes may have no job. */
 export type GatewayAccessContext = Readonly<
@@ -311,6 +313,7 @@ export function slackTransport(
 }
 
 export class Gateway {
+  private followUpTask: Promise<void> | undefined;
   private readonly meta: MetaCommands;
   private readonly activity: ActivityDelivery;
   private readonly cancellations = new Map<number, AbortController>();
@@ -573,10 +576,114 @@ export class Gateway {
       this.log.warn("Peer captain thread limit reached; message not admitted");
       return false;
     }
-    const accepted = this.store.enqueue(input);
+    const accepted =
+      (bot.slack.steerThreadFollowUps && this.backend.sessionID
+        ? this.store.admitFollowUp(input, this.backend.sessionID)
+        : undefined) ?? this.store.enqueue(input);
     if (accepted && this.slackQuestions && !input.sender && !input.fleet)
       this.store.recordQuestionSource(input);
     return accepted;
+  }
+
+  /** Existing worker poll drains durable intake; no new turn or scheduler. */
+  async pollFollowUps(signal: AbortSignal, finalOwner?: number): Promise<void> {
+    if (this.followUpTask !== undefined) return this.followUpTask;
+    this.followUpTask = this.deliverFollowUps(signal, finalOwner);
+    try {
+      await this.followUpTask;
+    } finally {
+      this.followUpTask = undefined;
+    }
+  }
+
+  private async deliverFollowUps(signal: AbortSignal, finalOwner?: number) {
+    for (const receipt of this.store.followUps(this.key, finalOwner)) {
+      signal.throwIfAborted();
+      const input = this.store.followUpInput(receipt);
+      let state = receipt.state;
+      const owner = this.store.jobByInput(this.key, receipt.inputID);
+      const source = owner
+        ? this.transport.source({ ...owner, ...input })
+        : undefined;
+      const allowed = () =>
+        !this.drain?.held() &&
+        this.allowed(input) &&
+        this.backend.sessionID === receipt.sessionID &&
+        (this.bot
+          ? this.bot.slack.steerThreadFollowUps
+          : "steerThreadFollowUps" in this.config &&
+            this.config.steerThreadFollowUps) === true &&
+        this.store.ownsFollowUp(receipt);
+      const native: SteerInput | undefined = source
+        ? {
+            sessionID: receipt.sessionID,
+            inputID: receipt.inputID,
+            id: receipt.nativeID,
+            text: input.text,
+            context: { source },
+            allowed,
+          }
+        : undefined;
+      if (state === "pending" && this.store.claimFollowUp(receipt)) {
+        let result: SteerResult = { status: "refused" };
+        if (native && allowed() && this.backend.steer) {
+          try {
+            result = await this.backend.steer(
+              native,
+              AbortSignal.any([signal, AbortSignal.timeout(1800)]),
+            );
+          } catch {
+            result = { status: "uncertain" };
+          }
+        }
+        state = result.status === "refused" ? "queued" : result.status;
+        this.store.settleFollowUp(receipt, state);
+      } else if (
+        (state === "writing" || state === "uncertain") &&
+        (finalOwner === receipt.owner ||
+          (receipt.reconcileAttempts < 8 && receipt.retryAt <= Date.now()))
+      ) {
+        // A crash may have followed the write. Read evidence only; never replay.
+        let result: SteerResult = { status: "uncertain" };
+        if (native && this.backend.reconcileSteer) {
+          try {
+            result = await this.backend.reconcileSteer(
+              native,
+              AbortSignal.any([signal, AbortSignal.timeout(1800)]),
+            );
+          } catch {
+            /* Ambiguous native evidence remains held. */
+          }
+        }
+        state = result.status === "accepted" ? "accepted" : "uncertain";
+        this.store.settleFollowUp(receipt, state);
+      }
+      if ((receipt.notified && state === receipt.state) || !this.allowed(input))
+        continue;
+      try {
+        if (state === "accepted") {
+          const message = input.eventId.slice(input.channel.length + 1);
+          await this.slack.react?.(input.channel, message, "eyes", () =>
+            this.allowed(input),
+          );
+        } else if (state === "queued" || state === "uncertain") {
+          await this.slack.post(
+            input.channel,
+            input.thread,
+            state === "uncertain"
+              ? "Follow-up delivery is unconfirmed. It has not been queued or repeated."
+              : receipt.state === "queued"
+                ? "Queued behind another request."
+                : "Could not steer the running request; queued as the next request.",
+            undefined,
+            { allowed: () => this.allowed(input) },
+          );
+        }
+        this.store.notifiedFollowUp(receipt);
+      } catch {
+        this.log.warn("Follow-up notification unavailable");
+      }
+    }
   }
 
   private route(body: unknown, peer?: PeerSender) {
@@ -998,6 +1105,7 @@ export class Gateway {
     return Effect.gen(function* () {
       gateway.drain?.tick();
       if (gateway.paused) return;
+      yield* abortable((signal) => gateway.pollFollowUps(signal));
       const used = yield* FiberMap.size(slots);
       // Held: accepted jobs stay queued; responding deliveries may finish.
       const hold = gateway.drain?.held() ?? false;
@@ -1200,6 +1308,13 @@ export class Gateway {
     );
   }
 
+  private followUpAnswer(owner: number, text: string): string {
+    const links = this.store.followUpLinks(owner);
+    return links && text.trim()
+      ? `${text}\n\nFollow-ups included:\n${links}`
+      : text;
+  }
+
   /** Resolve native input boundaries, never the latest queued Slack source. */
   private captainTranscript(
     sessionID: string,
@@ -1246,7 +1361,10 @@ export class Gateway {
                 {
                   job: group.job,
                   eventId: `transcript:${last.id}`,
-                  chunks: this.prepare(text, true),
+                  chunks: this.prepare(
+                    this.followUpAnswer(group.job, text),
+                    true,
+                  ),
                   files: transcriptAttachments(group.entries),
                 },
               ]
@@ -1787,6 +1905,11 @@ export class Gateway {
             inputFiles,
             sourceContext,
           );
+          // A concurrent native receipt must settle before final link capture.
+          await this.followUpTask;
+          // History may become readable only as the original turn settles.
+          // Resolve its held receipts once more before capturing final links.
+          await this.pollFollowUps(signal, job.id);
           signal.throwIfAborted();
           // The prompt reply is this request's own text: only it can react.
           // Text-free steps before the first text leave only blank lines.
@@ -1808,11 +1931,12 @@ export class Gateway {
             : transcript
               ? transcriptAttachments(transcript.entries)
               : parseAttachments(ownReply.text).files;
-          const answer = owned
+          const answerText = owned
             ? owned.text
             : transcript
               ? this.transcriptText(transcript)
               : own;
+          const answer = this.followUpAnswer(job.id, answerText);
           silent = ownReply.silent || owned?.silent === true;
           // Unread or unsettled text is never posted without its cursor.
           const unread = transcript
@@ -1890,7 +2014,11 @@ export class Gateway {
               : transcript
                 ? this.transcriptText(transcript)
                 : "";
-            if (text) output = [...this.prepare(text, true), ...output];
+            if (text)
+              output = [
+                ...this.prepare(this.followUpAnswer(job.id, text), true),
+                ...output,
+              ];
             keep = output.length - 1;
           }
         }

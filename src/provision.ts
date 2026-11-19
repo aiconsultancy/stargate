@@ -273,8 +273,20 @@ export async function provisionBots(
   const environment = dependencies.environment ?? process.env;
   const request = dependencies.fetch ?? fetch;
   const now = dependencies.now ?? Date.now;
+  // Disabled steering preserves pre-flag journal identity. Enabling it still
+  // changes the plan hash; no mismatch may replay a remote app creation.
+  const hashPlan = {
+    ...plan,
+    bots: plan.bots.map((entry) => {
+      const { steerThreadFollowUps, ...legacySlack } = entry.slack;
+      return {
+        ...entry,
+        slack: steerThreadFollowUps ? entry.slack : legacySlack,
+      };
+    }),
+  };
   const planHash = createHash("sha256")
-    .update(JSON.stringify({ plan, configPath }))
+    .update(JSON.stringify({ plan: hashPlan, configPath }))
     .digest("hex");
 
   const prepare = async () => {

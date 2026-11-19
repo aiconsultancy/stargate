@@ -110,6 +110,44 @@ test.each([false, true])(
   },
 );
 
+test.each([false, true])(
+  "legacy provisioning identity ignores disabled steering but rejects enabling it (%s)",
+  async (steerThreadFollowUps) => {
+    const input = structuredClone(legacyProvisionInput);
+    const options = await fixture(
+      input.bots.map((entry) => ({
+        ...entry,
+        slack: { ...entry.slack, steerThreadFollowUps },
+      })),
+    );
+    await writeFile(
+      options.journalPath,
+      JSON.stringify({
+        version: 1,
+        planHash: createHash("sha256")
+          .update(
+            JSON.stringify({
+              plan: legacyProvisionDecoded,
+              configPath: options.configPath,
+            }),
+          )
+          .digest("hex"),
+        bots: [{ id: "fixture", state: "pending" }],
+      }),
+      { mode: 0o600 },
+    );
+    const result = provisionBots(options, {
+      fetch: noNetwork,
+      environment: {},
+    });
+    if (steerThreadFollowUps)
+      await expect(result).rejects.toThrow(
+        "does not match the original plan/config",
+      );
+    else expect((await result).bots[0]?.app).toBe("planned");
+  },
+);
+
 test("offline planning returns manifests and links without creating files", async () => {
   const options = await fixture();
   const result = await provisionBots(options, {

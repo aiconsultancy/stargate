@@ -76,6 +76,15 @@ The per-bot `concurrency` setting defaults to four. Ordinary thread turns run
 in order within a thread. Pinned captains handle turns in arrival order
 across all their sources.
 
+`bots[].slack.steerThreadFollowUps` defaults to `false`. When enabled, eligible
+text follow-ups in a running OpenCode turn's exact thread use native steering
+instead of a new job. Different threads retain queue isolation and receive a
+queue notice. This flag requires a restart; it is not enabled by merging or
+releasing the source. IRC uses its own
+`irc[].features.steerThreadFollowUps` flag. See
+[follow-up steering](operations.md#follow-up-steering) for refusal, uncertain
+delivery and content limits.
+
 Slack registrations can set optional `health` paths and freshness limits for
 the read-only `@captain /health` command. See [health configuration and
 coverage](meta-commands.md#health-configuration-and-coverage). Missing telemetry

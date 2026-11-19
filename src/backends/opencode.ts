@@ -15,6 +15,8 @@ import { type Attachment, checkAttachments } from "../attachments";
 import type {
   AgentBackend,
   PromptSourceContext,
+  SteerInput,
+  SteerResult,
   TextSink,
   Transcript,
   TranscriptEntry,
@@ -26,6 +28,7 @@ import {
 } from "../backend-values";
 import { type BackendConfig, secret } from "../config";
 import { isNativeInstructionContext } from "../crew/instruction-context";
+import { crewMessageMetadataKey } from "../crew/message-protocol";
 import { CrewReporting } from "../crew/report-rpc";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
 import type {
@@ -1031,6 +1034,116 @@ export class OpenCodeBackend implements AgentBackend {
 
   get sessionID(): string | undefined {
     return this.config.sessionID;
+  }
+
+  async steer(input: SteerInput, signal: AbortSignal): Promise<SteerResult> {
+    const { sessionID, inputID, id } = input;
+    if (sessionID !== this.sessionID || !input.allowed())
+      return { status: "refused" };
+    // Forms/permissions are controls, not prompts. An idle or foreign native
+    // input must not receive this message, even when the gateway row is stale.
+    try {
+      for (const form of await this.client.session.form.list(
+        { sessionID },
+        { signal },
+      )) {
+        const detail = await this.client.session.form.get(
+          { sessionID, formID: form.id },
+          { signal },
+        );
+        if (detail.state.status === "pending") return { status: "refused" };
+      }
+      if ((await this.client.permission.list({ sessionID }, { signal })).length)
+        return { status: "refused" };
+      if (!(await this.followsInput(sessionID, inputID, signal)))
+        return { status: "refused" };
+      if (
+        (await this.client.session.inbox.list({ sessionID }, { signal })).some(
+          (item) => item.id === inputID,
+        )
+      )
+        return { status: "refused" };
+      const active = await this.client.session.active({ signal });
+      const session = await this.client.session.get({ sessionID }, { signal });
+      if (
+        !active[sessionID] ||
+        session.id !== sessionID ||
+        session.time.busy === undefined ||
+        (session.time.idle !== undefined &&
+          session.time.idle >= session.time.busy) ||
+        !(await this.followsInput(sessionID, inputID, signal)) ||
+        !input.allowed()
+      )
+        return { status: "refused" };
+      signal.throwIfAborted();
+    } catch {
+      // Preflight is read-only: ordinary queue fallback is safe.
+      return { status: "refused" };
+    }
+    try {
+      const receipt = await this.client.session.synthetic(
+        {
+          sessionID,
+          id,
+          text: `${sourceLine(input.context)}\n\nThread follow-up for the running request:\n${input.text}`,
+          description: "Thread follow-up",
+          metadata: {
+            [crewMessageMetadataKey]: {
+              originCaptainID: sessionID,
+              originInputID: inputID,
+            },
+          },
+          delivery: "steer",
+          resume: false,
+        },
+        { signal },
+      );
+      return receipt.id === id &&
+        receipt.sessionID === sessionID &&
+        receipt.delivery === "steer"
+        ? this.reconcileSteer(input, signal)
+        : { status: "uncertain" };
+    } catch {
+      // Even an HTTP error can follow a committed write. Only retained native
+      // evidence can resolve it; never submit again or blindly queue fallback.
+      return this.reconcileSteer(input, AbortSignal.timeout(1000));
+    }
+  }
+
+  async reconcileSteer(
+    input: SteerInput,
+    signal: AbortSignal,
+  ): Promise<SteerResult> {
+    if (input.sessionID !== this.sessionID) return { status: "uncertain" };
+    try {
+      const message = await this.client.session.message.get(
+        {
+          sessionID: input.sessionID,
+          messageID: input.id,
+        },
+        { signal },
+      );
+      const origin = Schema.decodeUnknownSync(
+        Schema.Struct({
+          originCaptainID: Schema.String,
+          originInputID: Schema.String,
+        }),
+      )(
+        message.type === "synthetic"
+          ? message.metadata?.[crewMessageMetadataKey]
+          : undefined,
+      );
+      if (
+        message.id === input.id &&
+        message.type === "synthetic" &&
+        origin.originCaptainID === input.sessionID &&
+        origin.originInputID === input.inputID
+      )
+        return { status: "accepted" };
+    } catch {
+      /* Missing/unreadable history proves neither rejection nor safety. */
+    }
+    return { status: "uncertain" };
   }
 
   async prompt(
