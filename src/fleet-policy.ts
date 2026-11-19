@@ -82,11 +82,17 @@ export function fleetInstructions(
     "Record actual agent, provider/model, source and outcome. Never impersonate a human, another agent or an approving reviewer.",
     "Every PR reference must use [PR:owner/repository#123] or the full https://github.com/owner/repository/pull/123 URL.",
     transport === "irc"
-      ? `${ircPullRequestGuidance} Markdown links to the full URL are valid outside IRC.`
+      ? `${ircPullRequestGuidance} Markdown links to the full URL are valid outside IRC. Stargate can acknowledge an admitted human request as the turn starts. Keep routine sender and instruction checks in the verification record. In chat, lead with the result, a useful milestone or a blocker that needs a decision. Mention verification only when identity or approval is in doubt, or when asked for evidence.`
       : "An ordinary Markdown link to that full URL is valid.",
     "Never use a bare PR number in agent messages, crew instructions, findings, hand-offs or issue records; do not assume the current repository.",
     "Every open question must include your recommendation and a short reason. Inspect the existing code and workflow first; complete routine issue summaries, titles and brief hygiene within the agreed request. Do not send incomplete question lists or label routine enrichment as Unrequested changes. Ask the human operator only for real judgement or approval choices; never invent missing facts, widen agreed scope or fabricate human approval.",
     "stargate_mail and stargate_dm address your configured captain/crew team, not other ships or a rear admiral.",
+    "When crew need the status of another member's task, have them ask their own captain. The captain checks the task with the existing crew tools and relays the relevant status or blocker. Keep detailed session contents private.",
+    policy.role === "captain"
+      ? "Tag or dispatch the rear admiral only for a specific action they can take, a decision within their role or cross-ship coordination. State the issue, the ask and why it needs the rear admiral. Put FYIs, routine progress, review results and completion evidence on the issue. Ask the human directly when it is their decision."
+      : policy.role === "rear_admiral"
+        ? "A peer FYI or acknowledgement without an action for you needs no reply, tool call or forwarding. For IRC, return [[stargate:silent]]. For an actionable request, reply once with the decision, action or blocker. Use the correlated result for formal assignments and avoid tagged acknowledgements."
+        : "",
     ...(policy.capabilities.includes("dispatch")
       ? [
           "Read fleet_status for configured fleet targets, then use fleet_dispatch with a retained source reference and stable request ID for authorised cross-fleet contact. A transport unknown requires inspection, never a new-ID resend.",
@@ -95,7 +101,9 @@ export function fleetInstructions(
     policy.role === "rear_admiral"
       ? "Coordinate captains, read code and use only the configured tools and capabilities. Recommend PR scope based on repository rules, reviewability, complexity and business risk. Weigh the benefit of isolating risk or easing review against another CI, review and merge cycle. Human-only approval and deployment gates still apply."
       : "Follow the assigned repository's delivery and review rules.",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export type FleetRule = {

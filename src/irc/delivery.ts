@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { AttachmentTransport } from "../attachment-delivery";
-import type { DeliveryUnit, SlackDelivery } from "../gateway";
+import type { DeliveryUnit, IrcTurnStatus, SlackDelivery } from "../gateway";
 import type { ReactionName } from "../reactions";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";
@@ -139,6 +139,7 @@ export class IrcDelivery implements SlackDelivery {
   }
 
   /**
+   * Fleet turns use bounded request notices. Other registrations send
    * +typing=active every `typingMs` (3 s) until the turn ends, then
    * +typing=done. Direct messages type only to a nick that WHOIS shows
    * holds the requester's account, rechecked for each TAGMSG and at its
@@ -147,9 +148,10 @@ export class IrcDelivery implements SlackDelivery {
    */
   async working(
     channel: string,
-    _thread: string,
+    thread: string,
     signal: AbortSignal,
     allowed?: () => boolean,
+    turnStatus?: IrcTurnStatus,
   ) {
     const finish = this.client.startStatus();
     if (signal.aborted) {
@@ -160,6 +162,28 @@ export class IrcDelivery implements SlackDelivery {
     // still owns its aggregate status handle until its actual lifecycle ends.
     signal.addEventListener("abort", finish, { once: true });
     try {
+      if (turnStatus) {
+        if (turnStatus === "notice") {
+          void this.turnNotice(
+            channel,
+            thread,
+            "Checking that now…",
+            signal,
+            allowed,
+          ).catch(() => {});
+          await delay(this.client.turnStatusMs, undefined, { signal }).catch(
+            () => {},
+          );
+          void this.turnNotice(
+            channel,
+            thread,
+            "This request is still open.",
+            signal,
+            allowed,
+          ).catch(() => {});
+        }
+        return;
+      }
       if (!this.presence.typing || !this.client.hasCap("message-tags")) {
         if (!signal.aborted)
           await new Promise<void>((resolve) =>
@@ -179,6 +203,37 @@ export class IrcDelivery implements SlackDelivery {
     } finally {
       if (signal.aborted) finish();
     }
+  }
+
+  /** NOTICE cannot wake another bot or count as the captain joining a thread. */
+  private async turnNotice(
+    channel: string,
+    thread: string,
+    text: string,
+    signal: AbortSignal,
+    allowed?: () => boolean,
+  ) {
+    const active = () => !signal.aborted && (allowed?.() ?? true);
+    if (!active() || !this.client.registered) return;
+    const target = await this.target(channel).catch(() => undefined);
+    if (!target || !active()) return;
+    const parent = this.replyParent?.(thread) ?? thread;
+    const tags =
+      this.client.hasCap("message-tags") &&
+      validMsgid(parent) &&
+      !parent.startsWith("stargate-")
+        ? { "+draft/reply": parent }
+        : {};
+    // A missing acknowledgement or IRC confirmation must not hold up a reply.
+    void this.client
+      .send(
+        "NOTICE",
+        [target, text],
+        tags,
+        this.guard(channel, target, active),
+        "low",
+      )
+      .catch(() => {});
   }
 
   /**

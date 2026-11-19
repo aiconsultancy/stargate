@@ -472,6 +472,9 @@ const runner: CommandRunner = {
 };
 
 const opencode: OpenCodeControl = {
+  maintenanceNotice: async () => [
+    { sessionID: "ses_captain", status: "queued" },
+  ],
   active: async () => fixture.active,
   pendingInput: async () => [],
   parent: async () => undefined,
@@ -561,6 +564,54 @@ const run = (
   );
 const commands = (prefix: string) =>
   fixture.commands.filter((command) => command.join(" ").startsWith(prefix));
+
+test("enabled drain waits for a running captain, then restarts and records completion", async () => {
+  const { config, path } = await install({
+    drain: { enabled: true, deadlineMinutes: 1 },
+    components: { stargate: true },
+  });
+  fixture.active = ["ses_captain"];
+  let waited = false;
+  const { report } = await run(config, path, "run", {
+    drainDirectory: join(fixture.dir, "drain-control"),
+    clock: {
+      now: () => fixture.time,
+      sleep: async (ms, signal) => {
+        signal.throwIfAborted();
+        fixture.time += ms;
+        waited = true;
+        fixture.active = [];
+      },
+    },
+  });
+  expect(waited).toBe(true);
+  expect(report.outcome).toBe("completed");
+  expect(report.drain).toMatchObject({
+    outcome: "idle",
+    state: { phase: "completed", services: ["gateway", "opencode"] },
+  });
+  expect(commands("systemctl --user stop stargate.service")).toHaveLength(1);
+});
+
+test("enabled drain proceeds at its deadline and reports the running session", async () => {
+  const { config, path } = await install({
+    drain: { enabled: true, deadlineMinutes: 1 },
+    components: { stargate: true },
+  });
+  fixture.active = ["ses_captain"];
+  const { report } = await run(config, path, "run", {
+    drainDirectory: join(fixture.dir, "drain-control"),
+  });
+  expect(report.outcome).toBe("completed");
+  expect(report.drain).toMatchObject({
+    outcome: "deadline",
+    state: {
+      phase: "completed",
+      stragglers: [{ sessionID: "ses_captain", reason: "busy-opencode" }],
+    },
+  });
+  expect(commands("systemctl --user stop stargate.service")).toHaveLength(1);
+});
 
 test("cleanup-only maintenance records results without stopping services", async () => {
   const { config, path } = await install();

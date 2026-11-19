@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { Result, Schema } from "effect";
 import type { PreparedAttachment, PublishedFile } from "./attachments";
 import { cancellationNotice } from "./cancellation";
@@ -115,6 +116,49 @@ export type Job = Incoming & {
   failure?: RequestFailure | null;
   input?: string | null;
   makers?: NativeMaker[];
+};
+
+const followUpSchema = Schema.Struct({
+  botKey: Schema.String,
+  eventId: Schema.String,
+  conversation: Schema.String,
+  channel: Schema.String,
+  thread: Schema.String,
+  replyParent: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  user: Schema.String,
+  text: Schema.String,
+  files: Schema.optionalKey(Schema.Array(Schema.String)),
+  received: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  sender: Schema.optionalKey(
+    Schema.NullOr(Schema.Literals(["captain", "crew"])),
+  ),
+  gate: Schema.optionalKey(
+    Schema.NullOr(Schema.Literals(["spoken", "admitted"])),
+  ),
+  textMention: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  notBefore: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  deferDelivery: Schema.optionalKey(Schema.Boolean),
+  fleet: Schema.optionalKey(fleetJobSchema),
+  notification: Schema.optionalKey(
+    Schema.Struct({
+      wake: Schema.Literals(["ordinary", "direct", "broadcast"]),
+      note: Schema.optionalKey(Schema.String),
+    }),
+  ),
+});
+export type ThreadFollowUp = {
+  botKey: string;
+  eventId: string;
+  owner: number;
+  sessionID: string;
+  inputID: string;
+  nativeID: string;
+  transport: "slack" | "irc";
+  state: "pending" | "writing" | "accepted" | "uncertain" | "queued";
+  notified: number;
+  reconcileAttempts: number;
+  retryAt: number;
+  payload: string;
 };
 
 type StoredJob = Omit<
@@ -292,6 +336,14 @@ export class Store {
       CREATE TABLE IF NOT EXISTS ignored_events (
         botKey TEXT NOT NULL, eventId TEXT NOT NULL, PRIMARY KEY(botKey, eventId)
       );
+      CREATE TABLE IF NOT EXISTS thread_followups (
+        botKey TEXT NOT NULL, eventId TEXT NOT NULL, owner INTEGER NOT NULL,
+        sessionID TEXT NOT NULL, inputID TEXT NOT NULL, nativeID TEXT NOT NULL,
+        state TEXT NOT NULL, notified INTEGER NOT NULL DEFAULT 0,
+        payload TEXT NOT NULL, transport TEXT NOT NULL,
+        reconcileAttempts INTEGER NOT NULL DEFAULT 0,
+        retryAt INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(botKey,eventId)
+      );
       CREATE TABLE IF NOT EXISTS meta_receipts (
         registration TEXT NOT NULL, message TEXT NOT NULL,
         channel TEXT NOT NULL, thread TEXT NOT NULL, user TEXT NOT NULL,
@@ -447,9 +499,17 @@ export class Store {
       this.db
         .query(
           `SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?
-           UNION ALL SELECT 1 FROM irc_burst_messages WHERE botKey=? AND eventId=? LIMIT 1`,
+           UNION ALL SELECT 1 FROM irc_burst_messages WHERE botKey=? AND eventId=?
+           UNION ALL SELECT 1 FROM thread_followups WHERE botKey=? AND eventId=? LIMIT 1`,
         )
-        .get(input.botKey, input.eventId, input.botKey, input.eventId) !== null
+        .get(
+          input.botKey,
+          input.eventId,
+          input.botKey,
+          input.eventId,
+          input.botKey,
+          input.eventId,
+        ) !== null
     )
       return false;
     return (
@@ -485,6 +545,208 @@ export class Store {
             : null,
         }).changes > 0
     );
+  }
+
+  /** Persist admission before transport ACK. Undefined keeps ordinary intake. */
+  admitFollowUp(
+    input: Incoming,
+    sessionID: string,
+    transport: "slack" | "irc" = "slack",
+    invited = false,
+  ): boolean | undefined {
+    return this.db.transaction(() => {
+      if (
+        this.db
+          .query("SELECT 1 FROM thread_followups WHERE botKey=? AND eventId=?")
+          .get(input.botKey, input.eventId) ||
+        this.jobByEvent(input.botKey, input.eventId)
+      )
+        return false;
+      const owner = this.db
+        .query<StoredJob, [string]>(
+          "SELECT * FROM jobs WHERE botKey=? AND status='running' ORDER BY id DESC LIMIT 1",
+        )
+        .get(input.botKey);
+      if (!owner) return undefined;
+      const root = (message: Pick<Incoming, "thread" | "replyParent">) =>
+        transport === "irc"
+          ? (message.replyParent ?? message.thread)
+          : message.thread;
+      const eligible =
+        owner.conversation === input.conversation &&
+        owner.channel === input.channel &&
+        root(owner) === root(input) &&
+        !!owner.input &&
+        !input.sender &&
+        !input.fleet &&
+        !input.gate &&
+        !input.deferDelivery &&
+        !input.files?.length;
+      if (!eligible && !this.enqueue(input)) return false;
+      if (transport === "irc") {
+        this.ircThreadMessage(
+          input.botKey,
+          input.channel,
+          input.thread,
+          root(input),
+        );
+        if (eligible)
+          this.db
+            .query(
+              "UPDATE jobs SET replyParent=COALESCE(replyParent,thread) WHERE id=? AND status='running'",
+            )
+            .run(owner.id);
+        if (
+          invited ||
+          this.ircThreadParticipating(input.botKey, input.channel, root(input))
+        )
+          this.joinIrcThread(input.botKey, input.channel, root(input));
+      }
+      this.db
+        .query(`INSERT INTO thread_followups
+        (botKey,eventId,owner,sessionID,inputID,nativeID,state,payload,transport)
+        VALUES (?,?,?,?,?,?,?,?,?)`)
+        .run(
+          input.botKey,
+          input.eventId,
+          owner.id,
+          sessionID,
+          owner.input ?? "",
+          `msg_${createHash("sha256").update(`${input.botKey}\0${input.eventId}`).digest("hex")}`,
+          eligible ? "pending" : "queued",
+          JSON.stringify(input),
+          transport,
+        );
+      return true;
+    })();
+  }
+
+  followUps(botKey: string, finalOwner?: number): ThreadFollowUp[] {
+    return this.db
+      .query<
+        ThreadFollowUp,
+        [string, number | null, number | null, number, number | null]
+      >(
+        `SELECT * FROM thread_followups WHERE botKey=? AND (? IS NULL OR owner=?) AND
+      (state='pending' OR notified=0 OR
+       (state IN ('writing','uncertain') AND ((reconcileAttempts<8 AND retryAt<=?) OR owner=?)))
+      ORDER BY rowid LIMIT 32`,
+      )
+      .all(
+        botKey,
+        finalOwner ?? null,
+        finalOwner ?? null,
+        Date.now(),
+        finalOwner ?? null,
+      );
+  }
+
+  followUpInput(receipt: ThreadFollowUp): Incoming {
+    return Schema.decodeUnknownSync(followUpSchema)(
+      JSON.parse(receipt.payload),
+    );
+  }
+
+  ownsFollowUp(receipt: ThreadFollowUp): boolean {
+    const input = this.followUpInput(receipt);
+    const owner = this.jobByInput(receipt.botKey, receipt.inputID);
+    const root = (message: Incoming) =>
+      receipt.transport === "irc"
+        ? (message.replyParent ?? message.thread)
+        : message.thread;
+    return (
+      owner?.id === receipt.owner &&
+      owner.status === "running" &&
+      owner.conversation === input.conversation &&
+      owner.channel === input.channel &&
+      root(owner) === root(input) &&
+      this.db
+        .query("SELECT 1 FROM jobs WHERE id=? AND cancel_requested=0")
+        .get(owner.id) !== null
+    );
+  }
+
+  claimFollowUp(receipt: ThreadFollowUp): boolean {
+    return (
+      this.db
+        .query(
+          "UPDATE thread_followups SET state='writing' WHERE botKey=? AND eventId=? AND state='pending'",
+        )
+        .run(receipt.botKey, receipt.eventId).changes === 1
+    );
+  }
+
+  settleFollowUp(
+    receipt: ThreadFollowUp,
+    state: "accepted" | "uncertain" | "queued",
+  ) {
+    this.db.transaction(() => {
+      // A definite refusal alone permits normal queue admission. Remove the
+      // receipt temporarily inside this transaction to reuse enqueue's guards.
+      if (state === "queued") {
+        this.db
+          .query("DELETE FROM thread_followups WHERE botKey=? AND eventId=?")
+          .run(receipt.botKey, receipt.eventId);
+        this.enqueue(this.followUpInput(receipt));
+        this.db
+          .query(`INSERT INTO thread_followups
+          (botKey,eventId,owner,sessionID,inputID,nativeID,state,notified,payload,transport)
+          VALUES (?,?,?,?,?,?,'queued',0,?,?)`)
+          .run(
+            receipt.botKey,
+            receipt.eventId,
+            receipt.owner,
+            receipt.sessionID,
+            receipt.inputID,
+            receipt.nativeID,
+            receipt.payload,
+            receipt.transport,
+          );
+      } else if (state === "uncertain")
+        this.db
+          .query(
+            "UPDATE thread_followups SET state=?,reconcileAttempts=reconcileAttempts+1,retryAt=? WHERE botKey=? AND eventId=?",
+          )
+          .run(
+            state,
+            Date.now() +
+              Math.min(60_000, 1000 * 2 ** receipt.reconcileAttempts),
+            receipt.botKey,
+            receipt.eventId,
+          );
+      else
+        this.db
+          .query(
+            "UPDATE thread_followups SET state=?,notified=0 WHERE botKey=? AND eventId=?",
+          )
+          .run(state, receipt.botKey, receipt.eventId);
+    })();
+  }
+
+  notifiedFollowUp(receipt: ThreadFollowUp) {
+    this.db
+      .query(
+        "UPDATE thread_followups SET notified=1 WHERE botKey=? AND eventId=?",
+      )
+      .run(receipt.botKey, receipt.eventId);
+  }
+
+  followUpLinks(owner: number): string {
+    return this.db
+      .query<{ payload: string; transport: string }, [number]>(
+        "SELECT payload,transport FROM thread_followups WHERE owner=? AND state='accepted' ORDER BY rowid LIMIT 20",
+      )
+      .all(owner)
+      .map((row) => {
+        const input = Schema.decodeUnknownSync(followUpSchema)(
+          JSON.parse(row.payload),
+        );
+        const message = input.eventId.slice(input.channel.length + 1);
+        return row.transport === "slack"
+          ? `https://slack.com/archives/${input.channel}/p${message.replace(".", "")}`
+          : `irc follow-up ${message}`;
+      })
+      .join("\n");
   }
 
   /**
@@ -980,10 +1242,17 @@ export class Store {
     })();
   }
 
-  ready(botKey: string, now: number, limit: number, serial = false): Job[] {
+  ready(
+    botKey: string,
+    now: number,
+    limit: number,
+    serial = false,
+    holdQueued = false,
+  ): Job[] {
     return this.db
       .query<StoredJob, (string | number)[]>(`SELECT * FROM jobs j
       WHERE botKey = ? AND status IN ('queued','responding') AND retry_at <= ?
+      ${holdQueued ? "AND status='responding'" : ""}
       AND NOT EXISTS (SELECT 1 FROM jobs earlier
         WHERE earlier.conversation=j.conversation AND earlier.id < j.id
          AND earlier.status IN (${unfinishedJobs})
@@ -1135,10 +1404,15 @@ export class Store {
   ircReplyParent(botKey: string, thread: string): string | undefined {
     return (
       this.db
-        .query<{ replyParent: string | null }, [string, string]>(
-          "SELECT replyParent FROM jobs WHERE botKey=? AND thread=? ORDER BY id LIMIT 1",
+        .query<
+          { replyParent: string | null },
+          [string, string, string, string]
+        >(
+          `SELECT replyParent FROM jobs WHERE botKey=? AND thread=?
+           UNION ALL SELECT COALESCE(json_extract(payload,'$.replyParent'),json_extract(payload,'$.thread')) AS replyParent
+           FROM thread_followups WHERE botKey=? AND transport='irc' AND json_extract(payload,'$.thread')=? LIMIT 1`,
         )
-        .get(botKey, thread)?.replyParent ?? undefined
+        .get(botKey, thread, botKey, thread)?.replyParent ?? undefined
     );
   }
 
@@ -1214,8 +1488,10 @@ export class Store {
       if (
         this.jobByEvent(input.botKey, input.eventId) ||
         this.db
-          .query("SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?")
-          .get(input.botKey, input.eventId) !== null
+          .query(`SELECT 1 FROM ignored_events WHERE botKey=? AND eventId=?
+            UNION ALL SELECT 1 FROM thread_followups WHERE botKey=? AND eventId=? LIMIT 1`)
+          .get(input.botKey, input.eventId, input.botKey, input.eventId) !==
+          null
       )
         return false;
       const latest = this.db

@@ -180,7 +180,7 @@ export async function maintenanceUpdate(
     if (options.json) deps.print(JSON.stringify(report, null, 2));
     else if (planned) {
       deps.print(
-        `Stargate ${stargateOf(report)?.before} → ${version}: would stage, verify (origin, checksum, tree), install, test and switch now, without the window, the idle gate or the cool-off.`,
+        `Stargate ${stargateOf(report)?.before} → ${version}: would stage, verify (origin, checksum, tree), install, test and switch now, without the window or cool-off${m.drain.enabled ? `, after an idle-or-deadline restart drain (at most ${m.drain.deadlineMinutes} minutes)` : " or the idle gate"}.`,
       );
       deps.print(await restartText(config, version));
       deps.print("Nothing was changed.");

@@ -15,6 +15,8 @@ import { type Attachment, checkAttachments } from "../attachments";
 import type {
   AgentBackend,
   PromptSourceContext,
+  SteerInput,
+  SteerResult,
   TextSink,
   Transcript,
   TranscriptEntry,
@@ -25,7 +27,9 @@ import {
   TranscriptUnavailable,
 } from "../backend-values";
 import { type BackendConfig, secret } from "../config";
+import { fleetCrewStatusSchema } from "../crew/fleet-status";
 import { isNativeInstructionContext } from "../crew/instruction-context";
+import { crewMessageMetadataKey } from "../crew/message-protocol";
 import { CrewReporting } from "../crew/report-rpc";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
 import type {
@@ -47,6 +51,7 @@ import {
   type MaintenanceWatch,
   maintenanceNoticeSchema,
 } from "../maintenance";
+import type { MaintenanceDrain } from "../maintenance-drain";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
@@ -763,7 +768,7 @@ export class OpenCodeBackend implements AgentBackend {
   readonly history: OpenCodeHistory;
   private readonly client;
   private readonly waitForIdle;
-  private readonly pairingClient;
+  private readonly serverClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
   private readonly inputs = new Map<string, string>();
   constructor(
@@ -791,8 +796,8 @@ export class OpenCodeBackend implements AgentBackend {
       ),
     }).experimental.session.wait;
     this.history = new OpenCodeHistory(this.client, config.directory);
-    // Same endpoint and authentication; never follow a pairing redirect.
-    this.pairingClient = OpenCode.make({
+    // Same endpoint and authentication; never forward headers on redirects.
+    this.serverClient = OpenCode.make({
       ...options,
       fetch: Object.assign(
         (url: URL | RequestInfo, init?: RequestInit) =>
@@ -802,11 +807,15 @@ export class OpenCodeBackend implements AgentBackend {
     });
   }
 
+  async serverVersion(signal: AbortSignal) {
+    return (await this.serverClient.server.info({ signal })).version;
+  }
+
   async pair(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
       const result = decodePairingCode(
-        await this.pairingClient.server.pair({ signal }),
+        await this.serverClient.server.pair({ signal }),
       );
       signal.throwIfAborted();
       return { code: result.code, expiresIn: result.expires_in };
@@ -831,6 +840,22 @@ export class OpenCodeBackend implements AgentBackend {
       throw new Error(
         "Crew status unavailable; check the captain location and crew plugin.",
       );
+    }
+  }
+
+  async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+    try {
+      signal.throwIfAborted();
+      return fleetCrewStatusSchema.parse(
+        await this.client.rpc(CrewReporting).fleetStatus(input, {
+          location: { directory: this.config.directory },
+          signal,
+        }),
+      );
+    } catch {
+      signal.throwIfAborted();
+      // A plugin that predates fleet metadata still serves ordinary status.
+      return undefined;
     }
   }
 
@@ -883,6 +908,25 @@ export class OpenCodeBackend implements AgentBackend {
         signal,
       });
     return [...receipts];
+  }
+
+  async maintenanceNotice(record: MaintenanceDrain, signal: AbortSignal) {
+    const receipts = await this.client
+      .rpc(CrewReporting)
+      .maintenanceNotice(record, {
+        location: { directory: this.config.directory },
+        signal,
+      });
+    return [...receipts];
+  }
+
+  async resumeMaintenance(signal: AbortSignal) {
+    return this.client
+      .rpc(CrewReporting)
+      .resumeMaintenance(
+        {},
+        { location: { directory: this.config.directory }, signal },
+      );
   }
 
   async quota(signal: AbortSignal) {
@@ -1011,6 +1055,116 @@ export class OpenCodeBackend implements AgentBackend {
 
   get sessionID(): string | undefined {
     return this.config.sessionID;
+  }
+
+  async steer(input: SteerInput, signal: AbortSignal): Promise<SteerResult> {
+    const { sessionID, inputID, id } = input;
+    if (sessionID !== this.sessionID || !input.allowed())
+      return { status: "refused" };
+    // Forms/permissions are controls, not prompts. An idle or foreign native
+    // input must not receive this message, even when the gateway row is stale.
+    try {
+      for (const form of await this.client.session.form.list(
+        { sessionID },
+        { signal },
+      )) {
+        const detail = await this.client.session.form.get(
+          { sessionID, formID: form.id },
+          { signal },
+        );
+        if (detail.state.status === "pending") return { status: "refused" };
+      }
+      if ((await this.client.permission.list({ sessionID }, { signal })).length)
+        return { status: "refused" };
+      if (!(await this.followsInput(sessionID, inputID, signal)))
+        return { status: "refused" };
+      if (
+        (await this.client.session.inbox.list({ sessionID }, { signal })).some(
+          (item) => item.id === inputID,
+        )
+      )
+        return { status: "refused" };
+      const active = await this.client.session.active({ signal });
+      const session = await this.client.session.get({ sessionID }, { signal });
+      if (
+        !active[sessionID] ||
+        session.id !== sessionID ||
+        session.time.busy === undefined ||
+        (session.time.idle !== undefined &&
+          session.time.idle >= session.time.busy) ||
+        !(await this.followsInput(sessionID, inputID, signal)) ||
+        !input.allowed()
+      )
+        return { status: "refused" };
+      signal.throwIfAborted();
+    } catch {
+      // Preflight is read-only: ordinary queue fallback is safe.
+      return { status: "refused" };
+    }
+    try {
+      const receipt = await this.client.session.synthetic(
+        {
+          sessionID,
+          id,
+          text: `${sourceLine(input.context)}\n\nThread follow-up for the running request:\n${input.text}`,
+          description: "Thread follow-up",
+          metadata: {
+            [crewMessageMetadataKey]: {
+              originCaptainID: sessionID,
+              originInputID: inputID,
+            },
+          },
+          delivery: "steer",
+          resume: false,
+        },
+        { signal },
+      );
+      return receipt.id === id &&
+        receipt.sessionID === sessionID &&
+        receipt.delivery === "steer"
+        ? this.reconcileSteer(input, signal)
+        : { status: "uncertain" };
+    } catch {
+      // Even an HTTP error can follow a committed write. Only retained native
+      // evidence can resolve it; never submit again or blindly queue fallback.
+      return this.reconcileSteer(input, AbortSignal.timeout(1000));
+    }
+  }
+
+  async reconcileSteer(
+    input: SteerInput,
+    signal: AbortSignal,
+  ): Promise<SteerResult> {
+    if (input.sessionID !== this.sessionID) return { status: "uncertain" };
+    try {
+      const message = await this.client.session.message.get(
+        {
+          sessionID: input.sessionID,
+          messageID: input.id,
+        },
+        { signal },
+      );
+      const origin = Schema.decodeUnknownSync(
+        Schema.Struct({
+          originCaptainID: Schema.String,
+          originInputID: Schema.String,
+        }),
+      )(
+        message.type === "synthetic"
+          ? message.metadata?.[crewMessageMetadataKey]
+          : undefined,
+      );
+      if (
+        message.id === input.id &&
+        message.type === "synthetic" &&
+        origin.originCaptainID === input.sessionID &&
+        origin.originInputID === input.inputID
+      )
+        return { status: "accepted" };
+    } catch {
+      /* Missing/unreadable history proves neither rejection nor safety. */
+    }
+    return { status: "uncertain" };
   }
 
   async prompt(

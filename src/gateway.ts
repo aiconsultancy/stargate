@@ -18,6 +18,8 @@ import {
   type AgentBackend,
   latestInput,
   type PromptSourceContext,
+  type SteerInput,
+  type SteerResult,
   type Transcript,
   type TranscriptEntry,
   TranscriptUnavailable,
@@ -28,6 +30,13 @@ import { abortable, runAbortable } from "./effect";
 import { fleetResultSource } from "./fleet/results";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
+import {
+  type DrainControl,
+  drainNoticeID,
+  drainNoticePhase,
+  drainNoticeText,
+  type MaintenanceDrain,
+} from "./maintenance-drain";
 import { textMentionNote } from "./mentions";
 import { MetaCommands, type MetaOptions, metaCandidate } from "./meta-commands";
 import { type NotificationReader, notificationNote } from "./notifications";
@@ -91,6 +100,7 @@ import {
   TranscriptionUnavailable,
   transcribeMedia,
 } from "./transcription";
+import type { UpdateReceipt } from "./update-notice";
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
 
 // Catch-up retries read history only; they never prompt the agent.
@@ -145,6 +155,8 @@ export type DeliveryUnit = {
   part: number;
   allowed?: () => boolean;
 };
+
+export type IrcTurnStatus = "notice" | "quiet";
 
 export interface SlackDelivery {
   /** Undefined (or absent) while the transport cannot move files. */
@@ -202,14 +214,15 @@ export interface SlackDelivery {
     allowed?: () => boolean,
   ): Promise<void>;
   /**
-   * Show that a turn is running (IRC +typing) until `signal` aborts, then
-   * clear it. Best effort: failures never affect the turn.
+   * Show that a turn is running until `signal` aborts. When requested, send
+   * an acknowledgement and an open-request notice. Best effort only.
    */
   working?(
     channel: string,
     thread: string,
     signal: AbortSignal,
     allowed?: () => boolean,
+    turnStatus?: IrcTurnStatus,
   ): Promise<void>;
 }
 
@@ -219,7 +232,7 @@ export interface SlackDelivery {
  */
 export type GatewayConfig =
   | BotConfig
-  | Pick<
+  | (Pick<
       BotConfig,
       | "id"
       | "displayName"
@@ -229,7 +242,7 @@ export type GatewayConfig =
       | "waiting"
       | "crewActivity"
       | "transcription"
-    >;
+    > & { steerThreadFollowUps?: boolean });
 
 /** Immutable access context; scheduled/catch-up scopes may have no job. */
 export type GatewayAccessContext = Readonly<
@@ -252,6 +265,7 @@ export interface GatewayTransport {
   /** Prompt prefix naming the sender when no source line is sent. */
   note(job: Job): string | undefined;
   instructions?(job: Job): string;
+  turnStatus?(job: Job): IrcTurnStatus | undefined;
   /**
    * Best effort, before each turn of an unpinned session (IRC crew: bind
    * the session to its crew member). Never fails or blocks the turn.
@@ -299,6 +313,7 @@ export function slackTransport(
 }
 
 export class Gateway {
+  private followUpTask: Promise<void> | undefined;
   private readonly meta: MetaCommands;
   private readonly activity: ActivityDelivery;
   private readonly cancellations = new Map<number, AbortController>();
@@ -342,8 +357,20 @@ export class Gateway {
       sessionID: string,
       signal: AbortSignal,
     ) => Promise<void>,
+    /** Host-wide maintenance drain: holds new turns, never running work. */
+    private readonly drain?: DrainControl,
   ) {
     this.meta = new MetaCommands(store, slack, metaOptions);
+    drain?.attach({
+      broadcast: (record, signal) => this.broadcastDrain(record, signal),
+      ...(backend.resumeMaintenance
+        ? {
+            resume: (signal) =>
+              backend.resumeMaintenance?.(signal) ??
+              Promise.resolve({ remaining: 0 }),
+          }
+        : {}),
+    });
     this.bot = "slack" in config ? config : undefined;
     const selected =
       transport ?? (this.bot ? slackTransport(this.bot, identity) : undefined);
@@ -453,6 +480,47 @@ export class Gateway {
     this.paused = value;
   }
 
+  /**
+   * Passive maintenance notice: the backend queues pin and crew contexts; each
+   * mapped, unpinned session is queued through the same validated API. A
+   * session that no longer validates is skipped, not reported as uncertain.
+   */
+  private async broadcastDrain(
+    record: MaintenanceDrain,
+    signal: AbortSignal,
+  ): Promise<UpdateReceipt[]> {
+    const receipts = [
+      ...((await this.backend.maintenanceNotice?.(record, signal)) ?? []),
+    ];
+    if (!this.backend.queueUpdateNotice || this.backend.sessionID)
+      return receipts;
+    const phase = drainNoticePhase(record);
+    const text = drainNoticeText(record);
+    const sessions = new Set<string>();
+    for (const conversation of this.store.transcripts(this.key)) {
+      const session = this.store.session(conversation);
+      if (session) sessions.add(session);
+    }
+    for (const sessionID of [...sessions].slice(0, 200)) {
+      signal.throwIfAborted();
+      try {
+        await this.backend.queueUpdateNotice(
+          sessionID,
+          drainNoticeID(record.runID, phase, sessionID),
+          text,
+          signal,
+        );
+        receipts.push({ sessionID, status: "queued" });
+      } catch {
+        signal.throwIfAborted();
+        this.log.warn(
+          "Maintenance notice skipped a session that no longer validates",
+        );
+      }
+    }
+    return receipts;
+  }
+
   isIdle() {
     const counts = this.store.queueCounts(this.key);
     return (
@@ -508,10 +576,114 @@ export class Gateway {
       this.log.warn("Peer captain thread limit reached; message not admitted");
       return false;
     }
-    const accepted = this.store.enqueue(input);
+    const accepted =
+      (bot.slack.steerThreadFollowUps && this.backend.sessionID
+        ? this.store.admitFollowUp(input, this.backend.sessionID)
+        : undefined) ?? this.store.enqueue(input);
     if (accepted && this.slackQuestions && !input.sender && !input.fleet)
       this.store.recordQuestionSource(input);
     return accepted;
+  }
+
+  /** Existing worker poll drains durable intake; no new turn or scheduler. */
+  async pollFollowUps(signal: AbortSignal, finalOwner?: number): Promise<void> {
+    if (this.followUpTask !== undefined) return this.followUpTask;
+    this.followUpTask = this.deliverFollowUps(signal, finalOwner);
+    try {
+      await this.followUpTask;
+    } finally {
+      this.followUpTask = undefined;
+    }
+  }
+
+  private async deliverFollowUps(signal: AbortSignal, finalOwner?: number) {
+    for (const receipt of this.store.followUps(this.key, finalOwner)) {
+      signal.throwIfAborted();
+      const input = this.store.followUpInput(receipt);
+      let state = receipt.state;
+      const owner = this.store.jobByInput(this.key, receipt.inputID);
+      const source = owner
+        ? this.transport.source({ ...owner, ...input })
+        : undefined;
+      const allowed = () =>
+        !this.drain?.held() &&
+        this.allowed(input) &&
+        this.backend.sessionID === receipt.sessionID &&
+        (this.bot
+          ? this.bot.slack.steerThreadFollowUps
+          : "steerThreadFollowUps" in this.config &&
+            this.config.steerThreadFollowUps) === true &&
+        this.store.ownsFollowUp(receipt);
+      const native: SteerInput | undefined = source
+        ? {
+            sessionID: receipt.sessionID,
+            inputID: receipt.inputID,
+            id: receipt.nativeID,
+            text: input.text,
+            context: { source },
+            allowed,
+          }
+        : undefined;
+      if (state === "pending" && this.store.claimFollowUp(receipt)) {
+        let result: SteerResult = { status: "refused" };
+        if (native && allowed() && this.backend.steer) {
+          try {
+            result = await this.backend.steer(
+              native,
+              AbortSignal.any([signal, AbortSignal.timeout(1800)]),
+            );
+          } catch {
+            result = { status: "uncertain" };
+          }
+        }
+        state = result.status === "refused" ? "queued" : result.status;
+        this.store.settleFollowUp(receipt, state);
+      } else if (
+        (state === "writing" || state === "uncertain") &&
+        (finalOwner === receipt.owner ||
+          (receipt.reconcileAttempts < 8 && receipt.retryAt <= Date.now()))
+      ) {
+        // A crash may have followed the write. Read evidence only; never replay.
+        let result: SteerResult = { status: "uncertain" };
+        if (native && this.backend.reconcileSteer) {
+          try {
+            result = await this.backend.reconcileSteer(
+              native,
+              AbortSignal.any([signal, AbortSignal.timeout(1800)]),
+            );
+          } catch {
+            /* Ambiguous native evidence remains held. */
+          }
+        }
+        state = result.status === "accepted" ? "accepted" : "uncertain";
+        this.store.settleFollowUp(receipt, state);
+      }
+      if ((receipt.notified && state === receipt.state) || !this.allowed(input))
+        continue;
+      try {
+        if (state === "accepted") {
+          const message = input.eventId.slice(input.channel.length + 1);
+          await this.slack.react?.(input.channel, message, "eyes", () =>
+            this.allowed(input),
+          );
+        } else if (state === "queued" || state === "uncertain") {
+          await this.slack.post(
+            input.channel,
+            input.thread,
+            state === "uncertain"
+              ? "Follow-up delivery is unconfirmed. It has not been queued or repeated."
+              : receipt.state === "queued"
+                ? "Queued behind another request."
+                : "Could not steer the running request; queued as the next request.",
+            undefined,
+            { allowed: () => this.allowed(input) },
+          );
+        }
+        this.store.notifiedFollowUp(receipt);
+      } catch {
+        this.log.warn("Follow-up notification unavailable");
+      }
+    }
   }
 
   private route(body: unknown, peer?: PeerSender) {
@@ -931,14 +1103,21 @@ export class Gateway {
   private poll(slots: FiberMap.FiberMap<string>) {
     const gateway = this;
     return Effect.gen(function* () {
+      gateway.drain?.tick();
       if (gateway.paused) return;
+      yield* abortable((signal) => gateway.pollFollowUps(signal));
       const used = yield* FiberMap.size(slots);
-      const jobs = gateway.store.ready(
-        gateway.key,
-        Date.now(),
-        gateway.config.concurrency + used,
-        gateway.backend.sessionID !== undefined,
-      );
+      // Held: accepted jobs stay queued; responding deliveries may finish.
+      const hold = gateway.drain?.held() ?? false;
+      const jobs = gateway.store
+        .ready(
+          gateway.key,
+          Date.now(),
+          gateway.config.concurrency + used,
+          gateway.backend.sessionID !== undefined,
+          hold,
+        )
+        .filter((job) => !hold || job.status !== "queued");
       for (const job of jobs) {
         if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
         // One worker per job. A pinned turn holds the bot slot while it
@@ -1016,7 +1195,7 @@ export class Gateway {
   private startCatchUps(slots: FiberMap.FiberMap<string>) {
     const gateway = this;
     return Effect.gen(function* () {
-      if (gateway.paused) return;
+      if (gateway.paused || gateway.drain?.held()) return;
       const now = Date.now();
       for (const [conversation, retry] of gateway.settled) {
         if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
@@ -1129,6 +1308,13 @@ export class Gateway {
     );
   }
 
+  private followUpAnswer(owner: number, text: string): string {
+    const links = this.store.followUpLinks(owner);
+    return links && text.trim()
+      ? `${text}\n\nFollow-ups included:\n${links}`
+      : text;
+  }
+
   /** Resolve native input boundaries, never the latest queued Slack source. */
   private captainTranscript(
     sessionID: string,
@@ -1175,7 +1361,10 @@ export class Gateway {
                 {
                   job: group.job,
                   eventId: `transcript:${last.id}`,
-                  chunks: this.prepare(text, true),
+                  chunks: this.prepare(
+                    this.followUpAnswer(group.job, text),
+                    true,
+                  ),
                   files: transcriptAttachments(group.entries),
                 },
               ]
@@ -1425,20 +1614,10 @@ export class Gateway {
     if (job.status === "queued") {
       // Intake may have extended a queued IRC burst after ready() returned.
       // Refuse a stale snapshot; the next poll reads its full text and files.
+      // Re-check at the last moment: a drain can start after ready() returned.
+      if (this.drain?.held()) return;
       if (!this.store.running(job.id, job.text)) return;
       await readReceipt(true);
-      // Ends before delivery, so a typing indicator never outlasts the turn.
-      const typing = new AbortController();
-      const working = job.deferDelivery
-        ? undefined
-        : this.slack
-            .working?.(
-              job.channel,
-              job.thread,
-              AbortSignal.any([typing.signal, shutdown]),
-              () => allowed(job),
-            )
-            .catch(() => {});
       // Only an accepted requester Stop aborts this controller.
       const cancellation = new AbortController();
       const maintenanceFailure = new AbortController();
@@ -1450,6 +1629,19 @@ export class Gateway {
         maintenanceFailure.signal,
         budget.controller.signal,
       ]);
+      // Ends before delivery, so a typing indicator never outlasts the turn.
+      const typing = new AbortController();
+      const working = job.deferDelivery
+        ? undefined
+        : this.slack
+            .working?.(
+              job.channel,
+              job.thread,
+              AbortSignal.any([typing.signal, signal]),
+              () => allowed(job),
+              transport.turnStatus?.(job),
+            )
+            .catch(() => {});
       const live = job.deferDelivery
         ? undefined
         : new LiveReply(job, this.store, this.slack, signal, this.log, {
@@ -1713,6 +1905,11 @@ export class Gateway {
             inputFiles,
             sourceContext,
           );
+          // A concurrent native receipt must settle before final link capture.
+          await this.followUpTask;
+          // History may become readable only as the original turn settles.
+          // Resolve its held receipts once more before capturing final links.
+          await this.pollFollowUps(signal, job.id);
           signal.throwIfAborted();
           // The prompt reply is this request's own text: only it can react.
           // Text-free steps before the first text leave only blank lines.
@@ -1734,11 +1931,12 @@ export class Gateway {
             : transcript
               ? transcriptAttachments(transcript.entries)
               : parseAttachments(ownReply.text).files;
-          const answer = owned
+          const answerText = owned
             ? owned.text
             : transcript
               ? this.transcriptText(transcript)
               : own;
+          const answer = this.followUpAnswer(job.id, answerText);
           silent = ownReply.silent || owned?.silent === true;
           // Unread or unsettled text is never posted without its cursor.
           const unread = transcript
@@ -1816,7 +2014,11 @@ export class Gateway {
               : transcript
                 ? this.transcriptText(transcript)
                 : "";
-            if (text) output = [...this.prepare(text, true), ...output];
+            if (text)
+              output = [
+                ...this.prepare(this.followUpAnswer(job.id, text), true),
+                ...output,
+              ];
             keep = output.length - 1;
           }
         }

@@ -146,7 +146,12 @@ export interface DashboardSource {
   ship(id: string, signal: AbortSignal): Promise<ShipView | undefined>;
   children(
     ship: string,
-    input: { parentID: string; cursor?: string },
+    input: {
+      parentID: string;
+      cursor?: string;
+      updatedSince?: number;
+      limit?: number;
+    },
     signal: AbortSignal,
   ): Promise<HistorySessionPage | undefined>;
   entries(

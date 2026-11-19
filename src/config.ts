@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { Result, Schema, SchemaTransformation } from "effect";
 import { crewActivitySchema } from "./activity";
+import { apiV1ConfigSchema } from "./api/v1/config";
 import { captainPostSchema } from "./captain-post-config";
 import { cronjobsSchema } from "./cronjob-config";
 import { validateFleetPermissions } from "./fleet/permissions";
@@ -372,6 +373,7 @@ export const botSchema = settingsStruct({
     ),
   ),
   slack: settingsStruct({
+    steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
     appId: Schema.String.check(settingsPattern(/^A[A-Z0-9]+$/)),
     appTokenEnv: envName,
     botTokenEnv: envName,
@@ -559,6 +561,7 @@ const ircCrewSchema = settingsStruct({
  * these switches can turn one off. The separate native-question bridge is opt-in.
  */
 const ircFeaturesSchema = settingsStruct({
+  steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
   /** Bridge native clarification forms to their original authenticated requester. */
   questions: Schema.Boolean.pipe(settingsDefault(false)),
   /** Download FILEHOST links in admitted messages as attachments. */
@@ -569,6 +572,8 @@ const ircFeaturesSchema = settingsStruct({
   multiline: Schema.Boolean.pipe(settingsDefault(true)),
   /** Send +typing while a turn runs (needs message-tags). */
   typing: Schema.Boolean.pipe(settingsDefault(true)),
+  /** Fleet captains acknowledge human requests and report long turns. */
+  turnStatus: Schema.Boolean.pipe(settingsDefault(true)),
   /** +draft/react for reaction replies, and Stop by reaction. */
   reactions: Schema.Boolean.pipe(settingsDefault(true)),
   /** CHATHISTORY catch-up of missed messages (persisted cursor). */
@@ -580,12 +585,14 @@ const ircFeaturesSchema = settingsStruct({
   /** draft/read-marker: MARKREAD after each accepted message. */
   readMarker: Schema.Boolean.pipe(settingsDefault(true)),
 });
-const ircFeatureDefaults = {
+export const ircFeatureDefaults = {
+  steerThreadFollowUps: false,
   questions: false,
   filesIn: true,
   filesOut: true,
   multiline: true,
   typing: true,
+  turnStatus: true,
   reactions: true,
   catchUp: true,
   alwaysOn: true,
@@ -771,7 +778,7 @@ const ircConfiguredSchema = settingsStruct({
   turnTimeoutMs: Schema.Finite.check(Schema.isInt())
     .check(Schema.isGreaterThanOrEqualTo(1000))
     .check(Schema.isLessThanOrEqualTo(3_600_000))
-    .pipe(settingsDefault(1_800_000)),
+    .pipe(settingsDefault(3_600_000)),
 });
 
 /** Persisted operator configuration: fleet-derived fields remain absent. */
@@ -1144,6 +1151,8 @@ export function pinnedSessionIDs(config: {
 
 export const configSchema = settingsStruct({
   dataDirectory: Schema.String.pipe(settingsDefault(".stargate")),
+  /** Opt in to the private-network Fleet API; see docs/api.md. */
+  api: Schema.optional(apiV1ConfigSchema),
   /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
   dashboard: Schema.optional(Schema.Boolean),
   /** Explicit operator-group socket; the private default is unchanged. */

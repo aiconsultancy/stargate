@@ -33,6 +33,11 @@ turn is waiting on its native form. The gateway binds each offer to its exact
 input, running question tool, form fingerprint and posted Slack message.
 Durable one-shot claims prevent a repeated interaction from replaying a native
 answer or cancellation. These controls never approve tool permissions.
+Opt-in [follow-up steering](operations.md#follow-up-steering) uses the same
+gateway queue and native synthetic-input mechanism as crew steering. Only the
+exact thread owning the active input is eligible. Durable admission receipts
+separate accepted steering, definite refusal and uncertain native writes;
+another thread stays queued. No second scheduler selects follow-ups.
 `attachment-delivery.ts` publishes the files of a stored reply. `store.ts` owns
 the queue, delivery cursor, and session mappings. `runtime.ts` owns startup,
 the exclusive process lock, cancellation, and resource cleanup.
@@ -60,6 +65,19 @@ redelivers them. All workers then stop together: each turn sees its signal
 abort and records an `interrupted` outcome. Backends, stores and the instance
 lock close last. A failure after startup stops every bot and exits with code
 1, so the service manager restarts Stargate.
+
+## Maintenance restart drain
+
+The optional [maintenance restart drain](maintenance.md#restart-drain) uses a
+same-user host barrier and private live-participant metadata under
+`~/.local/state/stargate/maintenance-drain`. Independent gateways retain their
+own databases. Their existing worker poll observes the barrier: admission
+pauses, intake persists accepted messages, and running work can finish.
+Crew admissions use the same barrier and retain held assignments in their
+existing pending-task table. This adds no scheduler or message queue.
+NET-1719 context queues carry advance/completion notices without native input
+or model execution; Pi notices use ordinary mail. Only drain-held assignments
+are automatically eligible after release, under their original ownership.
 
 ## Live configuration reload
 

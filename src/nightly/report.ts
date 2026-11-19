@@ -111,6 +111,41 @@ export const reportSchema = z.strictObject({
   components: z.array(componentSchema).max(limits.components),
   cleanup: cleanupResultSchema.optional(),
   models: z.array(modelChangeSchema).max(limits.models),
+  drain: z
+    .strictObject({
+      outcome: z.enum(["idle", "deadline", "aborted"]),
+      state: z.strictObject({
+        schema: z.literal("stargate.maintenance.drain.v1"),
+        runID: z.string().min(1).max(100),
+        pid: z.number().int().positive(),
+        job: z.enum(["nightly", "outside-window", "operator-update"]),
+        services: z
+          .array(z.enum(["gateway", "opencode", "cliproxyapi"]))
+          .max(3),
+        startedAt: z.number().int().nonnegative(),
+        deadlineAt: z.number().int().nonnegative(),
+        phase: z.enum(["draining", "restarting", "completed", "aborted"]),
+        stragglers: z
+          .array(
+            z.strictObject({
+              taskID: z.string().max(256).optional(),
+              sessionID: z.string().max(256).optional(),
+              reason: z.string().min(1).max(100),
+            }),
+          )
+          .max(1000)
+          .optional(),
+      }),
+      notices: z
+        .array(
+          z.strictObject({
+            sessionID: z.string().min(1).max(256),
+            status: z.enum(["queued", "mail", "unchanged", "uncertain"]),
+          }),
+        )
+        .max(1000),
+    })
+    .optional(),
   updateNotices: z
     .array(
       z.strictObject({
@@ -319,9 +354,21 @@ export function summary(report: Report, reportName: string) {
   const result = `${report.outcome}${report.reason ? ` (${labels[report.reason]})` : ""}.`;
   const parts = [
     report.steps.some((step) => step.name === "operator-update")
-      ? `Operator update of Stargate, outside the window and without the idle gate: ${result}`
+      ? `Operator update of Stargate, outside the window${report.drain ? " with restart drain" : " and without the idle gate"}: ${result}`
       : `Nightly maintenance ${report.window.localStart}–${report.window.localEnd} ${report.window.timeZone}: ${result}`,
   ];
+  if (report.drain) {
+    const drain = report.drain;
+    parts.push(
+      `Restart drain: ${drain.state.phase}; ${drain.outcome}; deadline ${new Date(drain.state.deadlineAt).toISOString()}; ${drain.notices.length} notice receipts; ${drain.state.stragglers?.length ?? 0} stragglers.`,
+    );
+    for (const work of drain.state.stragglers?.slice(0, 8) ?? [])
+      parts.push(
+        line(
+          `- drain straggler: ${work.taskID ?? "no task ID"} ${work.sessionID ?? "no session ID"} (${work.reason})`,
+        ),
+      );
+  }
   if (report.cleanup) {
     const items = report.cleanup.items;
     parts.push(

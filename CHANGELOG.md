@@ -5,11 +5,56 @@
 ### Feature flags
 
 - New flags: none.
+- Default changes: none.
+- Enabled by default: none.
+
+### Changes
+
+- The Fleet API's `gateway.version` reports the installed release's version
+  from `.stargate-release.json`, not the package version, which stays at
+  `0.1.0`. A git checkout of a release reports its `vX.Y.Z` tag at HEAD
+  (fetch the tag, not only the commit); other source checkouts report the
+  package version.
+
+## 0.40.0
+
+### Feature flags
+
+- New flag: the top-level `api` object enables the Fleet API (default **off**).
+- Default changes: none.
+- Enabled by default: none.
+
+### Changes
+
+- Add a private-network, read-only Fleet API with bearer authentication,
+  host metrics and streamed fleet events for Subspace. See the
+  [Fleet API setup guide](docs/api.md).
+
+## 0.39.0
+
+### Feature flags
+
+- New flags: `maintenance.drain.enabled` (default **off**), with
+  `maintenance.drain.deadlineMinutes` (default **10**, range 1–1440).
+- New flags: `slack.steerThreadFollowUps` and
+  `irc[].features.steerThreadFollowUps`, both default **off**. They deliver
+  same-thread follow-ups to a running OpenCode turn as steering input.
 - Default changes: IRC's peer-turn limit rises from 5 to 30 per receiving
   connection and conversation in a rolling hour.
 - Enabled by default: none.
 
 ### Changes
+
+- Opt-in maintenance restart drain: queue a passive notice for captains and
+  crew, hold new work in existing durable queues, wait for idle or the drain
+  deadline, report stragglers, and queue restart completion context before
+  resuming. Maintenance reports and `/health` show the drain state. No host
+  enables this flag automatically; release approval decides activation.
+
+- Add opt-in same-thread follow-up steering for running OpenCode turns. Other
+  threads retain queue isolation and receive a queue notice. Refused steering
+  falls back to the existing queue. Stop and local controls stay separate.
+  See [follow-up steering](docs/operations.md#follow-up-steering).
 
 - Guide new ships on choosing reviewable pull requests by complexity and
   risk. Existing ships can add the guidance to their working agreement.

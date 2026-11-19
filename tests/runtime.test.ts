@@ -711,6 +711,74 @@ test("the dashboard socket serves the fleet and is removed on shutdown", async (
   }
 });
 
+test("the Fleet API serves the projected fleet with the generated token", async () => {
+  const dataDirectory = await directory();
+  try {
+    const probe = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: { data() {} },
+    });
+    const port = probe.port;
+    probe.stop(true);
+    const config = {
+      dataDirectory,
+      api: { listen: `127.0.0.1:${port}`, fleetName: "Test Fleet" },
+      bots: [bot()],
+    };
+    const f = harness();
+    const controller = new AbortController();
+    const running = Effect.runPromise(
+      serve(config, silent, controller.signal, f.dependencies),
+    );
+    await f.started;
+    const tokenFile = join(dataDirectory, "api-token");
+    for (let attempt = 0; attempt < 200; attempt++) {
+      if (await Bun.file(tokenFile).exists()) break;
+      await Bun.sleep(10);
+    }
+    expect((await stat(tokenFile)).mode & 0o777).toBe(0o600);
+    const token = (await Bun.file(tokenFile).text()).trim();
+    const base = `http://127.0.0.1:${port}/api/v1`;
+    let unauthorized: Response | undefined;
+    for (let attempt = 0; attempt < 200 && !unauthorized; attempt++)
+      unauthorized = await fetch(`${base}/fleet`).catch(() => undefined);
+    expect(unauthorized?.status).toBe(401);
+    const response = await fetch(`${base}/fleet`, {
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "subspace://fleet-console",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "subspace://fleet-console",
+    );
+    const fleet = await response.json();
+    expect(fleet).toMatchObject({
+      apiVersion: 1,
+      name: "Test Fleet",
+      ships: [{ id: "helper" }],
+      gateway: { version: expect.any(String) },
+      host: { cpu: { cores: expect.any(Number) } },
+    });
+    expect(fleet.gateway.features).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "api", enabled: true }),
+      ]),
+    );
+    const ship = await fetch(`${base}/ships/helper`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(ship.status).toBe(200);
+    expect(await ship.json()).toMatchObject({ id: "helper" });
+    controller.abort();
+    await running;
+  } finally {
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
 test("no dashboard socket exists unless it is configured", async () => {
   const dataDirectory = await directory();
   try {

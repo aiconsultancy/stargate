@@ -19,7 +19,58 @@ mention. For IRC, see [requests and replies](irc.md#access).
 | Switch installed global OpenCode child-agent profiles                         | [Profile switching](agents/agent-profiles.md#switch-an-installed-profile)                                  |
 | Let a trusted captain send a message to another approved conversation         | [Captain posts](captain-post.md)                                                                           |
 
+## Follow-up steering
+
+Follow-up steering is optional and defaults to off. For one Slack registration,
+set the flag inside its existing `slack` object:
+
+```json
+{ "steerThreadFollowUps": true }
+```
+
+For IRC, set `irc[].features.steerThreadFollowUps` on the receiving ship. Both
+settings use the same gateway behaviour; enabling one does not enable the other.
+Changing configuration follows the normal restart-only configuration policy.
+Merging this feature does not enable it in an installed captain.
+
+When enabled for a pinned OpenCode captain, an admitted text follow-up in the
+exact thread of its running turn can reach that turn at its next safe point.
+It does not start a second captain job. A reaction marks an accepted Slack
+steer. The running turn replies in its original thread and includes references
+to the steered messages.
+
+A different thread or DM remains in the existing queue. A short queue notice
+explains that it is waiting behind another request. Idle captains retain normal
+turn admission. Stop buttons, local meta commands and clarification controls
+retain their own handling; they are never converted to steering input.
+An active maintenance drain also queues follow-ups instead of extending the turn.
+
+If native steering is definitely refused, for example while a form or permission
+prompt is pending, the follow-up goes into the normal queue with a notice.
+An ambiguous write is not proof of refusal: it must not create a duplicate
+queued turn. Check the retained outcome before retrying. Message redelivery
+must not repeat a native steer or captain job. External notices and reactions
+do not have exactly-once delivery guarantees.
+
+Unpinned sessions retain ordinary admission. Steering does not grant access or
+mix conversations. User/channel admission, bot rejection, exact native input
+ownership and current turn checks still apply. Unsupported attachments or
+adapters use ordinary queue admission rather than dropping content.
+An acknowledgement means native admission, not proof
+that the model has read or acted on the follow-up.
+
+The OpenCode SDK does not offer an atomic expected-input condition for steering.
+Stargate checks the current native input and local ownership immediately before
+the write, but a native turn change between that check and write remains possible.
+
 ## Linux user service
+
+Maintenance can opt into a [restart drain](maintenance.md#restart-drain) with
+`maintenance.drain.enabled` (default off). It queues advance context, holds new
+work in the existing queues, waits for idle or its deadline (default ten
+minutes), and reports remaining work before restarting. `/health stargate`
+shows the drain phase and outcome. This is separate from approval to install
+or restart services; merging code does neither.
 
 After verifying a foreground run, stop it and run these commands from the
 Stargate directory. Run them as the user who will own the service:

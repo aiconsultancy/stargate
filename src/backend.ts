@@ -4,6 +4,7 @@ import type { Attachment } from "./attachments";
 import { OpenCodeBackend } from "./backends/opencode";
 import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
+import type { FleetCrewStatus } from "./crew/fleet-status";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
 import type {
@@ -12,6 +13,7 @@ import type {
   NativeMaker,
 } from "./fleet/protocol";
 import type { MaintenanceWatch } from "./maintenance";
+import type { MaintenanceDrain } from "./maintenance-drain";
 import type {
   NativeQuestion,
   PendingQuestion,
@@ -55,6 +57,19 @@ export type PendingPermission = {
 /** Latest complete visible text for this turn, not reasoning or tool output. */
 export type TextSink = (text: string) => void;
 
+/** Refused proves no native write occurred. Uncertain must never be replayed. */
+export type SteerResult = { status: "accepted" | "refused" | "uncertain" };
+export type SteerInput = {
+  sessionID: string;
+  inputID: string;
+  /** Durable, unique native synthetic ID allocated before admission. */
+  id: string;
+  text: string;
+  context: PromptSourceContext;
+  /** Recheck local source, input, access and Stop immediately before writing. */
+  allowed(): boolean;
+};
+
 /** Public text of one settled assistant message; never reasoning or tools. */
 export type TranscriptEntry = {
   id: string;
@@ -80,6 +95,10 @@ export type Transcript = {
 
 /** Adapters own their sessions; the gateway owns Slack and durable routing. */
 export interface AgentBackend {
+  /** Optional text-only delivery into this exact running native input. */
+  steer?(input: SteerInput, signal: AbortSignal): Promise<SteerResult>;
+  /** Read-only reconciliation, never resubmission after an ambiguous write. */
+  reconcileSteer?(input: SteerInput, signal: AbortSignal): Promise<SteerResult>;
   updateNoticeContext?(
     sessionID: string,
     snapshot: UpdateSnapshot,
@@ -95,6 +114,15 @@ export interface AgentBackend {
     snapshot: UpdateSnapshot,
     signal: AbortSignal,
   ): Promise<UpdateReceipt[]>;
+  /** Passive maintenance-drain notice for the pin and ready crew contexts. */
+  maintenanceNotice?(
+    record: MaintenanceDrain,
+    signal: AbortSignal,
+  ): Promise<UpdateReceipt[]>;
+  /** Start held crew assignments after a drain; `remaining` are still held. */
+  resumeMaintenance?(
+    signal: AbortSignal,
+  ): Promise<{ resumed: number; remaining: number }>;
   pendingQuestions?(
     sessionID: string,
     signal: AbortSignal,
@@ -215,6 +243,11 @@ export interface AgentBackend {
   pair?(signal: AbortSignal): Promise<{ code: string; expiresIn: number }>;
   /** Read-only configured crew status; does not require/create a conversation. */
   crewStatus?(input: CrewStatusInput, signal: AbortSignal): Promise<CrewStatus>;
+  /** Private fleet metadata from the same location-scoped crew status read. */
+  fleetCrewStatus?(
+    input: CrewStatusInput,
+    signal: AbortSignal,
+  ): Promise<FleetCrewStatus | undefined>;
   /** Sanitized subscription limits; never runs a model or creates a session. */
   quota?(signal: AbortSignal): Promise<QuotaSnapshot>;
   /** Read-only transcripts for operator views; never prompts or mutates. */

@@ -121,6 +121,8 @@ export const historyChildrenInputSchema = exactStruct({
   parentID: id,
   cursor,
   limit: limit(HISTORY_PAGE),
+  /** Internal recent-child lookup for the Fleet API. */
+  updatedSince: Schema.optional(time),
 });
 export type HistoryChildrenInput = typeof historyChildrenInputSchema.Type;
 export const historySessionPageSchema = exactStruct({ sessions, cursor });

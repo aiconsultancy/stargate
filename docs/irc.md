@@ -99,6 +99,27 @@ Ergo, `force-nick-equals-account` keeps each nick equal to its account, and
 
 ### Optional features
 
+Fleet captains and rear admirals send an IRC notice when they start a verified
+human request, then one more if the request is still open after five minutes.
+Notices follow the request's thread where supported. They replace continuous
+typing for these registrations and cannot wake other agents. Finishing,
+cancelling or timing out the turn stops its notices. Use
+`features.turnStatus: false` to use the original typing behaviour instead.
+
+Captains tag or dispatch a rear admiral for a specific action, a decision
+within that role or cross-ship coordination. Put routine progress and review
+results on the issue. Rear admirals skip peer FYIs that require no action and
+reply once to an actionable request. Formal assignments use their correlated
+results. The gateway still wakes an explicitly tagged visitor.
+
+`features.steerThreadFollowUps` defaults to `false`. When enabled, an admitted
+text reply in the exact active captain thread can steer its running OpenCode
+input instead of creating another queued turn. Another thread stays queued;
+definite native refusal falls back to the same queue. Stop and clarification
+controls stay separate. It uses the same gateway admission and receipt rules
+as [Slack follow-up steering](operations.md#follow-up-steering), not another
+scheduler. Enabling it does not change any Slack registration's flag.
+
 Stargate uses each of these only when the server offers it. A switch under
 `irc[].features` turns one off; the protocol switches below default to `true`.
 The separate [native clarification bridge](#native-clarification-questions),
@@ -178,7 +199,7 @@ Add an `irc` array beside `bots`. Either array may be empty, but not both.
 | `access`                       | See [access](#access)                                                                                                                                                                                                                                   |
 | `crew`                         | See [crew](#crew-on-irc); at most 20                                                                                                                                                                                                                    |
 | `backend`                      | Any backend; OpenCode can pin the captain `sessionID`                                                                                                                                                                                                   |
-| `concurrency`, `turnTimeoutMs` | As for Slack bots (defaults 4 and 30 minutes)                                                                                                                                                                                                           |
+| `concurrency`, `turnTimeoutMs` | IRC ship registration defaults to concurrency 4 and a 60-minute turn. Crew entries keep their own limits.                                                                                                                                               |
 | `server.filehostOverride`      | Optional FILEHOST upload URL when the server does not advertise one ([files](#files))                                                                                                                                                                   |
 | `features`                     | Switches for [optional features](#optional-features); protocol switches default to `true`, while `questions` defaults to `false`                                                                                                                        |
 | `stopReactions`                | Emoji that stop a turn ([Stop](#stop-by-reaction)); default `["✋", "🛑"]`, at most 10, `[]` is off                                                                                                                                                     |
@@ -637,7 +658,7 @@ thread history or trust the tag as sender identity. The authenticated
   hands with no event Stargate can see (no shared channel) after the WHOIS is
   not detected for that chunk.
 - Sends are throttled: a burst of 4 lines, then one line every 600 ms.
-- While a turn runs, Stargate sends `+typing=active` (TAGMSG) every 3 seconds
+- For registrations using typing, Stargate sends `+typing=active` (TAGMSG) every 3 seconds while a turn runs
   and `+typing=done` before the reply. Typing is skipped while replies wait
   in the send queue, so it never delays them. In a direct message it goes
   only to a nick that WHOIS shows holds the requester's account, checked

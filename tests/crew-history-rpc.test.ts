@@ -259,6 +259,20 @@ test("history RPC pages recorded task/report children, excludes main and duplica
       },
     ]);
     expect(second.cursor).toBeUndefined();
+    const recent = await f.rpc.historyChildren(
+      { parentID: root, limit: 1, updatedSince: 0 },
+      signal(),
+    );
+    expect(recent.sessions).toMatchObject([
+      { parentID: root, updatedAt: expect.any(Number) },
+    ]);
+    expect(recent.cursor).toBeUndefined();
+    expect(
+      await f.rpc.historyChildren(
+        { parentID: root, limit: 1, updatedSince: Date.now() + 60_000 },
+        signal(),
+      ),
+    ).toEqual({ sessions: [] });
     await expect(
       f.rpc.historyChildren(
         { parentID: f.root("r2d2"), limit: 1, cursor: first.cursor },

@@ -10,6 +10,7 @@ import { maintenanceSchema } from "../src/nightly/config";
 import { type Crew, crewDatabase, piDatabase } from "../src/nightly/crews";
 import {
   checkIdle,
+  describeRunningWork,
   type IdleInput,
   queuedCrewTasks,
   waitForIdle,
@@ -107,6 +108,67 @@ const exec = (path: string, sql: string) => {
 };
 
 describe("idle gate", () => {
+  test("an unknown host participant cannot establish drain idle", async () => {
+    expect(
+      await checkIdle({ ...input(), draining: true, drainUnknown: true }),
+    ).toEqual({ idle: false, reason: "idle-unknown" });
+  });
+  test("drain deadline names running task/session without copying task text", async () => {
+    exec(
+      crewDatabase(crew),
+      "ALTER TABLE tasks ADD COLUMN workerSessionID TEXT; UPDATE tasks SET status='running', workerSessionID='ses_chief' WHERE id='t1'",
+    );
+    opencode.active = ["ses_child", "ses_unrelated"];
+    opencode.parents = { ses_child: "ses_chief" };
+    expect(await describeRunningWork(input())).toEqual([
+      { taskID: "t1", sessionID: "ses_chief", reason: "busy-crew" },
+      { sessionID: "ses_child", reason: "busy-opencode" },
+    ]);
+  });
+  test("drain holds queued gateway and cron work without treating it as running", async () => {
+    const store = new Store(join(data, "stargate.sqlite"));
+    store.enqueue({
+      eventId: "drain-queued",
+      botKey: "key",
+      conversation: '["key","C1","1.0"]',
+      channel: "C1",
+      thread: "1.0",
+      user: "U1",
+      text: "after restart",
+    });
+    store.close();
+    exec(
+      join(data, "cron.sqlite"),
+      `INSERT INTO cron_schedules (id,botKey,channel,user,name,expression,timezone,prompt,nextAt,createdAt)
+       VALUES ('drain','key','C1','U1','n','0 2 * * *','UTC','p',${now},0);
+       INSERT INTO cron_runs (id,scheduleId,dueAt) VALUES ('drain-run','drain',${now})`,
+    );
+    expect(await checkIdle(input())).toEqual({
+      idle: false,
+      reason: "busy-gateway",
+    });
+    expect(await checkIdle({ ...input(), draining: true })).toEqual({
+      idle: true,
+    });
+    exec(join(data, "stargate.sqlite"), "UPDATE jobs SET status='running'");
+    expect(await checkIdle({ ...input(), draining: true })).toEqual({
+      idle: false,
+      reason: "busy-gateway",
+    });
+  });
+
+  test("maintenance drain defaults off with a ten-minute validated deadline", () => {
+    expect(Schema.decodeUnknownSync(maintenanceSchema)({}).drain).toEqual({
+      enabled: false,
+      deadlineMinutes: 10,
+    });
+    for (const deadlineMinutes of [0, -1, 1.5, 1441])
+      expect(() =>
+        Schema.decodeUnknownSync(maintenanceSchema)({
+          drain: { enabled: true, deadlineMinutes },
+        }),
+      ).toThrow();
+  });
   test("idle when no work is queued, due or running", async () => {
     expect(await checkIdle(input())).toEqual({ idle: true });
     expect(await checkIdle(input("gateway"))).toEqual({ idle: true });

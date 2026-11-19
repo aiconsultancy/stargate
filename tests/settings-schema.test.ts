@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Result, Schema } from "effect";
+import { Predicate, Result, Schema } from "effect";
 import { z } from "zod";
 import { crewActivitySchema } from "../src/activity";
 import { captainPostSchema } from "../src/captain-post-config";
@@ -207,13 +207,34 @@ test("review: raw unknown keys survive structural child failures safely", () => 
 // Include raw wire order: provisioning hashes JSON.stringify(decoded plan).
 for (const [name, codec] of Object.entries(codecs))
   test(`settings legacy acceptance, values and wire order: ${name}`, () => {
+    // NET-1730 adds an intentional defaulted field after the legacy capture.
+    // Keep the independent legacy oracle unchanged; only this new field is
+    // tested separately by nightly-idle defaults/validation and run tests.
+    const legacy = (value: unknown): unknown => {
+      if (!Predicate.isObject(value) || Array.isArray(value)) return value;
+      if (name === "maintenanceSchema") {
+        const { drain: _drain, ...rest } = value as Record<string, unknown>;
+        return rest;
+      }
+      if (
+        name === "configSchema" &&
+        "maintenance" in value &&
+        Predicate.isObject(value["maintenance"])
+      ) {
+        const { drain: _drain, ...maintenance } = value[
+          "maintenance"
+        ] as Record<string, unknown>;
+        return { ...value, maintenance };
+      }
+      return value;
+    };
     const seeds = settingsSeeds[name];
     if (!seeds) throw new Error(`Missing seeds: ${name}`);
     const decode = Schema.decodeUnknownResult(codec, { errors: "all" });
     const decoded = seeds.map((input) => {
       const result = decode(input);
       if (Result.isFailure(result)) throw new Error(`Invalid seed for ${name}`);
-      return result.success;
+      return legacy(result.success);
     });
     const cases = settingsCases(seeds, decoded);
     const outcomes = cases.map(({ label, input }) => {
@@ -222,8 +243,8 @@ for (const [name, codec] of Object.entries(codecs))
         ? {
             label,
             accepted: true,
-            value: settingsCanonical(result.success),
-            wireValue: JSON.stringify(result.success),
+            value: settingsCanonical(legacy(result.success)),
+            wireValue: JSON.stringify(legacy(result.success)),
           }
         : { label, accepted: false };
     });

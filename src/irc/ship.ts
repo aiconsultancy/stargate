@@ -251,6 +251,8 @@ function gatewaySettings(config: IrcConfig, member: ShipMember): GatewayConfig {
     // IRC cannot edit a message: no waiting feedback or activity box.
     waiting: { delayMs: null, intervalMs: 10_000 },
     crewActivity: { detail: "off" },
+    steerThreadFollowUps:
+      member.role === "captain" && config.features.steerThreadFollowUps,
     ...(config.transcription ? { transcription: config.transcription } : {}),
   };
 }
@@ -368,6 +370,21 @@ function shipTransport(
     );
   };
   return {
+    turnStatus: (job) => {
+      const rank = config.fleetPolicy?.role;
+      if (
+        !config.features.turnStatus ||
+        member.role !== "captain" ||
+        (rank !== "captain" && rank !== "rear_admiral")
+      )
+        return;
+      return !job.fleet &&
+        !job.sender &&
+        job.eventId.startsWith(`${job.channel}:`) &&
+        questionHuman(config, job.user, client.fold)
+        ? "notice"
+        : "quiet";
+    },
     ...(config.features.questions
       ? {
           questions: {
@@ -1214,7 +1231,21 @@ export class IrcShip {
       ) &&
       !!this.config.fleetPolicy &&
       fleetAuthority(this.config.fleetPolicy, admission.user) === "human";
-    if (
+    const followUp =
+      member.role === "captain" &&
+      this.config.features.steerThreadFollowUps &&
+      this.config.backend.type === "opencode" &&
+      this.config.backend.sessionID
+        ? this.store.admitFollowUp(
+            input,
+            this.config.backend.sessionID,
+            "irc",
+            admission.threadInvitation === true,
+          )
+        : undefined;
+    if (followUp !== undefined) {
+      // Receipt is durable before advancing CHATHISTORY or the read marker.
+    } else if (
       quietMs > 0 &&
       !replay &&
       member.role === "captain" &&

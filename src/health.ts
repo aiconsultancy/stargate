@@ -11,6 +11,10 @@ import {
   hostHealthSchema,
   readHealthFile,
 } from "./health-host";
+import {
+  maintenanceDrainSchema,
+  readMaintenanceDrain,
+} from "./maintenance-drain";
 import { readReports, readUnit } from "./nightly/droid-facts";
 import { type CommandRunner, processRunner } from "./nightly/exec";
 import { readReady, readySchema } from "./nightly/ready";
@@ -56,6 +60,7 @@ type Sources = {
   alert?: () => Promise<unknown>;
   starfleet?: () => Promise<unknown>;
   uptime?: () => number;
+  drain?: () => Promise<unknown>;
 };
 export type HealthReaderInput = {
   bot: () => BotConfig;
@@ -198,6 +203,7 @@ export function createHealthReader(
       gatewayState,
       opencodeState,
       proxyState,
+      drainState,
     ] = await Promise.all([
       want("host") ? bounded(sources.host ?? readHost) : null,
       want("agents") || want("opencode")
@@ -261,6 +267,9 @@ export function createHealthReader(
       want("stargate") ? unit(m?.services.gateway) : null,
       want("opencode") ? unit(opencodeUnit) : null,
       want("proxy") ? unit(m?.cliproxyapi?.unit) : null,
+      want("stargate")
+        ? bounded(sources.drain ?? (async () => readMaintenanceDrain()))
+        : null,
     ]);
     const rows: Record<Section, string[]> = {
       host: [],
@@ -354,6 +363,19 @@ export function createHealthReader(
       );
     }
     if (want("stargate")) {
+      const decoded = Schema.decodeUnknownOption(maintenanceDrainSchema)(
+        drainState,
+      );
+      if (decoded._tag === "Some") {
+        const drain = decoded.value;
+        rows.stargate.push(
+          `⚠ restart drain ${drain.phase}; job ${drain.job}; services ${drain.services.join(", ")}; deadline ${date(drain.deadlineAt)}; stragglers ${drain.stragglers?.length ?? 0}`,
+        );
+        for (const work of drain.stragglers?.slice(0, 8) ?? [])
+          rows.stargate.push(
+            `⚠ drain ${identifier(work.taskID ?? "unknown-task")} ${identifier(work.sessionID ?? "unknown-session")}: ${identifier(work.reason)}`,
+          );
+      } else rows.stargate.push("⚠ restart drain inactive or unknown");
       const r = parsed(readySchema, ready);
       const valid = r && r.readyAt <= now;
       rows.stargate.push(

@@ -13,6 +13,7 @@ import { postInputSchema } from "../captain-post";
 import { cronOperationSchema } from "../cron-control";
 import { abortable, resourceScope } from "../effect";
 import { MaintenanceRPC, maintenancePlanSchema } from "../maintenance";
+import { activeMaintenanceDrain } from "../maintenance-drain";
 import { notificationInputSchema } from "../notification-store";
 import { quotaInputSchema } from "../quota";
 import { noticeTools } from "../update-notice";
@@ -74,6 +75,7 @@ const plugin = Plugin.define({
                 connectHistoryAPI(selected.options.team, caller, signal),
               (session, signal) =>
                 connectHistoryAPI(selected.options.team, session, signal),
+              { drain: () => activeMaintenanceDrain() },
             );
             return selected;
           }),
@@ -320,10 +322,32 @@ const plugin = Plugin.define({
               );
             return receipts;
           }),
+        maintenanceNotice: (input, context) =>
+          report(context.signal, async () => {
+            const receipts = [];
+            for (const selected of projects.contexts.values())
+              receipts.push(
+                ...(await selected.maintenanceNotice(input, context.signal)),
+              );
+            return receipts;
+          }),
+        resumeMaintenance: (_input, context) =>
+          report(context.signal, async () => {
+            let resumed = 0;
+            let remaining = 0;
+            for (const selected of projects.contexts.values()) {
+              const result = await selected.resumeMaintenance(context.signal);
+              resumed += result.resumed;
+              remaining += result.remaining;
+            }
+            return { resumed, remaining };
+          }),
         quota: (_input, context) =>
           report(context.signal, () => engine.quotas.read(context.signal)),
         status: (input, context) =>
           report(context.signal, async () => projects.status(input)),
+        fleetStatus: (input, context) =>
+          report(context.signal, async () => projects.fleetStatus(input)),
         historyRoots: (_input, context) =>
           report(context.signal, () => projects.historyRoots(context.signal)),
         historyDescribe: (input, context) =>
