@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Schema } from "effect";
 import type { FleetLedger, ReviewRecord } from "./ledger";
 import {
   type FleetControlConfig,
@@ -136,7 +137,7 @@ export class FleetReviews {
       try {
         const evidence = await this.options.native.readReview(binding, signal);
         if (!evidence) continue;
-        const result = reviewVerdictSchema.parse(
+        const result = Schema.decodeUnknownSync(reviewVerdictSchema)(
           JSON.parse(evidence.resultText),
         );
         const target = binding.context;
@@ -151,7 +152,9 @@ export class FleetReviews {
           throw new FleetError(
             "Native reviewer returned a different PR context",
           );
-        const makers = evidence.makers.map((m) => nativeMakerSchema.parse(m));
+        const makers = evidence.makers.map((m) =>
+          Schema.decodeUnknownSync(nativeMakerSchema)(m),
+        );
         if (
           !makers.length ||
           makers.length > 100 ||
@@ -169,7 +172,9 @@ export class FleetReviews {
           throw new FleetError(
             "Native reviewer family or agent does not match approved selectors",
           );
-        const proof: FleetReviewProof = reviewProofSchema.parse({
+        const proof: FleetReviewProof = Schema.decodeUnknownSync(
+          reviewProofSchema,
+        )({
           id: binding.id,
           reviewID: target.id,
           repository: target.repository,

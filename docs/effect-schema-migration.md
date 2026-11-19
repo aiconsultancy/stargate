@@ -7,8 +7,8 @@ This migration does not upgrade Effect or the SDKs.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**. Nine migration PRs are
-merged. That leaves nine component batches. One contingency split can bring the
+The revised target is **18 migration PRs in total**. Ten migration PRs are
+merged. That leaves eight component batches. One contingency split can bring the
 total to 19, still below 20. Report a proposed
 budget change before opening another PR; do not weaken verification to fit it.
 
@@ -34,6 +34,7 @@ Completed:
 - [Configuration, provisioning and composed settings](https://github.com/aiconsultancy/stargate/pull/66).
 - [Crew identities, teams, models and profiles](https://github.com/aiconsultancy/stargate/pull/67).
 - [Crew execution and recovery](https://github.com/aiconsultancy/stargate/pull/70).
+- [Crew messages, history and local RPC](https://github.com/aiconsultancy/stargate/pull/71).
 
 The first batch-6 timing pair failed at +18.27%. Its diagnostic pair measured
 +2.63% with retained coverage; this is not a performance repair. The earlier
@@ -41,18 +42,15 @@ batch-4 first-pair +10.9% failure also remains recorded.
 
 ## Remaining component batches
 
-The numbers include the nine completed PRs. File names identify primary scope,
+The numbers include the ten completed PRs. File names identify primary scope,
 not a restriction against updating a coupled consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
 
-10. Crew messages and RPC. Migrate `crew/mesij.ts`, `crew/messaging.ts`,
-    `crew/history.ts`, `crew/irc-rpc.ts`, local reporting methods in
-    `crew/report-rpc.ts`, activity entry/snapshot outputs and `crew/waiting.ts`.
-    Include engine's legacy inbox/mail parents and OpenCode/Pi/IRC consumers.
-    Reuse already-native history RPC, session history, journal and project
-    containers. Keep independent status/quota RPC schemas with batch 15.
-11. Fleet protocols. Migrate `fleet/` and remaining fleet policy schemas,
-    including dispatch, review, verification, results and stored fleet records.
+11. Fleet protocols. Migrate runtime dispatch, review, verification, results and
+    stored fleet records in `fleet/`, including plugin options, tool/query
+    parents and actual direct consumers. Include fleet-only Store job/maker
+    decoding and writes. Reuse native fleet configuration and policy codecs;
+    leave unrelated queue-row validators with batch 12.
 12. Chat routing and interaction envelopes. Migrate `routing.ts`,
     `interactions.ts`, `cancellation.ts`, `meta-commands.ts`, `questions.ts`,
     `pairing.ts`, `peers.ts`, `thread-context.ts`, `crew-ui.ts`, `irc/` and
@@ -92,8 +90,9 @@ Remove each bridge with its owning container:
 - Engine inbox/mail now compose native task-ID/text primitives directly;
   batch 10 removes their two bridges. Batch 9 removed the team/agent-ID and
   quota-configuration bridges with their native parents.
-- Fleet identifiers, repositories and review-worker settings in runtime
-  protocol/control records: batch 11.
+- Fleet identifiers, repositories and review-worker settings now compose
+  directly into native runtime protocol/control records. Batch 11 removes
+  their four bridges with the actual parents.
 - Cron destination identifiers in `cron-control.ts`: batch 14.
 - Cleanup paths in maintenance result records: batch 16.
 
@@ -135,6 +134,15 @@ text envelopes remain separate. IRC/local-report RPC retain structured output
 and native nested-strict decoding/encoding. Quota's Zod project helper remains
 until batch 15; the unused project-selection alias is removed with IRC's native
 consumer. Batch 18 must retain/move the pure projectors these adapters use.
+
+Fleet runtime codecs preserve strict nested decode/encode behavior and schema
+field order. The tool registrations keep their original object/union forms
+through native Standard Schema adapters and the existing pure projectors.
+UTC timestamps retain their spelling and require calendar-valid dates, seconds
+and uppercase Z. Review diff/proof UTF-8 bounds remain separate from code-point
+string bounds. Store's maker reads remain unbounded; writes and backend result
+validation retain their 100-maker limit. No fingerprint, proof immutability,
+queue-before-ACK, permission or recovery algorithm changes with these codecs.
 
 ## Verification and merge
 

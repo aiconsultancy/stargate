@@ -136,7 +136,7 @@ class Native implements AgentBackend {
     if (!this.active) throw new Error("No native input is executing");
     return fleetRequest(
       socket,
-      requestSchema.parse({
+      Schema.decodeUnknownSync(requestSchema)({
         operation,
         input,
         caller: {
@@ -748,6 +748,38 @@ test("fleet results: interrupted admitted execution reports uncertainty without 
   expect(
     f.ownerStore.ready(f.teamsGateway.key, Number.MAX_SAFE_INTEGER, 100),
   ).toHaveLength(0);
+});
+
+test("fleet results: oversized backend makers become empty uncertain evidence", async () => {
+  const f = await world();
+  await f.begin();
+  const job = await f.processNext(f.targetIrc.gateway, f.captainStore);
+  const inputID = f.captainStore.jobByEvent(job.botKey, job.eventId)?.input;
+  if (!inputID) throw new Error("Missing admitted native input");
+  f.captain.makers.set(
+    inputID,
+    Array.from({ length: 101 }, (_, index) => ({
+      messageID: `message-${index}`,
+      agent: "captain",
+      provider: "native-provider",
+      model: "actual-model",
+    })),
+  );
+  await f.targetResults.poll(signal());
+  expect(f.captainStore.jobByEvent(job.botKey, job.eventId)?.makers).toEqual(
+    [],
+  );
+  await f.ownerResults.poll(signal());
+  const result = f.ownerStore.ready(
+    f.teamsGateway.key,
+    Number.MAX_SAFE_INTEGER,
+    1,
+  )[0];
+  expect(result?.fleet).toMatchObject({
+    kind: "result",
+    completion: { outcome: "uncertain", makers: [], humanApproval: false },
+  });
+  expect(f.captain.calls).toHaveLength(1);
 });
 
 test("fleet results: agent continuation cannot borrow the old human's approval or create a new offer", async () => {

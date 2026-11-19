@@ -1,10 +1,9 @@
 import { isAbsolute, resolve } from "node:path";
 import { Schema, SchemaTransformation } from "effect";
-import { z } from "zod";
-import { legacySetting } from "../settings-legacy";
 import {
   settingsCheck,
   settingsDefault,
+  settingsDiscriminatedUnion,
   settingsPattern,
   settingsRecord,
   settingsRefine,
@@ -32,13 +31,19 @@ export const reviewRepositorySchema = Schema.String.check(
       }),
     ),
   );
-const identifier = legacySetting(fleetIdentifier);
-export const reviewTargetSchema = z.strictObject({
-  repository: legacySetting(reviewRepositorySchema),
-  pullRequest: z.number().int().positive().safe(),
-  headSHA: z.string().regex(/^[a-f0-9]{40}$/),
-  baseSHA: z.string().regex(/^[a-f0-9]{40}$/),
-  mergeBaseSHA: z.string().regex(/^[a-f0-9]{40}$/),
+const identifier = fleetIdentifier;
+// Preserve the UTC-only, seconds-required wire spelling and calendar check.
+const utcDatetime = Schema.String.check(
+  settingsPattern(
+    /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?Z)$/,
+  ),
+).annotate({ format: "date-time" });
+export const reviewTargetSchema = settingsStruct({
+  repository: reviewRepositorySchema,
+  pullRequest: Schema.Int.check(Schema.isGreaterThan(0)),
+  headSHA: Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/)),
+  baseSHA: Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/)),
+  mergeBaseSHA: Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/)),
 });
 /** Structural completeness only; the consumer must verify the live full diff. */
 function completeReviewDiff(text: string): boolean {
@@ -122,11 +127,10 @@ function completeReviewDiff(text: string): boolean {
     (fileContent || metadata)
   );
 }
-export const reviewContextTextSchema = z
-  .string()
-  .min(1)
-  .max(256000)
-  .refine(
+export const reviewContextTextSchema = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(256000),
+  Schema.makeFilter(
     (text) =>
       text.isWellFormed() &&
       Buffer.byteLength(text, "utf8") <= 256000 &&
@@ -134,12 +138,17 @@ export const reviewContextTextSchema = z
       !text.includes("\0") &&
       !/^GIT binary patch$|^Binary files .+ differ$/m.test(text) &&
       completeReviewDiff(text),
-    "A complete bounded UTF-8 textual diff is required; binary or partial review is unsupported",
-  );
-export const reviewAssignmentSchema = reviewTargetSchema.extend({
+    {
+      message:
+        "A complete bounded UTF-8 textual diff is required; binary or partial review is unsupported",
+    },
+  ),
+);
+export const reviewAssignmentSchema = settingsStruct({
+  ...reviewTargetSchema.fields,
   context: reviewContextTextSchema,
 });
-export type FleetReviewAssignment = z.infer<typeof reviewAssignmentSchema>;
+export type FleetReviewAssignment = typeof reviewAssignmentSchema.Type;
 export const reviewAgentSchema = settingsStruct({
   agent: fleetIdentifier,
   kind: Schema.Literals(["crew", "captain"]),
@@ -267,53 +276,64 @@ export const fleetControlSchema = settingsStruct({
 export type FleetControlConfig = typeof fleetControlSchema.Type;
 export type FleetTarget = typeof fleetTargetSchema.Type;
 
-export const sourceSchema = z
-  .strictObject({
-    reference: identifier,
-    transport: z.enum(["irc", "teams", "fleet"]),
-    account: identifier,
-    authority: z.enum(["human", "agent", "context"]),
-    role: z.enum(["rear_admiral", "captain", "crew"]).optional(),
-    text: z.string().min(1).max(100_000),
-    channel: z.string().min(1).max(1024),
-    messageID: identifier,
-    receivedAt: z.iso.datetime(),
-    /** Trusted intake identity, never accepted from a fleet IPC request. */
-    origin: z
-      .strictObject({
-        botKey: z.string().min(1).max(4096),
-        eventId: z.string().min(1).max(4096),
-      })
-      .optional(),
-  })
-  .superRefine((source, context) => {
+export const sourceSchema = settingsStruct({
+  reference: identifier,
+  transport: Schema.Literals(["irc", "teams", "fleet"]),
+  account: identifier,
+  authority: Schema.Literals(["human", "agent", "context"]),
+  role: Schema.optional(Schema.Literals(["rear_admiral", "captain", "crew"])),
+  text: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(100_000),
+  ),
+  channel: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(1024),
+  ),
+  messageID: identifier,
+  receivedAt: utcDatetime,
+  /** Trusted intake identity, never accepted from a fleet IPC request. */
+  origin: Schema.optional(
+    settingsStruct({
+      botKey: Schema.String.check(
+        Schema.isMinCodePoints(1),
+        Schema.isMaxCodePoints(4096),
+      ),
+      eventId: Schema.String.check(
+        Schema.isMinCodePoints(1),
+        Schema.isMaxCodePoints(4096),
+      ),
+    }),
+  ),
+}).check(
+  settingsCheck((source, context) => {
     if (source.transport === "fleet" && source.authority !== "agent")
       context.addIssue({
         code: "custom",
         message: "Fleet completion context must remain non-human",
       });
-  });
-export type FleetSource = z.infer<typeof sourceSchema>;
+  }),
+);
+export type FleetSource = typeof sourceSchema.Type;
 export type VerifiedSource = FleetSource & {
   ownerSessionID: string;
   humanApproval: false;
 };
 
-export const callerSchema = z.strictObject({
+export const callerSchema = settingsStruct({
   sessionID: identifier,
   agent: identifier,
   messageID: identifier,
   id: identifier,
 });
-export type FleetCaller = z.infer<typeof callerSchema>;
-export const verifyInputSchema = z.strictObject({ reference: identifier });
-export const dispatchInputSchema = z.strictObject({
+export type FleetCaller = typeof callerSchema.Type;
+export const verifyInputSchema = settingsStruct({ reference: identifier });
+export const dispatchInputSchema = settingsStruct({
   target: identifier,
-  text: z
-    .string()
-    .min(1)
-    .max(1800)
-    .refine((text) =>
+  text: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(1800),
+    Schema.makeFilter((text) =>
       [...text].every(
         (character) =>
           character === "\n" ||
@@ -321,46 +341,51 @@ export const dispatchInputSchema = z.strictObject({
           !/\p{Cc}/u.test(character),
       ),
     ),
+  ),
   sourceReference: identifier,
-  requestID: identifier.optional(),
-  review: reviewAssignmentSchema.optional(),
+  requestID: Schema.optional(identifier),
+  review: Schema.optional(reviewAssignmentSchema),
 });
-export type DispatchInput = z.infer<typeof dispatchInputSchema>;
-export const statusInputSchema = z.strictObject({
-  requestID: identifier.optional(),
+export type DispatchInput = typeof dispatchInputSchema.Type;
+export const statusInputSchema = settingsStruct({
+  requestID: Schema.optional(identifier),
 });
-export const reviewInputSchema = z.discriminatedUnion("op", [
-  z.strictObject({
-    op: z.literal("start"),
+export const reviewInputBranches = [
+  settingsStruct({
+    op: Schema.Literal("start"),
     reviewID: identifier,
     reviewerAgent: identifier,
-    requestID: identifier.optional(),
+    requestID: Schema.optional(identifier),
   }),
-  z.strictObject({ op: z.literal("status"), id: identifier }),
-]);
-export const requestSchema = z.discriminatedUnion("operation", [
-  z.strictObject({
-    operation: z.literal("verify"),
+  settingsStruct({ op: Schema.Literal("status"), id: identifier }),
+] as const;
+export const reviewInputSchema = settingsDiscriminatedUnion(
+  "op",
+  reviewInputBranches,
+);
+export const requestSchema = settingsDiscriminatedUnion("operation", [
+  settingsStruct({
+    operation: Schema.Literal("verify"),
     caller: callerSchema,
     input: verifyInputSchema,
   }),
-  z.strictObject({
-    operation: z.literal("dispatch"),
+  settingsStruct({
+    operation: Schema.Literal("dispatch"),
     caller: callerSchema,
     input: dispatchInputSchema,
   }),
-  z.strictObject({
-    operation: z.literal("status"),
+  settingsStruct({
+    operation: Schema.Literal("status"),
     caller: callerSchema,
     input: statusInputSchema,
   }),
-  z.strictObject({
-    operation: z.literal("review"),
+  settingsStruct({
+    operation: Schema.Literal("review"),
     caller: callerSchema,
     input: reviewInputSchema,
   }),
 ]);
-export type FleetRequest = z.infer<typeof requestSchema>;
+export type FleetRequest = typeof requestSchema.Type;
 export type DispatchResult = {
   requestID: string;
   target: FleetTarget;
@@ -374,69 +399,85 @@ export type DispatchResult = {
   review?: FleetReviewContext;
 };
 
-export const nativeMakerSchema = z.strictObject({
+export const nativeMakerSchema = settingsStruct({
   messageID: identifier,
   agent: identifier,
   provider: identifier,
   model: identifier,
-  variant: identifier.optional(),
+  variant: Schema.optional(identifier),
 });
-export type NativeMaker = z.infer<typeof nativeMakerSchema>;
-export const reviewContextSchema = reviewTargetSchema.extend({
+export type NativeMaker = typeof nativeMakerSchema.Type;
+export const reviewContextSchema = settingsStruct({
+  ...reviewTargetSchema.fields,
   id: identifier,
   authorShip: identifier,
   coordinatorShip: identifier,
   coordinatorSessionID: identifier,
   dispatchID: identifier,
-  contextDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  contextDigest: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
 });
-export type FleetReviewContext = z.infer<typeof reviewContextSchema>;
-export const reviewBindingSchema = z.strictObject({
+export type FleetReviewContext = typeof reviewContextSchema.Type;
+export const reviewBindingSchema = settingsStruct({
   id: identifier,
-  nonce: z.string().regex(/^[a-f0-9]{32}$/),
+  nonce: Schema.String.check(settingsPattern(/^[a-f0-9]{32}$/)),
   context: reviewContextSchema,
   contextText: reviewContextTextSchema,
   reviewerShip: identifier,
-  reviewer: legacySetting(reviewAgentSchema),
+  reviewer: reviewAgentSchema,
   sessionID: identifier,
   inputID: identifier,
-  createdAt: z.iso.datetime(),
+  createdAt: utcDatetime,
 });
-export type FleetReviewBinding = z.infer<typeof reviewBindingSchema>;
-export const reviewVerdictSchema = reviewTargetSchema.extend({
-  contextDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  verdict: z.enum(["approve", "request_changes", "comment"]),
-  summary: z.string().min(1).max(16000),
-  findings: z.array(z.string().min(1).max(4000)).max(50),
+export type FleetReviewBinding = typeof reviewBindingSchema.Type;
+export const reviewVerdictSchema = settingsStruct({
+  ...reviewTargetSchema.fields,
+  contextDigest: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
+  verdict: Schema.Literals(["approve", "request_changes", "comment"]),
+  summary: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(16000),
+  ),
+  findings: Schema.mutable(
+    Schema.Array(
+      Schema.String.check(
+        Schema.isMinCodePoints(1),
+        Schema.isMaxCodePoints(4000),
+      ),
+    ),
+  ).check(Schema.isMaxLength(50)),
 });
-export const reviewProofSchema = reviewTargetSchema.extend({
+export const reviewProofSchema = settingsStruct({
+  ...reviewTargetSchema.fields,
   id: identifier,
   reviewID: identifier,
-  contextDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  contextDigest: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
   authorShip: identifier,
   coordinatorShip: identifier,
   reviewerShip: identifier,
   reviewerAgent: identifier,
-  kind: z.enum(["crew", "captain"]),
+  kind: Schema.Literals(["crew", "captain"]),
   sessionID: identifier,
   inputID: identifier,
-  makers: z.array(nativeMakerSchema).min(1).max(100),
+  makers: Schema.mutable(Schema.Array(nativeMakerSchema)).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(100),
+  ),
   family: identifier,
-  outcome: z.literal("completed"),
-  verdict: reviewVerdictSchema.shape.verdict,
-  resultText: z
-    .string()
-    .min(1)
-    .max(64000)
-    .refine(
+  outcome: Schema.Literal("completed"),
+  verdict: reviewVerdictSchema.fields.verdict,
+  resultText: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(64000),
+    Schema.makeFilter(
       (text) => text.isWellFormed() && Buffer.byteLength(text, "utf8") <= 64000,
     ),
-  resultDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  completedAt: z.iso.datetime(),
-  authority: z.literal("agent"),
-  humanApproval: z.literal(false),
+  ),
+  resultDigest: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
+  completedAt: utcDatetime,
+  authority: Schema.Literal("agent"),
+  humanApproval: Schema.Literal(false),
 });
-export type FleetReviewProof = z.infer<typeof reviewProofSchema>;
+export type FleetReviewProof = typeof reviewProofSchema.Type;
 export type FleetReviewEvidence = { resultText: string; makers: NativeMaker[] };
 export interface FleetReviewNative {
   startReview(binding: FleetReviewBinding, signal: AbortSignal): Promise<void>;
@@ -445,35 +486,49 @@ export interface FleetReviewNative {
     signal: AbortSignal,
   ): Promise<FleetReviewEvidence | undefined>;
 }
-export const fleetOriginSchema = z.strictObject({
-  botKey: z.string().min(1).max(4096),
-  eventId: z.string().min(1).max(4096),
+export const fleetOriginSchema = settingsStruct({
+  botKey: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(4096),
+  ),
+  eventId: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(4096),
+  ),
   sessionID: identifier,
   inputID: identifier,
 });
-export type FleetOrigin = z.infer<typeof fleetOriginSchema>;
-export const fleetCompletionSchema = z.strictObject({
+export type FleetOrigin = typeof fleetOriginSchema.Type;
+export const fleetCompletionSchema = settingsStruct({
   dispatchID: identifier,
   sourceReference: identifier,
   actor: identifier,
   sessionID: identifier,
-  inputID: identifier.nullable(),
-  channel: z.string().min(1).max(1024),
-  outcome: z.enum(["completed", "uncertain"]),
-  text: z.string().max(12000),
-  makers: z.array(nativeMakerSchema).max(100),
-  humanApproval: z.literal(false),
+  inputID: Schema.NullOr(identifier),
+  channel: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(1024),
+  ),
+  outcome: Schema.Literals(["completed", "uncertain"]),
+  text: Schema.String.check(Schema.isMaxCodePoints(12000)),
+  makers: Schema.mutable(Schema.Array(nativeMakerSchema)).check(
+    Schema.isMaxLength(100),
+  ),
+  humanApproval: Schema.Literal(false),
 });
-export type FleetCompletion = z.infer<typeof fleetCompletionSchema>;
-export const fleetJobSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("assignment"), dispatchID: identifier }),
-  z.strictObject({
-    kind: z.literal("result"),
+export type FleetCompletion = typeof fleetCompletionSchema.Type;
+export const fleetJobSchema = settingsDiscriminatedUnion("kind", [
+  settingsStruct({
+    kind: Schema.Literal("assignment"),
+    dispatchID: identifier,
+  }),
+  settingsStruct({
+    kind: Schema.Literal("result"),
     completion: fleetCompletionSchema,
     originInputID: identifier,
   }),
 ]);
-export type FleetJob = z.infer<typeof fleetJobSchema>;
+export type FleetJob = typeof fleetJobSchema.Type;
 export type FleetResultDelivery = {
   origin: FleetOrigin;
   completion: FleetCompletion;
