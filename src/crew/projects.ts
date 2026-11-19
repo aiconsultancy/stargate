@@ -14,6 +14,7 @@ import {
   type CrewOptions,
   crewOptionsSchema,
 } from "./engine";
+import type { FleetCrewStatus } from "./fleet-status";
 import { effectProjectKeySchema } from "./project-options";
 import { CrewError } from "./state";
 import { defaultTeam } from "./team";
@@ -228,6 +229,33 @@ export class CrewProjects {
       total: pages.reduce((total, p) => total + p.status.total, 0),
       truncated: members.length > 20 || pages.some((p) => p.status.truncated),
       busy: pages.reduce((total, page) => total + page.status.busy, 0),
+    };
+  }
+
+  fleetStatus(input: CrewStatusInput): FleetCrewStatus {
+    const status = this.status(input);
+    const contexts = status.members.flatMap(({ id, project }) => {
+      const { options } = this.get(project ?? "default");
+      const member = options.team.crew.find((entry) => entry.id === id);
+      const directory = options.worktrees[id];
+      if (!member || !directory) return [];
+      const model = member.backend?.model ?? member.model;
+      return [
+        {
+          member: id,
+          project: project === "default" ? null : (project ?? null),
+          directory,
+          role: member.role,
+          ...(model ? { model: model.slice(0, 200) } : {}),
+        },
+      ];
+    });
+    return {
+      status,
+      metadata: {
+        projectDirectory: this.default.options.projectDirectory,
+        contexts,
+      },
     };
   }
 

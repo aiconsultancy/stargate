@@ -125,6 +125,8 @@ export class CrewHistoryRPC {
       const input = decodeChildren(raw);
       const owned = this.authorized(input.parentID);
       if (!owned) throw new CrewError(unavailable);
+      if (input.updatedSince !== undefined && input.cursor)
+        throw new CrewError(unavailable);
       const cursor = input.cursor
         ? decodeChildrenCursor(
             JSON.parse(Buffer.from(input.cursor, "base64url").toString("utf8")),
@@ -140,6 +142,7 @@ export class CrewHistoryRPC {
         owned.sessionID,
         cursor?.after ?? "",
         input.limit + 1,
+        input.updatedSince,
       );
       const selected = rows.slice(0, input.limit);
       return {
@@ -150,9 +153,12 @@ export class CrewHistoryRPC {
             kind: "conversation",
             parentID: input.parentID,
             title: row.title,
+            ...(input.updatedSince !== undefined && row.updatedAt !== null
+              ? { updatedAt: row.updatedAt }
+              : {}),
           }),
         ),
-        ...(rows.length > input.limit
+        ...(input.updatedSince === undefined && rows.length > input.limit
           ? {
               cursor: Buffer.from(
                 JSON.stringify({

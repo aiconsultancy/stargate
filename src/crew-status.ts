@@ -73,3 +73,16 @@ export const crewStatusSchema = z
 export type CrewStatus = z.infer<typeof crewStatusSchema>;
 export type CrewStatusInput = z.infer<typeof crewStatusInputSchema>;
 export type CrewStatusTask = z.infer<typeof task>;
+
+/** Multi-project dispatch adds a worktree preamble for the worker, outside
+ * the assignment itself. Older retained summaries may end inside it. */
+export function crewAssignmentText(text: string): string {
+  if (
+    !/^Configured Stargate project: [a-z][a-z0-9_-]*\.\nUse only your permanent worktree: /.test(
+      text,
+    )
+  )
+    return text;
+  const start = text.indexOf("\n\n");
+  return start < 0 ? "Project assignment" : text.slice(start + 2);
+}

@@ -4,6 +4,7 @@ import type { Attachment } from "./attachments";
 import { OpenCodeBackend } from "./backends/opencode";
 import { PiDurableBackend } from "./backends/pi-durable";
 import type { BackendConfig } from "./config";
+import type { FleetCrewStatus } from "./crew/fleet-status";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
 import type {
@@ -242,6 +243,11 @@ export interface AgentBackend {
   pair?(signal: AbortSignal): Promise<{ code: string; expiresIn: number }>;
   /** Read-only configured crew status; does not require/create a conversation. */
   crewStatus?(input: CrewStatusInput, signal: AbortSignal): Promise<CrewStatus>;
+  /** Private fleet metadata from the same location-scoped crew status read. */
+  fleetCrewStatus?(
+    input: CrewStatusInput,
+    signal: AbortSignal,
+  ): Promise<FleetCrewStatus | undefined>;
   /** Sanitized subscription limits; never runs a model or creates a session. */
   quota?(signal: AbortSignal): Promise<QuotaSnapshot>;
   /** Read-only transcripts for operator views; never prompts or mutates. */

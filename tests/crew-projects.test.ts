@@ -21,6 +21,7 @@ import {
   type CrewSession,
   type CrewSessions,
 } from "../src/crew/engine";
+import { fleetCrewStatusSchema } from "../src/crew/fleet-status";
 import { journalInputSchema } from "../src/crew/journal";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import plugin from "../src/crew/plugin";
@@ -340,6 +341,12 @@ test("dispatch selects only protected paths; worker omission binds native contex
       f.options.projects?.["stargate"]?.worktrees["worker"] ?? "missing",
     );
     expect(f.prompts[0]?.text).toContain("not human approval");
+    expect(
+      projects
+        .status({ member: "worker" })
+        .members.find((member) => member.project === "stargate")?.current
+        ?.summary,
+    ).toBe("Read the assigned repository");
     for (const mail of [false, true])
       await expect(
         projects.select({ project: "default" }, worker, mail),
@@ -572,6 +579,30 @@ test("status and history identify all project contexts while legacy output stays
       "default",
       "stargate",
     ]);
+    const fleet = fleetCrewStatusSchema.parse(
+      projects.fleetStatus({ member: "worker" }),
+    );
+    expect(fleet.status).toEqual(status);
+    expect(fleet.metadata).toEqual({
+      projectDirectory: f.base.projectDirectory,
+      contexts: [
+        {
+          member: "worker",
+          project: null,
+          directory: join(f.root, "worker-default"),
+          role: "Builder",
+          model: "fixture/worker",
+        },
+        {
+          member: "worker",
+          project: "stargate",
+          directory: join(f.root, "worker-stargate"),
+          role: "Builder",
+          model: "fixture/worker",
+        },
+      ],
+    });
+    expect(JSON.stringify(status)).not.toContain(f.base.projectDirectory);
     const roots = await projects.historyRoots(new AbortController().signal);
     expect(roots.sessions).toHaveLength(2);
     expect(new Set(roots.sessions.map((s) => s.id)).size).toBe(2);

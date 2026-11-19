@@ -146,7 +146,12 @@ export type V1Feature = {
 };
 
 export type V1Transport = "slack" | "irc" | "teams";
-export type V1Backend = "opencode" | "pi-durable" | "claude" | "codex" | "module";
+export type V1Backend =
+  | "opencode"
+  | "pi-durable"
+  | "claude"
+  | "codex"
+  | "module";
 
 export type V1Captain = {
   /** Configured registration ID. */

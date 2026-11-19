@@ -584,7 +584,7 @@ const ircFeaturesSchema = settingsStruct({
   /** draft/read-marker: MARKREAD after each accepted message. */
   readMarker: Schema.Boolean.pipe(settingsDefault(true)),
 });
-const ircFeatureDefaults = {
+export const ircFeatureDefaults = {
   steerThreadFollowUps: false,
   questions: false,
   filesIn: true,

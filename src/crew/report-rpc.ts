@@ -15,6 +15,10 @@ import {
 } from "../session-history";
 import { settingsPattern, settingsStruct } from "../settings-schema";
 import { updateSnapshotSchema } from "../update-notice";
+import {
+  fleetCrewStatusInputSchema,
+  fleetCrewStatusSchema,
+} from "./fleet-status";
 import { messagePortableSchema } from "./message-tool-input";
 
 // Clients require Standard Schema definitions; OpenCode still decodes and
@@ -123,6 +127,10 @@ export const CrewReporting = Rpc.define({
     },
     quota: { input: quotaInputSchema, output: quotaSnapshotSchema },
     status: { input: crewStatusInputSchema, output: crewStatusSchema },
+    fleetStatus: {
+      input: portable(fleetCrewStatusInputSchema),
+      output: fleetCrewStatusSchema,
+    },
     // Read-only operator history. Roots list every provisioned crew member.
     // Describe, children and entries serve only this team's `pi:` sessions;
     // callers read OpenCode sessions through the server API instead.

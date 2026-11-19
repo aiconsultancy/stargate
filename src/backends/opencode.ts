@@ -27,6 +27,7 @@ import {
   TranscriptUnavailable,
 } from "../backend-values";
 import { type BackendConfig, secret } from "../config";
+import { fleetCrewStatusSchema } from "../crew/fleet-status";
 import { isNativeInstructionContext } from "../crew/instruction-context";
 import { crewMessageMetadataKey } from "../crew/message-protocol";
 import { CrewReporting } from "../crew/report-rpc";
@@ -835,6 +836,22 @@ export class OpenCodeBackend implements AgentBackend {
       throw new Error(
         "Crew status unavailable; check the captain location and crew plugin.",
       );
+    }
+  }
+
+  async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+    try {
+      signal.throwIfAborted();
+      return fleetCrewStatusSchema.parse(
+        await this.client.rpc(CrewReporting).fleetStatus(input, {
+          location: { directory: this.config.directory },
+          signal,
+        }),
+      );
+    } catch {
+      signal.throwIfAborted();
+      // A plugin that predates fleet metadata still serves ordinary status.
+      return undefined;
     }
   }
 
