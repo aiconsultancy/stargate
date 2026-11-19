@@ -1,8 +1,8 @@
-// Generated from Zod 4.6.7 source at4ff23cb, never from the Effect candidate.
+// Generated from Zod 4.6.7 at 4ff23cb. The IRC and root fixtures also include the new IRC turn defaults.
 export const settingsGolden = {
   configSchema: {
-    count: 6647,
-    hash: "04ed044d070f6a4fc43db97445738ede25187ee03c12381cb5999a90b41c0600",
+    count: 6660,
+    hash: "949e8ce75be0d9933e0d17af3c866b10e93722fccd961a1633f43da4bbb23acf",
   },
   botSchema: {
     count: 2590,
@@ -13,8 +13,8 @@ export const settingsGolden = {
     hash: "b54a366b9892b4d5dfa3a4b422ed54d701b04e74874a43b0f54feff3415dfad9",
   },
   ircSchema: {
-    count: 2910,
-    hash: "03f2a40d09c2b139aa2a0c61031cc04ee1899b3e9dcd2b1e60f6d3715cd43e85",
+    count: 2936,
+    hash: "594ac6418caa3ad3dad914c318ce39401c1ba57c7e6a35d3e4b13c82426bef4e",
   },
   teamsSchema: {
     count: 580,

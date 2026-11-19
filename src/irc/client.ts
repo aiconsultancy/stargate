@@ -39,6 +39,8 @@ export type IrcTiming = {
   registerMs: number;
   /** +typing=active refresh while a turn runs (the spec allows 3 s). */
   typingMs: number;
+  /** Age at which an open fleet request gets one progress notice. */
+  turnStatusMs: number;
 };
 
 export const defaultTiming: IrcTiming = {
@@ -53,6 +55,7 @@ export const defaultTiming: IrcTiming = {
   intervalMs: 600,
   registerMs: 30_000,
   typingMs: 3000,
+  turnStatusMs: 300_000,
 };
 
 export type IrcClientOptions = {
@@ -536,6 +539,10 @@ export class IrcClient {
 
   get typingMs() {
     return this.timing.typingMs;
+  }
+
+  get turnStatusMs() {
+    return this.timing.turnStatusMs;
   }
 
   /** Shared by every conversation on this captain or crew connection. */

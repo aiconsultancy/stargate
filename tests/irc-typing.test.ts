@@ -17,7 +17,12 @@ afterEach(async () => {
 });
 
 async function setup(
-  options: { caps?: string[]; features?: Record<string, boolean> } = {},
+  options: {
+    caps?: string[];
+    features?: Record<string, boolean>;
+    role?: "captain" | "rear_admiral" | "crew";
+    turnStatusMs?: number;
+  } = {},
 ) {
   const fake = new FakeIrcServer({
     accounts: { galactica: "captain-pass" },
@@ -35,6 +40,18 @@ async function setup(
     passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     ...(options.features ? { features: options.features } : {}),
+    ...(options.role
+      ? {
+          access: { allowedAccounts: ["jack", "visitor"] },
+          fleetPolicy: {
+            role: options.role,
+            humanAccounts: ["jack"],
+            agentAccounts: ["visitor"],
+            assignedCheckout: "/workspace",
+            capabilities: ["read_code"],
+          },
+        }
+      : {}),
     backend: {
       type: "opencode",
       url: "http://localhost:4096",
@@ -44,7 +61,13 @@ async function setup(
   });
   const ship = await IrcShip.create(config, store, pino({ level: "silent" }), {
     env: { STARGATE_IRC_GALACTICA: "captain-pass" },
-    timing: { reconnectMinMs: 20, intervalMs: 5, burst: 50, typingMs: 100 },
+    timing: {
+      reconnectMinMs: 20,
+      intervalMs: 5,
+      burst: 50,
+      typingMs: 100,
+      ...(options.turnStatusMs ? { turnStatusMs: options.turnStatusMs } : {}),
+    },
     readyMs: 2000,
   });
   let release = Promise.withResolvers<void>();
@@ -185,4 +208,62 @@ test("irc typing: off without message-tags or with features.typing false", async
     await until(() => store.queueCounts(captain.key).done === 1, 5000, "done");
     expect(lineOf(fake.received("galactica"), "TAGMSG")).toHaveLength(0);
   }
+});
+
+for (const role of ["captain", "rear_admiral"] as const) {
+  test(`irc fleet ${role}: acknowledges a human turn and reports an open request once`, async () => {
+    const { fake, store, captain, finish } = await setup({
+      role,
+      turnStatusMs: 30,
+    });
+    expect(captain.settings.turnTimeoutMs).toBe(3_600_000);
+    fake.say(
+      { nick: "jack", account: "jack" },
+      "#galactica",
+      "@galactica check",
+    );
+    const notices = () => lineOf(fake.received("galactica"), "NOTICE");
+    await until(() => notices().length === 2, 3000, "request status");
+    const [ack, progress] = notices();
+    expect(ack?.params).toEqual(["#galactica", "Checking that now…"]);
+    expect(progress?.params).toEqual([
+      "#galactica",
+      "This request is still open.",
+    ]);
+    expect(ack?.tags.get("+draft/reply")).toBeTruthy();
+    expect(progress?.tags.get("+draft/reply")).toBe(
+      ack?.tags.get("+draft/reply"),
+    );
+    expect(typing(fake.received("galactica"), "#galactica")).toEqual([]);
+    finish();
+    await until(() => store.queueCounts(captain.key).done === 1, 3000, "done");
+    expect(notices()).toHaveLength(2);
+  });
+}
+
+test("irc fleet: a settled turn cancels its delayed progress notice", async () => {
+  const { fake, store, captain, finish } = await setup({
+    role: "captain",
+    turnStatusMs: 500,
+  });
+  fake.say({ nick: "jack", account: "jack" }, "#galactica", "@galactica check");
+  const notices = () => lineOf(fake.received("galactica"), "NOTICE");
+  await until(() => notices().length === 1, 3000, "ack");
+  finish();
+  await until(() => store.queueCounts(captain.key).done === 1, 3000, "done");
+  await Bun.sleep(550);
+  expect(notices()).toHaveLength(1);
+});
+
+test("irc fleet: a configuration with crew rank keeps its typing behaviour", async () => {
+  const { fake, store, captain, finish } = await setup({ role: "crew" });
+  fake.say({ nick: "jack", account: "jack" }, "#galactica", "@galactica check");
+  await until(
+    () => typing(fake.received("galactica"), "#galactica").includes("active"),
+    3000,
+    "original typing",
+  );
+  expect(lineOf(fake.received("galactica"), "NOTICE")).toEqual([]);
+  finish();
+  await until(() => store.queueCounts(captain.key).done === 1, 3000, "done");
 });

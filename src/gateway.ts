@@ -146,6 +146,8 @@ export type DeliveryUnit = {
   allowed?: () => boolean;
 };
 
+export type IrcTurnStatus = "notice" | "quiet";
+
 export interface SlackDelivery {
   /** Undefined (or absent) while the transport cannot move files. */
   readonly files?: AttachmentTransport | undefined;
@@ -202,14 +204,15 @@ export interface SlackDelivery {
     allowed?: () => boolean,
   ): Promise<void>;
   /**
-   * Show that a turn is running (IRC +typing) until `signal` aborts, then
-   * clear it. Best effort: failures never affect the turn.
+   * Show that a turn is running until `signal` aborts. When requested, send
+   * an acknowledgement and an open-request notice. Best effort only.
    */
   working?(
     channel: string,
     thread: string,
     signal: AbortSignal,
     allowed?: () => boolean,
+    turnStatus?: IrcTurnStatus,
   ): Promise<void>;
 }
 
@@ -252,6 +255,7 @@ export interface GatewayTransport {
   /** Prompt prefix naming the sender when no source line is sent. */
   note(job: Job): string | undefined;
   instructions?(job: Job): string;
+  turnStatus?(job: Job): IrcTurnStatus | undefined;
   /**
    * Best effort, before each turn of an unpinned session (IRC crew: bind
    * the session to its crew member). Never fails or blocks the turn.
@@ -1427,18 +1431,6 @@ export class Gateway {
       // Refuse a stale snapshot; the next poll reads its full text and files.
       if (!this.store.running(job.id, job.text)) return;
       await readReceipt(true);
-      // Ends before delivery, so a typing indicator never outlasts the turn.
-      const typing = new AbortController();
-      const working = job.deferDelivery
-        ? undefined
-        : this.slack
-            .working?.(
-              job.channel,
-              job.thread,
-              AbortSignal.any([typing.signal, shutdown]),
-              () => allowed(job),
-            )
-            .catch(() => {});
       // Only an accepted requester Stop aborts this controller.
       const cancellation = new AbortController();
       const maintenanceFailure = new AbortController();
@@ -1450,6 +1442,19 @@ export class Gateway {
         maintenanceFailure.signal,
         budget.controller.signal,
       ]);
+      // Ends before delivery, so a typing indicator never outlasts the turn.
+      const typing = new AbortController();
+      const working = job.deferDelivery
+        ? undefined
+        : this.slack
+            .working?.(
+              job.channel,
+              job.thread,
+              AbortSignal.any([typing.signal, signal]),
+              () => allowed(job),
+              transport.turnStatus?.(job),
+            )
+            .catch(() => {});
       const live = job.deferDelivery
         ? undefined
         : new LiveReply(job, this.store, this.slack, signal, this.log, {

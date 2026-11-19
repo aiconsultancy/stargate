@@ -368,6 +368,21 @@ function shipTransport(
     );
   };
   return {
+    turnStatus: (job) => {
+      const rank = config.fleetPolicy?.role;
+      if (
+        !config.features.turnStatus ||
+        member.role !== "captain" ||
+        (rank !== "captain" && rank !== "rear_admiral")
+      )
+        return;
+      return !job.fleet &&
+        !job.sender &&
+        job.eventId.startsWith(`${job.channel}:`) &&
+        questionHuman(config, job.user, client.fold)
+        ? "notice"
+        : "quiet";
+    },
     ...(config.features.questions
       ? {
           questions: {

@@ -569,6 +569,8 @@ const ircFeaturesSchema = settingsStruct({
   multiline: Schema.Boolean.pipe(settingsDefault(true)),
   /** Send +typing while a turn runs (needs message-tags). */
   typing: Schema.Boolean.pipe(settingsDefault(true)),
+  /** Fleet captains acknowledge human requests and report long turns. */
+  turnStatus: Schema.Boolean.pipe(settingsDefault(true)),
   /** +draft/react for reaction replies, and Stop by reaction. */
   reactions: Schema.Boolean.pipe(settingsDefault(true)),
   /** CHATHISTORY catch-up of missed messages (persisted cursor). */
@@ -586,6 +588,7 @@ const ircFeatureDefaults = {
   filesOut: true,
   multiline: true,
   typing: true,
+  turnStatus: true,
   reactions: true,
   catchUp: true,
   alwaysOn: true,
@@ -771,7 +774,7 @@ const ircConfiguredSchema = settingsStruct({
   turnTimeoutMs: Schema.Finite.check(Schema.isInt())
     .check(Schema.isGreaterThanOrEqualTo(1000))
     .check(Schema.isLessThanOrEqualTo(3_600_000))
-    .pipe(settingsDefault(1_800_000)),
+    .pipe(settingsDefault(3_600_000)),
 });
 
 /** Persisted operator configuration: fleet-derived fields remain absent. */
