@@ -428,7 +428,7 @@ for (const defect of [
 
 test("shell cursor reanchors after restart and reconnect; text and files keep original destination without replay", async () => {
   const scratch = opencodeScratchDirectory();
-  await mkdir(scratch, { recursive: true });
+  await mkdir(scratch, { recursive: true, mode: 0o700 });
   const directory = await mkdtemp(join(scratch, "stargate-shell-source-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "state.sqlite");
