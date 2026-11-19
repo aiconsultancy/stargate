@@ -115,8 +115,9 @@ test("dependency provenance checks every page, signature, count, and current hea
   expect(status([[]], 0)).toBe(1);
 });
 
-test("Effect and native ID schema stay pinned to the OpenCode SDK release", async () => {
+test("OpenCode SDK packages share an exact stable release and its Effect version", async () => {
   const manifest = z.object({
+    version: z.string(),
     dependencies: z.record(z.string(), z.string()),
     peerDependencies: z.record(z.string(), z.string()).default({}),
   });
@@ -126,6 +127,16 @@ test("Effect and native ID schema stay pinned to the OpenCode SDK release", asyn
   const plugin = await read("../node_modules/@opencode/plugin/package.json");
   const client = await read("../node_modules/@opencode/client/package.json");
   const schema = await read("../node_modules/@opencode/schema/package.json");
+  const sdkVersion = z
+    .string()
+    .regex(/^\d+\.\d+\.\d+$/)
+    .parse(stargate.dependencies["@opencode/plugin"]);
+  expect(stargate.dependencies["@opencode/client"]).toBe(sdkVersion);
+  expect(stargate.dependencies["@opencode/schema"]).toBe(sdkVersion);
+  expect(client.version).toBe(sdkVersion);
+  expect(plugin.version).toBe(sdkVersion);
+  expect(schema.version).toBe(sdkVersion);
+  expect(plugin.dependencies["@opencode/client"]).toBe(sdkVersion);
   // One runtime copy: Stargate programs and the SDK share fiber/runtime types.
   expect(stargate.dependencies["effect"]).toMatch(/^\d+\.\d+\.\d+$/);
   expect(stargate.dependencies["effect"]).toBe(plugin.dependencies["effect"]);

@@ -60,11 +60,10 @@ SQLite schema or Slack scopes.
 
 ### Version
 
-`effect` is pinned to **4.1.0**, the exact version that the installed
-`@opencode/plugin` 2.2.7 requires and `@opencode/client` 2.2.7 declares as a peer.
-Stargate and the SDK then load one Effect runtime.
-Upgrade Effect together with the OpenCode SDK; a dependency test enforces the
-match. API usage follows the Effect 4 documentation at
+Stargate pins `@opencode/client`, `@opencode/plugin` and `@opencode/schema` to
+the same SDK release in `package.json`. It uses the exact Effect version
+required by that release, so Stargate and the SDK load one Effect runtime.
+The dependency test checks both matches. API usage follows the Effect 4 documentation at
 <https://effect.website/docs/v4> and the installed declarations.
 
 ### Where Effect owns behaviour
