@@ -1524,7 +1524,10 @@ export class Gateway {
           // Without a source line, the prompt itself names a special sender.
           const note = sourceContext ? undefined : transport.note(job);
           if (note) text = `${note}\n\n${text}`;
-          if (job.textMention)
+          if (
+            job.textMention &&
+            !(transport.name === "irc" && job.textMention.startsWith("@"))
+          )
             text = `${textMentionNote(job.textMention)}\n\n${text}`;
           // greybeard: pinned turns carry IDs only; missing history needs explicit retrieval.
           if (!pinned && !session && bot) {

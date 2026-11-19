@@ -459,7 +459,10 @@ For a captain, trusted-human messages and valid replies in `home` wake it;
 command roots wake it, while command replies need confirmed participation or
 an explicit current-nick invitation. A rear admiral's `home` is its private
 coordination room: human messages and replies wake it there, and other joined
-rooms require a mention. Visitors require an exact current-nick mention.
+rooms require a mention. In a configured peer captain's channel or the fleet
+command channel outside the visitor's human wake list, type the current `@nick`
+of the visiting captain or rear admiral in each message, including replies. The
+gateway applies the same policy to queued visitor turns.
 Explicit `humanWakeChannels`, legacy `wakeChannels`, account allowlists, denies
 and peer caps remain authoritative. An explicit legacy wake list (including
 `[]`) prevents automatic human-wake and strict-mention defaults. Use
@@ -512,6 +515,7 @@ approval or Stop authority.
 When `fleetControl.results: true` enables the
 [correlated fleet result outbox](fleet-tools.md), ordinary authenticated,
 enrolled peers may still start a context turn with an exact current-nick mention.
+Use `@nick` to address a visiting captain or rear admiral in the channels above.
 The default is **30 peer turns per receiving connection and channel or DM in
 a rolling hour**, shared by ordinary peer messages and correlated handoffs.
 Peers get no automatic human wake or human approval.

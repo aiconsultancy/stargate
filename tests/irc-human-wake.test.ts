@@ -167,7 +167,7 @@ test("opt-in channel policy wakes all captains for human top-level messages, eve
   }
   const vance = config("vance");
   expect(route(vance, "#command", "rollcall please")).toBeUndefined();
-  expect(route(vance, "#command", "vance: rollcall please")).toBeDefined();
+  expect(route(vance, "#command", "@vance: rollcall please")).toBeDefined();
   expect(route(vance, "#starbase", "rollcall please")).toBeDefined();
   expect(route(vance, "#audit", "vance: no conversation")).toBeUndefined();
   const cfg = config();
@@ -188,6 +188,113 @@ test("opt-in channel policy wakes all captains for human top-level messages, eve
       now: () => 0,
     }),
   ).toBeUndefined();
+});
+
+test("fleet visitors require a current explicit tag, even in a thread they joined", () => {
+  for (const account of ["phoenix", "vance"]) {
+    const base = config(account);
+    const channel = "#prometheus";
+    if (!base.fleetControl) throw new Error("Missing fleet control fixture");
+    const cfg = {
+      ...base,
+      channels: [...base.channels, channel],
+      fleetControl: {
+        ...base.fleetControl,
+        targets: [
+          ...base.fleetControl.targets,
+          {
+            id: "prometheus",
+            account: "prometheus",
+            channel,
+            sessionID: "ses_prometheus",
+            role: "captain" as const,
+          },
+        ],
+      },
+    };
+    const visitor = member(cfg);
+    const withoutResults = {
+      ...cfg,
+      fleetControl: { ...cfg.fleetControl, results: false },
+    };
+    expect(
+      ircResultJobAllowed(withoutResults, visitor, account, "jac", {
+        channel,
+        eventId: `${channel}:old-message`,
+        text: `Update on ${account}'s work`,
+      }),
+    ).toBe(false);
+    expect(ircResultJobAllowed(cfg, visitor, account, "jac", { channel })).toBe(
+      true,
+    );
+    expect(
+      ircResultJobAllowed(cfg, visitor, account, "jac", {
+        channel,
+        eventId: "scheduled:digest",
+        text: "Raise digest",
+      }),
+    ).toBe(true);
+    const admit = (text: string, sender: string, inThread: boolean) =>
+      routeIrcMessage(
+        wire(channel, text, {
+          account: sender,
+          ...(sender === "jac" ? {} : { bot: "" }),
+          ...(inThread ? { "+draft/reply": "known-reply" } : {}),
+        }),
+        {
+          config: cfg,
+          member: visitor,
+          currentNick: account,
+          sent: () => true,
+          joined: () => true,
+          fold,
+          now: () => 0,
+          threadRoot: () => "known-root",
+          participating: () => true,
+        },
+      );
+    for (const sender of ["jac", "prometheus"]) {
+      for (const inThread of [false, true]) {
+        for (const text of [
+          `Update on ${account}'s work`,
+          `SUB-74 (${account})`,
+          `${account}: please check`,
+          `Contact me@${account}.example`,
+          `Use @${account}-old for this`,
+          `@${account}:`,
+        ]) {
+          expect(admit(text, sender, inThread)).toBeUndefined();
+          expect(
+            ircResultJobAllowed(cfg, visitor, account, sender, {
+              channel,
+              eventId: `${channel}:old-message`,
+              text,
+              sender: "captain",
+              textMention: `@${account}`,
+            }),
+          ).toBe(false);
+        }
+        const text = `@${account.toUpperCase()} please check`;
+        const admitted = admit(text, sender, inThread);
+        expect(admitted?.textMention).toBe(`@${account}`);
+        expect(
+          ircResultJobAllowed(cfg, visitor, `${account}_`, sender, admitted),
+        ).toBe(true);
+      }
+    }
+    const label = `[fleet_dispatch from=prometheus source=fixture authority=human dispatch=abc; not human approval] ${account}: check CI`;
+    const envelope = admit(label, "prometheus", false);
+    expect(envelope).toBeDefined();
+    expect(
+      ircResultJobAllowed(cfg, visitor, account, "prometheus", envelope),
+    ).toBe(false);
+    expect(
+      ircResultJobAllowed(cfg, visitor, account, "prometheus", {
+        ...envelope,
+        fleet: { kind: "assignment", dispatchID: "abc" },
+      }),
+    ).toBe(true);
+  }
 });
 
 test("only explicit invitations or confirmed own replies create durable thread participation", async () => {
@@ -524,7 +631,7 @@ for (const multiline of [false, true])
     const root = f.fake.say(
       { nick: "jac", account: "jac" },
       "#command",
-      "vance: remain silent",
+      "@vance: remain silent",
     );
     await until(
       () => f.prompts.length === 5,
