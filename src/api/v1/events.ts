@@ -8,7 +8,7 @@ import type {
 
 export type ApiV1Diff = (
   previous: V1Snapshot | undefined,
-  next: V1Snapshot,
+  next: V1Snapshot & { fleet: V1Fleet },
   now: number,
 ) => V1Event[];
 
@@ -74,8 +74,8 @@ export function createEventStreams(options: Options, timing = streamTiming) {
         ]);
         readSignal.throwIfAborted();
         const details = ships.filter((ship) => ship !== undefined);
-        const next: V1Snapshot = {
-          fleet: overview,
+        const next: V1Snapshot & { fleet: V1Fleet } = {
+          fleet,
           ships: Object.fromEntries(details.map((ship) => [ship.id, ship])),
         };
         const changes = options.diff(previous, next, Date.now());

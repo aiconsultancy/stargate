@@ -37,7 +37,10 @@ test("gateway and Slack features reflect parsed defaults and explicit overrides"
       },
     ],
   });
-  const gateway = gatewayFeatures({ ...configured, api: { enabled: true } });
+  const gateway = gatewayFeatures({
+    ...configured,
+    api: { listen: "127.0.0.1:7781" },
+  });
   const slack = configured.bots[0];
   if (!slack) throw new Error("Missing test registration");
   const ship = await registrationFeatures({ kind: "slack", config: slack });

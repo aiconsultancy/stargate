@@ -157,8 +157,8 @@ function fixture() {
   const ships: DashboardShip[] = [];
   for (const entry of [
     ...config.bots,
-    ...config.irc,
-    ...config.teams,
+    ...(config.irc ?? []),
+    ...(config.teams ?? []),
     { ...bot(), id: "other-worker" },
   ]) {
     const id = entry.id;
@@ -289,7 +289,7 @@ describe("Fleet API projection", () => {
     const f = fixture();
     f.useConfig((config) => ({
       ...config,
-      api: { enabled: true, name: "Test Fleet" },
+      api: { listen: "127.0.0.1:7781", fleetName: "Test Fleet" },
     }));
     f.set(
       "captain",

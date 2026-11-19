@@ -7,11 +7,16 @@ import { parseEnv } from "node:util";
 import { Cause, Data, Deferred, Effect, FiberMap } from "effect";
 import pino, { type Logger } from "pino";
 import { z } from "zod";
+import packageManifest from "../package.json";
+import { diffEvents } from "./api/v1/diff";
+import { createApiV1Source } from "./api/v1/projection";
+import { startApiV1Server } from "./api/v1/server";
 import {
   type AgentBackend,
   type BackendContext,
   createBackend,
 } from "./backend";
+import { OpenCodeBackend } from "./backends/opencode";
 import {
   type BackendConfig,
   type BotConfig,
@@ -158,6 +163,17 @@ const release = (log: Logger, name: string, close: () => unknown) =>
       log.warn(`${name} cleanup failed`);
     }
   });
+
+/** The connected OpenCode server's version, from the first OpenCode ship. */
+async function openCodeVersion(
+  ships: readonly DashboardShip[],
+  signal: AbortSignal,
+): Promise<string | null> {
+  for (const ship of ships)
+    if (ship.backend instanceof OpenCodeBackend)
+      return ship.backend.serverVersion(signal);
+  return null;
+}
 
 /** One idempotent close owner, shared by reload retirement and shutdown. */
 function ownedBackend(backend: AgentBackend) {
@@ -962,6 +978,36 @@ export function serve(
             ),
         );
         log.info("Dashboard listening");
+      }
+      if (config.api) {
+        // Like the dashboard: a bind failure is an ordinary startup failure.
+        const api = config.api;
+        const viewers = new AbortController();
+        yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startApiV1Server({
+              config: api,
+              dataDirectory: config.dataDirectory,
+              source: createApiV1Source({
+                dashboard: dashboardSource(ships, store, cronStore),
+                config: () => reload?.current.config ?? config,
+              }),
+              diff: diffEvents,
+              gateway: {
+                version: packageManifest.version,
+                startedAt: Math.round(performance.timeOrigin),
+                opencodeVersion: (signal) => openCodeVersion(ships, signal),
+              },
+              signal: viewers.signal,
+            }),
+          ),
+          (server) =>
+            Effect.sync(() => viewers.abort()).pipe(
+              Effect.andThen(release(log, "Fleet API", () => server.stop())),
+              Effect.timeoutOption("5 seconds"),
+            ),
+        );
+        log.info({ listen: api.listen }, "Fleet API listening");
       }
       // Dynamic backend resources close after worker interruption, before the
       // stores. The single finalizer also owns later roster additions.

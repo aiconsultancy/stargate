@@ -177,9 +177,9 @@ function registrations(config: ApiV1Config) {
   const result = new Map<string, Registration>();
   for (const bot of config.bots)
     result.set(bot.id, { kind: "slack", config: bot });
-  for (const irc of config.irc)
+  for (const irc of config.irc ?? [])
     result.set(irc.id, { kind: "irc", config: irc });
-  for (const team of config.teams)
+  for (const team of config.teams ?? [])
     result.set(team.id, { kind: "teams", config: team });
   return result;
 }
@@ -542,7 +542,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       return {
         apiVersion: API_V1_VERSION,
         generatedAt: fleet.generatedAt,
-        name: redactCredentials(config.api?.name ?? hostname(), 100),
+        name: redactCredentials(config.api?.fleetName ?? hostname(), 100),
         admiral,
         ships: await Promise.all(pending),
         longestIdle,

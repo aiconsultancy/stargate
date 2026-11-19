@@ -9,9 +9,14 @@ import {
 import { resolveQuestionSettings } from "../../question-settings";
 import type { V1Feature } from "./types";
 
-/** The HTTP layer owns the parser and listener for the opt-in API block. */
-export type ApiV1Config = Config & {
-  api?: { enabled?: boolean; name?: string };
+/**
+ * The loaded configuration as the runtime holds it; the HTTP layer owns the
+ * parser and listener for the opt-in API block.
+ */
+export type ApiV1Config = Omit<Config, "irc" | "teams" | "notifications"> & {
+  irc?: Config["irc"];
+  teams?: Config["teams"];
+  notifications?: Config["notifications"];
 };
 
 export type Registration =
@@ -35,8 +40,8 @@ const flag = (
 
 export function gatewayFeatures(config: ApiV1Config): V1Feature[] {
   const maintenance = config.maintenance;
-  const waiting = [...config.bots, ...config.teams];
-  const transcription = [...config.bots, ...config.irc];
+  const waiting = [...config.bots, ...(config.teams ?? [])];
+  const transcription = [...config.bots, ...(config.irc ?? [])];
   return [
     flag("dashboard", "Dashboard", config.dashboard === true),
     flag(
@@ -44,7 +49,7 @@ export function gatewayFeatures(config: ApiV1Config): V1Feature[] {
       "Shared dashboard socket",
       config.dashboardSocket?.groupAccess === true,
     ),
-    flag("api", "Fleet API", config.api?.enabled === true),
+    flag("api", "Fleet API", config.api !== undefined),
     flag(
       "cronjobs",
       "File-backed cron",
@@ -64,7 +69,7 @@ export function gatewayFeatures(config: ApiV1Config): V1Feature[] {
     flag(
       "notifications.updateNotice",
       "Update notices",
-      config.notifications.updateNotice,
+      config.notifications?.updateNotice ?? false,
     ),
     flag(
       "quotaWatch",
