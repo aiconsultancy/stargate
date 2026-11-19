@@ -35,7 +35,7 @@ import {
 import { CrewHistoryRPC } from "./history-rpc";
 import { crewFingerprint } from "./identity";
 import { MesijClient, type MesijMessage } from "./mesij";
-import { crewMessageMetadataKey } from "./message-protocol";
+import { crewMessageMetadataKey, resumeMessageID } from "./message-protocol";
 import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
 import { readInputOrigin } from "./origin";
 import { piCrewToolDefinitions } from "./pi-extension";
@@ -53,18 +53,22 @@ import {
   type ExecutionInspection,
   type InspectInput,
   type InspectionConnector,
+  idleBoundary,
   inspectInputSchema,
   observeExecution,
   observePlacement,
   type Placement,
   type ReconcileInput,
+  type ResumeInput,
   reconcileInputSchema,
   requireQuiescent,
+  resumeAdmitted,
+  resumeInputSchema,
   sha256,
   verifyResult,
 } from "./reconciliation";
 import { CrewReporter } from "./reporting";
-import { type ResultAPI, readTaskResult } from "./result";
+import { MissingTaskResult, type ResultAPI, readTaskResult } from "./result";
 import {
   type AbandonableStatus,
   CrewError,
@@ -119,6 +123,7 @@ export const crewOptionsSchema = z
       })
       .optional(),
     allowCrewExpansion: z.boolean().optional(),
+    exclusiveWorkerInput: z.boolean().optional(),
     mesijCommand: directory,
     /** The one native captain root; earlier roots stay history. */
     captainSessionID: z
@@ -167,6 +172,7 @@ export const crewInputSchema = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("roster") }),
   inspectInputSchema,
   reconcileInputSchema,
+  resumeInputSchema,
   abandonInputSchema,
   ...workspaceInputSchemas,
   z.strictObject({ op: z.literal("ensure"), crew: agentIDSchema.optional() }),
@@ -1242,6 +1248,7 @@ export class CrewEngine {
       await this.captain(caller);
       if (input.op === "inspect") return await this.inspect(input, caller);
       if (input.op === "reconcile") return await this.reconcile(input, caller);
+      if (input.op === "resume") return await this.resume(input, caller);
       if (input.op === "abandon") return await this.abandon(input, caller);
       if (
         input.op === "workspace" ||
@@ -1276,6 +1283,7 @@ export class CrewEngine {
       if (abandoned) return abandoned;
       if (input.op === "status") {
         if (task.status === "queued") task = await this.promote(task, caller);
+        await this.observeResumeReceipts(task, caller);
         const recovered = await this.reconcileResult(task, caller);
         return {
           status: recovered.task.status,
@@ -1851,6 +1859,191 @@ export class CrewEngine {
     }
   }
 
+  /** Receipt recovery only. Never enqueue or wake through status or abandon. */
+  private async observeResumeReceipts(
+    task: CrewTask,
+    caller: CrewCaller,
+  ): Promise<void> {
+    const pending = this.state.resumeBoundaries(task.id, true);
+    if (!pending.length) return;
+    const signal = AbortSignal.any([caller.signal, AbortSignal.timeout(10000)]);
+    try {
+      const api = await this.inspectionAPI({ ...caller, signal });
+      const peer = this.state.peer(task.crewID);
+      if (!peer || peer.sessionID !== task.workerSessionID) return;
+      this.validPeer(
+        await api.session.get({ sessionID: peer.sessionID }, { signal }),
+        peer,
+      );
+      for (const idleAt of pending) {
+        if (
+          await resumeAdmitted(
+            api,
+            peer.sessionID,
+            resumeMessageID(task, idleAt),
+            idleAt,
+            signal,
+          )
+        )
+          this.state.confirmResumeAttempt(task.id, idleAt);
+      }
+    } catch {
+      caller.signal.throwIfAborted();
+      // Unknown stays unconfirmed. A later status can re-read native evidence.
+    }
+  }
+
+  private async resume(
+    input: ResumeInput,
+    caller: CrewCaller,
+  ): Promise<CrewResult> {
+    const task = this.ownedCaptainTask(input.taskID, caller);
+    if (!this.options.exclusiveWorkerInput)
+      throw new CrewError(
+        "Resume requires a protected worker profile with exclusive Stargate input.",
+      );
+    const member = this.member(task.crewID);
+    const peer = this.state.peer(task.crewID);
+    const { expected } = input;
+    if (member.backend)
+      throw new CrewError("Resume supports native OpenCode workers only.");
+    if (
+      task.status !== "uncertain" ||
+      task.result !== null ||
+      peer?.status !== "ready" ||
+      peer.sessionID !== task.workerSessionID ||
+      task.workerSessionID !== expected.workerSessionID ||
+      task.originCaptainID !== expected.originCaptainID ||
+      task.inputID !== expected.inputID
+    )
+      throw new CrewError(
+        "Resume requires the current uncertain task and its inspected worker, captain and input.",
+      );
+
+    const token = this.state.reserveReconciliation(task);
+    const signal = AbortSignal.any([caller.signal, AbortSignal.timeout(30000)]);
+    try {
+      const api = await this.inspectionAPI({ ...caller, signal });
+      const inspect = async () => {
+        const { session, execution } = await observeExecution(
+          api,
+          peer.sessionID,
+          signal,
+        );
+        this.validPeer(session, peer);
+        if (idleBoundary(execution) !== expected.idleAt)
+          throw new CrewError(
+            "Worker changed, is busy, or has pending input or approval; inspect again before resuming.",
+          );
+        return execution;
+      };
+      const id = resumeMessageID(task, expected.idleAt);
+      if (
+        this.state.resumeAttempted(task.id, expected.idleAt) &&
+        (await resumeAdmitted(api, peer.sessionID, id, expected.idleAt, signal))
+      ) {
+        this.state.confirmResumeAttempt(task.id, expected.idleAt);
+        return {
+          status: "resume-already-admitted",
+          task,
+          diagnostic:
+            "This idle boundary already has its continuation. Use status on the same task.",
+        };
+      }
+      const before = await inspect();
+      const workerAgent = member.agent ?? task.crewID;
+      const placement = await observePlacement(api, task, signal, workerAgent);
+      if (placement === "unknown")
+        throw new CrewError(
+          "Native history is unverified. Inspect the existing task before resuming.",
+        );
+      if (placement !== "placed")
+        throw new CrewError(
+          "Original assignment no longer owns the native turn; resume refused.",
+        );
+
+      try {
+        await readTaskResult(api, task, signal, workerAgent);
+        return {
+          status:
+            before.outcome === "succeeded"
+              ? "result-available"
+              : "result-unconfirmed",
+          task,
+          diagnostic:
+            before.outcome === "succeeded"
+              ? "The original final answer is retained. Use status or reconcile to collect it."
+              : "History contains a final answer, but OpenCode did not report success. Preserve the answer and inspect the native outcome.",
+        };
+      } catch (error) {
+        if (!(error instanceof MissingTaskResult)) throw error;
+      }
+
+      const after = await inspect();
+      if (JSON.stringify(before) !== JSON.stringify(after))
+        throw new CrewError(
+          "Worker changed during resume checks; inspect again.",
+        );
+      signal.throwIfAborted();
+      this.state.recordResumeAttempt(
+        task,
+        token,
+        expected.idleAt,
+        caller.sessionID,
+      );
+      try {
+        await this.sessions.synthetic(
+          {
+            sessionID: peer.sessionID,
+            id,
+            text: `Resume retained task ${task.id}. Read the captain's task mail and check your saved progress and prior tool results before continuing the remaining work. Return the final answer for this task.`,
+            description: "Captain resume of retained crew task",
+            metadata: {
+              [crewMessageMetadataKey]: {
+                taskID: task.id,
+                originCaptainID: task.originCaptainID,
+                sourceTaskID: task.id,
+                resumeIdleAt: expected.idleAt,
+              },
+            },
+            delivery: "queue",
+            resume: true,
+          },
+          {
+            signal: AbortSignal.any([
+              caller.signal,
+              AbortSignal.timeout(10000),
+            ]),
+          },
+        );
+      } catch {
+        caller.signal.throwIfAborted();
+        return {
+          status: "resume-uncertain",
+          task,
+          diagnostic:
+            "Resume admission is unconfirmed. Inspect the existing session. An exact retry uses the same native message ID.",
+        };
+      }
+      this.state.confirmResumeAttempt(task.id, expected.idleAt);
+      return {
+        status: "resume-admitted",
+        task: this.state.readmit(task, token),
+        diagnostic:
+          "OpenCode accepted the continuation. Use status on the same task to observe execution or collect its final answer.",
+      };
+    } catch (error) {
+      caller.signal.throwIfAborted();
+      if (signal.aborted)
+        throw new CrewError(
+          "Resume inspection timed out. Inspect the existing task before another attempt.",
+        );
+      throw error;
+    } finally {
+      this.state.releaseControl(task.crewID, token);
+    }
+  }
+
   private abandoned(task: CrewTask, after: number): CrewResult | null {
     const abandonment = this.state.abandonment(task.id);
     return abandonment
@@ -1917,6 +2110,7 @@ export class CrewEngine {
       throw new CrewError(
         "Queued work has no native execution to abandon. Nothing abandoned.",
       );
+    await this.observeResumeReceipts(task, caller);
     const token = this.state.beginAbandon(
       { ...task, status: expected.status, controlID: expected.controlID },
       {
@@ -1996,6 +2190,42 @@ export class CrewEngine {
     const api = this.inspectionConnector
       ? await this.inspectionAPI({ ...caller, signal }).catch(() => null)
       : null;
+    if (this.state.resumeBoundaries(task.id, true).length)
+      return {
+        stop: "unconfirmed",
+        detail:
+          "Resume admission is unconfirmed. Inspect native evidence before stopping.",
+        withdrawn: false,
+      };
+    const resumeIDs = new Set(
+      this.state
+        .resumeBoundaries(task.id)
+        .map((idleAt) => resumeMessageID(task, idleAt)),
+    );
+    if (resumeIDs.size) {
+      const queuedResumes = async () =>
+        (
+          await api?.session.inbox.list(
+            { sessionID: peer.sessionID },
+            { signal },
+          )
+        )?.filter(({ id }) => resumeIDs.has(id));
+      const stopUnconfirmed = {
+        stop: "unconfirmed" as const,
+        detail:
+          "The task's queued resume could not be withdrawn. Inspect its native inbox.",
+        withdrawn: false,
+      };
+      const queued = await queuedResumes().catch(() => undefined);
+      if (!queued || (queued.length && !api?.session.inbox.cancel))
+        return stopUnconfirmed;
+      for (const { id } of queued)
+        await api?.session.inbox
+          .cancel?.({ sessionID: peer.sessionID, inboxID: id }, { signal })
+          .catch(() => {});
+      const remaining = await queuedResumes().catch(() => undefined);
+      if (!remaining || remaining.length) return stopUnconfirmed;
+    }
     let placement: Placement = api
       ? await observePlacement(api, task, signal, member.agent ?? task.crewID)
       : "unknown";
@@ -2101,7 +2331,7 @@ export class CrewEngine {
       };
     return {
       task,
-      diagnostic: `Task ${task.id}: own input ${task.inputID} is ${placement} natively. ${placement === "unknown" ? "Native evidence unreadable; inspect before recovery." : "Recover a retained answer with status/reconcile, or inspect and abandon."}`,
+      diagnostic: `Task ${task.id}: own input ${task.inputID} is ${placement} natively. ${placement === "unknown" ? "Native evidence unreadable; inspect before recovery." : "Recover a retained answer with status/reconcile, or inspect for resume or explicit abandonment."}`,
     };
   }
 
