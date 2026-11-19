@@ -5,33 +5,148 @@ import type {
   SessionInterruptInput,
   SessionSwitchModelInput,
 } from "@opencode/client";
-import { z } from "zod";
+import { JsonSchema, Predicate, Result, Schema } from "effect";
+import type {
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
+} from "effect/StandardSchema";
+import {
+  settingsDefault,
+  settingsDiscriminatedUnion,
+  settingsIssues,
+  settingsStruct,
+} from "../settings-schema";
 import type { CrewCaller, WorkerModelPeer } from "./engine";
+import { effectProjectToolInput } from "./project-options";
 import { CrewError } from "./state";
 import { agentIDSchema, defaultModelProviders, type Team } from "./team";
 
-const target = agentIDSchema.default("captain");
-export const modelInputSchema = z.discriminatedUnion("op", [
-  z.strictObject({
-    op: z.literal("get"),
-    target: z.enum(["captain", "self"]).default("self"),
+const target = agentIDSchema.pipe(settingsDefault("captain"));
+const modelBranches = Schema.Union([
+  settingsStruct({
+    op: Schema.Literal("get"),
+    target: Schema.Literals(["captain", "self"]).pipe(settingsDefault("self")),
   }),
-  z.strictObject({ op: z.literal("list"), target }),
-  z.strictObject({ op: z.literal("inspect"), target: agentIDSchema }),
-  z.strictObject({
-    op: z.literal("effort"),
+  settingsStruct({ op: Schema.Literal("list"), target }),
+  settingsStruct({ op: Schema.Literal("inspect"), target: agentIDSchema }),
+  settingsStruct({
+    op: Schema.Literal("effort"),
     target: agentIDSchema,
-    variant: z.string().min(1).max(100),
+    variant: Schema.String.check(
+      Schema.isMinCodePoints(1),
+      Schema.isMaxCodePoints(100),
+    ),
   }),
-  z.strictObject({
-    op: z.literal("switch"),
+  settingsStruct({
+    op: Schema.Literal("switch"),
     target,
-    providerID: z.string().min(1).max(100),
-    id: z.string().min(1).max(256),
-    variant: z.string().min(1).max(100).optional(),
-    compactFirst: z.boolean().default(false),
+    providerID: Schema.String.check(
+      Schema.isMinCodePoints(1),
+      Schema.isMaxCodePoints(100),
+    ),
+    id: Schema.String.check(
+      Schema.isMinCodePoints(1),
+      Schema.isMaxCodePoints(256),
+    ),
+    variant: Schema.optional(
+      Schema.String.check(
+        Schema.isMinCodePoints(1),
+        Schema.isMaxCodePoints(100),
+      ),
+    ),
+    compactFirst: Schema.Boolean.pipe(settingsDefault(false)),
   }),
 ]);
+export const modelInputSchema = settingsDiscriminatedUnion(
+  "op",
+  modelBranches.members,
+);
+
+// The legacy object envelope orders fields but leaves branch defaults to run().
+// Keep this model-only SDK adapter native; other operation envelopes stay put.
+const modelEnvelope = effectProjectToolInput(modelBranches);
+const decodeEnvelope = Schema.decodeUnknownResult(modelEnvelope, {
+  errors: "all",
+});
+const decodeOperation = Schema.decodeUnknownResult(modelInputSchema, {
+  errors: "all",
+});
+const modelDocument = Schema.toJsonSchemaDocument(modelEnvelope, {
+  onExcessProperty: "error",
+});
+const modelProperties = modelDocument.schema["properties"];
+if (!Predicate.isObject(modelProperties))
+  throw new Error("Invalid model tool advertisement");
+// Preserve the installed Zod converter's literal/boolean union spelling.
+modelProperties["op"] = {
+  anyOf: modelBranches.members.map((member) => {
+    const json = Schema.toJsonSchemaDocument(member.fields.op).schema;
+    const values = json["enum"];
+    if (!Array.isArray(values) || values.length !== 1)
+      throw new Error("Invalid model operation advertisement");
+    return { type: "string", const: values[0] };
+  }),
+};
+for (const [key, property] of Object.entries(modelProperties)) {
+  if (
+    Predicate.isObject(property) &&
+    Array.isArray(property["anyOf"]) &&
+    property["anyOf"].length === 1 &&
+    property["anyOf"][0]?.type === "boolean"
+  )
+    modelProperties[key] = property["anyOf"][0];
+}
+const modelFieldOrder = Object.keys(modelProperties);
+export const modelToolInputSchema: StandardSchemaV1<Record<string, unknown>> &
+  StandardJSONSchemaV1<Record<string, unknown>> = {
+  "~standard": {
+    version: 1,
+    vendor: "effect",
+    validate: (raw) => {
+      const result = decodeEnvelope(raw);
+      if (Result.isFailure(result)) {
+        if (Predicate.isObject(raw)) {
+          const { project: _project, ...operation } = raw;
+          const failure = decodeOperation(operation);
+          if (Result.isFailure(failure))
+            return {
+              issues: [
+                ...settingsIssues(result.failure.issue).issues.filter(
+                  (issue) => issue.path?.length,
+                ),
+                ...settingsIssues(failure.failure.issue).issues,
+              ],
+            };
+        }
+        return settingsIssues(result.failure.issue);
+      }
+      return {
+        value: Object.fromEntries(
+          modelFieldOrder
+            .filter((key) => Object.hasOwn(result.success, key))
+            .map((key) => [key, result.success[key]]),
+        ),
+      };
+    },
+    jsonSchema: {
+      input: ({ target }) => {
+        if (target === "draft-2020-12")
+          return structuredClone({
+            $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12,
+            ...modelDocument.schema,
+          });
+        if (target === "draft-07")
+          return structuredClone({
+            $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
+            ...JsonSchema.toDocumentDraft07(modelDocument).schema,
+          });
+        throw new Error(`Unsupported model schema target: ${target}`);
+      },
+      output: ({ target }) =>
+        modelToolInputSchema["~standard"].jsonSchema.input({ target }),
+    },
+  },
+};
 type ModelRef = SessionSwitchModelInput["model"];
 type Request = { signal: AbortSignal };
 export interface ModelSessions {
@@ -100,10 +215,12 @@ export class CrewModels {
   ) {}
 
   async run(raw: unknown, caller: CrewCaller) {
-    const parsed = modelInputSchema.safeParse(raw);
-    if (!parsed.success)
+    const parsed = Schema.decodeUnknownResult(modelInputSchema, {
+      onExcessProperty: "error",
+    })(raw);
+    if (Result.isFailure(parsed))
       throw new CrewError("Invalid stargate_model operation.");
-    const input = parsed.data;
+    const input = parsed.success;
     try {
       caller.signal.throwIfAborted();
       if (input.op === "get") {

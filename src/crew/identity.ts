@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
-import { z } from "zod";
+import { Schema } from "effect";
+import { settingsRecord, settingsStruct } from "../settings-schema";
 import type { Team } from "./team";
 
 /** Shared with the explicit cutover planner; JSON ordering is persistent identity. */
@@ -29,19 +30,23 @@ export function crewFingerprint(options: {
   });
 }
 
-const identitySchema = z.strictObject({
-  version: z.literal(2),
-  namespace: z.string(),
-  projectDirectory: z.string(),
-  captain: z.strictObject({ id: z.string(), directory: z.string() }),
-  crew: z.array(z.record(z.string(), z.unknown())),
+const identitySchema = settingsStruct({
+  version: Schema.Literal(2),
+  namespace: Schema.String,
+  projectDirectory: Schema.String,
+  captain: settingsStruct({ id: Schema.String, directory: Schema.String }),
+  crew: Schema.mutable(
+    Schema.Array(settingsRecord(Schema.String, Schema.Unknown)),
+  ),
 });
 
 /** Explicit append-only rollout; existing workers can never be rebound. */
 export function canExpandCrew(previous: string, next: string): boolean {
   try {
-    const before = identitySchema.parse(JSON.parse(previous));
-    const after = identitySchema.parse(JSON.parse(next));
+    const before = Schema.decodeUnknownSync(identitySchema)(
+      JSON.parse(previous),
+    );
+    const after = Schema.decodeUnknownSync(identitySchema)(JSON.parse(next));
     if (
       before.namespace !== after.namespace ||
       before.projectDirectory !== after.projectDirectory ||

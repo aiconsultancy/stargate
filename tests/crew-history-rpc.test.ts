@@ -19,7 +19,7 @@ const unavailable = "Pi history unavailable or cancelled.";
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-crew-history-"));
   const state = await CrewState.open(directory, "history", "identity");
-  const team = teamSchema.parse({
+  const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [
       {
@@ -443,7 +443,7 @@ test("Pi history reuses the shared live pool and never opens a second runtime", 
 test("Pi history owner shutdown cancels active reads without interrupting work", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-history-cancel-"));
   const state = await CrewState.open(directory, "history-cancel", "identity");
-  const member = teamSchema.parse({
+  const member = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [
       {

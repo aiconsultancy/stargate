@@ -120,7 +120,7 @@ test("conversation eval: exported plugin wires cancellable native wait through i
     | undefined;
   try {
     const seed = await fixture(
-      teamSchema.parse({
+      Schema.decodeUnknownSync(teamSchema)({
         ...defaultTeam,
         historyAPI: { url: server.url.href },
       }),
@@ -1568,7 +1568,7 @@ test("notification bookkeeping failure keeps the successful durable mail receipt
 
 test("broadcast returns partial receipts and Pi tools-none stores no unreadable mail", async () => {
   const f = await fixture(
-    teamSchema.parse({
+    Schema.decodeUnknownSync(teamSchema)({
       ...defaultTeam,
       crew: [
         ...defaultTeam.crew,
@@ -1730,7 +1730,7 @@ test("captain context admission verifies native identity and leaves native histo
 });
 
 test("Pi update notices use durable plain mail only, and failed mail is not reported as told", async () => {
-  const team = teamSchema.parse({
+  const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "bowser" },
     crew: [
       {
@@ -4402,7 +4402,7 @@ test("ready-only inspection validates one existing native snapshot and refuses c
 
 test("ready-only model operations refuse Pi, unknown crew and foreign native captain roots", async () => {
   const f = await fixture(
-    teamSchema.parse({
+    Schema.decodeUnknownSync(teamSchema)({
       ...customTeam,
       crew: customTeam.crew.map((member) =>
         member.id === "builder"

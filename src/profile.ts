@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import {
   managedPrompt,
   piDefinitionPath,
@@ -30,69 +30,88 @@ import {
 } from "./nightly/instructions";
 import { peerInstructions } from "./peers";
 import { reactionInstructions } from "./reactions";
-import { legacySetting } from "./settings-legacy";
+import {
+  settingsDefault,
+  settingsPattern,
+  settingsRecord,
+  settingsRefine,
+  settingsStruct,
+  settingsURL,
+} from "./settings-schema";
 import { voiceInstructions } from "./transcription";
 
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
-const absolute = z
-  .string()
-  .refine(isAbsolute)
-  .refine((path) => !/[\r\n\0]/.test(path));
-const optionsSchema = z.strictObject({
+const absolute = Schema.String.check(
+  settingsRefine(isAbsolute, { message: "Invalid input" }),
+  settingsRefine((path) => !/[\r\n\0]/.test(path), {
+    message: "Invalid input",
+  }),
+);
+const optionsSchema = settingsStruct({
   directory: absolute,
   projectDirectory: absolute,
   worktreeDirectory: absolute,
-  workspaceMode: z.enum(["worktree", "clone"]).default("worktree"),
-  namespace: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)
-    .optional(),
-  captainSessionID: z
-    .string()
-    .regex(/^ses_[A-Za-z0-9]+$/)
-    .max(256)
-    .optional(),
-  cron: z
-    .strictObject({
+  workspaceMode: Schema.Literals(["worktree", "clone"]).pipe(
+    settingsDefault("worktree"),
+  ),
+  namespace: Schema.optional(
+    Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  ),
+  captainSessionID: Schema.optional(
+    Schema.String.check(
+      settingsPattern(/^ses_[A-Za-z0-9]+$/),
+      Schema.isMaxCodePoints(256),
+    ),
+  ),
+  cron: Schema.optional(
+    settingsStruct({
       configPath: absolute,
-      bot: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-    })
-    .optional(),
-  team: teamSchema.default(defaultTeam),
-  base: z
-    .string()
-    .min(1)
-    .refine((base) => !base.startsWith("-"))
-    .default("origin/main"),
+      bot: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+    }),
+  ),
+  team: teamSchema.pipe(settingsDefault(defaultTeam)),
+  base: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    settingsRefine((base) => !base.startsWith("-"), {
+      message: "Invalid input",
+    }),
+  ).pipe(settingsDefault("origin/main")),
   mesijCommand: absolute,
-  proxyURL: z.url().default("http://127.0.0.1:8317/v1"),
-  apiKeyReference: z
-    .string()
-    .regex(/^\{(?:env:[A-Z_][A-Z0-9_]*|file:[^\r\n{}]+)\}$/)
-    .default("{env:CLIPROXYAPI_API_KEY}"),
+  proxyURL: settingsURL.pipe(settingsDefault("http://127.0.0.1:8317/v1")),
+  apiKeyReference: Schema.String.check(
+    settingsPattern(/^\{(?:env:[A-Z_][A-Z0-9_]*|file:[^\r\n{}]+)\}$/),
+  ).pipe(settingsDefault("{env:CLIPROXYAPI_API_KEY}")),
   /** Nightly maintenance window rendered into captain and crew instructions. */
-  maintenanceWindow: legacySetting(nightlyWindowSchema).optional(),
+  maintenanceWindow: Schema.optional(nightlyWindowSchema),
 });
-type Options = z.input<typeof optionsSchema>;
-const document = z.record(z.string(), z.unknown());
-const templateSchema = z
-  .object({
-    model: z.string(),
-    compaction: document,
-    experimental: document,
-    providers: z.record(z.string(), document),
-  })
-  .passthrough();
+type Options = typeof optionsSchema.Encoded;
+const document = settingsRecord(
+  Schema.String,
+  Schema.mutableKey(Schema.Unknown),
+);
+const templateSchema = document.pipe(
+  Schema.decodeTo(
+    Schema.StructWithRest(
+      Schema.Struct({
+        model: Schema.String,
+        compaction: document,
+        experimental: document,
+        providers: settingsRecord(Schema.String, document),
+      }),
+      [Schema.Record(Schema.String, Schema.Unknown)],
+    ),
+  ),
+);
 
 function parseOptions(input: Options) {
-  const parsed = optionsSchema.safeParse(input);
-  if (!parsed.success)
+  const parsed = Schema.decodeUnknownResult(optionsSchema)(input);
+  if (Result.isFailure(parsed))
     throw new Error(
       "Invalid profile paths, team, namespace, proxy URL, or credential reference.",
     );
   const options = {
-    ...parsed.data,
-    namespace: parsed.data.namespace ?? parsed.data.team.captain.id,
+    ...parsed.success,
+    namespace: parsed.success.namespace ?? parsed.success.team.captain.id,
   };
   options.team = profileTeam(options.team, options.namespace);
   const proxy = new URL(options.proxyURL);
@@ -135,11 +154,11 @@ export async function renderProfile(input: Options, role: string) {
     join(packageDirectory, "templates", "opencode.json"),
   ).json();
   // The template is project-owned; untrusted inputs are validated above.
-  const parsed = templateSchema.parse(config);
+  const parsed = Schema.decodeUnknownSync(templateSchema)(config);
   const providers = parsed.providers;
   for (const provider of Object.values(providers)) {
     provider["settings"] = {
-      ...document.parse(provider["settings"]),
+      ...Schema.decodeUnknownSync(document)(provider["settings"]),
       baseURL: options.proxyURL,
       apiKey: options.apiKeyReference,
     };

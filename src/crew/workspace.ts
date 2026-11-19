@@ -3,9 +3,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, readFile, readlink, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
+import { legacySetting } from "../settings-legacy";
 import { CrewError } from "./state";
-import { agentIDSchema } from "./team";
+import { agentIDSchema as nativeAgentIDSchema } from "./team";
 
+// Batch 9 owns the remaining workspace operation containers.
+const agentIDSchema = legacySetting(nativeAgentIDSchema);
 const expected = z.strictObject({
   head: z.string().regex(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/),
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),

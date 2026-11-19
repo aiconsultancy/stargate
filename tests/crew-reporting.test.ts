@@ -23,7 +23,7 @@ import { Store } from "../src/store";
 
 async function fixture(safeReports = true) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-reporting-"));
-  const team = teamSchema.parse({
+  const team = Schema.decodeUnknownSync(teamSchema)({
     ...defaultTeam,
     crew: [
       ...defaultTeam.crew.map((member) => ({

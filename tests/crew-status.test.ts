@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import {
@@ -18,7 +19,7 @@ import { bot, identity } from "./fixtures";
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-member-status-"));
-  const team = teamSchema.parse({
+  const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "adama" },
     crew: [
       { id: "chief", role: "Engineering", permissionProfile: "coding" },

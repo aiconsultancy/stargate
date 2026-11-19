@@ -606,7 +606,7 @@ for (const report of [false, true]) {
         new URL("/v1", server.url).href,
         directory,
       );
-      const member = teamSchema.parse({
+      const member = Schema.decodeUnknownSync(teamSchema)({
         captain: { id: "captain" },
         crew: [
           {

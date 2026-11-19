@@ -124,7 +124,7 @@ test("Pi thinking level accepts only SDK levels the model supports", () => {
     thinkingLevel: "low",
   });
   const team = (thinkingLevel: unknown) =>
-    teamSchema.parse({
+    Schema.decodeUnknownSync(teamSchema)({
       captain: { id: "captain" },
       crew: [
         {

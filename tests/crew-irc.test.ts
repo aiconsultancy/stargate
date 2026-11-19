@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import {
   type CrewCaller,
   CrewEngine,
@@ -15,7 +16,7 @@ const pin = "ses_captainpin";
 
 async function fixture(options: { pinned?: boolean } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-crew-irc-"));
-  const team = teamSchema.parse({
+  const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [
       { id: "worker", role: "Builder", permissionProfile: "coding" },

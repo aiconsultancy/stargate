@@ -83,10 +83,10 @@ import {
   withdrawKey,
 } from "./state";
 import {
-  agentIDSchema,
   type CrewMember,
   defaultTeam,
-  teamSchema,
+  agentIDSchema as nativeAgentIDSchema,
+  teamSchema as nativeTeamSchema,
 } from "./team";
 import {
   inspectWorkspace,
@@ -99,6 +99,9 @@ import {
   workspaceRoot,
 } from "./workspace";
 
+// Batch 9 owns these remaining Zod configuration/operation containers.
+const agentIDSchema = legacySetting(nativeAgentIDSchema);
+const teamSchema = legacySetting(nativeTeamSchema);
 const decodeJournalInput = Schema.decodeUnknownResult(journalInputSchema, {
   onExcessProperty: "error",
 });

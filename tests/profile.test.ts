@@ -13,6 +13,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import { runCli } from "../src/cli";
 import { crewPermissions } from "../src/crew/policy";
 import {
@@ -411,7 +412,7 @@ test("shared working agreement is preserved and referenced, never injected into 
 
 test("portable Bosun is an ordinary configured worker, not a runtime default", async () => {
   const { options } = await fixture();
-  const example = teamSchema.parse(
+  const example = Schema.decodeUnknownSync(teamSchema)(
     await Bun.file(join(import.meta.dir, "..", "team.example.json")).json(),
   );
   const bosun = example.crew.find(({ id }) => id === "bosun");
@@ -471,7 +472,7 @@ for (const example of [
     );
     const command = document.match(/crew init[^`]+/)?.[0];
     expect(command).toContain(`--team ${example.teamArgument}`);
-    const team = teamSchema.parse(
+    const team = Schema.decodeUnknownSync(teamSchema)(
       await Bun.file(join(import.meta.dir, "..", example.teamPath)).json(),
     );
     expect(
@@ -517,7 +518,7 @@ test("ship initialization rejects a linked record without changing its target", 
 
 test("Pi crew receives a worktree but no OpenCode agent or session profile", async () => {
   const { options } = await fixture();
-  const mixed = teamSchema.parse({
+  const mixed = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "adama" },
     crew: [
       {
@@ -604,7 +605,9 @@ const team: Team = {
 };
 
 test("agent IDs must match assigned names without legacy aliases", () => {
-  expect(teamSchema.safeParse(team).success).toBe(true);
+  expect(Result.isSuccess(Schema.decodeUnknownResult(teamSchema)(team))).toBe(
+    true,
+  );
   for (const [id, name] of [
     ["mario", "Chief"],
     ["luigi", "Starbuck"],
@@ -612,28 +615,36 @@ test("agent IDs must match assigned names without legacy aliases", () => {
     ["toad", "Apollo"],
   ]) {
     expect(
-      teamSchema.safeParse({
-        ...team,
-        crew: [{ id, name, role: "Worker", permissionProfile: "coding" }],
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(teamSchema)({
+          ...team,
+          crew: [{ id, name, role: "Worker", permissionProfile: "coding" }],
+        }),
+      ),
     ).toBe(false);
   }
   expect(
-    teamSchema.safeParse({ ...team, captain: { id: "bowser", name: "Adama" } })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(teamSchema)({
+        ...team,
+        captain: { id: "bowser", name: "Adama" },
+      }),
+    ),
   ).toBe(false);
   expect(
-    teamSchema.safeParse({
-      ...team,
-      crew: [
-        {
-          id: "chief-engineer",
-          name: "Chief Engineer",
-          role: "Worker",
-          permissionProfile: "coding",
-        },
-      ],
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(teamSchema)({
+        ...team,
+        crew: [
+          {
+            id: "chief-engineer",
+            name: "Chief Engineer",
+            role: "Worker",
+            permissionProfile: "coding",
+          },
+        ],
+      }),
+    ),
   ).toBe(true);
 });
 
@@ -917,7 +928,7 @@ test("crew CLI loads non-secret --team JSON and rejects invalid input without ec
       );
     }
   }
-  const configured = teamSchema.parse({
+  const configured = Schema.decodeUnknownSync(teamSchema)({
     ...team,
     crew: [
       ...team.crew,
@@ -985,7 +996,7 @@ test("captain, crew and Pi instructions render the configured maintenance window
   );
   expect(paragraph).toContain("checkpoint work in progress");
   expect(paragraph).toContain("Do not start long tasks");
-  const team = teamSchema.parse({
+  const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "adama" },
     crew: [
       { id: "chief", role: "Engineer", permissionProfile: "coding" },

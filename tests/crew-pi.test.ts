@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import type { TextSink } from "../src/backend";
 import {
   CrewEngine,
@@ -22,7 +23,7 @@ import {
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 
 function twikiTeam(): Team {
-  return teamSchema.parse({
+  return Schema.decodeUnknownSync(teamSchema)({
     ...defaultTeam,
     crew: [
       ...defaultTeam.crew,
@@ -1085,10 +1086,10 @@ test("explicit OpenCode roster expansion preserves native and Pi peers and tasks
     const savedTask = f.engine.state.task(task.id);
     const statePath = f.engine.state.path;
     await f.engine.close();
-    const existingTeam = teamSchema.parse(f.options.team);
+    const existingTeam = Schema.decodeUnknownSync(teamSchema)(f.options.team);
     const expanded = {
       ...f.options,
-      team: teamSchema.parse({
+      team: Schema.decodeUnknownSync(teamSchema)({
         ...existingTeam,
         crew: [
           ...existingTeam.crew,

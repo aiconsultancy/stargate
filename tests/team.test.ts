@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import { crewPermissions } from "../src/crew/policy";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 
@@ -16,7 +17,7 @@ const team = {
 } satisfies Team;
 
 test("team configuration supports named captains and non-default rosters", () => {
-  expect(teamSchema.parse(team)).toEqual(team);
+  expect(Schema.decodeUnknownSync(teamSchema)(team)).toEqual(team);
   expect(defaultTeam.captain.id).toBe("bowser");
   expect(defaultTeam.crew.map((member) => member.id)).toEqual([
     "mario",
@@ -37,9 +38,17 @@ test("team configuration rejects ambiguous identities and implicit tool access",
     [{ ...team.crew[0], permissionProfile: "everything" }],
     [{ ...team.crew[0], model: "missing-provider" }],
   ]) {
-    expect(teamSchema.safeParse({ ...team, crew }).success).toBe(false);
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(teamSchema)({ ...team, crew }),
+      ),
+    ).toBe(false);
   }
-  expect(teamSchema.safeParse({ ...team, unknown: true }).success).toBe(false);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(teamSchema)({ ...team, unknown: true }),
+    ),
+  ).toBe(false);
 });
 
 test("specialisms share broad tools without granting captain model controls", () => {
@@ -86,34 +95,42 @@ test("history endpoints require safe transport and environment references", () =
       headersEnv: { authorization: "Bearer secret" },
     },
   ])
-    expect(teamSchema.safeParse({ ...team, historyAPI }).success).toBe(false);
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(teamSchema)({ ...team, historyAPI }),
+      ),
+    ).toBe(false);
   expect(
-    teamSchema.safeParse({
-      ...team,
-      historyAPI: {
-        url: "http://127.0.0.1:4096",
-        headersEnv: { authorization: "OPENCODE_AUTHORIZATION" },
-      },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(teamSchema)({
+        ...team,
+        historyAPI: {
+          url: "http://127.0.0.1:4096",
+          headersEnv: { authorization: "OPENCODE_AUTHORIZATION" },
+        },
+      }),
+    ),
   ).toBe(true);
 });
 
 test("a Pi research specialism does not restrict explicitly enabled host tools", () => {
   expect(
-    teamSchema.safeParse({
-      ...team,
-      crew: [
-        {
-          id: "researcher",
-          role: "Research",
-          permissionProfile: "research",
-          backend: {
-            type: "pi-durable",
-            model: "openai/opencode-go/deepseek-v4.1-flash",
-            tools: "coding",
+    Result.isSuccess(
+      Schema.decodeUnknownResult(teamSchema)({
+        ...team,
+        crew: [
+          {
+            id: "researcher",
+            role: "Research",
+            permissionProfile: "research",
+            backend: {
+              type: "pi-durable",
+              model: "openai/opencode-go/deepseek-v4.1-flash",
+              tools: "coding",
+            },
           },
-        },
-      ],
-    }).success,
+        ],
+      }),
+    ),
   ).toBe(true);
 });

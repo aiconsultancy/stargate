@@ -6,7 +6,7 @@ import { crewInputSchema } from "../src/crew/engine";
 import { historyInputSchema } from "../src/crew/history";
 import { journalInputSchema } from "../src/crew/journal";
 import { mailInputSchema } from "../src/crew/messaging";
-import { modelInputSchema } from "../src/crew/models";
+import { modelInputSchema, modelToolInputSchema } from "../src/crew/models";
 import * as toolInputs from "../src/crew/tool-input";
 import { objectToolInput } from "../src/crew/tool-input";
 import { cronOperationSchema } from "../src/cron-control";
@@ -17,7 +17,6 @@ const schemas = {
   stargate_crew: crewInputSchema,
   stargate_history: historyInputSchema,
   stargate_mail: mailInputSchema,
-  stargate_model: modelInputSchema,
   stargate_notifications: notificationInputSchema,
 };
 
@@ -172,10 +171,9 @@ test("original branch requirements, strictness and bounds remain enforced", () =
   ).toBe(true);
 });
 
-test("optional envelope fields do not inject another operation's defaults", () => {
+test("optional envelope fields do not inject another operation's defaults", async () => {
   for (const [original, input] of [
     [crewInputSchema, { op: "ensure" }],
-    [modelInputSchema, { op: "get" }],
     [mailInputSchema, { op: "inbox" }],
     [cronOperationSchema, { op: "report" }],
     [historyInputSchema, { op: "sessions" }],
@@ -183,4 +181,12 @@ test("optional envelope fields do not inject another operation's defaults", () =
     const adapted = objectToolInput(original).parse(input);
     expect(original.parse(adapted)).toEqual(original.parse(input));
   }
+  const input = { op: "get" };
+  const adapted = await modelToolInputSchema["~standard"].validate(input);
+  expect(adapted).toEqual({ value: input });
+  if (adapted.issues) throw new Error("Unexpected model validation failure");
+  expect(Schema.decodeUnknownSync(modelInputSchema)(adapted.value)).toEqual({
+    op: "get",
+    target: "self",
+  });
 });

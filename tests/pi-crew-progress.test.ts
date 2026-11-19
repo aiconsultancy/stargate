@@ -14,6 +14,7 @@ import type {
   SubmissionId,
   SubmissionRecord,
 } from "@earendil-works/pi-durable";
+import { Schema } from "effect";
 import { PiDurableBackend } from "../src/backends/pi-durable";
 import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
 import { CrewState, type CrewTask } from "../src/crew/state";
@@ -78,7 +79,7 @@ async function fixture(report = false) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-progress-"));
   const state = await CrewState.open(directory, "progress", "identity");
   const clock = new Clock();
-  const member = teamSchema.parse({
+  const member = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [
       {
