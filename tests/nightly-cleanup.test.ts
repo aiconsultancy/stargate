@@ -13,7 +13,9 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { Result, Schema } from "effect";
 import {
   type CleanupInput,
   runCleanup as cleanup,
@@ -26,7 +28,7 @@ import {
 } from "../src/nightly/cleanup-config";
 import { type CommandRunner, processRunner } from "../src/nightly/exec";
 
-const root = await mkdtemp("/tmp/opencode/stargate-cleanup-");
+const root = await mkdtemp(join(tmpdir(), "stargate-cleanup-"));
 // Even epoch day: oversized scratch batches start with the first window.
 const now = Date.parse("2026-01-01T00:00:00Z");
 const day = 86_400_000;
@@ -55,7 +57,10 @@ function input(
   extra: Partial<CleanupInput> = {},
 ): CleanupInput {
   return {
-    settings: cleanupSchema.parse({ enabled: true, scratchRoots }),
+    settings: Schema.decodeUnknownSync(cleanupSchema)({
+      enabled: true,
+      scratchRoots,
+    }),
     plan: false,
     now,
     runner: processRunner,
@@ -94,7 +99,7 @@ async function repository() {
 }
 
 test("strict schema is disabled by default and rejects relative paths and unknown fields", () => {
-  expect(cleanupSchema.parse({})).toEqual({
+  expect(Schema.decodeUnknownSync(cleanupSchema)({})).toEqual({
     enabled: false,
     olderThanDays: 5,
     scratchRoots: [],
@@ -107,7 +112,9 @@ test("strict schema is disabled by default and rejects relative paths and unknow
     { olderThanDays: 0 },
     { surprise: true },
   ])
-    expect(cleanupSchema.safeParse(value).success).toBe(false);
+    expect(
+      Result.isSuccess(Schema.decodeUnknownResult(cleanupSchema)(value)),
+    ).toBe(false);
 });
 
 test("disabled does not inspect or run commands; plan never deletes or writes", async () => {
@@ -117,7 +124,7 @@ test("disabled does not inspect or run commands; plan never deletes or writes", 
   await writeFile(join(stale, "data"), "123");
   await age(stale);
   const disabled = await cleanup(
-    input([scratch], { settings: cleanupSchema.parse({}) }),
+    input([scratch], { settings: Schema.decodeUnknownSync(cleanupSchema)({}) }),
   );
   expect(disabled.items).toEqual([]);
   const plan = await cleanup(input([scratch], { plan: true }));
@@ -165,7 +172,10 @@ test("unsafe scratch names and oversized branch names cannot invalidate the audi
   await git(repo, "branch", longBranch);
   const branches = await cleanup(
     input([], {
-      settings: cleanupSchema.parse({ enabled: true, repositories: [repo] }),
+      settings: Schema.decodeUnknownSync(cleanupSchema)({
+        enabled: true,
+        repositories: [repo],
+      }),
     }),
   );
   expect(cleanupResultSchema.safeParse(branches).success).toBe(true);
@@ -334,7 +344,10 @@ test("branches use only safe deletion, skip checked-out branches, and plan never
       return processRunner.run(command, options);
     },
   };
-  const settings = cleanupSchema.parse({ enabled: true, repositories: [repo] });
+  const settings = Schema.decodeUnknownSync(cleanupSchema)({
+    enabled: true,
+    repositories: [repo],
+  });
   const plan = await cleanup(input([], { settings, runner, plan: true }));
   expect(plan.items.find((item) => item.branch === "merged")?.status).toBe(
     "planned",
@@ -385,7 +398,10 @@ test("worktrees preserve primary, locked, dirty, unpushed, active and permanent 
     await age(worktree, mode === "recent" ? 1 : 10);
     const result = await cleanup(
       input([], {
-        settings: cleanupSchema.parse({ enabled: true, repositories: [repo] }),
+        settings: Schema.decodeUnknownSync(cleanupSchema)({
+          enabled: true,
+          repositories: [repo],
+        }),
         protectedPaths: mode === "permanent" ? [worktree] : [],
         taskDirectories: mode === "active" ? [worktree] : [],
       }),
@@ -992,7 +1008,10 @@ test("fetch errors and malformed worktree metadata fail closed without exposing 
     };
     const result = await cleanup(
       input([], {
-        settings: cleanupSchema.parse({ enabled: true, repositories: [repo] }),
+        settings: Schema.decodeUnknownSync(cleanupSchema)({
+          enabled: true,
+          repositories: [repo],
+        }),
         runner,
       }),
     );
@@ -1016,7 +1035,10 @@ test("abort during completed Git deletion still records removed outcome", async 
   };
   const result = await cleanup(
     input([], {
-      settings: cleanupSchema.parse({ enabled: true, repositories: [repo] }),
+      settings: Schema.decodeUnknownSync(cleanupSchema)({
+        enabled: true,
+        repositories: [repo],
+      }),
       runner,
       signal: controller.signal,
       record: async (item) => {
@@ -1035,7 +1057,10 @@ test("permanent primary protection permits unused branch management, never direc
   await git(repo, "branch", "merged");
   const result = await cleanup(
     input([], {
-      settings: cleanupSchema.parse({ enabled: true, repositories: [repo] }),
+      settings: Schema.decodeUnknownSync(cleanupSchema)({
+        enabled: true,
+        repositories: [repo],
+      }),
       protectedPaths: [repo],
     }),
   );
@@ -1080,7 +1105,10 @@ test("Git state and process use are checked again after the durable intent", asy
     let recorded = false;
     const result = await cleanup(
       input([], {
-        settings: cleanupSchema.parse({ enabled: true, repositories: [repo] }),
+        settings: Schema.decodeUnknownSync(cleanupSchema)({
+          enabled: true,
+          repositories: [repo],
+        }),
         inUse: async () =>
           recorded && mode === "in-use" ? "in-use" : "unused",
         record: async (item) => {

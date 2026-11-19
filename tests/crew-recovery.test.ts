@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CrewEngine,
@@ -12,7 +13,7 @@ import type { ResultAPI, ResultMessage } from "../src/crew/result";
 import type { CrewTask } from "../src/crew/state";
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/stargate-recovery-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-recovery-"));
   const options = {
     namespace: "recovery",
     stateDirectory: directory,

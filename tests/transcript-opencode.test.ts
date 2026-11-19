@@ -9,7 +9,9 @@ import {
   symlink,
   unlink,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { z } from "zod";
 import { latestInput, TranscriptUnavailable } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
@@ -81,7 +83,7 @@ function fixture(time: { busy?: number; idle?: number }) {
       return new Response(null, { status: 404 });
     },
   });
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
@@ -218,7 +220,7 @@ test("OpenCode watch reports settled sessions and reconnects", async () => {
       );
     },
   });
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
@@ -256,7 +258,7 @@ test("OpenCode watch reports settled sessions and reconnects", async () => {
 });
 
 test("repairThread resolves the namespace and protects existing state", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-repair-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-repair-"));
   const state = join(directory, "state");
   const database = join(state, "stargate.sqlite");
   const modes: number[] = [];
@@ -407,7 +409,7 @@ test("OpenCode reads every page of a long gap, keeps missing cursors, and honour
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
@@ -487,7 +489,7 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
@@ -550,7 +552,7 @@ test("OpenCode interrupt treats a deleted session as stopped, other failures as 
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",

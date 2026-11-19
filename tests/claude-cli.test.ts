@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { z } from "zod";
 import { ClaudeBackend } from "../src/backends/claude";
 import { claudeBackendSchema } from "../src/config";
@@ -226,7 +227,7 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
     const dataDirectory = join(data, name);
     await mkdir(dataDirectory);
     const backend = await ClaudeBackend.open(
-      claudeBackendSchema.parse({
+      Schema.decodeUnknownSync(claudeBackendSchema)({
         type: "claude",
         directory: project,
         model: "claude-sonnet-5-5",
@@ -328,7 +329,7 @@ test("real Claude Code CLI runs only the allowed tool names", async () => {
   setEnv({ [apiKeyEnv]: key });
   const open = async (allowedTools: string[]) =>
     ClaudeBackend.open(
-      claudeBackendSchema.parse({
+      Schema.decodeUnknownSync(claudeBackendSchema)({
         type: "claude",
         directory: project,
         model: "claude-sonnet-5-5",
@@ -455,7 +456,7 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
   ]);
   setEnv({ [apiKeyEnv]: key });
   const backend = await ClaudeBackend.open(
-    claudeBackendSchema.parse({
+    Schema.decodeUnknownSync(claudeBackendSchema)({
       type: "claude",
       directory: root,
       model: "claude-fable-5-2",
@@ -533,7 +534,7 @@ test("no Bash process of the real CLI outlives its turn", async () => {
   ]);
   setEnv({ [apiKeyEnv]: key });
   const backend = await ClaudeBackend.open(
-    claudeBackendSchema.parse({
+    Schema.decodeUnknownSync(claudeBackendSchema)({
       type: "claude",
       directory: project,
       model: "claude-sonnet-5-5",

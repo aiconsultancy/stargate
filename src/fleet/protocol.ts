@@ -1,24 +1,39 @@
 import { isAbsolute, resolve } from "node:path";
+import { Schema, SchemaTransformation } from "effect";
 import { z } from "zod";
+import { legacySetting } from "../settings-legacy";
+import {
+  settingsCheck,
+  settingsDefault,
+  settingsPattern,
+  settingsRefine,
+  settingsStruct,
+} from "../settings-schema";
 
-const identifier = z
-  .string()
-  .min(1)
-  .max(256)
-  .regex(/^[^\s\p{Cc}]+$/u);
-const path = z
-  .string()
-  .refine(
-    (value) => isAbsolute(value) && resolve(value) === value,
-    "An absolute normalised path is required",
+const fleetIdentifier = Schema.String.check(Schema.isMinCodePoints(1))
+  .check(Schema.isMaxCodePoints(256))
+  .check(settingsPattern(/^[^\s\p{Cc}]+$/u));
+const fleetPath = Schema.String.check(
+  settingsRefine((value) => isAbsolute(value) && resolve(value) === value, {
+    message: "An absolute normalised path is required",
+  }),
+);
+export const reviewRepositorySchema = Schema.String.check(
+  Schema.isMaxCodePoints(256),
+)
+  .check(settingsPattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/))
+  .pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transform({
+        decode: (value) => value.toLowerCase(),
+        encode: (value) => value,
+      }),
+    ),
   );
-export const reviewRepositorySchema = z
-  .string()
-  .max(256)
-  .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
-  .transform((value) => value.toLowerCase());
+const identifier = legacySetting(fleetIdentifier);
 export const reviewTargetSchema = z.strictObject({
-  repository: reviewRepositorySchema,
+  repository: legacySetting(reviewRepositorySchema),
   pullRequest: z.number().int().positive().safe(),
   headSHA: z.string().regex(/^[a-f0-9]{40}$/),
   baseSHA: z.string().regex(/^[a-f0-9]{40}$/),
@@ -124,32 +139,31 @@ export const reviewAssignmentSchema = reviewTargetSchema.extend({
   context: reviewContextTextSchema,
 });
 export type FleetReviewAssignment = z.infer<typeof reviewAssignmentSchema>;
-export const reviewAgentSchema = z
-  .strictObject({
-    agent: identifier,
-    kind: z.enum(["crew", "captain"]),
-    family: identifier,
-    directory: path,
-    models: z
-      .array(
-        z.strictObject({
-          provider: identifier,
-          model: identifier,
-          variant: identifier.optional(),
-        }),
-      )
-      .min(1),
-    permissions: z
-      .array(
-        z.strictObject({
-          action: z.string().min(1),
-          resource: z.string().min(1),
-          effect: z.enum(["allow", "deny", "ask"]),
-        }),
-      )
-      .default([]),
-  })
-  .superRefine((reviewer, context) => {
+export const reviewAgentSchema = settingsStruct({
+  agent: fleetIdentifier,
+  kind: Schema.Literals(["crew", "captain"]),
+  family: fleetIdentifier,
+  directory: fleetPath,
+  models: Schema.mutable(
+    Schema.Array(
+      settingsStruct({
+        provider: fleetIdentifier,
+        model: fleetIdentifier,
+        variant: Schema.optional(fleetIdentifier),
+      }),
+    ),
+  ).check(Schema.isMinLength(1)),
+  permissions: Schema.mutable(
+    Schema.Array(
+      settingsStruct({
+        action: Schema.String.check(Schema.isMinCodePoints(1)),
+        resource: Schema.String.check(Schema.isMinCodePoints(1)),
+        effect: Schema.Literals(["allow", "deny", "ask"]),
+      }),
+    ),
+  ).pipe(settingsDefault([])),
+}).check(
+  settingsCheck((reviewer, context) => {
     if (
       reviewer.kind === "crew" &&
       reviewer.permissions.some(
@@ -164,31 +178,37 @@ export const reviewAgentSchema = z
         message:
           "Review workers permit only explicit read, glob and grep grants; no ask or mutating tools",
       });
-  });
-export type FleetReviewAgent = z.infer<typeof reviewAgentSchema>;
-export const fleetTargetSchema = z.strictObject({
-  id: identifier,
-  account: identifier,
+  }),
+);
+export type FleetReviewAgent = typeof reviewAgentSchema.Type;
+export const fleetTargetSchema = settingsStruct({
+  id: fleetIdentifier,
+  account: fleetIdentifier,
   /** Explicit routing metadata; omitted/unknown roles never add channel joins. */
-  role: z.enum(["captain", "rear_admiral", "crew"]).optional(),
-  channel: z.string().regex(/^#[^\s,\p{Cc}]{1,190}$/u),
-  sessionID: identifier,
+  role: Schema.optional(Schema.Literals(["captain", "rear_admiral", "crew"])),
+  channel: Schema.String.check(settingsPattern(/^#[^\s,\p{Cc}]{1,190}$/u)),
+  sessionID: fleetIdentifier,
 });
-export const fleetControlSchema = z
-  .strictObject({
-    socketPath: path,
-    statePath: path,
-    targets: z.array(fleetTargetSchema).min(1),
-    /** Gateway-only completion outbox; never enabled by installing the plugin. */
-    results: z.boolean().optional(),
-    reviews: z
-      .strictObject({
-        repositories: z.array(reviewRepositorySchema).min(1),
-        reviewers: z.array(reviewAgentSchema).min(1),
-      })
-      .optional(),
-  })
-  .superRefine((config, context) => {
+export const fleetControlSchema = settingsStruct({
+  socketPath: fleetPath,
+  statePath: fleetPath,
+  targets: Schema.mutable(Schema.Array(fleetTargetSchema)).check(
+    Schema.isMinLength(1),
+  ),
+  /** Gateway-only completion outbox; never enabled by installing the plugin. */
+  results: Schema.optional(Schema.Boolean),
+  reviews: Schema.optional(
+    settingsStruct({
+      repositories: Schema.mutable(Schema.Array(reviewRepositorySchema)).check(
+        Schema.isMinLength(1),
+      ),
+      reviewers: Schema.mutable(Schema.Array(reviewAgentSchema)).check(
+        Schema.isMinLength(1),
+      ),
+    }),
+  ),
+}).check(
+  settingsCheck((config, context) => {
     if (config.reviews) {
       if (config.results !== true)
         context.addIssue({
@@ -212,9 +232,10 @@ export const fleetControlSchema = z
         code: "custom",
         message: "Fleet target IDs must be unique",
       });
-  });
-export type FleetControlConfig = z.infer<typeof fleetControlSchema>;
-export type FleetTarget = z.infer<typeof fleetTargetSchema>;
+  }),
+);
+export type FleetControlConfig = typeof fleetControlSchema.Type;
+export type FleetTarget = typeof fleetTargetSchema.Type;
 
 export const sourceSchema = z
   .strictObject({
@@ -346,7 +367,7 @@ export const reviewBindingSchema = z.strictObject({
   context: reviewContextSchema,
   contextText: reviewContextTextSchema,
   reviewerShip: identifier,
-  reviewer: reviewAgentSchema,
+  reviewer: legacySetting(reviewAgentSchema),
   sessionID: identifier,
   inputID: identifier,
   createdAt: z.iso.datetime(),

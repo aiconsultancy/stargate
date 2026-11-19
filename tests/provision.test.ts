@@ -1,8 +1,14 @@
 import { afterEach, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { provisionBots } from "../src/provision";
 import { addBot, readConfiguration } from "../src/setup";
+import {
+  legacyProvisionDecoded,
+  legacyProvisionInput,
+} from "./settings-schema-golden";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -33,7 +39,7 @@ function bot(id = "crew") {
 }
 
 async function fixture(bots: unknown[] = [bot()]) {
-  const directory = await mkdtemp(join("/tmp/opencode", "stargate-provision-"));
+  const directory = await mkdtemp(join(tmpdir(), "stargate-provision-"));
   directories.push(directory);
   const planPath = join(directory, "bots.json");
   const configPath = join(directory, "stargate.json");
@@ -49,6 +55,60 @@ const credentials = { SLACK_APP_CONFIG_TOKEN: "private-config-token" };
 const noNetwork = async () => {
   throw new Error("Unexpected network access");
 };
+
+test.each([false, true])(
+  "a legacy provisioning journal retains its decoded-plan hash after migration (module options: %s)",
+  async (moduleOptions) => {
+    const input = structuredClone(legacyProvisionInput);
+    const decoded = structuredClone(legacyProvisionDecoded);
+    const raw = JSON.parse(
+      '{"__proto__":{"fixture":true},"ordinary":1,"nested":{"__proto__":{"keep":true}}}',
+    );
+    const backend = {
+      type: "module",
+      module: "/workspace/module.ts",
+      options: raw,
+    };
+    const bots = moduleOptions
+      ? input.bots.map((bot) => ({ ...bot, backend }))
+      : input.bots;
+    const plan = moduleOptions
+      ? {
+          ...decoded,
+          bots: decoded.bots.map((bot) => ({
+            ...bot,
+            backend: {
+              ...backend,
+              options: { ordinary: 1, nested: raw.nested },
+            },
+          })),
+        }
+      : decoded;
+    const options = await fixture([...bots]);
+    const planHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          plan,
+          configPath: options.configPath,
+        }),
+      )
+      .digest("hex");
+    await writeFile(
+      options.journalPath,
+      JSON.stringify({
+        version: 1,
+        planHash,
+        bots: [{ id: "fixture", state: "pending" }],
+      }),
+      { mode: 0o600 },
+    );
+    const result = await provisionBots(options, {
+      fetch: noNetwork,
+      environment: {},
+    });
+    expect(result.bots[0]?.app).toBe("planned");
+  },
+);
 
 test("offline planning returns manifests and links without creating files", async () => {
   const options = await fixture();

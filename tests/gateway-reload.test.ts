@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
@@ -70,7 +71,7 @@ test("reconfiguration changes access and text-mention admission without reconnec
   };
   expect(f.gateway.accept(body)).toBe(false);
   f.gateway.reconfigure(
-    botSchema.parse({
+    Schema.decodeUnknownSync(botSchema)({
       ...f.config,
       access: {
         ...f.config.access,
@@ -108,7 +109,7 @@ test("the starting transcriber survives a reload during file download", async ()
       ];
     },
   });
-  const config = botSchema.parse({
+  const config = Schema.decodeUnknownSync(botSchema)({
     ...f.config,
     transcription: {
       provider: {
@@ -129,7 +130,7 @@ test("the starting transcriber survives a reload during file download", async ()
   const work = f.gateway.process(f.next(), new AbortController().signal);
   await downloading.promise;
   f.gateway.reconfigure(
-    botSchema.parse({
+    Schema.decodeUnknownSync(botSchema)({
       ...config,
       transcription: {
         ...config.transcription,
@@ -162,7 +163,7 @@ test("a deny reload blocks streaming updates after an earlier preview", async ()
   const work = f.gateway.process(f.next(), new AbortController().signal);
   await visible.promise;
   f.gateway.reconfigure(
-    botSchema.parse({
+    Schema.decodeUnknownSync(botSchema)({
       ...f.config,
       access: { ...f.config.access, deniedChannels: ["C123"] },
     }),
@@ -176,7 +177,7 @@ test("live peer limits enforce caps above the old query bound", () => {
   const f = fixture();
   const configure = (cap: number) =>
     f.gateway.reconfigure(
-      botSchema.parse({
+      Schema.decodeUnknownSync(botSchema)({
         ...f.config,
         access: {
           ...f.config.access,

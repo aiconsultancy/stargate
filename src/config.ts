@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { z } from "zod";
+import { Result, Schema, SchemaTransformation } from "effect";
 import { crewActivitySchema } from "./activity";
 import { captainPostSchema } from "./captain-post-config";
 import { cronjobsSchema } from "./cronjob-config";
@@ -23,28 +23,50 @@ import {
   secureLocalOrHttpsURL,
 } from "./pi-model";
 import { quotaWatchSchema } from "./quota-watch";
+import { decodeSettings } from "./settings-errors";
+import {
+  settingsCheck,
+  settingsDefault,
+  settingsDiscriminatedUnion,
+  settingsPattern,
+  settingsRecord,
+  settingsRefine,
+  settingsStruct,
+  settingsURL,
+  settingsUUID,
+} from "./settings-schema";
 import { transcriptionSchema } from "./transcription";
 import { waitingSchema } from "./waiting";
 
-const absolutePath = z.string().refine(isAbsolute, "Use an absolute path");
-const envName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
-const userRule = z.union([z.literal("*"), z.string().regex(/^[UW][A-Z0-9]+$/)]);
-const channelRule = z.union([
-  z.literal("*"),
-  z.string().regex(/^[CGD][A-Z0-9]+$/),
+const absolutePath = Schema.String.check(
+  settingsRefine(isAbsolute, { message: "Use an absolute path" }),
+);
+const envName = Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/));
+const userRule = Schema.Union([
+  Schema.Literal("*"),
+  Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
+]);
+const channelRule = Schema.Union([
+  Schema.Literal("*"),
+  Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
 ]);
 
-export const piDurableBackendSchema = z.strictObject({
-  type: z.literal("pi-durable"),
+export const piDurableBackendSchema = settingsStruct({
+  type: Schema.Literal("pi-durable"),
   directory: absolutePath,
   model: piModelSchema,
-  provider: piProviderSchema.optional(),
-  thinkingLevel: piThinkingLevelSchema.optional(),
-  systemPrompt: z
-    .string()
-    .default("You are a helpful assistant responding in Slack."),
-  tools: z.enum(["none", "coding"]).default("none"),
+  provider: Schema.optional(piProviderSchema),
+  thinkingLevel: Schema.optional(piThinkingLevelSchema),
+  systemPrompt: Schema.String.pipe(
+    settingsDefault("You are a helpful assistant responding in Slack."),
+  ),
+  tools: Schema.Literals(["none", "coding"]).pipe(settingsDefault("none")),
 });
+
+const { directory: _piDirectory, ...piCrewBackendFields } =
+  piDurableBackendSchema.fields;
+/** Crew working directories are supplied by the configured worktree map. */
+export const piCrewBackendSchema = settingsStruct(piCrewBackendFields);
 
 /**
  * Built-in Claude Code tools that a `claude` backend may enable. Others, such
@@ -70,32 +92,38 @@ export const claudeToolNames = [
  * Claude Code permits reads anywhere in its working directory regardless of
  * the scope, so the rule would promise a limit that nothing enforces.
  */
-const claudeToolsSchema = z
-  .array(z.enum(claudeToolNames))
-  .max(claudeToolNames.length)
-  .refine((tools) => new Set(tools).size === tools.length, {
-    message: "Duplicate allowedTools entry",
-  });
+const claudeToolsSchema = Schema.mutable(
+  Schema.Array(Schema.Literals(claudeToolNames)),
+)
+  .check(Schema.isMaxLength(claudeToolNames.length))
+  .check(
+    settingsRefine((tools) => new Set(tools).size === tools.length, {
+      message: "Duplicate allowedTools entry",
+    }),
+  );
 
 /** Explicit, operator-controlled MCP servers; no embedded credentials. */
-const claudeMcpServersSchema = z.record(
-  z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
-  z.discriminatedUnion("type", [
-    z.strictObject({
-      type: z.literal("http"),
+const claudeMcpServersSchema = settingsRecord(
+  Schema.String.check(settingsPattern(/^[a-z][a-z0-9_-]{0,31}$/)),
+  settingsDiscriminatedUnion("type", [
+    settingsStruct({
+      type: Schema.Literal("http"),
       url: secureLocalOrHttpsURL,
-      headersHelper: z
-        .string()
-        .regex(
-          /^\/[a-zA-Z0-9_./-]+(?: [a-zA-Z0-9_./-]+)*$/,
-          "Use an absolute executable and optional literal arguments",
-        )
-        .optional(),
+      headersHelper: Schema.optional(
+        Schema.String.check(
+          settingsPattern(/^\/[a-zA-Z0-9_./-]+(?: [a-zA-Z0-9_./-]+)*$/, {
+            message:
+              "Use an absolute executable and optional literal arguments",
+          }),
+        ),
+      ),
     }),
-    z.strictObject({
-      type: z.literal("stdio"),
+    settingsStruct({
+      type: Schema.Literal("stdio"),
       command: absolutePath,
-      args: z.array(z.string()).default([]),
+      args: Schema.mutable(Schema.Array(Schema.String)).pipe(
+        settingsDefault([]),
+      ),
     }),
   ]),
 );
@@ -104,40 +132,52 @@ const claudeMcpServersSchema = z.record(
  * Claude Agent SDK backend. The model is reached only through the explicit
  * proxy `provider`; there is no native login or API-key fallback.
  */
-export const claudeBackendSchema = z.strictObject({
-  type: z.literal("claude"),
+export const claudeBackendSchema = settingsStruct({
+  type: Schema.Literal("claude"),
   /** Starting working directory, not a sandbox. */
   directory: absolutePath,
-  model: z
-    .string()
-    .regex(
-      /^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,127}$/,
-      "Use a proxy model ID such as claude-sonnet-5-5",
-    ),
-  /** Anthropic Messages endpoint ending in `/v1`, as for OpenCode and Pi. */
-  provider: piProviderSchema.refine(
-    (provider) => provider.baseURL.endsWith("/v1"),
-    "Claude provider baseURL must end with /v1",
+  model: Schema.String.check(
+    settingsPattern(/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,127}$/, {
+      message: "Use a proxy model ID such as claude-sonnet-5-5",
+    }),
   ),
-  effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+  /** Anthropic Messages endpoint ending in `/v1`, as for OpenCode and Pi. */
+  provider: piProviderSchema.check(
+    settingsRefine((provider) => provider.baseURL.endsWith("/v1"), {
+      message: "Claude provider baseURL must end with /v1",
+    }),
+  ),
+  effort: Schema.optional(
+    Schema.Literals(["low", "medium", "high", "xhigh", "max"]),
+  ),
   /** Appended to Claude Code's own system prompt. */
-  systemPrompt: z.string().trim().min(1).max(64_000).optional(),
+  systemPrompt: Schema.optional(
+    Schema.Trim.check(Schema.isMinCodePoints(1)).check(
+      Schema.isMaxCodePoints(64_000),
+    ),
+  ),
   /** The only tools the model can see and run; every other one is absent. */
-  allowedTools: claudeToolsSchema.default([]),
-  mcpServers: claudeMcpServersSchema.optional(),
+  allowedTools: claudeToolsSchema.pipe(settingsDefault([])),
+  mcpServers: Schema.optional(claudeMcpServersSchema),
   /**
    * Filesystem settings to load from `directory`: `project` loads
    * `.claude/settings.json` and CLAUDE.md, `local` loads
    * `.claude/settings.local.json`. Empty by default.
    */
-  settingSources: z
-    .array(z.enum(["project", "local"]))
-    .max(2)
-    .refine((sources) => new Set(sources).size === sources.length, {
-      message: "Duplicate settingSources entry",
-    })
-    .default([]),
-  maxTurns: z.number().int().min(1).max(500).default(50),
+  settingSources: Schema.mutable(
+    Schema.Array(Schema.Literals(["project", "local"])),
+  )
+    .check(Schema.isMaxLength(2))
+    .check(
+      settingsRefine((sources) => new Set(sources).size === sources.length, {
+        message: "Duplicate settingSources entry",
+      }),
+    )
+    .pipe(settingsDefault([])),
+  maxTurns: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .check(Schema.isLessThanOrEqualTo(500))
+    .pipe(settingsDefault(50)),
 });
 
 /**
@@ -146,299 +186,399 @@ export const claudeBackendSchema = z.strictObject({
  * `~/.codex` or API-key fallback. Only settings the Codex sandbox enforces
  * are accepted.
  */
-export const codexBackendSchema = z
-  .strictObject({
-    type: z.literal("codex"),
-    /** Starting working directory and sandbox root, not a host boundary. */
-    directory: absolutePath,
-    model: z
-      .string()
-      .regex(
-        /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
-        "Use a proxy model ID such as gpt-6.1-sol",
-      ),
-    /** OpenAI Responses API endpoint ending in `/v1`, as for OpenCode. */
-    provider: piProviderSchema.refine(
-      (provider) => provider.baseURL.endsWith("/v1"),
-      "Codex provider baseURL must end with /v1",
+export const codexBackendSchema = settingsStruct({
+  type: Schema.Literal("codex"),
+  /** Starting working directory and sandbox root, not a host boundary. */
+  directory: absolutePath,
+  model: Schema.String.check(
+    settingsPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/, {
+      message: "Use a proxy model ID such as gpt-6.1-sol",
+    }),
+  ),
+  /** OpenAI Responses API endpoint ending in `/v1`, as for OpenCode. */
+  provider: piProviderSchema.check(
+    settingsRefine((provider) => provider.baseURL.endsWith("/v1"), {
+      message: "Codex provider baseURL must end with /v1",
+    }),
+  ),
+  reasoningEffort: Schema.optional(
+    Schema.Literals(["minimal", "low", "medium", "high", "xhigh"]),
+  ),
+  /** Added as Codex developer instructions. */
+  systemPrompt: Schema.optional(
+    Schema.Trim.check(Schema.isMinCodePoints(1)).check(
+      Schema.isMaxCodePoints(64_000),
     ),
-    reasoningEffort: z
-      .enum(["minimal", "low", "medium", "high", "xhigh"])
-      .optional(),
-    /** Added as Codex developer instructions. */
-    systemPrompt: z.string().trim().min(1).max(64_000).optional(),
-    /**
-     * Codex sandbox for tool commands. `read-only` by default;
-     * `workspace-write` permits writes under `directory`;
-     * `danger-full-access` runs commands without a sandbox.
-     */
-    sandbox: z
-      .enum(["read-only", "workspace-write", "danger-full-access"])
-      .default("read-only"),
-    /**
-     * Network for tool commands. Only `workspace-write` switches it; the
-     * read-only sandbox always blocks it, and `danger-full-access` cannot
-     * block it, so that mode requires `network: true`.
-     */
-    network: z.boolean().default(false),
-    /** Read `AGENTS.md` project instructions from `directory`. */
-    projectDocs: z.boolean().default(false),
-    /**
-     * Directories after the system ones on the CLI's `PATH`. The operator's
-     * own `PATH` is never inherited; every entry is checked at start-up.
-     */
-    extraPath: z.array(absolutePath).max(32).default([]),
-  })
-  .refine(
-    (backend) => !backend.network || backend.sandbox !== "read-only",
-    "The read-only sandbox always blocks network; network: true needs workspace-write",
+  ),
+  /**
+   * Codex sandbox for tool commands. `read-only` by default;
+   * `workspace-write` permits writes under `directory`;
+   * `danger-full-access` runs commands without a sandbox.
+   */
+  sandbox: Schema.Literals([
+    "read-only",
+    "workspace-write",
+    "danger-full-access",
+  ]).pipe(settingsDefault("read-only")),
+  /**
+   * Network for tool commands. Only `workspace-write` switches it; the
+   * read-only sandbox always blocks it, and `danger-full-access` cannot
+   * block it, so that mode requires `network: true`.
+   */
+  network: Schema.Boolean.pipe(settingsDefault(false)),
+  /** Read `AGENTS.md` project instructions from `directory`. */
+  projectDocs: Schema.Boolean.pipe(settingsDefault(false)),
+  /**
+   * Directories after the system ones on the CLI's `PATH`. The operator's
+   * own `PATH` is never inherited; every entry is checked at start-up.
+   */
+  extraPath: Schema.mutable(Schema.Array(absolutePath))
+    .check(Schema.isMaxLength(32))
+    .pipe(settingsDefault([])),
+})
+  .check(
+    settingsRefine(
+      (backend) => !backend.network || backend.sandbox !== "read-only",
+      {
+        message:
+          "The read-only sandbox always blocks network; network: true needs workspace-write",
+      },
+    ),
   )
-  .refine(
-    (backend) => backend.network || backend.sandbox !== "danger-full-access",
-    "danger-full-access cannot block the network; set network: true",
+  .check(
+    settingsRefine(
+      (backend) => backend.network || backend.sandbox !== "danger-full-access",
+      {
+        message:
+          "danger-full-access cannot block the network; set network: true",
+      },
+    ),
   );
 
 // HTTP is permitted only for Tailscale names/addresses. Public routes need TLS.
-const pairingOrigin = z
-  .url()
-  .max(2048)
-  .refine((value) => {
-    if (!URL.canParse(value) || !/^https?:\/\//i.test(value)) return false;
-    const url = new URL(value);
-    if (
-      /[\s\\?#@]/.test(value) ||
-      url.username ||
-      url.password ||
-      url.pathname !== "/"
-    )
-      return false;
-    if (url.protocol === "https:") return true;
-    if (url.protocol !== "http:") return false;
-    const host = url.hostname;
-    const parts = host.split(".").map(Number);
-    return (
-      host.endsWith(".ts.net") ||
-      (parts.length === 4 &&
-        parts.every(
-          (part) => Number.isInteger(part) && part >= 0 && part <= 255,
-        ) &&
-        parts[0] === 100 &&
-        (parts[1] ?? 0) >= 64 &&
-        (parts[1] ?? 256) <= 127) ||
-      host.startsWith("[fd7a:115c:a1e0:")
-    );
-  }, "Use an HTTPS origin, or an HTTP Tailscale origin, without credentials, path, query or fragment")
-  .transform((value) => new URL(value).origin);
+const pairingOrigin = settingsURL
+  .check(Schema.isMaxCodePoints(2048))
+  .check(
+    settingsRefine(
+      (value) => {
+        if (!URL.canParse(value) || !/^https?:\/\//i.test(value)) return false;
+        const url = new URL(value);
+        if (
+          /[\s\\?#@]/.test(value) ||
+          url.username ||
+          url.password ||
+          url.pathname !== "/"
+        )
+          return false;
+        if (url.protocol === "https:") return true;
+        if (url.protocol !== "http:") return false;
+        const host = url.hostname;
+        const parts = host.split(".").map(Number);
+        return (
+          host.endsWith(".ts.net") ||
+          (parts.length === 4 &&
+            parts.every(
+              (part) => Number.isInteger(part) && part >= 0 && part <= 255,
+            ) &&
+            parts[0] === 100 &&
+            (parts[1] ?? 0) >= 64 &&
+            (parts[1] ?? 256) <= 127) ||
+          host.startsWith("[fd7a:115c:a1e0:")
+        );
+      },
+      {
+        message:
+          "Use an HTTPS origin, or an HTTP Tailscale origin, without credentials, path, query or fragment",
+      },
+    ),
+  )
+  .pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transform({
+        // The checks above own rejection. Failure-only diagnostic decoding
+        // disables checks and must retain the string instead of throwing.
+        decode: (value) =>
+          URL.canParse(value) ? new URL(value).origin : value,
+        encode: (value) => value,
+      }),
+    ),
+  );
 
-const pairingSchema = z.strictObject({
-  operators: z
-    .array(z.string().regex(/^[UW][A-Z0-9]+$/))
-    .min(1)
-    .max(100),
-  urls: z.array(pairingOrigin).min(1).max(5),
+const pairingSchema = settingsStruct({
+  operators: Schema.mutable(
+    Schema.Array(Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/))),
+  )
+    .check(Schema.isMinLength(1))
+    .check(Schema.isMaxLength(100)),
+  urls: Schema.mutable(Schema.Array(pairingOrigin))
+    .check(Schema.isMinLength(1))
+    .check(Schema.isMaxLength(5)),
 });
 
-export const backendSchema = z.discriminatedUnion("type", [
-  z.strictObject({
-    type: z.literal("opencode"),
-    url: z
-      .url()
-      .refine((value) => ["http:", "https:"].includes(new URL(value).protocol)),
+export const backendSchema = settingsDiscriminatedUnion("type", [
+  settingsStruct({
+    type: Schema.Literal("opencode"),
+    url: settingsURL.check(
+      settingsRefine(
+        (value) => ["http:", "https:"].includes(new URL(value).protocol),
+        { message: "Invalid input" },
+      ),
+    ),
     directory: absolutePath,
-    headersEnv: z.record(z.string(), envName).default({}),
-    sessionID: z
-      .string()
-      .max(256)
-      .regex(/^ses_[A-Za-z0-9]+$/)
-      .optional(),
-    agent: z.string().min(1).optional(),
-    enforcePermissions: z.boolean().optional(),
-    model: z
-      .strictObject({ providerID: z.string().min(1), id: z.string().min(1) })
-      .optional(),
-    permissions: z
-      .array(
-        z.strictObject({
-          action: z.string().min(1),
-          resource: z.string().min(1),
-          effect: z.enum(["allow", "deny", "ask"]),
+    headersEnv: settingsRecord(Schema.String, envName).pipe(
+      settingsDefault({}),
+    ),
+    sessionID: Schema.optional(
+      Schema.String.check(Schema.isMaxCodePoints(256)).check(
+        settingsPattern(/^ses_[A-Za-z0-9]+$/),
+      ),
+    ),
+    agent: Schema.optional(Schema.String.check(Schema.isMinCodePoints(1))),
+    enforcePermissions: Schema.optional(Schema.Boolean),
+    model: Schema.optional(
+      settingsStruct({
+        providerID: Schema.String.check(Schema.isMinCodePoints(1)),
+        id: Schema.String.check(Schema.isMinCodePoints(1)),
+      }),
+    ),
+    permissions: Schema.mutable(
+      Schema.Array(
+        settingsStruct({
+          action: Schema.String.check(Schema.isMinCodePoints(1)),
+          resource: Schema.String.check(Schema.isMinCodePoints(1)),
+          effect: Schema.Literals(["allow", "deny", "ask"]),
         }),
-      )
-      .default([{ action: "*", resource: "*", effect: "deny" }]),
+      ),
+    ).pipe(settingsDefault([{ action: "*", resource: "*", effect: "deny" }])),
   }),
   piDurableBackendSchema,
   claudeBackendSchema,
   codexBackendSchema,
-  z.strictObject({
-    type: z.literal("module"),
+  settingsStruct({
+    type: Schema.Literal("module"),
     module: absolutePath,
-    options: z.record(z.string(), z.unknown()).default({}),
+    options: settingsRecord(Schema.String, Schema.Unknown).pipe(
+      settingsDefault({}),
+    ),
   }),
 ]);
 
-export const botSchema = z.strictObject({
-  id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-  displayName: z.string().trim().min(1).max(100).optional(),
-  slack: z.strictObject({
-    appId: z.string().regex(/^A[A-Z0-9]+$/),
+export const botSchema = settingsStruct({
+  id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  displayName: Schema.optional(
+    Schema.Trim.check(Schema.isMinCodePoints(1)).check(
+      Schema.isMaxCodePoints(100),
+    ),
+  ),
+  slack: settingsStruct({
+    appId: Schema.String.check(settingsPattern(/^A[A-Z0-9]+$/)),
     appTokenEnv: envName,
     botTokenEnv: envName,
   }),
-  access: z.strictObject({
-    users: z.array(userRule).min(1),
-    channels: z.array(channelRule).min(1),
-    deniedUsers: z.array(userRule).default([]),
-    deniedChannels: z.array(channelRule).default([]),
-    mentionOnly: z.boolean().default(false),
+  access: settingsStruct({
+    users: Schema.mutable(Schema.Array(userRule)).check(Schema.isMinLength(1)),
+    channels: Schema.mutable(Schema.Array(channelRule)).check(
+      Schema.isMinLength(1),
+    ),
+    deniedUsers: Schema.mutable(Schema.Array(userRule)).pipe(
+      settingsDefault([]),
+    ),
+    deniedChannels: Schema.mutable(Schema.Array(channelRule)).pipe(
+      settingsDefault([]),
+    ),
+    mentionOnly: Schema.Boolean.pipe(settingsDefault(false)),
     /** Admit verified peer captain bots (`*-captain`); other bots stay rejected. */
-    peerCaptains: z.boolean().optional(),
+    peerCaptains: Schema.optional(Schema.Boolean),
     /** Peer captain turns per thread/hour; absent keeps the default of five. */
-    peerTurnsPerHour: z.number().int().min(0).max(600).optional(),
+    peerTurnsPerHour: Schema.optional(
+      Schema.Finite.check(Schema.isInt())
+        .check(Schema.isGreaterThanOrEqualTo(0))
+        .check(Schema.isLessThanOrEqualTo(600)),
+    ),
     /**
      * In these channels, a top-level message whose text contains one of the
      * names starts a conversation like a mention. Absent is off.
      */
-    textMentions: textMentionRuleSchema.optional(),
+    textMentions: Schema.optional(textMentionRuleSchema),
   }),
   backend: backendSchema,
   /** Read-only health reporting; remote health uses a cached snapshot only. */
-  health: healthConfigSchema.optional(),
+  health: Schema.optional(healthConfigSchema),
   /** Opt-in Slack configuration buttons; typed commands remain the default. */
-  configPanelEnabled: z.boolean().default(false),
-  cronjobs: cronjobsSchema.optional(),
+  configPanelEnabled: Schema.Boolean.pipe(settingsDefault(false)),
+  cronjobs: Schema.optional(cronjobsSchema),
   /** Captain `stargate_post` to allowed channels; absent is off. */
-  captainPost: captainPostSchema.optional(),
-  pairing: pairingSchema.optional(),
-  threadContext: z.boolean().default(false),
+  captainPost: Schema.optional(captainPostSchema),
+  pairing: Schema.optional(pairingSchema),
+  threadContext: Schema.Boolean.pipe(settingsDefault(false)),
   /** Follow an untagged reply when Slack history proves this bot already replied. */
-  resumeSlackThreads: z.boolean().optional(),
+  resumeSlackThreads: Schema.optional(Schema.Boolean),
   /** Acknowledge a human Slack message while its turn runs. */
-  slackReadReceipts: z.boolean().optional(),
+  slackReadReceipts: Schema.optional(Schema.Boolean),
   /** Speech-to-text for accepted audio and video messages; absent is off. */
-  transcription: transcriptionSchema.optional(),
-  waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),
-  crewActivity: crewActivitySchema.default({
-    detail: "off",
-  }),
-  concurrency: z.number().int().min(1).max(32).default(4),
-  turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
+  transcription: Schema.optional(transcriptionSchema),
+  waiting: waitingSchema.pipe(
+    settingsDefault({ delayMs: 5000, intervalMs: 10000 }),
+  ),
+  crewActivity: crewActivitySchema.pipe(
+    settingsDefault({
+      detail: "off",
+    }),
+  ),
+  concurrency: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .check(Schema.isLessThanOrEqualTo(32))
+    .pipe(settingsDefault(4)),
+  turnTimeoutMs: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1000))
+    .check(Schema.isLessThanOrEqualTo(3_600_000))
+    .pipe(settingsDefault(1_800_000)),
 });
 
 // IRC names are matched without case. Accounts and nicks stay within the
 // common RFC 2812 nick alphabet; channels use `#` or `&`, no spaces/commas.
 const ircNickPattern = /^[A-Za-z[\]\\`_^{|}][A-Za-z0-9[\]\\`_^{|}-]{0,31}$/;
-const ircAccount = z.string().regex(ircNickPattern);
+const ircAccount = Schema.String.check(settingsPattern(ircNickPattern));
 // At most 50 bytes (a common CHANNELLEN); JOIN lines are batched to 512.
-const ircChannel = z
-  .string()
-  .regex(/^[#&][^\s,:]{1,49}$/)
-  .refine(
-    (name) => Buffer.byteLength(name, "utf8") <= 50,
-    "IRC channel names are limited to 50 bytes",
+const ircChannel = Schema.String.check(settingsPattern(/^[#&][^\s,:]{1,49}$/))
+  .check(
+    settingsRefine((name) => Buffer.byteLength(name, "utf8") <= 50, {
+      message: "IRC channel names are limited to 50 bytes",
+    }),
   )
-  .refine(
-    (name) => [...name].every((char) => char >= " " && char !== "\u007f"),
-    "IRC channel names cannot contain control characters",
+  .check(
+    settingsRefine(
+      (name) => [...name].every((char) => char >= " " && char !== "\u007f"),
+      { message: "IRC channel names cannot contain control characters" },
+    ),
   );
 const loopbackHosts = new Set(["127.0.0.1", "::1"]);
 
 export const defaultAllCallWords = ["all hands", "all crew", "everyone"];
 
-const ircServerSchema = z
-  .strictObject({
-    host: z.string().regex(/^[A-Za-z0-9.:-]{1,253}$/),
-    port: z.number().int().min(1).max(65_535),
-    tls: z.boolean(),
-    /** PEM file of a private CA. Without it, system roots verify the server. */
-    caFile: absolutePath.optional(),
-    /**
-     * Expected ISUPPORT NETWORK name, for example `Fleet`. Stargate refuses a
-     * server that announces another name. Part of the namespace, with host
-     * and port.
-     */
-    network: z
-      .string()
-      .regex(/^[A-Za-z0-9._-]{1,64}$/)
-      .optional(),
-    /**
-     * FILEHOST upload URL to use when the server does not advertise
-     * soju.im/FILEHOST or draft/FILEHOST. A different advertised origin
-     * turns files off rather than choosing one.
-     */
-    filehostOverride: z
-      .url()
-      .max(2048)
-      .refine((value) => {
-        const url = new URL(value);
-        return (
-          !url.username &&
-          !url.password &&
-          !url.search &&
-          !url.hash &&
-          (url.protocol === "https:" ||
-            (url.protocol === "http:" && isLoopbackAddress(url.hostname)))
-        );
-      }, "Use an HTTPS URL (HTTP only on loopback) without credentials, query or fragment")
-      .optional(),
-  })
-  .refine(
-    (server) => server.tls || loopbackHosts.has(server.host),
-    "Plaintext IRC is allowed only for 127.0.0.1 or ::1; set tls: true",
+const ircServerSchema = settingsStruct({
+  host: Schema.String.check(settingsPattern(/^[A-Za-z0-9.:-]{1,253}$/)),
+  port: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .check(Schema.isLessThanOrEqualTo(65_535)),
+  tls: Schema.Boolean,
+  /** PEM file of a private CA. Without it, system roots verify the server. */
+  caFile: Schema.optional(absolutePath),
+  /**
+   * Expected ISUPPORT NETWORK name, for example `Fleet`. Stargate refuses a
+   * server that announces another name. Part of the namespace, with host
+   * and port.
+   */
+  network: Schema.optional(
+    Schema.String.check(settingsPattern(/^[A-Za-z0-9._-]{1,64}$/)),
+  ),
+  /**
+   * FILEHOST upload URL to use when the server does not advertise
+   * soju.im/FILEHOST or draft/FILEHOST. A different advertised origin
+   * turns files off rather than choosing one.
+   */
+  filehostOverride: Schema.optional(
+    settingsURL.check(Schema.isMaxCodePoints(2048)).check(
+      settingsRefine(
+        (value) => {
+          const url = new URL(value);
+          return (
+            !url.username &&
+            !url.password &&
+            !url.search &&
+            !url.hash &&
+            (url.protocol === "https:" ||
+              (url.protocol === "http:" && isLoopbackAddress(url.hostname)))
+          );
+        },
+        {
+          message:
+            "Use an HTTPS URL (HTTP only on loopback) without credentials, query or fragment",
+        },
+      ),
+    ),
+  ),
+})
+  .check(
+    settingsRefine((server) => server.tls || loopbackHosts.has(server.host), {
+      message:
+        "Plaintext IRC is allowed only for 127.0.0.1 or ::1; set tls: true",
+    }),
   )
-  .refine(
-    (server) => server.tls || server.caFile === undefined,
-    "caFile requires tls: true",
+  .check(
+    settingsRefine((server) => server.tls || server.caFile === undefined, {
+      message: "caFile requires tls: true",
+    }),
   );
 
-const ircCrewSchema = z.strictObject({
+const ircCrewSchema = settingsStruct({
   /** Short crew member ID, for example `chief`. */
-  id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/),
-  displayName: z.string().trim().min(1).max(100).optional(),
+  id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,31}$/)),
+  displayName: Schema.optional(
+    Schema.Trim.check(Schema.isMinCodePoints(1)).check(
+      Schema.isMaxCodePoints(100),
+    ),
+  ),
   account: ircAccount,
-  passwordEnv: envName.optional(),
+  passwordEnv: Schema.optional(envName),
   /** Private certificate and key for this account's SASL EXTERNAL login. */
-  clientPemFile: absolutePath.optional(),
+  clientPemFile: Schema.optional(absolutePath),
   /** Defaults to the account; Ergo forces nick = account anyway. */
-  nick: ircAccount.optional(),
+  nick: Schema.optional(ircAccount),
   /**
    * Channels the captain grants this member. Only these are ever joined; an
    * invite to any other channel is ignored. Currently exactly one channel.
    */
-  channels: z.array(ircChannel).length(1),
-  /** Unpinned: one session per IRC channel, never the crew task session. */
-  backend: backendSchema.refine(
-    (backend) => backend.type !== "opencode" || backend.sessionID === undefined,
-    "IRC crew backends must not pin a sessionID; crew task sessions stay with the crew plugin",
+  channels: Schema.mutable(Schema.Array(ircChannel)).check(
+    Schema.isBetweenLength(1, 1),
   ),
-  concurrency: z.number().int().min(1).max(32).default(2),
-  turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
+  /** Unpinned: one session per IRC channel, never the crew task session. */
+  backend: backendSchema.check(
+    settingsRefine(
+      (backend) =>
+        backend.type !== "opencode" || backend.sessionID === undefined,
+      {
+        message:
+          "IRC crew backends must not pin a sessionID; crew task sessions stay with the crew plugin",
+      },
+    ),
+  ),
+  concurrency: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .check(Schema.isLessThanOrEqualTo(32))
+    .pipe(settingsDefault(2)),
+  turnTimeoutMs: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1000))
+    .check(Schema.isLessThanOrEqualTo(3_600_000))
+    .pipe(settingsDefault(1_800_000)),
 });
 
 /**
  * Optional IRCv3 features. Each is used only when the server offers it;
  * these switches can turn one off. The separate native-question bridge is opt-in.
  */
-const ircFeaturesSchema = z.strictObject({
+const ircFeaturesSchema = settingsStruct({
   /** Bridge native clarification forms to their original authenticated requester. */
-  questions: z.boolean().default(false),
+  questions: Schema.Boolean.pipe(settingsDefault(false)),
   /** Download FILEHOST links in admitted messages as attachments. */
-  filesIn: z.boolean().default(true),
+  filesIn: Schema.Boolean.pipe(settingsDefault(true)),
   /** Upload published reply files to FILEHOST and post their links. */
-  filesOut: z.boolean().default(true),
+  filesOut: Schema.Boolean.pipe(settingsDefault(true)),
   /** Send each reply chunk as one draft/multiline batch. */
-  multiline: z.boolean().default(true),
+  multiline: Schema.Boolean.pipe(settingsDefault(true)),
   /** Send +typing while a turn runs (needs message-tags). */
-  typing: z.boolean().default(true),
+  typing: Schema.Boolean.pipe(settingsDefault(true)),
   /** +draft/react for reaction replies, and Stop by reaction. */
-  reactions: z.boolean().default(true),
+  reactions: Schema.Boolean.pipe(settingsDefault(true)),
   /** CHATHISTORY catch-up of missed messages (persisted cursor). */
-  catchUp: z.boolean().default(true),
+  catchUp: Schema.Boolean.pipe(settingsDefault(true)),
   /** draft/persistence: ask the server to keep the account always-on. */
-  alwaysOn: z.boolean().default(true),
+  alwaysOn: Schema.Boolean.pipe(settingsDefault(true)),
   /** Set the ISUPPORT BOT user mode (for example +B). */
-  botMode: z.boolean().default(true),
+  botMode: Schema.Boolean.pipe(settingsDefault(true)),
   /** draft/read-marker: MARKREAD after each accepted message. */
-  readMarker: z.boolean().default(true),
+  readMarker: Schema.Boolean.pipe(settingsDefault(true)),
 });
 const ircFeatureDefaults = {
   questions: false,
@@ -453,120 +593,163 @@ const ircFeatureDefaults = {
   readMarker: true,
 };
 
-const ircConfiguredSchema = z.strictObject({
-  id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-  displayName: z.string().trim().min(1).max(100).optional(),
+const ircConfiguredSchema = settingsStruct({
+  id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  displayName: Schema.optional(
+    Schema.Trim.check(Schema.isMinCodePoints(1)).check(
+      Schema.isMaxCodePoints(100),
+    ),
+  ),
   server: ircServerSchema,
   /** Expected SASL account of the captain bot. */
   account: ircAccount,
-  passwordEnv: envName.optional(),
+  passwordEnv: Schema.optional(envName),
   /** Owner-only PEM bundle used for SASL EXTERNAL instead of a password. */
-  clientPemFile: absolutePath.optional(),
+  clientPemFile: Schema.optional(absolutePath),
   /** Defaults to the account. */
-  nick: ircAccount.optional(),
+  nick: Schema.optional(ircAccount),
   /** The only channels the captain joins; the first is the ship channel. */
-  channels: z.array(ircChannel).min(1).max(20),
+  channels: Schema.mutable(Schema.Array(ircChannel))
+    .check(Schema.isMinLength(1))
+    .check(Schema.isMaxLength(20)),
   /** Role-aware fleet defaults; home is this ship or the rear admiral's room. */
-  fleetChannels: z
-    .strictObject({ home: ircChannel, command: ircChannel })
-    .optional(),
-  access: z
-    .strictObject({
-      /** When set, only these exact SASL accounts may start a turn. */
-      allowedAccounts: z.array(ircAccount).min(1).max(50).optional(),
-      /** Require an exact current nick mention in joined channels and a real msgid. */
-      channelRequests: z.enum(["nick-mention", "standard"]).optional(),
-      /** Explicit channels that wake on every admitted account's message. */
-      wakeChannels: z.array(ircChannel).max(20).optional(),
-      /** Captain-only automatic human requests; reply membership is gateway-owned. */
-      humanWakeChannels: z
-        .array(
-          z.strictObject({
+  fleetChannels: Schema.optional(
+    settingsStruct({ home: ircChannel, command: ircChannel }),
+  ),
+  access: settingsStruct({
+    /** When set, only these exact SASL accounts may start a turn. */
+    allowedAccounts: Schema.optional(
+      Schema.mutable(Schema.Array(ircAccount))
+        .check(Schema.isMinLength(1))
+        .check(Schema.isMaxLength(50)),
+    ),
+    /** Require an exact current nick mention in joined channels and a real msgid. */
+    channelRequests: Schema.optional(
+      Schema.Literals(["nick-mention", "standard"]),
+    ),
+    /** Explicit channels that wake on every admitted account's message. */
+    wakeChannels: Schema.optional(
+      Schema.mutable(Schema.Array(ircChannel)).check(Schema.isMaxLength(20)),
+    ),
+    /** Captain-only automatic human requests; reply membership is gateway-owned. */
+    humanWakeChannels: Schema.optional(
+      Schema.mutable(
+        Schema.Array(
+          settingsStruct({
             channel: ircChannel,
-            replies: z.enum(["all", "participating"]),
+            replies: Schema.Literals(["all", "participating"]),
           }),
-        )
-        .max(20)
-        .optional(),
-      /** Quiet window for consecutive live human messages; absent/0 is off. */
-      humanMessageDebounceMs: z.number().int().min(0).max(5000).optional(),
-      /** Any SASL account may write unless denied; `*` denies everyone. */
-      deniedAccounts: z
-        .array(z.union([z.literal("*"), ircAccount]))
-        .default([]),
-      /** `*` also blocks direct messages. */
-      deniedChannels: z
-        .array(z.union([z.literal("*"), ircChannel]))
-        .default([]),
-      /** Words that address the captain in its channels, like a nick mention. */
-      textMentions: mentionNamesSchema.optional(),
-      /**
-       * All-call words (whole words, any case): a channel message that
-       * contains one reaches the captain and every crew member in that
-       * channel. `[]` turns all-calls off.
-       */
-      allCallWords: z
-        .array(mentionNameSchema)
-        .max(20)
-        .default([...defaultAllCallWords]),
-      /** Accounts of other fleet captains: peer rules, 5 per target an hour. */
-      peerCaptains: z.array(ircAccount).max(50).optional(),
-      /** Peer turns per conversation/hour; absent keeps the default of five. */
-      peerTurnsPerHour: z.number().int().min(0).max(600).optional(),
-      /**
-       * Ship (captain/crew) messages admitted per agent in a rolling hour.
-       * A channel's cap is this value times the ship agents configured in
-       * it, counted across the whole ship. `0` turns ship messages off.
-       */
-      shipTurnsPerAgentPerHour: z.number().int().min(0).max(600).default(60),
-      /**
-       * All-call turns start this many milliseconds apart: the captain at
-       * once, then each crew member of the channel in configuration order.
-       * Each later turn lists what was said since the all-call. `0` is off.
-       */
-      allCallStaggerMs: z.number().int().min(0).max(30_000).default(4000),
-    })
-    .default({
+        ),
+      ).check(Schema.isMaxLength(20)),
+    ),
+    /** Quiet window for consecutive live human messages; absent/0 is off. */
+    humanMessageDebounceMs: Schema.optional(
+      Schema.Finite.check(Schema.isInt())
+        .check(Schema.isGreaterThanOrEqualTo(0))
+        .check(Schema.isLessThanOrEqualTo(5000)),
+    ),
+    /** Any SASL account may write unless denied; `*` denies everyone. */
+    deniedAccounts: Schema.mutable(
+      Schema.Array(Schema.Union([Schema.Literal("*"), ircAccount])),
+    ).pipe(settingsDefault([])),
+    /** `*` also blocks direct messages. */
+    deniedChannels: Schema.mutable(
+      Schema.Array(Schema.Union([Schema.Literal("*"), ircChannel])),
+    ).pipe(settingsDefault([])),
+    /** Words that address the captain in its channels, like a nick mention. */
+    textMentions: Schema.optional(mentionNamesSchema),
+    /**
+     * All-call words (whole words, any case): a channel message that
+     * contains one reaches the captain and every crew member in that
+     * channel. `[]` turns all-calls off.
+     */
+    allCallWords: Schema.mutable(Schema.Array(mentionNameSchema))
+      .check(Schema.isMaxLength(20))
+      .pipe(settingsDefault([...defaultAllCallWords])),
+    /** Accounts of other fleet captains: peer rules, 5 per target an hour. */
+    peerCaptains: Schema.optional(
+      Schema.mutable(Schema.Array(ircAccount)).check(Schema.isMaxLength(50)),
+    ),
+    /** Peer turns per conversation/hour; absent keeps the default of five. */
+    peerTurnsPerHour: Schema.optional(
+      Schema.Finite.check(Schema.isInt())
+        .check(Schema.isGreaterThanOrEqualTo(0))
+        .check(Schema.isLessThanOrEqualTo(600)),
+    ),
+    /**
+     * Ship (captain/crew) messages admitted per agent in a rolling hour.
+     * A channel's cap is this value times the ship agents configured in
+     * it, counted across the whole ship. `0` turns ship messages off.
+     */
+    shipTurnsPerAgentPerHour: Schema.Finite.check(Schema.isInt())
+      .check(Schema.isGreaterThanOrEqualTo(0))
+      .check(Schema.isLessThanOrEqualTo(600))
+      .pipe(settingsDefault(60)),
+    /**
+     * All-call turns start this many milliseconds apart: the captain at
+     * once, then each crew member of the channel in configuration order.
+     * Each later turn lists what was said since the all-call. `0` is off.
+     */
+    allCallStaggerMs: Schema.Finite.check(Schema.isInt())
+      .check(Schema.isGreaterThanOrEqualTo(0))
+      .check(Schema.isLessThanOrEqualTo(30_000))
+      .pipe(settingsDefault(4000)),
+  }).pipe(
+    settingsDefault({
       deniedAccounts: [],
       deniedChannels: [],
       allCallWords: [...defaultAllCallWords],
       shipTurnsPerAgentPerHour: 60,
       allCallStaggerMs: 4000,
     }),
-  crew: z.array(ircCrewSchema).max(20).default([]),
-  features: ircFeaturesSchema.default(ircFeatureDefaults),
+  ),
+  crew: Schema.mutable(Schema.Array(ircCrewSchema))
+    .check(Schema.isMaxLength(20))
+    .pipe(settingsDefault([])),
+  features: ircFeaturesSchema.pipe(settingsDefault(ircFeatureDefaults)),
   /**
    * Reactions (+draft/react) that stop an active turn when a person
    * reacts to its request or to a bot message answering it. `[]` is off.
    */
-  stopReactions: z
-    .array(z.string().min(1).max(32))
-    .max(10)
-    .default(["✋", "🛑"]),
+  stopReactions: Schema.mutable(
+    Schema.Array(
+      Schema.String.check(Schema.isMinCodePoints(1)).check(
+        Schema.isMaxCodePoints(32),
+      ),
+    ),
+  )
+    .check(Schema.isMaxLength(10))
+    .pipe(settingsDefault(["✋", "🛑"])),
   /** Catch-up replays at most this many hours, whatever the cursor. */
-  catchUpHours: z.number().int().min(1).max(168).default(24),
+  catchUpHours: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .check(Schema.isLessThanOrEqualTo(168))
+    .pipe(settingsDefault(24)),
   /**
    * Speech-to-text for audio and video files in admitted messages, as for
    * Slack bots; absent is off. Spoken mentions are Slack-only.
    */
-  transcription: transcriptionSchema
-    .refine(
-      (value) => value.spokenMentions === undefined,
-      "spokenMentions is not supported on IRC",
-    )
-    .optional(),
+  transcription: Schema.optional(
+    transcriptionSchema.check(
+      settingsRefine((value) => value.spokenMentions === undefined, {
+        message: "spokenMentions is not supported on IRC",
+      }),
+    ),
+  ),
   /**
    * DM audit mirror: the captain connection posts a copy of every direct
    * message that the captain or a crew connection receives or sends to
    * this channel. Absent is off. The channel is never a conversation.
    */
-  audit: z.strictObject({ channel: ircChannel }).optional(),
+  audit: Schema.optional(settingsStruct({ channel: ircChannel })),
   /**
    * `agent`: the captain answers direct messages (crew ignore them).
    * `redirect`: every connection answers a direct message with a NOTICE
    * that points to its ship channel and never acts on its content.
    */
-  dmPolicy: z.enum(["agent", "redirect"]).default("agent"),
+  dmPolicy: Schema.Literals(["agent", "redirect"]).pipe(
+    settingsDefault("agent"),
+  ),
   /**
    * Crew messaging over IRC (OpenCode captain; opt-in). `sessions` binds
    * each crew IRC session to its crew member in the crew plugin, so
@@ -574,21 +757,25 @@ const ircConfiguredSchema = z.strictObject({
    * between two ship agents with IRC connections as an IRC DM from the
    * sender's account.
    */
-  crewMessaging: z
-    .strictObject({
-      sessions: z.boolean().default(false),
-      ircCopies: z.boolean().default(false),
-    })
-    .default({ sessions: false, ircCopies: false }),
+  crewMessaging: settingsStruct({
+    sessions: Schema.Boolean.pipe(settingsDefault(false)),
+    ircCopies: Schema.Boolean.pipe(settingsDefault(false)),
+  }).pipe(settingsDefault({ sessions: false, ircCopies: false })),
   backend: backendSchema,
-  fleetPolicy: fleetPolicySchema.optional(),
-  fleetControl: fleetControlSchema.optional(),
-  concurrency: z.number().int().min(1).max(32).default(4),
-  turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
+  fleetPolicy: Schema.optional(fleetPolicySchema),
+  fleetControl: Schema.optional(fleetControlSchema),
+  concurrency: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .check(Schema.isLessThanOrEqualTo(32))
+    .pipe(settingsDefault(4)),
+  turnTimeoutMs: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1000))
+    .check(Schema.isLessThanOrEqualTo(3_600_000))
+    .pipe(settingsDefault(1_800_000)),
 });
 
 /** Persisted operator configuration: fleet-derived fields remain absent. */
-export type IrcConfig = z.infer<typeof ircConfiguredSchema>;
+export type IrcConfig = typeof ircConfiguredSchema.Type;
 export type EffectiveIrcConfig = IrcConfig & {
   access: IrcConfig["access"] & { peerCaptains: string[] };
 };
@@ -668,8 +855,8 @@ export function effectiveIrcConfig(config: IrcConfig): EffectiveIrcConfig {
   return { ...config, access, channels };
 }
 
-export const ircSchema = ircConfiguredSchema.superRefine(
-  (configured, context) => {
+export const ircSchema = ircConfiguredSchema.check(
+  settingsCheck((configured, context) => {
     const irc = effectiveIrcConfig(configured);
     if (irc.fleetChannels) {
       if (
@@ -687,7 +874,9 @@ export const ircSchema = ircConfiguredSchema.superRefine(
         for (const target of fleetRoster(configured))
           if (
             target.role === "captain" &&
-            !ircChannel.safeParse(target.channel).success
+            !Result.isSuccess(
+              Schema.decodeUnknownResult(ircChannel)(target.channel),
+            )
           )
             context.addIssue({
               code: "custom",
@@ -700,8 +889,13 @@ export const ircSchema = ircConfiguredSchema.superRefine(
               message: "Derived fleet membership requires a valid IRC channel",
             });
         if (
-          !z.array(ircAccount).max(50).safeParse(irc.access.peerCaptains)
-            .success
+          !Result.isSuccess(
+            Schema.decodeUnknownResult(
+              Schema.mutable(Schema.Array(ircAccount)).check(
+                Schema.isMaxLength(50),
+              ),
+            )(irc.access.peerCaptains),
+          )
         )
           context.addIssue({
             code: "custom",
@@ -840,33 +1034,65 @@ export const ircSchema = ircConfiguredSchema.superRefine(
       )
     )
       issue("The IRC audit channel must not be a captain or crew channel");
-  },
+  }),
 );
 
 /** Bot Framework transport: exact sender IDs, no credential values in config. */
-export const teamsSchema = z
-  .strictObject({
-    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-    displayName: z.string().min(1).max(100).optional(),
-    botClientId: z.uuid(),
-    tenantId: z.uuid(),
-    socketPath: absolutePath,
-    access: z.strictObject({
-      users: z.array(z.uuid()).min(1),
-      channels: z.array(z.string().min(1).max(1024)).default([]),
-      deniedUsers: z.array(z.uuid()).default([]),
-      deniedChannels: z.array(z.string().min(1).max(1024)).default([]),
-    }),
-    backend: backendSchema,
-    fleetPolicy: fleetPolicySchema.optional(),
-    approvalUsers: z.array(z.uuid()).default([]),
-    approvalTTLms: z.number().int().min(1000).max(3_600_000).default(600_000),
-    waiting: waitingSchema.default({ delayMs: 5000, intervalMs: 10000 }),
-    crewActivity: crewActivitySchema.default({ detail: "off" }),
-    concurrency: z.number().int().min(1).max(32).default(1),
-    turnTimeoutMs: z.number().int().min(1000).max(3_600_000).default(1_800_000),
-  })
-  .superRefine((value, context) => {
+export const teamsSchema = settingsStruct({
+  id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  displayName: Schema.optional(
+    Schema.String.check(Schema.isMinCodePoints(1)).check(
+      Schema.isMaxCodePoints(100),
+    ),
+  ),
+  botClientId: settingsUUID,
+  tenantId: settingsUUID,
+  socketPath: absolutePath,
+  access: settingsStruct({
+    users: Schema.mutable(Schema.Array(settingsUUID)).check(
+      Schema.isMinLength(1),
+    ),
+    channels: Schema.mutable(
+      Schema.Array(
+        Schema.String.check(Schema.isMinCodePoints(1)).check(
+          Schema.isMaxCodePoints(1024),
+        ),
+      ),
+    ).pipe(settingsDefault([])),
+    deniedUsers: Schema.mutable(Schema.Array(settingsUUID)).pipe(
+      settingsDefault([]),
+    ),
+    deniedChannels: Schema.mutable(
+      Schema.Array(
+        Schema.String.check(Schema.isMinCodePoints(1)).check(
+          Schema.isMaxCodePoints(1024),
+        ),
+      ),
+    ).pipe(settingsDefault([])),
+  }),
+  backend: backendSchema,
+  fleetPolicy: Schema.optional(fleetPolicySchema),
+  approvalUsers: Schema.mutable(Schema.Array(settingsUUID)).pipe(
+    settingsDefault([]),
+  ),
+  approvalTTLms: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1000))
+    .check(Schema.isLessThanOrEqualTo(3_600_000))
+    .pipe(settingsDefault(600_000)),
+  waiting: waitingSchema.pipe(
+    settingsDefault({ delayMs: 5000, intervalMs: 10000 }),
+  ),
+  crewActivity: crewActivitySchema.pipe(settingsDefault({ detail: "off" })),
+  concurrency: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .check(Schema.isLessThanOrEqualTo(32))
+    .pipe(settingsDefault(1)),
+  turnTimeoutMs: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1000))
+    .check(Schema.isLessThanOrEqualTo(3_600_000))
+    .pipe(settingsDefault(1_800_000)),
+}).check(
+  settingsCheck((value, context) => {
     if (value.approvalUsers.some((user) => !value.access.users.includes(user)))
       context.addIssue({
         code: "custom",
@@ -877,8 +1103,9 @@ export const teamsSchema = z
         code: "custom",
         message: "Teams approvals require OpenCode",
       });
-  });
-export type TeamsConfig = z.infer<typeof teamsSchema>;
+  }),
+);
+export type TeamsConfig = typeof teamsSchema.Type;
 
 /** Registration IDs: Slack bots, IRC captains and `<irc id>-<crew id>`. */
 export function registrationIds(config: {
@@ -915,34 +1142,34 @@ export function pinnedSessionIDs(config: {
   ];
 }
 
-export const configSchema = z
-  .strictObject({
-    dataDirectory: z.string().default(".stargate"),
-    /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
-    dashboard: z.boolean().optional(),
-    /** Explicit operator-group socket; the private default is unchanged. */
-    dashboardSocket: z
-      .strictObject({
-        path: absolutePath.refine(
-          (path) => resolve(path) === path,
-          "An absolute normalised socket path is required",
-        ),
-        groupAccess: z.literal(true),
-      })
-      .optional(),
-    bots: z.array(botSchema).default([]),
-    notifications: z
-      .strictObject({ updateNotice: z.boolean().default(false) })
-      .default({ updateNotice: false }),
-    /** IRCv3 registrations, independent of Slack; see docs/irc.md. */
-    irc: z.array(ircSchema).default([]),
-    teams: z.array(teamsSchema).default([]),
-    /** Nightly self-update and host maintenance; see docs/maintenance.md. */
-    maintenance: maintenanceSchema.optional(),
-    /** Read subscription quota and announce changes to crew availability. */
-    quotaWatch: quotaWatchSchema.optional(),
-  })
-  .superRefine(
+export const configSchema = settingsStruct({
+  dataDirectory: Schema.String.pipe(settingsDefault(".stargate")),
+  /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
+  dashboard: Schema.optional(Schema.Boolean),
+  /** Explicit operator-group socket; the private default is unchanged. */
+  dashboardSocket: Schema.optional(
+    settingsStruct({
+      path: absolutePath.check(
+        settingsRefine((path) => resolve(path) === path, {
+          message: "An absolute normalised socket path is required",
+        }),
+      ),
+      groupAccess: Schema.Literal(true),
+    }),
+  ),
+  bots: Schema.mutable(Schema.Array(botSchema)).pipe(settingsDefault([])),
+  notifications: settingsStruct({
+    updateNotice: Schema.Boolean.pipe(settingsDefault(false)),
+  }).pipe(settingsDefault({ updateNotice: false })),
+  /** IRCv3 registrations, independent of Slack; see docs/irc.md. */
+  irc: Schema.mutable(Schema.Array(ircSchema)).pipe(settingsDefault([])),
+  teams: Schema.mutable(Schema.Array(teamsSchema)).pipe(settingsDefault([])),
+  /** Nightly self-update and host maintenance; see docs/maintenance.md. */
+  maintenance: Schema.optional(maintenanceSchema),
+  /** Read subscription quota and announce changes to crew availability. */
+  quotaWatch: Schema.optional(quotaWatchSchema),
+}).check(
+  settingsCheck(
     (
       { bots, irc, teams, maintenance, quotaWatch, dashboard, dashboardSocket },
       context,
@@ -1095,12 +1322,13 @@ export const configSchema = z
         }
       }
     },
-  );
+  ),
+);
 
-export type BackendConfig = z.infer<typeof backendSchema>;
-export type BotConfig = z.infer<typeof botSchema>;
+export type BackendConfig = typeof backendSchema.Type;
+export type BotConfig = typeof botSchema.Type;
 /** Loaded configuration; `dataDirectory` is absolute. */
-export type Config = z.infer<typeof configSchema>;
+export type Config = typeof configSchema.Type;
 
 export function secret(
   name: string,
@@ -1112,7 +1340,7 @@ export function secret(
 }
 
 export async function loadConfig(path: string) {
-  const config = configSchema.parse(await Bun.file(path).json());
+  const config = decodeSettings(configSchema, await Bun.file(path).json());
   const dataDirectory = resolve(dirname(resolve(path)), config.dataDirectory);
   // Rejection, not a compatibility reader: never create a parallel empty store.
   if (

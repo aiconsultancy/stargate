@@ -1,6 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import { z } from "zod";
 import { configSchema } from "../src/config";
 import { maintenanceSchema } from "../src/nightly/config";
@@ -21,7 +23,7 @@ import {
 } from "../src/nightly/timer";
 import { occurrence } from "../src/nightly/window";
 
-const root = await mkdtemp("/tmp/opencode/stargate-report-");
+const root = await mkdtemp(join(tmpdir(), "stargate-report-"));
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 const report: Report = {
@@ -315,10 +317,12 @@ describe("kill timer and daylight saving time", () => {
 
 describe("undo budget", () => {
   test("TimeoutStopSec follows the configured packages and session cap", () => {
-    const one = maintenanceSchema.parse({
+    const one = Schema.decodeUnknownSync(maintenanceSchema)({
       agentClis: { prefix: "/p", packages: [{ name: "a", command: "a" }] },
     });
-    const four = maintenanceSchema.parse({ agentClis: { prefix: "/p" } });
+    const four = Schema.decodeUnknownSync(maintenanceSchema)({
+      agentClis: { prefix: "/p" },
+    });
     const extra = recoveryBudgetMs(four) - recoveryBudgetMs(one);
     expect(extra).toBe(3 * undoBounds.npmPerPackage);
     expect(recoveryBudgetMs(one)).toBeGreaterThanOrEqual(
@@ -383,15 +387,22 @@ describe("configuration boundary", () => {
   };
   test("report channel must be allowed for an existing bot", () => {
     const parse = (report: unknown) =>
-      configSchema.safeParse({ bots: [bot], maintenance: { report } }).success;
+      Result.isSuccess(
+        Schema.decodeUnknownResult(configSchema)({
+          bots: [bot],
+          maintenance: { report },
+        }),
+      );
     expect(parse({ bot: "helper", channel: "C1" })).toBe(true);
     expect(parse({ bot: "helper", channel: "C0EXAMPLE05" })).toBe(false);
     expect(parse({ bot: "other", channel: "C1" })).toBe(false);
     expect(
-      configSchema.safeParse({
-        bots: [{ ...bot, access: { ...bot.access, channels: ["*"] } }],
-        maintenance: { report: { bot: "helper", channel: "C2" } },
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(configSchema)({
+          bots: [{ ...bot, access: { ...bot.access, channels: ["*"] } }],
+          maintenance: { report: { bot: "helper", channel: "C2" } },
+        }),
+      ),
     ).toBe(false);
   });
 });

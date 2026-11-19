@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { Schema } from "effect";
 import { z } from "zod";
 import type { AgentBackend } from "./backend";
 import type { BotConfig, Config } from "./config";
@@ -144,7 +145,8 @@ export function createHealthReader(
 ): (section?: string) => Promise<string> {
   const readHost = createHostHealthReader(
     input.maintenance?.stargate?.root ?? input.dataDirectory,
-    () => healthConfigSchema.parse(input.bot().health ?? {}),
+    () =>
+      Schema.decodeUnknownSync(healthConfigSchema)(input.bot().health ?? {}),
   );
   return async (requested?: string) => {
     if (
@@ -154,7 +156,7 @@ export function createHealthReader(
       return `Health sections: ${healthSections.join(", ")}.`;
     const bot = input.bot();
     // Parse separately so callers can use the reader before optional config wiring.
-    const config = healthConfigSchema.parse(
+    const config = Schema.decodeUnknownSync(healthConfigSchema)(
       "health" in bot ? (bot.health ?? {}) : {},
     );
     const now = (input.now ?? Date.now)();

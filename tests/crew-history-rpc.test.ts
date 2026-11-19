@@ -1,6 +1,8 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Schema } from "effect";
 import { CrewHistoryRPC } from "../src/crew/history-rpc";
 import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
@@ -15,7 +17,7 @@ const signal = () => new AbortController().signal;
 const unavailable = "Pi history unavailable or cancelled.";
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/stargate-crew-history-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-crew-history-"));
   const state = await CrewState.open(directory, "history", "identity");
   const team = teamSchema.parse({
     captain: { id: "captain" },
@@ -361,7 +363,7 @@ test("history RPC abort uses fixed errors and never reads state or transcripts",
 });
 
 test("Pi history reuses the shared live pool and never opens a second runtime", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-live-history-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-live-history-"));
   const state = await CrewState.open(directory, "history-pool", "identity");
   const member: CrewMember = {
     id: "twiki",
@@ -439,7 +441,7 @@ test("Pi history reuses the shared live pool and never opens a second runtime", 
 });
 
 test("Pi history owner shutdown cancels active reads without interrupting work", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-history-cancel-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-history-cancel-"));
   const state = await CrewState.open(directory, "history-cancel", "identity");
   const member = teamSchema.parse({
     captain: { id: "captain" },

@@ -7,8 +7,8 @@ This migration does not upgrade Effect or the SDKs.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**. Five migration PRs are
-merged. That leaves 13 component batches. One contingency split can bring the
+The revised target is **18 migration PRs in total**. Six migration PRs are
+merged. That leaves 12 component batches. One contingency split can bring the
 total to 19, still below 20. Report a proposed
 budget change before opening another PR; do not weaken verification to fit it.
 
@@ -30,17 +30,18 @@ Completed:
 - [Azure transcript-response schema](https://github.com/aiconsultancy/stargate/pull/45).
 - [Remaining native backend validators](https://github.com/aiconsultancy/stargate/pull/48).
 - [Shared tool envelopes, journal and project selection](https://github.com/aiconsultancy/stargate/pull/49).
+- [Pi and shared session history](https://github.com/aiconsultancy/stargate/pull/51).
+
+The first batch-6 timing pair failed at +18.27%. Its diagnostic pair measured
++2.63% with retained coverage; this is not a performance repair. The earlier
+batch-4 first-pair +10.9% failure also remains recorded.
 
 ## Remaining component batches
 
-The numbers include the five completed PRs. File names identify primary scope,
+The numbers include the six completed PRs. File names identify primary scope,
 not a restriction against updating a coupled consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
 
-6. Pi and session history. Migrate `backends/pi-durable.ts`,
-   `backends/pi-history.ts`, `session-history.ts` and their history consumers.
-   Include history RPC codecs and HTTP validation; leave unrelated reporting
-   operations for their own batches.
 7. Configuration and provisioning. Migrate `config.ts`, `provision.ts` and the
    schema definitions composed into configuration, including provider, activity,
    mention, transcription, waiting and component settings. Include affected
@@ -86,6 +87,35 @@ without creating another PR. Each merged batch must leave main working.
 For mixed composition, add an adapter only when the selected schema requires
 one. It must delegate to the authoritative Effect decoder, not copy its rules.
 Remove the adapter when its remaining consumer migrates.
+
+### Configuration settings composed into later batches
+
+Batch 7 uses `settings-legacy.ts` only where an authoritative Effect setting is
+still embedded in a Zod container. It does not retain a second validation rule.
+Remove each bridge with its owning container:
+
+- Pi crew backend in `crew/team.ts`: batch 8.
+- Nightly window in profile-generation options: batch 8.
+- Quota settings in `crew/engine.ts`: batch 9.
+- Fleet identifiers, repositories and review-worker settings in runtime
+  protocol/control records: batch 11.
+- Cron destination identifiers in `cron-control.ts`: batch 14.
+- Cleanup paths in maintenance result records: batch 16.
+
+The cron tool's JSON advertisement remains derived from the setting codec,
+including when the existing tool-input projection selects a transform's input.
+Settings defaults retain the legacy decoded-value fallback and shallow-copy
+semantics. They must not re-run input transforms or validate the fallback as
+an input. Configuration string limits count Unicode code points; a regex keeps
+its original JavaScript flags and its existing advertised pattern.
+
+`loadConfig` is a human-facing error boundary for maintenance and transcript
+commands. It collects all native field errors and preserves safe custom
+diagnostics after non-aborting child constraint failures. This failure-only
+pass runs the same annotated checks on structurally decoded values; it cannot
+accept a configuration. Fixed safe error messages in setup, provisioning and
+reload remain unchanged. Native vendor issue objects and duplicate ordering
+are not copied into the public error format.
 
 ## Verification and merge
 

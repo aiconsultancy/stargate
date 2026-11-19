@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import { effectiveIrcConfig, ircSchema } from "../src/config";
 import { fleetInstructions } from "../src/fleet-policy";
 import { fold, formatMessage, parseMessage } from "../src/irc/protocol";
@@ -11,6 +12,7 @@ import {
   routeIrcMessage,
   withinLimits,
 } from "../src/irc/routing";
+import { settingsIssues } from "../src/settings-schema";
 import { addBot, readConfiguration } from "../src/setup";
 
 const cleanup: string[] = [];
@@ -19,7 +21,7 @@ afterEach(async () => {
     await rm(path, { recursive: true, force: true });
 });
 function effective(input: unknown) {
-  return effectiveIrcConfig(ircSchema.parse(input));
+  return effectiveIrcConfig(Schema.decodeUnknownSync(ircSchema)(input));
 }
 
 function input(account = "discovery") {
@@ -129,21 +131,34 @@ test("explicit wake/denies/caps stay authoritative; unknown fleet identities do 
   expect(config.access.deniedChannels).toEqual(["#phoenix"]);
   expect(config.access.peerTurnsPerHour).toBe(0);
   expect(
-    ircSchema.safeParse({
-      ...raw,
-      fleetChannels: { home: "#command", command: "#COMMAND" },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...raw,
+        fleetChannels: { home: "#command", command: "#COMMAND" },
+      }),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse({ ...raw, channels: ["#discovery", "#DISCOVERY"] })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...raw,
+        channels: ["#discovery", "#DISCOVERY"],
+      }),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse({ ...raw, audit: { channel: "#phoenix" } }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...raw,
+        audit: { channel: "#phoenix" },
+      }),
+    ),
   ).toBe(false);
-  expect(ircSchema.safeParse({ ...raw, fleetPolicy: undefined }).success).toBe(
-    false,
-  );
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({ ...raw, fleetPolicy: undefined }),
+    ),
+  ).toBe(false);
 });
 
 test("results-mode peer context requires an enrolled explicit current nick and never accepts a reserved dispatch label", () => {
@@ -271,30 +286,36 @@ test("derived peer defaults retain the schema's length and SASL-name bounds", ()
     sessionID: `ses_${account}`,
   }));
   expect(
-    ircSchema.safeParse({
-      ...raw,
-      fleetPolicy: { ...raw.fleetPolicy, agentAccounts: accounts },
-      fleetControl: { ...raw.fleetControl, targets },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...raw,
+        fleetPolicy: { ...raw.fleetPolicy, agentAccounts: accounts },
+        fleetControl: { ...raw.fleetControl, targets },
+      }),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse({
-      ...raw,
-      access: { allowedAccounts: ["jac"] },
-      fleetPolicy: { ...raw.fleetPolicy, agentAccounts: accounts },
-      fleetControl: { ...raw.fleetControl, targets },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...raw,
+        access: { allowedAccounts: ["jac"] },
+        fleetPolicy: { ...raw.fleetPolicy, agentAccounts: accounts },
+        fleetControl: { ...raw.fleetControl, targets },
+      }),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse({
-      ...raw,
-      access: { allowedAccounts: ["jac"] },
-      fleetPolicy: { ...raw.fleetPolicy, agentAccounts: ["not:valid"] },
-      fleetControl: {
-        ...raw.fleetControl,
-        targets: [{ ...targets[0], id: "bad", account: "not:valid" }],
-      },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...raw,
+        access: { allowedAccounts: ["jac"] },
+        fleetPolicy: { ...raw.fleetPolicy, agentAccounts: ["not:valid"] },
+        fleetControl: {
+          ...raw.fleetControl,
+          targets: [{ ...targets[0], id: "bad", account: "not:valid" }],
+        },
+      }),
+    ),
   ).toBe(false);
 });
 
@@ -378,10 +399,15 @@ test("explicit empty peer lists and legacy wake selectors override fleet default
       .channelRequests,
   ).toBe("standard");
   expect(
-    ircSchema.safeParse({
-      ...input(),
-      access: { wakeChannels: ["#discovery"], channelRequests: "nick-mention" },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...input(),
+        access: {
+          wakeChannels: ["#discovery"],
+          channelRequests: "nick-mention",
+        },
+      }),
+    ),
   ).toBe(false);
 });
 
@@ -438,14 +464,14 @@ test("derived membership rejects invalid IRC target channels at configuration ch
     const targets = raw.fleetControl.targets.map((target) =>
       target.account === "phoenix" ? { ...target, channel } : target,
     );
-    const result = ircSchema.safeParse({
+    const result = Schema.decodeUnknownResult(ircSchema)({
       ...raw,
       fleetControl: { ...raw.fleetControl, targets },
     });
-    expect(result.success).toBe(false);
-    if (!result.success)
+    expect(Result.isSuccess(result)).toBe(false);
+    if (!Result.isSuccess(result))
       expect(
-        result.error.issues.some((issue) =>
+        settingsIssues(result.failure.issue).issues.some((issue) =>
           issue.message.includes("valid IRC channel"),
         ),
       ).toBe(true);
@@ -580,11 +606,19 @@ test("portable guidance keeps PR and question rules for every role and advertise
     expect(dispatcher).toContain("fleet_status");
   }
   expect(
-    ircSchema.safeParse({ ...input(), access: { allCallWords: ["@vance"] } })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...input(),
+        access: { allCallWords: ["@vance"] },
+      }),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse({ ...input(), access: { textMentions: ["@vance"] } })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...input(),
+        access: { textMentions: ["@vance"] },
+      }),
+    ),
   ).toBe(false);
 });

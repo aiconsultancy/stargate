@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
@@ -16,7 +17,7 @@ import type { CronView } from "../src/cron-ui";
 import { bot, identity } from "./fixtures";
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/stargate-member-status-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-member-status-"));
   const team = teamSchema.parse({
     captain: { id: "adama" },
     crew: [

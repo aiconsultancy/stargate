@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import {
@@ -317,7 +318,7 @@ test("Stop keeps settled public text and later results without rerunning", async
 });
 
 test("restart resumes from the durable cursor without reposting", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-transcript-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-transcript-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
   const native = nativeSession();
@@ -345,7 +346,7 @@ test("restart resumes from the durable cursor without reposting", async () => {
 });
 
 test("upgrade baselines existing threads without backfill, then follows them", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-transcript-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-transcript-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
   const legacy = new Store(path);
@@ -775,7 +776,7 @@ test("an unsettled legacy reply shows delayed status after its input is anchored
 });
 
 test("a cursor moved by another writer rolls back the reply and defers instead of duplicating", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-transcript-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-transcript-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
   const store = new Store(path);

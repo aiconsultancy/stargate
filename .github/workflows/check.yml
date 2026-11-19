@@ -43,8 +43,11 @@ jobs:
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
       - name: Install locked dependencies
         run: mise run deps
-      - name: Prepare test scratch directory
-        run: mkdir -p /tmp/opencode
+      - name: Prepare private per-run test directories
+        shell: bash
+        run: |
+          test_tmp=$(mktemp -d "$RUNNER_TEMP/stargate-tests.XXXXXX")
+          printf 'TMPDIR=%s\nXDG_CACHE_HOME=%s/cache\n' "$test_tmp" "$test_tmp" >> "$GITHUB_ENV"
       - name: Run pre-commit and quality checks
         run: mise run hooks
       # Self-updates test a release with a minimal environment and a hidden

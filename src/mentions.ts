@@ -1,39 +1,53 @@
-import { z } from "zod";
+import { Schema } from "effect";
+import {
+  settingsCheck,
+  settingsPattern,
+  settingsStruct,
+} from "./settings-schema";
 
 /**
  * Names that address a bot without a typed Slack mention, shared by spoken
  * and text mentions. Each name is literal; spelling variants must be listed.
  */
-export const mentionNameSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(40)
-  .regex(/^[\p{L}\p{N}][\p{L}\p{N}' -]*$/u);
-export const mentionNamesSchema = z.array(mentionNameSchema).min(1).max(20);
+export const mentionNameSchema = Schema.Trim.check(Schema.isMinCodePoints(1))
+  .check(Schema.isMaxCodePoints(40))
+  .check(settingsPattern(/^[\p{L}\p{N}][\p{L}\p{N}' -]*$/u));
+export const mentionNamesSchema = Schema.mutable(
+  Schema.Array(mentionNameSchema),
+)
+  .check(Schema.isMinLength(1))
+  .check(Schema.isMaxLength(20));
 
 /** Channel IDs only: not DMs, which need no mention, and not `*`. */
-export const mentionChannelsSchema = z
-  .array(z.string().regex(/^[CG][A-Z0-9]+$/))
-  .min(1)
-  .max(50);
+export const mentionChannelsSchema = Schema.mutable(
+  Schema.Array(Schema.String.check(settingsPattern(/^[CG][A-Z0-9]+$/))),
+)
+  .check(Schema.isMinLength(1))
+  .check(Schema.isMaxLength(50));
 
-export const mentionRuleSchema = z.strictObject({
+export const mentionRuleSchema = settingsStruct({
   channels: mentionChannelsSchema,
   names: mentionNamesSchema,
 });
 
 /** Wake phrases are only an explicit subset of existing Slack text aliases. */
-export const textMentionRuleSchema = mentionRuleSchema
-  .extend({ muteBypassNames: z.array(mentionNameSchema).max(20).optional() })
-  .superRefine((rule, context) => {
+export const textMentionRuleSchema = settingsStruct({
+  ...mentionRuleSchema.fields,
+  muteBypassNames: Schema.optional(
+    Schema.mutable(Schema.Array(mentionNameSchema)).check(
+      Schema.isMaxLength(20),
+    ),
+  ),
+}).check(
+  settingsCheck((rule, context) => {
     if (rule.muteBypassNames?.some((name) => !rule.names.includes(name)))
       context.addIssue({
         code: "custom",
         path: ["muteBypassNames"],
         message: "Mute bypass names must be configured text-mention names.",
       });
-  });
+  }),
+);
 
 const pattern = (name: string) =>
   new RegExp(

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Schema } from "effect";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
 import { BackendFailure } from "../src/request-failure";
@@ -47,7 +48,7 @@ function openCode(messages: Assistant[]) {
       return new Response(null, { status: 404 });
     },
   });
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
@@ -284,7 +285,7 @@ test("a lost history read after the turn ran never says that nothing ran", async
         return new Response(null, { status: 404 });
       },
     });
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",

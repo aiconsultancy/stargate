@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { Writable } from "node:stream";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { Attachment } from "../src/attachments";
 import type { AgentBackend } from "../src/backend";
@@ -112,7 +113,7 @@ function provider() {
   });
   cleanup.push(() => server.stop(true));
   const origin = server.url.origin;
-  const config = transcriptionSchema.parse({
+  const config = Schema.decodeUnknownSync(transcriptionSchema)({
     provider: {
       type: "azure-openai",
       endpoint: origin,
@@ -144,7 +145,10 @@ test("transcription is off by default and accepts only the keyless Azure shape",
     apiVersion: "2024-06-01",
     auth: "managedIdentity",
   };
-  const parsed = botSchema.parse({ ...bot(), transcription: { provider } });
+  const parsed = Schema.decodeUnknownSync(botSchema)({
+    ...bot(),
+    transcription: { provider },
+  });
   expect(parsed.transcription?.timeoutMs).toBe(120_000);
   for (const change of [
     { endpoint: "http://example.openai.azure.com" },
@@ -158,11 +162,19 @@ test("transcription is off by default and accepts only the keyless Azure shape",
     { type: "openai" },
   ])
     expect(
-      transcriptionSchema.safeParse({ provider: { ...provider, ...change } })
-        .success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(transcriptionSchema)({
+          provider: { ...provider, ...change },
+        }),
+      ),
     ).toBe(false);
   expect(
-    transcriptionSchema.safeParse({ provider, timeoutMs: 500 }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(transcriptionSchema)({
+        provider,
+        timeoutMs: 500,
+      }),
+    ),
   ).toBe(false);
 });
 
@@ -202,7 +214,7 @@ test("Azure preserves raw transcript strings and accepts extra provider fields",
 
 test("Azure token expiry uses Number coercion and positive safe integers", async () => {
   const file = { data: audio, mime: "audio/mp4", extension: "m4a" };
-  const providerConfig = transcriptionSchema.parse({
+  const providerConfig = Schema.decodeUnknownSync(transcriptionSchema)({
     provider: {
       type: "azure-openai",
       endpoint: "http://127.0.0.1:1",
@@ -463,7 +475,7 @@ function gatewayFixture(
   const f = provider();
   const store = new Store(":memory:");
   cleanup.push(() => store.close());
-  const config = botSchema.parse({
+  const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     ...(options.configured === false ? {} : { transcription: f.config }),
   });

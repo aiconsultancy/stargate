@@ -4,6 +4,7 @@ import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:tls";
+import { Schema } from "effect";
 import pino from "pino";
 import { ircSchema } from "../src/config";
 import { IrcClient } from "../src/irc/client";
@@ -213,7 +214,7 @@ test.skipIf(!openssl)(
       channels: ["#ship"],
       backend,
     });
-    const config = ircSchema.parse({
+    const config = Schema.decodeUnknownSync(ircSchema)({
       id: "enterprise",
       account: "enterprisecaptain",
       clientPemFile: f.pemFile,
@@ -231,7 +232,7 @@ test.skipIf(!openssl)(
     await Promise.all(ship.registrations.map((r) => r.client.waitReady(2000)));
     expect(f.presented.get("enterprisecaptain")).toBe("enterprisecaptain");
     expect(f.presented.get("enterprisechief")).toBe("enterprisechief");
-    const next = ircSchema.parse({
+    const next = Schema.decodeUnknownSync(ircSchema)({
       ...config,
       crew: [...config.crew, member("apollo", apollo.file)],
     });
@@ -278,7 +279,7 @@ test.skipIf(!openssl)(
     };
     for (const externalCaptain of [false, true]) {
       f.presented.clear();
-      const config = ircSchema.parse({
+      const config = Schema.decodeUnknownSync(ircSchema)({
         id: "enterprise",
         account: "enterprisecaptain",
         ...(externalCaptain
@@ -349,7 +350,7 @@ test.skipIf(!openssl)(
       url: "http://localhost:4096",
       directory: "/fixture",
     };
-    const config = ircSchema.parse({
+    const config = Schema.decodeUnknownSync(ircSchema)({
       id: "enterprise",
       account: "enterprisecaptain",
       clientPemFile: f.pemFile,
@@ -374,7 +375,7 @@ test.skipIf(!openssl)(
       publicFile,
       join(f.dir, "missing.pem"),
     ]) {
-      const next = ircSchema.parse({
+      const next = Schema.decodeUnknownSync(ircSchema)({
         ...config,
         crew: [
           {

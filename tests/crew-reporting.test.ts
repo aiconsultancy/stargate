@@ -1,7 +1,9 @@
 import { Database } from "bun:sqlite";
 import { expect, setSystemTime, test } from "bun:test";
 import { access, mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import pino from "pino";
 import { activitySnapshotSchema } from "../src/activity";
 import { ActivityDelivery } from "../src/activity-delivery";
@@ -20,7 +22,7 @@ import { defaultTeam, teamSchema } from "../src/crew/team";
 import { Store } from "../src/store";
 
 async function fixture(safeReports = true) {
-  const directory = await mkdtemp("/tmp/opencode/stargate-reporting-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-reporting-"));
   const team = teamSchema.parse({
     ...defaultTeam,
     crew: [
@@ -1219,7 +1221,7 @@ function completion(content: string, toolCall?: object) {
 }
 
 test("real Pi reporting uses fresh context and no tools; maintenance conversation stays unchanged", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-report-sdk-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-report-sdk-"));
   const apiKeyEnv = "STARGATE_REPORTING_PROXY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
@@ -1240,7 +1242,7 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
   const signal = new AbortController().signal;
   try {
     backend = await PiDurableBackend.open(
-      piDurableBackendSchema.parse({
+      Schema.decodeUnknownSync(piDurableBackendSchema)({
         type: "pi-durable",
         model: "openai/opencode-go/deepseek-v4.1-flash",
         directory,
@@ -1293,7 +1295,7 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
 });
 
 test("malicious report tool call cannot execute maintenance", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-report-tool-deny-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-report-tool-deny-"));
   const apiKeyEnv = "STARGATE_REPORTING_DENY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
@@ -1319,7 +1321,7 @@ test("malicious report tool call cannot execute maintenance", async () => {
   const signal = new AbortController().signal;
   try {
     backend = await PiDurableBackend.open(
-      piDurableBackendSchema.parse({
+      Schema.decodeUnknownSync(piDurableBackendSchema)({
         type: "pi-durable",
         model: "openai/opencode-go/deepseek-v4.1-flash",
         directory,

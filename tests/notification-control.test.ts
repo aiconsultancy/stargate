@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { configSchema } from "../src/config";
 import type { CrewCaller } from "../src/crew/engine";
 import { CrewNotifications } from "../src/crew/notifications";
@@ -36,7 +37,7 @@ async function fixture() {
     config.backend.directory = "/workspace/captain";
     config.backend.sessionID = "ses_captain";
   }
-  const configuration = configSchema.parse({
+  const configuration = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: directory,
     bots: [config],
   });

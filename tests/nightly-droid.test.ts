@@ -10,7 +10,9 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
 import { CrewState } from "../src/crew/state";
 import { maintenanceSchema } from "../src/nightly/config";
@@ -30,7 +32,7 @@ import { buildDroidUnits } from "../src/nightly/timer";
 import { stableJitter } from "../src/nightly/window";
 import { Store } from "../src/store";
 
-const base = await mkdtemp("/tmp/opencode/stargate-droid-");
+const base = await mkdtemp(join(tmpdir(), "stargate-droid-"));
 afterAll(async () => {
   server.stop(true);
   await rm(base, { recursive: true, force: true });
@@ -309,7 +311,7 @@ async function install(droid: Record<string, unknown> = {}) {
       },
     },
   };
-  const config: Config = configSchema.parse(raw);
+  const config: Config = Schema.decodeUnknownSync(configSchema)(raw);
   await ready();
   // One Stargate-owned OpenCode session: the gateway's mapping of a thread.
   const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
@@ -935,7 +937,7 @@ describe("droid configuration and units", () => {
   test("the droid needs a report destination and a coherent model", () => {
     const base = { report: { bot: "helper", channel: "C123" } };
     expect(
-      maintenanceSchema.parse({
+      Schema.decodeUnknownSync(maintenanceSchema)({
         ...base,
         droid: {
           backend: {
@@ -972,9 +974,11 @@ describe("droid configuration and units", () => {
         },
       },
     ])
-      expect(() => maintenanceSchema.parse({ ...base, droid })).toThrow();
+      expect(() =>
+        Schema.decodeUnknownSync(maintenanceSchema)({ ...base, droid }),
+      ).toThrow();
     expect(
-      maintenanceSchema.parse({
+      Schema.decodeUnknownSync(maintenanceSchema)({
         ...base,
         droid: {
           backend: {
@@ -985,7 +989,7 @@ describe("droid configuration and units", () => {
       }).droid?.backend.model,
     ).toBe("anthropic/claude-haiku-5-5");
     expect(() =>
-      maintenanceSchema.parse({
+      Schema.decodeUnknownSync(maintenanceSchema)({
         droid: {
           enabled: true,
           backend: { model: "anthropic/claude-sonnet-5" },

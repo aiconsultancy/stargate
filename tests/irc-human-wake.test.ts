@@ -1,6 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { type IrcConfig, ircSchema } from "../src/config";
@@ -27,7 +29,7 @@ function config(account = "discovery", port = 6667): IrcConfig {
     account === "vance"
       ? ["#starbase", "#command"]
       : [`#${account}`, "#command"];
-  return ircSchema.parse({
+  return Schema.decodeUnknownSync(ircSchema)({
     id: account,
     server: { host: "127.0.0.1", port, tls: false },
     account,
@@ -191,7 +193,7 @@ test("opt-in channel policy wakes all captains for human top-level messages, eve
 });
 
 test("only explicit invitations or confirmed own replies create durable thread participation", async () => {
-  const directory = await mkdtemp("/tmp/opencode/irc-human-store-");
+  const directory = await mkdtemp(join(tmpdir(), "irc-human-store-"));
   close.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "state.sqlite");
   let store = new Store(path);
@@ -349,38 +351,49 @@ test("all-replies mode admits unknown opaque parents from verified humans; other
     };
     expect(route(legacy, "#starbase", "unaddressed")).toBeUndefined();
     expect(
-      ircSchema.safeParse({ ...cfg, fleetPolicy: undefined }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(ircSchema)({
+          ...cfg,
+          fleetPolicy: undefined,
+        }),
+      ),
     ).toBe(false);
     expect(
-      ircSchema.safeParse({
-        ...cfg,
-        access: {
-          ...cfg.access,
-          humanWakeChannels: [{ channel: "#not-joined", replies: "all" }],
-        },
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(ircSchema)({
+          ...cfg,
+          access: {
+            ...cfg.access,
+            humanWakeChannels: [{ channel: "#not-joined", replies: "all" }],
+          },
+        }),
+      ),
     ).toBe(false);
     expect(
-      ircSchema.safeParse({
-        ...cfg,
-        access: {
-          ...cfg.access,
-          humanWakeChannels: [
-            { channel: "#starbase", replies: "all" },
-            { channel: "#STARBASE", replies: "participating" },
-          ],
-        },
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(ircSchema)({
+          ...cfg,
+          access: {
+            ...cfg.access,
+            humanWakeChannels: [
+              { channel: "#starbase", replies: "all" },
+              { channel: "#STARBASE", replies: "participating" },
+            ],
+          },
+        }),
+      ),
     ).toBe(false);
     expect(
-      ircSchema.safeParse({
-        ...cfg,
-        channels: [...cfg.channels, "#audit"],
-        access: {
-          ...cfg.access,
-          humanWakeChannels: [{ channel: "#audit", replies: "all" }],
-        },
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(ircSchema)({
+          ...cfg,
+          channels: [...cfg.channels, "#audit"],
+          access: {
+            ...cfg.access,
+            humanWakeChannels: [{ channel: "#audit", replies: "all" }],
+          },
+        }),
+      ),
     ).toBe(false);
   } finally {
     store.close();
@@ -396,7 +409,7 @@ async function liveFixture(multiline = false) {
   if (multiline) fake.caps.push("draft/multiline=max-bytes=4096,max-lines=100");
   fake.start();
   close.push(() => fake.stop());
-  const directory = await mkdtemp("/tmp/opencode/irc-human-live-");
+  const directory = await mkdtemp(join(tmpdir(), "irc-human-live-"));
   close.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "state.sqlite");
   let store = new Store(path);

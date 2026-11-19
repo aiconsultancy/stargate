@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { Writable } from "node:stream";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
@@ -182,7 +183,7 @@ test("a failed lookup admits nothing and is not cached", async () => {
 
 test("routing admits a verified captain only with the setting, and never the own bot", () => {
   const off = bot();
-  const on = botSchema.parse({
+  const on = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     access: { ...bot().access, users: ["*"], peerCaptains: true },
   });
@@ -228,7 +229,7 @@ test("routing admits a verified captain only with the setting, and never the own
 
 test("deny lists and allow lists still apply to a verified captain", () => {
   const config = (access: Record<string, unknown>) =>
-    botSchema.parse({
+    Schema.decodeUnknownSync(botSchema)({
       ...bot(),
       access: { ...bot().access, peerCaptains: true, ...access },
     });
@@ -282,7 +283,7 @@ test("botSender reads only well-formed IDs, never text", () => {
 function gatewayFixture(peerCaptains = true, pinned = true) {
   const store = new Store(":memory:");
   cleanup.push(() => store.close());
-  const config = botSchema.parse({
+  const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     access: { users: ["*"], channels: ["*"], peerCaptains },
   });
@@ -414,7 +415,7 @@ test("the OpenCode source line carries k=captain only for a peer captain", async
     },
   });
   cleanup.push(() => server.stop(true));
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",

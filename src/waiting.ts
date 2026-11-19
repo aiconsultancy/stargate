@@ -1,21 +1,24 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { z } from "zod";
+import { Schema } from "effect";
 import type { BotConfig } from "./config";
+import { settingsDefault, settingsStruct } from "./settings-schema";
 
-export const waitingDelaySchema = z
-  .number()
-  .int()
-  .min(0)
-  .max(3_600_000)
-  .nullable();
-export const waitingSchema = z.strictObject({
-  delayMs: waitingDelaySchema.default(5000),
-  intervalMs: z.number().int().min(1000).max(3_600_000).default(10000),
+export const waitingDelaySchema = Schema.NullOr(
+  Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(0))
+    .check(Schema.isLessThanOrEqualTo(3_600_000)),
+);
+export const waitingSchema = settingsStruct({
+  delayMs: waitingDelaySchema.pipe(settingsDefault(5000)),
+  intervalMs: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1000))
+    .check(Schema.isLessThanOrEqualTo(3_600_000))
+    .pipe(settingsDefault(10000)),
 });
-export type WaitingSettings = z.infer<typeof waitingSchema>;
-const overrideSchema = z.strictObject({ delayMs: waitingDelaySchema });
+export type WaitingSettings = typeof waitingSchema.Type;
+const overrideSchema = settingsStruct({ delayMs: waitingDelaySchema });
 
 /** Shared captain workspace settings, isolated by configured agent identity. */
 export function waitingSettingsPath(directory: string, agent: string): string {
@@ -30,7 +33,7 @@ export async function resolveWaiting(
   const backend = bot.backend;
   if (backend.type !== "opencode" || !backend.agent) return bot.waiting;
   try {
-    const override = overrideSchema.parse(
+    const override = Schema.decodeUnknownSync(overrideSchema)(
       await Bun.file(
         waitingSettingsPath(backend.directory, backend.agent),
       ).json(),
@@ -48,7 +51,7 @@ export async function saveWaitingDelay(
   delayMs: number | null,
   signal: AbortSignal,
 ): Promise<void> {
-  const settings = overrideSchema.parse({ delayMs });
+  const settings = Schema.decodeUnknownSync(overrideSchema)({ delayMs });
   signal.throwIfAborted();
   const path = waitingSettingsPath(directory, agent);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });

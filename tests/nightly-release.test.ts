@@ -20,7 +20,9 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { bootstrapRelease } from "../scripts/bootstrap-stargate";
 import { maintenanceSchema } from "../src/nightly/config";
 import {
@@ -174,7 +176,9 @@ const runner: CommandRunner = {
 };
 
 function config(root: string, withCheckout = true): StargateReleaseConfig {
-  const release = maintenanceSchema.parse({ stargate: { root } }).stargate;
+  const release = Schema.decodeUnknownSync(maintenanceSchema)({
+    stargate: { root },
+  }).stargate;
   if (!release) throw new Error("missing release configuration");
   return {
     root,
@@ -192,7 +196,7 @@ function config(root: string, withCheckout = true): StargateReleaseConfig {
 }
 
 beforeAll(async () => {
-  directory = await mkdtemp("/tmp/opencode/stargate-release-");
+  directory = await mkdtemp(join(tmpdir(), "stargate-release-"));
   source = join(directory, "source");
   await mkdir(join(source, "src"), { recursive: true });
   git(directory, "init", "-q", "-b", "main", source);

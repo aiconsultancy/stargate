@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import { sourceLine } from "../src/backend";
 import { configSchema, ircSchema } from "../src/config";
 import {
@@ -10,7 +11,7 @@ import {
 import { parseMessage } from "../src/irc/protocol";
 import { type IrcMember, routeIrcMessage } from "../src/irc/routing";
 
-const policy = fleetPolicySchema.parse({
+const policy = Schema.decodeUnknownSync(fleetPolicySchema)({
   role: "rear_admiral",
   humanAccounts: ["operator"],
   agentAccounts: ["captain"],
@@ -44,8 +45,12 @@ test("fleet controls are explicit and preserve human authority", () => {
   expect(fleetAuthority(policy, "captain")).toBe("agent");
   expect(fleetAuthority(policy, "outsider")).toBe("context");
   expect(
-    fleetPolicySchema.safeParse({ ...policy, agentAccounts: ["Operator"] })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(fleetPolicySchema)({
+        ...policy,
+        agentAccounts: ["Operator"],
+      }),
+    ),
   ).toBe(false);
   expect(fleetInstructions(policy)).toContain(
     "MUST use your assigned checkout: /srv/assigned",
@@ -126,11 +131,11 @@ test("wake channels are opt-in, authenticated and constrained to joined channels
   expect(
     routeIrcMessage(message, {
       ...context,
-      config: ircSchema.parse(input),
+      config: Schema.decodeUnknownSync(ircSchema)(input),
       member,
     }),
   ).toBeUndefined();
-  const enabled = ircSchema.parse({
+  const enabled = Schema.decodeUnknownSync(ircSchema)({
     ...input,
     access: { wakeChannels: ["#ship"] },
   });
@@ -145,8 +150,14 @@ test("wake channels are opt-in, authenticated and constrained to joined channels
     routeIrcMessage(stranger, { ...context, config: enabled, member }),
   ).toBeUndefined();
   expect(
-    ircSchema.safeParse({ ...input, access: { wakeChannels: ["#other"] } })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...input,
+        access: { wakeChannels: ["#other"] },
+      }),
+    ),
   ).toBe(false);
-  expect(configSchema.parse({ irc: [input] }).teams).toEqual([]);
+  expect(
+    Schema.decodeUnknownSync(configSchema)({ irc: [input] }).teams,
+  ).toEqual([]);
 });

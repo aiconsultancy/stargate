@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { piDurableBackendSchema } from "../config";
+import { piCrewBackendSchema } from "../config";
 import { isLocalhost } from "../loopback";
+import { legacySetting } from "../settings-legacy";
 
 export const agentIDSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
 export function agentIDForName(name: string): string {
@@ -57,7 +58,7 @@ export const teamSchema = z
         agentSchema.extend({
           role: z.string().trim().min(1).max(1000),
           permissionProfile: z.enum(["coding", "research"]),
-          backend: piDurableBackendSchema.omit({ directory: true }).optional(),
+          backend: legacySetting(piCrewBackendSchema).optional(),
         }),
       )
       .min(1),

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import pino from "pino";
 import { z } from "zod";
 import type { AgentBackend } from "../src/backend";
@@ -40,7 +40,7 @@ async function running(
   const directory = await mkdtemp(join(tmpdir(), "stargate-runtime-reload-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.json");
-  const config = configSchema.parse({
+  const config = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: join(directory, "data"),
     bots: [bot()],
     dashboard: options.dashboard,
@@ -307,7 +307,7 @@ test("deny reload blocks a running turn's delivery without stopping its executio
 });
 
 function irc(port: number) {
-  return ircSchema.parse({
+  return Schema.decodeUnknownSync(ircSchema)({
     id: "fleet",
     server: { host: "127.0.0.1", port, tls: false },
     account: "galactica",
@@ -426,7 +426,10 @@ test("busy IRC removal rejects the whole reload without applying new denies", as
     accounts: { galactica: "captain-pass", "galactica-chief": "chief-pass" },
   }).start();
   cleanup.push(() => server.stop());
-  const registration = ircSchema.parse({ ...irc(server.port), crew: [chief] });
+  const registration = Schema.decodeUnknownSync(ircSchema)({
+    ...irc(server.port),
+    crew: [chief],
+  });
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const f = await running({

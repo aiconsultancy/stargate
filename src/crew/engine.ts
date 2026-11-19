@@ -26,6 +26,7 @@ import { Result, Schema } from "effect";
 import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
+import { legacySetting } from "../settings-legacy";
 import {
   noticeTools,
   scopedUpdate,
@@ -111,7 +112,7 @@ export const crewOptionsSchema = z
     /** Additional configured repositories; omission preserves the existing team. */
     projects: projectsSchema.optional(),
     team: teamSchema.optional(),
-    quota: quotaConfigSchema.optional(),
+    quota: legacySetting(quotaConfigSchema).optional(),
     cron: z
       .strictObject({
         configPath: directory,

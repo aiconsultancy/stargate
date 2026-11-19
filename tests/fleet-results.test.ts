@@ -3,6 +3,7 @@ import { chmod, mkdtemp, realpath, rm } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { ircSchema, teamsSchema } from "../src/config";
@@ -260,7 +261,7 @@ async function world(
     capabilities: ["read_code", "subspace", "dispatch", "implement"],
   });
   const buildShip = async (backend: Native, peer: string, store: Store) => {
-    const config = ircSchema.parse({
+    const config = Schema.decodeUnknownSync(ircSchema)({
       id: backend.account,
       server: { host: "127.0.0.1", port: fake.port, tls: false },
       account: backend.account,
@@ -306,7 +307,7 @@ async function world(
   };
   const ownerIrc = await buildShip(vance, "captain", ownerStore);
   const targetIrc = await buildShip(captain, "vance", captainStore);
-  const teamsConfig = teamsSchema.parse({
+  const teamsConfig = Schema.decodeUnknownSync(teamsSchema)({
     id: "admiral",
     botClientId: APP_ID,
     tenantId: TENANT_ID,

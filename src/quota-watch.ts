@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { mkdir, open } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { Schema } from "effect";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { atomicWrite, readOptional } from "./nightly/files";
@@ -10,29 +11,40 @@ import {
   type QuotaSnapshot,
   quotaConfigSchema,
 } from "./quota";
+import {
+  settingsDefault,
+  settingsPattern,
+  settingsRefine,
+  settingsStruct,
+} from "./settings-schema";
 
 const providers = ["claude", "codex"] as const;
-const providerSchema = z.enum(providers);
-const absolutePath = z
-  .string()
-  .refine((path) => isAbsolute(path) && !path.includes("\0"));
-export const quotaWatchSchema = z.strictObject({
+const providerSchema = Schema.Literals(providers);
+const absolutePath = Schema.String.check(
+  settingsRefine((path) => isAbsolute(path) && !path.includes("\0"), {
+    message: "Invalid input",
+  }),
+);
+export const quotaWatchSchema = settingsStruct({
   proxy: quotaConfigSchema,
   stateFile: absolutePath,
-  nativeCodexFile: absolutePath.optional(),
-  providers: z
-    .array(providerSchema)
-    .min(1)
-    .max(2)
-    .refine((items) => new Set(items).size === items.length)
-    .default([...providers]),
-  report: z.strictObject({
-    bot: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-    channel: z.string().regex(/^[CG][A-Z0-9]+$/),
+  nativeCodexFile: Schema.optional(absolutePath),
+  providers: Schema.mutable(Schema.Array(providerSchema))
+    .check(Schema.isMinLength(1))
+    .check(Schema.isMaxLength(2))
+    .check(
+      settingsRefine((items) => new Set(items).size === items.length, {
+        message: "Invalid input",
+      }),
+    )
+    .pipe(settingsDefault([...providers])),
+  report: settingsStruct({
+    bot: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+    channel: Schema.String.check(settingsPattern(/^[CG][A-Z0-9]+$/)),
   }),
 });
-type QuotaWatchConfig = z.infer<typeof quotaWatchSchema>;
-type Provider = z.infer<typeof providerSchema>;
+type QuotaWatchConfig = typeof quotaWatchSchema.Type;
+type Provider = typeof providerSchema.Type;
 const observation = z.strictObject({
   mode: z.enum(["normal", "limited", "paused"]),
   observedAt: z.number().int().positive(),

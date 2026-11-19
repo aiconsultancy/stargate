@@ -13,6 +13,7 @@ import { Agent } from "@opencode/schema/agent";
 import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import { Tool } from "@opencode/schema/tool";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import { z } from "zod";
 import { ircSchema } from "../src/config";
@@ -431,14 +432,16 @@ test("review evidence stays off by default and does not admit completion claims"
     }).success,
   ).toBe(false);
   expect(
-    fleetControlSchema.safeParse({
-      socketPath: "/tmp/x",
-      statePath: "/tmp/state",
-      targets: [
-        { id: "peer", account: "peer", channel: "#peer", sessionID: "peer" },
-      ],
-      reviews: { repositories: [target.repository], reviewers },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(fleetControlSchema)({
+        socketPath: "/tmp/x",
+        statePath: "/tmp/state",
+        targets: [
+          { id: "peer", account: "peer", channel: "#peer", sessionID: "peer" },
+        ],
+        reviews: { repositories: [target.repository], reviewers },
+      }),
+    ),
   ).toBe(false);
 });
 
@@ -612,7 +615,7 @@ test("authenticated IRC intake injects exact private context before retaining th
   server.caps.push("draft/multiline=max-bytes=4096,max-lines=100");
   const store = new Store(join(w.directory, "irc.sqlite"));
   close.push(() => store.close());
-  const config = ircSchema.parse({
+  const config = Schema.decodeUnknownSync(ircSchema)({
     id: "peer",
     account: "peer",
     passwordEnv: "IRC_PASSWORD",
@@ -776,24 +779,30 @@ test("review workers cannot opt into mutating, wildcard or interactive permissio
   };
   for (const action of ["edit", "bash", "*", "stargate_crew"])
     expect(
-      reviewAgentSchema.safeParse({
-        ...base,
-        permissions: [{ action, resource: "*", effect: "allow" }],
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(reviewAgentSchema)({
+          ...base,
+          permissions: [{ action, resource: "*", effect: "allow" }],
+        }),
+      ),
     ).toBe(false);
   expect(
-    reviewAgentSchema.safeParse({
-      ...base,
-      permissions: [{ action: "read", resource: "*", effect: "ask" }],
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(reviewAgentSchema)({
+        ...base,
+        permissions: [{ action: "read", resource: "*", effect: "ask" }],
+      }),
+    ),
   ).toBe(false);
   expect(
-    reviewAgentSchema.safeParse({
-      ...base,
-      permissions: [
-        { action: "read", resource: "/project/worker/**", effect: "allow" },
-      ],
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(reviewAgentSchema)({
+        ...base,
+        permissions: [
+          { action: "read", resource: "/project/worker/**", effect: "allow" },
+        ],
+      }),
+    ),
   ).toBe(true);
 });
 

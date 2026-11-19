@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import {
   CaptainPostError,
   type PostAudit,
@@ -19,6 +20,7 @@ import { configSchema } from "../src/config";
 import type { CrewCaller } from "../src/crew/engine";
 import { CrewPost } from "../src/crew/post";
 import { CrewError } from "../src/crew/state";
+import { settingsIssues } from "../src/settings-schema";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -442,7 +444,7 @@ test("files upload into the new message's thread and resume on retry", async () 
 
 test("captainPost config needs explicit channels and an OpenCode backend", () => {
   const check = (captainPost: unknown, type = "opencode") =>
-    configSchema.safeParse({
+    Schema.decodeUnknownResult(configSchema)({
       bots: [
         {
           id: "captain",
@@ -456,13 +458,16 @@ test("captainPost config needs explicit channels and an OpenCode backend", () =>
         },
       ],
     });
-  expect(check({ channels: ["C1", "G2", "D3"] }).success).toBe(true);
-  expect(check({ channels: ["C1"] }, "module").success).toBe(false);
+  expect(Result.isSuccess(check({ channels: ["C1", "G2", "D3"] }))).toBe(true);
+  expect(Result.isSuccess(check({ channels: ["C1"] }, "module"))).toBe(false);
   for (const invalid of [{}, { channels: [] }, { channels: ["#general"] }])
-    expect(check(invalid).success).toBe(false);
+    expect(Result.isSuccess(check(invalid))).toBe(false);
   const wildcard = check({ channels: ["*"] });
-  expect(wildcard.success).toBe(false);
-  expect(JSON.stringify(wildcard.error?.issues)).toContain("* is not accepted");
+  expect(Result.isSuccess(wildcard)).toBe(false);
+  if (Result.isFailure(wildcard))
+    expect(
+      JSON.stringify(settingsIssues(wildcard.failure.issue).issues),
+    ).toContain("* is not accepted");
 });
 
 function crew() {

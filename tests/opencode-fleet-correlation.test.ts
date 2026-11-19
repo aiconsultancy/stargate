@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Schema } from "effect";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
 
@@ -112,7 +113,7 @@ function fixture(changes: Changes = {}) {
       return new Response(null, { status: 404 });
     },
   });
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",

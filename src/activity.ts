@@ -1,13 +1,20 @@
+import { Schema } from "effect";
 import { z } from "zod";
+import {
+  settingsDefault,
+  settingsPattern,
+  settingsStruct,
+} from "./settings-schema";
 
-export const crewActivitySchema = z.strictObject({
-  detail: z.enum(["off", "summary", "detailed"]).default("off"),
-  reporter: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)
-    .optional(),
+export const crewActivitySchema = settingsStruct({
+  detail: Schema.Literals(["off", "summary", "detailed"]).pipe(
+    settingsDefault("off"),
+  ),
+  reporter: Schema.optional(
+    Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  ),
 });
-export type CrewActivitySettings = z.infer<typeof crewActivitySchema>;
+export type CrewActivitySettings = typeof crewActivitySchema.Type;
 
 export const activityEntrySchema = z.strictObject({
   id: z.number().int().nonnegative(),

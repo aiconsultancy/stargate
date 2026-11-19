@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
@@ -84,7 +85,7 @@ async function setup(
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
-  const config = ircSchema.parse({
+  const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica-captain",
@@ -216,7 +217,12 @@ test("irc crew link: off by default, and only on the captain's OpenCode server",
     expect(link.binds).toEqual([]);
   }
   expect(
-    ircSchema.shape.crewMessaging.safeParse({ sessions: true, x: 1 }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema.fields.crewMessaging)({
+        sessions: true,
+        x: 1,
+      }),
+    ),
   ).toBe(false);
 });
 

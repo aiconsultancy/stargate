@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import { configSchema } from "../src/config";
 import type { QuotaSnapshot } from "../src/quota";
 import { QuotaWatch, quotaWatchSchema } from "../src/quota-watch";
@@ -45,7 +46,10 @@ function account(
 test("quota notices and launch policy track the two providers independently across restarts", async () => {
   const path = await mkdtemp(join(tmpdir(), "stargate-quota-watch-"));
   const stateFile = join(path, "crew", "quota.json");
-  const settings = quotaWatchSchema.parse({ ...config, stateFile });
+  const settings = Schema.decodeUnknownSync(quotaWatchSchema)({
+    ...config,
+    stateFile,
+  });
   const messages: string[] = [];
   let now = start;
   let accounts: Account[] = [];
@@ -121,7 +125,7 @@ test("quota notices and launch policy track the two providers independently acro
 test("quota compares the tightest windows without adding account percentages", async () => {
   const path = await mkdtemp(join(tmpdir(), "stargate-quota-watch-pool-"));
   const stateFile = join(path, "quota.json");
-  const settings = quotaWatchSchema.parse({
+  const settings = Schema.decodeUnknownSync(quotaWatchSchema)({
     ...config,
     stateFile,
     providers: ["claude"],
@@ -168,27 +172,34 @@ test("quota report config authorises one outbound destination without opening in
     backend: { type: "module", module: "/private/backend.ts" },
   };
   const quotaWatch = { ...config, stateFile: "/private/quota.json" };
-  const parsed = configSchema.parse({ bots: [bot], quotaWatch });
+  const parsed = Schema.decodeUnknownSync(configSchema)({
+    bots: [bot],
+    quotaWatch,
+  });
   const reporter = parsed.bots[0];
   if (!reporter) throw new Error("Missing report bot fixture");
   expect(isAllowedChannel(reporter, quotaWatch.report.channel)).toBe(false);
   expect(
-    configSchema.safeParse({
-      bots: [bot],
-      quotaWatch: {
-        ...quotaWatch,
-        report: { ...quotaWatch.report, channel: "C789" },
-      },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        bots: [bot],
+        quotaWatch: {
+          ...quotaWatch,
+          report: { ...quotaWatch.report, channel: "C789" },
+        },
+      }),
+    ),
   ).toBe(false);
   expect(
-    configSchema.safeParse({
-      bots: [bot],
-      quotaWatch: {
-        ...quotaWatch,
-        report: { ...quotaWatch.report, bot: "other" },
-      },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        bots: [bot],
+        quotaWatch: {
+          ...quotaWatch,
+          report: { ...quotaWatch.report, bot: "other" },
+        },
+      }),
+    ),
   ).toBe(false);
 });
 
@@ -196,7 +207,7 @@ test("native Codex receipts override proxy accounts and only a valid fresh recei
   const path = await mkdtemp(join(tmpdir(), "stargate-native-quota-"));
   const stateFile = join(path, "quota.json");
   const nativeCodexFile = join(path, "native.json");
-  const settings = quotaWatchSchema.parse({
+  const settings = Schema.decodeUnknownSync(quotaWatchSchema)({
     ...config,
     stateFile,
     nativeCodexFile,

@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type CrewCaller,
@@ -12,7 +13,7 @@ import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import { teamSchema } from "../src/crew/team";
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/stargate-mail-receipt-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-mail-receipt-"));
   const team = teamSchema.parse({
     captain: { id: "captain" },
     crew: [{ id: "worker", role: "Builder", permissionProfile: "coding" }],

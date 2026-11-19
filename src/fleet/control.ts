@@ -1,5 +1,7 @@
 import { createServer, type Server } from "node:http";
+import { Schema } from "effect";
 import { z } from "zod";
+import { legacySetting } from "../settings-legacy";
 import { close, readBody, sendJson } from "../teams/http-util";
 import {
   listenOnUnixSocket,
@@ -68,7 +70,7 @@ export class FleetControl {
   private constructor(private readonly options: FleetControlOptions) {
     validateFleetPermissions(options.permissions);
     this.permissions = options.permissions.map((rule) => ({ ...rule }));
-    fleetControlSchema.parse(options.config);
+    Schema.decodeUnknownSync(fleetControlSchema)(options.config);
     if (
       !options.sessionID ||
       !options.account ||
@@ -328,7 +330,7 @@ export class FleetControl {
               throw new FleetError("Invalid review proof lookup");
             const target = z
               .strictObject({
-                repository: reviewRepositorySchema,
+                repository: legacySetting(reviewRepositorySchema),
                 pullRequest: z
                   .string()
                   .regex(/^[1-9][0-9]*$/)

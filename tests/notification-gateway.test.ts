@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
@@ -589,30 +590,34 @@ test("released chat holds wait for a bypassed same-thread reply without deadlock
 test("text mute bypass configuration must be an explicit subset on Slack text rules only", () => {
   const config = bot();
   expect(
-    botSchema.safeParse({
-      ...config,
-      access: {
-        ...config.access,
-        textMentions: {
-          channels: ["C123"],
-          names: ["helper"],
-          muteBypassNames: ["all captains"],
+    Result.isSuccess(
+      Schema.decodeUnknownResult(botSchema)({
+        ...config,
+        access: {
+          ...config.access,
+          textMentions: {
+            channels: ["C123"],
+            names: ["helper"],
+            muteBypassNames: ["all captains"],
+          },
         },
-      },
-    }).success,
+      }),
+    ),
   ).toBe(false);
   expect(
-    botSchema.safeParse({
-      ...config,
-      access: {
-        ...config.access,
-        textMentions: {
-          channels: ["C123"],
-          names: ["helper"],
-          muteBypassNames: [],
+    Result.isSuccess(
+      Schema.decodeUnknownResult(botSchema)({
+        ...config,
+        access: {
+          ...config.access,
+          textMentions: {
+            channels: ["C123"],
+            names: ["helper"],
+            muteBypassNames: [],
+          },
         },
-      },
-    }).success,
+      }),
+    ),
   ).toBe(true);
   const changed = bot();
   if (changed.backend.type === "opencode")

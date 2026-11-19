@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AttachmentTransport } from "../src/attachment-delivery";
 import type { Attachment } from "../src/attachments";
@@ -11,6 +12,7 @@ import { backendSchema } from "../src/config";
 import { Gateway, type SlackDelivery } from "../src/gateway";
 import { routeEvent } from "../src/routing";
 import { Store } from "../src/store";
+import { publishedFileDirectory } from "./file-fixture";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
@@ -25,7 +27,7 @@ const png = Uint8Array.from(
 );
 
 async function fixture(pinned = false) {
-  const directory = await mkdtemp("/tmp/opencode/stargate-media-");
+  const directory = await publishedFileDirectory("stargate-media-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const image = join(directory, "proof.png");
   await writeFile(image, png);
@@ -324,7 +326,7 @@ test("attachment eval: real OpenCode parser routes late private proof, not publi
     },
   });
   cleanup.push(() => server.stop(true));
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: f.directory,

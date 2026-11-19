@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import {
   parseQuotaWindows,
   QuotaReader,
@@ -53,7 +55,7 @@ test("Claude quotas preserve used semantics, unknowns and inactive model scopes"
 });
 
 test("collector blocks redirects, oversized data, key symlinks and caller cancellation", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-quota-boundary-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-quota-boundary-"));
   const key = join(directory, "management.key");
   const link = join(directory, "link.key");
   await writeFile(key, "fixture-only", { mode: 0o600 });
@@ -159,23 +161,27 @@ test("quota configuration permits loopback only and never accepts inline credent
     "http://127.0.0.1:8317/?key=x",
   ]) {
     expect(
-      quotaConfigSchema.safeParse({
-        baseURL,
-        managementKeyFile: "/private/key",
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(quotaConfigSchema)({
+          baseURL,
+          managementKeyFile: "/private/key",
+        }),
+      ),
     ).toBe(false);
   }
   expect(
-    quotaConfigSchema.safeParse({
-      baseURL: "http://127.0.0.1:8317",
-      managementKeyFile: "/private/key",
-      key: "secret",
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(quotaConfigSchema)({
+        baseURL: "http://127.0.0.1:8317",
+        managementKeyFile: "/private/key",
+        key: "secret",
+      }),
+    ),
   ).toBe(false);
 });
 
 test("collector uses fixed read endpoints, strips secrets, caches then fails closed per account", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-quota-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-quota-"));
   const managementKeyFile = join(directory, "management.key");
   await writeFile(managementKeyFile, "fixture-management-key\n", {
     mode: 0o600,

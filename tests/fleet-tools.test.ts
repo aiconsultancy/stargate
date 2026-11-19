@@ -20,6 +20,7 @@ import { Agent } from "@opencode/schema/agent";
 import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import { Tool } from "@opencode/schema/tool";
+import { Result, Schema } from "effect";
 import { fleetRequest } from "../src/fleet/client";
 import { FleetControl, type FleetControlOptions } from "../src/fleet/control";
 import { FleetLedger } from "../src/fleet/ledger";
@@ -127,26 +128,40 @@ async function fixture() {
 }
 
 test("control is opt-in, requires pins/targets and rejects arbitrary destinations", () => {
-  expect(fleetControlSchema.safeParse(undefined).success).toBe(false);
+  expect(
+    Result.isSuccess(Schema.decodeUnknownResult(fleetControlSchema)(undefined)),
+  ).toBe(false);
   const valid = {
     socketPath: "/run/gateway/control.sock",
     statePath: "/var/lib/gateway/evidence.sqlite",
     targets: [target],
   };
-  expect(fleetControlSchema.safeParse(valid).success).toBe(true);
   expect(
-    fleetControlSchema.safeParse({
-      ...valid,
-      targets: [{ ...target, sessionID: undefined }],
-    }).success,
+    Result.isSuccess(Schema.decodeUnknownResult(fleetControlSchema)(valid)),
+  ).toBe(true);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(fleetControlSchema)({
+        ...valid,
+        targets: [{ ...target, sessionID: undefined }],
+      }),
+    ),
   ).toBe(false);
   expect(
-    fleetControlSchema.safeParse({ ...valid, targets: [target, target] })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(fleetControlSchema)({
+        ...valid,
+        targets: [target, target],
+      }),
+    ),
   ).toBe(false);
   expect(
-    fleetControlSchema.safeParse({ ...valid, socketPath: "relative.sock" })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(fleetControlSchema)({
+        ...valid,
+        socketPath: "relative.sock",
+      }),
+    ),
   ).toBe(false);
 });
 

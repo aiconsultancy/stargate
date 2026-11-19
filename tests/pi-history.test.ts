@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
@@ -225,7 +226,7 @@ test("Pi clips non-BMP text within the wire bound without splitting characters",
 });
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-history-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-history-"));
   const path = join(directory, "pi.sqlite");
   const harness = await Harness.open(
     await openNodeSqliteStorage(path),
@@ -382,7 +383,7 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
 });
 
 test("Pi history aborts without native reads or missing-database creation", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-history-abort-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-history-abort-"));
   let reads = 0;
   const history = piSessionHistory({
     async conversation() {

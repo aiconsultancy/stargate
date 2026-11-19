@@ -1,34 +1,53 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
+import { Schema } from "effect";
 import { z } from "zod";
 import { isLoopbackAddress } from "./loopback";
+import {
+  settingsEmail,
+  settingsRefine,
+  settingsStruct,
+  settingsURL,
+} from "./settings-schema";
 
-const accountEmails = z.array(z.email()).min(1).max(10);
+const accountEmails = Schema.mutable(Schema.Array(settingsEmail))
+  .check(Schema.isMinLength(1))
+  .check(Schema.isMaxLength(10));
 export const quotaInputSchema = z.strictObject({});
-export const quotaConfigSchema = z.strictObject({
-  baseURL: z.url().refine((value) => {
-    const url = new URL(value);
-    return (
-      url.protocol === "http:" &&
-      isLoopbackAddress(url.hostname) &&
-      !url.username &&
-      !url.password &&
-      url.pathname === "/" &&
-      !url.search &&
-      !url.hash &&
-      !/[?#\\\s]/.test(value)
-    );
-  }, "Use a loopback HTTP origin without credentials, path, query or fragment"),
-  accounts: z
-    .strictObject({
-      claude: accountEmails.optional(),
-      codex: accountEmails.optional(),
-    })
-    .optional(),
-  managementKeyFile: z
-    .string()
-    .refine((value) => isAbsolute(value) && !value.includes("\0")),
+export const quotaConfigSchema = settingsStruct({
+  baseURL: settingsURL.check(
+    settingsRefine(
+      (value) => {
+        const url = new URL(value);
+        return (
+          url.protocol === "http:" &&
+          isLoopbackAddress(url.hostname) &&
+          !url.username &&
+          !url.password &&
+          url.pathname === "/" &&
+          !url.search &&
+          !url.hash &&
+          !/[?#\\\s]/.test(value)
+        );
+      },
+      {
+        message:
+          "Use a loopback HTTP origin without credentials, path, query or fragment",
+      },
+    ),
+  ),
+  accounts: Schema.optional(
+    settingsStruct({
+      claude: Schema.optional(accountEmails),
+      codex: Schema.optional(accountEmails),
+    }),
+  ),
+  managementKeyFile: Schema.String.check(
+    settingsRefine((value) => isAbsolute(value) && !value.includes("\0"), {
+      message: "Invalid input",
+    }),
+  ),
 });
 const providerSchema = z.enum(["claude", "codex"]);
 type Provider = z.infer<typeof providerSchema>;
@@ -208,15 +227,17 @@ const ttl = 60_000;
 
 /** One opt-in reader per host binding. No URL/auth/reset controls reach callers. */
 export class QuotaReader {
-  private readonly config: z.infer<typeof quotaConfigSchema> | undefined;
+  private readonly config: typeof quotaConfigSchema.Type | undefined;
   private cache?: QuotaSnapshot;
   constructor(
-    config?: z.input<typeof quotaConfigSchema>,
+    config?: typeof quotaConfigSchema.Encoded,
     private readonly now = Date.now,
     private readonly monitoredProviders = providers,
   ) {
     this.config =
-      config === undefined ? undefined : quotaConfigSchema.parse(config);
+      config === undefined
+        ? undefined
+        : Schema.decodeUnknownSync(quotaConfigSchema)(config);
   }
 
   async read(caller: AbortSignal): Promise<QuotaSnapshot> {

@@ -1,8 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
+import { Schema } from "effect";
 import pino from "pino";
 import { opencodeScratchDirectory } from "../src/attachments";
 import {
@@ -143,7 +145,7 @@ function productionTranscriptFixture(store?: Store, ownStore = true) {
     },
   });
   cleanup.push(() => server.stop(true));
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
@@ -588,7 +590,7 @@ test("conversation eval: production parser preserves a crew origin across cursor
 });
 
 test("conversation eval: crew origin survives restart and ordinary shell completion", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-origin-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-origin-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
   const initial = new Store(path);
@@ -1451,7 +1453,7 @@ test("lost captain cursor re-anchors current ownership, not the previous source"
 });
 
 test("restart preserves source jobs, input ownership and the one delivery cursor", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-captain-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-captain-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
   const first = new Store(path);

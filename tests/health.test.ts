@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import { createHealthReader, readStarfleetSnapshot } from "../src/health";
 import { healthConfigSchema } from "../src/health-config";
 import { maintenanceSchema } from "../src/nightly/config";
@@ -65,18 +66,37 @@ function reader(extra: Partial<Parameters<typeof createHealthReader>[0]> = {}) {
 }
 
 test("strict health settings accept absolute paths and reject executable or relative settings", () => {
-  expect(healthConfigSchema.parse({}).stalledAfterSeconds).toBe(1800);
-  expect(healthConfigSchema.parse({}).snapshotMaxAgeSeconds).toBe(900);
   expect(
-    healthConfigSchema.safeParse({ starfleetSnapshotFile: "relative" }).success,
+    Schema.decodeUnknownSync(healthConfigSchema)({}).stalledAfterSeconds,
+  ).toBe(1800);
+  expect(
+    Schema.decodeUnknownSync(healthConfigSchema)({}).snapshotMaxAgeSeconds,
+  ).toBe(900);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(healthConfigSchema)({
+        starfleetSnapshotFile: "relative",
+      }),
+    ),
   ).toBe(false);
   expect(
-    healthConfigSchema.safeParse({ opencodeDataDirectory: "/safe\0bad" })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(healthConfigSchema)({
+        opencodeDataDirectory: "/safe\0bad",
+      }),
+    ),
   ).toBe(false);
-  expect(healthConfigSchema.safeParse({ command: "az" }).success).toBe(false);
   expect(
-    healthConfigSchema.safeParse({ stalledAfterSeconds: 59 }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(healthConfigSchema)({ command: "az" }),
+    ),
+  ).toBe(false);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(healthConfigSchema)({
+        stalledAfterSeconds: 59,
+      }),
+    ),
   ).toBe(false);
 });
 
@@ -428,7 +448,7 @@ test("OpenCode detail consumes optional canonical metadata without exposing igno
 test("configured unit reads use only fixed read-only systemctl properties and suppress stderr", async () => {
   const commands: string[][] = [];
   const read = reader({
-    maintenance: maintenanceSchema.parse({
+    maintenance: Schema.decodeUnknownSync(maintenanceSchema)({
       services: {
         gateway: "test-gateway.service",
         openCodeRestart: [

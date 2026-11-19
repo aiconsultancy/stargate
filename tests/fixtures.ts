@@ -1,7 +1,8 @@
+import { Schema } from "effect";
 import { botSchema } from "../src/config";
 
 export function bot(id = "helper") {
-  return botSchema.parse({
+  return Schema.decodeUnknownSync(botSchema)({
     id,
     slack: {
       appId: "A123",

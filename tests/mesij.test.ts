@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { MesijClient, MesijError } from "../src/crew/mesij";
 
@@ -26,7 +27,7 @@ const realMesij = test.skipIf(!mise);
 const signal = new AbortController().signal;
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/stargate-mesij-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-mesij-"));
   await chmod(directory, 0o700);
   const projectDirectory = join(directory, "project");
   const dataDirectory = join(directory, "data");

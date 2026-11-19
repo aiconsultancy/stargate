@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Schema } from "effect";
 import type { AgentBackend } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema, configSchema } from "../src/config";
@@ -70,7 +71,7 @@ test("update notice admission queues local context via RPC, never native input",
 });
 
 function backend(url: string, options: Record<string, unknown> = {}) {
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url,
     directory: "/captain",
@@ -108,11 +109,15 @@ test("one bot per pinned root; distinct and absent pins stay valid", () => {
       botTokenEnv: "SECOND_BOT_TOKEN",
     },
   };
-  expect(() => configSchema.parse({ bots: [first, second] })).not.toThrow();
-  const pinned = { ...first, backend: { ...first.backend, sessionID } };
-  expect(() => configSchema.parse({ bots: [pinned, second] })).not.toThrow();
   expect(() =>
-    configSchema.parse({
+    Schema.decodeUnknownSync(configSchema)({ bots: [first, second] }),
+  ).not.toThrow();
+  const pinned = { ...first, backend: { ...first.backend, sessionID } };
+  expect(() =>
+    Schema.decodeUnknownSync(configSchema)({ bots: [pinned, second] }),
+  ).not.toThrow();
+  expect(() =>
+    Schema.decodeUnknownSync(configSchema)({
       bots: [
         pinned,
         {
@@ -123,7 +128,7 @@ test("one bot per pinned root; distinct and absent pins stay valid", () => {
     }),
   ).not.toThrow();
   expect(() =>
-    configSchema.parse({
+    Schema.decodeUnknownSync(configSchema)({
       bots: [
         pinned,
         {

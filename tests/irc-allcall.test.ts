@@ -3,6 +3,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
@@ -55,7 +56,7 @@ async function setup(
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
-  const config = ircSchema.parse({
+  const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica-captain",
@@ -274,11 +275,16 @@ test(
     expect(startDelay("galactica-tyrol")).toBe(0);
     await idle();
     const parse = (value: unknown) =>
-      ircSchema.shape.access.safeParse({ allCallStaggerMs: value });
-    expect(parse(undefined).data?.allCallStaggerMs).toBe(4000);
-    expect(parse(-1).success).toBe(false);
-    expect(parse(30_001).success).toBe(false);
-    expect(parse(2.5).success).toBe(false);
+      Schema.decodeUnknownResult(ircSchema.fields.access)({
+        allCallStaggerMs: value,
+      });
+    const defaults = parse(undefined);
+    expect(
+      Result.isSuccess(defaults) && defaults.success.allCallStaggerMs,
+    ).toBe(4000);
+    expect(Result.isSuccess(parse(-1))).toBe(false);
+    expect(Result.isSuccess(parse(30_001))).toBe(false);
+    expect(Result.isSuccess(parse(2.5))).toBe(false);
   },
   limit,
 );

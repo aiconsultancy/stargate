@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import type { AgentBackend, PendingPermission } from "../src/backend";
 import { teamsSchema } from "../src/config";
@@ -94,7 +95,7 @@ export function registrationFixture(
   const directory = mkdtempSync(join(tmpdir(), "sg-teams-"));
   const storePath = join(directory, "queue.sqlite");
   const path = join(directory, "teams.sqlite");
-  const config = teamsSchema.parse({
+  const config = Schema.decodeUnknownSync(teamsSchema)({
     id: "test-admiral",
     botClientId: APP_ID,
     tenantId: TENANT_ID,

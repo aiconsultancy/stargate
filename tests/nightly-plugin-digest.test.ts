@@ -7,6 +7,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   pluginDigest,
@@ -15,7 +16,7 @@ import {
   writePluginDigest,
 } from "../src/nightly/plugin-digest";
 
-const base = await mkdtemp("/tmp/opencode/stargate-plugin-digest-");
+const base = await mkdtemp(join(tmpdir(), "stargate-plugin-digest-"));
 afterAll(() => rm(base, { recursive: true, force: true }));
 let count = 0;
 

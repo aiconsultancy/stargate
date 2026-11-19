@@ -10,8 +10,15 @@ import {
 } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import { type BotConfig, botSchema } from "./config";
+import {
+  settingsDefault,
+  settingsDiscriminatedUnion,
+  settingsPattern,
+  settingsRefine,
+  settingsStruct,
+} from "./settings-schema";
 import {
   addBot,
   buildManifest,
@@ -20,51 +27,61 @@ import {
   readConfiguration,
 } from "./setup";
 
-const appIdSchema = botSchema.shape.slack.shape.appId;
-const planBotSchema = botSchema.omit({ slack: true }).extend({
-  name: z.string().trim().min(1).max(80),
-  app: z.discriminatedUnion("mode", [
-    z.strictObject({ mode: z.literal("reuse"), appId: appIdSchema }),
-    z.strictObject({ mode: z.literal("create") }),
-  ]),
-  slack: botSchema.shape.slack.omit({ appId: true }),
-});
-const planSchema = z.strictObject({
-  version: z.literal(1),
-  teamId: z.string().regex(/^T[A-Z0-9]+$/),
-  configTokenEnv: botSchema.shape.slack.shape.appTokenEnv.default(
-    "SLACK_APP_CONFIG_TOKEN",
+const appIdSchema = botSchema.fields.slack.schema.fields.appId;
+const { slack: slackSchema, ...planBotFields } = botSchema.fields;
+const { appId: _appId, ...planSlackFields } = slackSchema.schema.fields;
+const planBotSchema = settingsStruct({
+  ...planBotFields,
+  name: Schema.Trim.check(Schema.isMinCodePoints(1)).check(
+    Schema.isMaxCodePoints(80),
   ),
-  bots: z.array(planBotSchema).min(1),
+  app: settingsDiscriminatedUnion("mode", [
+    settingsStruct({ mode: Schema.Literal("reuse"), appId: appIdSchema }),
+    settingsStruct({ mode: Schema.Literal("create") }),
+  ]),
+  slack: settingsStruct(planSlackFields),
 });
-const journalBotSchema = z
-  .strictObject({
-    id: botSchema.shape.id,
-    state: z.enum([
-      "pending",
-      "creating",
-      "created",
-      "recorded",
-      "outcome_unknown",
-      "rate_limited",
-      "failed",
-    ]),
-    appId: appIdSchema.optional(),
-    retryAt: z.number().int().nonnegative().optional(),
-  })
-  .refine(
+const planSchema = settingsStruct({
+  version: Schema.Literal(1),
+  teamId: Schema.String.check(settingsPattern(/^T[A-Z0-9]+$/)),
+  configTokenEnv: slackSchema.schema.fields.appTokenEnv.pipe(
+    settingsDefault("SLACK_APP_CONFIG_TOKEN"),
+  ),
+  bots: Schema.mutable(Schema.Array(planBotSchema)).check(
+    Schema.isMinLength(1),
+  ),
+});
+const journalBotSchema = settingsStruct({
+  id: botSchema.fields.id,
+  state: Schema.Literals([
+    "pending",
+    "creating",
+    "created",
+    "recorded",
+    "outcome_unknown",
+    "rate_limited",
+    "failed",
+  ]),
+  appId: Schema.optional(appIdSchema),
+  retryAt: Schema.optional(
+    Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
+  ),
+}).check(
+  settingsRefine(
     (entry) =>
       Boolean(entry.appId) === ["created", "recorded"].includes(entry.state) &&
       (entry.state === "rate_limited") === (entry.retryAt !== undefined),
-  );
-const journalSchema = z.strictObject({
-  version: z.literal(1),
-  planHash: z.string().regex(/^[a-f0-9]{64}$/),
-  bots: z.array(journalBotSchema),
+    { message: "Invalid input" },
+  ),
+);
+const journalSchema = settingsStruct({
+  version: Schema.Literal(1),
+  planHash: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
+  bots: Schema.mutable(Schema.Array(journalBotSchema)),
 });
-type Plan = z.infer<typeof planSchema>;
-type Journal = z.infer<typeof journalSchema>;
-type JournalBot = z.infer<typeof journalBotSchema>;
+type Plan = typeof planSchema.Type;
+type Journal = typeof journalSchema.Type;
+type JournalBot = typeof journalBotSchema.Type;
 
 export interface ProvisionOptions {
   planPath: string;
@@ -117,7 +134,7 @@ function stateFor(journal: Journal, id: string) {
 
 function runtimeBot(entry: Plan["bots"][number], appId = "APLANNED") {
   const { name: _name, app: _app, ...runtime } = entry;
-  return botSchema.parse({
+  return Schema.decodeUnknownSync(botSchema)({
     ...runtime,
     slack: { ...entry.slack, appId },
   });
@@ -200,19 +217,19 @@ async function createApp(
       };
     }
     if (response.status >= 500) return { state: "outcome_unknown" };
-    const parsed = z
-      .object({
-        ok: z.boolean(),
-        app_id: appIdSchema.optional(),
-        error: z.string().optional(),
-      })
-      .safeParse(await response.json());
-    if (parsed.success) {
-      if (response.ok && parsed.data.ok && parsed.data.app_id)
-        return { state: "created", appId: parsed.data.app_id };
+    const parsed = Schema.decodeUnknownResult(
+      Schema.Struct({
+        ok: Schema.Boolean,
+        app_id: Schema.optional(appIdSchema),
+        error: Schema.optional(Schema.String),
+      }),
+    )(await response.json());
+    if (Result.isSuccess(parsed)) {
+      if (response.ok && parsed.success.ok && parsed.success.app_id)
+        return { state: "created", appId: parsed.success.app_id };
       if (
-        !parsed.data.ok &&
-        rejectedWithoutCreation.has(parsed.data.error ?? "")
+        !parsed.success.ok &&
+        rejectedWithoutCreation.has(parsed.success.error ?? "")
       )
         return { state: "failed" };
     }
@@ -245,7 +262,9 @@ export async function provisionBots(
     throw new Error("Provision journal must use a separate path.");
   let plan: Plan;
   try {
-    plan = planSchema.parse(JSON.parse((await optionalFile(planPath)) ?? ""));
+    plan = Schema.decodeUnknownSync(planSchema)(
+      JSON.parse((await optionalFile(planPath)) ?? ""),
+    );
   } catch {
     throw new Error(
       "Invalid provisioning plan; check version, fields, and bots.",
@@ -264,7 +283,7 @@ export async function provisionBots(
     try {
       journal =
         contents !== undefined
-          ? journalSchema.parse(JSON.parse(contents))
+          ? Schema.decodeUnknownSync(journalSchema)(JSON.parse(contents))
           : {
               version: 1,
               planHash,

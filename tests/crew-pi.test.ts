@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TextSink } from "../src/backend";
 import {
@@ -41,7 +42,7 @@ function twikiTeam(): Team {
 }
 
 async function fixture() {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-crew-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-crew-"));
   const team = twikiTeam();
   const options: CrewOptions = {
     namespace: "galactica",

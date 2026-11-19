@@ -1,11 +1,12 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/store";
 
 test("IRC reply parent migrates, survives reopen and stays scoped to the registration", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-thread-store-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-thread-store-"));
   const path = join(directory, "store.sqlite");
   let store: Store | undefined;
   try {

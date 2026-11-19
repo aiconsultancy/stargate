@@ -1,12 +1,13 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { lockInstance } from "../src/runtime";
 import { JobTransitionRefused, Store } from "../src/store";
 
 test("state survives reopening and exclusive lock prevents two owners", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-test-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-test-"));
   try {
     const path = join(directory, "stargate.sqlite");
     const lock = lockInstance(join(directory, "lock.sqlite"));
@@ -45,7 +46,7 @@ test("state survives reopening and exclusive lock prevents two owners", async ()
 });
 
 test("migration preserves old jobs and accepted Stop survives database reopen", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-cancel-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-cancel-"));
   const path = join(directory, "stargate.sqlite");
   try {
     const initial = new Store(path);

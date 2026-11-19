@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import { configSchema, ircSchema } from "../src/config";
 import { restartRequired } from "../src/config-reload";
 import { checkCredentials } from "../src/setup";
@@ -43,13 +44,17 @@ test("crew auth accepts mixed and multiple EXTERNAL members without password col
     member("apollo", { clientPemFile: "/private/apollo.pem" }),
     member("bosun", { passwordEnv: "BOSUN" }),
   ]);
-  expect(configSchema.safeParse({ irc: [irc] }).success).toBe(true);
   expect(
-    ircSchema.safeParse({
-      ...irc,
-      passwordEnv: undefined,
-      clientPemFile: "/private/captain.pem",
-    }).success,
+    Result.isSuccess(Schema.decodeUnknownResult(configSchema)({ irc: [irc] })),
+  ).toBe(true);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...irc,
+        passwordEnv: undefined,
+        clientPemFile: "/private/captain.pem",
+      }),
+    ),
   ).toBe(true);
 });
 
@@ -59,19 +64,30 @@ test("crew auth refuses missing, both, non-TLS and duplicate PLAIN references", 
     { passwordEnv: "CHIEF", clientPemFile: "/private/chief.pem" },
   ])
     expect(
-      ircSchema.safeParse(registration([member("chief", auth)])).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(ircSchema)(
+          registration([member("chief", auth)]),
+        ),
+      ),
     ).toBe(false);
   expect(
-    ircSchema.safeParse(
-      registration([member("chief", { clientPemFile: "/private/chief.pem" })], {
-        server: { host: "127.0.0.1", port: 6667, tls: false },
-      }),
-    ).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)(
+        registration(
+          [member("chief", { clientPemFile: "/private/chief.pem" })],
+          {
+            server: { host: "127.0.0.1", port: 6667, tls: false },
+          },
+        ),
+      ),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse(
-      registration([member("chief", { passwordEnv: "CAPTAIN" })]),
-    ).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)(
+        registration([member("chief", { passwordEnv: "CAPTAIN" })]),
+      ),
+    ),
   ).toBe(false);
   const first = registration([member("chief", { passwordEnv: "SHARED" })]);
   const second = registration(
@@ -82,11 +98,15 @@ test("crew auth refuses missing, both, non-TLS and duplicate PLAIN references", 
       passwordEnv: "OTHER",
     },
   );
-  expect(configSchema.safeParse({ irc: [first, second] }).success).toBe(false);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({ irc: [first, second] }),
+    ),
+  ).toBe(false);
 });
 
 test("crew PEM references are restart-only without changing session routing", () => {
-  const before = configSchema.parse({
+  const before = Schema.decodeUnknownSync(configSchema)({
     irc: [
       registration([member("chief", { clientPemFile: "/private/chief.pem" })]),
     ],
@@ -108,7 +128,7 @@ test("credential checks validate crew PEMs without requiring an undefined passwo
   cleanup.push(dir);
   const pem = join(dir, "unsafe.pem");
   await writeFile(pem, "not a certificate", { mode: 0o644 });
-  const config = ircSchema.parse(
+  const config = Schema.decodeUnknownSync(ircSchema)(
     registration([member("chief", { clientPemFile: pem })]),
   );
   await expect(

@@ -11,6 +11,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/cli";
 import { crewPermissions } from "../src/crew/policy";
@@ -34,7 +35,9 @@ afterEach(async () => {
   }
 });
 async function fixture() {
-  const root = await realpath(await mkdtemp("/tmp/opencode/stargate-profile-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "stargate-profile-")),
+  );
   directories.push(root);
   const projectDirectory = join(root, "indra");
   execFileSync("git", ["init", "-b", "main", projectDirectory]);

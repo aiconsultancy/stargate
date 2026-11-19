@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
+import { Schema } from "effect";
 import { z } from "zod";
 import { PiDurableBackend } from "../src/backends/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
@@ -146,7 +148,7 @@ test("Pi preserves required default fields and native argument coercion", () => 
 });
 
 test("real Pi crew extension reads only native self history and deduplicates DM admission", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-coordination-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-coordination-"));
   const apiKeyEnv = "STARGATE_COORDINATION_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
@@ -164,7 +166,7 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
   let authorized = 0;
   const signal = new AbortController().signal;
   try {
-    const config = piDurableBackendSchema.parse({
+    const config = Schema.decodeUnknownSync(piDurableBackendSchema)({
       type: "pi-durable",
       model: "openai/opencode-go/deepseek-v4.1-flash",
       directory,
@@ -253,7 +255,7 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
 
 for (const tools of ["coding", "none"] as const) {
   test(`Pi ${tools} request hook sends changed-file advice once; reports stay excluded`, async () => {
-    const directory = await mkdtemp("/tmp/opencode/stargate-pi-agreement-");
+    const directory = await mkdtemp(join(tmpdir(), "stargate-pi-agreement-"));
     const path = join(directory, "WAYS_OF_WORKING.md");
     const apiKeyEnv = `STARGATE_AGREEMENT_${tools.toUpperCase()}_TEST_KEY`;
     const previous = process.env[apiKeyEnv];
@@ -277,7 +279,7 @@ for (const tools of ["coding", "none"] as const) {
     try {
       await writeFile(path, "PRIVATE AGREEMENT ONE");
       backend = await PiDurableBackend.open(
-        piDurableBackendSchema.parse({
+        Schema.decodeUnknownSync(piDurableBackendSchema)({
           type: "pi-durable",
           model: "openai/opencode-go/deepseek-v4.1-flash",
           directory,
@@ -426,7 +428,7 @@ for (const scenario of [
   },
 ]) {
   test(`real Pi binding: ${scenario.title}`, async () => {
-    const directory = await mkdtemp("/tmp/opencode/stargate-pi-output-");
+    const directory = await mkdtemp(join(tmpdir(), "stargate-pi-output-"));
     const apiKeyEnv = "STARGATE_OUTPUT_TEST_KEY";
     const previous = process.env[apiKeyEnv];
     process.env[apiKeyEnv] = "fixture-only";
@@ -448,7 +450,7 @@ for (const scenario of [
     const inputs: unknown[] = [];
     try {
       backend = await PiDurableBackend.open(
-        piDurableBackendSchema.parse({
+        Schema.decodeUnknownSync(piDurableBackendSchema)({
           type: "pi-durable",
           model: "openai/opencode-go/deepseek-v4.1-flash",
           directory,
@@ -507,7 +509,9 @@ for (const scenario of [
 }
 
 test("native Pi history bounds visible text and retains the raw page cursor", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-visible-history-");
+  const directory = await mkdtemp(
+    join(tmpdir(), "stargate-pi-visible-history-"),
+  );
   const apiKeyEnv = "STARGATE_VISIBLE_HISTORY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
@@ -530,7 +534,7 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
   let backend: PiDurableBackend | undefined;
   try {
     backend = await PiDurableBackend.open(
-      piDurableBackendSchema.parse({
+      Schema.decodeUnknownSync(piDurableBackendSchema)({
         type: "pi-durable",
         model: "openai/opencode-go/deepseek-v4.1-flash",
         directory,

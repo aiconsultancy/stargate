@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { BUILTIN_TOOL_NAMES } from "@anthropic-ai/claude-agent-sdk";
+import { Result, Schema } from "effect";
 import { z } from "zod";
 import { createBackend } from "../src/backend";
 import {
@@ -67,7 +68,7 @@ afterEach(async () => {
 });
 
 function config(extra: Record<string, unknown> = {}, directory = "/workspace") {
-  return claudeBackendSchema.parse({
+  return Schema.decodeUnknownSync(claudeBackendSchema)({
     type: "claude",
     directory,
     model: "claude-sonnet-5-5",
@@ -211,7 +212,9 @@ test("Claude resumes its own transcript and never another namespace's", async ()
   );
   // Backend settings select the namespace, as for other backends.
   const fingerprint = (backend: unknown) =>
-    backendFingerprint({ backend: backendSchema.parse(backend) });
+    backendFingerprint({
+      backend: Schema.decodeUnknownSync(backendSchema)(backend),
+    });
   expect(fingerprint(config())).not.toBe(
     fingerprint(config({ allowedTools: ["Read"] })),
   );
@@ -749,13 +752,15 @@ test("Claude attachments become content blocks or fail closed", () => {
 
 test("Claude configuration is strict and fails closed", () => {
   const parse = (extra: Record<string, unknown>) =>
-    claudeBackendSchema.safeParse({
-      type: "claude",
-      directory: "/workspace",
-      model: "claude-sonnet-5-5",
-      provider: { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv },
-      ...extra,
-    }).success;
+    Result.isSuccess(
+      Schema.decodeUnknownResult(claudeBackendSchema)({
+        type: "claude",
+        directory: "/workspace",
+        model: "claude-sonnet-5-5",
+        provider: { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv },
+        ...extra,
+      }),
+    );
   const defaults = config();
   expect(defaults.allowedTools).toEqual([]);
   expect(defaults.settingSources).toEqual([]);
@@ -819,23 +824,25 @@ test("Claude configuration is strict and fails closed", () => {
   expect(claudeToolNames.filter((name) => !builtin.includes(name))).toEqual([]);
   // IRC crew members accept the backend too.
   expect(
-    ircSchema.safeParse({
-      id: "galactica-irc",
-      server: { host: "127.0.0.1", port: 6667, tls: false },
-      account: "galactica",
-      passwordEnv: "IRC_CAPTAIN",
-      channels: ["#ship-galactica"],
-      crew: [
-        {
-          id: "chief",
-          account: "galactica-chief",
-          passwordEnv: "IRC_CHIEF",
-          channels: ["#ship-galactica"],
-          backend: config(),
-        },
-      ],
-      backend: config(),
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        id: "galactica-irc",
+        server: { host: "127.0.0.1", port: 6667, tls: false },
+        account: "galactica",
+        passwordEnv: "IRC_CAPTAIN",
+        channels: ["#ship-galactica"],
+        crew: [
+          {
+            id: "chief",
+            account: "galactica-chief",
+            passwordEnv: "IRC_CHIEF",
+            channels: ["#ship-galactica"],
+            backend: config(),
+          },
+        ],
+        backend: config(),
+      }),
+    ),
   ).toBe(true);
 });
 

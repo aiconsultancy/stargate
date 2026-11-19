@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { ircSchema } from "../src/config";
@@ -74,7 +74,7 @@ async function setup(
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
-  const config = ircSchema.parse({
+  const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     displayName: "Galactica",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
@@ -321,7 +321,7 @@ test("irc runtime: an IRC-only config serves, answers and QUITs on shutdown", as
   cleanup.push(() => fake.stop());
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-irc-runtime-"));
   cleanup.push(() => rm(dataDirectory, { recursive: true, force: true }));
-  const config = ircSchema.parse({
+  const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica",

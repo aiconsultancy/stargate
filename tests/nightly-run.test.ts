@@ -14,7 +14,9 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
 import { CrewState } from "../src/crew/state";
 import { CronStore } from "../src/cron-store";
@@ -54,7 +56,7 @@ import { botKey } from "../src/routing";
 import { Store } from "../src/store";
 import { tarball } from "./tar";
 
-const base = await mkdtemp("/tmp/opencode/stargate-run-");
+const base = await mkdtemp(join(tmpdir(), "stargate-run-"));
 afterAll(async () => {
   api.stop(true);
   await rm(base, { recursive: true, force: true });
@@ -389,7 +391,7 @@ async function install(
   };
   const path = join(dir, "stargate.json");
   await writeFile(path, `${JSON.stringify(raw, null, 2)}\n`);
-  const config = configSchema.parse(raw);
+  const config = Schema.decodeUnknownSync(configSchema)(raw);
   await mkdir(config.dataDirectory, { recursive: true });
   const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
   store.saveSession('["k","C123","1.0"]', "ses_captain");
@@ -853,8 +855,9 @@ describe("nightly maintenance run", () => {
       await readFile(join(fixture.dir, "dotfiles", "team.json"), "utf8"),
     ).toContain("gpt-6.2-sol#high");
     // H4: stargate.json is not rewritten, so the bot key and Slack mappings stay.
-    const after = configSchema.parse(JSON.parse(await readFile(path, "utf8")))
-      .bots[0];
+    const after = Schema.decodeUnknownSync(configSchema)(
+      JSON.parse(await readFile(path, "utf8")),
+    ).bots[0];
     if (!after) throw new Error("bot");
     expect(botKey(after, identity)).toBe(key);
     expect(fixture.probes).toEqual([
@@ -1317,7 +1320,7 @@ describe("nightly maintenance run", () => {
     ).toBe(false);
     expect(await readFile(globalConfigFile, "utf8")).toBe(original);
     expect(
-      configSchema.parse({
+      Schema.decodeUnknownSync(configSchema)({
         dataDirectory: config.dataDirectory,
         bots: config.bots,
         maintenance: { ...config.maintenance, models: {} },

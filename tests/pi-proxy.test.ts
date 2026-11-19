@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   BACKGROUND_CONTEXT,
   type Context,
@@ -18,8 +20,9 @@ import {
   UserEntry,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { Schema } from "effect";
 import { PiDurableBackend } from "../src/backends/pi-durable";
-import { piDurableBackendSchema } from "../src/config";
+import { piCrewBackendSchema, piDurableBackendSchema } from "../src/config";
 import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
 import { CrewState, type CrewTask } from "../src/crew/state";
 import { teamSchema } from "../src/crew/team";
@@ -30,7 +33,7 @@ const model = "openai/opencode-go/deepseek-v4.1-flash";
 const signal = () => new AbortController().signal;
 
 function config(baseURL: string, directory = "/workspace") {
-  return piDurableBackendSchema.parse({
+  return Schema.decodeUnknownSync(piDurableBackendSchema)({
     type: "pi-durable",
     directory,
     model,
@@ -63,21 +66,19 @@ test("Pi proxy configuration validates endpoint and environment references", () 
   }
   const valid = config("http://127.0.0.1/v1");
   expect(() =>
-    piDurableBackendSchema.parse({
+    Schema.decodeUnknownSync(piDurableBackendSchema)({
       ...valid,
       provider: { baseURL: valid.provider?.baseURL, apiKey: "raw-secret" },
     }),
   ).toThrow();
   expect(() =>
-    piDurableBackendSchema.parse({
+    Schema.decodeUnknownSync(piDurableBackendSchema)({
       ...valid,
       provider: { baseURL: valid.provider?.baseURL, apiKeyEnv: "raw-key" },
     }),
   ).toThrow();
   const { directory: _, ...worker } = valid;
-  expect(
-    piDurableBackendSchema.omit({ directory: true }).parse(worker),
-  ).toEqual(worker);
+  expect(Schema.decodeUnknownSync(piCrewBackendSchema)(worker)).toEqual(worker);
 });
 
 function completion(text = "Proxy answer") {
@@ -99,7 +100,7 @@ function completion(text = "Proxy answer") {
 }
 
 test("Pi proxy sends chat tools, safe auth and persisted conversation headers", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-proxy-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-proxy-"));
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "local-proxy-test-only";
   const requests: {
@@ -239,7 +240,7 @@ test("Pi proxy fails closed on missing auth or unsupported model", async () => {
 });
 
 test("Pi cancellation closes the underlying proxy stream", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-cancel-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-cancel-"));
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "local-proxy-test-only";
   const started = Promise.withResolvers<void>();
@@ -299,7 +300,7 @@ for (const cancelQueued of [false, true]) {
       ? "Pi queued cancellation preserves the prior native run"
       : "Pi queued follow-up streams and returns only its own answer",
     async () => {
-      const directory = await mkdtemp("/tmp/opencode/stargate-pi-follow-up-");
+      const directory = await mkdtemp(join(tmpdir(), "stargate-pi-follow-up-"));
       const previous = process.env[apiKeyEnv];
       process.env[apiKeyEnv] = "local-proxy-test-only";
       const priorStarted = Promise.withResolvers<void>();
@@ -446,7 +447,7 @@ for (const cancelQueued of [false, true]) {
 for (const placement of ["queued", "placed", "unreadable"] as const) {
   for (const aborted of [false, true]) {
     test(`Pi recovers ${placement} admission after ${aborted ? "abort" : "lost handle"}`, async () => {
-      const directory = await mkdtemp("/tmp/opencode/stargate-pi-admission-");
+      const directory = await mkdtemp(join(tmpdir(), "stargate-pi-admission-"));
       const previous = process.env[apiKeyEnv];
       process.env[apiKeyEnv] = "local-proxy-test-only";
       const started = Promise.withResolvers<void>();
@@ -573,7 +574,7 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
 
 for (const report of [false, true]) {
   test(`Pi ${report ? "report" : "maintenance"} recovers committed answer after lost crew completion without opening runtime`, async () => {
-    const directory = await mkdtemp("/tmp/opencode/stargate-pi-receipt-");
+    const directory = await mkdtemp(join(tmpdir(), "stargate-pi-receipt-"));
     const previous = process.env[apiKeyEnv];
     process.env[apiKeyEnv] = "local-test-only";
     let state = await CrewState.open(directory, "receipt", "identity");
@@ -712,7 +713,7 @@ for (const report of [false, true]) {
 }
 
 test("Pi receipt inspection leaves placed, queued and unanswered native work unchanged", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-readonly-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-readonly-"));
   const path = `${directory}/pi.sqlite`;
   const storage = await openNodeSqliteStorage(path);
   const harness = await Harness.open(
@@ -840,7 +841,7 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
 });
 
 test("Pi maps the proxy's answer to one shared failure category", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-failure-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-failure-"));
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "local-proxy-test-only";
   // The next answers of the proxy: a status, "tool" for a tool call, or
