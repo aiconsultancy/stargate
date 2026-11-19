@@ -165,7 +165,7 @@ test("results-mode peer context requires an enrolled explicit current nick and n
     sent: () => false,
     joined: () => true,
   };
-  for (const text of ["vance: peer contact", "@vance, peer contact"]) {
+  for (const text of ["@vance: peer contact", "@vance, peer contact"]) {
     const message = parseMessage(
       formatMessage("PRIVMSG", ["#phoenix", text], {
         account: "phoenix",

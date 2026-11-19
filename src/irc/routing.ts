@@ -146,6 +146,41 @@ function mentions(text: string, nick: string) {
   ).test(text);
 }
 
+export function requiresVisitorTag(
+  config: IrcConfig,
+  member: IrcMember,
+  channel: string,
+  caseFold: Fold,
+) {
+  if (
+    member.role !== "captain" ||
+    config.access.channelRequests !== "nick-mention" ||
+    !config.fleetPolicy ||
+    !isIrcChannel(channel)
+  )
+    return false;
+  const key = caseFold(channel);
+  if (config.fleetChannels && key === caseFold(config.fleetChannels.home))
+    return false;
+  return (
+    !config.access.humanWakeChannels?.some(
+      (rule) => caseFold(rule.channel) === key,
+    ) &&
+    ((config.fleetChannels !== undefined &&
+      key === caseFold(config.fleetChannels.command)) ||
+      config.fleetControl?.targets.some(
+        (target) =>
+          target.role !== "crew" &&
+          target.role !== "rear_admiral" &&
+          caseFold(target.account) !== caseFold(member.account) &&
+          config.fleetPolicy?.agentAccounts.some(
+            (peer) => caseFold(peer) === caseFold(target.account),
+          ) &&
+          caseFold(target.channel) === key,
+      )) === true
+  );
+}
+
 /** `nick: text` or `nick, text` addresses the bot; keep only the text. */
 function withoutAddress(
   text: string,
@@ -163,6 +198,14 @@ function withoutAddress(
       return text.slice(offset + nick.length).replace(/^[:,]\s*/, "");
   }
   return text;
+}
+
+function visitorAddressed(text: string, nick: string, caseFold: Fold) {
+  return (
+    mentions(caseFold(text), caseFold(`@${nick}`)) &&
+    caseFold(text.trim()) !== caseFold(`@${nick}`) &&
+    withoutAddress(text.trim(), [nick], caseFold, true).trim() !== ""
+  );
 }
 
 /** In results mode, a leading fleet address selects one recipient. */
@@ -211,38 +254,53 @@ export function ircResultJobAllowed(
   job:
     | Readonly<
         Pick<Incoming, "fleet"> &
-          Partial<Pick<Incoming, "text" | "channel" | "sender" | "textMention">>
+          Partial<
+            Pick<
+              Incoming,
+              "text" | "channel" | "sender" | "textMention" | "eventId"
+            >
+          >
       >
     | undefined,
   caseFold: Fold = rfc1459,
 ) {
+  const effective = effectiveIrcConfig(config);
+  // Reconnects and fallback nick recovery must not erase an accepted address.
+  const captured = job?.textMention?.startsWith("@")
+    ? job.textMention.slice(1)
+    : undefined;
+  // Recheck visitor turns persisted before this policy or queued during a
+  // reload. Thread membership and an old bare name grant no admission.
+  if (
+    job?.channel &&
+    job.eventId?.startsWith(`${caseFold(job.channel)}:`) &&
+    job.text !== undefined &&
+    !job.fleet &&
+    requiresVisitorTag(effective, member, job.channel, caseFold) &&
+    !(captured ? [captured] : [currentNick, member.nick]).some((nick) =>
+      visitorAddressed(job.text ?? "", nick, caseFold),
+    )
+  )
+    return false;
   if (!config.fleetControl?.results) return true;
   if (!config.fleetPolicy) return false;
   const authority = fleetAuthority(config.fleetPolicy, account);
   if (authority === "agent") {
     if (job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result")
       return true;
-    // @ cannot be an all-call/text alias. Intake stores the exact admitted
-    // connection nick in this existing durable mention field; reconnects and
-    // fallback nick recovery must not erase an accepted recipient.
-    const captured =
-      job?.sender === "captain" && job.textMention?.startsWith("@")
-        ? job.textMention.slice(1)
-        : undefined;
-    const aliases = captured ? [captured] : [currentNick];
+    // Only a peer's reserved @nick field can act as a persisted recipient.
+    const recipient = job?.sender === "captain" ? captured : undefined;
     return (
-      effectiveIrcConfig(config).access.peerCaptains.some(
+      effective.access.peerCaptains.some(
         (peer) => caseFold(peer) === caseFold(account),
       ) &&
       typeof job?.text === "string" &&
       !/\[fleet_dispatch\b/i.test(job.text) &&
-      aliases.some((nick) =>
-        mentions(caseFold(job.text ?? ""), caseFold(nick)),
-      ) &&
+      mentions(caseFold(job.text), caseFold(recipient ?? currentNick)) &&
       !addressedToFleetPeer(
         config,
         member,
-        captured ?? member.nick,
+        recipient ?? member.nick,
         job.text,
         caseFold,
       )
@@ -324,9 +382,25 @@ export function routeIrcMessage(
   const nicks = strict
     ? [context.currentNick]
     : [...new Set([context.currentNick, member.nick])];
-  const mentioned = nicks.some((nick) =>
-    mentions(caseFold(body), caseFold(nick)),
+  const visitorTag = requiresVisitorTag(config, member, channel, caseFold);
+  const matchedNick = nicks.find((nick) =>
+    visitorTag
+      ? visitorAddressed(body, nick, caseFold)
+      : mentions(caseFold(body), caseFold(nick)),
   );
+  // A reserved peer envelope is only a candidate. IRC intake must correlate
+  // it against the protected assignment ledger before work is enqueued.
+  const envelope =
+    visitorTag &&
+    fleetPeer &&
+    config.fleetControl?.results &&
+    /^\[fleet_dispatch [^\r\n]+?\] /.test(body);
+  const assignmentAddress = envelope ? body.slice(body.indexOf("] ") + 2) : "";
+  const candidateAssignment =
+    assignmentAddress &&
+    withoutAddress(assignmentAddress, [member.account], caseFold) !==
+      assignmentAddress;
+  const mentioned = matchedNick !== undefined || candidateAssignment;
   const reply = message.tags.get("+draft/reply") ?? message.tags.get("+reply");
   const hasReply =
     message.tags.has("+draft/reply") || message.tags.has("+reply");
@@ -404,16 +478,18 @@ export function routeIrcMessage(
       ? findMention([body], config.access.allCallWords)
       : undefined;
   const recipient =
-    fleetPeer && config.fleetControl?.results
-      ? nicks.find((nick) => mentions(caseFold(body), caseFold(nick)))
+    visitorTag || (config.fleetControl?.results && fleetPeer)
+      ? matchedNick
       : undefined;
   const mention = recipient ? `@${recipient}` : (allCall ?? named);
-  const content = withoutAddress(body, nicks, caseFold).trim();
+  const content = withoutAddress(body, nicks, caseFold, visitorTag).trim();
   if (!content) return;
   // Recovery must see the same recipient as intake, including nested
   // addresses such as `captain: vance: ...`; historical rows stay intact.
   const text =
-    config.fleetControl?.results && (human || fleetPeer) ? body : content;
+    visitorTag || (config.fleetControl?.results && (human || fleetPeer))
+      ? body
+      : content;
   const ship = shipAccounts(config, caseFold);
   const sender = ship.has(user)
     ? ("crew" as const)

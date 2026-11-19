@@ -902,8 +902,12 @@ test("fleet results stay disabled when not opted in", async () => {
   const f = await world(false);
   await f.begin();
   expect(f.dispatch?.dispatchID).toBeUndefined();
+  expect(f.packets[0]).toContain("] @captain: ");
   const job = await f.processNext(f.targetIrc.gateway, f.captainStore);
   expect(job.fleet).toBeUndefined();
+  expect(f.targetIrc.registration.transport.instructions?.(job)).toContain(
+    "Tag another fleet agent with its current @nick",
+  );
   await f.targetResults.poll(signal());
   await f.ownerResults.poll(signal());
   expect(f.owner.pendingResults()).toHaveLength(0);
@@ -986,7 +990,7 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
       authority: "human",
       humanApproval: false,
     });
-    return "Vance: work is complete.";
+    return "@Vance: work is complete.";
   };
   const time = new Date().toISOString();
   const sourceID = f.fake.say(
