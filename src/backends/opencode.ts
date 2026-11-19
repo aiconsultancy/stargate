@@ -768,7 +768,7 @@ export class OpenCodeBackend implements AgentBackend {
   readonly history: OpenCodeHistory;
   private readonly client;
   private readonly waitForIdle;
-  private readonly pairingClient;
+  private readonly serverClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
   private readonly inputs = new Map<string, string>();
   constructor(
@@ -796,8 +796,8 @@ export class OpenCodeBackend implements AgentBackend {
       ),
     }).experimental.session.wait;
     this.history = new OpenCodeHistory(this.client, config.directory);
-    // Same endpoint and authentication; never follow a pairing redirect.
-    this.pairingClient = OpenCode.make({
+    // Same endpoint and authentication; never forward headers on redirects.
+    this.serverClient = OpenCode.make({
       ...options,
       fetch: Object.assign(
         (url: URL | RequestInfo, init?: RequestInit) =>
@@ -807,11 +807,15 @@ export class OpenCodeBackend implements AgentBackend {
     });
   }
 
+  async serverVersion(signal: AbortSignal) {
+    return (await this.serverClient.server.info({ signal })).version;
+  }
+
   async pair(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
       const result = decodePairingCode(
-        await this.pairingClient.server.pair({ signal }),
+        await this.serverClient.server.pair({ signal }),
       );
       signal.throwIfAborted();
       return { code: result.code, expiresIn: result.expires_in };

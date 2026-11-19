@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { Result, Schema, SchemaTransformation } from "effect";
 import { crewActivitySchema } from "./activity";
+import { apiV1ConfigSchema } from "./api/v1/config";
 import { captainPostSchema } from "./captain-post-config";
 import { cronjobsSchema } from "./cronjob-config";
 import { validateFleetPermissions } from "./fleet/permissions";
@@ -1150,6 +1151,8 @@ export function pinnedSessionIDs(config: {
 
 export const configSchema = settingsStruct({
   dataDirectory: Schema.String.pipe(settingsDefault(".stargate")),
+  /** Opt in to the private-network Fleet API; see docs/api.md. */
+  api: Schema.optional(apiV1ConfigSchema),
   /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
   dashboard: Schema.optional(Schema.Boolean),
   /** Explicit operator-group socket; the private default is unchanged. */
