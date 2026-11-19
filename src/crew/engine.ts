@@ -23,10 +23,8 @@ import type {
   SessionSyntheticInput,
 } from "@opencode/client";
 import { Predicate, Result, Schema } from "effect";
-import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
-import { legacySetting } from "../settings-legacy";
 import {
   settingsCheck,
   settingsDefault,
@@ -254,29 +252,27 @@ export const crewInputSchema = Schema.Unknown.check(
   Schema.decodeTo(settingsDiscriminatedUnion("op", crewInputBranches.members)),
 );
 export type CrewInput = typeof crewInputSchema.Type;
-// Batch 10 owns the remaining Zod inbox/mail containers using these primitives.
-const taskID = legacySetting(crewTaskID);
-const text = legacySetting(crewText);
-const legacyMailInputSchema = z.discriminatedUnion("op", [
-  z.strictObject({
-    op: z.literal("inbox"),
-    taskID,
-    after: z.number().int().safe().nonnegative().optional(),
-    limit: z.number().int().min(1).max(100).default(20),
+const legacyMailInputSchema = settingsDiscriminatedUnion("op", [
+  settingsStruct({
+    op: Schema.Literal("inbox"),
+    taskID: crewTaskID,
+    after: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    limit: Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: 100 }),
+    ).pipe(settingsDefault(20)),
   }),
 ]);
-const mailEnvelopeSchema = z.strictObject({
-  namespace: z.string(),
-  sourceTaskID: taskID,
-  targetTaskID: taskID,
-  originCaptainID: z.string(),
-  sender: z.string(),
-  recipient: z.string(),
-  text,
-  statusRequestID: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .optional(),
+const mailEnvelopeSchema = settingsStruct({
+  namespace: Schema.String,
+  sourceTaskID: crewTaskID,
+  targetTaskID: crewTaskID,
+  originCaptainID: Schema.String,
+  sender: Schema.String,
+  recipient: Schema.String,
+  text: crewText,
+  statusRequestID: Schema.optional(
+    Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
+  ),
 });
 export type CrewCaller = {
   sessionID: string;
@@ -884,10 +880,11 @@ export class CrewEngine {
     } catch {
       return null;
     }
-    const envelope = mailEnvelopeSchema.safeParse(value);
-    if (!envelope.success || !envelope.data.statusRequestID) return null;
-    const mail = envelope.data;
-    const request = this.state.statusRequest(envelope.data.statusRequestID);
+    const envelope = Schema.decodeUnknownResult(mailEnvelopeSchema)(value);
+    if (Result.isFailure(envelope) || !envelope.success.statusRequestID)
+      return null;
+    const mail = envelope.success;
+    const request = this.state.statusRequest(envelope.success.statusRequestID);
     const route = request?.receiptID
       ? this.statusRequestRoute(request.receiptID)
       : null;
@@ -926,12 +923,13 @@ export class CrewEngine {
 
   async mail(raw: unknown, caller: CrewCaller) {
     caller = this.logicalCaller(caller);
-    const input = mailInputSchema.safeParse(raw);
-    if (!input.success) throw new CrewError("Invalid stargate_mail input.");
+    const input = Schema.decodeUnknownResult(mailInputSchema)(raw);
+    if (Result.isFailure(input))
+      throw new CrewError("Invalid stargate_mail input.");
     const result = await this.message(raw, caller, false);
-    if (input.data.op !== "inbox" || !input.data.taskID) return result;
+    if (input.success.op !== "inbox" || !input.success.taskID) return result;
     // Keep pre-upgrade task envelopes readable without rewriting Mesij history.
-    const legacy = await this.legacyMail(input.data, caller);
+    const legacy = await this.legacyMail(input.success, caller);
     if (!("messages" in result) || !("messages" in legacy)) return result;
     const messages = [
       ...(result.messages ?? []),
@@ -1160,12 +1158,12 @@ export class CrewEngine {
   }
 
   private async legacyMail(raw: unknown, caller: CrewCaller) {
-    const parsed = legacyMailInputSchema.safeParse(raw);
-    if (!parsed.success)
+    const parsed = Schema.decodeUnknownResult(legacyMailInputSchema)(raw);
+    if (Result.isFailure(parsed))
       throw new CrewError(
         "Invalid stargate_mail input. Supply a task ID and the operation's declared fields.",
       );
-    const input = parsed.data;
+    const input = parsed.success;
     try {
       await this.authorize(caller);
       let source: CrewTask;
@@ -1210,9 +1208,9 @@ export class CrewEngine {
         } catch {
           continue;
         }
-        const envelope = mailEnvelopeSchema.safeParse(value);
-        if (!envelope.success) continue;
-        const mail = envelope.data;
+        const envelope = Schema.decodeUnknownResult(mailEnvelopeSchema)(value);
+        if (Result.isFailure(envelope)) continue;
+        const mail = envelope.success;
         const origin = this.state.task(mail.sourceTaskID);
         const statusRequest = mail.statusRequestID
           ? this.state.statusRequest(mail.statusRequestID)

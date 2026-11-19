@@ -5,7 +5,8 @@ import { quotaInputSchema } from "../quota";
 import { crewPiParameters } from "./crew-tool-input";
 import { crewInputSchema } from "./engine";
 import { journalInputSchema } from "./journal";
-import { dmInputSchema, mailInputSchema } from "./messaging";
+import { messagePiParameters } from "./message-tool-input";
+import { dmInputSchema, mailInputBranches, mailInputSchema } from "./messaging";
 import { CrewError } from "./state";
 import { effectToolInputFields } from "./tool-input";
 
@@ -48,6 +49,8 @@ const decodeJournal = Schema.decodeUnknownSync(journalInputSchema, {
 // Resolve the circular engine import only when this crew tool is invoked.
 const decodeCrew = (raw: unknown) =>
   Schema.decodeUnknownSync(crewInputSchema)(raw);
+const decodeMail = Schema.decodeUnknownSync(mailInputSchema);
+const decodeDM = Schema.decodeUnknownSync(dmInputSchema);
 // Pi's legacy advertisement required defaulted fields. Handler defaults do not
 // authorize accepting their omission at the native JSON Schema boundary.
 const historyParameters = effectParameters(
@@ -118,7 +121,11 @@ export function piCrewExtension(
         ? historyParameters
         : name === "stargate_crew"
           ? crewPiParameters()
-          : journalParameters
+          : name === "stargate_mail"
+            ? messagePiParameters(mailInputBranches)
+            : name === "stargate_dm"
+              ? messagePiParameters(dmInputSchema)
+              : journalParameters
       : z.toJSONSchema(schema);
     return defineTool({
       name,
@@ -141,7 +148,11 @@ export function piCrewExtension(
                   Schema.isSchema(schema)
                     ? name === "stargate_crew"
                       ? decodeCrew(raw)
-                      : decodeJournal(raw)
+                      : name === "stargate_mail"
+                        ? decodeMail(raw)
+                        : name === "stargate_dm"
+                          ? decodeDM(raw)
+                          : decodeJournal(raw)
                     : schema.parse(raw),
                   String(api.conversationId),
                   String(api.taskId),

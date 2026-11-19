@@ -6,7 +6,13 @@ import type {
   SessionListInput,
   SessionMessageInfo,
 } from "@opencode/client";
-import { z } from "zod";
+import { Result, Schema } from "effect";
+import { decodeSettings } from "../settings-errors";
+import {
+  settingsDefault,
+  settingsDiscriminatedUnion,
+  settingsStruct,
+} from "../settings-schema";
 import { CrewError } from "./state";
 
 const MAX_RESULTS = 20;
@@ -14,38 +20,55 @@ const MAX_TEXT = 2000;
 const MAX_PAGES = 32;
 const SESSION_BATCH = 20;
 const MESSAGE_BATCH = 100;
-const identifier = z.string().min(1).max(256);
-const query = z
-  .string()
-  .min(1)
-  .max(200)
-  .refine((value) => value.trim() !== "");
-const apiCursor = z.string().min(1).max(4096);
-const limit = z.number().int().min(1).max(MAX_RESULTS).default(MAX_RESULTS);
+const identifier = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(256),
+);
+const query = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(200),
+  Schema.makeFilter((value) => value.trim() !== ""),
+);
+const apiCursor = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(4096),
+);
+const limit = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: MAX_RESULTS }),
+).pipe(settingsDefault(MAX_RESULTS));
 
-export const historyInputSchema = z.discriminatedUnion("op", [
-  z.strictObject({
-    op: z.literal("sessions"),
-    query: query.optional(),
-    cursor: apiCursor.optional(),
+export const historyInputBranches = Schema.Union([
+  settingsStruct({
+    op: Schema.Literal("sessions"),
+    query: Schema.optional(query),
+    cursor: Schema.optional(apiCursor),
     limit,
   }),
-  z.strictObject({
-    op: z.literal("messages"),
+  settingsStruct({
+    op: Schema.Literal("messages"),
     sessionID: identifier,
-    order: z.enum(["asc", "desc"]).default("asc"),
-    query: query.optional(),
-    cursor: apiCursor.optional(),
+    order: Schema.Literals(["asc", "desc"]).pipe(settingsDefault("asc")),
+    query: Schema.optional(query),
+    cursor: Schema.optional(apiCursor),
     limit,
   }),
-  z.strictObject({
-    op: z.literal("search"),
+  settingsStruct({
+    op: Schema.Literal("search"),
     query,
-    cursor: z.string().min(1).max(32768).optional(),
+    cursor: Schema.optional(
+      Schema.String.check(
+        Schema.isMinCodePoints(1),
+        Schema.isMaxCodePoints(32768),
+      ),
+    ),
     limit,
   }),
 ]);
-export type HistoryInput = z.infer<typeof historyInputSchema>;
+export const historyInputSchema = settingsDiscriminatedUnion(
+  "op",
+  historyInputBranches.members,
+);
+export type HistoryInput = typeof historyInputSchema.Type;
 
 export type HistorySession = Pick<
   SessionInfo,
@@ -117,56 +140,60 @@ export type HistoryResult = Continuation &
     | { op: "search"; matches: HistoryText[]; scannedPages: number }
   );
 
-const sessionPosition = z.strictObject({
-  phase: z.literal("sessions"),
-  cursor: apiCursor.optional(),
+const sessionPosition = settingsStruct({
+  phase: Schema.Literal("sessions"),
+  cursor: Schema.optional(apiCursor),
 });
-const messagePosition = z.strictObject({
-  phase: z.literal("messages"),
+const messagePosition = settingsStruct({
+  phase: Schema.Literal("messages"),
   sessionID: identifier,
-  cursor: apiCursor.optional(),
-  nextSessionCursor: apiCursor.nullable(),
-  pendingSessionIDs: z.array(identifier).max(SESSION_BATCH - 1),
-  offset: z
-    .number()
-    .int()
-    .min(0)
-    .max(MESSAGE_BATCH - 1)
-    .default(0),
+  cursor: Schema.optional(apiCursor),
+  nextSessionCursor: Schema.NullOr(apiCursor),
+  pendingSessionIDs: Schema.mutable(Schema.Array(identifier)).check(
+    Schema.isMaxLength(SESSION_BATCH - 1),
+  ),
+  offset: Schema.Int.check(
+    Schema.isBetween({ minimum: 0, maximum: MESSAGE_BATCH - 1 }),
+  ).pipe(settingsDefault(0)),
 });
-const searchPosition = z.discriminatedUnion("phase", [
+const searchPosition = settingsDiscriminatedUnion("phase", [
   sessionPosition,
   messagePosition,
 ]);
-const searchCursor = z.discriminatedUnion("version", [
-  z.strictObject({
-    version: z.literal(1),
+const searchCursor = settingsDiscriminatedUnion("version", [
+  settingsStruct({
+    version: Schema.Literal(1),
     query,
-    position: z.discriminatedUnion("phase", [
+    position: settingsDiscriminatedUnion("phase", [
       sessionPosition,
-      messagePosition.omit({ pendingSessionIDs: true, offset: true }),
+      settingsStruct({
+        phase: messagePosition.fields.phase,
+        sessionID: identifier,
+        cursor: Schema.optional(apiCursor),
+        nextSessionCursor: Schema.NullOr(apiCursor),
+      }),
     ]),
   }),
-  z.strictObject({
-    version: z.literal(2),
+  settingsStruct({
+    version: Schema.Literal(2),
     query,
     position: searchPosition,
   }),
 ]);
-type SearchPosition = z.infer<typeof searchPosition>;
+type SearchPosition = typeof searchPosition.Type;
 
 export class HistoryError extends CrewError {}
 
 function nextCursor(page: Page<unknown>): string | undefined {
   const cursor = page.cursor.next;
   if (cursor == null) return;
-  if (!apiCursor.safeParse(cursor).success)
+  if (Result.isFailure(Schema.decodeUnknownResult(apiCursor)(cursor)))
     throw new HistoryError("Invalid history API response.");
   return cursor;
 }
 
 function checkedID(id: string): string {
-  if (!identifier.safeParse(id).success)
+  if (Result.isFailure(Schema.decodeUnknownResult(identifier)(id)))
     throw new HistoryError("Invalid history API response.");
   return id;
 }
@@ -213,7 +240,8 @@ function plainText(
 function decodeCursor(cursor: string, query: string): SearchPosition {
   try {
     if (!/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error();
-    const decoded = searchCursor.parse(
+    const decoded = decodeSettings(
+      searchCursor,
       JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")),
     );
     if (decoded.query !== query) throw new Error();
@@ -241,9 +269,10 @@ export class CrewHistory {
   async run(input: unknown, signal: AbortSignal): Promise<HistoryResult> {
     try {
       signal.throwIfAborted();
-      const parsed = historyInputSchema.safeParse(input);
-      if (!parsed.success) throw new HistoryError("Invalid history input.");
-      const request = parsed.data;
+      const parsed = Schema.decodeUnknownResult(historyInputSchema)(input);
+      if (Result.isFailure(parsed))
+        throw new HistoryError("Invalid history input.");
+      const request = parsed.success;
       if (request.op === "search") return await this.search(request, signal);
       if (request.op === "sessions") {
         const page = await this.options.sessions.list(

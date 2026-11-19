@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
-import { z } from "zod";
+import { Result, Schema } from "effect";
+import {
+  settingsDefault,
+  settingsPattern,
+  settingsStruct,
+} from "../settings-schema";
 
 const errors = {
   options: "Invalid Mesij options.",
@@ -21,64 +26,78 @@ export class MesijError extends Error {
   }
 }
 
-const identity = z
-  .string()
-  .min(1)
-  .max(256)
-  .refine(
+const identity = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(256),
+  Schema.makeFilter(
     (value) =>
       value.trim().length > 0 &&
       [...value].every((character) => {
         const code = character.charCodeAt(0);
         return code > 31 && code !== 127;
       }),
-  );
-const absolutePath = z
-  .string()
-  .refine((value) => isAbsolute(value) && !value.includes("\0"));
-const eventID = z.string().regex(/^[a-f0-9]{32}$/);
-const sequence = z.number().int().safe().nonnegative();
-const optionsSchema = z.strictObject({
+  ),
+);
+const absolutePath = Schema.String.check(
+  Schema.makeFilter((value) => isAbsolute(value) && !value.includes("\0")),
+);
+const eventID = Schema.String.check(settingsPattern(/^[a-f0-9]{32}$/));
+const sequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const optionsSchema = settingsStruct({
   command: absolutePath,
   projectDirectory: absolutePath,
-  dataDirectory: absolutePath.optional(),
-  maxOutputBytes: z.number().int().min(1).max(16_777_216).default(4_194_304),
-  timeoutMs: z.number().int().min(1).max(300_000).default(30_000),
+  dataDirectory: Schema.optional(absolutePath),
+  maxOutputBytes: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: 16_777_216 }),
+  ).pipe(settingsDefault(4_194_304)),
+  timeoutMs: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: 300_000 }),
+  ).pipe(settingsDefault(30_000)),
 });
-const registrationSchema = z.strictObject({
+const registrationSchema = settingsStruct({
   actor: identity,
   sessionID: identity,
 });
-const sendSchema = registrationSchema.extend({
+const sendSchema = settingsStruct({
+  ...registrationSchema.fields,
   to: identity,
-  text: z
-    .string()
-    .min(1)
-    .max(65_536)
-    .refine((value) => value.trim().length > 0),
+  text: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(65_536),
+    Schema.makeFilter((value) => value.trim().length > 0),
+  ),
   key: identity,
-  replyTo: eventID.optional(),
+  replyTo: Schema.optional(eventID),
 });
-const inboxSchema = z.strictObject({
+const inboxSchema = settingsStruct({
   sessionID: identity,
-  after: sequence.default(0),
-  limit: z.number().int().min(1).max(1000).default(100),
+  after: sequence.pipe(settingsDefault(0)),
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })).pipe(
+    settingsDefault(100),
+  ),
 });
 // v0.1.0 returns extra source context. Keep only fields callers need.
-const eventSchema = z.object({
+const eventSchema = Schema.Struct({
   id: eventID,
-  sequence: sequence.positive(),
+  sequence: sequence.check(Schema.isGreaterThan(0)),
   actor: identity,
   session: identity,
-  recipient_session: identity.optional(),
-  reply_to: eventID.optional(),
-  type: z.string().min(1).max(256),
-  payload: z.object({ message: z.string().max(65_536).optional() }),
+  recipient_session: Schema.optional(identity),
+  reply_to: Schema.optional(eventID),
+  type: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(256),
+  ),
+  payload: Schema.Struct({
+    message: Schema.optional(
+      Schema.String.check(Schema.isMaxCodePoints(65_536)),
+    ),
+  }),
 });
 
-export type MesijOptions = z.input<typeof optionsSchema>;
-export type MesijSend = z.input<typeof sendSchema>;
-export type MesijInbox = z.input<typeof inboxSchema>;
+export type MesijOptions = typeof optionsSchema.Encoded;
+export type MesijSend = typeof sendSchema.Encoded;
+export type MesijInbox = typeof inboxSchema.Encoded;
 export type MesijReceipt = { id: string; sequence: number };
 export type MesijMessage = MesijReceipt & {
   actor: string;
@@ -89,14 +108,14 @@ export type MesijMessage = MesijReceipt & {
   text: string;
 };
 
-function parse<T>(
-  schema: z.ZodType<T>,
+function parse<S extends Schema.ConstraintDecoder<unknown>>(
+  schema: S,
   input: unknown,
   code: MesijErrorCode,
-): T {
-  const result = schema.safeParse(input);
-  if (!result.success) throw new MesijError(code);
-  return result.data;
+): S["Type"] {
+  const result = Schema.decodeUnknownResult(schema)(input);
+  if (Result.isFailure(result)) throw new MesijError(code);
+  return result.success;
 }
 
 function json(output: string): unknown {
@@ -113,7 +132,7 @@ function receipt(event: MesijReceipt): MesijReceipt {
 
 /** Trusted callers bind roster identities. This adapter owns no mapping/cursor. */
 export class MesijClient {
-  private readonly options: z.output<typeof optionsSchema>;
+  private readonly options: typeof optionsSchema.Type;
 
   constructor(options: MesijOptions) {
     this.options = parse(optionsSchema, options, "options");
@@ -184,7 +203,9 @@ export class MesijClient {
       signal,
     );
     const events = parse(
-      z.array(eventSchema).max(query.limit),
+      Schema.mutable(Schema.Array(eventSchema)).check(
+        Schema.isMaxLength(query.limit),
+      ),
       json(output),
       "output",
     );

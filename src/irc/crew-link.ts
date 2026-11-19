@@ -1,4 +1,5 @@
 import { OpenCode } from "@opencode/client";
+import { Schema } from "effect";
 import { type BackendConfig, secret } from "../config";
 import { CrewIrc, type OutboxPage, outboxPageSchema } from "../crew/irc-rpc";
 
@@ -61,7 +62,7 @@ class OpenCodeCrewLink implements CrewLink {
 
   async outbox(input: { after?: number; limit: number }, signal: AbortSignal) {
     try {
-      return outboxPageSchema.parse(
+      return Schema.decodeUnknownSync(outboxPageSchema)(
         await this.client.rpc(CrewIrc).outbox(input, {
           location: { directory: this.captain.directory },
           signal,

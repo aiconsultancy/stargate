@@ -203,6 +203,39 @@ process.stdout.write(JSON.stringify({
   }
 });
 
+test("Mesij preserves untrimmed 65536-code-point text, identity controls and stripping events", async () => {
+  const setup = await fixture();
+  try {
+    const fake = await setup.executable(`
+const input = JSON.parse(await Bun.stdin.text());
+process.stdout.write(JSON.stringify({
+  id: "a".repeat(32), sequence: 1, actor: input.actor,
+  session: input.session, recipient_session: input.to,
+  type: "message.posted", payload: {message: input.message, extra: "context"},
+  extra: "source"
+}));
+`);
+    const client = new MesijClient({ ...setup.options, command: fake });
+    const text = ` ${"😀".repeat(65533)}\0 `;
+    expect([...text]).toHaveLength(65536);
+    expect(
+      await client.send({ ...message, actor: " Padded actor ", text }, signal),
+    ).toEqual({ id: "a".repeat(32), sequence: 1 });
+    for (const change of [
+      { text: `${text}x` },
+      { text: " \t " },
+      { actor: "a\nb" },
+      { sessionID: "a\0b" },
+      { to: "a\x7fb" },
+    ])
+      await expect(
+        client.send({ ...message, ...change }, signal),
+      ).rejects.toThrow("Invalid Mesij input.");
+  } finally {
+    await setup.close();
+  }
+});
+
 test("invalid options and inputs produce sanitised typed errors", async () => {
   const setup = await fixture();
   try {

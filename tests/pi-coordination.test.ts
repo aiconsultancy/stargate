@@ -342,6 +342,14 @@ for (const tools of ["coding", "none"] as const) {
 
 for (const scenario of [
   {
+    title: "remaining quota binding executes its strict Zod input",
+    name: "stargate_quota",
+    args: {},
+    input: {},
+    result: { status: "not-configured", accounts: [] },
+    error: null,
+  },
+  {
     title: "crew status uses its own native decoder rather than journal",
     name: "stargate_crew",
     args: { op: "status", taskID: "task_fixture" },
@@ -444,6 +452,30 @@ for (const scenario of [
     error: "result too large, retry with a smaller limit",
   },
   {
+    title: "mail uses its own decoder and native inbox coercion",
+    name: "stargate_mail",
+    args: { op: "inbox", limit: "2", after: true },
+    input: { op: "inbox", limit: 2, after: 1 },
+    result: { messages: [], nextAfter: 1 },
+    error: null,
+  },
+  {
+    title: "DM uses its own decoder and trims after native validation",
+    name: "stargate_dm",
+    args: { op: "send", to: "captain", text: " note ", delivery: "steer" },
+    input: { op: "send", to: "captain", text: "note", delivery: "steer" },
+    result: { status: "sent", stored: true, notification: "accepted" },
+    error: null,
+  },
+  {
+    title: "mail send does not fall through to journal append decoding",
+    name: "stargate_mail",
+    args: { op: "send", to: "captain", text: " note " },
+    input: { op: "send", to: "captain", text: "note" },
+    result: { status: "sent", stored: true },
+    error: null,
+  },
+  {
     title: "safe crew errors remain actionable",
     name: "stargate_mail",
     args: { op: "inbox", limit: 20 },
@@ -515,7 +547,14 @@ for (const scenario of [
         expect(output).not.toContain('"entries"');
         expect(output).not.toContain('"messages"');
         expect(output).not.toContain("private wrong-branch value");
-      } else if (scenario.name === "stargate_crew")
+      } else if (
+        [
+          "stargate_quota",
+          "stargate_crew",
+          "stargate_mail",
+          "stargate_dm",
+        ].includes(scenario.name)
+      )
         expect(JSON.parse(output)).toEqual(scenario.result);
       else
         expect(JSON.parse(output)).toMatchObject({

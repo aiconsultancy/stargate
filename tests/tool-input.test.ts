@@ -4,20 +4,20 @@ import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
 import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
 import { crewInputSchema } from "../src/crew/engine";
-import { historyInputSchema } from "../src/crew/history";
+import { historyInputBranches, historyInputSchema } from "../src/crew/history";
 import { journalInputSchema } from "../src/crew/journal";
-import { mailInputSchema } from "../src/crew/messaging";
+import { messageOpenCodeInput } from "../src/crew/message-tool-input";
+import { mailInputBranches, mailInputSchema } from "../src/crew/messaging";
 import { modelInputSchema, modelToolInputSchema } from "../src/crew/models";
 import { projectToolInput } from "../src/crew/project-options";
 import * as toolInputs from "../src/crew/tool-input";
 import { objectToolInput } from "../src/crew/tool-input";
 import { cronOperationSchema } from "../src/cron-control";
 import { notificationInputSchema } from "../src/notification-store";
+import { quotaInputSchema } from "../src/quota";
 
 const schemas = {
   stargate_cron: cronOperationSchema,
-  stargate_history: historyInputSchema,
-  stargate_mail: mailInputSchema,
   stargate_notifications: notificationInputSchema,
 };
 
@@ -174,29 +174,68 @@ test("original branch requirements, strictness and bounds remain enforced", asyn
   ).toHaveProperty("value");
 });
 
-test("remaining Zod project envelopes retain branch requirements and field paths", () => {
-  const schema = projectToolInput(mailInputSchema);
+test("native mail project envelope retains branch requirements and field paths", async () => {
+  const schema = messageOpenCodeInput(mailInputBranches)["~standard"];
   const inbox = { op: "inbox", project: "stargate" };
-  expect(schema.parse(inbox)).toEqual(inbox);
-  const invalid = schema.safeParse({
+  expect(await schema.validate(inbox)).toEqual({ value: inbox });
+  const invalid = await schema.validate({
     op: "send",
     text: "note",
     project: "stargate",
   });
-  if (invalid.success) throw new Error("Missing mail recipient accepted");
-  expect(invalid.error.issues).toContainEqual(
+  if (!invalid.issues) throw new Error("Missing mail recipient accepted");
+  expect(invalid.issues).toContainEqual(
     expect.objectContaining({ path: ["to"] }),
   );
 });
 
+test("Zod project helper preserves required operation fields after separating project", () => {
+  const schema = projectToolInput(cronOperationSchema);
+  expect(schema.parse({ op: "report", project: "stargate" })).toEqual({
+    op: "report",
+    project: "stargate",
+  });
+  const missing = schema.safeParse({ op: "run", project: "stargate" });
+  if (missing.success) throw new Error("Missing operation name accepted");
+  expect(missing.error.issues).toContainEqual(
+    expect.objectContaining({ path: ["name"] }),
+  );
+});
+
+test("remaining quota Zod project helper stays strict and validates project keys", () => {
+  const schema = projectToolInput(quotaInputSchema);
+  expect(schema.parse({})).toEqual({});
+  expect(schema.parse({ project: undefined })).toEqual({ project: undefined });
+  expect(schema.parse({ project: "stargate" })).toEqual({
+    project: "stargate",
+  });
+  for (const raw of [
+    null,
+    [],
+    { project: null },
+    { project: "../foreign" },
+    { project: "constructor" },
+    { op: "inbox" },
+  ])
+    expect(schema.safeParse(raw).success).toBe(false);
+});
+
 test("optional envelope fields do not inject another operation's defaults", async () => {
-  for (const [original, input] of [
-    [mailInputSchema, { op: "inbox" }],
-    [cronOperationSchema, { op: "report" }],
-    [historyInputSchema, { op: "sessions" }],
+  const cron = { op: "report" };
+  expect(
+    cronOperationSchema.parse(objectToolInput(cronOperationSchema).parse(cron)),
+  ).toEqual(cronOperationSchema.parse(cron));
+  for (const [branches, original, input] of [
+    [mailInputBranches, mailInputSchema, { op: "inbox" }],
+    [historyInputBranches, historyInputSchema, { op: "sessions" }],
   ] as const) {
-    const adapted = objectToolInput(original).parse(input);
-    expect(original.parse(adapted)).toEqual(original.parse(input));
+    const adapted =
+      await messageOpenCodeInput(branches)["~standard"].validate(input);
+    expect(adapted).toEqual({ value: input });
+    if (adapted.issues) throw new Error("Native operation rejected");
+    expect(Schema.decodeUnknownSync(original)(adapted.value)).toEqual(
+      Schema.decodeUnknownSync(original)(input),
+    );
   }
   const crew = await crewOpenCodeInput()["~standard"].validate({
     op: "ensure",

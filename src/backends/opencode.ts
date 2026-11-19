@@ -1635,7 +1635,7 @@ export class OpenCodeBackend implements AgentBackend {
       location: { directory: this.config.directory },
       signal,
     });
-    const capture = activitySnapshotSchema.parse(
+    const capture = Schema.decodeUnknownSync(activitySnapshotSchema)(
       await rpc.start(
         { sessionID, requestID, ...(reporter ? { reporter } : {}) },
         options(signal),
@@ -1652,7 +1652,9 @@ export class OpenCodeBackend implements AgentBackend {
     });
     const owner = { sessionID, id: capture };
     const snapshot = async (request: Promise<unknown>) => {
-      const value = activitySnapshotSchema.parse(await request);
+      const value = Schema.decodeUnknownSync(activitySnapshotSchema)(
+        await request,
+      );
       if (value.id !== capture)
         throw new Error("Crew activity capture changed");
       return value;

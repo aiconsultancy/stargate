@@ -3,7 +3,7 @@ import { expect, setSystemTime, test } from "bun:test";
 import { access, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Schema } from "effect";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import { activitySnapshotSchema } from "../src/activity";
 import { ActivityDelivery } from "../src/activity-delivery";
@@ -511,7 +511,11 @@ test("captures assignments, validated messages, urgency, results, and configured
     await f.complete(historical.id, "Historical result must stay absent");
     await f.complete(task.id, "Result sk-provider-secret");
     const snapshot = await f.read(capture.id);
-    expect(activitySnapshotSchema.safeParse(snapshot).success).toBe(true);
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(activitySnapshotSchema)(snapshot),
+      ),
+    ).toBe(true);
     expect(snapshot.entries.map(({ kind }) => kind)).toEqual([
       "assignment",
       "update",

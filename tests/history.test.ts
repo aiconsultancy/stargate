@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import {
   CrewHistory,
   type HistoryMessage,
@@ -127,9 +128,16 @@ test("history validates bounded, literal inputs", () => {
     { op: "sessions", directory: "/foreign" },
     { op: "messages", sessionID: "x", order: "sideways" },
   ])
-    expect(historyInputSchema.safeParse(input).success).toBe(false);
+    expect(
+      Result.isSuccess(Schema.decodeUnknownResult(historyInputSchema)(input)),
+    ).toBe(false);
   expect(
-    historyInputSchema.safeParse({ op: "search", query: "[a.*" }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(historyInputSchema)({
+        op: "search",
+        query: "[a.*",
+      }),
+    ),
   ).toBe(true);
 });
 
@@ -487,11 +495,13 @@ test("batched search cursors fit accepted bounds at maximum identifier lengths",
   expect(result.partial).toBe(true);
   expect(result.cursor?.length).toBeLessThanOrEqual(32768);
   expect(
-    historyInputSchema.safeParse({
-      op: "search",
-      query: "hit",
-      cursor: result.cursor,
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(historyInputSchema)({
+        op: "search",
+        query: "hit",
+        cursor: result.cursor,
+      }),
+    ),
   ).toBe(true);
 });
 

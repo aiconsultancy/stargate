@@ -1,34 +1,43 @@
 import { Rpc } from "@opencode/plugin/rpc";
-import { z } from "zod";
-import { projectSelectionSchema } from "./project-options";
+import { Schema } from "effect";
+import { settingsPattern, settingsStruct } from "../settings-schema";
+import { messagePortableSchema } from "./message-tool-input";
+import { effectProjectKeySchema } from "./project-options";
 
-const sessionID = z
-  .string()
-  .max(256)
-  .regex(/^ses_[A-Za-z0-9]+$/);
-const memberID = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
-const member = z.strictObject({
-  role: z.enum(["captain", "crew"]),
+const sessionID = Schema.String.check(
+  Schema.isMaxCodePoints(256),
+  settingsPattern(/^ses_[A-Za-z0-9]+$/),
+);
+const memberID = Schema.String.check(
+  settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+);
+const member = settingsStruct({
+  role: Schema.Literals(["captain", "crew"]),
   id: memberID,
 });
-const sequence = z.number().int().safe().nonnegative();
+const sequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 /** An outbox entry older than this is never listed or copied. */
 export const outboxMaxAgeMs = 24 * 60 * 60_000;
-export const outboxPageSchema = z.strictObject({
-  items: z.array(
-    z.strictObject({
-      sequence,
-      id: z.string().regex(/^[a-f0-9]{32}$/),
-      from: member,
-      to: member,
-      text: z.string().min(1).max(64000),
-      /** Time the stargate_dm was stored (ms). */
-      created: z.number().int().safe().nonnegative(),
-    }),
+export const outboxPageSchema = settingsStruct({
+  items: Schema.mutable(
+    Schema.Array(
+      settingsStruct({
+        sequence,
+        id: Schema.String.check(settingsPattern(/^[a-f0-9]{32}$/)),
+        from: member,
+        to: member,
+        text: Schema.String.check(
+          Schema.isMinCodePoints(1),
+          Schema.isMaxCodePoints(64000),
+        ),
+        /** Time the stargate_dm was stored (ms). */
+        created: sequence,
+      }),
+    ),
   ),
   latest: sequence,
 });
-export type OutboxPage = z.infer<typeof outboxPageSchema>;
+export type OutboxPage = typeof outboxPageSchema.Type;
 
 /**
  * Stargate's IRC transport → crew plugin, at the captain location only. `bind`
@@ -42,20 +51,28 @@ export const CrewIrc = Rpc.define({
   events: {},
   methods: {
     bind: {
-      input: z.strictObject({
-        sessionID,
-        crewID: memberID,
-        project: projectSelectionSchema.optional(),
-      }),
-      output: z.strictObject({ bound: z.literal(true) }),
+      input: messagePortableSchema(
+        settingsStruct({
+          sessionID,
+          crewID: memberID,
+          project: Schema.optional(effectProjectKeySchema),
+        }),
+      ),
+      output: messagePortableSchema(
+        settingsStruct({ bound: Schema.Literal(true) }),
+      ),
     },
     outbox: {
-      input: z.strictObject({
-        project: projectSelectionSchema.optional(),
-        after: sequence.optional(),
-        limit: z.number().int().min(1).max(100),
-      }),
-      output: outboxPageSchema,
+      input: messagePortableSchema(
+        settingsStruct({
+          project: Schema.optional(effectProjectKeySchema),
+          after: Schema.optional(sequence),
+          limit: Schema.Int.check(
+            Schema.isBetween({ minimum: 1, maximum: 100 }),
+          ),
+        }),
+      ),
+      output: messagePortableSchema(outboxPageSchema),
     },
   },
 });
