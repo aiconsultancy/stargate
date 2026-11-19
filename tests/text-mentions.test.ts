@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { botSchema } from "../src/config";
@@ -29,7 +30,7 @@ function config(
     mentionOnly?: boolean;
   } = {},
 ) {
-  return botSchema.parse({
+  return Schema.decodeUnknownSync(botSchema)({
     id: "galactica-captain",
     slack: { appId: "A123", appTokenEnv: "APP", botTokenEnv: "BOT" },
     access: {
@@ -88,7 +89,9 @@ test("setting: off by default; channel IDs and literal names", () => {
     { channels: ["C1"], names: ["capt.*"] },
     { channels: ["C1"], names: [] },
   ])
-    expect(mentionRuleSchema.safeParse(rule).success).toBe(false);
+    expect(
+      Result.isSuccess(Schema.decodeUnknownResult(mentionRuleSchema)(rule)),
+    ).toBe(false);
 });
 
 test("the longest whole-word name wins, in any letter case", () => {

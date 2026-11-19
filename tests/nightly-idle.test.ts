@@ -1,7 +1,9 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { CrewState } from "../src/crew/state";
 import { type CronRun, CronStore } from "../src/cron-store";
 import { maintenanceSchema } from "../src/nightly/config";
@@ -16,7 +18,7 @@ import type { OpenCodeControl } from "../src/nightly/opencode";
 import { bounds } from "../src/nightly/run";
 import { jobStatuses, Store } from "../src/store";
 
-const root = await mkdtemp("/tmp/opencode/stargate-idle-");
+const root = await mkdtemp(join(tmpdir(), "stargate-idle-"));
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 const opencode = {
@@ -357,7 +359,8 @@ describe("idle gate", () => {
 
   test("an hourly cron blocks only near its run; the gate passes after it", async () => {
     const horizon =
-      maintenanceSchema.parse({}).idle.cronHorizonMinutes * 60_000;
+      Schema.decodeUnknownSync(maintenanceSchema)({}).idle.cronHorizonMinutes *
+      60_000;
     const cron = join(data, "cron.sqlite");
     const at = (time: string) => Date.parse(`2026-11-12T${time}Z`);
     // `15 * * * *`, as on Galactica: a run is never more than an hour away.
@@ -395,7 +398,8 @@ describe("idle gate", () => {
 
   test("the default cron horizon covers the longest disruptive step", () => {
     const horizon =
-      maintenanceSchema.parse({}).idle.cronHorizonMinutes * 60_000;
+      Schema.decodeUnknownSync(maintenanceSchema)({}).idle.cronHorizonMinutes *
+      60_000;
     expect(horizon).toBeLessThan(60 * 60_000);
     expect(horizon).toBeGreaterThanOrEqual(
       bounds.openCodeRestart + bounds.openCodeVerify,

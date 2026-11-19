@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
+import { Schema } from "effect";
 import { PiDurableBackend, piModels } from "../src/backends/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
 import { teamSchema } from "../src/crew/team";
@@ -34,7 +37,7 @@ function config(
   directory = "/workspace",
   extra: Record<string, unknown> = {},
 ) {
-  return piDurableBackendSchema.parse({
+  return Schema.decodeUnknownSync(piDurableBackendSchema)({
     type: "pi-durable",
     directory,
     model,
@@ -145,7 +148,9 @@ test("Pi thinking level accepts only SDK levels the model supports", () => {
 
 for (const thinkingLevel of [undefined, "low"] as const)
   test(`Pi Claude proxy sends thinking ${thinkingLevel ?? "default off"} to bot and report conversations`, async () => {
-    const directory = await mkdtemp("/tmp/opencode/stargate-pi-claude-level-");
+    const directory = await mkdtemp(
+      join(tmpdir(), "stargate-pi-claude-level-"),
+    );
     const bodies: Record<string, unknown>[] = [];
     const server = Bun.serve({
       port: 0,
@@ -193,7 +198,7 @@ for (const thinkingLevel of [undefined, "low"] as const)
   });
 
 test("Pi Claude proxy sends Anthropic messages with only the proxy key", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-claude-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-claude-"));
   const requests: {
     path: string;
     headers: Headers;

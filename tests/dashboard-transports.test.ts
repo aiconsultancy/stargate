@@ -3,7 +3,7 @@ import { chmod, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
-import { Effect } from "effect";
+import { Effect, Result, Schema } from "effect";
 import pino from "pino";
 import { z } from "zod";
 import type { AgentBackend } from "../src/backend";
@@ -44,7 +44,7 @@ async function runtime(transports: "irc" | "teams" | "both") {
   cleanup.push(() => irc.stop());
   setDefaultLockCommandForTests(lock);
   cleanup.push(() => setDefaultLockCommandForTests(flockCommand));
-  const config = configSchema.parse({
+  const config = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: directory,
     dashboard: true,
     irc:
@@ -280,7 +280,9 @@ for (const transport of ["irc", "teams", "both"] as const)
 
 test("shared dashboard configuration is explicit, normalised and requires dashboard enablement", () => {
   const base = { bots: [bot()] };
-  expect(configSchema.parse(base).dashboardSocket).toBeUndefined();
+  expect(
+    Schema.decodeUnknownSync(configSchema)(base).dashboardSocket,
+  ).toBeUndefined();
   for (const dashboardSocket of [
     { path: "relative.sock", groupAccess: true },
     { path: "/run/../dashboard.sock", groupAccess: true },
@@ -289,21 +291,30 @@ test("shared dashboard configuration is explicit, normalised and requires dashbo
     { path: "/run/dashboard.sock", groupAccess: true, mode: 0o666 },
   ])
     expect(
-      configSchema.safeParse({ ...base, dashboard: true, dashboardSocket })
-        .success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(configSchema)({
+          ...base,
+          dashboard: true,
+          dashboardSocket,
+        }),
+      ),
     ).toBe(false);
   expect(
-    configSchema.safeParse({
-      ...base,
-      dashboardSocket: { path: "/run/dashboard.sock", groupAccess: true },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        ...base,
+        dashboardSocket: { path: "/run/dashboard.sock", groupAccess: true },
+      }),
+    ),
   ).toBe(false);
   expect(
-    configSchema.safeParse({
-      ...base,
-      dashboard: true,
-      dashboardSocket: { path: "/run/dashboard.sock", groupAccess: true },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        ...base,
+        dashboard: true,
+        dashboardSocket: { path: "/run/dashboard.sock", groupAccess: true },
+      }),
+    ),
   ).toBe(true);
 });
 
@@ -312,7 +323,7 @@ test("shared dashboard cannot expose its private gateway data directory", async 
     await mkdtemp(join(tmpdir(), "stargate-dashboard-isolation-")),
   );
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const config = configSchema.parse({
+  const config = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: directory,
     dashboard: true,
     dashboardSocket: {

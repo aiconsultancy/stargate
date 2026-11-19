@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { Schema } from "effect";
 import pino from "pino";
 import { ircSchema } from "../src/config";
 import { type IrcRegistration, IrcShip } from "../src/irc/ship";
@@ -57,7 +58,7 @@ function shipConfig(
   access: Record<string, unknown> = {},
   extra: Record<string, unknown> = {},
 ) {
-  return ircSchema.parse({
+  return Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     displayName: "Galactica",
     server: { host: "127.0.0.1", port, tls: false },

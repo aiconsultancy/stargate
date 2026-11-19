@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, spyOn, test } from "bun:test";
 import { dirname, join } from "node:path";
+import { Result, Schema } from "effect";
 import { teamsSchema } from "../src/config";
 import { allowedActivity, TeamsRegistration } from "../src/teams/registration";
 import {
@@ -435,20 +436,29 @@ describe("Opt-in Teams native permission decisions", () => {
     try {
       expect(f.config.approvalUsers).toEqual([]);
       expect(
-        teamsSchema.safeParse({ ...f.config, access: { users: [] } }).success,
+        Result.isSuccess(
+          Schema.decodeUnknownResult(teamsSchema)({
+            ...f.config,
+            access: { users: [] },
+          }),
+        ),
       ).toBe(false);
       expect(
-        teamsSchema.safeParse({
-          ...f.config,
-          approvalUsers: ["00000000-0000-4000-8000-000000000000"],
-        }).success,
+        Result.isSuccess(
+          Schema.decodeUnknownResult(teamsSchema)({
+            ...f.config,
+            approvalUsers: ["00000000-0000-4000-8000-000000000000"],
+          }),
+        ),
       ).toBe(false);
       expect(
-        teamsSchema.safeParse({
-          ...f.config,
-          approvalUsers: [HUMAN],
-          backend: { type: "module", module: "/srv/backend.ts" },
-        }).success,
+        Result.isSuccess(
+          Schema.decodeUnknownResult(teamsSchema)({
+            ...f.config,
+            approvalUsers: [HUMAN],
+            backend: { type: "module", module: "/srv/backend.ts" },
+          }),
+        ),
       ).toBe(false);
     } finally {
       await f.close();

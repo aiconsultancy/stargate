@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import { backendSchema, configSchema, secret } from "../src/config";
 import { botKey, chunks, routeEvent } from "../src/routing";
 import { bot, event, identity } from "./fixtures";
@@ -8,7 +9,11 @@ describe("routing", () => {
     const config = bot();
     config.access.users = ["*"];
     const request = { ...event(), event: { ...event().event, user: "U999" } };
-    expect(configSchema.safeParse({ bots: [config] }).success).toBe(true);
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(configSchema)({ bots: [config] }),
+      ),
+    ).toBe(true);
     expect(routeEvent(request, config, identity)?.user).toBe("U999");
     expect(
       routeEvent({ ...request, team_id: "T999" }, config, identity),
@@ -33,7 +38,11 @@ describe("routing", () => {
     const config = bot();
     config.access.users = ["*"];
     config.access.channels = ["*"];
-    expect(configSchema.safeParse({ bots: [config] }).success).toBe(true);
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(configSchema)({ bots: [config] }),
+      ),
+    ).toBe(true);
     const request = {
       ...event(),
       event: { ...event().event, user: "U999", channel: "C999" },
@@ -91,14 +100,22 @@ describe("routing", () => {
     config.access.deniedUsers = ["U999"];
     config.access.deniedChannels = ["C999"];
     expect(routeEvent(event(), config, identity)?.text).toBe("hello");
-    expect(configSchema.safeParse({ bots: [config] }).success).toBe(true);
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(configSchema)({ bots: [config] }),
+      ),
+    ).toBe(true);
     for (const access of [
       { ...config.access, channels: ["C*"] },
       { ...config.access, deniedUsers: ["C123"] },
       { ...config.access, deniedChannels: ["U123"] },
     ]) {
       expect(
-        configSchema.safeParse({ bots: [{ ...config, access }] }).success,
+        Result.isSuccess(
+          Schema.decodeUnknownResult(configSchema)({
+            bots: [{ ...config, access }],
+          }),
+        ),
       ).toBe(false);
     }
   });
@@ -190,24 +207,34 @@ describe("routing", () => {
 
 test("config fails closed and rejects duplicate registrations", () => {
   expect(
-    configSchema.safeParse({
-      bots: [{ ...bot(), access: { users: [], channels: [] } }],
-    }).success,
-  ).toBe(false);
-  expect(configSchema.safeParse({ bots: [bot(), bot()] }).success).toBe(false);
-  expect(
-    backendSchema.safeParse({
-      type: "opencode",
-      url: "file:///secret",
-      directory: "/work",
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        bots: [{ ...bot(), access: { users: [], channels: [] } }],
+      }),
+    ),
   ).toBe(false);
   expect(
-    backendSchema.safeParse({
-      type: "pi-durable",
-      directory: "/work",
-      model: "unknown/model",
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({ bots: [bot(), bot()] }),
+    ),
+  ).toBe(false);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(backendSchema)({
+        type: "opencode",
+        url: "file:///secret",
+        directory: "/work",
+      }),
+    ),
+  ).toBe(false);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(backendSchema)({
+        type: "pi-durable",
+        directory: "/work",
+        model: "unknown/model",
+      }),
+    ),
   ).toBe(false);
   expect(() => secret("MISSING", {})).toThrow("Missing environment variable");
 });

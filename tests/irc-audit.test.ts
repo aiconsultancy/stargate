@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { configSchema, ircSchema } from "../src/config";
@@ -125,7 +126,9 @@ async function setup(
   } = {},
 ) {
   const { fake, store } = options.reuse ?? (await world(options));
-  const config = ircSchema.parse(shipConfig(fake.port, options.extra));
+  const config = Schema.decodeUnknownSync(ircSchema)(
+    shipConfig(fake.port, options.extra),
+  );
   const { log, lines: logs } = capture();
   const ship = await IrcShip.create(config, store, log, {
     env: {
@@ -643,18 +646,25 @@ test("irc audit: crew never join the audit channel; config keeps it apart", asyn
 
   // The audit channel is never a captain or crew channel.
   expect(
-    ircSchema.safeParse(
-      shipConfig(6667, { audit: { channel: "#Ship-Galactica" } }),
-    ).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)(
+        shipConfig(6667, { audit: { channel: "#Ship-Galactica" } }),
+      ),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse(shipConfig(6667, { audit: { channel: "#agent dms" } }))
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)(
+        shipConfig(6667, { audit: { channel: "#agent dms" } }),
+      ),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse(
-      shipConfig(6667, { audit: { channel: "#agent-dms", x: 1 } }),
-    ).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)(
+        shipConfig(6667, { audit: { channel: "#agent-dms", x: 1 } }),
+      ),
+    ),
   ).toBe(false);
   // Nor a ship channel of another registration on the same server.
   const other = {
@@ -668,19 +678,32 @@ test("irc audit: crew never join the audit channel; config keeps it apart", asyn
     backend: { ...backend, sessionID: "ses_pegasus" },
   };
   expect(
-    configSchema.safeParse({ irc: [shipConfig(6667), other] }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        irc: [shipConfig(6667), other],
+      }),
+    ),
   ).toBe(false);
   expect(
-    configSchema.safeParse({
-      irc: [shipConfig(6667), { ...other, channels: ["#ship-pegasus"] }],
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        irc: [shipConfig(6667), { ...other, channels: ["#ship-pegasus"] }],
+      }),
+    ),
   ).toBe(true);
   // Defaults: no audit, DMs answered by the agent.
-  const plain = ircSchema.parse({ ...shipConfig(6667), audit: undefined });
+  const plain = Schema.decodeUnknownSync(ircSchema)({
+    ...shipConfig(6667),
+    audit: undefined,
+  });
   expect(plain.audit).toBeUndefined();
   expect(plain.dmPolicy).toBe("agent");
   expect(
-    ircSchema.safeParse(shipConfig(6667, { dmPolicy: "ignore" })).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)(
+        shipConfig(6667, { dmPolicy: "ignore" }),
+      ),
+    ),
   ).toBe(false);
 });
 
@@ -704,7 +727,7 @@ test("irc audit: the audit channel is no ship channel anywhere, under any foldin
     backend: { ...backend, sessionID: "ses_pegasus" },
   });
   const accepted = (...irc: Record<string, unknown>[]) =>
-    configSchema.safeParse({ irc }).success;
+    Result.isSuccess(Schema.decodeUnknownResult(configSchema)({ irc }));
   const elsewhere = { host: "irc.example", port: 6697, tls: true };
   // Another host name or port is no proof of another server.
   expect(
@@ -731,12 +754,14 @@ test("irc audit: the audit channel is no ship channel anywhere, under any foldin
   ).toBe(false);
   expect(accepted(shipConfig(6667), other(["#\uff41gent-dms"]))).toBe(false);
   expect(
-    ircSchema.safeParse(
-      shipConfig(6667, {
-        channels: ["#ship-galactica", "#ärger"],
-        audit: { channel: "#ÄRGER" },
-      }),
-    ).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)(
+        shipConfig(6667, {
+          channels: ["#ship-galactica", "#ärger"],
+          audit: { channel: "#ÄRGER" },
+        }),
+      ),
+    ),
   ).toBe(false);
   expect(accepted(shipConfig(6667), other(["#ship-pegasus"], elsewhere))).toBe(
     true,
@@ -755,19 +780,23 @@ test("irc audit: names any runtime casemapping joins are refused by config", () 
     backend: { ...backend, sessionID: "ses_pegasus" },
   });
   const accepted = (audit: string, ship: string) =>
-    configSchema.safeParse({
-      irc: [shipConfig(6667, { audit: { channel: audit } }), pegasus(ship)],
-    }).success;
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        irc: [shipConfig(6667, { audit: { channel: audit } }), pegasus(ship)],
+      }),
+    );
   // Regression: the server folds both to "#straße".
   expect(fold("#STRAẞE", "unicode")).toBe(fold("#straße", "unicode"));
   expect(accepted("#STRAẞE", "#straße")).toBe(false);
   expect(
-    ircSchema.safeParse(
-      shipConfig(6667, {
-        channels: ["#ship-galactica", "#straße"],
-        audit: { channel: "#STRAẞE" },
-      }),
-    ).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)(
+        shipConfig(6667, {
+          channels: ["#ship-galactica", "#straße"],
+          audit: { channel: "#STRAẞE" },
+        }),
+      ),
+    ),
   ).toBe(false);
   // Property: equal under any runtime CASEMAPPING ⇒ refused by config.
   const tricky = [
@@ -820,7 +849,11 @@ test("irc audit: names any runtime casemapping joins are refused by config", () 
     ...new Set(
       tricky.flatMap((name) => [name, name.toUpperCase(), name.toLowerCase()]),
     ),
-  ].filter((name) => ircSchema.shape.channels.element.safeParse(name).success);
+  ].filter((name) =>
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema.fields.channels)([name]),
+    ),
+  );
   const mappings: Casemapping[] = [
     "ascii",
     "rfc1459",

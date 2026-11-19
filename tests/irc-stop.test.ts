@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
@@ -18,7 +19,7 @@ afterEach(async () => {
 });
 
 function config(port: number, extra: Record<string, unknown> = {}) {
-  return ircSchema.parse({
+  return Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port, tls: false },
     account: "galactica",

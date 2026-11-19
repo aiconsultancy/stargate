@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
+import { Schema } from "effect";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
 
 const fixtureAuthEnv = "STARGATE_PAIR_FIXTURE_AUTH";
 
 function backend(url: string, headersEnv: Record<string, string> = {}) {
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url,
     directory: "/workspace",

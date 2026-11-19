@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   workingAgreementContext,
@@ -7,7 +8,7 @@ import {
 } from "../src/crew/instructions";
 
 test("agreement changes produce one path-only notice per member/session and survive read failure", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-agreement-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-agreement-"));
   const path = join(directory, "WAYS_OF_WORKING.md");
   try {
     await writeFile(path, "PRIVATE RULE VERSION ONE");
@@ -41,7 +42,7 @@ test("agreement changes produce one path-only notice per member/session and surv
 });
 
 test("OpenCode request hook advises reread only on change for an authorized current member", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-agreement-hook-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-agreement-hook-"));
   const path = join(directory, "WAYS_OF_WORKING.md");
   try {
     await writeFile(path, "DO NOT INLINE ORIGINAL RULES");

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Schema } from "effect";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
 
@@ -27,7 +28,7 @@ test("maintenance RPC pins session, request, notice and captain location", async
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/captain",

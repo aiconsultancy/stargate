@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type CrewCaller,
@@ -13,7 +14,7 @@ import { teamSchema } from "../src/crew/team";
 const pin = "ses_captainpin";
 
 async function fixture(options: { pinned?: boolean } = {}) {
-  const directory = await mkdtemp("/tmp/opencode/stargate-crew-irc-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-crew-irc-"));
   const team = teamSchema.parse({
     captain: { id: "captain" },
     crew: [

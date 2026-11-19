@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
@@ -7,7 +8,7 @@ import { PairingUI } from "../src/pairing";
 import { bot, identity } from "./fixtures";
 
 function fixture(deadline?: () => AbortSignal) {
-  const config = botSchema.parse({
+  const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     pairing: {
       operators: ["U123"],
@@ -124,7 +125,11 @@ test("pairing config is off by default; operators are exact and URLs are origins
     { ...config.pairing, urls: [] },
     { ...config.pairing, urls: Array(6).fill("https://example.test") },
   ])
-    expect(botSchema.safeParse({ ...config, pairing }).success).toBe(false);
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(botSchema)({ ...config, pairing }),
+      ),
+    ).toBe(false);
   for (const url of [
     "ftp://example.test",
     "https://u:p@example.test",
@@ -139,10 +144,12 @@ test("pairing config is off by default; operators are exact and URLs are origins
     "//example.test",
   ])
     expect(
-      botSchema.safeParse({
-        ...config,
-        pairing: { operators: ["U123"], urls: [url] },
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(botSchema)({
+          ...config,
+          pairing: { operators: ["U123"], urls: [url] },
+        }),
+      ),
     ).toBe(false);
   expect(config.pairing?.urls).toEqual([
     "https://code.example.test",

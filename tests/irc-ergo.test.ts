@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { ircSchema } from "../src/config";
@@ -242,7 +243,7 @@ test.skipIf(!available)(
     const store = new Store(join(directory, "stargate.sqlite"));
     cleanup.push(() => store.close());
     const ship = await IrcShip.create(
-      ircSchema.parse({
+      Schema.decodeUnknownSync(ircSchema)({
         id: "galactica-irc",
         server: {
           host: "127.0.0.1",

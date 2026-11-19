@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Result, Schema } from "effect";
 import { botSchema } from "../src/config";
 import { CrewWaiting } from "../src/crew/waiting";
 import {
@@ -12,14 +15,18 @@ import {
 import { bot } from "./fixtures";
 
 test("waiting defaults distinguish disabled from immediate", () => {
-  expect(waitingSchema.parse({})).toEqual({ delayMs: 5000, intervalMs: 10000 });
+  expect(Schema.decodeUnknownSync(waitingSchema)({})).toEqual({
+    delayMs: 5000,
+    intervalMs: 10000,
+  });
   for (const delayMs of [0, 3000, 5000, null]) {
-    expect(botSchema.parse({ ...bot(), waiting: { delayMs } }).waiting).toEqual(
-      {
-        delayMs,
-        intervalMs: 10000,
-      },
-    );
+    expect(
+      Schema.decodeUnknownSync(botSchema)({ ...bot(), waiting: { delayMs } })
+        .waiting,
+    ).toEqual({
+      delayMs,
+      intervalMs: 10000,
+    });
   }
   for (const waiting of [
     { delayMs: -1 },
@@ -30,9 +37,11 @@ test("waiting defaults distinguish disabled from immediate", () => {
     { intervalMs: -1 },
     { typo: true },
   ]) {
-    expect(waitingSchema.safeParse(waiting).success).toBe(false);
+    expect(
+      Result.isSuccess(Schema.decodeUnknownResult(waitingSchema)(waiting)),
+    ).toBe(false);
   }
-  expect(botSchema.parse(bot()).waiting.delayMs).toBe(5000);
+  expect(Schema.decodeUnknownSync(botSchema)(bot()).waiting.delayMs).toBe(5000);
 });
 
 test("100 varied waiting phrases use the actual agent name and wrap", () => {
@@ -57,9 +66,9 @@ test("100 varied waiting phrases use the actual agent name and wrap", () => {
 });
 
 test("captain waiting changes persist and apply without gateway restart", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-waiting-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-waiting-"));
   try {
-    const config = botSchema.parse({
+    const config = Schema.decodeUnknownSync(botSchema)({
       ...bot(),
       backend: { ...bot().backend, directory, agent: "adama" },
       waiting: { delayMs: 5000, intervalMs: 12000 },

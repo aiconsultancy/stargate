@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { Schema } from "effect";
 import { z } from "zod";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
@@ -324,7 +325,7 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
       return new Response(null, { status: 404 });
     },
   });
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/project/root",

@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import { maxAttachmentBytes, UploadRefused } from "../src/attachments";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
@@ -14,6 +15,7 @@ import { routeIrcMessage } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
 import { Store } from "../src/store";
 import type { Transcriber } from "../src/transcription";
+import { publishedFileDirectory } from "./file-fixture";
 import { FakeFilehost, FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -36,7 +38,7 @@ function filehostServer() {
 }
 
 function shipConfig(port: number, server: Record<string, unknown> = {}) {
-  return ircSchema.parse({
+  return Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port, tls: false, ...server },
     account: "galactica",
@@ -69,13 +71,12 @@ async function ship(
     ],
   }).start();
   cleanup.push(() => fake.stop());
-  // Published files must not sit under a hidden directory (Stargate refuses
-  // those), and TMPDIR is hidden during a self-update's test run.
-  const directory = await mkdtemp("/tmp/opencode/stargate-irc-files-");
+  // Published files use configured OpenCode scratch, including hidden TMPDIR.
+  const directory = await publishedFileDirectory("stargate-irc-files-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
-  const config = ircSchema.parse({
+  const config = Schema.decodeUnknownSync(ircSchema)({
     ...shipConfig(fake.port, options.server?.(host)),
     ...(options.features ? { features: options.features } : {}),
   });
@@ -332,15 +333,17 @@ test("irc files in: filehostOverride applies only without a conflicting ISUPPORT
     0,
   );
   expect(
-    ircSchema.safeParse({
-      ...shipConfig(6667),
-      server: {
-        host: "127.0.0.1",
-        port: 6667,
-        tls: false,
-        filehostOverride: "http://files.example/upload",
-      },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...shipConfig(6667),
+        server: {
+          host: "127.0.0.1",
+          port: 6667,
+          tls: false,
+          filehostOverride: "http://files.example/upload",
+        },
+      }),
+    ),
   ).toBe(false);
 });
 

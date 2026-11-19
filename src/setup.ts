@@ -13,6 +13,7 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import { parseEnv } from "node:util";
+import { Result, Schema } from "effect";
 import {
   type BotConfig,
   botSchema,
@@ -96,18 +97,18 @@ Deny rules always beat allow rules, including *. Empty deny lists block nobody.
 Messages from bots are never allowed. Backend permissions are separate.`;
 
 function validBot(input: unknown): BotConfig {
-  const parsed = botSchema.safeParse(input);
-  if (!parsed.success)
+  const parsed = Schema.decodeUnknownResult(botSchema)(input);
+  if (Result.isFailure(parsed))
     throw new Error(
       "Invalid bot configuration. Check IDs, backend options, and nonempty user/channel allowlists.",
     );
   if (
-    parsed.data.backend.type === "pi-durable" &&
-    !/^(openai|anthropic)\/.+$/.test(parsed.data.backend.model)
+    parsed.success.backend.type === "pi-durable" &&
+    !/^(openai|anthropic)\/.+$/.test(parsed.success.backend.model)
   ) {
     throw new Error("Pi model must be openai/modelId or anthropic/modelId.");
   }
-  return parsed.data;
+  return parsed.success;
 }
 
 /**
@@ -167,11 +168,11 @@ export async function checkCredentials(
 export async function readConfiguration(path: string) {
   try {
     if (!(await lstat(path)).isFile()) throw new Error("Not a regular file");
-    const parsed = configSchema.safeParse(
+    const parsed = Schema.decodeUnknownResult(configSchema)(
       JSON.parse(await readFile(path, "utf8")),
     );
-    if (!parsed.success) throw new Error("Invalid schema");
-    return parsed.data;
+    if (Result.isFailure(parsed)) throw new Error("Invalid schema");
+    return parsed.success;
   } catch {
     throw new Error(
       "Cannot read a valid configuration. Check path, JSON, bot IDs, and allowlists.",
@@ -232,16 +233,16 @@ export async function addBot(
     const previous = (await exists(path))
       ? await readConfiguration(path)
       : { bots: [], dataDirectory: ".stargate" };
-    const next = configSchema.safeParse({
+    const next = Schema.decodeUnknownResult(configSchema)({
       ...previous,
       bots: [...previous.bots, bot],
     });
-    if (!next.success)
+    if (Result.isFailure(next))
       throw new Error(
         "Cannot add bot: duplicate identity/token reference or invalid configuration.",
       );
     // Env names must be unique across both token kinds, too.
-    const names = next.data.bots.flatMap((entry) => [
+    const names = next.success.bots.flatMap((entry) => [
       entry.slack.appTokenEnv,
       entry.slack.botTokenEnv,
     ]);
@@ -269,7 +270,7 @@ export async function addBot(
         `${contents}${contents.endsWith("\n") || !contents ? "" : "\n"}${bot.slack.appTokenEnv}=${tokens.app}\n${bot.slack.botTokenEnv}=${tokens.bot}\n`,
       );
     }
-    await atomicWrite(path, `${JSON.stringify(next.data, null, 2)}\n`);
+    await atomicWrite(path, `${JSON.stringify(next.success, null, 2)}\n`);
   } finally {
     await lock.close();
     await unlink(`${path}.lock`);

@@ -3,7 +3,7 @@ import { watch } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { type BotConfig, botSchema } from "../src/config";
@@ -70,7 +70,7 @@ test("ready update notices are opt-in, persistent across restarts and included i
             dataDirectory,
             notifications: { updateNotice: enabled },
             bots: [pinned],
-            maintenance: maintenanceSchema.parse({
+            maintenance: Schema.decodeUnknownSync(maintenanceSchema)({
               models: { updateGlobalCatalog: changed },
             }),
           },
@@ -421,7 +421,7 @@ test("a failed worker stops the process with a restartable failure", async () =>
 test("a startup failure releases bots that already connected", async () => {
   const dataDirectory = await directory();
   try {
-    const broken = botSchema.parse({
+    const broken = Schema.decodeUnknownSync(botSchema)({
       ...bot("broken"),
       slack: {
         appId: "A999",
@@ -617,7 +617,7 @@ test("shutdown closes every intake and stops every worker together", async () =>
   const dataDirectory = await directory();
   try {
     const helper = bot();
-    const other = botSchema.parse({
+    const other = Schema.decodeUnknownSync(botSchema)({
       ...bot("other"),
       slack: {
         appId: "A999",
@@ -760,7 +760,7 @@ test("gateway writes a readiness record and delivers maintenance summaries", asy
     const config = {
       dataDirectory,
       bots: [bot()],
-      maintenance: maintenanceSchema.parse({
+      maintenance: Schema.decodeUnknownSync(maintenanceSchema)({
         report: { bot: "helper", channel: "C123" },
       }),
     };

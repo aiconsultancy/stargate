@@ -9,6 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type CronjobDefinition,
@@ -31,7 +32,7 @@ schedule: '0 9 * * *' # YAML comments are accepted
 Read supporting files and prepare the report.`;
 const roots: string[] = [];
 async function fixture() {
-  const root = await mkdtemp("/tmp/opencode/cronjob-files-");
+  const root = await mkdtemp(join(tmpdir(), "cronjob-files-"));
   roots.push(root);
   return root;
 }

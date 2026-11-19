@@ -1,26 +1,44 @@
 import { isAbsolute } from "node:path";
+import { Schema } from "effect";
 import { z } from "zod";
+import { legacySetting } from "../settings-legacy";
+import {
+  settingsDefault,
+  settingsRefine,
+  settingsStruct,
+} from "../settings-schema";
 
-const path = z
-  .string()
-  .min(1)
-  .max(4096)
-  .refine(isAbsolute, "Use an absolute path")
-  .refine(
-    (value) =>
-      ![...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127),
-    "No control characters",
+const path = Schema.String.check(Schema.isMinCodePoints(1))
+  .check(Schema.isMaxCodePoints(4096))
+  .check(settingsRefine(isAbsolute, { message: "Use an absolute path" }))
+  .check(
+    settingsRefine(
+      (value) =>
+        ![...value].some(
+          (c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
+        ),
+      { message: "No control characters" },
+    ),
   );
 
 /** Cleanup has separate standing approval; enabling maintenance does not enable it. */
-export const cleanupSchema = z.strictObject({
-  enabled: z.boolean().default(false),
-  olderThanDays: z.number().int().min(1).max(3650).default(5),
-  scratchRoots: z.array(path).max(32).default([]),
-  repositories: z.array(path).max(32).default([]),
-  protectedPaths: z.array(path).max(256).default([]),
+export const cleanupSchema = settingsStruct({
+  enabled: Schema.Boolean.pipe(settingsDefault(false)),
+  olderThanDays: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .check(Schema.isLessThanOrEqualTo(3650))
+    .pipe(settingsDefault(5)),
+  scratchRoots: Schema.mutable(Schema.Array(path))
+    .check(Schema.isMaxLength(32))
+    .pipe(settingsDefault([])),
+  repositories: Schema.mutable(Schema.Array(path))
+    .check(Schema.isMaxLength(32))
+    .pipe(settingsDefault([])),
+  protectedPaths: Schema.mutable(Schema.Array(path))
+    .check(Schema.isMaxLength(256))
+    .pipe(settingsDefault([])),
 });
-export type CleanupSettings = z.infer<typeof cleanupSchema>;
+export type CleanupSettings = typeof cleanupSchema.Type;
 
 export const cleanupReasonSchema = z.enum([
   "stale",
@@ -51,7 +69,7 @@ export const cleanupReasonSchema = z.enum([
 ]);
 export const cleanupItemSchema = z.strictObject({
   kind: z.enum(["scratch", "branch", "worktree"]),
-  path,
+  path: legacySetting(path),
   status: z.enum(["planned", "removed", "skipped", "failed"]),
   reason: cleanupReasonSchema,
   size: z.number().nonnegative().finite(),

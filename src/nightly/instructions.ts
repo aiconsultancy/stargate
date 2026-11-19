@@ -1,12 +1,13 @@
-import { z } from "zod";
+import { Schema } from "effect";
+import { settingsPattern, settingsStruct } from "../settings-schema";
 import { timeZoneSchema } from "./config";
 
-export const nightlyWindowSchema = z.strictObject({
-  start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+export const nightlyWindowSchema = settingsStruct({
+  start: Schema.String.check(settingsPattern(/^([01]\d|2[0-3]):[0-5]\d$/)),
+  end: Schema.String.check(settingsPattern(/^([01]\d|2[0-3]):[0-5]\d$/)),
   timeZone: timeZoneSchema,
 });
-export type NightlyWindow = z.infer<typeof nightlyWindowSchema>;
+export type NightlyWindow = typeof nightlyWindowSchema.Type;
 
 /**
  * Captain and crew paragraph. Rendered with the configured window; empty

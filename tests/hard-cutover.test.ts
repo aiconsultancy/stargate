@@ -13,6 +13,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import {
   cutoverBotKey,
   cutoverSessionFields,
@@ -719,8 +720,12 @@ describe("one-time Stargate cutover", () => {
       await Bun.file(join(root, ".stargate", "stargate.sqlite")).exists(),
     ).toBe(false);
     expect(
-      configSchema.safeParse({ bots: [bot()], maintenance: { pogo: {} } })
-        .success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(configSchema)({
+          bots: [bot()],
+          maintenance: { pogo: {} },
+        }),
+      ),
     ).toBe(false);
   });
 });

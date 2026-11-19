@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
@@ -728,7 +729,10 @@ for (const backend of [
   test(`${backend.type} without workspace agent reports local waiting unavailability`, async () => {
     const f = await fixture();
     // Parse through the repository boundary, rather than weakening config types.
-    const config = botSchema.parse({ ...f.config, backend });
+    const config = Schema.decodeUnknownSync(botSchema)({
+      ...f.config,
+      backend,
+    });
     // A backend identity change needs a new gateway, not live reconfiguration.
     const local = new Gateway(
       config,

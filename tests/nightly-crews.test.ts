@@ -1,10 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
 import { discoverCrews } from "../src/nightly/crews";
 
-const root = await mkdtemp("/tmp/opencode/stargate-crews-");
+const root = await mkdtemp(join(tmpdir(), "stargate-crews-"));
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 async function setup(name: string) {
@@ -22,7 +24,7 @@ async function setup(name: string) {
   };
   const profile = (extra = {}) =>
     `${JSON.stringify({ plugins: [{ package: "/srv/stargate/plugin", options: { ...options, ...extra } }] }, null, 2)}\n`;
-  const config: Config = configSchema.parse({
+  const config: Config = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: join(dir, "data"),
     bots: [
       {

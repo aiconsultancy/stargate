@@ -1,28 +1,40 @@
 import { expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import { configSchema } from "../src/config";
 import { cleanupProtection } from "../src/nightly/cleanup-protection";
 import { maintenanceSchema } from "../src/nightly/config";
 import type { Crew } from "../src/nightly/crews";
 
 test("maintenance cleanup is opt-in and strict at the real config boundary", () => {
-  expect(maintenanceSchema.parse({}).cleanup).toBeUndefined();
-  expect(maintenanceSchema.parse({ cleanup: {} }).cleanup?.enabled).toBe(false);
   expect(
-    maintenanceSchema.parse({ cleanup: { enabled: true } }).cleanup
-      ?.olderThanDays,
-  ).toBe(5);
+    Schema.decodeUnknownSync(maintenanceSchema)({}).cleanup,
+  ).toBeUndefined();
   expect(
-    maintenanceSchema.safeParse({ cleanup: { scratchRoots: ["relative"] } })
-      .success,
+    Schema.decodeUnknownSync(maintenanceSchema)({ cleanup: {} }).cleanup
+      ?.enabled,
   ).toBe(false);
   expect(
-    maintenanceSchema.safeParse({ cleanup: { enabled: true, force: true } })
-      .success,
+    Schema.decodeUnknownSync(maintenanceSchema)({ cleanup: { enabled: true } })
+      .cleanup?.olderThanDays,
+  ).toBe(5);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(maintenanceSchema)({
+        cleanup: { scratchRoots: ["relative"] },
+      }),
+    ),
+  ).toBe(false);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(maintenanceSchema)({
+        cleanup: { enabled: true, force: true },
+      }),
+    ),
   ).toBe(false);
 });
 
 test("cleanup protects configuration, runtime and every permanent crew directory", () => {
-  const config = configSchema.parse({
+  const config = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: "/runtime/stargate",
     bots: [
       {

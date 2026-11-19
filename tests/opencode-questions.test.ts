@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { OpenCode } from "@opencode/client";
+import { Schema } from "effect";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
 
@@ -158,7 +159,7 @@ function fixture(injected = false) {
       return new Response(null, { status: 404 });
     },
   });
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: injected ? "http://127.0.0.1:1" : server.url.href,
     directory: "/workspace",

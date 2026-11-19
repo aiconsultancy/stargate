@@ -7,10 +7,11 @@ import { cronChannel, cronUser } from "./cronjob-config";
 import { cronjobNameSchema } from "./cronjob-files";
 import { CronjobManager } from "./cronjob-manager";
 import type { Identity } from "./routing";
+import { legacySetting } from "./settings-legacy";
 
 const destination = {
-  channel: cronChannel.optional(),
-  user: cronUser.optional(),
+  channel: legacySetting(cronChannel).optional(),
+  user: legacySetting(cronUser).optional(),
 };
 export const cronOperationSchema = z.discriminatedUnion("op", [
   z.strictObject({

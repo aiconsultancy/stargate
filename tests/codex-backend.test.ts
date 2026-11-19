@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Codex } from "@openai/codex-sdk";
+import { Result, Schema } from "effect";
 import { z } from "zod";
 import { createBackend } from "../src/backend";
 import { inheritedEnvironment } from "../src/backends/cli-agent";
@@ -84,7 +85,7 @@ const tools = await toolchain();
 afterAll(() => tools.remove());
 
 function config(extra: Record<string, unknown> = {}, directory = "/workspace") {
-  return codexBackendSchema.parse({
+  return Schema.decodeUnknownSync(codexBackendSchema)({
     type: "codex",
     directory,
     model: "gpt-6.1-sol",
@@ -349,7 +350,9 @@ test("Codex resumes its own thread, also after restart, and never another namesp
   );
   // Backend settings select the namespace, as for other backends.
   const fingerprint = (backend: unknown) =>
-    backendFingerprint({ backend: backendSchema.parse(backend) });
+    backendFingerprint({
+      backend: Schema.decodeUnknownSync(backendSchema)(backend),
+    });
   expect(fingerprint(config())).not.toBe(
     fingerprint(config({ sandbox: "workspace-write" })),
   );
@@ -1282,13 +1285,15 @@ test("Codex attachments become images or inline text, or fail closed", async () 
 
 test("Codex configuration is strict and fails closed", () => {
   const parse = (extra: Record<string, unknown>) =>
-    codexBackendSchema.safeParse({
-      type: "codex",
-      directory: "/workspace",
-      model: "gpt-6.1-sol",
-      provider: { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv },
-      ...extra,
-    }).success;
+    Result.isSuccess(
+      Schema.decodeUnknownResult(codexBackendSchema)({
+        type: "codex",
+        directory: "/workspace",
+        model: "gpt-6.1-sol",
+        provider: { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv },
+        ...extra,
+      }),
+    );
   const defaults = config();
   expect(defaults.sandbox).toBe("read-only");
   expect(defaults.network).toBe(false);
@@ -1338,23 +1343,25 @@ test("Codex configuration is strict and fails closed", () => {
     expect(Object.keys(features as object)).toContain(name);
   // IRC captains and crew accept the backend too.
   expect(
-    ircSchema.safeParse({
-      id: "galactica-irc",
-      server: { host: "127.0.0.1", port: 6667, tls: false },
-      account: "galactica",
-      passwordEnv: "IRC_CAPTAIN",
-      channels: ["#ship-galactica"],
-      crew: [
-        {
-          id: "helo",
-          account: "galactica-helo",
-          passwordEnv: "IRC_HELO",
-          channels: ["#ship-galactica"],
-          backend: config(),
-        },
-      ],
-      backend: config(),
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        id: "galactica-irc",
+        server: { host: "127.0.0.1", port: 6667, tls: false },
+        account: "galactica",
+        passwordEnv: "IRC_CAPTAIN",
+        channels: ["#ship-galactica"],
+        crew: [
+          {
+            id: "helo",
+            account: "galactica-helo",
+            passwordEnv: "IRC_HELO",
+            channels: ["#ship-galactica"],
+            backend: config(),
+          },
+        ],
+        backend: config(),
+      }),
+    ),
   ).toBe(true);
 });
 

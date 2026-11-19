@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   readArchive,
@@ -191,7 +192,7 @@ describe("release archive validation", () => {
   });
 });
 
-const extracted = await mkdtemp("/tmp/opencode/stargate-extract-");
+const extracted = await mkdtemp(join(tmpdir(), "stargate-extract-"));
 afterAll(() => rm(extracted, { recursive: true, force: true }));
 
 describe("post-extraction check", () => {

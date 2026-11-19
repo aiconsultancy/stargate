@@ -1,6 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import pino from "pino";
 import {
   type AgentBackend,
@@ -36,11 +38,11 @@ async function setup(
     caps: offered,
   }).start();
   cleanup.push(() => fake.stop());
-  const directory = await mkdtemp("/tmp/opencode/stargate-irc-threads-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-irc-threads-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = new Store(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
-  const config = ircSchema.parse({
+  const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
     account: "galactica",

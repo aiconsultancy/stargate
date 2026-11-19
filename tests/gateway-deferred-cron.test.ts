@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import {
@@ -149,7 +150,7 @@ function fixture(path = ":memory:", pinned = false) {
 }
 
 async function databasePath() {
-  const directory = await mkdtemp("/tmp/opencode/stargate-deferred-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-deferred-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   return join(directory, "stargate.sqlite");
 }

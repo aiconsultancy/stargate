@@ -3,12 +3,14 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway";
 import { IrcShip } from "../src/irc/ship";
 import { nativeQuestionSchema, type QuestionAnswer } from "../src/questions";
+import { settingsIssues } from "../src/settings-schema";
 import { Store } from "../src/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
@@ -36,7 +38,7 @@ async function fixture(
   const store = new Store(path);
   cleanup.push(() => store.close());
   const config = (account: string) =>
-    ircSchema.parse({
+    Schema.decodeUnknownSync(ircSchema)({
       id: account,
       server: { host: "127.0.0.1", port: server.port, tls: false },
       account,
@@ -450,7 +452,7 @@ for (const multiline of [false, true]) {
 
 test("native questions stay disabled by default while targeted controls never wake other ships", async () => {
   expect(
-    ircSchema.parse({
+    Schema.decodeUnknownSync(ircSchema)({
       id: "fixture",
       server: { host: "localhost", port: 6697, tls: true },
       account: "fixture",
@@ -484,15 +486,18 @@ test("enabling questions requires explicit human policy, while default-off non-f
       directory: "/project",
     },
   };
-  expect(ircSchema.safeParse(raw).success).toBe(true);
-  const enabled = ircSchema.safeParse({
+  expect(Result.isSuccess(Schema.decodeUnknownResult(ircSchema)(raw))).toBe(
+    true,
+  );
+  const enabled = Schema.decodeUnknownResult(ircSchema)({
     ...raw,
     features: { questions: true },
   });
-  expect(enabled.success).toBe(false);
-  if (enabled.success) throw new Error("Missing human policy was accepted");
+  expect(Result.isSuccess(enabled)).toBe(false);
+  if (Result.isSuccess(enabled))
+    throw new Error("Missing human policy was accepted");
   expect(
-    enabled.error.issues.some((issue) =>
+    settingsIssues(enabled.failure.issue).issues.some((issue) =>
       issue.message.includes("explicit humanAccounts"),
     ),
   ).toBe(true);

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Schema } from "effect";
 import { healthConfigSchema } from "../src/health-config";
 import {
   createHostHealthReader,
@@ -40,7 +41,7 @@ test("host snapshots expose safe process leaders and growth only after a baselin
   };
   const read = createHostHealthReader(
     "/data",
-    () => healthConfigSchema.parse({}),
+    () => Schema.decodeUnknownSync(healthConfigSchema)({}),
     sources,
   );
   const first = await read();
@@ -77,7 +78,7 @@ test("unreadable process and filesystem data stays unknown, never a zero leader"
   };
   const data = await createHostHealthReader(
     "/data",
-    () => healthConfigSchema.parse({}),
+    () => Schema.decodeUnknownSync(healthConfigSchema)({}),
     sources,
   )();
   expect(data.processes).toBeNull();

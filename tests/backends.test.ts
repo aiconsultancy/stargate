@@ -1,5 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type {
   ConversationId,
@@ -8,6 +10,7 @@ import type {
   EntryRecord,
   Observer,
 } from "@earendil-works/pi-durable";
+import { Schema } from "effect";
 import { latestInput } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { PiDurableBackend, piPartialText } from "../src/backends/pi-durable";
@@ -71,7 +74,7 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
@@ -143,7 +146,7 @@ test("OpenCode sends only a compact Slack source line before the raw instruction
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
@@ -218,7 +221,7 @@ test("OpenCode placed-input failure explicitly interrupts server-side execution"
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
@@ -249,7 +252,7 @@ test("OpenCode uncertain admission does not interrupt unrelated native work", as
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
@@ -314,7 +317,7 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
         },
       });
       try {
-        const config = backendSchema.parse({
+        const config = Schema.decodeUnknownSync(backendSchema)({
           type: "opencode",
           url: server.url.href,
           directory: "/workspace",
@@ -350,7 +353,7 @@ test("OpenCode cancellation before admission makes no native requests", async ()
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
@@ -518,7 +521,7 @@ function openCodeStreamFixture(
       return new Response(null, { status: 404 });
     },
   });
-  const config = backendSchema.parse({
+  const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
@@ -1256,11 +1259,11 @@ test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
 });
 
 test("real Pi Durable harness persists sessions under Bun SQLite", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-"));
   const previous = process.env["OPENAI_API_KEY"];
   process.env["OPENAI_API_KEY"] = "local-test-not-sent";
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "pi-durable",
       directory,
       model: "openai/gpt-5",

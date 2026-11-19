@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import { sourceLine } from "../src/backend";
 import { configSchema, type IrcConfig, ircSchema } from "../src/config";
@@ -38,7 +39,7 @@ const backend = {
 };
 
 function shipConfig(overrides: Record<string, unknown> = {}): IrcConfig {
-  return ircSchema.parse({
+  return Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: 6667, tls: false },
     account: "galactica",
@@ -181,18 +182,36 @@ test("irc config requires one credential and TLS for client PEM", () => {
     passwordEnv: undefined,
     clientPemFile: "/private/client.pem",
   };
-  expect(ircSchema.safeParse(certificate).success).toBe(false);
+  expect(
+    Result.isSuccess(Schema.decodeUnknownResult(ircSchema)(certificate)),
+  ).toBe(false);
   const secure = { ...certificate, server: { ...config.server, tls: true } };
-  expect(ircSchema.safeParse(secure).success).toBe(true);
+  expect(Result.isSuccess(Schema.decodeUnknownResult(ircSchema)(secure))).toBe(
+    true,
+  );
   expect(
-    ircSchema.safeParse({ ...secure, passwordEnv: "IRC_PASSWORD" }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...secure,
+        passwordEnv: "IRC_PASSWORD",
+      }),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse({ ...secure, clientPemFile: undefined }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...secure,
+        clientPemFile: undefined,
+      }),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse({ ...secure, access: { allowedAccounts: ["*"] } })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...secure,
+        access: { allowedAccounts: ["*"] },
+      }),
+    ),
   ).toBe(false);
 });
 
@@ -475,7 +494,9 @@ test("irc limits: peers per conversation, ship messages per channel", async () =
 
 test("irc config: strict server, crew and pin rules", () => {
   const parse = (overrides: Record<string, unknown>) =>
-    ircSchema.safeParse({ ...shipConfig(), ...overrides }).success;
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({ ...shipConfig(), ...overrides }),
+    );
   expect(parse({})).toBe(true);
   expect(
     parse({ server: { host: "10.23.45.67", port: 6667, tls: false } }),
@@ -549,27 +570,43 @@ test("irc config: IRC-only configs, shared Slack pins and unique IDs", () => {
     ...bot("galactica"),
     backend: { ...backend, sessionID: "ses_captain" },
   };
-  expect(configSchema.safeParse({ irc: [irc] }).success).toBe(true);
-  expect(configSchema.safeParse({}).success).toBe(false);
-  // One Slack bot and one IRC captain may share a pinned captain session.
-  expect(configSchema.safeParse({ bots: [slack], irc: [irc] }).success).toBe(
-    true,
+  expect(
+    Result.isSuccess(Schema.decodeUnknownResult(configSchema)({ irc: [irc] })),
+  ).toBe(true);
+  expect(Result.isSuccess(Schema.decodeUnknownResult(configSchema)({}))).toBe(
+    false,
   );
+  // One Slack bot and one IRC captain may share a pinned captain session.
   expect(
-    configSchema.safeParse({
-      irc: [
-        irc,
-        { ...irc, id: "other", account: "x", passwordEnv: "X", crew: [] },
-      ],
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({ bots: [slack], irc: [irc] }),
+    ),
+  ).toBe(true);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        irc: [
+          irc,
+          { ...irc, id: "other", account: "x", passwordEnv: "X", crew: [] },
+        ],
+      }),
+    ),
   ).toBe(false);
   expect(
-    configSchema.safeParse({ bots: [bot("galactica-irc")], irc: [irc] })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        bots: [bot("galactica-irc")],
+        irc: [irc],
+      }),
+    ),
   ).toBe(false);
   expect(
-    configSchema.safeParse({ bots: [bot("galactica-irc-chief")], irc: [irc] })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        bots: [bot("galactica-irc-chief")],
+        irc: [irc],
+      }),
+    ),
   ).toBe(false);
   // Namespaces: transport, registration, server, account and backend settings.
   const server = irc.server;
@@ -856,14 +893,20 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
   });
   expect(admitted(off, "#quiet", 1)).toBe(0);
   expect(
-    ircSchema.safeParse({ ...shipConfig(), access: { crewTurnsPerHour: 10 } })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...shipConfig(),
+        access: { crewTurnsPerHour: 10 },
+      }),
+    ),
   ).toBe(false);
   expect(
-    ircSchema.safeParse({
-      ...shipConfig(),
-      access: { shipTurnsPerAgentPerHour: 601 },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...shipConfig(),
+        access: { shipTurnsPerAgentPerHour: 601 },
+      }),
+    ),
   ).toBe(false);
 });
 
@@ -1020,8 +1063,12 @@ test("irc all-call: reaches every ship agent in the channel, word-bounded", asyn
   const none = shipConfig({ access: { allCallWords: [] } });
   expect(reach("everyone, report", "#galactica", none)).toEqual([]);
   expect(
-    ircSchema.safeParse({ ...shipConfig(), access: { allCallWords: ["a,b"] } })
-      .success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(ircSchema)({
+        ...shipConfig(),
+        access: { allCallWords: ["a,b"] },
+      }),
+    ),
   ).toBe(false);
 });
 

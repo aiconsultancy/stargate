@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { Writable } from "node:stream";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { Attachment } from "../src/attachments";
 import type { AgentBackend } from "../src/backend";
@@ -47,7 +48,7 @@ function config(
     channels?: string[];
   } = {},
 ) {
-  return botSchema.parse({
+  return Schema.decodeUnknownSync(botSchema)({
     id: "galactica-captain",
     slack: {
       appId: "A123",
@@ -107,12 +108,14 @@ function message(
 
 test("setting: off by default; channels are IDs, names are words", () => {
   expect(
-    transcriptionSchema.parse({ provider }).spokenMentions,
+    Schema.decodeUnknownSync(transcriptionSchema)({ provider }).spokenMentions,
   ).toBeUndefined();
   const valid = { channels: ["C0EXAMPLE04", "G123"], names };
   expect(
-    transcriptionSchema.parse({ provider, spokenMentions: valid })
-      .spokenMentions,
+    Schema.decodeUnknownSync(transcriptionSchema)({
+      provider,
+      spokenMentions: valid,
+    }).spokenMentions,
   ).toEqual(valid);
   for (const spokenMentions of [
     { channels: ["*"], names },
@@ -124,7 +127,12 @@ test("setting: off by default; channels are IDs, names are words", () => {
     { channels: ["C1"], names, extra: true },
   ])
     expect(
-      transcriptionSchema.safeParse({ provider, spokenMentions }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(transcriptionSchema)({
+          provider,
+          spokenMentions,
+        }),
+      ),
     ).toBe(false);
 });
 

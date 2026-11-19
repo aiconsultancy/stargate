@@ -9,7 +9,9 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { maintenanceSchema } from "../src/nightly/config";
 import { processRunner } from "../src/nightly/exec";
 import {
@@ -21,7 +23,7 @@ import {
 import { restoreCutoff } from "../src/nightly/run";
 import { tarball } from "./tar";
 
-const root = await mkdtemp("/tmp/opencode/stargate-host-");
+const root = await mkdtemp(join(tmpdir(), "stargate-host-"));
 const now = Date.parse("2026-11-12T00:10:00Z");
 const old = new Date(now - 72 * 3_600_000).toISOString();
 const sha = (data: Uint8Array) =>
@@ -71,7 +73,7 @@ afterAll(async () => {
 });
 
 const settings = (dir: string) => {
-  const parsed = maintenanceSchema.parse({
+  const parsed = Schema.decodeUnknownSync(maintenanceSchema)({
     cliproxyapi: {
       link: join(dir, "current"),
       binary: join(dir, "{version}", "cliproxyapi"),

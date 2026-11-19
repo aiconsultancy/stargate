@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Schema } from "effect";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
 
@@ -31,7 +32,7 @@ test("activity RPC pins the captain, capture and configured OpenCode location", 
     },
   });
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/captain",
@@ -102,7 +103,7 @@ test("crew status uses authenticated location RPC only, with no captain session 
   });
   process.env["STARGATE_CREW_TEST_AUTH"] = "Bearer fixture-only";
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/captain",

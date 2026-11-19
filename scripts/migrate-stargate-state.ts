@@ -22,6 +22,7 @@ import {
 } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionMoveInput, SessionUpdateInput } from "@opencode/client";
+import { Schema } from "effect";
 import { z } from "zod";
 import { backendSchema } from "../src/config";
 import { backendFingerprint } from "../src/routing";
@@ -115,7 +116,7 @@ export function cutoverBotKey(key: string, before: unknown, after: unknown) {
   if (sha256(JSON.stringify(oldBackend)) !== parts.at(-1))
     throw new Error("Old normalized backend does not match stored namespace.");
   parts[parts.length - 1] = backendFingerprint({
-    backend: backendSchema.parse(after),
+    backend: Schema.decodeUnknownSync(backendSchema)(after),
   });
   const next = JSON.stringify(parts);
   return { from: key, to: next, fromHash: sha256(key), toHash: sha256(next) };

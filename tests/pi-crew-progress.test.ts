@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type {
   ConversationId,
@@ -73,7 +75,7 @@ function assistant(
 }
 
 async function fixture(report = false) {
-  const directory = await mkdtemp("/tmp/opencode/stargate-pi-progress-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-progress-"));
   const state = await CrewState.open(directory, "progress", "identity");
   const clock = new Clock();
   const member = teamSchema.parse({

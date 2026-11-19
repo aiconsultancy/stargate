@@ -12,6 +12,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { z } from "zod";
 import {
   bootTicks,
@@ -273,7 +274,7 @@ async function open(
 ) {
   await mkdir(dataDirectory, { recursive: true });
   const backend = await CodexBackend.open(
-    codexBackendSchema.parse({
+    Schema.decodeUnknownSync(codexBackendSchema)({
       type: "codex",
       directory: project,
       model: "gpt-6.1-sol",

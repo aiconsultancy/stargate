@@ -30,6 +30,7 @@ import {
 } from "./nightly/instructions";
 import { peerInstructions } from "./peers";
 import { reactionInstructions } from "./reactions";
+import { legacySetting } from "./settings-legacy";
 import { voiceInstructions } from "./transcription";
 
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
@@ -70,7 +71,7 @@ const optionsSchema = z.strictObject({
     .regex(/^\{(?:env:[A-Z_][A-Z0-9_]*|file:[^\r\n{}]+)\}$/)
     .default("{env:CLIPROXYAPI_API_KEY}"),
   /** Nightly maintenance window rendered into captain and crew instructions. */
-  maintenanceWindow: nightlyWindowSchema.optional(),
+  maintenanceWindow: legacySetting(nightlyWindowSchema).optional(),
 });
 type Options = z.input<typeof optionsSchema>;
 const document = z.record(z.string(), z.unknown());

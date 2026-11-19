@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -1793,7 +1794,7 @@ async function fixture(
   pin = false,
 ) {
   const definition = team ?? defaultTeam;
-  const directory = await mkdtemp("/tmp/opencode/stargate-crew-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-crew-"));
   const options: CrewOptions = {
     namespace: "bowser-one",
     stateDirectory: directory,

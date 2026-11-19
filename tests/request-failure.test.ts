@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
@@ -53,17 +55,25 @@ test("failures use one accessible collapsed box with a safe cause and next actio
 test("default turn timeout is thirty minutes, with explicit values and the one-hour maximum preserved", () => {
   const config = bot();
   const { turnTimeoutMs: _timeout, ...input } = config;
-  expect(botSchema.parse(input).turnTimeoutMs).toBe(1_800_000);
+  expect(Schema.decodeUnknownSync(botSchema)(input).turnTimeoutMs).toBe(
+    1_800_000,
+  );
   expect(
-    botSchema.parse({ ...input, turnTimeoutMs: 300_000 }).turnTimeoutMs,
+    Schema.decodeUnknownSync(botSchema)({ ...input, turnTimeoutMs: 300_000 })
+      .turnTimeoutMs,
   ).toBe(300_000);
   expect(
-    botSchema.safeParse({ ...input, turnTimeoutMs: 3_600_001 }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(botSchema)({
+        ...input,
+        turnTimeoutMs: 3_600_001,
+      }),
+    ),
   ).toBe(false);
 });
 
 test("failure delivery replaces a preview and retries durable cause without rerunning the backend", async () => {
-  const directory = await mkdtemp("/tmp/opencode/stargate-request-failure-");
+  const directory = await mkdtemp(join(tmpdir(), "stargate-request-failure-"));
   const path = join(directory, "state.sqlite");
   let store = new Store(path);
   let turns = 0;

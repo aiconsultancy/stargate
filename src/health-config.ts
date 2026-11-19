@@ -1,16 +1,29 @@
 import { isAbsolute } from "node:path";
-import { z } from "zod";
+import { Schema } from "effect";
+import {
+  settingsDefault,
+  settingsRefine,
+  settingsStruct,
+} from "./settings-schema";
 
-const absolutePath = z
-  .string()
-  .min(1)
-  .max(4096)
-  .refine((value) => isAbsolute(value) && !value.includes("\0"));
-export const healthConfigSchema = z.strictObject({
-  starfleetSnapshotFile: absolutePath.optional(),
-  opencodeDataDirectory: absolutePath.optional(),
-  crewWorktreesDirectory: absolutePath.optional(),
-  stalledAfterSeconds: z.number().int().min(60).max(86400).default(1800),
-  snapshotMaxAgeSeconds: z.number().int().min(60).max(86400).default(900),
+const absolutePath = Schema.String.check(Schema.isMinCodePoints(1))
+  .check(Schema.isMaxCodePoints(4096))
+  .check(
+    settingsRefine((value) => isAbsolute(value) && !value.includes("\0"), {
+      message: "Invalid input",
+    }),
+  );
+export const healthConfigSchema = settingsStruct({
+  starfleetSnapshotFile: Schema.optional(absolutePath),
+  opencodeDataDirectory: Schema.optional(absolutePath),
+  crewWorktreesDirectory: Schema.optional(absolutePath),
+  stalledAfterSeconds: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(60))
+    .check(Schema.isLessThanOrEqualTo(86400))
+    .pipe(settingsDefault(1800)),
+  snapshotMaxAgeSeconds: Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(60))
+    .check(Schema.isLessThanOrEqualTo(86400))
+    .pipe(settingsDefault(900)),
 });
-export type HealthConfig = z.infer<typeof healthConfigSchema>;
+export type HealthConfig = typeof healthConfigSchema.Type;

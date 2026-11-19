@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
+import { Schema } from "effect";
 import { configSchema } from "../src/config";
 import {
   buildUpdateSnapshot,
@@ -139,7 +140,7 @@ test("tool diff contains only names; descriptions, schemas and permission resour
 });
 
 test("notifications.updateNotice is off by default", () => {
-  const parsed = configSchema.parse({ bots: [bot()] });
+  const parsed = Schema.decodeUnknownSync(configSchema)({ bots: [bot()] });
   expect(parsed.notifications.updateNotice).toBe(false);
 });
 

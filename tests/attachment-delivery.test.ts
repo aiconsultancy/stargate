@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import {
   type AttachmentTransport,
   agentFilesLocal,
@@ -175,7 +176,11 @@ test("removed access stops before any notice or transport call", async () => {
 
 test("only an OpenCode server on another host has remote files", () => {
   const opencode = (url: string) =>
-    backendSchema.parse({ type: "opencode", url, directory: "/work" });
+    Schema.decodeUnknownSync(backendSchema)({
+      type: "opencode",
+      url,
+      directory: "/work",
+    });
   expect(agentFilesLocal(opencode("http://localhost:4096"))).toBe(true);
   expect(agentFilesLocal(opencode("http://127.0.0.1:4096"))).toBe(true);
   expect(agentFilesLocal(opencode("https://agents.example:4096"))).toBe(false);

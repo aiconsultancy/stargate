@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import pino from "pino";
 import { configSchema } from "../src/config";
 import {
@@ -83,7 +84,7 @@ function candidate(
   input: Record<string, unknown>,
   environment: NodeJS.ProcessEnv = { ...secrets },
 ): ReloadCandidate {
-  return { config: configSchema.parse(input), environment };
+  return { config: Schema.decodeUnknownSync(configSchema)(input), environment };
 }
 function envText(values: Record<string, string>) {
   return Object.entries(values)

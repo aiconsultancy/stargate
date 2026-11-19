@@ -1,18 +1,39 @@
 import { isAbsolute } from "node:path";
-import { z } from "zod";
+import { Schema } from "effect";
+import {
+  settingsCheck,
+  settingsDefault,
+  settingsRefine,
+  settingsStruct,
+} from "./settings-schema";
 
 /** An optional operating policy. Human authority is never an agent rank. */
-export const fleetPolicySchema = z
-  .strictObject({
-    role: z.enum(["rear_admiral", "captain", "crew"]),
-    humanAccounts: z.array(z.string().min(1).max(256)).min(1),
-    agentAccounts: z.array(z.string().min(1).max(256)).default([]),
-    assignedCheckout: z.string().refine(isAbsolute),
-    capabilities: z
-      .array(z.enum(["read_code", "subspace", "dispatch", "implement"]))
-      .min(1),
-  })
-  .superRefine((policy, context) => {
+export const fleetPolicySchema = settingsStruct({
+  role: Schema.Literals(["rear_admiral", "captain", "crew"]),
+  humanAccounts: Schema.mutable(
+    Schema.Array(
+      Schema.String.check(Schema.isMinCodePoints(1)).check(
+        Schema.isMaxCodePoints(256),
+      ),
+    ),
+  ).check(Schema.isMinLength(1)),
+  agentAccounts: Schema.mutable(
+    Schema.Array(
+      Schema.String.check(Schema.isMinCodePoints(1)).check(
+        Schema.isMaxCodePoints(256),
+      ),
+    ),
+  ).pipe(settingsDefault([])),
+  assignedCheckout: Schema.String.check(
+    settingsRefine(isAbsolute, { message: "Invalid input" }),
+  ),
+  capabilities: Schema.mutable(
+    Schema.Array(
+      Schema.Literals(["read_code", "subspace", "dispatch", "implement"]),
+    ),
+  ).check(Schema.isMinLength(1)),
+}).check(
+  settingsCheck((policy, context) => {
     const humans = new Set(
       policy.humanAccounts.map((name) => name.toLowerCase()),
     );
@@ -26,8 +47,9 @@ export const fleetPolicySchema = z
         code: "custom",
         message: "Duplicate fleet capability",
       });
-  });
-export type FleetPolicy = z.infer<typeof fleetPolicySchema>;
+  }),
+);
+export type FleetPolicy = typeof fleetPolicySchema.Type;
 export type Authority = "human" | "agent" | "context";
 
 export function fleetAuthority(

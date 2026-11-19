@@ -3,6 +3,7 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
@@ -1687,7 +1688,7 @@ test("recent participation preserves an older reply parent through cleanup and r
     "INSERT INTO irc_thread_messages(botKey,channel,msgid,root,recorded) VALUES('another-bot','#ship','old-parent','m1',?)",
   ).run(start);
   db.close();
-  const config = ircSchema.parse({
+  const config = Schema.decodeUnknownSync(ircSchema)({
     id: original.botKey,
     account: "captain",
     passwordEnv: "FIXTURE",
@@ -1918,7 +1919,7 @@ for (const botReply of [false, true]) {
       accounts: { captain: "fixture" },
     }).start();
     cleanup.push(() => server.stop());
-    const cfg = ircSchema.parse({
+    const cfg = Schema.decodeUnknownSync(ircSchema)({
       id: "recovered",
       account: "captain",
       passwordEnv: "FIXTURE",

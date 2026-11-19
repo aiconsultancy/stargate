@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Schema } from "effect";
 import pino from "pino";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
@@ -215,7 +216,7 @@ test("quota adapter uses only location-scoped authenticated RPC, no session or i
   });
   process.env["STARGATE_QUOTA_TEST_AUTH"] = "Bearer fixture-only";
   try {
-    const config = backendSchema.parse({
+    const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/captain",

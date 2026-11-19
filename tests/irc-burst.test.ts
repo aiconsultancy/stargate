@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { ircSchema } from "../src/config";
@@ -62,7 +63,7 @@ function enqueue(
 }
 
 function config(port = 6667, quietMs?: number) {
-  return ircSchema.parse({
+  return Schema.decodeUnknownSync(ircSchema)({
     id: "discovery",
     server: { host: "127.0.0.1", port, tls: false },
     account: "discovery",
@@ -569,7 +570,7 @@ test("a reload rechecks the original addressing inside a pending burst instead o
   expect(f.registration.transport.allowed(job.user, job.channel, job)).toBe(
     true,
   );
-  const next = ircSchema.parse({
+  const next = Schema.decodeUnknownSync(ircSchema)({
     ...f.cfg,
     access: { ...f.cfg.access, humanWakeChannels: [] },
     fleetControl: {
@@ -709,7 +710,7 @@ test("internal transcript delivery and fleet-result continuations do not split c
 for (const keepPolicy of [false, true])
   test(`ordinary channels keep their original thread state and Stop resolves grouped members (fleet policy ${keepPolicy})`, async () => {
     const f = await live(1000, false, (base) =>
-      ircSchema.parse({
+      Schema.decodeUnknownSync(ircSchema)({
         ...base,
         fleetPolicy: keepPolicy ? base.fleetPolicy : undefined,
         access: {
@@ -763,7 +764,7 @@ for (const keepPolicy of [false, true])
 
 test("all-call context excludes every grouped source while retaining unrelated channel context", async () => {
   const f = await live(1000, false, (base) =>
-    ircSchema.parse({
+    Schema.decodeUnknownSync(ircSchema)({
       ...base,
       access: {
         ...base.access,

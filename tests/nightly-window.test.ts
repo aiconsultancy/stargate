@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import { maintenanceSchema } from "../src/nightly/config";
 import {
   currentWindow,
@@ -103,13 +104,14 @@ describe("Europe/London window", () => {
 describe("maintenance configuration", () => {
   test("release source defaults to the canonical public repository", () => {
     expect(
-      maintenanceSchema.parse({ stargate: { root: "/release-root" } }).stargate
-        ?.repository,
+      Schema.decodeUnknownSync(maintenanceSchema)({
+        stargate: { root: "/release-root" },
+      }).stargate?.repository,
     ).toBe("aiconsultancy/stargate");
   });
 
   test("defaults are disabled, 00:00-01:00 Europe/London, all components off", () => {
-    const parsed = maintenanceSchema.parse({});
+    const parsed = Schema.decodeUnknownSync(maintenanceSchema)({});
     expect(parsed.enabled).toBe(false);
     expect(parsed.window).toEqual(london);
     expect(Object.values(parsed.components)).toEqual([
@@ -134,14 +136,18 @@ describe("maintenance configuration", () => {
       { unknown: true },
     ];
     for (const value of bad)
-      expect(maintenanceSchema.safeParse(value).success).toBe(false);
+      expect(
+        Result.isSuccess(Schema.decodeUnknownResult(maintenanceSchema)(value)),
+      ).toBe(false);
     expect(
-      maintenanceSchema.safeParse({
-        enabled: true,
-        components: { models: true },
-        models: {},
-        proxy: { clientKeyFile: "/home/me/.config/cliproxyapi/client.key" },
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(maintenanceSchema)({
+          enabled: true,
+          components: { models: true },
+          models: {},
+          proxy: { clientKeyFile: "/home/me/.config/cliproxyapi/client.key" },
+        }),
+      ),
     ).toBe(true);
   });
 });

@@ -1,13 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import {
-  mkdir,
-  mkdtemp,
-  rm,
-  symlink,
-  truncate,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -20,6 +13,7 @@ import {
   parseAttachments,
   readPreparedAttachment,
 } from "../src/attachments";
+import { ordinaryFileDirectory } from "./file-fixture";
 
 const cleanup: string[] = [];
 afterEach(async () => {
@@ -28,7 +22,7 @@ afterEach(async () => {
 });
 
 async function directory() {
-  const path = await mkdtemp("/tmp/opencode/stargate-attachments-");
+  const path = await ordinaryFileDirectory("stargate-attachments-");
   cleanup.push(path);
   return path;
 }

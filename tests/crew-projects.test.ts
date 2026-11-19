@@ -8,6 +8,7 @@ import {
   rm,
   symlink,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Plugin as EffectPlugin } from "@opencode/plugin/effect";
 import { Agent, Session, SessionMessage } from "@opencode/schema";
@@ -66,7 +67,7 @@ async function git(directory: string, ...args: string[]) {
 
 async function fixture(crewCount = 1) {
   const root = await realpath(
-    await mkdtemp("/tmp/opencode/stargate-projects-"),
+    await mkdtemp(join(tmpdir(), "stargate-projects-")),
   );
   const captainDirectory = join(root, "captain");
   await mkdir(captainDirectory);

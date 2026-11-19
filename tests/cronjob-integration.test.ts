@@ -1,7 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import { botSchema, configSchema } from "../src/config";
 import {
@@ -41,10 +43,10 @@ afterEach(async () => {
 });
 async function fixture() {
   const directory = await mkdtemp(
-    "/tmp/opencode/stargate-cronjob-integration-",
+    join(tmpdir(), "stargate-cronjob-integration-"),
   );
   directories.push(directory);
-  const config = botSchema.parse({
+  const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     cronjobs: {
       directory: join(directory, "cronjobs"),
@@ -279,31 +281,37 @@ test("cron config rejects duplicate file roots and unsupported report times", ()
       dailyReport: {},
     },
   };
-  expect(botSchema.parse(config).cronjobs?.dailyReport).toEqual({
+  expect(
+    Schema.decodeUnknownSync(botSchema)(config).cronjobs?.dailyReport,
+  ).toEqual({
     time: "08:30",
     timezone: "UTC",
   });
   expect(
-    botSchema.safeParse({
-      ...config,
-      cronjobs: { ...config.cronjobs, dailyReport: { time: "25:30" } },
-    }).success,
+    Result.isSuccess(
+      Schema.decodeUnknownResult(botSchema)({
+        ...config,
+        cronjobs: { ...config.cronjobs, dailyReport: { time: "25:30" } },
+      }),
+    ),
   ).toBe(false);
   expect(
-    configSchema.safeParse({
-      bots: [
-        config,
-        {
-          ...config,
-          id: "second",
-          slack: {
-            appId: "AOTHER",
-            appTokenEnv: "OTHER_APP",
-            botTokenEnv: "OTHER_BOT",
+    Result.isSuccess(
+      Schema.decodeUnknownResult(configSchema)({
+        bots: [
+          config,
+          {
+            ...config,
+            id: "second",
+            slack: {
+              appId: "AOTHER",
+              appTokenEnv: "OTHER_APP",
+              botTokenEnv: "OTHER_BOT",
+            },
           },
-        },
-      ],
-    }).success,
+        ],
+      }),
+    ),
   ).toBe(false);
 });
 

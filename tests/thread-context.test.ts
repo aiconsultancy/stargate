@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import pino from "pino";
 import { botSchema } from "../src/config";
 import { isAllowedUser } from "../src/routing";
@@ -38,12 +39,18 @@ function message(ts: string, extra: Record<string, unknown> = {}) {
 
 test("thread context configuration is strictly opt-in", () => {
   expect(bot().threadContext).toBe(false);
-  expect(botSchema.parse({ ...bot(), threadContext: true }).threadContext).toBe(
-    true,
-  );
-  expect(botSchema.safeParse({ ...bot(), threadContext: "true" }).success).toBe(
-    false,
-  );
+  expect(
+    Schema.decodeUnknownSync(botSchema)({ ...bot(), threadContext: true })
+      .threadContext,
+  ).toBe(true);
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(botSchema)({
+        ...bot(),
+        threadContext: "true",
+      }),
+    ),
+  ).toBe(false);
 });
 
 test("one fixture API page uses the same channel, thread and exclusive cutoff", async () => {
