@@ -36,6 +36,7 @@ import { CrewQuestions, crewQuestionInputSchema } from "./questions";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
 import { CrewError } from "./state";
+import { protectedCrewTool } from "./tool";
 import { objectToolInput } from "./tool-input";
 import { CrewWaiting, waitingInputSchema } from "./waiting";
 
@@ -184,14 +185,12 @@ const plugin = Plugin.define({
       }
     };
     /** One error boundary: permission first, then only safe crew messages. */
-    const guard = async (
+    const assertPermission = (
       context: ToolContext,
       action: string,
       resource: string,
-      failure: string,
-      run: () => Promise<unknown>,
-    ) => {
-      await ctx.permission.assert({
+    ) =>
+      ctx.permission.assert({
         sessionID: context.sessionID,
         agent: context.agent,
         source: { type: "tool", messageID: context.messageID, id: context.id },
@@ -199,6 +198,14 @@ const plugin = Plugin.define({
         resources: [resource],
         save: [resource],
       });
+    const guard = async (
+      context: ToolContext,
+      action: string,
+      resource: string,
+      failure: string,
+      run: () => Promise<unknown>,
+    ) => {
+      await assertPermission(context, action, resource);
       try {
         return { content: JSON.stringify(await run()) };
       } catch (error) {
@@ -507,12 +514,8 @@ const plugin = Plugin.define({
           input: projectToolInput(crewInputSchema),
           options: { codemode: false, permission: "stargate_crew" },
           execute: (input, context) =>
-            guard(
-              context,
-              "stargate_crew",
-              String(input["op"]),
-              "Crew operation failed; raw details withheld.",
-              () => projects.run(input, context),
+            protectedCrewTool(projects, input, context, (resource) =>
+              assertPermission(context, "stargate_crew", resource),
             ),
         });
         editor.add({

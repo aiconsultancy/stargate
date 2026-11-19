@@ -8,6 +8,7 @@ import type {
 } from "@opencode/client";
 import { z } from "zod";
 import type { CrewSession } from "./engine";
+import { inspectionGrantIDSchema } from "./inspection-grants";
 import { isNativeInstructionContext } from "./instruction-context";
 import {
   crewMessageMetadataKey,
@@ -27,6 +28,7 @@ export const inspectInputSchema = z.strictObject({
   op: z.literal("inspect"),
   crew: agentIDSchema,
   taskID: z.string().startsWith("task_").max(100).optional(),
+  grantID: inspectionGrantIDSchema.optional(),
   requestStatus: z.strictObject({ key: z.string().min(1).max(100) }).optional(),
 });
 export const reconcileInputSchema = z.strictObject({

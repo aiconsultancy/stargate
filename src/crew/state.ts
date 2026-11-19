@@ -4,12 +4,16 @@ import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { redactCredentials } from "../credentials";
 import { UpdateNotices } from "../update-notice";
+import { CrewError } from "./error";
 import { canExpandCrew } from "./identity";
+import { InspectionGrants } from "./inspection-grants";
 import { IrcSessions } from "./irc";
 import { MemberActivityStore } from "./member-activity";
 import { MailRoutes } from "./messaging";
 import { queuedPendingTask, reportTask } from "./pending";
 import { ReportingStore } from "./reporting";
+
+export { CrewError } from "./error";
 export type CrewID = string;
 export type Peer = {
   crewID: CrewID;
@@ -102,8 +106,6 @@ type AbandonExpected = Pick<
   "id" | "crewID" | "workerSessionID" | "originCaptainID" | "inputID"
 > & { status: AbandonableStatus; controlID: string | null };
 
-export class CrewError extends Error {}
-
 /** greybeard: bounded captain-selected queue; no background scheduler. */
 export const pendingTaskLimit = 100;
 type QueuedTask = CrewTask & { text: string };
@@ -133,6 +135,7 @@ const controlID = (token: string) =>
 
 export class CrewState {
   readonly updateNotices: UpdateNotices;
+  readonly inspectionGrants: InspectionGrants;
   readonly reporting: ReportingStore;
   readonly activity: MemberActivityStore;
   readonly mailRoutes: MailRoutes;
@@ -140,10 +143,12 @@ export class CrewState {
   private constructor(
     readonly path: string,
     private readonly db: Database,
+    identity: string,
     /** Configured root of a pinned team; not part of the crew identity. */
     readonly captainSessionID?: string,
   ) {
     this.updateNotices = new UpdateNotices(db);
+    this.inspectionGrants = new InspectionGrants(db, identity);
     this.reporting = new ReportingStore(db, (id) => this.captainRoute(id));
     this.activity = new MemberActivityStore(db);
     this.mailRoutes = new MailRoutes(db);
@@ -348,7 +353,7 @@ export class CrewState {
           db.query("INSERT INTO identity VALUES (?)").run(fingerprint);
       }).immediate();
       db.exec("PRAGMA foreign_keys=ON");
-      return new CrewState(path, db, captainSessionID);
+      return new CrewState(path, db, fingerprint, captainSessionID);
     } catch (error) {
       db.close();
       if (error instanceof CrewError) throw error;

@@ -18,6 +18,7 @@ mention. For IRC, see [requests and replies](irc.md#access).
 | Read gateway settings or change a captain's waiting delay without a turn      | [Captain-addressed meta commands](meta-commands.md)                                                        |
 | Switch installed global OpenCode child-agent profiles                         | [Profile switching](agents/agent-profiles.md#switch-an-installed-profile)                                  |
 | Let a trusted captain send a message to another approved conversation         | [Captain posts](captain-post.md)                                                                           |
+| Give one current worker bounded read-only crew inspection                     | [Inspection delegation](inspection-delegation.md)                                                          |
 
 ## Linux user service
 

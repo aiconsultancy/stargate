@@ -34,6 +34,14 @@ import {
 } from "../update-notice";
 import { CrewHistoryRPC } from "./history-rpc";
 import { crewFingerprint } from "./identity";
+import { CrewInspectionDelegation } from "./inspection-delegation";
+import {
+  type InspectionAudit,
+  type InspectionBinding,
+  InspectionDenied,
+  inspectionGrantInputSchemas,
+  type inspectionGrantView,
+} from "./inspection-grants";
 import { MesijClient, type MesijMessage } from "./mesij";
 import { crewMessageMetadataKey, resumeMessageID } from "./message-protocol";
 import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
@@ -50,6 +58,7 @@ import { projectsSchema } from "./project-options";
 import {
   type AbandonInput,
   abandonInputSchema,
+  type CrewInspectionAPI,
   type ExecutionInspection,
   type InspectInput,
   type InspectionConnector,
@@ -171,6 +180,7 @@ const text = z.string().min(1).max(64000);
 export const crewInputSchema = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("roster") }),
   inspectInputSchema,
+  ...inspectionGrantInputSchemas,
   reconcileInputSchema,
   resumeInputSchema,
   abandonInputSchema,
@@ -225,6 +235,9 @@ export type CrewCaller = {
   signal: AbortSignal;
   id?: string;
   messageID?: string;
+  /** Host-only native permission recheck before delegated data leaves the owner.
+   * Pi uses its saved coding-enabled conversation binding, not this callback. */
+  inspectionPermission?: (resource: string) => Promise<void>;
   [piIdentity]?: true;
   /** Set by `authorizeMail`: the crew member a bound IRC session serves. */
   [ircIdentity]?: string;
@@ -241,6 +254,13 @@ export type ResultConnector = (
   session: CrewSession,
   signal: AbortSignal,
 ) => Promise<ResultAPI>;
+/** Trusted owner injection only. Must evaluate effective issuer permission
+ * read-only, including policies/hooks; never assert as a foreign tool caller.
+ * SDK 2.2.7 has no such API, so the plugin does not supply this proof. */
+export type InspectionIssuerPermission = (
+  issuerSessionID: string,
+  signal: AbortSignal,
+) => Promise<void>;
 type RequestOptions = NonNullable<
   Parameters<OpenCodeClient["session"]["get"]>[1]
 >;
@@ -279,6 +299,16 @@ export interface CrewAgents {
 }
 export type CrewResult = {
   status: string;
+  grant?: ReturnType<typeof inspectionGrantView>;
+  grants?: ReturnType<typeof inspectionGrantView>[];
+  audit?: InspectionAudit[];
+  nextAfter?: number;
+  inspection?: {
+    crew: string;
+    taskID: string;
+    taskStatus: CrewTask["status"];
+    execution: { state: "running" | "idle" | "unknown" };
+  };
   diagnostic?: string;
   peers?: Peer[];
   task?: CrewTask;
@@ -353,9 +383,12 @@ export type CrewWaitOptions = {
   now?: () => number;
   wait?: (ms: number, signal: AbortSignal) => Promise<void>;
   windowMs?: number;
+  /** Test clock for capability expiry; never a configurable grant lifetime. */
+  inspectionNow?: () => number;
 };
 
 export class CrewEngine {
+  readonly inspectionDelegation: CrewInspectionDelegation;
   readonly quotas: QuotaReader;
   private readonly pi: PiCrewWorkers;
   readonly reporting: CrewReporter;
@@ -374,7 +407,12 @@ export class CrewEngine {
     private readonly inspectionConnector?: InspectionConnector,
     private readonly connectResults?: ResultConnector,
     waitOptions: CrewWaitOptions = {},
+    private readonly inspectionIssuerPermission?: InspectionIssuerPermission,
   ) {
+    this.inspectionDelegation = new CrewInspectionDelegation(
+      this,
+      waitOptions.inspectionNow,
+    );
     this.quotas = new QuotaReader(options.quota);
     this.waitNow = waitOptions.now ?? (() => performance.now());
     this.waitPoll =
@@ -494,6 +532,7 @@ export class CrewEngine {
     inspectionConnector?: InspectionConnector,
     connectResults?: ResultConnector,
     waitOptions: CrewWaitOptions = {},
+    inspectionIssuerPermission?: InspectionIssuerPermission,
   ) {
     const parsed = crewOptionsSchema.safeParse(input);
     if (!parsed.success)
@@ -570,6 +609,7 @@ export class CrewEngine {
       inspectionConnector,
       connectResults,
       waitOptions,
+      inspectionIssuerPermission,
     );
   }
 
@@ -1204,11 +1244,21 @@ export class CrewEngine {
   async run(raw: unknown, caller: CrewCaller): Promise<CrewResult> {
     caller = this.logicalCaller(caller);
     const parsed = crewInputSchema.safeParse(raw);
-    if (!parsed.success)
+    if (!parsed.success) {
+      this.inspectionDelegation.denied(raw, caller, "invalid-input");
       throw new CrewError(
         "Invalid stargate_crew input. Use the operation's declared fields.",
       );
+    }
     const input = parsed.data;
+    if (
+      input.op === "grant-inspect" ||
+      input.op === "list-inspect-grants" ||
+      input.op === "revoke-inspect" ||
+      input.op === "audit-inspect-grant" ||
+      (input.op === "inspect" && input.grantID)
+    )
+      return this.inspectionDelegation.run(input, caller);
     const deadline =
       input.op === "wait" ? this.waitNow() + this.waitWindowMs : 0;
     let authorized = false;
@@ -1324,13 +1374,14 @@ export class CrewEngine {
       throw new CrewError(
         `Only the configured ${this.options.team.captain.name ?? this.options.team.captain.id} session may perform this operation; earlier captain sessions are retained history.`,
       );
-    const session = await this.sessions.get(
-      { sessionID: caller.sessionID },
-      { signal: caller.signal },
-    );
+    await this.verifyCaptainRoot(caller.sessionID, caller.signal);
+  }
+
+  private async verifyCaptainRoot(sessionID: string, signal: AbortSignal) {
+    const session = await this.sessions.get({ sessionID }, { signal });
     if (
       session.parentID ||
-      session.id !== caller.sessionID ||
+      session.id !== sessionID ||
       ![
         this.options.team.captain.agent ?? this.options.team.captain.id,
         this.options.team.captain.id,
@@ -1646,6 +1697,135 @@ export class CrewEngine {
     return task;
   }
 
+  /** Capability issuance requires an explicit pinned root, not rank, a human
+   * account claim, a previous captain, or a synthesized tool caller. */
+  async verifyInspectionIssuer(sessionID: string, signal: AbortSignal) {
+    if (
+      !this.options.captainSessionID ||
+      sessionID !== this.options.captainSessionID ||
+      this.state.peerBySession(sessionID)
+    )
+      throw new InspectionDenied("identity");
+    await this.verifyCaptainRoot(sessionID, signal);
+  }
+
+  async verifyIssuerInspectionPermission(
+    sessionID: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const verify = this.inspectionIssuerPermission;
+    if (!verify) throw new InspectionDenied("unavailable");
+    const verified: Promise<void> = verify(sessionID, signal);
+    await verified;
+    signal.throwIfAborted();
+  }
+
+  hostBoundInspectionPi(caller: CrewCaller): boolean {
+    const peer = this.state.peerBySession(caller.sessionID);
+    return !!(
+      caller[piIdentity] &&
+      peer &&
+      peer.crewID === caller.agent &&
+      this.member(peer.crewID).backend?.tools === "coding" &&
+      this.state.piPeer(peer.sessionID)?.conversationID
+    );
+  }
+
+  /** Synchronous final gate: exact current order, ownership and controller.
+   * Legacy lineage is deliberately not authority to delegate another task. */
+  inspectionBinding(
+    crew: string,
+    taskID: string,
+    issuer: string,
+  ): InspectionBinding {
+    const member = this.member(crew);
+    const task = this.state.activeTask(crew);
+    const peer = this.state.peer(crew);
+    if (
+      !task ||
+      !peer ||
+      peer.status !== "ready" ||
+      task.id !== taskID ||
+      task.status !== "running" ||
+      task.released !== 0 ||
+      task.notifying !== 0 ||
+      task.originCaptainID !== issuer ||
+      peer.sessionID !== task.workerSessionID
+    )
+      throw new InspectionDenied("task");
+    if (this.state.controlled(crew)) throw new InspectionDenied("controller");
+    const conversationID = member.backend
+      ? (this.state.piPeer(peer.sessionID)?.conversationID ?? null)
+      : null;
+    if (
+      member.backend &&
+      (member.backend.tools !== "coding" || !conversationID)
+    )
+      throw new InspectionDenied("identity");
+    return {
+      crew,
+      taskID,
+      sessionID: peer.sessionID,
+      inputID: task.inputID,
+      conversationID,
+    };
+  }
+
+  async verifyInspectionPeer(crew: string, signal: AbortSignal) {
+    const peer = this.state.peer(crew);
+    if (peer?.status !== "ready") throw new InspectionDenied("identity");
+    if (this.member(crew).backend) {
+      if (!this.state.piPeer(peer.sessionID)?.conversationID)
+        throw new InspectionDenied("identity");
+      return;
+    }
+    const native = await this.sessions.get(
+      { sessionID: peer.sessionID },
+      { signal },
+    );
+    this.validPeer(native, peer);
+  }
+
+  async readDelegatedInspection(
+    resource: InspectionBinding,
+    signal: AbortSignal,
+  ): Promise<NonNullable<CrewResult["inspection"]>> {
+    const task = this.state.activeTask(resource.crew);
+    if (!task || task.id !== resource.taskID)
+      throw new InspectionDenied("task");
+    let execution: NonNullable<CrewResult["inspection"]>["execution"] = {
+      state: "unknown",
+    };
+    if (this.member(resource.crew).backend) {
+      // Observation only: idle() can open a Pi runtime; do not call it here.
+      execution = { state: this.pi.observed(task) ? "running" : "unknown" };
+    } else if (this.inspectionConnector) {
+      const peer = this.state.peer(resource.crew);
+      if (!peer) throw new InspectionDenied("identity");
+      const native = await this.sessions.get(
+        { sessionID: peer.sessionID },
+        { signal },
+      );
+      this.validPeer(native, peer);
+      try {
+        // Same-server anchor is the verified target, not a captain identity.
+        const api = await this.inspectionConnection(native, signal);
+        const live = await observeExecution(api, peer.sessionID, signal);
+        this.validPeer(live.session, peer);
+        execution = { state: live.execution.state };
+      } catch {
+        signal.throwIfAborted();
+        // No raw SDK detail, outcomes, prompts, results, queue or control IDs.
+      }
+    }
+    return {
+      crew: resource.crew,
+      taskID: resource.taskID,
+      taskStatus: task.status,
+      execution,
+    };
+  }
+
   private async inspectionAPI(caller: CrewCaller) {
     if (!this.inspectionConnector)
       throw new CrewError(
@@ -1655,7 +1835,16 @@ export class CrewEngine {
       { sessionID: caller.sessionID },
       { signal: caller.signal },
     );
-    return this.inspectionConnector(native, caller.signal);
+    return this.inspectionConnection(native, caller.signal);
+  }
+
+  private async inspectionConnection(
+    native: CrewSession,
+    signal: AbortSignal,
+  ): Promise<CrewInspectionAPI> {
+    const connect = this.inspectionConnector;
+    if (!connect) throw new InspectionDenied("unavailable");
+    return connect(native, signal);
   }
 
   private async inspect(

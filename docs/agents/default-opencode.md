@@ -537,6 +537,17 @@ untrusted data. Compaction does not remove the stored transcript.
 
 ## Coordination and limits
 
+The pinned captain can issue bounded, revocable read-only inspection handles
+for one assigned worker and one explicit current same-team task. Workers keep
+their own identity; native denies, task ownership and controller guards still
+apply. The default has no grant. See [inspection delegation](../inspection-delegation.md)
+for the 15-minute ceiling, tool operations, non-delegable powers, proof custody
+and unimplemented human/cross-ship paths. This does not grant human approval.
+SDK 2.2.7 cannot prove continuing issuer permissions read-only; the plugin leaves
+delegated snapshots and worker audits disabled (`unavailable`), not implicitly
+authorized by issuance. Captain grant lifecycle and ordinary crew tools remain
+available.
+
 Use the [crew coordination guide](../crew-coordination.md) for the read-only
 roster, append-only SQLite journal, asynchronous mail and explicit native DM.
 Coding-enabled Pi crew share these handlers; tools-none crew remain tools-off.

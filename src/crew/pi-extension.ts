@@ -71,7 +71,7 @@ export function piCrewToolDefinitions() {
       name: "stargate_crew",
       schema: crewInputSchema,
       description:
-        "Read configured roster or own task status; captain controls remain captain-only.",
+        "Read configured roster or own task status. list-inspect-grants discovers captain-issued handles for your current task; inspect with grantID, exact crew and taskID reads only that target. Handles are not bearer authority. No requestStatus, mutations or onward delegation. Captain controls remain captain-only.",
     },
     {
       name: "stargate_journal",

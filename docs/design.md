@@ -277,6 +277,16 @@ validation. Module import and execution are trusted-code operations.
 
 ## Identity and state
 
+Task-scoped [inspection delegation](inspection-delegation.md) stays in the
+existing CrewState owner. Private HMAC proofs bind a pinned captain, current
+recipient order and one explicit target. The normal crew authorizer and native
+permission checks intersect that authority; final checks after awaited reads
+prevent revoked, expired or reassigned snapshots from leaving the owner.
+There is no new broker, captain impersonation or human approval path.
+SDK 2.2.7 lacks read-only effective issuer permission evaluation. The plugin
+therefore fails closed for delegated snapshots and worker audits; raw rules and
+an issuance-time native assertion do not prove continuing issuer authority.
+
 See the [state-machine inventory](agents/state-machines.md) for transition
 owners and invariants across the gateway, backends, crew, and scheduled work.
 

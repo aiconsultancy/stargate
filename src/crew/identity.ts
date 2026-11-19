@@ -37,6 +37,19 @@ const identitySchema = z.strictObject({
   crew: z.array(z.record(z.string(), z.unknown())),
 });
 
+/** Authority survives supported append-only expansion, not identity rebinding.
+ * CrewState still validates the complete roster before it opens this store. */
+export function inspectionTeamIdentity(identity: string): string {
+  try {
+    const { version, namespace, projectDirectory, captain } =
+      identitySchema.parse(JSON.parse(identity));
+    return JSON.stringify({ version, namespace, projectDirectory, captain });
+  } catch {
+    // Legacy/non-team state identities remain exact, not inferred or widened.
+    return identity;
+  }
+}
+
 /** Explicit append-only rollout; existing workers can never be rebound. */
 export function canExpandCrew(previous: string, next: string): boolean {
   try {

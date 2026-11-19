@@ -14,6 +14,7 @@ import {
   type CrewOptions,
   crewOptionsSchema,
 } from "./engine";
+import type { InspectionDenial } from "./inspection-grants";
 import { effectProjectKeySchema } from "./project-options";
 import { CrewError } from "./state";
 import { defaultTeam } from "./team";
@@ -188,7 +189,21 @@ export class CrewProjects {
   }
 
   async run(raw: unknown, caller: CrewCaller) {
-    const selected = await this.select(raw, caller);
+    let selected: Awaited<ReturnType<CrewProjects["select"]>>;
+    try {
+      selected = await this.select(raw, caller);
+    } catch (error) {
+      this.inspectionDenied(
+        raw,
+        caller,
+        caller.signal.aborted
+          ? "cancelled"
+          : error instanceof CrewError
+            ? "identity"
+            : "unavailable",
+      );
+      throw error;
+    }
     const input = selected.input;
     if (
       selected.project !== "default" &&
@@ -212,6 +227,30 @@ export class CrewProjects {
     }
     const result = await selected.engine.run(input, caller);
     return this.enabled ? { ...result, project: selected.project } : result;
+  }
+
+  /** Audit only: failed native/identity checks must never need authorization
+   * to return data. Route by the actual saved owner, not a claimed project. */
+  inspectionDenied(raw: unknown, caller: CrewCaller, reason: InspectionDenial) {
+    try {
+      const owner = this.owner(caller.sessionID);
+      const selection = decodeProjectKey(
+        typeof raw === "object" && raw !== null && "project" in raw
+          ? raw.project
+          : "default",
+      );
+      const key =
+        owner ?? (Result.isSuccess(selection) ? selection.success : "default");
+      const input: unknown =
+        typeof raw === "object" && raw !== null && !Array.isArray(raw)
+          ? { ...raw }
+          : raw;
+      if (typeof input === "object" && input !== null)
+        delete (input as Record<string, unknown>)["project"];
+      this.get(key).inspectionDelegation.denied(input, caller, reason);
+    } catch {
+      // Unknown/ambiguous state cannot weaken the original failure.
+    }
   }
 
   status(input: CrewStatusInput = {}): CrewStatus {
