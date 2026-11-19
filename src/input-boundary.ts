@@ -1,27 +1,61 @@
-import { z } from "zod";
+import { Option, Schema } from "effect";
+import { isNativeInstructionContext } from "./crew/instruction-context";
 import { crewMessageMetadataKey } from "./crew/message-protocol";
 
-const crewOrigin = z.object({
-  originCaptainID: z.string(),
-  originInputID: z.string().min(1).optional(),
-});
+const decodeCrewOrigin = Schema.decodeUnknownOption(
+  Schema.Struct({
+    originCaptainID: Schema.String,
+    originInputID: Schema.optional(Schema.NonEmptyString),
+  }),
+);
+const decodeRestart = Schema.decodeUnknownOption(
+  Schema.Struct({ notice: Schema.Literal("restart") }),
+  { onExcessProperty: "error" },
+);
+// OpenCode 2.3.0 SessionRunner.continueOutputLimit emits same-turn context
+// without description or metadata, not an asynchronous completion.
+const outputLimitContinuation =
+  "Your last response hit the output token limit (stop reason: length). Do not apologize, recap, or repeat yourself. Break the remaining work into smaller pieces.";
+type BoundaryMessage = {
+  id: string;
+  type: string;
+  text?: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+};
 
-/** Resolve one native input boundary; unmapped crew wakes clear public ownership. */
+/** Resolve one native input boundary; unmapped wakes clear public ownership. */
 export function inputBoundary(
-  message: { id: string; type: string; metadata?: Record<string, unknown> },
+  message: BoundaryMessage,
   sessionID: string,
 ): string | undefined {
   if (message.type === "user" || message.type === "shell") return message.id;
+  // A shell callback is not a continuation of the latest chat. A reader with
+  // retained launch ancestry may replace this native-only boundary.
+  if (message.type === "synthetic" && message.metadata?.["source"] === "shell")
+    return message.id;
+  if (message.type !== "synthetic") return;
   if (
-    message.type !== "synthetic" ||
-    !message.metadata ||
-    !Object.hasOwn(message.metadata, crewMessageMetadataKey)
+    message.metadata &&
+    Object.hasOwn(message.metadata, crewMessageMetadataKey)
+  ) {
+    const origin = decodeCrewOrigin(message.metadata[crewMessageMetadataKey]);
+    return Option.isSome(origin) && origin.value.originCaptainID === sessionID
+      ? (origin.value.originInputID ?? message.id)
+      : message.id;
+  }
+  // These native context records do not start asynchronous work. Every other
+  // unproven synthetic input clears ownership, including missing metadata.
+  if (
+    isNativeInstructionContext(message) ||
+    Option.isSome(decodeRestart(message.metadata)) ||
+    (message.text === outputLimitContinuation &&
+      message.description === undefined &&
+      (message.metadata === undefined ||
+        Object.keys(message.metadata).length === 0))
   )
     return;
-  const origin = crewOrigin.safeParse(message.metadata[crewMessageMetadataKey]);
-  return origin.success && origin.data.originCaptainID === sessionID
-    ? (origin.data.originInputID ?? message.id)
-    : message.id;
+  return message.id;
 }
 
 /** Retain ordering and boundaries, never tool payloads or metadata. */
@@ -32,7 +66,7 @@ export type InputBoundaryRecord = {
 };
 
 export function boundaryRecord(
-  message: { id: string; type: string; metadata?: Record<string, unknown> },
+  message: BoundaryMessage,
   sessionID: string,
 ): InputBoundaryRecord {
   const input = inputBoundary(message, sessionID);
@@ -68,7 +102,7 @@ export class InputBoundaryFold {
   }
 }
 
-/** A preceding assistant or raw input closes a descending crew batch scan. */
+/** A preceding assistant or raw input closes a descending wake batch scan. */
 export function closesBoundaryContext(message: InputBoundaryRecord): boolean {
   return (
     message.type === "assistant" ||

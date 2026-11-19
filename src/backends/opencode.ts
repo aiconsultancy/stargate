@@ -5,22 +5,25 @@ import {
   isFormNotFoundError,
   isSessionNotFoundError,
   OpenCode,
+  type OpenCodeClient,
   type SessionMessageInfo,
 } from "@opencode/client";
 import { SessionMessage } from "@opencode/schema";
 import { Option, Schema } from "effect";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
 import { type Attachment, checkAttachments } from "../attachments";
-import {
-  type AgentBackend,
-  latestInput,
-  type PromptSourceContext,
-  sourceLine,
-  type TextSink,
-  type Transcript,
-  type TranscriptEntry,
-  TranscriptUnavailable,
+import type {
+  AgentBackend,
+  PromptSourceContext,
+  TextSink,
+  Transcript,
+  TranscriptEntry,
 } from "../backend";
+import {
+  latestInput,
+  sourceLine,
+  TranscriptUnavailable,
+} from "../backend-values";
 import { type BackendConfig, secret } from "../config";
 import { isNativeInstructionContext } from "../crew/instruction-context";
 import { CrewReporting } from "../crew/report-rpc";
@@ -38,6 +41,7 @@ import {
   type InputBoundaryRecord,
   resolveBoundaryContext,
 } from "../input-boundary";
+import { InputBoundaryReader } from "../input-origin";
 import {
   MaintenanceRPC,
   type MaintenanceWatch,
@@ -57,6 +61,7 @@ import {
   connectionFailure,
   statusKind,
 } from "../request-failure";
+import { scopedUpdate, type UpdateSnapshot } from "../update-notice";
 import { OpenCodeHistory } from "./opencode-history";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
@@ -271,6 +276,7 @@ export class OpenCodeBackend implements AgentBackend {
     assistant: string,
     signal: AbortSignal,
   ): Promise<string | undefined> {
+    const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
     let found = false;
     let cursor: string | undefined;
     const seen = new Set<string>();
@@ -288,7 +294,7 @@ export class OpenCodeBackend implements AgentBackend {
             found = true;
           continue;
         }
-        const record = boundaryRecord(message, sessionID);
+        const record = await boundaries.record(message);
         if (chain.length && closesBoundaryContext(record)) {
           chain.push(record);
           return resolveBoundaryContext(chain);
@@ -760,7 +766,10 @@ export class OpenCodeBackend implements AgentBackend {
   private readonly pairingClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
   private readonly inputs = new Map<string, string>();
-  constructor(private readonly config: Config) {
+  constructor(
+    private readonly config: Config,
+    verifiedClient?: OpenCodeClient,
+  ) {
     const options = {
       baseUrl: config.url,
       headers: Object.fromEntries(
@@ -770,7 +779,7 @@ export class OpenCodeBackend implements AgentBackend {
         ]),
       ),
     };
-    this.client = OpenCode.make(options);
+    this.client = verifiedClient ?? OpenCode.make(options);
     // A quiet wait can exceed Bun's HTTP idle timeout. Keep the caller's
     // Stop/deadline signal; leave other requests and pairing policy unchanged.
     this.waitForIdle = OpenCode.make({
@@ -823,6 +832,57 @@ export class OpenCodeBackend implements AgentBackend {
         "Crew status unavailable; check the captain location and crew plugin.",
       );
     }
+  }
+
+  async updateNoticeContext(
+    sessionID: string,
+    snapshot: UpdateSnapshot,
+    signal: AbortSignal,
+  ) {
+    const session = await this.client.session.get({ sessionID }, { signal });
+    if (
+      session.id !== sessionID ||
+      session.location.directory !== this.config.directory ||
+      (this.config.agent && session.agent !== this.config.agent)
+    )
+      throw new Error("Update notice session does not belong to this backend");
+    const tools = await this.client
+      .rpc(CrewReporting)
+      .updateTools(
+        {},
+        { location: { directory: this.config.directory }, signal },
+      )
+      .catch(() => null);
+    return scopedUpdate(snapshot, tools, {
+      model: session.model,
+      permissions: session.permissions,
+    });
+  }
+
+  async queueUpdateNotice(
+    sessionID: string,
+    id: string,
+    text: string,
+    signal: AbortSignal,
+  ) {
+    const receipt = await this.client
+      .rpc(CrewReporting)
+      .queueUpdateNotice(
+        { sessionID, id, text },
+        { location: { directory: this.config.directory }, signal },
+      );
+    if (receipt.id !== id || receipt.sessionID !== sessionID)
+      throw new Error("Update notice identity changed");
+  }
+
+  async crewUpdateNotice(snapshot: UpdateSnapshot, signal: AbortSignal) {
+    const receipts = await this.client
+      .rpc(CrewReporting)
+      .updateNotice(snapshot, {
+        location: { directory: this.config.directory },
+        signal,
+      });
+    return [...receipts];
   }
 
   async quota(signal: AbortSignal) {
@@ -1095,6 +1155,11 @@ export class OpenCodeBackend implements AgentBackend {
       const history: (InputBoundaryRecord & {
         reply?: Reply;
       })[] = [];
+      const boundaries = new InputBoundaryReader(
+        this.client,
+        sessionId,
+        signal,
+      );
       let cursor: string | undefined;
       const cursors = new Set<string>();
       do {
@@ -1107,7 +1172,7 @@ export class OpenCodeBackend implements AgentBackend {
         );
         for (const message of page.data) {
           history.push({
-            ...boundaryRecord(message, sessionId),
+            ...(await boundaries.record(message)),
             ...(message.type === "assistant"
               ? {
                   reply: {
@@ -1213,6 +1278,7 @@ export class OpenCodeBackend implements AgentBackend {
       );
       if (inbox.some((item) => item.id === input)) return false;
     }
+    const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
     let found = assistant === undefined;
     let cursor: string | undefined;
     const cursors = new Set<string>();
@@ -1231,7 +1297,7 @@ export class OpenCodeBackend implements AgentBackend {
             found = true;
           continue;
         }
-        const record = boundaryRecord(message, sessionID);
+        const record = await boundaries.record(message);
         if (chain.length && closesBoundaryContext(record)) {
           chain.push(record);
           return resolveBoundaryContext(chain) === input;
@@ -1269,6 +1335,7 @@ export class OpenCodeBackend implements AgentBackend {
       maker?: NativeMaker;
       settled: boolean;
     })[] = [];
+    const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
     let cursor: string | undefined;
     const cursors = new Set<string>();
     for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
@@ -1280,7 +1347,7 @@ export class OpenCodeBackend implements AgentBackend {
       );
       for (const message of page.data) {
         messages.push({
-          ...boundaryRecord(message, sessionID),
+          ...(await boundaries.record(message)),
           settled:
             message.type !== "assistant" ||
             message.time.completed !== undefined ||
@@ -1401,6 +1468,7 @@ export class OpenCodeBackend implements AgentBackend {
     after: string | undefined,
     signal: AbortSignal,
   ): Promise<Transcript> {
+    const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
     // Quiet threads: one small page proves nothing follows the cursor.
     if (after) {
       const newest = await this.client.message.list(
@@ -1432,7 +1500,7 @@ export class OpenCodeBackend implements AgentBackend {
     let reached = false;
     let selected = false;
     let needContext = false;
-    const startsWithCrew = () => {
+    const startsWithSynthetic = () => {
       const oldest = newer.findLast(
         (message) =>
           message.input !== undefined || message.type === "assistant",
@@ -1449,7 +1517,7 @@ export class OpenCodeBackend implements AgentBackend {
         { signal },
       );
       for (const message of result.data) {
-        const record = boundaryRecord(message, sessionID);
+        const record = await boundaries.record(message);
         if (selected) {
           if (record.input !== undefined || record.type === "assistant")
             context.push(record);
@@ -1465,7 +1533,7 @@ export class OpenCodeBackend implements AgentBackend {
           context.push(record);
           needContext =
             record.type === "synthetic" ||
-            (!closesBoundaryContext(record) && startsWithCrew());
+            (!closesBoundaryContext(record) && startsWithSynthetic());
           if (!needContext) break;
           continue;
         }
@@ -1478,7 +1546,7 @@ export class OpenCodeBackend implements AgentBackend {
       }
       if (after === undefined && !selected) {
         selected = true;
-        needContext = startsWithCrew();
+        needContext = startsWithSynthetic();
       }
       cursor = result.cursor.next ?? undefined;
       if ((selected && !needContext) || !cursor) break;
@@ -1498,7 +1566,7 @@ export class OpenCodeBackend implements AgentBackend {
       context[0]?.id === after && context[0]?.type === "synthetic";
     for (const message of context.reverse()) {
       const boundary = fold.next(message);
-      // Ordinary synthetic cursors can also sit inside an undelivered crew batch.
+      // Re-anchor cursor-only wakes, including an undelivered mixed batch.
       if (reanchor) input = boundary ?? input;
     }
     const entries: TranscriptEntry[] = [];

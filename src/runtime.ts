@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { chmod, mkdir } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { parseEnv } from "node:util";
 import { Cause, Data, Deferred, Effect, FiberMap } from "effect";
 import pino, { type Logger } from "pino";
@@ -46,7 +47,8 @@ import { createHealthReader } from "./health";
 import { controlInteractions } from "./interactions";
 import { type IrcRegistration, IrcShip } from "./irc/ship";
 import { MaintenanceOutbox } from "./nightly/outbox";
-import { writeReady } from "./nightly/ready";
+import type { Ready } from "./nightly/ready";
+import { packageDirectory, runningVersion, writeReady } from "./nightly/ready";
 import { NotificationStore } from "./notification-store";
 import { notificationKey } from "./notifications";
 import { PairingUI } from "./pairing";
@@ -60,9 +62,15 @@ import {
   isAllowedChannel,
 } from "./routing";
 import { SlackConnection, type SlackInteractions } from "./slack";
+import type { ConnectionState } from "./slack-connection";
 import { Store } from "./store";
 import { TeamsRegistration } from "./teams/registration";
 import { createTranscriber } from "./transcribers/azure-openai";
+import {
+  buildUpdateSnapshot,
+  type UpdateReceipt,
+  type UpdateSnapshot,
+} from "./update-notice";
 
 export async function loadEnvironment(configPath: string) {
   const file = Bun.file(`${configPath}.env`);
@@ -86,12 +94,14 @@ export function lockInstance(path: string) {
 
 /** Stargate failed after startup; the service manager should restart it. */
 export class RuntimeStopped extends Data.TaggedError("RuntimeStopped")<{
-  readonly worker: "gateway" | "cron" | "runtime";
+  readonly worker: "gateway" | "cron" | "runtime" | "transport";
 }> {}
 
 /** One registration's Slack surface: intake, Web API delivery and modals. */
 export interface SlackApp extends SlackDelivery, CronDelivery {
-  identity(): Promise<Identity>;
+  identity(signal?: AbortSignal): Promise<Identity>;
+  readonly connectionState?: ConnectionState;
+  watch?(): Promise<void>;
   /** Slack `users.info`; required for peer captain admission. */
   userInfo?(user: string, signal: AbortSignal): Promise<unknown>;
   start(
@@ -99,6 +109,7 @@ export interface SlackApp extends SlackDelivery, CronDelivery {
     log: Logger,
     interactions: SlackInteractions,
     open: () => boolean,
+    signal?: AbortSignal,
   ): Promise<void>;
   close(): Promise<void>;
   readonly cronUI: CronUIApi;
@@ -113,10 +124,13 @@ export type RuntimeDependencies = {
   ): Promise<AgentBackend>;
   /** IRC ship connections; tests shorten the timings. */
   irc?(config: IrcConfig, store: Store, log: Logger): Promise<IrcShip>;
+  /** Short test-only outage/observation timings; never a host flag. */
+  connectionTiming?: { outageMs: number; pollMs: number };
 };
 
 /** Programmatic callers may omit transports they do not use. */
-export type ServeConfig = Omit<Config, "irc" | "teams"> & {
+export type ServeConfig = Omit<Config, "irc" | "teams" | "notifications"> & {
+  notifications?: Config["notifications"];
   irc?: Config["irc"];
   teams?: Config["teams"];
 };
@@ -208,6 +222,16 @@ export function serve(
         Effect.sync(() => lockInstance(lock)),
         (lock) => Effect.sync(() => lock.close()),
       );
+      yield* Effect.promise(() =>
+        rm(join(config.dataDirectory, "ready.json"), { force: true }),
+      );
+      const transportSources: (() => NonNullable<Ready["transports"]>)[] = [];
+      const transportSnapshot = () =>
+        transportSources.flatMap((read) => read());
+      const connectionTiming = dependencies.connectionTiming ?? {
+        outageMs: 600_000,
+        pollMs: 250,
+      };
       const store = yield* Effect.acquireRelease(
         Effect.sync(
           () => new Store(join(config.dataDirectory, "stargate.sqlite")),
@@ -244,7 +268,7 @@ export function serve(
       const stopped = yield* Deferred.make<void, RuntimeStopped>();
       const supervise = (
         botLog: Logger,
-        worker: "gateway" | "cron",
+        worker: "gateway" | "cron" | "transport",
         work: (signal: AbortSignal) => Promise<void>,
       ) =>
         abortable(work).pipe(
@@ -252,12 +276,45 @@ export function serve(
             botLog.error(
               worker === "gateway"
                 ? "Worker stopped unexpectedly"
-                : "Cron worker stopped unexpectedly",
+                : worker === "cron"
+                  ? "Cron worker stopped unexpectedly"
+                  : "Transport stopped unexpectedly",
             );
             return Deferred.fail(stopped, new RuntimeStopped({ worker }));
           }),
         );
       const workers: { key: string; work: Effect.Effect<void> }[] = [];
+      let updateSnapshot: UpdateSnapshot | undefined;
+      const updateTargets = new Map<AgentBackend, string>();
+      const noticeFor = (backend: AgentBackend, scope: string) => {
+        const owner = createHash("sha256").update(scope).digest("hex");
+        updateTargets.set(backend, owner);
+        return async (sessionID: string, signal: AbortSignal) => {
+          if (
+            !updateSnapshot ||
+            !backend.queueUpdateNotice ||
+            !backend.updateNoticeContext
+          )
+            return;
+          const bounded = AbortSignal.any([signal, AbortSignal.timeout(2000)]);
+          const selected = await backend.updateNoticeContext(
+            sessionID,
+            updateSnapshot,
+            bounded,
+          );
+          return store.updateNotices
+            .deliver(
+              sessionID,
+              selected,
+              "queued",
+              (id, text) =>
+                backend.queueUpdateNotice?.(sessionID, id, text, bounded) ??
+                Promise.reject(new Error("Update notice unsupported")),
+              owner,
+            )
+            .then(() => {});
+        };
+      };
       const botBindings = new Map<
         string,
         (
@@ -306,6 +363,12 @@ export function serve(
           undefined,
           undefined,
           registration.transport,
+          undefined,
+          undefined,
+          noticeFor(
+            resource.backend,
+            teams.backend.type === "opencode" ? teams.backend.url : teams.id,
+          ),
         );
         workers.push({
           key: registration.key,
@@ -320,7 +383,17 @@ export function serve(
         let currentBot = bot;
         const botLog = log.child({ bot: bot.id });
         const slack = dependencies.slack(bot, botLog);
-        const identity = yield* Effect.promise(() => slack.identity());
+        const identity = yield* Effect.promise(() => slack.identity(shutdown));
+        let slackStarted = false;
+        transportSources.push(() => [
+          {
+            kind: "slack",
+            id: bot.id,
+            state:
+              slack.connectionState ??
+              (slackStarted ? "connected" : "connecting"),
+          },
+        ]);
         const key = JSON.stringify([identity.team, identity.user]);
         if (identities.has(key))
           return yield* Effect.die(
@@ -426,6 +499,10 @@ export function serve(
               }
             },
           },
+          noticeFor(
+            backend,
+            bot.backend.type === "opencode" ? bot.backend.url : bot.id,
+          ),
         );
         const cron = new CronScheduler(
           bot,
@@ -533,8 +610,19 @@ export function serve(
             botLog,
             interactions,
             () => open,
+            AbortSignal.any([shutdown, requests.signal]),
           ),
         );
+        slackStarted = true;
+        if (slack.watch)
+          workers.push({
+            key: `transport:${bot.id}`,
+            work: supervise(
+              botLog,
+              "transport",
+              () => slack.watch?.() ?? Promise.resolve(),
+            ),
+          });
         botLog.info("Bot connected");
         const dashboardShip = {
           bot,
@@ -584,6 +672,14 @@ export function serve(
               : undefined,
             undefined,
             registration.transport,
+            undefined,
+            undefined,
+            noticeFor(
+              resource.backend,
+              registration.backend.type === "opencode"
+                ? registration.backend.url
+                : registration.id,
+            ),
           );
           registration.stopTurn = (conversation, thread) =>
             gateway.stopTurn(conversation, thread);
@@ -773,10 +869,33 @@ export function serve(
         connections.push(close);
         yield* Effect.addFinalizer(() => closeIntake(close));
         ship.start(() => open);
+        const seen = new Set<string>();
+        transportSources.push(() =>
+          ship.registrations.map((registration) => {
+            const id = `${irc.id}:${registration.id}`;
+            if (registration.client.registered) seen.add(id);
+            return {
+              kind: "irc",
+              id,
+              state: registration.client.registered
+                ? "connected"
+                : seen.has(id)
+                  ? "reconnecting"
+                  : "connecting",
+            };
+          }),
+        );
         log.info({ irc: irc.id }, "IRC connecting");
       }
       for (const team of teamsRegistrations) {
         yield* Effect.promise(() => team.start(() => open));
+        transportSources.push(() => [
+          {
+            kind: "teams",
+            id: team.config.id,
+            state: open ? "connected" : "closed",
+          },
+        ]);
         log.info({ teams: team.config.id }, "Teams listener ready");
       }
       if (config.dashboard) {
@@ -819,6 +938,17 @@ export function serve(
       );
       // Registered after backends: shutdown interrupts every worker first.
       const fibers = yield* FiberMap.make<string, void>();
+      if (config.notifications?.updateNotice)
+        updateSnapshot = yield* Effect.promise(async () =>
+          buildUpdateSnapshot(
+            await runningVersion(),
+            config,
+            await readFile(
+              join(packageDirectory, "CHANGELOG.md"),
+              "utf8",
+            ).catch(() => ""),
+          ),
+        );
       for (const worker of workers)
         yield* FiberMap.run(fibers, worker.key, worker.work);
       if (reload) {
@@ -989,20 +1119,138 @@ export function serve(
       }
       // LIFO: close intake and abort reload preparation before workers drain.
       yield* Effect.addFinalizer(() => closeIntake());
+      yield* Effect.promise(async () => {
+        const deadline = Date.now() + connectionTiming.outageMs;
+        while (
+          transportSnapshot().length &&
+          !transportSnapshot().some(
+            (transport) => transport.state === "connected",
+          )
+        ) {
+          if (Date.now() >= deadline)
+            throw new Error("No transport connected before readiness deadline");
+          await delay(connectionTiming.pollMs, undefined, { signal: shutdown });
+        }
+      });
       started = true;
       log.info("Stargate ready");
+      const updateReceipts: UpdateReceipt[] = [];
+      if (updateSnapshot)
+        yield* Effect.promise(async () => {
+          await Promise.all(
+            [...updateTargets].map(async ([backend, scope]) => {
+              const signal = AbortSignal.any([
+                requests.signal,
+                AbortSignal.timeout(10_000),
+              ]);
+              try {
+                if (
+                  backend.sessionID &&
+                  backend.queueUpdateNotice &&
+                  backend.updateNoticeContext &&
+                  updateSnapshot
+                ) {
+                  const selected = await backend.updateNoticeContext(
+                    backend.sessionID,
+                    updateSnapshot,
+                    signal,
+                  );
+                  updateReceipts.push(
+                    await store.updateNotices.deliver(
+                      backend.sessionID,
+                      selected,
+                      "queued",
+                      (id, text) =>
+                        backend.queueUpdateNotice?.(
+                          backend.sessionID ?? "",
+                          id,
+                          text,
+                          signal,
+                        ) ??
+                        Promise.reject(new Error("Update notice unsupported")),
+                      scope,
+                    ),
+                  );
+                }
+                if (
+                  backend.sessionID &&
+                  backend.crewUpdateNotice &&
+                  updateSnapshot
+                )
+                  updateReceipts.push(
+                    ...(await backend.crewUpdateNotice(updateSnapshot, signal)),
+                  );
+              } catch {
+                log.warn("Update notice unavailable");
+              }
+            }),
+          );
+        });
       // Readiness record for maintenance health checks; never fatal.
-      yield* Effect.promise(() =>
-        writeReady(config.dataDirectory).then(
-          (version) => {
-            // Only matters where maintenance manages Stargate releases.
-            if (version === null && config.maintenance?.stargate)
-              log.warn(
-                "This Stargate directory has no valid .stargate-release.json; the readiness record has no version and maintenance cannot verify an update. Install releases with stargate maintenance update or adopt.",
-              );
-          },
-          () => log.warn("Readiness record not written"),
+      const readyAt = Date.now();
+      let readinessWrite = Promise.resolve();
+      const publishReady = (transports = transportSnapshot()) => {
+        readinessWrite = readinessWrite.then(() =>
+          writeReady(
+            config.dataDirectory,
+            readyAt,
+            packageDirectory,
+            updateReceipts,
+            transports,
+          ).then(
+            (version) => {
+              // Only matters where maintenance manages Stargate releases.
+              if (version === null && config.maintenance?.stargate)
+                log.warn(
+                  "This Stargate directory has no valid .stargate-release.json; the readiness record has no version and maintenance cannot verify an update. Install releases with stargate maintenance update or adopt.",
+                );
+            },
+            () => log.warn("Readiness record not written"),
+          ),
+        );
+        return readinessWrite;
+      };
+      const initialTransports = transportSnapshot();
+      yield* Effect.promise(() => publishReady(initialTransports));
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() =>
+          publishReady(
+            transportSnapshot().map((transport) => ({
+              ...transport,
+              state: "closed",
+            })),
+          ),
         ),
+      );
+      yield* FiberMap.run(
+        fibers,
+        "transport-readiness",
+        supervise(log, "transport", async (signal) => {
+          let last = JSON.stringify(initialTransports);
+          let lostSince: number | undefined;
+          while (!signal.aborted) {
+            await delay(connectionTiming.pollMs, undefined, { signal }).catch(
+              () => {},
+            );
+            if (signal.aborted) break;
+            const transports = transportSnapshot();
+            const next = JSON.stringify(transports);
+            if (next !== last) {
+              await publishReady(transports);
+              last = next;
+            }
+            if (
+              transports.length &&
+              !transports.some((transport) => transport.state === "connected")
+            ) {
+              lostSince ??= Date.now();
+              if (Date.now() - lostSince >= connectionTiming.outageMs)
+                throw new Error(
+                  "No transport connected before outage deadline",
+                );
+            } else lostSince = undefined;
+          }
+        }),
       );
       yield* Effect.raceFirst(
         Deferred.await(stopped),
@@ -1019,6 +1267,7 @@ export function serve(
   // stop, not a startup failure. The raw cause is never exposed.
   return program.pipe(
     Effect.catchCause((cause) => {
+      if (shutdown.aborted && !started) return Effect.void;
       const error = Cause.squash(cause);
       return started &&
         !Cause.hasInterruptsOnly(cause) &&

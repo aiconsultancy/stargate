@@ -14,6 +14,32 @@ export const readySchema = z.strictObject({
   readyAt: z.number().int().positive(),
   /** Release version from `.stargate-release.json`, or null for a checkout. */
   version: z.string().nullable(),
+  transportObservedAt: z.number().int().positive().optional(),
+  transports: z
+    .array(
+      z.strictObject({
+        kind: z.enum(["slack", "irc", "teams"]),
+        id: z.string().min(1).max(256),
+        state: z.enum([
+          "connecting",
+          "connected",
+          "reconnecting",
+          "failed",
+          "closed",
+        ]),
+      }),
+    )
+    .max(1000)
+    .optional(),
+  updateNotices: z
+    .array(
+      z.strictObject({
+        sessionID: z.string().min(1).max(256),
+        status: z.enum(["queued", "mail", "unchanged", "uncertain"]),
+      }),
+    )
+    .max(1000)
+    .optional(),
 });
 export type Ready = z.infer<typeof readySchema>;
 
@@ -35,12 +61,16 @@ export async function writeReady(
   dataDirectory: string,
   now = Date.now(),
   directory = packageDirectory,
+  updateNotices: Ready["updateNotices"] = [],
+  transports?: Ready["transports"],
 ) {
   const record: Ready = {
     schema: "stargate.ready.v1",
     pid: process.pid,
     readyAt: now,
     version: await runningVersion(directory),
+    ...(transports ? { transports, transportObservedAt: Date.now() } : {}),
+    ...(updateNotices.length ? { updateNotices } : {}),
   };
   const path = join(dataDirectory, "ready.json");
   const temp = `${path}.tmp-${process.pid}`;
@@ -87,6 +117,10 @@ export async function waitReady(
     if (
       record !== null &&
       record.readyAt >= since &&
+      (!record.transports ||
+        record.transports.some(
+          (transport) => transport.state === "connected",
+        )) &&
       (version === undefined || record.version === version)
     )
       return true;

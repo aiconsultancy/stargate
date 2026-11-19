@@ -219,6 +219,7 @@ type Fixture = {
   sessions: Map<string, ModelRef>;
   active: string[];
   readyVersions: Set<string | null>;
+  updateNotices: { sessionID: string; status: "queued" | "mail" }[];
   proxyDown: (f: Fixture) => boolean;
   probeOK: (model: string) => boolean;
   probes: string[];
@@ -240,6 +241,7 @@ const fixture: Fixture = {
   sessions: new Map(),
   active: [],
   readyVersions: new Set(),
+  updateNotices: [],
   proxyDown: () => false,
   probeOK: () => true,
   probes: [],
@@ -455,6 +457,9 @@ const runner: CommandRunner = {
               pid: process.pid,
               readyAt: fixture.time,
               version,
+              ...(fixture.updateNotices.length
+                ? { updateNotices: fixture.updateNotices }
+                : {}),
             }),
           );
       }
@@ -525,6 +530,7 @@ beforeEach(() => {
     ]),
     active: [],
     readyVersions: new Set(["0.1.0", "0.2.0"]),
+    updateNotices: [],
     proxyDown: () => false,
     probeOK: () => true,
     probes: [],
@@ -1256,6 +1262,26 @@ describe("nightly maintenance run", () => {
     } finally {
       opencode.sessionModel = original;
     }
+  });
+
+  test("maintenance report includes current ready update notices, not receipts from an earlier run", async () => {
+    const { config, path } = await install({
+      components: {
+        stargate: true,
+        cliproxyapi: false,
+        agentClis: false,
+        models: false,
+      },
+    });
+    fixture.updateNotices = [
+      { sessionID: "ses_captain", status: "queued" },
+      { sessionID: "ses_pi", status: "mail" },
+    ];
+    const first = await run(config, path);
+    expect(first.report.updateNotices).toEqual(fixture.updateNotices);
+    fixture.time += 1000;
+    const repeated = await run(config, path);
+    expect(repeated.report.updateNotices).toBeUndefined();
   });
 
   test("global catalog opt-in plans additions without probing or writing, and default stays off", async () => {

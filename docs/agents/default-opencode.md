@@ -68,6 +68,26 @@ asks to change it. This uses the existing `stargate_crew` permission and verifie
 the caller's real captain session. See [waiting responses](../waiting.md) for
 defaults, off versus zero, workspace persistence and plugin activation.
 
+Native OpenCode crew clarifications can route automatically to the task's
+originating captain when that captain enables
+[`/config questions on`](../meta-commands.md#opencode-clarification-questions).
+The crew plugin reads the same private settings using the captain's native
+agent identity and workspace. It does not post crew questions to Slack.
+Pending forms are reconciled from active tasks, including after a restart.
+
+The captain receives numbered choices and an exact token through the existing
+crew DM path. Use `stargate_question` with `op: "answer"`, that `token`, and
+`answer` containing a choice number, comma-separated choices, or JSON native
+field values. Use `op: "cancel"` with the token to cancel the form. Include
+the notice's `project` for a non-default project. The existing `stargate_crew`
+permission applies; only the exact originating captain can answer while the
+same worker task, input and form remain active. This is not a tool-permission
+approval. No crew ownership, queue or controller is changed.
+
+An expired offer makes one native cancellation attempt. A failed or interrupted
+native write remains uncertain and cannot be replayed through its token.
+Unsupported or sensitive forms stay in the native operator interface.
+
 Captains can post as their own bot to another allowed Slack channel or
 thread with `stargate_post`, instead of asking an operator to relay. It uses the
 `stargate_crew` permission and the captain's `cron` gateway binding, and is off

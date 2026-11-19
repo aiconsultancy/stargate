@@ -31,10 +31,19 @@ const assistant = (
   content,
 });
 
+const outputLimitContinuation =
+  "Your last response hit the output token limit (stop reason: length). Do not apologize, recap, or repeat yourself. Break the remaining work into smaller pieces.";
+
 // Newest first, as OpenCode returns `order: "desc"` pages.
 const history = [
   assistant("m8", 80, [{ type: "text", text: "STILL STREAMING" }], false),
-  { id: "m7", type: "synthetic", time: { created: 70 }, text: "SHELL DONE" },
+  // Native same-turn context, not an unproven background shell callback.
+  {
+    id: "m7",
+    type: "synthetic",
+    time: { created: 70 },
+    text: outputLimitContinuation,
+  },
   assistant("m6", 60, [{ type: "text", text: "Pushed 79233." }]),
   assistant("m5", 50, [
     { type: "tool", id: "t1", name: "bash", state: { input: "TOKEN=x" } },
@@ -119,6 +128,37 @@ test("OpenCode transcript returns settled public text after the cursor only", as
   }
 });
 
+test("OpenCode output-limit continuation retains the original input through a synthetic cursor", async () => {
+  const f = fixture({ busy: 75, idle: 90 });
+  try {
+    const transcript = await f.backend.transcript(
+      "session-1",
+      "m2",
+      new AbortController().signal,
+    );
+    expect(transcript.entries.at(-1)).toEqual({
+      id: "m8",
+      text: "STILL STREAMING",
+      created: 80,
+      input: "m3",
+    });
+    expect(transcript.input).toBe("m3");
+    // A neutral cursor does not replace the caller's persisted delivery owner.
+    expect(
+      await f.backend.transcript(
+        "session-1",
+        "m7",
+        new AbortController().signal,
+      ),
+    ).toEqual({
+      cursor: "m8",
+      entries: [{ id: "m8", text: "STILL STREAMING", created: 80 }],
+    });
+  } finally {
+    await f.server.stop(true);
+  }
+});
+
 test("OpenCode baselines never backfill, lost cursors fail, and idle settles stale text", async () => {
   const f = fixture({ busy: 75, idle: 90 });
   try {
@@ -141,7 +181,7 @@ test("OpenCode baselines never backfill, lost cursors fail, and idle settles sta
     ]);
     expect(JSON.stringify(all)).not.toContain("SECRET");
     expect(JSON.stringify(all)).not.toContain("PROMPT");
-    expect(JSON.stringify(all)).not.toContain("SHELL DONE");
+    expect(JSON.stringify(all)).not.toContain(outputLimitContinuation);
   } finally {
     await f.server.stop(true);
   }

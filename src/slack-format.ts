@@ -389,13 +389,23 @@ export type SlackPanelContent = {
     | {
         type: "actions";
         block_id: string;
-        elements: {
-          type: "button";
-          action_id: string;
-          value: string;
-          text: { type: "plain_text"; text: string; emoji?: boolean };
-          accessibility_label?: string;
-        }[];
+        elements: (
+          | {
+              type: "button";
+              action_id: string;
+              value: string;
+              text: { type: "plain_text"; text: string; emoji?: boolean };
+              accessibility_label?: string;
+            }
+          | {
+              type: "checkboxes";
+              action_id: string;
+              options: {
+                text: { type: "plain_text"; text: string; emoji?: boolean };
+                value: string;
+              }[];
+            }
+        )[];
       }
   )[];
 };

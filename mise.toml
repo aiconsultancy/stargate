@@ -67,6 +67,19 @@ run = "bun run check"
 description = "Run tests"
 run = "bun test"
 
+[tasks.strobe]
+description = "Run the project-pinned Strobe CLI"
+run = "bun x --no-install strobe"
+raw = true
+
+[tasks.perf-check]
+description = "Check the CLI performance benchmark without a timing verdict"
+run = "bun x --no-install strobe bench perf/smoke.bench.ts --head . --check --power keep --reserve-cpus off --max-time 2m"
+
+[tasks.perf-compare]
+description = "Compare CLI startup against origin/main on a quiet machine"
+run = "bun x --no-install strobe bench perf/smoke.bench.ts --base origin/main --head . --power keep --reserve-cpus off --require-verdict"
+
 [tasks.test-release-env]
 description = "Run tests as a self-update does: minimal environment, hidden TMPDIR"
 run = "bun run scripts/test-release-env.ts"

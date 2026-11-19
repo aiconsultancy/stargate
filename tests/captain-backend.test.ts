@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import type { AgentBackend } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema, configSchema } from "../src/config";
+import { buildUpdateSnapshot } from "../src/update-notice";
 import { bot } from "./fixtures";
 
 const sessionID = "ses_captain";
@@ -12,6 +13,61 @@ const session = {
   model: { providerID: "stored", id: "stored-model" },
   permissions: [{ action: "*", resource: "*", effect: "allow" }],
 };
+
+test("update notice admission queues local context via RPC, never native input", async () => {
+  const requests: { path: string; body: unknown }[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const path = new URL(request.url).pathname;
+      const body: unknown =
+        request.method === "GET" ? undefined : await request.json();
+      requests.push({ path, body });
+      if (path.endsWith("/queueUpdateNotice"))
+        return Response.json({ output: { id: "msg_update", sessionID } });
+      if (path === `/api/session/${sessionID}`)
+        return Response.json({ data: session });
+      return new Response("Tool RPC unavailable", { status: 404 });
+    },
+  });
+  const adapter = backend(server.url.href);
+  try {
+    const snapshot = await adapter.updateNoticeContext(
+      sessionID,
+      buildUpdateSnapshot(
+        "0.37.0",
+        { notifications: { updateNotice: true } },
+        "- New notices",
+      ),
+      new AbortController().signal,
+    );
+    expect(snapshot.configDigest).toMatch(/^[a-f0-9]{64}$/);
+    await adapter.queueUpdateNotice(
+      sessionID,
+      "msg_update",
+      "Context only",
+      new AbortController().signal,
+    );
+    expect(
+      requests.filter((request) => request.path.endsWith("/queueUpdateNotice")),
+    ).toEqual([
+      {
+        path: "/api/rpc/stargate.crew.reporting/queueUpdateNotice",
+        body: { input: { sessionID, id: "msg_update", text: "Context only" } },
+      },
+    ]);
+    expect(
+      requests.some((request) => request.path.endsWith("/synthetic")),
+    ).toBe(false);
+    expect(
+      requests.some((request) => /interrupt|prompt/.test(request.path)),
+    ).toBe(false);
+  } finally {
+    await adapter.close();
+    server.stop(true);
+  }
+});
 
 function backend(url: string, options: Record<string, unknown> = {}) {
   const config = backendSchema.parse({
@@ -466,7 +522,7 @@ test("transcript attributes settled text to only preceding window inputs", async
       { id: "user-one", type: "user" },
       assistant("answer-one", "First answer"),
       { id: "crew-dm", type: "synthetic" },
-      assistant("answer-dm", "Same owner"),
+      assistant("answer-dm", "Unproven synthetic owner"),
       { id: "ui-shell", type: "shell" },
       assistant("shell-answer", "Native shell owner"),
       { id: "user-two", type: "user" },
@@ -486,7 +542,12 @@ test("transcript attributes settled text to only preceding window inputs", async
           created: 10,
           input: "user-one",
         },
-        { id: "answer-dm", text: "Same owner", created: 10, input: "user-one" },
+        {
+          id: "answer-dm",
+          text: "Unproven synthetic owner",
+          created: 10,
+          input: "crew-dm",
+        },
         {
           id: "shell-answer",
           text: "Native shell owner",
@@ -546,7 +607,16 @@ test.each(["user", "shell"])(
             return Response.json({
               data: [
                 assistant("own-two", "Own second"),
-                { id: "crew-dm", type: "synthetic" },
+                {
+                  id: "crew-dm",
+                  type: "synthetic",
+                  metadata: {
+                    pogoCrew: {
+                      originCaptainID: sessionID,
+                      originInputID: input,
+                    },
+                  },
+                },
                 assistant("own-one", "Own first"),
                 { id: input, type: "user" },
               ],

@@ -482,6 +482,12 @@ run lock and refuses while a run holds it.
 
 ## Stargate releases
 
+Main merges do not publish releases. The manual [release workflow](releases.md)
+requires a person's approval through the `release` environment. Maintenance
+continues to consume the published release feed; it does not install unreleased
+main commits. The Checks workflow still exercises the self-update environment
+on PRs and main pushes, independently of publication.
+
 Stargate publishes `vX.Y.Z` on [GitHub Releases](releases.md) with
 `stargate-vX.Y.Z.tar.gz` (a `git archive --prefix=stargate-vX.Y.Z/`) and
 `stargate-vX.Y.Z.tar.gz.sha256`. The release workflow does not publish artifact
@@ -554,8 +560,19 @@ OpenCode server, unless the crew plugin is unchanged (see
 [gateway-only update](#gateway-only-update)). `.staging-*` and `.failed-*` directories are this tool's own
 temporary folders; pruning removes them.
 
-The gateway writes `<dataDirectory>/ready.json` after every bot connected. The
-record holds the process, time and release version from `.stargate-release.json`.
+The gateway writes `<dataDirectory>/ready.json` only after transport connection:
+Slack registrations finish connecting, IRC-only gateways wait for registration,
+and Teams-only gateways wait for their listener. The record holds the process,
+startup time and release version from `.stargate-release.json`, plus observed
+transport states. State changes do not advance the original startup timestamp.
+Maintenance rejects a new-format record with no connected transport. See
+[connection readiness](operations.md#boot-time-network-failures-and-connection-readiness).
+
+For the first upgrade that adds transport fields, run the managed updater
+using the new verified release/checkout's maintenance CLI. Older CLIs strictly
+decode the record and can reject the new fields, causing a readiness rollback.
+Do not use an old nightly CLI for that first upgrade or bypass managed release
+switching. Subsequent updates can use the upgraded maintenance CLI normally.
 
 ## CLIProxyAPI
 
@@ -596,6 +613,11 @@ never a fresh cutoff, which could pull newer dependencies. A package with
 neither is not updated.
 
 ## Model upgrades
+
+After a managed restart, optional [session update notices](update-notices.md)
+tell captains and crew what changed. `notifications.updateNotice` defaults off.
+The maintenance report includes receipts from the new readiness record; queued
+delivery does not prove that a model has read the notice.
 
 Known families and their version order:
 
@@ -1281,8 +1303,8 @@ how to resume from the journal. For existing profiles, use
   operator must review any capability changes separately.
 - With the flag enabled, proxy discovery is repeated after a proxy update
   and newly declared models are checked after the OpenCode restart.
-- The readiness record proves that every bot connected, not that a model call
-  works. Plugin activity proves that OpenCode loaded the plugin, not that
+- The readiness record shows startup completion and the last transport states,
+  not that a model call works. Plugin activity proves that OpenCode loaded the plugin, not that
   every crew tool works.
 - `stargate.json` `backend.model` is not upgraded (it would change the bot key);
   only pinned captain sessions, crew sessions and profiles move. Sessions

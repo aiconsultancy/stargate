@@ -931,6 +931,9 @@ export const configSchema = z
       })
       .optional(),
     bots: z.array(botSchema).default([]),
+    notifications: z
+      .strictObject({ updateNotice: z.boolean().default(false) })
+      .default({ updateNotice: false }),
     /** IRCv3 registrations, independent of Slack; see docs/irc.md. */
     irc: z.array(ircSchema).default([]),
     teams: z.array(teamsSchema).default([]),

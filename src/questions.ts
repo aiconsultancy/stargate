@@ -286,6 +286,18 @@ export function questionText(
 
 export type QuestionPort = {
   account: string;
+  settings?(): Promise<{
+    enabled: boolean;
+    timeoutMs: number;
+    answer: "requester" | "allowed";
+  }>;
+  answerAllowed?(user: string, job: Job): Promise<boolean>;
+  publishQuestion?(
+    job: Job,
+    offer: QuestionOffer,
+    question: NativeQuestion,
+    allowed: () => boolean,
+  ): Promise<void>;
   /** Current authority only; connection readiness must not revoke ownership. */
   authorized?(job: Job): boolean;
   ready?(job: Job): boolean;
@@ -498,8 +510,13 @@ export class Questions {
         )
     )
       return;
+    const settings = await this.port()?.settings?.();
+    // Disabling controls revokes publication and writes, not settlement reads.
+    // Recovered inputs have no live prompt worker to release their queue hold.
     const pending =
-      (await this.backend.pendingQuestions?.(session, signal)) ?? [];
+      settings && !settings.enabled
+        ? []
+        : ((await this.backend.pendingQuestions?.(session, signal)) ?? []);
     if (pending.length > 16)
       throw new Error("Too many native clarification questions");
     for (const raw of pending) {
@@ -529,6 +546,16 @@ export class Questions {
         notified: 0,
         recovering: 0,
       });
+      if (
+        settings &&
+        offer?.state === "offered" &&
+        offer.publicationStarted &&
+        offer.expires <= Date.now() &&
+        !("unsupported" in question)
+      ) {
+        await this.expire(job, offer, question, signal);
+        continue;
+      }
       if (
         offer?.state !== "offered" ||
         offer.notified ||
@@ -615,19 +642,76 @@ export class Questions {
     try {
       // Start the reply window only when a first publication can be attempted.
       // Persist before sending: an ACK loss must not silently renew a seen token.
-      current = this.store.startQuestionPublication(this.key, offer.token);
-      if (!current) return;
-      await port.publish(
-        job,
-        "unsupported" in question
-          ? "OpenCode needs clarification, but this form cannot be safely shown or answered on IRC. The original requester must use the native operator interface. No answer or cancellation has been submitted."
-          : prefix + questionText(question, port.account, offer.token),
-        () => !signal.aborted && !!this.owner(offer),
+      const settings = await port.settings?.();
+      if (settings && !settings.enabled) return;
+      current = this.store.startQuestionPublication(
+        this.key,
+        offer.token,
+        settings?.timeoutMs,
       );
+      if (!current) return;
+      if (port.publishQuestion && !("unsupported" in question)) {
+        await port.publishQuestion(
+          job,
+          current,
+          question,
+          () => !signal.aborted && !!this.owner(offer),
+        );
+      } else
+        await port.publish(
+          job,
+          "unsupported" in question
+            ? "OpenCode needs clarification, but this form cannot be safely shown or answered on this transport. The original requester must use the native operator interface. No answer or cancellation has been submitted."
+            : prefix + questionText(question, port.account, offer.token),
+          () => !signal.aborted && !!this.owner(offer),
+        );
       this.store.questionNotified(offer.token);
     } finally {
       this.offering.delete(offer.token);
     }
+  }
+
+  private async expire(
+    job: Job,
+    offer: QuestionOffer,
+    question: NativeQuestion,
+    signal: AbortSignal,
+  ) {
+    if (
+      !(await this.backend.questionBelongsToInput?.(
+        offer.sessionID,
+        offer.formID,
+        offer.inputID,
+        offer.fingerprint,
+        signal,
+      ))
+    )
+      return;
+    const settings = await this.port()?.settings?.();
+    signal.throwIfAborted();
+    if (
+      (settings && !settings.enabled) ||
+      !this.owner(offer) ||
+      !this.store.claimExpiredQuestion(offer.token, Date.now())
+    )
+      return;
+    this.inFlight.add(offer.token);
+    try {
+      await this.backend.replyQuestion?.(question, null, signal);
+      this.store.questionOutcome(offer.token, "cancelled");
+    } catch {
+      this.store.questionOutcome(offer.token, "uncertain");
+    } finally {
+      this.inFlight.delete(offer.token);
+    }
+    await this.port()?.publish(
+      job,
+      "Clarification timed out; cancellation submitted to OpenCode. Check the native form if its outcome is uncertain.",
+      () => !signal.aborted && !!this.owner(offer),
+    );
+    await this.notifyOutcome(
+      this.store.questionByToken(this.key, offer.token) ?? offer,
+    );
   }
 
   private async notifyOutcome(offer: QuestionOffer) {
@@ -686,6 +770,8 @@ export class Questions {
     control: NonNullable<ReturnType<typeof questionControl>>,
     signal: AbortSignal,
   ) {
+    const settings = await this.port()?.settings?.();
+    if (settings && !settings.enabled) return;
     const offer = this.store.questionByToken(this.key, control.token);
     if (
       control.invalid ||
@@ -703,7 +789,11 @@ export class Questions {
       input.botKey !== this.key ||
       input.sender ||
       input.fleet ||
-      input.user !== job.user ||
+      (input.user !== job.user &&
+        !(
+          (await this.port()?.settings?.())?.answer === "allowed" &&
+          (await this.port()?.answerAllowed?.(input.user, job))
+        )) ||
       input.channel !== job.channel ||
       (input.replyParent ?? input.thread) !== (job.replyParent ?? job.thread) ||
       !this.port()?.human(input.user)
@@ -767,8 +857,15 @@ export class Questions {
       );
       return;
     }
+    const currentSettings = await this.port()?.settings?.();
+    const actorAllowed =
+      input.user === job.user ||
+      (currentSettings?.answer === "allowed" &&
+        (await this.port()?.answerAllowed?.(input.user, job)));
     signal.throwIfAborted();
     if (
+      (currentSettings && !currentSettings.enabled) ||
+      !actorAllowed ||
       !this.owner(offer) ||
       !this.store.attemptQuestion(offer.token, Date.now())
     )

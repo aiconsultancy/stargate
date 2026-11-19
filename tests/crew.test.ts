@@ -43,6 +43,7 @@ import {
 import { CrewWaiting } from "../src/crew/waiting";
 import { Gateway } from "../src/gateway";
 import { Store } from "../src/store";
+import { buildUpdateSnapshot, noticeTools } from "../src/update-notice";
 import { waitingSettingsPath } from "../src/waiting";
 import { bot, event, identity } from "./fixtures";
 
@@ -279,8 +280,8 @@ test("conversation eval: exported plugin wires cancellable native wait through i
           expect(observers).toBe(0);
           expect(unexpected).toEqual([]);
           expect(historyRequests).toEqual([]);
-          // Every registration is released once (the IRC RPC added one).
-          expect(disposed).toBe(6);
+          // Every registration is released once, including passive context.
+          expect(disposed).toBe(7);
         }
       }
     }
@@ -1619,7 +1620,178 @@ test("broadcast returns partial receipts and Pi tools-none stores no unreadable 
   }
 });
 
-async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
+test("update notices queue once behind busy OpenCode crew without interrupting, creating or promoting work", async () => {
+  const f = await fixture(undefined, undefined, true);
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Keep working" },
+        f.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    const before = f.calls.length;
+    const nativeHistory = structuredClone(f.history.get(task.workerSessionID));
+    const snapshot = buildUpdateSnapshot(
+      "0.37.0",
+      { notifications: { updateNotice: true } },
+      "- New notices",
+    );
+    const first = await f.engine.updateNotice(
+      snapshot,
+      noticeTools([{ id: "stargate_crew", description: "Current tools" }]),
+      new AbortController().signal,
+    );
+    expect(first).toEqual([
+      { sessionID: task.workerSessionID, status: "queued" },
+    ]);
+    expect(f.calls.slice(before)).toEqual([]);
+    expect(f.synthetics).toEqual([]);
+    const system: { type: "text"; text: string }[] = [];
+    f.engine.updateNoticeContext(task.workerSessionID, "mario", system);
+    expect(system[0]?.text).toContain("Stargate update notice");
+    expect(f.history.get(task.workerSessionID)).toEqual(nativeHistory);
+    expect(f.engine.state.task(task.id)?.status).toBe("running");
+    const repeat = await f.engine.updateNotice(
+      snapshot,
+      noticeTools([{ id: "stargate_crew", description: "Current tools" }]),
+      new AbortController().signal,
+    );
+    expect(repeat[0]?.status).toBe("unchanged");
+    expect(f.calls.slice(before)).toHaveLength(0);
+    f.engine.updateNoticeContext(task.workerSessionID, "mario", system);
+    expect(system).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("passive notices preserve uncertain reconciliation and later legitimate dispatch", async () => {
+  const f = await fixture(undefined, undefined, true);
+  try {
+    const task = (
+      await f.engine.run(
+        { op: "dispatch", crew: "mario", text: "Original work" },
+        f.captain(),
+      )
+    ).task;
+    if (!task) throw new Error("Missing task");
+    const input = uncertainResult(f, task);
+    await f.engine.updateNotice(
+      buildUpdateSnapshot("0.37.0", {}, "- New notices"),
+      {},
+      new AbortController().signal,
+    );
+    expect(await f.engine.run(input, f.captain())).toMatchObject({
+      status: "reconciled",
+    });
+    expect(
+      (
+        await f.engine.run(
+          { op: "dispatch", crew: "mario", text: "Next legitimate work" },
+          f.captain(),
+        )
+      ).task,
+    ).toMatchObject({ status: "running" });
+  } finally {
+    await f.close();
+  }
+});
+
+test("captain context admission verifies native identity and leaves native history unchanged", async () => {
+  const f = await fixture(undefined, undefined, true);
+  try {
+    const input = {
+      sessionID: "ses_captaina",
+      id: "msg_update",
+      text: "Stargate update notice: passive only",
+    };
+    expect(
+      await f.engine.queueCaptainNotice(input, new AbortController().signal),
+    ).toEqual({ id: input.id, sessionID: input.sessionID });
+    expect(f.calls).toEqual([]);
+    const system: { type: "text"; text: string }[] = [];
+    f.engine.updateNoticeContext(input.sessionID, "foreign", system);
+    expect(system).toEqual([]);
+    f.engine.updateNoticeContext(input.sessionID, "bowser", system);
+    expect(system).toEqual([{ type: "text", text: input.text }]);
+    f.engine.updateNoticeContext(input.sessionID, "bowser", system);
+    expect(system).toHaveLength(1);
+    await expect(
+      f.engine.queueCaptainNotice(
+        { ...input, sessionID: "ses_foreign" },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow();
+  } finally {
+    await f.close();
+  }
+});
+
+test("Pi update notices use durable plain mail only, and failed mail is not reported as told", async () => {
+  const team = teamSchema.parse({
+    captain: { id: "bowser" },
+    crew: [
+      {
+        id: "twiki",
+        role: "Worker",
+        permissionProfile: "coding",
+        backend: {
+          type: "pi-durable",
+          model: "openai/gpt-6.1-sol",
+          tools: "coding",
+        },
+      },
+    ],
+  });
+  const f = await fixture(team, undefined, true);
+  try {
+    const peer = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const snapshot = buildUpdateSnapshot(
+      "0.37.0",
+      { notifications: { updateNotice: true } },
+      "- New tools",
+    );
+    const receipts = await f.engine.updateNotice(
+      snapshot,
+      {},
+      new AbortController().signal,
+    );
+    expect(receipts).toEqual([{ sessionID: peer.sessionID, status: "mail" }]);
+    expect(f.messages).toHaveLength(1);
+    expect(f.synthetics).toEqual([]);
+    expect(f.calls).toEqual([]);
+    expect(
+      (
+        await f.mailer.inbox(
+          { sessionID: peer.sessionID },
+          new AbortController().signal,
+        )
+      )[0]?.to,
+    ).toBe(peer.sessionID);
+    f.mailer.send = async () => {
+      throw new Error("secret transport failure");
+    };
+    expect(
+      (
+        await f.engine.updateNotice(
+          { ...snapshot, version: "0.38.0" },
+          {},
+          new AbortController().signal,
+        )
+      )[0]?.status,
+    ).toBe("uncertain");
+  } finally {
+    await f.close();
+  }
+});
+
+async function fixture(
+  team?: Team,
+  waitOptions?: CrewWaitOptions,
+  pin = false,
+) {
   const definition = team ?? defaultTeam;
   const directory = await mkdtemp("/tmp/opencode/stargate-crew-");
   const options: CrewOptions = {
@@ -1631,10 +1803,13 @@ async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
       definition.crew.map(({ id }) => [id, join(directory, id)]),
     ),
     mesijCommand: "/usr/bin/mesij",
+    ...(pin ? { captainSessionID: "ses_captaina" } : {}),
     ...(team ? { team } : {}),
   };
   const sessions = new Map<string, CrewSession>();
-  for (const id of ["ses_captain_a", "ses_captain_b"]) {
+  for (const id of pin
+    ? ["ses_captaina"]
+    : ["ses_captain_a", "ses_captain_b"]) {
     sessions.set(id, {
       id,
       agent: definition.captain.agent ?? definition.captain.id,
@@ -1729,6 +1904,7 @@ async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
       const { sessionID, text } = input;
       synthetics.push(input);
       calls.push({ method: "synthetic", sessionID, text });
+      return { id: input.id, sessionID };
     },
   };
   const mailer: Pick<MesijClient, "register" | "send" | "inbox"> = {
@@ -1816,7 +1992,7 @@ async function fixture(team?: Team, waitOptions?: CrewWaitOptions) {
   );
   let toolCall = 0;
   const captain = (
-    id = "ses_captain_a",
+    id = pin ? "ses_captaina" : "ses_captain_a",
     signal = new AbortController().signal,
   ) => ({
     sessionID: id,

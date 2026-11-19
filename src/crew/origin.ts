@@ -1,9 +1,9 @@
 import {
-  boundaryRecord,
   closesBoundaryContext,
   type InputBoundaryRecord,
   resolveBoundaryContext,
 } from "../input-boundary";
+import { InputBoundaryReader } from "../input-origin";
 import type { ResultAPI } from "./result";
 
 /** Resolve the tool's retained turn, not whichever input is newest now. */
@@ -13,6 +13,7 @@ export async function readInputOrigin(
   messageID: string,
   signal: AbortSignal,
 ): Promise<string | null> {
+  const boundaries = new InputBoundaryReader(api, sessionID, signal);
   let anchored = false;
   let cursor: string | undefined;
   const cursors = new Set<string>();
@@ -39,7 +40,7 @@ export async function readInputOrigin(
         if (message.type !== "assistant") return null;
         anchored = true;
       }
-      const record = boundaryRecord(message, sessionID);
+      const record = await boundaries.record(message);
       if (chain.length && closesBoundaryContext(record)) {
         chain.push(record);
         return origin();

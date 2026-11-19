@@ -26,12 +26,19 @@ import { Result, Schema } from "effect";
 import { z } from "zod";
 import type { CrewStatus, CrewStatusInput } from "../crew-status";
 import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
+import {
+  noticeTools,
+  scopedUpdate,
+  type UpdateReceipt,
+  type UpdateSnapshot,
+} from "../update-notice";
 import { CrewHistoryRPC } from "./history-rpc";
 import { crewFingerprint } from "./identity";
 import { MesijClient, type MesijMessage } from "./mesij";
 import { crewMessageMetadataKey } from "./message-protocol";
 import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
 import { readInputOrigin } from "./origin";
+import { piCrewToolDefinitions } from "./pi-extension";
 
 export { mailInputSchema } from "./messaging";
 
@@ -220,6 +227,7 @@ export type CrewSession = Pick<
   SessionInfo,
   "id" | "parentID" | "agent" | "location" | "metadata" | "outcome" | "model"
 > & {
+  permissions?: unknown;
   time?: Pick<SessionInfo["time"], "updated" | "busy" | "idle">;
 };
 export type WorkerModelPeer = Peer & Pick<CrewSession, "model">;
@@ -574,6 +582,152 @@ export class CrewEngine {
 
   mailActor(sessionID: string) {
     return this.actor(sessionID);
+  }
+
+  /** Passive ready-state information only: never provision, promote or notify a worker. */
+  async updateNotice(
+    snapshot: UpdateSnapshot,
+    tools: Record<string, string>,
+    signal: AbortSignal,
+  ): Promise<UpdateReceipt[]> {
+    const captain = this.options.captainSessionID;
+    if (!captain) return [];
+    const receipts: UpdateReceipt[] = [];
+    for (const member of this.options.team.crew) {
+      signal.throwIfAborted();
+      const peer = this.state.peer(member.id);
+      if (peer?.status !== "ready") continue;
+      try {
+        let effective: unknown;
+        if (member.backend)
+          effective = {
+            model: member.backend.model,
+            permissions: member.permissionProfile,
+            tools: member.backend.tools,
+          };
+        else {
+          const session = await this.sessions.get(
+            { sessionID: peer.sessionID },
+            { signal },
+          );
+          if (
+            session.agent !== (member.agent ?? member.id) ||
+            session.location.directory !== this.options.worktrees[member.id]
+          )
+            throw new Error("Wrong crew session");
+          effective = {
+            model: session.model,
+            permissions: session.permissions,
+          };
+        }
+        const selectedTools = member.backend
+          ? noticeTools(
+              member.backend.tools === "coding"
+                ? piCrewToolDefinitions().map((tool) => ({
+                    id: tool.name,
+                    description: tool.description,
+                    input: tool.schema,
+                  }))
+                : [],
+            )
+          : tools;
+        const next = scopedUpdate(snapshot, selectedTools, effective);
+        receipts.push(
+          await this.state.updateNotices.deliver(
+            peer.sessionID,
+            next,
+            member.backend ? "mail" : "queued",
+            async (id, text) => {
+              if (member.backend) {
+                const receipt = await this.mail(
+                  { op: "send", to: member.id, text, key: id },
+                  {
+                    sessionID: captain,
+                    agent:
+                      this.options.team.captain.agent ??
+                      this.options.team.captain.id,
+                    signal,
+                  },
+                );
+                Schema.decodeUnknownSync(
+                  Schema.Struct({ stored: Schema.Literal(true) }),
+                )(receipt);
+              } else
+                this.state.updateNotices.queueContext(
+                  peer.sessionID,
+                  id,
+                  this.options.namespace,
+                );
+            },
+            this.options.namespace,
+          ),
+        );
+      } catch {
+        receipts.push({ sessionID: peer.sessionID, status: "uncertain" });
+      }
+    }
+    return receipts;
+  }
+
+  /** Consume only for this roster's native worker, at an already-running model context boundary. */
+  updateNoticeContext(
+    sessionID: string,
+    agent: string,
+    system: { type: "text"; text: string }[],
+  ) {
+    if (
+      agent ===
+        (this.options.team.captain.agent ?? this.options.team.captain.id) &&
+      !this.state.peerBySession(sessionID)
+    ) {
+      this.state.updateNotices.consumeContext(
+        sessionID,
+        this.options.namespace,
+        (text) => system.push({ type: "text", text }),
+      );
+      return;
+    }
+    const peer = this.state.peerBySession(sessionID);
+    const member = this.options.team.crew.find(
+      (member) => member.id === peer?.crewID,
+    );
+    if (
+      peer?.status !== "ready" ||
+      !member ||
+      member.backend ||
+      agent !== (member.agent ?? member.id)
+    )
+      return;
+    this.state.updateNotices.consumeContext(
+      sessionID,
+      this.options.namespace,
+      (text) => system.push({ type: "text", text }),
+    );
+  }
+
+  async queueCaptainNotice(
+    input: { sessionID: string; id: string; text: string },
+    signal: AbortSignal,
+  ) {
+    const session = await this.sessions.get(
+      { sessionID: input.sessionID },
+      { signal },
+    );
+    if (
+      session.id !== input.sessionID ||
+      session.agent !==
+        (this.options.team.captain.agent ?? this.options.team.captain.id) ||
+      session.location.directory !== this.options.captainDirectory ||
+      this.state.peerBySession(session.id)
+    )
+      throw new Error("Update notice captain identity changed");
+    this.state.updateNotices.queueExternalContext(
+      session.id,
+      input.id,
+      input.text,
+      this.options.namespace,
+    );
+    return { id: input.id, sessionID: session.id };
   }
 
   /** Same captain context: equal IDs, or both lineage of the pinned root. */
