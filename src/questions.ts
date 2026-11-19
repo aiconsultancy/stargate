@@ -1,53 +1,93 @@
 import { createHash, randomBytes } from "node:crypto";
-import { z } from "zod";
+import { Schema } from "effect";
 import type { AgentBackend } from "./backend";
 import { containsCredential } from "./credentials";
+import {
+  settingsCheck,
+  settingsDiscriminatedUnion,
+  settingsPattern,
+  settingsRecord,
+  settingsStruct,
+} from "./settings-schema";
 import type { Incoming, Job, Store } from "./store";
 
-const option = z.strictObject({
-  value: z.string().min(1).max(500),
-  label: z.string().min(1).max(300),
-  description: z.string().max(1500).optional(),
+const option = settingsStruct({
+  value: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(500),
+  ),
+  label: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(300),
+  ),
+  description: Schema.optional(
+    Schema.String.check(Schema.isMaxCodePoints(1500)),
+  ),
 });
 const fieldBase = {
-  key: z.string().regex(/^q[0-9]{1,2}$/),
-  title: z.string().max(300).optional(),
-  description: z.string().max(4000).optional(),
-  required: z.boolean().optional(),
-  hidden: z.literal(false).optional(),
-  custom: z.boolean().optional(),
+  key: Schema.String.check(settingsPattern(/^q[0-9]{1,2}$/)),
+  title: Schema.optional(Schema.String.check(Schema.isMaxCodePoints(300))),
+  description: Schema.optional(
+    Schema.String.check(Schema.isMaxCodePoints(4000)),
+  ),
+  required: Schema.optional(Schema.Boolean),
+  hidden: Schema.optional(Schema.Literal(false)),
+  custom: Schema.optional(Schema.Boolean),
 };
-const field = z.discriminatedUnion("type", [
-  z.strictObject({
+const field = settingsDiscriminatedUnion("type", [
+  settingsStruct({
     ...fieldBase,
-    type: z.literal("string"),
-    options: z.array(option).max(20).optional(),
+    type: Schema.Literal("string"),
+    options: Schema.optional(
+      Schema.mutable(Schema.Array(option)).check(Schema.isMaxLength(20)),
+    ),
   }),
-  z.strictObject({
+  settingsStruct({
     ...fieldBase,
-    type: z.literal("multiselect"),
-    options: z.array(option).max(20),
-    minItems: z.number().int().min(0).max(20).optional(),
-    maxItems: z.number().int().min(1).max(20).optional(),
+    type: Schema.Literal("multiselect"),
+    options: Schema.mutable(Schema.Array(option)).check(Schema.isMaxLength(20)),
+    minItems: Schema.optional(
+      Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 20 })),
+    ),
+    maxItems: Schema.optional(
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 })),
+    ),
   }),
 ]);
 
 /** Clarification only. Auth, hidden, conditional and default-valued forms fail closed. */
-export const nativeQuestionSchema = z
-  .strictObject({
-    id: z
-      .string()
-      .regex(/^frm_[A-Za-z0-9_]+$/)
-      .max(128),
-    sessionID: z.string().min(1).max(200),
-    inputID: z.string().min(1).max(200),
-    toolMessageID: z.string().min(1).max(200),
-    toolCallID: z.string().min(1).max(200),
-    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-    title: z.string().min(1).max(500),
-    fields: z.array(field).min(1).max(8),
-  })
-  .superRefine((value, context) => {
+export const nativeQuestionSchema = settingsStruct({
+  id: Schema.String.check(
+    settingsPattern(/^frm_[A-Za-z0-9_]+$/),
+    Schema.isMaxCodePoints(128),
+  ),
+  sessionID: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(200),
+  ),
+  inputID: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(200),
+  ),
+  toolMessageID: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(200),
+  ),
+  toolCallID: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(200),
+  ),
+  fingerprint: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
+  title: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(500),
+  ),
+  fields: Schema.mutable(Schema.Array(field)).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(8),
+  ),
+}).check(
+  settingsCheck((value, context) => {
     if (new Set(value.fields.map((f) => f.key)).size !== value.fields.length)
       context.addIssue({
         code: "custom",
@@ -89,8 +129,9 @@ export const nativeQuestionSchema = z
         code: "custom",
         message: "Sensitive or oversized question",
       });
-  });
-export type NativeQuestion = z.infer<typeof nativeQuestionSchema>;
+  }),
+);
+export type NativeQuestion = typeof nativeQuestionSchema.Type;
 /** Verified question-tool ownership, with unsafe/unsupported content omitted. */
 export type UnsupportedQuestion = Pick<
   NativeQuestion,
@@ -205,12 +246,17 @@ export function questionAnswer(
         : choices;
     input = { [f.key]: value };
   } else input = JSON.parse(text);
-  const parsed = z
-    .record(
-      z.string(),
-      z.union([z.string().max(2000), z.array(z.string().max(2000)).max(20)]),
-    )
-    .parse(input);
+  const parsed = Schema.decodeUnknownSync(
+    settingsRecord(
+      Schema.String,
+      Schema.Union([
+        Schema.String.check(Schema.isMaxCodePoints(2000)),
+        Schema.mutable(
+          Schema.Array(Schema.String.check(Schema.isMaxCodePoints(2000))),
+        ).check(Schema.isMaxLength(20)),
+      ]),
+    ),
+  )(input);
   if (
     Object.keys(parsed).some(
       (key) => !question.fields.some((f) => f.key === key),
@@ -521,7 +567,9 @@ export class Questions {
       throw new Error("Too many native clarification questions");
     for (const raw of pending) {
       const question =
-        "unsupported" in raw ? raw : nativeQuestionSchema.parse(raw);
+        "unsupported" in raw
+          ? raw
+          : Schema.decodeUnknownSync(nativeQuestionSchema)(raw);
       if (question.sessionID !== session) continue;
       const job = this.store.jobByInput(this.key, question.inputID);
       if (
@@ -846,7 +894,7 @@ export class Questions {
         control.answer === null
           ? null
           : questionAnswer(
-              nativeQuestionSchema.parse(question),
+              Schema.decodeUnknownSync(nativeQuestionSchema)(question),
               control.answer ?? "",
             );
     } catch {

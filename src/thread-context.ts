@@ -1,4 +1,5 @@
-import { z } from "zod";
+import { Result, Schema } from "effect";
+import { settingsPattern } from "./settings-schema";
 
 export const threadContextLimits = {
   pageSize: 50,
@@ -7,18 +8,18 @@ export const threadContextLimits = {
   totalCodepoints: 12_000,
 } as const;
 
-const timestamp = z.string().regex(/^\d{1,16}\.\d{1,6}$/);
-const requestSchema = z.object({
-  channel: z.string().regex(/^[CGD][A-Z0-9]+$/),
+const timestamp = Schema.String.check(settingsPattern(/^\d{1,16}\.\d{1,6}$/));
+const requestSchema = Schema.Struct({
+  channel: Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
   thread: timestamp,
   before: timestamp,
-  user: z.string().min(1),
-  botUser: z.string().min(1),
-  appId: z.string().min(1),
-  team: z.string().min(1),
+  user: Schema.String.check(Schema.isMinCodePoints(1)),
+  botUser: Schema.String.check(Schema.isMinCodePoints(1)),
+  appId: Schema.String.check(Schema.isMinCodePoints(1)),
+  team: Schema.String.check(Schema.isMinCodePoints(1)),
 });
 
-export type ThreadContextRequest = z.infer<typeof requestSchema> & {
+export type ThreadContextRequest = typeof requestSchema.Type & {
   signal: AbortSignal;
   /** Internal access check, never Slack/model-supplied metadata. */
   allowThreadRoot?: (user: string) => boolean;
@@ -38,30 +39,30 @@ export class ThreadContextUnavailable extends Error {
   }
 }
 
-const pageSchema = z.object({
-  ok: z.literal(true),
-  messages: z.array(z.unknown()),
-  has_more: z.boolean().optional(),
-  response_metadata: z
-    .object({ next_cursor: z.string().optional() })
-    .optional(),
+const pageSchema = Schema.Struct({
+  ok: Schema.Literal(true),
+  messages: Schema.mutable(Schema.Array(Schema.Unknown)),
+  has_more: Schema.optional(Schema.Boolean),
+  response_metadata: Schema.optional(
+    Schema.Struct({ next_cursor: Schema.optional(Schema.String) }),
+  ),
 });
-const messageSchema = z.object({
-  type: z.literal("message"),
-  user: z.string().min(1),
-  text: z.string(),
+const messageSchema = Schema.Struct({
+  type: Schema.Literal("message"),
+  user: Schema.String.check(Schema.isMinCodePoints(1)),
+  text: Schema.String,
   ts: timestamp,
-  thread_ts: timestamp.optional(),
-  channel: z.string().optional(),
-  team: z.string().optional(),
-  app_id: z.string().optional(),
-  bot_id: z.string().optional(),
-  subtype: z.literal("bot_message").optional(),
-  hidden: z.literal(false).optional(),
-  edited: z.never().optional(),
-  deleted_ts: z.never().optional(),
-  files: z.never().optional(),
-  attachments: z.never().optional(),
+  thread_ts: Schema.optional(timestamp),
+  channel: Schema.optional(Schema.String),
+  team: Schema.optional(Schema.String),
+  app_id: Schema.optional(Schema.String),
+  bot_id: Schema.optional(Schema.String),
+  subtype: Schema.optional(Schema.Literal("bot_message")),
+  hidden: Schema.optional(Schema.Literal(false)),
+  edited: Schema.optional(Schema.Never),
+  deleted_ts: Schema.optional(Schema.Never),
+  files: Schema.optional(Schema.Never),
+  attachments: Schema.optional(Schema.Never),
 });
 
 function timestampValue(value: string) {
@@ -82,7 +83,7 @@ export async function loadThreadContext(
 ): Promise<ThreadContext> {
   try {
     input.signal.throwIfAborted();
-    const request = requestSchema.parse(input);
+    const request = Schema.decodeUnknownSync(requestSchema)(input);
     const start = timestampValue(request.thread);
     const end = timestampValue(request.before);
     if (start >= end) return { messages: [], truncated: false };
@@ -94,7 +95,7 @@ export async function loadThreadContext(
       limit: threadContextLimits.pageSize,
     });
     input.signal.throwIfAborted();
-    const page = pageSchema.parse(raw);
+    const page = Schema.decodeUnknownSync(pageSchema)(raw);
     const result: ThreadContext = {
       messages: [],
       truncated: Boolean(
@@ -109,8 +110,8 @@ export async function loadThreadContext(
     const candidates = page.messages
       .slice(0, threadContextLimits.pageSize)
       .flatMap((raw) => {
-        const parsed = messageSchema.safeParse(raw);
-        return parsed.success ? [parsed.data] : [];
+        const parsed = Schema.decodeUnknownResult(messageSchema)(raw);
+        return Result.isSuccess(parsed) ? [parsed.success] : [];
       })
       .sort((a, b) => (timestampValue(a.ts) < timestampValue(b.ts) ? -1 : 1));
     for (const message of candidates) {

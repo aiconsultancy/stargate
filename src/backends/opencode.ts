@@ -9,7 +9,7 @@ import {
   type SessionMessageInfo,
 } from "@opencode/client";
 import { SessionMessage } from "@opencode/schema";
-import { Option, Schema } from "effect";
+import { Option, Result, Schema } from "effect";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
 import { type Attachment, checkAttachments } from "../attachments";
 import type {
@@ -247,7 +247,7 @@ export class OpenCodeBackend implements AgentBackend {
       } else return;
     }
     if (!inputID) return;
-    const parsed = nativeQuestionSchema.safeParse({
+    const parsed = Schema.decodeUnknownResult(nativeQuestionSchema)({
       id: form.id,
       sessionID,
       inputID,
@@ -257,8 +257,8 @@ export class OpenCodeBackend implements AgentBackend {
       title: form.title,
       fields: form.fields,
     });
-    return parsed.success
-      ? parsed.data
+    return Result.isSuccess(parsed)
+      ? parsed.success
       : {
           id: form.id,
           sessionID,

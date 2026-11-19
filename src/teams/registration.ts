@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmodSync } from "node:fs";
 import type { Server } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import type { AgentBackend, PendingPermission } from "../backend";
 import type { TeamsConfig } from "../config";
 import type { FleetSource } from "../fleet/protocol";
@@ -12,6 +12,11 @@ import { fleetAuthority, fleetInstructions } from "../fleet-policy";
 import { fleetSourceReference } from "../fleet-source";
 import type { GatewayTransport, SlackDelivery } from "../gateway";
 import { backendFingerprint } from "../routing";
+import {
+  settingsDefault,
+  settingsPattern,
+  settingsUUID,
+} from "../settings-schema";
 import type { Store } from "../store";
 import {
   BotFrameworkKeyStore,
@@ -29,42 +34,57 @@ import {
   unlinkOwnSocket,
 } from "./unix-socket";
 
-const account = z.object({
-  id: z.string().min(1),
-  aadObjectId: z.uuid().optional(),
-  role: z.string().optional(),
+const account = Schema.Struct({
+  id: Schema.String.check(Schema.isMinCodePoints(1)),
+  aadObjectId: Schema.optional(settingsUUID),
+  role: Schema.optional(Schema.String),
 });
-export const activitySchema = z.object({
-  type: z.literal("message"),
-  id: z.string().min(1).max(512),
-  channelId: z.literal("msteams"),
-  serviceUrl: z.string().refine(isAllowedServiceUrl),
+const timestamp = Schema.String.check(
+  settingsPattern(
+    /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?Z)$/,
+  ),
+).annotate({ format: "date-time" });
+export const activitySchema = Schema.Struct({
+  type: Schema.Literal("message"),
+  id: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(512),
+  ),
+  channelId: Schema.Literal("msteams"),
+  serviceUrl: Schema.String.check(Schema.makeFilter(isAllowedServiceUrl)),
   from: account,
   recipient: account,
-  conversation: z.object({
-    id: z.string().min(1).max(1024),
-    conversationType: z.enum(["personal", "channel", "groupChat"]),
-    tenantId: z.uuid().optional(),
+  conversation: Schema.Struct({
+    id: Schema.String.check(
+      Schema.isMinCodePoints(1),
+      Schema.isMaxCodePoints(1024),
+    ),
+    conversationType: Schema.Literals(["personal", "channel", "groupChat"]),
+    tenantId: Schema.optional(settingsUUID),
   }),
-  channelData: z
-    .object({
-      tenant: z.object({ id: z.uuid() }).optional(),
-      channel: z.object({ id: z.string() }).optional(),
-    })
-    .optional(),
-  text: z.string().max(40_000).default(""),
-  timestamp: z.iso.datetime().optional(),
-  entities: z
-    .array(
-      z.object({
-        type: z.string().optional(),
-        text: z.string().optional(),
-        mentioned: account.optional(),
-      }),
-    )
-    .optional(),
+  channelData: Schema.optional(
+    Schema.Struct({
+      tenant: Schema.optional(Schema.Struct({ id: settingsUUID })),
+      channel: Schema.optional(Schema.Struct({ id: Schema.String })),
+    }),
+  ),
+  text: Schema.String.check(Schema.isMaxCodePoints(40_000)).pipe(
+    settingsDefault(""),
+  ),
+  timestamp: Schema.optional(timestamp),
+  entities: Schema.optional(
+    Schema.mutable(
+      Schema.Array(
+        Schema.Struct({
+          type: Schema.optional(Schema.String),
+          text: Schema.optional(Schema.String),
+          mentioned: Schema.optional(account),
+        }),
+      ),
+    ),
+  ),
 });
-export type TeamsActivity = z.infer<typeof activitySchema>;
+export type TeamsActivity = typeof activitySchema.Type;
 
 export function allowedActivity(config: TeamsConfig, activity: TeamsActivity) {
   const user = activity.from.aadObjectId?.toLowerCase();
@@ -262,10 +282,13 @@ export class TeamsRegistration {
     return response.id;
   }
   async accept(raw: unknown): Promise<boolean> {
-    const parsed = activitySchema.safeParse(raw);
-    if (!parsed.success || !allowedActivity(this.config, parsed.data))
+    const parsed = Schema.decodeUnknownResult(activitySchema)(raw);
+    if (
+      Result.isFailure(parsed) ||
+      !allowedActivity(this.config, parsed.success)
+    )
       return false;
-    const activity = parsed.data;
+    const activity = parsed.success;
     const user = activity.from.aadObjectId?.toLowerCase() ?? "";
     const conversation = activity.conversation.id;
     const text = extractText({

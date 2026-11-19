@@ -1,6 +1,5 @@
 import { Database } from "bun:sqlite";
-import { Schema } from "effect";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import type { PreparedAttachment, PublishedFile } from "./attachments";
 import { cancellationNotice } from "./cancellation";
 import {
@@ -23,6 +22,7 @@ import {
 } from "./notifications";
 import type { NativeQuestion, QuestionOffer } from "./questions";
 import { failureText, type RequestFailure } from "./request-failure";
+import { settingsPattern, settingsStruct } from "./settings-schema";
 import type { ReplyChunk } from "./slack-format";
 import { UpdateNotices } from "./update-notice";
 
@@ -202,13 +202,13 @@ export type AttachmentDelivery = PublishedFile & {
   noticeSent?: boolean;
 };
 
-const activityProgress = z.strictObject({
-  ts: z.string().optional(),
-  capture: z.string(),
-  revision: z.number().int(),
-  done: z.boolean(),
+const activityProgress = settingsStruct({
+  ts: Schema.optional(Schema.String),
+  capture: Schema.String,
+  revision: Schema.Int,
+  done: Schema.Boolean,
 });
-export type ActivityProgress = z.infer<typeof activityProgress>;
+export type ActivityProgress = typeof activityProgress.Type;
 
 /**
  * `respond` was called for a job that is not running. Nothing was written:
@@ -563,16 +563,17 @@ export class Store {
       )
       .get(id);
     return row?.input_files
-      ? z
-          // Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
-          .array(
-            z
-              .string()
-              .max(2048)
-              .regex(/^(?:F[A-Z0-9]+|https?:\/\/\S+)$/),
-          )
-          .max(10)
-          .parse(JSON.parse(row.input_files))
+      ? // Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
+        Schema.decodeUnknownSync(
+          Schema.mutable(
+            Schema.Array(
+              Schema.String.check(
+                Schema.isMaxCodePoints(2048),
+                settingsPattern(/^(?:F[A-Z0-9]+|https?:\/\/\S+)$/),
+              ),
+            ),
+          ).check(Schema.isMaxLength(10)),
+        )(JSON.parse(row.input_files))
       : [];
   }
 
@@ -599,13 +600,18 @@ export class Store {
         "SELECT activity FROM jobs WHERE id=?",
       )
       .get(id)?.activity;
-    return raw ? activityProgress.parse(JSON.parse(raw)) : undefined;
+    return raw
+      ? Schema.decodeUnknownSync(activityProgress)(JSON.parse(raw))
+      : undefined;
   }
 
   saveActivity(id: number, progress: ActivityProgress) {
     this.db
       .query("UPDATE jobs SET activity=? WHERE id=?")
-      .run(JSON.stringify(activityProgress.parse(progress)), id);
+      .run(
+        JSON.stringify(Schema.decodeUnknownSync(activityProgress)(progress)),
+        id,
+      );
   }
 
   latestActivity(botKey: string, conversation: string): Job | null {
@@ -1198,7 +1204,11 @@ export class Store {
       Buffer.byteLength(JSON.stringify(message)) > ircBurstLimits.bytes
     )
       return ordinary(input);
-    if (!ircBurstMessageSchema.safeParse(message).success)
+    if (
+      Result.isFailure(
+        Schema.decodeUnknownResult(ircBurstMessageSchema)(message),
+      )
+    )
       return ordinary(input);
     return this.db.transaction(() => {
       if (
@@ -1312,7 +1322,9 @@ export class Store {
         "SELECT message FROM irc_burst_messages WHERE job=? ORDER BY ordinal",
       )
       .all(job)
-      .map(({ message }) => ircBurstMessageSchema.parse(JSON.parse(message)));
+      .map(({ message }) =>
+        Schema.decodeUnknownSync(ircBurstMessageSchema)(JSON.parse(message)),
+      );
   }
 
   /** Stop can resolve a grouped member without changing ordinary thread state. */

@@ -90,7 +90,7 @@ async function fixture(
   const replies: (QuestionAnswer | null)[] = [];
   let pending = false;
   let complete = false;
-  const q = nativeQuestionSchema.parse({
+  const q = Schema.decodeUnknownSync(nativeQuestionSchema)({
     id: "frm_question",
     sessionID: "ses_captain",
     inputID: "msg_original",

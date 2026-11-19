@@ -1,42 +1,50 @@
-import { z } from "zod";
+import { Result, Schema, SchemaTransformation } from "effect";
 import type { BotConfig } from "./config";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
+import { settingsPattern } from "./settings-schema";
 
 export const cancellationNotice =
   "Stargate received your stop request. Work may have run; existing effects may remain. The request was not repeated. Check agent state before trying again.";
 
-const timestamp = z.string().regex(/^\d+\.\d+$/);
-const actionSchema = z.object({
-  type: z.literal("block_actions"),
-  api_app_id: z.string(),
-  team: z.object({ id: z.string() }),
-  user: z.object({
-    id: z.string().regex(/^[UW][A-Z0-9]+$/),
-    is_bot: z.literal(false).optional(),
-    bot_id: z.never().optional(),
+const timestamp = Schema.String.check(settingsPattern(/^\d+\.\d+$/));
+const actionSchema = Schema.Struct({
+  type: Schema.Literal("block_actions"),
+  api_app_id: Schema.String,
+  team: Schema.Struct({ id: Schema.String }),
+  user: Schema.Struct({
+    id: Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
+    is_bot: Schema.optional(Schema.Literal(false)),
+    bot_id: Schema.optional(Schema.Never),
   }),
-  bot_id: z.never().optional(),
-  channel: z.object({ id: z.string().regex(/^[CGD][A-Z0-9]+$/) }),
-  container: z.object({
-    type: z.literal("message"),
-    channel_id: z.string(),
+  bot_id: Schema.optional(Schema.Never),
+  channel: Schema.Struct({
+    id: Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
+  }),
+  container: Schema.Struct({
+    type: Schema.Literal("message"),
+    channel_id: Schema.String,
     message_ts: timestamp,
-    is_ephemeral: z.literal(false).optional(),
+    is_ephemeral: Schema.optional(Schema.Literal(false)),
   }),
-  message: z.object({ user: z.string(), ts: timestamp, thread_ts: timestamp }),
-  actions: z
-    .array(
-      z.object({
-        type: z.literal("button"),
-        action_id: z.literal("stargate_stop"),
-        value: z
-          .string()
-          .regex(/^[1-9]\d{0,15}$/)
-          .transform(Number)
-          .pipe(z.number().int().positive().max(Number.MAX_SAFE_INTEGER)),
+  message: Schema.Struct({
+    user: Schema.String,
+    ts: timestamp,
+    thread_ts: timestamp,
+  }),
+  actions: Schema.mutable(
+    Schema.Array(
+      Schema.Struct({
+        type: Schema.Literal("button"),
+        action_id: Schema.Literal("stargate_stop"),
+        value: Schema.String.check(settingsPattern(/^[1-9]\d{0,15}$/)).pipe(
+          Schema.decodeTo(
+            Schema.Int.check(Schema.isGreaterThan(0)),
+            SchemaTransformation.transform({ decode: Number, encode: String }),
+          ),
+        ),
       }),
-    )
-    .length(1),
+    ),
+  ).check(Schema.isBetweenLength(1, 1)),
 });
 
 /** Socket Mode authenticates the envelope; persisted preview identity binds its target. */
@@ -45,9 +53,9 @@ export function cancellationTarget(
   config: BotConfig,
   identity: Identity,
 ) {
-  const parsed = actionSchema.safeParse(raw);
-  if (!parsed.success) return;
-  const data = parsed.data;
+  const parsed = Schema.decodeUnknownResult(actionSchema)(raw);
+  if (Result.isFailure(parsed)) return;
+  const data = parsed.success;
   const action = data.actions[0];
   if (
     !action ||

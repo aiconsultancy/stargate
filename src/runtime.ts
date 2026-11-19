@@ -4,9 +4,16 @@ import { chmod, mkdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseEnv } from "node:util";
-import { Cause, Data, Deferred, Effect, FiberMap } from "effect";
+import {
+  Cause,
+  Data,
+  Deferred,
+  Effect,
+  FiberMap,
+  Result,
+  Schema,
+} from "effect";
 import pino, { type Logger } from "pino";
-import { z } from "zod";
 import {
   type AgentBackend,
   type BackendContext,
@@ -458,26 +465,26 @@ export function serve(
             }),
             isHuman: async (user) => {
               try {
-                const result = z
-                  .object({
-                    ok: z.literal(true),
-                    user: z.object({
-                      id: z.literal(user),
-                      team_id: z.literal(identity.team),
-                      is_bot: z.literal(false),
-                      deleted: z.literal(false),
+                const result = Schema.decodeUnknownResult(
+                  Schema.Struct({
+                    ok: Schema.Literal(true),
+                    user: Schema.Struct({
+                      id: Schema.Literal(user),
+                      team_id: Schema.Literal(identity.team),
+                      is_bot: Schema.Literal(false),
+                      deleted: Schema.Literal(false),
                     }),
-                  })
-                  .safeParse(
-                    await slack.userInfo?.(
-                      user,
-                      AbortSignal.any([
-                        requests.signal,
-                        AbortSignal.timeout(2000),
-                      ]),
-                    ),
-                  );
-                return result.success;
+                  }),
+                )(
+                  await slack.userInfo?.(
+                    user,
+                    AbortSignal.any([
+                      requests.signal,
+                      AbortSignal.timeout(2000),
+                    ]),
+                  ),
+                );
+                return Result.isSuccess(result);
               } catch {
                 return false;
               }

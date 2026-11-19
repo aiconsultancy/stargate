@@ -1,4 +1,5 @@
-import { z } from "zod";
+import { Schema } from "effect";
+import { settingsStartsWith, settingsStruct } from "../settings-schema";
 import type { Incoming } from "../store";
 import { validMsgid } from "./protocol";
 
@@ -10,16 +11,33 @@ export const ircBurstLimits = {
   files: 10,
 } as const;
 
-export const ircBurstMessageSchema = z.strictObject({
-  eventId: z.string().min(1).max(4096),
-  thread: z.string().min(1).max(1024),
-  source: z.string().startsWith("s=irc;").max(8192),
-  text: z.string().min(1).max(100_000),
-  originalText: z.string().min(1).max(100_000),
-  received: z.number().finite(),
-  files: z.array(z.string().max(2048)).max(10),
+export const ircBurstMessageSchema = settingsStruct({
+  eventId: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(4096),
+  ),
+  thread: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(1024),
+  ),
+  source: Schema.String.check(
+    settingsStartsWith("s=irc;"),
+    Schema.isMaxCodePoints(8192),
+  ),
+  text: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(100_000),
+  ),
+  originalText: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(100_000),
+  ),
+  received: Schema.Finite,
+  files: Schema.mutable(
+    Schema.Array(Schema.String.check(Schema.isMaxCodePoints(2048))),
+  ).check(Schema.isMaxLength(10)),
 });
-export type IrcBurstMessage = z.infer<typeof ircBurstMessageSchema>;
+export type IrcBurstMessage = typeof ircBurstMessageSchema.Type;
 
 /** Transport admission remains separate; only ordinary human jobs can group. */
 export function ircBurstEligible(input: Incoming): boolean {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import type { BotConfig } from "./config";
 import {
   buildConfigPanel,
@@ -24,43 +24,43 @@ import {
   saveQuestionSettings,
 } from "./question-settings";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
+import { settingsPattern, settingsRecord } from "./settings-schema";
 import type { ConfigPanelRecord, Store } from "./store";
 import { resolveWaiting, saveWaitingDelay } from "./waiting";
 
-const envelope = z.object({
-  api_app_id: z.string(),
-  team_id: z.string(),
-  event: z.object({
-    type: z.enum(["message", "app_mention"]),
-    user: z.string(),
-    channel: z.string(),
-    ts: z.string().regex(/^\d{1,16}\.\d{1,6}$/),
-    thread_ts: z
-      .string()
-      .regex(/^\d{1,16}\.\d{1,6}$/)
-      .optional(),
-    text: z.string().max(40_000),
-    bot_id: z.unknown().optional(),
-    subtype: z.unknown().optional(),
-    hidden: z.unknown().optional(),
-    blocks: z.unknown().optional(),
-    attachments: z.unknown().optional(),
+const envelope = Schema.Struct({
+  api_app_id: Schema.String,
+  team_id: Schema.String,
+  event: Schema.Struct({
+    type: Schema.Literals(["message", "app_mention"]),
+    user: Schema.String,
+    channel: Schema.String,
+    ts: Schema.String.check(settingsPattern(/^\d{1,16}\.\d{1,6}$/)),
+    thread_ts: Schema.optional(
+      Schema.String.check(settingsPattern(/^\d{1,16}\.\d{1,6}$/)),
+    ),
+    text: Schema.String.check(Schema.isMaxCodePoints(40_000)),
+    bot_id: Schema.optional(Schema.Unknown),
+    subtype: Schema.optional(Schema.Unknown),
+    hidden: Schema.optional(Schema.Unknown),
+    blocks: Schema.optional(Schema.Unknown),
+    attachments: Schema.optional(Schema.Unknown),
   }),
 });
 
 /** Only a literal first-token bot tag followed by a command word is local. */
 export function metaCandidate(raw: unknown, identity: Identity): boolean {
-  const parsed = z
-    .object({
-      event: z.object({
-        text: z.string(),
-        blocks: z.unknown().optional(),
-        attachments: z.unknown().optional(),
+  const parsed = Schema.decodeUnknownResult(
+    Schema.Struct({
+      event: Schema.Struct({
+        text: Schema.String,
+        blocks: Schema.optional(Schema.Unknown),
+        attachments: Schema.optional(Schema.Unknown),
       }),
-    })
-    .safeParse(raw);
-  if (!parsed.success) return false;
-  const event = parsed.data.event;
+    }),
+  )(raw);
+  if (Result.isFailure(parsed)) return false;
+  const event = parsed.success.event;
   const text = event.text.trimStart();
   const tag = `<@${identity.user}>`;
   return (
@@ -88,9 +88,11 @@ function unsafeMetadata(raw: unknown, depth = 0): boolean {
       raw.length > 1000 ||
       raw.some((entry: unknown) => unsafeMetadata(entry, depth + 1))
     );
-  const parsed = z.record(z.string(), z.unknown()).safeParse(raw);
-  if (!parsed.success) return false;
-  const node = parsed.data;
+  const parsed = Schema.decodeUnknownResult(
+    settingsRecord(Schema.String, Schema.Unknown),
+  )(raw);
+  if (Result.isFailure(parsed)) return false;
+  const node = parsed.success;
   if (
     node["type"] === "rich_text_quote" ||
     node["type"] === "rich_text_preformatted" ||
@@ -427,7 +429,9 @@ export class MetaCommands {
   private view(panel: ConfigPanelRecord) {
     return buildConfigPanel(configPanelRows(), {
       ...panel,
-      snapshot: configSnapshotSchema.parse(JSON.parse(panel.snapshot)),
+      snapshot: Schema.decodeUnknownSync(configSnapshotSchema)(
+        JSON.parse(panel.snapshot),
+      ),
     });
   }
 
@@ -464,10 +468,14 @@ export class MetaCommands {
     assertOpen(open);
     const reject = (text = configPanelRefused) =>
       this.refuse(raw, bot, identity, open, text);
-    const parsed = configActionSchema.safeParse(raw);
-    if (!parsed.success || !bot.configPanelEnabled || !this.slack.update)
+    const parsed = Schema.decodeUnknownResult(configActionSchema)(raw);
+    if (
+      Result.isFailure(parsed) ||
+      !bot.configPanelEnabled ||
+      !this.slack.update
+    )
       return reject();
-    const body = parsed.data;
+    const body = parsed.success;
     const action = body.actions[0];
     if (
       !action ||
@@ -631,7 +639,9 @@ export class MetaCommands {
   ): Promise<boolean> {
     try {
       return sameConfigSnapshot(
-        configSnapshotSchema.parse(JSON.parse(panel.snapshot)),
+        Schema.decodeUnknownSync(configSnapshotSchema)(
+          JSON.parse(panel.snapshot),
+        ),
         await this.snapshot(bot),
       );
     } catch {
@@ -660,10 +670,10 @@ export class MetaCommands {
     identity: Identity,
     open: () => boolean,
   ) {
-    const parsed = envelope.safeParse(raw);
-    if (!parsed.success) return;
+    const parsed = Schema.decodeUnknownResult(envelope)(raw);
+    if (Result.isFailure(parsed)) return;
     assertOpen(open);
-    const body = parsed.data;
+    const body = parsed.success;
     const event = body.event;
     const text = event.text.trim();
     const tag = `<@${identity.user}>`;

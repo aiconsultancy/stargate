@@ -145,9 +145,9 @@ export class CrewQuestions {
           throw new CrewError("Too many crew clarifications.");
         for (const raw of pending) {
           if ("unsupported" in raw) continue;
-          const parsed = nativeQuestionSchema.safeParse(raw);
-          if (!parsed.success) continue;
-          const question = parsed.data;
+          const parsed = Schema.decodeUnknownResult(nativeQuestionSchema)(raw);
+          if (Result.isFailure(parsed)) continue;
+          const question = parsed.success;
           if (
             question.sessionID !== task.workerSessionID ||
             question.inputID !== task.inputID ||
@@ -281,7 +281,7 @@ export class CrewQuestions {
         input.success.op === "cancel"
           ? null
           : questionAnswer(
-              nativeQuestionSchema.parse(question),
+              Schema.decodeUnknownSync(nativeQuestionSchema)(question),
               input.success.answer,
             );
     } catch {
