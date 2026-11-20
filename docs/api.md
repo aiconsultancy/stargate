@@ -106,13 +106,18 @@ when it is on a separate device.
 
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
 submodules. Status reads run in a private Git directory with a copy of the
-index, a pinned HEAD, and access to the checkout's objects. Git versions with
-`GIT_ATTR_SOURCE` support read attributes from the empty tree, so files that
-depend on attributes for content conversion may count as changed.
+index, a pinned HEAD, and access to the checkout's objects. The snapshot
+includes repository-configured `core.excludesFile` patterns and preserves
+the precedence of `info/exclude`. Pattern files have a 1 MiB limit, each
+index file has a 128 MiB limit, and the snapshot has a 192 MiB aggregate
+limit. Oversized metadata produces a Git read error. Git versions with
+`GIT_ATTR_SOURCE` support read attributes from the empty tree, so files
+that depend on attributes for content conversion may count as changed.
 
-Pull requests are looked up by head branch, including branches with numeric
-names. The head repository's owner and name must match the branch's GitHub
-push repository, reported as `git.pushRepository` when resolvable. The
+Pull requests are looked up by head owner and branch, including branches
+with numeric names. The head repository's owner and name must match the
+branch's GitHub push repository, reported as `git.pushRepository` when
+resolvable. Stargate fetches check results for the matching PR. The
 lookup targets the GitHub repository at `origin`, or the push repository
 when `origin` has no GitHub URL. A failed or incomplete refresh retains the
 last successful result. For a crew context, `pullRequestKnown: true` means its
@@ -123,23 +128,29 @@ means no matching PR was found.
 
 Use a streaming browser `fetch` with an `Authorization` header. A connection
 gets a `fleet` event with host and gateway information, followed by the
-available `ship` details. One shared poller reads the overview every three
+initial `ship` details. One shared poller reads the overview every three
 seconds while clients are connected and publishes changed overviews independently
-of ship details. Each ship detail has its own 20-second deadline. A timed-out
-read keeps its slot until it settles, with at most one read in flight per
-ship. Each successful sample publishes a ship event with its
-`detailUpdatedAt`, including when the rest of the detail is unchanged. If a
-refresh fails, `detailStale` is set to `true` on the last successful detail,
-which keeps its original sample time. A successful refresh clears
-`detailStale`. The stream also sends `host` every ten seconds and `heartbeat`
-every fifteen seconds.
+of ship details. Overview and ship reads have 20-second deadlines and
+keep their slots until they settle. Changed details emit a full `ship`
+event with `detailUpdatedAt`. Timestamp-only refreshes emit
+`ship-sampled` with `id` and `detailUpdatedAt`. Clients can use this event
+to update the timestamp on the cached detail. If a refresh fails,
+`detailStale` is set to `true` on the last successful detail, which keeps
+its original sample time. A crew failure before the first successful
+detail emits an unavailable `ship` with an `error` field. A successful
+refresh clears `detailStale`. Availability activity follows the overview's
+availability transitions. The stream also sends `host` every ten seconds
+and `heartbeat` every fifteen seconds.
 
-The overview and ship details share one crew status read per ship per poll.
-Each crew read has a one-second deadline. If it fails, the overview marks
-the ship unavailable and uses its last successful crew counts if available.
-An OpenCode plugin's explicit missing-method response or three consecutive
-non-cancellation failures pause `fleetStatus` probes for one minute.
-Stargate uses ordinary crew status during the pause.
+The overview and ship details share one crew read per ship. Each caller waits
+up to one second, and a disconnected caller cancels its own wait. The shared
+read can take up to 20 seconds. If a caller's wait expires during a refresh,
+it can use a successful sample from the previous five seconds. After a
+failure or when no fresh sample is available, the overview marks the ship
+unavailable and retains its last successful crew counts if available.
+OpenCode `fleetStatus` probes have a 400 ms budget so ordinary crew status
+can run on probe failure. An explicit missing-method response or three
+consecutive failures, including probe timeouts, pause probes for one minute.
 
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git
