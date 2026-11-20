@@ -304,6 +304,7 @@ export async function startApiV1Server(options: Options) {
     lifetime.abort();
     host.stop();
     events.stop();
+    await source.stop?.();
     throw new Error(
       `Cannot start Fleet API listener on ${config.listen}. Check that the private address is assigned and the port is free.`,
     );
@@ -311,12 +312,14 @@ export async function startApiV1Server(options: Options) {
 
   let stopping: Promise<void> | undefined;
   const stop = () => {
-    if (stopping) return stopping;
+    if (stopping !== undefined) return stopping;
     options.signal.removeEventListener("abort", onAbort);
     lifetime.abort();
     host.stop();
     events.stop();
-    stopping = server.stop();
+    stopping = Promise.all([server.stop(), source.stop?.()]).then(
+      () => undefined,
+    );
     return stopping;
   };
   const onAbort = () => {

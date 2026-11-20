@@ -31,6 +31,7 @@ import {
   type V1CrewContext,
   type V1CrewMember,
   type V1Fleet,
+  type V1Git,
   type V1Ship,
   type V1Subagent,
   type V1Task,
@@ -46,7 +47,12 @@ export type ApiV1Deps = {
   config: () => ApiV1Config;
   now?: () => number;
   dataDirectory?: string;
-  git?: ReturnType<typeof createGitReader>;
+  git?: ((
+    directory: string | undefined,
+    signal: AbortSignal,
+  ) => Promise<V1Git | null>) & {
+    stop?(): Promise<void>;
+  };
   pullRequest?: ReturnType<typeof createPullReader>;
 };
 
@@ -535,6 +541,9 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   }
 
   return {
+    async stop() {
+      await git.stop?.();
+    },
     shipIdentities() {
       const identities = new Map<string, string>();
       for (const [id, registration] of registrations(deps.config())) {

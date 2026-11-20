@@ -2,6 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { appendFileSync, constants, fstatSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   open,
@@ -583,6 +584,85 @@ test("rejects the temporary snapshot fallback inside the checkout", async () => 
   }
 });
 
+test("leaves a planted temporary snapshot directory untouched", async () => {
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "stargate-api-git-")),
+  );
+  const checkout = join(root, "checkout");
+  const planted = join(root, "stargate-git-status");
+  const stale = join(planted, "stargate-git-status-Stale1");
+  const parents: string[] = [];
+  const reader = () =>
+    createGitReader(
+      Date.now,
+      async (args, options) => {
+        const snapshot = options.env["GIT_DIR"];
+        if (snapshot && args.includes("status"))
+          parents.push(dirname(snapshot));
+        return readCommand(args, options);
+      },
+      undefined,
+      () => root,
+    );
+  const first = reader();
+  const second = reader();
+  try {
+    await mkdir(checkout);
+    git(checkout, "init", "-b", "main");
+    await mkdir(planted, { mode: 0o700 });
+    await mkdir(stale, { mode: 0o700 });
+    const old = new Date(Date.now() - 25 * 60 * 60_000);
+    await utimes(stale, old, old);
+    const signal = new AbortController().signal;
+    const results = await Promise.all([
+      first(checkout, signal),
+      second(checkout, signal),
+    ]);
+    expect(results).toMatchObject([{ changedFiles: 0 }, { changedFiles: 0 }]);
+    expect(parents).toHaveLength(2);
+    const [parent] = parents;
+    if (!parent) throw new Error("No temporary snapshot directory");
+    expect(dirname(parent)).toBe(root);
+    expect(parent).not.toBe(planted);
+    expect(parents).toEqual([parent, parent]);
+    expect((await stat(parent)).mode & 0o777).toBe(0o700);
+    expect((await stat(parent)).uid).toBe(process.getuid?.() ?? -1);
+    await first.stop();
+    expect((await stat(parent)).isDirectory()).toBe(true);
+    await second.stop();
+    expect((await readdir(root)).sort()).toEqual([
+      "checkout",
+      "stargate-git-status",
+    ]);
+    expect(await readdir(planted)).toEqual(["stargate-git-status-Stale1"]);
+  } finally {
+    await Promise.all([first.stop(), second.stop()]);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a snapshot root with a writable non-sticky ancestor", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const shared = join(root, "shared");
+  const unsafe = join(shared, "private");
+  const checkout = join(root, "checkout");
+  const read = createGitReader(Date.now, readCommand, unsafe, () => unsafe);
+  try {
+    await mkdir(shared);
+    await chmod(shared, 0o777);
+    await mkdir(unsafe, { mode: 0o700 });
+    await mkdir(checkout);
+    git(checkout, "init", "-b", "main");
+    expect(await read(checkout, new AbortController().signal)).toMatchObject({
+      error: "Git state unavailable.",
+    });
+    expect(await readdir(unsafe)).toEqual([]);
+  } finally {
+    await read.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a temporary root reached through a symlink is checked and used canonically", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const outside = await mkdtemp(join(tmpdir(), "stargate-api-git-tmp-"));
@@ -618,7 +698,7 @@ test("a temporary root reached through a symlink is checked and used canonically
         () => link,
       )(directory, AbortSignal.timeout(3000)),
     ).toMatchObject({ changedFiles: 1 });
-    expect(parent).toBe(join(await realpath(outside), "stargate-git-status"));
+    expect(parent && dirname(parent)).toBe(await realpath(outside));
   } finally {
     await rm(directory, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
@@ -1110,7 +1190,8 @@ test("startup sweeps old Git snapshots only inside the private snapshot director
     await Promise.all(
       [stale, unrelated, linkedStale].map((path) => utimes(path, old, old)),
     );
-    createGitReader(Date.now, readCommand, linkedRoot, () => data);
+    createGitReader(Date.now, readCommand, linkedRoot);
+    createGitReader(Date.now, readCommand, data);
     await waitForRemoval(snapshots, "stargate-git-status-Stale1");
     expect(await readdir(unrelated)).toEqual(["stargate-git-status-Stale2"]);
     expect(await readdir(snapshots)).toEqual(["stargate-git-status-Fresh1"]);

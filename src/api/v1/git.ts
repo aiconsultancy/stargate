@@ -233,48 +233,116 @@ async function privateStatusDirectory(path: string) {
   return undefined;
 }
 
-async function createStatusDirectory(
-  checkout: string,
-  dataDirectory?: string,
-  temporaryDirectory: () => string = tmpdir,
-) {
-  const root = await realpath(checkout);
-  // The private snapshot would appear as untracked files inside the worktree.
-  const outsideCheckout = (path: string) => {
-    const child = relative(root, path);
-    return child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child);
-  };
-  // The chosen root and its ancestors must be protected from replacement by
-  // other users. A sticky world-writable root such as /tmp is fine.
-  const create = async (directory: string) => {
-    const parent = join(await realpath(directory), statusDirectoryName);
-    if (!outsideCheckout(parent)) return undefined;
-    await mkdir(parent, { mode: 0o700 }).catch((error: unknown) => {
-      if (fileError(error) !== "EEXIST") throw error;
-    });
-    if (!(await privateStatusDirectory(parent))) return undefined;
-    const canonical = await realpath(parent);
-    return outsideCheckout(canonical)
-      ? mkdtemp(join(canonical, statusDirectoryPrefix))
-      : undefined;
-  };
-  if (dataDirectory) {
-    try {
-      const path = await create(dataDirectory);
-      if (path) return path;
-    } catch (error) {
-      if (
-        !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
-          String(fileError(error)),
-        )
-      )
-        throw error;
-    }
+async function trustedStatusRoot(path: string, serviceOwned = false) {
+  const canonical = await realpath(path).catch(() => undefined);
+  if (!canonical) return undefined;
+  const uid = process.getuid?.();
+  // Walk from the root so each directory entry is protected before use.
+  // Sticky directories protect entries owned by root or the service user.
+  let ancestor: string = sep;
+  for (const part of canonical.split(sep)) {
+    ancestor = join(ancestor, part);
+    const info = await lstat(ancestor).catch(() => undefined);
+    if (
+      !info?.isDirectory() ||
+      (info.uid !== uid &&
+        (info.uid !== 0 || (serviceOwned && ancestor === canonical))) ||
+      (info.mode & 0o022 && !(info.mode & 0o1000))
+    )
+      return undefined;
   }
-  const path = await create(temporaryDirectory());
-  if (!path)
-    throw new Error("No private Git status directory outside checkout");
-  return path;
+  return canonical;
+}
+
+const temporaryStatusRoots = new Map<
+  string,
+  { path: Promise<string>; readers: number }
+>();
+
+function retainTemporaryStatusRoot(directory: string) {
+  let root = temporaryStatusRoots.get(directory);
+  if (!root) {
+    const path = mkdtemp(join(directory, statusDirectoryPrefix)).then(
+      async (path) => {
+        const info = await privateStatusDirectory(path);
+        if (info && (info.mode & 0o7777) === 0o700) return path;
+        await removeStatusDirectory(path);
+        throw new Error("Invalid private Git status directory");
+      },
+    );
+    root = { path, readers: 0 };
+    temporaryStatusRoots.set(directory, root);
+  }
+  const retained = root;
+  retained.readers++;
+  return {
+    path: retained.path,
+    async release() {
+      if (--retained.readers !== 0) return;
+      temporaryStatusRoots.delete(directory);
+      const path = await retained.path.catch(() => undefined);
+      if (path) await removeStatusDirectory(path);
+    },
+  };
+}
+
+function statusDirectories(
+  dataDirectory: string | undefined,
+  temporaryDirectory: () => string,
+) {
+  let temporaryRoot: ReturnType<typeof retainTemporaryStatusRoot> | undefined;
+  return {
+    async snapshot(checkout: string) {
+      const root = await realpath(checkout);
+      // The snapshot would appear as untracked files inside the worktree.
+      const outsideCheckout = (path: string) => {
+        const child = relative(root, path);
+        return (
+          child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)
+        );
+      };
+      if (dataDirectory) {
+        try {
+          const data = await trustedStatusRoot(dataDirectory, true);
+          const parent = data && join(data, statusDirectoryName);
+          if (parent && outsideCheckout(parent)) {
+            await mkdir(parent, { mode: 0o700 }).catch((error: unknown) => {
+              if (fileError(error) !== "EEXIST") throw error;
+            });
+            if (await privateStatusDirectory(parent))
+              return await mkdtemp(join(parent, statusDirectoryPrefix));
+          }
+        } catch (error) {
+          if (
+            !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
+              String(fileError(error)),
+            )
+          )
+            throw error;
+        }
+      }
+      if (!temporaryRoot) {
+        const temporary = await trustedStatusRoot(temporaryDirectory());
+        if (!temporary || !outsideCheckout(temporary))
+          throw new Error("No private Git status directory outside checkout");
+        temporaryRoot ??= retainTemporaryStatusRoot(temporary);
+      }
+      const retained = temporaryRoot;
+      const parent = await retained.path.catch(async (error: unknown) => {
+        if (temporaryRoot === retained) {
+          temporaryRoot = undefined;
+          await retained.release();
+        }
+        throw error;
+      });
+      if (!outsideCheckout(parent))
+        throw new Error("No private Git status directory outside checkout");
+      return mkdtemp(join(parent, statusDirectoryPrefix));
+    },
+    async stop() {
+      await temporaryRoot?.release();
+    },
+  };
 }
 
 async function removeStatusDirectory(path: string) {
@@ -282,7 +350,7 @@ async function removeStatusDirectory(path: string) {
 }
 
 async function sweepStatusDirectories(root: string) {
-  const canonical = await realpath(root).catch(() => undefined);
+  const canonical = await trustedStatusRoot(root, true);
   if (!canonical) return;
   const directory = join(canonical, statusDirectoryName);
   if (!(await privateStatusDirectory(directory))) return;
@@ -339,8 +407,7 @@ async function prepareStatus(
   runWithEnv: (env: NodeJS.ProcessEnv, ...args: string[]) => ReturnType<RunGit>,
   command: typeof readCommand,
   ownDirectory: (path: string) => void,
-  dataDirectory?: string,
-  temporaryDirectory?: () => string,
+  createStatusDirectory: (checkout: string) => Promise<string>,
 ) {
   const [paths, settings, excludes] = await Promise.all([
     run(
@@ -402,11 +469,7 @@ async function prepareStatus(
 
   // Status only sees this repository's config, HEAD, index and object store.
   // Never copy executable settings, hooks, info/attributes or a commondir.
-  const gitDir = await createStatusDirectory(
-    directory,
-    dataDirectory,
-    temporaryDirectory,
-  );
+  const gitDir = await createStatusDirectory(directory);
   ownDirectory(gitDir);
   signal.throwIfAborted();
   const configuredExcludes =
@@ -531,8 +594,7 @@ async function inspect(
   signal: AbortSignal,
   command: typeof readCommand,
   ownDirectory: (path: string) => void,
-  dataDirectory?: string,
-  temporaryDirectory?: () => string,
+  createStatusDirectory: (checkout: string) => Promise<string>,
 ): Promise<V1Git | null> {
   const state = emptyState(now());
   let deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
@@ -625,8 +687,7 @@ async function inspect(
       runWithEnv,
       command,
       ownDirectory,
-      dataDirectory,
-      temporaryDirectory,
+      createStatusDirectory,
     );
     deadline.throwIfAborted();
     // Snapshot I/O and index inspection have a separate budget from status.
@@ -687,6 +748,11 @@ async function inspect(
   }
 }
 
+type GitReader = {
+  (directory: string | undefined, signal: AbortSignal): Promise<V1Git | null>;
+  stop(): Promise<void>;
+};
+
 export function createGitReader(
   now: () => number = Date.now,
   command = readCommand,
@@ -698,8 +764,12 @@ export function createGitReader(
   // The whole read's budget, waiting for a slot included. A timeout counts as
   // the checkout's own when it got a slot with at least half of it left.
   readMs: number = 2 * timeout,
-) {
+): GitReader {
   const permits = Semaphore.makeUnsafe(4);
+  const directories = statusDirectories(dataDirectory, temporaryDirectory);
+  const lifetime = new AbortController();
+  const reads = new Set<Promise<void>>();
+  let stopping: Promise<void> | undefined;
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
   let sweptAt = Number.NEGATIVE_INFINITY;
   function cacheResult(directory: string, value: V1Git | null, ms = ttl) {
@@ -713,16 +783,15 @@ export function createGitReader(
     cache.set(directory, { expiresAt: at + ms, value });
     return value;
   }
-  void runAbortable(
-    permits.withPermit(
-      abortable(async () => {
-        for (const root of new Set([dataDirectory, temporaryDirectory()]))
-          if (root) await sweepStatusDirectories(root);
-      }),
-    ),
-    new AbortController().signal,
-  ).catch(() => {});
-  return async (directory: string | undefined, signal: AbortSignal) => {
+  if (dataDirectory)
+    void runAbortable(
+      permits.withPermit(
+        abortable(() => sweepStatusDirectories(dataDirectory)),
+      ),
+      lifetime.signal,
+    ).catch(() => {});
+  async function read(directory: string | undefined, caller: AbortSignal) {
+    const signal = AbortSignal.any([caller, lifetime.signal]);
     signal.throwIfAborted();
     if (!directory || !isAbsolute(directory)) return null;
     const cached = cache.get(directory);
@@ -739,7 +808,7 @@ export function createGitReader(
     try {
       return await readWithDeadline(signal, readMs, (deadline) => {
         const reply = Promise.withResolvers<V1Git | null>();
-        void runAbortable(
+        const task = runAbortable(
           permits.withPermit(
             abortable(async (reading) => {
               startedAt = monotonic();
@@ -758,8 +827,7 @@ export function createGitReader(
                   (path) => {
                     snapshot = path;
                   },
-                  dataDirectory,
-                  temporaryDirectory,
+                  directories.snapshot,
                 );
                 deadline.throwIfAborted();
                 reply.resolve(cacheResult(directory, value));
@@ -773,7 +841,10 @@ export function createGitReader(
             }),
           ),
           deadline,
-        ).catch(reply.reject);
+        )
+          .catch(reply.reject)
+          .finally(() => reads.delete(task));
+        reads.add(task);
         return reply.promise;
       }).result;
     } catch (error) {
@@ -787,5 +858,12 @@ export function createGitReader(
         startedAt !== undefined && budgetEnds - startedAt >= readMs / 2;
       return cacheResult(directory, timedOut, own ? ttl : readMs / 2);
     }
-  };
+  }
+  return Object.assign(read, {
+    stop() {
+      lifetime.abort();
+      stopping ??= Promise.all(reads).then(() => directories.stop());
+      return stopping;
+    },
+  });
 }

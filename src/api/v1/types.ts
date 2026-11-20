@@ -296,6 +296,7 @@ export type V1ShipRead = (
 
 /** What the projection provides to the HTTP layer. */
 export interface ApiV1Source {
+  stop?(): Promise<void>;
   /** Fleet without host/gateway. The poller can reuse its captured crew reads. */
   fleet(
     signal: AbortSignal,
