@@ -393,6 +393,7 @@ function openCodeStreamFixture(
     active: boolean;
     running?: boolean;
     unrelated?: number;
+    stale?: number;
     waitForList?: Promise<void>;
   },
 ) {
@@ -401,6 +402,7 @@ function openCodeStreamFixture(
   const disconnected = Promise.withResolvers<void>();
   const interrupted = Promise.withResolvers<void>();
   const checked = Promise.withResolvers<void>();
+  const checkedAgain = Promise.withResolvers<void>();
   const formListing = Promise.withResolvers<void>();
   const reconnected = Promise.withResolvers<void>();
   let placed = !queued;
@@ -410,6 +412,7 @@ function openCodeStreamFixture(
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
   let sequence = 0;
   let historyReads = 0;
+  let inboxReads = 0;
   let inputId = "";
   let admissions = 0;
   let eventConnections = 0;
@@ -422,6 +425,24 @@ function openCodeStreamFixture(
       tool: { messageID: "old-answer", id: "call_earlier" },
     },
   };
+  const forms = pendingQuestion
+    ? [
+        ...Array.from({ length: pendingQuestion.unrelated ?? 0 }, (_, i) => ({
+          ...form,
+          id: `form_unrelated_${i}`,
+          metadata: {},
+        })),
+        ...Array.from({ length: pendingQuestion.stale ?? 0 }, (_, i) => ({
+          ...form,
+          id: `form_stale_${i}`,
+          metadata: {
+            kind: "question",
+            tool: { messageID: "settled-answer", id: "call_earlier" },
+          },
+        })),
+        form,
+      ]
+    : [];
   const encoder = new TextEncoder();
   const emit = (type: string, data: Record<string, unknown>) => {
     if (!stream) throw new Error("Fixture SSE connection is not open");
@@ -445,16 +466,19 @@ function openCodeStreamFixture(
       if (path.endsWith("/form")) {
         formListing.resolve();
         await pendingQuestion?.waitForList;
-        const unrelated = Array.from(
-          { length: pendingQuestion?.unrelated ?? 0 },
-          (_, i) => ({ ...form, id: `form_${i}`, metadata: {} }),
-        );
-        return Response.json({
-          data: pendingQuestion ? [...unrelated, form] : [],
-        });
+        return Response.json({ data: forms });
       }
-      if (path.endsWith("/form/form_earlier"))
-        return Response.json({ data: form });
+      const detail = forms.find(({ id }) => path.endsWith(`/form/${id}`));
+      if (detail) return Response.json({ data: detail });
+      if (path.endsWith("/message/settled-answer"))
+        return Response.json({
+          data: {
+            id: "settled-answer",
+            type: "assistant",
+            time: { created: 1, completed: 2 },
+            content: [],
+          },
+        });
       if (path === "/api/session/active")
         return Response.json({
           data: pendingQuestion?.active ? { "session-current": true } : {},
@@ -566,6 +590,7 @@ function openCodeStreamFixture(
       if (path.endsWith("/inbox") && request.method === "GET") {
         if (deliverDuringCheck) placed = true;
         checked.resolve();
+        if (++inboxReads === 2) checkedAgain.resolve();
         return Response.json({
           data: placed ? [] : [{ id: inputId, type: "user" }],
         });
@@ -602,6 +627,7 @@ function openCodeStreamFixture(
     input: () => inputId,
     admissions: () => admissions,
     checked: checked.promise,
+    checkedAgain: checkedAgain.promise,
     place: () => {
       placed = true;
     },
@@ -846,13 +872,13 @@ const humanIrcSource = {
   },
 } as const;
 
-test("OpenCode finds a running IRC question after unrelated forms without status notices", async () => {
+test("OpenCode finds a running IRC question after unrelated and settled forms without status notices", async () => {
   const fixture = openCodeStreamFixture(
     false,
     false,
     undefined,
     {},
-    { active: true, unrelated: 16 },
+    { active: true, unrelated: 16, stale: 16 },
   );
   try {
     await expect(
@@ -1023,6 +1049,50 @@ test("OpenCode reports metadata for the exact inbox item and its own assistant",
       "tool",
     ]);
     expect(JSON.stringify(observed)).not.toContain("PRIVATE TOOL INPUT");
+    expect(fixture.admissions()).toBe(1);
+  } finally {
+    controller.abort();
+    await result.catch(() => {});
+    await fixture.close();
+  }
+});
+
+test("OpenCode rechecks uncertain ownership on a later tool event", async () => {
+  const fixture = openCodeStreamFixture(true);
+  const controller = new AbortController();
+  const toolReported = Promise.withResolvers<void>();
+  const result = fixture.backend.prompt(
+    "session-current",
+    "New IRC request",
+    controller.signal,
+    undefined,
+    undefined,
+    undefined,
+    humanIrcSource,
+    ({ stage }) => {
+      if (stage === "tool") toolReported.resolve();
+    },
+  );
+  try {
+    await fixture.waiting;
+    const owner = {
+      sessionID: "session-current",
+      assistantMessageID: "answer-current",
+    };
+    fixture.emit("session.reasoning.started", { ...owner, ordinal: 0 });
+    await fixture.checkedAgain;
+    // Both initial reads saw a queued input. Let the later event recheck it.
+    await Bun.sleep(300);
+    fixture.place();
+    fixture.emit("session.tool.called", {
+      ...owner,
+      id: "tool-call",
+      input: {},
+      executed: true,
+    });
+    await toolReported.promise;
+    fixture.finish();
+    expect(await result).toBe("Canonical final answer.");
     expect(fixture.admissions()).toBe(1);
   } finally {
     controller.abort();

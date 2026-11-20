@@ -1218,7 +1218,8 @@ export class OpenCodeBackend implements AgentBackend {
     if (!candidates.length) return false;
     const active = await this.client.session.active({ signal });
     if (!active[sessionID]) return false;
-    for (const form of candidates.slice(0, 16)) {
+    for (const form of candidates) {
+      signal.throwIfAborted();
       const running = await this.runningQuestion(
         sessionID,
         form.id,
@@ -1272,7 +1273,10 @@ export class OpenCodeBackend implements AgentBackend {
     let admitted = false;
     const currentPhase = (): Phase => phase;
     const messages = new Map<string, Map<number, string>>();
-    const ownership = new Map<string, "checking" | "owned" | "excluded">();
+    const ownership = new Map<
+      string,
+      "checking" | "owned" | "excluded" | { retryAt: number; delayMs: number }
+    >();
     const checks = new Set<Promise<void>>();
     const pendingProgress = new Map<
       string,
@@ -1392,7 +1396,12 @@ export class OpenCodeBackend implements AgentBackend {
         if (status === "owned") {
           reportOwned(assistantMessageID);
           publish();
-        } else if (status === undefined) {
+        } else if (
+          status === undefined ||
+          (typeof status === "object" &&
+            event.type !== "session.text.delta" &&
+            Date.now() >= status.retryAt)
+        ) {
           ownership.set(assistantMessageID, "checking");
           // Events identify the session and assistant, not its input.
           // Only transcript placement proves this is not a queued prior turn.
@@ -1406,15 +1415,27 @@ export class OpenCodeBackend implements AgentBackend {
             ).catch(() => undefined);
           const check = readOwner()
             .then(async (owned) => {
-              // Retry one early/unreadable observation. Previous turns
-              // cannot trigger a new history walk on each streamed delta.
-              if (owned !== undefined || !onProgress) return owned;
+              // First observations can lead the history projection. Later
+              // state changes can retry with backoff without polling deltas.
+              if (owned !== undefined || !onProgress || status !== undefined)
+                return owned;
               await delay(ownershipRetryMs, undefined, {
                 signal: readSignal,
               });
               return readOwner();
             })
             .then((owned) => {
+              if (owned === undefined && onProgress) {
+                const delayMs =
+                  typeof status === "object"
+                    ? status.delayMs
+                    : ownershipRetryMs;
+                ownership.set(assistantMessageID, {
+                  retryAt: Date.now() + delayMs,
+                  delayMs: Math.min(delayMs * 2, 10_000),
+                });
+                return;
+              }
               ownership.set(assistantMessageID, owned ? "owned" : "excluded");
               if (owned) {
                 if (currentPhase().type !== "settled")
