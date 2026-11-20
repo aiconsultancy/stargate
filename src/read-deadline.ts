@@ -1,10 +1,13 @@
 /** Deliver the deadline separately from the lifetime of the underlying read. */
 export function readWithDeadline<T>(
   parent: AbortSignal,
-  timeout: number,
+  timeout: number | undefined,
   read: (signal: AbortSignal) => Promise<T>,
 ) {
-  const signal = AbortSignal.any([parent, AbortSignal.timeout(timeout)]);
+  const signal =
+    timeout === undefined
+      ? parent
+      : AbortSignal.any([parent, AbortSignal.timeout(timeout)]);
   const aborted = Promise.withResolvers<never>();
   const abort = () => aborted.reject(signal.reason);
   signal.addEventListener("abort", abort, { once: true });

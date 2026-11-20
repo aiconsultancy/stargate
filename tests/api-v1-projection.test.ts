@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Schema } from "effect";
 import { diffEvents } from "../src/api/v1/diff";
 import { createEventStreams } from "../src/api/v1/events";
@@ -347,7 +347,40 @@ async function nextEvent(
 }
 
 describe("Fleet API projection", () => {
-  test("a timed-out OpenCode fleet probe leaves time for status and backs off", async () => {
+  test("OpenCode adapts to a fleet probe slower than its initial budget", async () => {
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch() {
+        await Bun.sleep(550);
+        return Response.json({
+          output: {
+            status: { members: [], total: 0, truncated: false },
+            metadata: { projectDirectory: "/fixture", contexts: [] },
+          },
+        });
+      },
+    });
+    const config = Schema.decodeUnknownSync(backendSchema)({
+      type: "opencode",
+      url: server.url.href,
+      directory: "/",
+    });
+    if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+    const backend = new OpenCodeBackend(config);
+    try {
+      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      for (let i = 0; i < 2; i++)
+        expect(await backend.fleetCrewStatus({}, signal)).toMatchObject({
+          metadata: { projectDirectory: "/fixture" },
+        });
+    } finally {
+      await backend.close();
+      await server.stop(true);
+    }
+  });
+
+  test("a timed-out OpenCode fleet probe leaves time for status and honours caller cancellation", async () => {
     const methods: string[] = [];
     const server = Bun.serve({
       hostname: "127.0.0.1",
@@ -374,42 +407,43 @@ describe("Fleet API projection", () => {
       while (!methods.length) await Bun.sleep(5);
       caller.abort();
       await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
-      for (let i = 0; i < 4; i++) {
-        const reading = AbortSignal.timeout(1_000);
-        expect(await backend.fleetCrewStatus({}, reading)).toBeUndefined();
-        expect(await backend.crewStatus({}, reading)).toMatchObject({
-          members: [],
-        });
-      }
-      expect(methods).toEqual([
-        "fleetStatus",
-        "fleetStatus",
-        "status",
-        "fleetStatus",
-        "status",
-        "fleetStatus",
-        "status",
-        "status",
-      ]);
+      const reading = AbortSignal.timeout(1_000);
+      expect(await backend.fleetCrewStatus({}, reading)).toBeUndefined();
+      expect(await backend.crewStatus({}, reading)).toMatchObject({
+        members: [],
+      });
+      expect(methods).toEqual(["fleetStatus", "fleetStatus", "status"]);
     } finally {
       await backend.close();
       await server.stop(true);
     }
   });
 
-  test("a slow crew sample can become available after the fleet wait expires", async () => {
+  test("the first fleet request waits for slow shared crew status", async () => {
     const f = fixture({ fleetCrewReadMs: 25 });
     const held = Promise.withResolvers<CrewStatus>();
     f.statuses.set("captain", held.promise);
-    const first = await f.source.fleet(signal);
-    expect(first.ships.find(({ id }) => id === "captain")?.available).toBe(
-      false,
-    );
+    const first = f.source.fleet(signal);
+    await Bun.sleep(60);
     held.resolve({ members: [context("pilot")], total: 1, truncated: false });
-    await Bun.sleep(0);
-    // The next read is slow too. It must be able to publish the late sample.
+    expect(
+      (await first).ships.find(({ id }) => id === "captain"),
+    ).toMatchObject({
+      available: true,
+      crew: { people: 1 },
+    });
+    expect(f.calls.status.filter((id) => id === "captain")).toHaveLength(1);
+  });
+
+  test("a refresh retains a crew sample older than five seconds until the new result arrives", async () => {
+    const f = fixture({ fleetCrewReadMs: 25 });
+    f.set("captain", [context("pilot")]);
+    await f.source.fleet(signal);
     const next = Promise.withResolvers<CrewStatus>();
     f.statuses.set("captain", next.promise);
+    const clock = spyOn(performance, "now").mockReturnValue(
+      performance.now() + 6_000,
+    );
     try {
       const fleet = await f.source.fleet(signal);
       expect(fleet.ships.find(({ id }) => id === "captain")).toMatchObject({
@@ -417,7 +451,20 @@ describe("Fleet API projection", () => {
         crew: { people: 1 },
       });
       expect(f.calls.status.filter((id) => id === "captain")).toHaveLength(2);
+      next.resolve({
+        members: [context("pilot"), context("navigator")],
+        total: 2,
+        truncated: false,
+      });
+      await Bun.sleep(0);
+      expect(
+        (await f.source.fleet(signal)).ships.find(({ id }) => id === "captain"),
+      ).toMatchObject({
+        available: true,
+        crew: { people: 2 },
+      });
     } finally {
+      clock.mockRestore();
       next.resolve({ members: [], total: 0, truncated: false });
     }
   });
@@ -599,7 +646,7 @@ describe("Fleet API projection", () => {
   });
 
   test("a stalled crew backend leaves healthy overview and detail updates streaming", async () => {
-    const f = fixture({ fleetCrewReadMs: 40, fleetCrewFreshMs: 40 });
+    const f = fixture({ fleetCrewReadMs: 40, fleetCrewDeadlineMs: 140 });
     f.set("other", [context("remote")]);
     f.set("captain", [context("pilot")]);
     const streams = fleetEvents(f.source, {

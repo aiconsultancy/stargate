@@ -163,6 +163,7 @@ function generationFailureKind(error: {
 export class OpenCodeBackend implements AgentBackend {
   private fleetStatusRetryAt = 0;
   private fleetStatusFailures = 0;
+  private fleetStatusProbeMs = 400;
 
   // Native messages/form IDs are immutable. Recheck their live tool/input state,
   // but do not traverse the entire session twice every second for the same form.
@@ -848,11 +849,12 @@ export class OpenCodeBackend implements AgentBackend {
   }
 
   async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+    const probeMs = this.fleetStatusProbeMs;
     try {
       signal.throwIfAborted();
       if (performance.now() < this.fleetStatusRetryAt) return undefined;
-      // Reserve part of the fleet wait for the ordinary status RPC.
-      const { result: probe } = readWithDeadline(signal, 400, (reading) =>
+      // Start with a short probe and leave time for ordinary crew status.
+      const { result: probe } = readWithDeadline(signal, probeMs, (reading) =>
         this.client.rpc(CrewReporting).fleetStatus(input, {
           location: { directory: this.config.directory },
           signal: reading,
@@ -864,6 +866,18 @@ export class OpenCodeBackend implements AgentBackend {
       return result;
     } catch (error) {
       signal.throwIfAborted();
+      const maxProbeMs = 6_400;
+      if (
+        error instanceof DOMException &&
+        error.name === "TimeoutError" &&
+        probeMs < maxProbeMs
+      ) {
+        this.fleetStatusProbeMs = Math.max(
+          this.fleetStatusProbeMs,
+          Math.min(probeMs * 2, maxProbeMs),
+        );
+        return undefined;
+      }
       // Older plugins still serve ordinary status. Probe again after an upgrade.
       const unsupported =
         error &&

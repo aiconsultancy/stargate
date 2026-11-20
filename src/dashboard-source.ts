@@ -115,7 +115,7 @@ const ROOT_CACHE_MS = 10_000;
 /** Subagents of subagents are rare; a deeper chain is refused, not followed. */
 const MAX_DEPTH = 8;
 const crewUnavailable = "Crew status unavailable.";
-const fleetCrewDeadlineMs = 20_000;
+const crewPollIntervalMs = 3_000;
 type CrewRead = {
   status: CrewStatus | null;
   error?: string;
@@ -136,7 +136,7 @@ export function dashboardSource(
   >,
   cronStore: Pick<CronStore, "report" | "recentRuns">,
   now: () => number = Date.now,
-  { fleetCrewReadMs = 1_000, fleetCrewFreshMs = 5_000 } = {},
+  { fleetCrewReadMs = 1_000, fleetCrewDeadlineMs = 20_000 } = {},
 ) {
   const crewRoots = new WeakMap<
     DashboardShip,
@@ -144,7 +144,11 @@ export function dashboardSource(
   >();
   const fleetCrew = new WeakMap<
     DashboardShip,
-    { latest?: CrewRead; freshUntil: number; pending?: Promise<CrewRead> }
+    {
+      latest?: CrewRead;
+      last?: { sample: CrewRead; at: number };
+      pending?: { result: Promise<CrewRead>; fallback: CrewRead | undefined };
+    }
   >();
 
   const find = (id: string) => ships.find((ship) => ship.bot.id === id);
@@ -240,7 +244,7 @@ export function dashboardSource(
     read: (reading: AbortSignal) => Promise<CrewRead>,
   ): Promise<CrewRead> {
     signal.throwIfAborted();
-    const slot = fleetCrew.get(key) ?? { freshUntil: 0 };
+    const slot = fleetCrew.get(key) ?? {};
     fleetCrew.set(key, slot);
     const unavailable = (): CrewRead => ({
       ...slot.latest,
@@ -254,17 +258,25 @@ export function dashboardSource(
         fleetCrewDeadlineMs,
         read,
       );
-      const failed = () => {
-        slot.freshUntil = 0;
-        return unavailable();
-      };
-      slot.pending = attempt.result.then((sample) => {
-        if (sample.error) return failed();
-        slot.latest = sample;
-        slot.freshUntil = performance.now() + fleetCrewFreshMs;
-        return sample;
-      }, failed);
-      void slot.pending
+      const last = slot.last;
+      // A recent sample stays usable throughout this refresh. A cold caller
+      // needs the shared result to establish availability.
+      const fallback =
+        last &&
+        (last.sample.error ||
+          performance.now() - last.at <
+            fleetCrewDeadlineMs + crewPollIntervalMs)
+          ? last.sample
+          : undefined;
+      const result = attempt.result
+        .then((sample) => (sample.error ? unavailable() : sample), unavailable)
+        .then((sample) => {
+          if (!sample.error) slot.latest = sample;
+          slot.last = { sample, at: performance.now() };
+          return sample;
+        });
+      slot.pending = { result, fallback };
+      void result
         .then(() => attempt.settled)
         .then(() => {
           delete slot.pending;
@@ -272,14 +284,15 @@ export function dashboardSource(
     }
     const pending = slot.pending;
     try {
-      return await readWithDeadline(signal, fleetCrewReadMs, () => pending)
-        .result;
-    } catch {
+      return await readWithDeadline(
+        signal,
+        pending.fallback ? fleetCrewReadMs : undefined,
+        () => pending.result,
+      ).result;
+    } catch (error) {
       signal.throwIfAborted();
-      // A successful read can arrive after an earlier caller's wait expired.
-      if (slot.latest && performance.now() < slot.freshUntil)
-        return slot.latest;
-      return unavailable();
+      if (pending.fallback) return slot.last?.sample ?? pending.fallback;
+      throw error;
     }
   }
 
