@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { createReadSlot, readWithDeadline } from "../../read-deadline";
 import type { V1EventSnapshot } from "./diff";
+import { hostSampleOrder } from "./host";
 import type {
   ApiV1Source,
   V1Event,
@@ -106,8 +107,20 @@ export function createEventStreams(
     }
 
     function newestHost(host: V1Host) {
-      if (!latestHost || host.sampledAt >= latestHost.sampledAt)
+      if (!latestHost) {
         latestHost = host;
+        return latestHost;
+      }
+      // Samples from the host sampler are ordered by when they were taken;
+      // `sampledAt` is only a fallback, because a wall-clock step backwards
+      // would make every later sample look older.
+      const next = hostSampleOrder(host);
+      const kept = hostSampleOrder(latestHost);
+      const newer =
+        next !== undefined && kept !== undefined
+          ? next >= kept
+          : host.sampledAt >= latestHost.sampledAt;
+      if (newer) latestHost = host;
       return latestHost;
     }
 

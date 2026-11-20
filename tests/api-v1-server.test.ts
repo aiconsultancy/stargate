@@ -728,6 +728,57 @@ test("host frames use the fresh sample and keep it while the next disk read stal
   }
 });
 
+test("host samples stay in the order they were taken when the wall clock steps back", async () => {
+  // Real samples from the host sampler, so they carry their sampling order.
+  const metrics = startHostMetrics("/dev/fd");
+  const clock = spyOn(Date, "now");
+  const enrichment = Promise.withResolvers<V1Fleet>();
+  let streams: ReturnType<typeof createEventStreams> | undefined;
+  try {
+    clock.mockReturnValue(2_000_000);
+    const older = await metrics.read();
+    await Bun.sleep(5);
+    clock.mockReturnValue(1_000_000); // the wall clock steps back
+    await metrics.read();
+    const newer = metrics.snapshot();
+    clock.mockRestore(); // the stream itself runs on the real clock
+    expect(newer.sampledAt).toBeLessThan(older.sampledAt);
+    streams = createEventStreams(
+      {
+        ...source,
+        diff: diffEvents,
+        completeFleet: () => enrichment.promise,
+        // Like production, the fallback uses the sampler's own latest sample.
+        fallbackFleet: (fleet) => ({ ...fallbackFleet(fleet), host: newer }),
+        readHost: async () => newer,
+        snapshotHost: () => newer,
+      },
+      { pollMs: 1000, hostMs: 15, heartbeatMs: 1000 },
+    );
+    const reader = streams.open(AbortSignal.timeout(750))?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    expect(await nextFrame(reader, "host")).toContain(
+      `"sampledAt":${newer.sampledAt}`,
+    );
+    // Delayed enrichment carries the sample taken first, although its
+    // wall-clock time is later: the stream must keep the newer sample.
+    const enriched = fallbackFleet(overview);
+    enrichment.resolve({
+      ...enriched,
+      host: older,
+      gateway: { ...enriched.gateway, opencodeVersion: "2.3.2" },
+    });
+    expect(
+      await nextFrame(reader, "fleet", '"opencodeVersion":"2.3.2"'),
+    ).toContain(`"sampledAt":${newer.sampledAt}`);
+  } finally {
+    streams?.stop();
+    enrichment.resolve(fallbackFleet(overview));
+    clock.mockRestore();
+    metrics.stop();
+  }
+});
+
 test("delayed gateway enrichment keeps the newest host sample in the stream", async () => {
   const latest = { ...host, sampledAt: host.sampledAt + 100 };
   const enrichment = Promise.withResolvers<V1Fleet>();

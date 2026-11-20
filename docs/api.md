@@ -196,7 +196,11 @@ overview or gateway metadata changes, independently of ship details.
 In the event stream, overview reads have a 25-second deadline,
 and host and gateway enrichment and individual ship details each have a
 20-second deadline. Over HTTP, every read ends one second before the request
-deadline, so a fallback or an error can still be sent.
+deadline, so a fallback or an error can still be sent. Within that, `GET
+/api/v1/fleet` stops waiting for crew reads 5 seconds before its own deadline
+(14 seconds by default) and reports any captain that hasn't answered as
+unavailable. Ship and crew detail routes answer 503 while eight earlier detail
+reads are still settling.
 When an overview read fails or times out, the poller can republish the last
 successful overview with `overviewStale: true` and its original `generatedAt`.
 That fallback expires 75 seconds after the successful read and is discarded

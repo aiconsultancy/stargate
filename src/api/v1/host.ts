@@ -71,6 +71,16 @@ async function availableMemory() {
   return freemem();
 }
 
+// The order in which samples were taken, independent of the wall clock, so a
+// clock change cannot make a newer sample look older.
+const sampleOrder = new WeakMap<V1Host, number>();
+let sampleSequence = 0;
+
+/** When `host` was taken relative to other samples, if this module took it. */
+export function hostSampleOrder(host: V1Host): number | undefined {
+  return sampleOrder.get(host);
+}
+
 export function startHostMetrics(dataDirectory: string) {
   const lifetime = new AbortController();
   let cpu = cpuTotals(cpus());
@@ -85,7 +95,7 @@ export function startHostMetrics(dataDirectory: string) {
     availableBytes = freemem(),
   ): V1Host {
     const [short = 0, medium = 0, long = 0] = loadavg();
-    return {
+    const sample: V1Host = {
       hostname: hostname(),
       platform: platform(),
       arch: arch(),
@@ -95,6 +105,8 @@ export function startHostMetrics(dataDirectory: string) {
       disks,
       sampledAt: Date.now(),
     };
+    sampleOrder.set(sample, ++sampleSequence);
+    return sample;
   }
 
   async function sample() {
