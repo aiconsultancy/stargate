@@ -13,7 +13,11 @@ const input = "msg_original";
 const assistant = "msg_question";
 const formID = "frm_question";
 
-function fixture(injected = false) {
+function fixture(
+  injected = false,
+  originType = "user",
+  metadata?: Record<string, unknown>,
+) {
   const form = {
     id: formID,
     sessionID: session,
@@ -108,7 +112,8 @@ function fixture(injected = false) {
         return Response.json({
           data: {
             id: input,
-            type: "user",
+            type: originType,
+            ...(metadata ? { metadata } : {}),
             text: "Original request",
             time: { created: 1 },
           },
@@ -130,7 +135,8 @@ function fixture(injected = false) {
             message,
             {
               id: origin,
-              type: "user",
+              type: originType,
+              ...(metadata ? { metadata } : {}),
               text: "Original request",
               time: { created: 1 },
             },
@@ -148,6 +154,7 @@ function fixture(injected = false) {
         return Response.json({
           data: {
             id: session,
+            location: { directory: "/workspace" },
             time: {
               created: 0,
               updated: 4,
@@ -473,4 +480,39 @@ test("crew form adapter uses its verified injected client, not fallback service 
       body: { answer: { q0: "wait" } },
     },
   ]);
+});
+
+test("only standalone synthetic input can be claimed outside its original thread", async () => {
+  const signal = AbortSignal.timeout(5000);
+  for (const source of [
+    fixture(),
+    fixture(false, "synthetic", { taskID: "owned" }),
+  ]) {
+    expect(await source.backend.pinnedBackgroundQuestions(signal)).toEqual([]);
+    expect(source.writes).toEqual([]);
+  }
+  const standalone = fixture(false, "synthetic");
+  const [q] = await standalone.backend.pinnedBackgroundQuestions(signal);
+  if (!q) throw new Error("Missing synthetic question");
+  await expect(
+    standalone.backend.replyQuestion(q, { q0: "wait" }, signal, () => false),
+  ).rejects.toThrow();
+  expect(standalone.writes).toEqual([]);
+  await standalone.backend.replyQuestion(q, { q0: "wait" }, signal, () => true);
+  expect(
+    await standalone.backend.backgroundOutcome(
+      session,
+      formID,
+      q.fingerprint,
+      signal,
+    ),
+  ).toBe("answered");
+  expect(
+    await standalone.backend.backgroundOutcome(
+      session,
+      formID,
+      "wrong",
+      signal,
+    ),
+  ).toBeUndefined();
 });

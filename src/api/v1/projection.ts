@@ -37,6 +37,10 @@ import {
 } from "./types";
 
 export type ApiV1Deps = {
+  requests?: (
+    registration: Registration,
+    at: number,
+  ) => NonNullable<V1Captain["requests"]>;
   dashboard: DashboardFleetSource;
   /** Loaded settings, including any committed live reload. */
   config: () => ApiV1Config;
@@ -259,6 +263,11 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     return {
       id,
       name: redactCredentials(name, 100),
+      ...(registration.kind === "irc" &&
+      registration.config.features.liveProgress &&
+      deps.requests
+        ? { requests: deps.requests(registration, at) }
+        : {}),
       role: role(registration),
       transport: registration.kind,
       backend: backend.type,

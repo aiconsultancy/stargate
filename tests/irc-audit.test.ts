@@ -1098,3 +1098,96 @@ test("strict human-wake catch-up never redirects historical DMs before the repla
   );
   expect(resumed.prompts).toEqual([]);
 }, 10_000);
+
+test("private operator controls stay out of the model and audit, including replay and a wrong account", async () => {
+  const { fake, store, captain, prompts } = await setup({
+    extra: {
+      features: { questions: true },
+      questionOperator: "operator",
+      access: { allowedAccounts: ["operator", "other"] },
+      fleetPolicy: {
+        role: "captain",
+        humanAccounts: ["operator", "other"],
+        agentAccounts: [captainAccount, chiefAccount],
+        assignedCheckout: "/workspace",
+        capabilities: ["read_code"],
+      },
+    },
+  });
+  const q = store.backgroundCases.remember(captain.key, "operator", {
+    id: "form_1",
+    sessionID: "ses_captain",
+    inputID: "msg_orphan",
+    toolMessageID: "msg_tool",
+    toolCallID: "call_1",
+    fingerprint: "a".repeat(64),
+    title: "Private",
+    fields: [{ key: "q0", type: "string" }],
+  });
+  if (!q) throw new Error("Missing case");
+  const token = store.backgroundCases.show(q.reference);
+  if (!token) throw new Error("Missing token");
+  const route = captain.transport.questions?.operator;
+  if (!route) throw new Error("Missing configured route");
+  fake.setUser("operator", "operator");
+  await route.send("private outgoing form", () => true);
+  await until(
+    () =>
+      fake
+        .received(captainAccount)
+        .some((l) => l.includes("PRIVMSG operator :private outgoing form")),
+    3000,
+    "bound DM",
+  );
+  const seen: string[] = [];
+  captain.operatorQuestion = async (actor, text, connected) => {
+    if (connected()) seen.push(actor + " " + text);
+  };
+  const op = { nick: "operator", account: "operator" };
+  fake.sendTo(captainAccount, ":fixture BATCH +old chathistory operator");
+  fake.say(op, captainAccount, "show " + q.reference, { batch: "old" });
+  fake.sendTo(captainAccount, ":fixture BATCH -old");
+  fake.say(
+    { nick: "other", account: "other" },
+    captainAccount,
+    "answer " + token + " forbidden",
+  );
+  fake.say(op, captainAccount, "show " + q.reference);
+  fake.say(op, captainAccount, "answer " + token + " private-choice");
+  await until(() => seen.length >= 2, 3000, "live operator controls");
+  expect(seen).toEqual([
+    "operator show " + q.reference,
+    "operator answer " + token + " private-choice",
+  ]);
+  expect(prompts).toEqual([]);
+  expect(store.queueCounts(captain.key).queued).toBe(0);
+  expect(mirror(fake).join(" ")).not.toMatch(
+    /private-choice|private outgoing form|forbidden|show Q/,
+  );
+});
+
+test("private clarification configuration requires an admitted human and a pinned OpenCode captain", () => {
+  const policy = {
+    role: "captain",
+    humanAccounts: ["operator"],
+    agentAccounts: [captainAccount],
+    assignedCheckout: "/workspace",
+    capabilities: ["read_code"],
+  };
+  const config = shipConfig(6667, {
+    features: { questions: true },
+    questionOperator: "operator",
+    fleetPolicy: policy,
+  });
+  const decode = Schema.decodeUnknownResult(ircSchema);
+  expect(Result.isSuccess(decode(config))).toBe(true);
+  for (const change of [
+    { features: { questions: false } },
+    { questionOperator: "visitor" },
+    { access: { allowedAccounts: ["other"] } },
+    { access: { deniedAccounts: ["operator"] } },
+    { access: { deniedChannels: ["*"] } },
+    { backend: { ...backend, sessionID: undefined } },
+  ])
+    expect(Result.isFailure(decode({ ...config, ...change }))).toBe(true);
+});

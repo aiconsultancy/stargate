@@ -57,7 +57,7 @@ import { sendFleetAssignment } from "./fleet-irc";
 import { Gateway, type SlackDelivery } from "./gateway";
 import { createHealthReader } from "./health";
 import { controlInteractions } from "./interactions";
-import { type IrcRegistration, IrcShip } from "./irc/ship";
+import { type IrcRegistration, IrcShip, ircKey } from "./irc/ship";
 import { DrainRuntime } from "./maintenance-drain";
 import { discoverCrews } from "./nightly/crews";
 import { MaintenanceOutbox } from "./nightly/outbox";
@@ -744,6 +744,8 @@ export function serve(
           );
           registration.stopTurn = (conversation, thread) =>
             gateway.stopTurn(conversation, thread);
+          registration.operatorQuestion =
+            gateway.operatorQuestion.bind(gateway);
           registration.answerQuestion = (input, control) =>
             gateway.answerQuestion(input, control);
           return {
@@ -1001,6 +1003,17 @@ export function serve(
               config: api,
               dataDirectory: config.dataDirectory,
               source: createApiV1Source({
+                requests: (registration, at) => {
+                  if (registration.kind !== "irc") return [];
+                  const cfg = registration.config;
+                  return store.requestProgress(
+                    ircKey(cfg.id, cfg.server, cfg.account, cfg.backend),
+                    undefined,
+                    at,
+                  );
+                },
+                // This instance carries the viewers' signal, so shutdown and
+                // reload can cancel the shared crew reads.
                 dashboard,
                 config: () => reload?.current.config ?? config,
                 dataDirectory: config.dataDirectory,

@@ -39,6 +39,7 @@ import {
   type BackendFailureKind,
   statusKind,
 } from "../request-failure";
+import type { TurnProgress, TurnStage } from "../turn-progress";
 import {
   inherited,
   isTextAttachment,
@@ -307,7 +308,7 @@ export class ClaudeTurn {
     | undefined;
 
   /** Returns true when the visible text may have changed. */
-  add(raw: unknown): boolean {
+  add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
     if (isToolFrame(raw)) this.worked = true;
     const init = decodeInitFrame(raw);
     if (Option.isSome(init)) {
@@ -319,6 +320,7 @@ export class ClaudeTurn {
       const event = decodeStreamEvent(frame.value.event);
       if (Option.isNone(event)) return false;
       if (event.value.type === "message_start") {
+        stage?.("model");
         this.streaming = event.value.message.id;
         this.seen(this.streaming);
         if (!this.streamed.has(this.streaming))
@@ -328,7 +330,12 @@ export class ClaudeTurn {
       const blocks = this.streaming && this.streamed.get(this.streaming);
       if (!blocks) return false;
       if (event.value.type === "content_block_start") {
-        if (event.value.content_block.type !== "text") return false;
+        const kind = event.value.content_block.type;
+        if (kind === "thinking" || kind === "redacted_thinking")
+          stage?.("reasoning");
+        if (kind === "tool_use" || kind === "server_tool_use") stage?.("tool");
+        if (kind !== "text") return false;
+        stage?.("reply");
         blocks.set(event.value.index, event.value.content_block.text ?? "");
         return true;
       }
@@ -603,7 +610,16 @@ export class ClaudeBackend implements AgentBackend {
     onInput?: (id: string) => void,
     files: readonly Attachment[] = [],
     context?: PromptSourceContext,
+    onProgress?: (value: TurnProgress) => void,
   ): Promise<string> {
+    const stage = onProgress
+      ? (value: TurnStage) =>
+          onProgress({
+            stage: value,
+            observedAt: Date.now(),
+            backend: "claude",
+          })
+      : undefined;
     signal.throwIfAborted();
     if (this.closed) throw new Error("Claude backend is closing");
     if (!isSessionID(sessionId))
@@ -683,7 +699,8 @@ export class ClaudeBackend implements AgentBackend {
         strictMcpConfig: true,
         // Slack text is data: no @file expansion or slash-command dispatch.
         verbatimPrompts: true,
-        includePartialMessages: onText !== undefined,
+        includePartialMessages:
+          onText !== undefined || onProgress !== undefined,
         maxTurns: this.config.maxTurns,
         systemPrompt: {
           type: "preset",
@@ -705,7 +722,7 @@ export class ClaudeBackend implements AgentBackend {
       let settle: ReturnType<typeof setTimeout> | undefined;
       try {
         for await (const frame of query({ prompt: messages(), options })) {
-          const changed = turn.add(frame);
+          const changed = turn.add(frame, stage);
           if (turn.session !== undefined && turn.session !== id)
             throw new ClaudeTurnError("Claude session identity changed");
           if (changed && onText) {
