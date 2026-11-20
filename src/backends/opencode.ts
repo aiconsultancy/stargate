@@ -60,7 +60,7 @@ import {
   questionFingerprint,
 } from "../questions";
 import { quotaSnapshotSchema } from "../quota";
-import { readWithDeadline } from "../read-deadline";
+import { createReadSlot } from "../read-deadline";
 import {
   BackendFailure,
   type BackendFailureKind,
@@ -108,6 +108,7 @@ const decodeQuestionOrigin = Schema.decodeUnknownOption(questionOriginSchema, {
 });
 const agentReadyMs = 30_000;
 const agentReadyPollMs = 250;
+const maxFleetStatusProbeMs = 6_400;
 const assistantProgress = {
   "session.step.started": "model",
   "session.retry.scheduled": "retry",
@@ -176,7 +177,9 @@ export class OpenCodeBackend implements AgentBackend {
   private fleetStatusRetryAt = 0;
   private fleetStatusFailures = 0;
   private fleetStatusProbeMs = 400;
-  private fleetStatusPending = false;
+  private readonly fleetStatusRead = createReadSlot<unknown>(
+    maxFleetStatusProbeMs,
+  );
 
   // Native messages/form IDs are immutable. Recheck their live tool/input state,
   // but do not traverse the entire session twice every second for the same form.
@@ -932,54 +935,65 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
+  private recordFleetStatusFailure(unsupported = false) {
+    if (++this.fleetStatusFailures >= 3 || unsupported) {
+      this.fleetStatusRetryAt = performance.now() + 60_000;
+      this.fleetStatusFailures = 0;
+    }
+  }
+
   async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+    signal.throwIfAborted();
+    if (
+      this.fleetStatusRead.pending ||
+      performance.now() < this.fleetStatusRetryAt
+    )
+      return undefined;
+
+    // Start with a short probe and leave time for ordinary crew status.
     const probeMs = this.fleetStatusProbeMs;
+    let failureCounted = false;
+    const { result: probe } = this.fleetStatusRead.start(
+      signal,
+      (reading) =>
+        this.client.rpc(CrewReporting).fleetStatus(input, {
+          location: { directory: this.config.directory },
+          signal: reading,
+        }),
+      {
+        timeout: probeMs,
+        onAbandon: () => {
+          if (!failureCounted) this.recordFleetStatusFailure();
+          failureCounted = true;
+        },
+      },
+    );
     try {
+      const status = await probe;
       signal.throwIfAborted();
-      if (
-        this.fleetStatusPending ||
-        performance.now() < this.fleetStatusRetryAt
-      )
-        return undefined;
-      // Start with a short probe and leave time for ordinary crew status.
-      const { result: probe, settled } = readWithDeadline(
-        signal,
-        probeMs,
-        (reading) =>
-          this.client.rpc(CrewReporting).fleetStatus(input, {
-            location: { directory: this.config.directory },
-            signal: reading,
-          }),
-      );
-      this.fleetStatusPending = true;
-      void settled.then(() => {
-        this.fleetStatusPending = false;
-      });
-      const result = fleetCrewStatusSchema.parse(await probe);
-      signal.throwIfAborted();
+      if (failureCounted) return undefined;
+      const result = fleetCrewStatusSchema.parse(status);
       this.fleetStatusFailures = 0;
       return result;
     } catch (error) {
       signal.throwIfAborted();
-      const maxProbeMs = 6_400;
+      if (failureCounted) return undefined;
       const timedOut =
         error instanceof DOMException && error.name === "TimeoutError";
-      if (timedOut && probeMs < maxProbeMs) {
+      if (timedOut && probeMs < maxFleetStatusProbeMs) {
         this.fleetStatusProbeMs = Math.max(
           this.fleetStatusProbeMs,
-          Math.min(probeMs * 2, maxProbeMs),
+          Math.min(probeMs * 2, maxFleetStatusProbeMs),
         );
       } else {
         // Older plugins still serve ordinary status. Probe again after an upgrade.
         const unsupported =
-          error &&
+          error !== null &&
           typeof error === "object" &&
           "type" in error &&
           error.type === "rpc.method_not_found";
-        if (++this.fleetStatusFailures >= 3 || unsupported) {
-          this.fleetStatusRetryAt = performance.now() + 60_000;
-          this.fleetStatusFailures = 0;
-        }
+        this.recordFleetStatusFailure(unsupported);
+        failureCounted = true;
       }
       // Ordinary status cannot verify which checkout is provisioned.
       return undefined;

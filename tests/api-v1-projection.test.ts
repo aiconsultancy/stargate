@@ -567,6 +567,84 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("OpenCode backs off and allows one retry after abandoning a stuck fleet probe", async () => {
+    const first = Promise.withResolvers<void>();
+    const retry = Promise.withResolvers<void>();
+    const status = { members: [], total: 0, truncated: false };
+    const metadata = { projectDirectory: "/fixture", contexts: [] };
+    const fetchProbe = mock(async () => {
+      switch (fetchProbe.mock.calls.length) {
+        case 1:
+        case 2:
+          return new Response("Unavailable", { status: 500 });
+        case 3:
+          await first.promise;
+          break;
+        case 4:
+          await retry.promise;
+      }
+      return Response.json({ output: { status, metadata } });
+    });
+    const config = Schema.decodeUnknownSync(backendSchema)({
+      type: "opencode",
+      url: "http://127.0.0.1:1",
+      directory: "/",
+    });
+    if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+    const backend = new OpenCodeBackend(
+      config,
+      OpenCode.make({
+        baseUrl: config.url,
+        fetch: Object.assign(fetchProbe, { preconnect: fetch.preconnect }),
+      }),
+    );
+    const clock = spyOn(performance, "now").mockReturnValue(0);
+    const timeout = spyOn(AbortSignal, "timeout");
+    const hardCap = 3 * 6_400;
+    const startAndTimeOut = async (count: number) => {
+      const deadline = new AbortController();
+      timeout.mockReturnValueOnce(deadline.signal);
+      const read = backend.fleetCrewStatus({}, signal);
+      await Bun.sleep(0);
+      expect(fetchProbe).toHaveBeenCalledTimes(count);
+      deadline.abort(new DOMException("Fixture deadline", "TimeoutError"));
+      expect(await read).toBeUndefined();
+    };
+    try {
+      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      await startAndTimeOut(3);
+
+      clock.mockReturnValue(hardCap - 1);
+      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      clock.mockReturnValue(hardCap);
+      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      clock.mockReturnValue(hardCap + 59_999);
+      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(fetchProbe).toHaveBeenCalledTimes(3);
+
+      clock.mockReturnValue(hardCap + 60_000);
+      await startAndTimeOut(4);
+      clock.mockReturnValue(2 * hardCap + 60_000);
+      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(fetchProbe).toHaveBeenCalledTimes(4);
+
+      first.resolve();
+      await Bun.sleep(0);
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        status,
+        metadata,
+      });
+      expect(fetchProbe).toHaveBeenCalledTimes(5);
+    } finally {
+      timeout.mockRestore();
+      clock.mockRestore();
+      first.resolve();
+      retry.resolve();
+      await backend.close();
+    }
+  });
+
   test("a cancelled OpenCode fleet probe leaves ordinary status available", async () => {
     const methods: string[] = [];
     const server = Bun.serve({

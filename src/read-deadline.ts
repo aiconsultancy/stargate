@@ -30,7 +30,11 @@ export function readWithDeadline<T>(
 
 /** Share one attempt and allow one retry while an abort-ignoring read drains. */
 export function createReadSlot<T>(timeout: number, onIdle?: () => void) {
-  type Attempt = { result: Promise<T>; abandonAt: number };
+  type Attempt = {
+    result: Promise<T>;
+    abandonAt: number;
+    onAbandon: (() => void) | undefined;
+  };
   let pending: Attempt | undefined;
   let abandoned: Attempt | undefined;
   return {
@@ -39,12 +43,25 @@ export function createReadSlot<T>(timeout: number, onIdle?: () => void) {
       if (pending && !abandoned && performance.now() >= pending.abandonAt) {
         abandoned = pending;
         pending = undefined;
+        abandoned.onAbandon?.();
       }
       return pending;
     },
-    start(parent: AbortSignal, read: (signal: AbortSignal) => Promise<T>) {
-      const { result, settled } = readWithDeadline(parent, timeout, read);
-      const attempt = { result, abandonAt: performance.now() + 3 * timeout };
+    start(
+      parent: AbortSignal,
+      read: (signal: AbortSignal) => Promise<T>,
+      options?: { timeout?: number; onAbandon?: () => void },
+    ) {
+      const { result, settled } = readWithDeadline(
+        parent,
+        options?.timeout ?? timeout,
+        read,
+      );
+      const attempt = {
+        result,
+        abandonAt: performance.now() + 3 * timeout,
+        onAbandon: options?.onAbandon,
+      };
       pending = attempt;
       void settled.then(() => {
         if (pending === attempt) pending = undefined;
