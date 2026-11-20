@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
 import { appendFileSync, constants, fstatSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import {
@@ -18,7 +18,19 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { readCommand } from "../src/api/v1/command";
-import { createGitReader } from "../src/api/v1/git";
+import { createGitReader as makeGitReader } from "../src/api/v1/git";
+
+// Every reader made here is stopped after the file, so no private temporary
+// snapshot folder is left behind.
+const readers: { stop(): Promise<void> }[] = [];
+function createGitReader(
+  ...args: Parameters<typeof makeGitReader>
+): ReturnType<typeof makeGitReader> {
+  const reader = makeGitReader(...args);
+  readers.push(reader);
+  return reader;
+}
+afterAll(() => Promise.all(readers.map((reader) => reader.stop())));
 
 function git(directory: string, ...args: string[]) {
   const result = Bun.spawnSync(

@@ -148,8 +148,10 @@ is cached for 15 seconds. Timeouts spent mostly waiting for a read slot are
 cached for one read deadline (two seconds). Cleanup runs in the background
 within the same concurrency limit. Snapshots use a private
 `stargate-git-status` folder in the data directory when the data directory is
-outside the worktree and writable, and startup removes snapshots there that
-are older than 24 hours. Otherwise each process uses its own private folder in
+outside the worktree, writable, owned by the service user, and has no
+ancestor that other users can write to without the sticky bit. Startup
+removes snapshots there that are older than 24 hours. If the temporary
+directory also fails those checks, Git status is reported unavailable. Otherwise each process uses its own private folder in
 the system temporary directory, removed when the gateway stops; a folder left
 by a crash is not swept and is cleared with the temporary directory.
 
@@ -157,8 +159,8 @@ Copied ignore files, including `core.excludesFile`, must resolve inside
 the checkout or the Git directories Git reports for it. Those directories come
 from the checkout itself, so this limits which files are copied rather than
 forming a hard boundary: a checkout pointed at another repository on the host
-can affect its own changed-file count. The 1 MiB limit applies to each copied
-pattern file.
+can affect its own changed-file count.
+The 1 MiB limit applies to each copied pattern file.
 Unreadable ignore files are skipped, and `info/exclude` retains its usual
 precedence. Git reads worktree `.gitignore` files directly. Status reads
 disable filters for safety. Git versions that support `GIT_ATTR_SOURCE`
@@ -220,8 +222,9 @@ snapshot. A change to the ship roster or to a ship's backend identity also
 closes the streams, and clients reconnect for a fresh snapshot. Host and
 heartbeat events continue while the poller waits for a stalled overview.
 At three times a read's deadline, another attempt can start. Each overview,
-enrichment, host metrics, crew sample, and ship detail slot allows one
-outstanding abandoned read alongside the current attempt. If the first
+enrichment, host metrics, crew sample, ship detail and OpenCode `fleetStatus`
+probe slot allows one outstanding abandoned read alongside the current
+attempt. If the first
 overview stalls, host and heartbeat events can arrive before the initial
 fleet frame. The host timer waits up to one second for a fresh sample and
 uses the latest snapshot if the read is still pending. The snapshot omits
@@ -258,6 +261,7 @@ After a shared read fails or reaches its deadline, the overview marks the
 ship unavailable and retains its last successful crew counts if available.
 OpenCode `fleetStatus` probes start with a 400 ms budget that doubles after
 a timeout, up to 6.4 seconds, leaving time for ordinary crew status.
+Concurrent callers with the same filter share one probe.
 An explicit missing-method response or three consecutive failures pause
 probes for one minute. Timeouts count toward that pause at the maximum budget.
 

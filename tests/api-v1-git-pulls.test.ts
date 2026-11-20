@@ -1,14 +1,26 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   countChangedPaths,
-  createGitReader,
   githubRepository,
+  createGitReader as makeGitReader,
   parseAheadBehind,
 } from "../src/api/v1/git";
 import { createPullReader, mapPullRequest } from "../src/api/v1/pulls";
+
+// Every reader made here is stopped after the file, so no private temporary
+// snapshot folder is left behind.
+const readers: { stop(): Promise<void> }[] = [];
+function createGitReader(
+  ...args: Parameters<typeof makeGitReader>
+): ReturnType<typeof makeGitReader> {
+  const reader = makeGitReader(...args);
+  readers.push(reader);
+  return reader;
+}
+afterAll(() => Promise.all(readers.map((reader) => reader.stop())));
 
 test("porcelain -z counts rename/copy records once and accepts literal path whitespace", () => {
   expect(countChangedPaths("")).toBe(0);
