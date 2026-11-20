@@ -293,6 +293,24 @@ test.each(["success", "failure"])(
   },
 );
 
+test("rejects the temporary snapshot fallback inside the checkout", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const previous = process.env["TMPDIR"];
+  try {
+    git(directory, "init", "-b", "main");
+    const temporary = join(directory, "tmp");
+    await mkdir(temporary);
+    process.env["TMPDIR"] = temporary;
+    expect(
+      await createGitReader()(directory, AbortSignal.timeout(3000)),
+    ).toMatchObject({ changedFiles: null, error: "Git state unavailable." });
+  } finally {
+    if (previous === undefined) delete process.env["TMPDIR"];
+    else process.env["TMPDIR"] = previous;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("the documented copy limit leaves a large worktree .gitignore usable", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   try {

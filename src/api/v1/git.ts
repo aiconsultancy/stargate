@@ -240,15 +240,15 @@ async function copyStatusFile(
 type RunGit = (...args: string[]) => Promise<{ code: number; stdout: string }>;
 
 async function createStatusDirectory(checkout: string, dataDirectory?: string) {
+  const root = await realpath(checkout);
+  const outsideCheckout = async (directory: string) => {
+    const child = relative(root, await realpath(directory));
+    // The private snapshot would appear as untracked files inside the worktree.
+    return child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child);
+  };
   if (dataDirectory) {
     try {
-      const [root, data] = await Promise.all([
-        realpath(checkout),
-        realpath(dataDirectory),
-      ]);
-      const child = relative(root, data);
-      // The private snapshot would appear as untracked files inside the worktree.
-      if (child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child))
+      if (await outsideCheckout(dataDirectory))
         return await mkdtemp(join(dataDirectory, statusDirectoryPrefix));
     } catch (error) {
       if (
@@ -259,7 +259,10 @@ async function createStatusDirectory(checkout: string, dataDirectory?: string) {
         throw error;
     }
   }
-  return mkdtemp(join(tmpdir(), statusDirectoryPrefix));
+  const temporary = tmpdir();
+  if (!(await outsideCheckout(temporary)))
+    throw new Error("Git status snapshot would be inside the checkout");
+  return mkdtemp(join(temporary, statusDirectoryPrefix));
 }
 
 async function removeStatusDirectory(path: string) {
