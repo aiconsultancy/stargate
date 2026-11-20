@@ -1,0 +1,11 @@
+@msgid=root-1;account=jack :jack!u@outside PRIVMSG #galactica :Fuel report
+@msgid=req-1;account=jack;+draft/reply=root-1 :jack!u@outside PRIVMSG #galactica :@galactica Check the main tank
+@+draft/reply=req-1;+stargate/progress=received;bot;msgid=m1;account=galactica :galactica!u@stargate NOTICE #galactica :Stargate received your request. Waiting for backend activity.
+@msgid=req-2;account=jack;+draft/reply=root-1 :jack!u@outside PRIVMSG #galactica :@galactica Check the spare tank
+@msgid=m2;account=jack :jack!u@outside NOTICE #galactica :Ordinary notice.
+@+draft/reply=req-1;+stargate/progress=reasoning,disconnected;bot;msgid=m3;account=galactica :galactica!u@stargate NOTICE #galactica :OpenCode event stream disconnected. OpenCode reported model reasoning. Observed at 02:23 UTC.
+@+draft/reply=root-1;bot;msgid=m4;account=galactica :galactica!u@stargate PRIVMSG #galactica Done.
+@+draft/reply=req-1;+stargate/progress=completed;bot;msgid=m5;account=galactica :galactica!u@stargate NOTICE #galactica :Stargate completed this request.
+@+draft/reply=req-2;+stargate/progress=received;bot;msgid=m6;account=galactica :galactica!u@stargate NOTICE #galactica :Stargate received your request. Waiting for backend activity.
+@+draft/reply=root-1;bot;msgid=m7;account=galactica :galactica!u@stargate PRIVMSG #galactica Done.
+@+draft/reply=req-2;+stargate/progress=completed;bot;msgid=m8;account=galactica :galactica!u@stargate NOTICE #galactica :Stargate completed this request.

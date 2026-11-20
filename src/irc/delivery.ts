@@ -1,10 +1,19 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
 import type { AttachmentTransport } from "../attachment-delivery";
-import type { DeliveryUnit, IrcTurnStatus, SlackDelivery } from "../gateway";
+import type {
+  DeliveryUnit,
+  IrcTurnStatus,
+  RequestOutcome,
+  SlackDelivery,
+} from "../gateway";
 import type { ReactionName } from "../reactions";
 import { settingsStruct } from "../settings-schema";
-import { type TurnProgress, turnProgressText } from "../turn-progress";
+import {
+  type TurnProgress,
+  type TurnStage,
+  turnProgressText,
+} from "../turn-progress";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";
 import { cleanText, utf8Bytes } from "./protocol";
@@ -160,6 +169,7 @@ export class IrcDelivery implements SlackDelivery {
     allowed?: () => boolean,
     turnStatus?: IrcTurnStatus,
     readProgress?: () => TurnProgress | undefined,
+    request?: string,
   ) {
     const finish = this.client.startStatus();
     if (signal.aborted) {
@@ -173,6 +183,7 @@ export class IrcDelivery implements SlackDelivery {
       turnStatus && turnStatus !== "quiet" && this.presence.fleetTyping
         ? this.typing(channel, signal, allowed).catch(() => {})
         : undefined;
+    const active = () => !signal.aborted && (allowed?.() ?? true);
     try {
       if (turnStatus) {
         if (turnStatus === "live") {
@@ -181,7 +192,7 @@ export class IrcDelivery implements SlackDelivery {
           await delay(Math.min(3000, this.client.turnStatusMs), undefined, {
             signal,
           }).catch(() => {});
-          while (!signal.aborted && (allowed?.() ?? true)) {
+          while (active()) {
             const observed = readProgress?.();
             if (
               !sent ||
@@ -198,8 +209,8 @@ export class IrcDelivery implements SlackDelivery {
                 observed
                   ? turnProgressText(observed)
                   : "Stargate received your request. Waiting for backend activity.",
-                signal,
-                allowed,
+                active,
+                observedProgress(request, observed),
               ).catch(() => {});
             }
             await delay(Math.min(30_000, this.client.turnStatusMs), undefined, {
@@ -213,8 +224,8 @@ export class IrcDelivery implements SlackDelivery {
             channel,
             thread,
             "Checking that now…",
-            signal,
-            allowed,
+            active,
+            observedProgress(request),
           ).catch(() => {});
           let reported: TurnProgress | undefined;
           let first = true;
@@ -233,8 +244,8 @@ export class IrcDelivery implements SlackDelivery {
               readProgress
                 ? turnProgressText(progress)
                 : "This request is still open.",
-              signal,
-              allowed,
+              active,
+              progress ? observedProgress(request, progress) : undefined,
             ).catch(() => {});
             if (!readProgress) break;
           }
@@ -246,6 +257,32 @@ export class IrcDelivery implements SlackDelivery {
       await fleetTyping;
       if (signal.aborted) finish();
     }
+  }
+
+  async requestSettled(
+    channel: string,
+    request: string,
+    outcome: RequestOutcome,
+    signal: AbortSignal,
+    allowed: () => boolean,
+  ) {
+    if (signal.aborted) return;
+    if (!this.client.registered) {
+      try {
+        await this.client.waitReady(this.readyMs, signal);
+      } catch {
+        return;
+      }
+    }
+    await this.turnNotice(
+      channel,
+      request,
+      outcome === "completed"
+        ? "Stargate completed this request."
+        : "Stargate could not complete this request.",
+      () => !signal.aborted && allowed(),
+      { request, stage: outcome },
+    );
   }
 
   private async typing(
@@ -276,20 +313,26 @@ export class IrcDelivery implements SlackDelivery {
     channel: string,
     thread: string,
     text: string,
-    signal: AbortSignal,
-    allowed?: () => boolean,
+    active: () => boolean,
+    progress?: NoticeProgress,
   ) {
-    const active = () => !signal.aborted && (allowed?.() ?? true);
     if (!active() || !this.client.registered) return;
+    const terminal =
+      progress?.stage === "completed" || progress?.stage === "failed";
+    if (terminal && !this.client.hasCap("message-tags")) return;
     const target = await this.target(channel).catch(() => undefined);
     if (!target || !active()) return;
-    const parent = this.replyParent?.(thread) ?? thread;
-    const tags =
+    const parent = progress?.request ?? this.replyParent?.(thread) ?? thread;
+    const tags: Record<string, string> =
       this.client.hasCap("message-tags") &&
       validMsgid(parent) &&
       !parent.startsWith("stargate-")
         ? { "+draft/reply": parent }
         : {};
+    if (progress && tags["+draft/reply"])
+      tags["+stargate/progress"] =
+        progress.stage + (progress.disconnected ? ",disconnected" : "");
+    if (terminal && !tags["+stargate/progress"]) return;
     // A missing acknowledgement or IRC confirmation must not hold up a reply.
     void this.client
       .send(
@@ -554,4 +597,25 @@ export class IrcDelivery implements SlackDelivery {
       this.guard(channel, target, allowed),
     );
   }
+}
+
+type NoticeProgress = { request: string } & (
+  | {
+      stage: "received" | Exclude<TurnStage, "completed">;
+      disconnected?: boolean;
+    }
+  | { stage: RequestOutcome; disconnected?: never }
+);
+
+/** A backend event is an observation, even if the backend says it ended. */
+function observedProgress(
+  request: string | undefined,
+  progress?: TurnProgress,
+): NoticeProgress | undefined {
+  if (!request || progress?.stage === "completed") return;
+  return {
+    request,
+    stage: progress?.stage ?? "received",
+    ...(progress?.disconnected ? { disconnected: true } : {}),
+  };
 }

@@ -115,9 +115,9 @@ reports the blocker without exposing or answering the question. Answer from
 the original conversation or resolve the form in OpenCode, then resend the
 new request. If the check is unavailable, normal submission continues.
 
-Notices follow the request's thread where supported. They replace continuous
-typing for these registrations and cannot wake other agents. Finishing,
-cancelling or timing out the turn stops its notices. Use
+Progress notices identify the triggering message where supported. They replace
+continuous typing for these registrations and cannot wake other agents.
+Finishing, cancelling or timing out the turn stops ongoing status notices. Use
 `features.turnStatus: false` to use the original typing behaviour instead.
 
 Captains tag or dispatch a rear admiral for a specific action, a decision
@@ -829,14 +829,50 @@ out of the DM audit mirror. Once a native reply is attempted, its IRC token is s
 
 Live progress is on by default for enrolled humans' captain and rear admiral
 requests when turn status is enabled and the backend emits progress events.
-Fast turns finish quietly. After three seconds, a longer turn shows the
-latest observed stage. Routine updates are coalesced. In a registration with
+After three seconds, a longer turn shows the latest observed stage. Fast
+turns can show a terminal notice before any other progress update. Routine updates are coalesced. In a registration with
 enrolled humans, `captain: status` is reserved for checking a request. Reply to
 your original request using the ship's account or nick. The gateway checks that
 you own the request before returning its latest observation. Set
 `features.liveProgress: false` to disable these notices and release the status
 command for ordinary messages. The Fleet API captain summary includes up to 16
 recent observations. Private content stays in the backend.
+
+### Request progress tags
+
+On a server that negotiates `message-tags`, Stargate sends eligible progress
+updates as `NOTICE` with both `+stargate/progress=<stage>` and
+`+draft/reply=<request-msgid>`. The reply tag identifies the original message
+that triggered this request. Two requests under the same thread root have
+different progress reply tags. Clients should use the server's authenticated
+`account` tag to verify the expected ship account before acting on these
+client-supplied tags. The notice text is for people and can change.
+
+The fixed stages are `received`, `submitting`, `accepted`, `queued`,
+`delivered`, `model`, `reasoning`, `tool`, `retry`, `waiting`, `clarified`,
+`reply`, `completed` and `failed`. A nonterminal backend observation may have
+the suffix `,disconnected` while its event stream is offline. The gateway
+may skip intermediate observations. A follow-up notice that only reports
+the lack of a confirmed backend observation carries no progress stage.
+
+- `completed` means the gateway settled the stored successful response using
+  its usual delivery receipts. This can follow resumed delivery after a
+  restart. An unconfirmed send with a receipt outstanding remains pending.
+- `failed` means the gateway stored a known request failure, such as a
+  provider rejection, a timeout or an accepted Stop. The error reply has its
+  own delivery path and may still be pending. A delivery retry may repeat
+  the same failure marker.
+- Interrupted execution, unread reply history and unclassified or ambiguous
+  backend errors have no terminal marker. Use the existing status and
+  recovery paths when the outcome is uncertain. Delivery of the marker itself
+  is best effort. After a disconnect, a terminal notice can wait briefly for
+  the IRC connection alongside normal reply delivery.
+
+Stargate uses the existing fleet turn-status policy and requires an actual
+request message ID for a marker. Final replies and native questions keep their
+existing thread routing, and `+typing` remains scoped to the channel or DM.
+See the [loopback IRC transcript](../tests/fixtures/irc-progress.irc) for two
+requests in the same thread, an ordinary notice and the final replies.
 
 ## Native clarification questions
 

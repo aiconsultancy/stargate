@@ -163,6 +163,7 @@ export type DeliveryUnit = {
 };
 
 export type IrcTurnStatus = "notice" | "live" | "quiet";
+export type RequestOutcome = "completed" | "failed";
 
 export interface SlackDelivery {
   /** Undefined (or absent) while the transport cannot move files. */
@@ -233,6 +234,14 @@ export interface SlackDelivery {
     allowed?: () => boolean,
     turnStatus?: IrcTurnStatus,
     readProgress?: () => TurnProgress | undefined,
+    request?: string,
+  ): Promise<void>;
+  requestSettled?(
+    channel: string,
+    request: string,
+    outcome: RequestOutcome,
+    signal: AbortSignal,
+    allowed: () => boolean,
   ): Promise<void>;
 }
 
@@ -278,6 +287,7 @@ export interface GatewayTransport {
   note(job: Job): string | undefined;
   instructions?(job: Job): string;
   turnStatus?(job: Job): IrcTurnStatus | undefined;
+  progressRequest?(job: Job): string | undefined;
   /**
    * Best effort, before each turn of an unpinned session (IRC crew: bind
    * the session to its crew member). Never fails or blocks the turn.
@@ -293,6 +303,17 @@ function errorFailure(error: unknown): RequestFailure {
   if (error instanceof AttachmentInputUnavailable) return "attachments";
   if (error instanceof TranscriptionUnavailable) return "transcription";
   return "backend";
+}
+
+/** Unknown native outcomes stay open in the wire view. */
+function knownRequestFailure(cause: RequestFailure) {
+  const provider = providerFailure(cause);
+  return (
+    cause !== "interrupted" &&
+    cause !== "history" &&
+    cause !== "backend" &&
+    !(provider?.kind === "network" && provider.ran)
+  );
 }
 
 /** Slack rules: bot/app/workspace namespace and Slack message timestamps. */
@@ -1768,6 +1789,19 @@ export class Gateway {
     if (!classified) return;
     const job: Job =
       held.gate === "spoken" ? { ...classified, gate: "admitted" } : classified;
+    const turnStatus = transport.turnStatus?.(job);
+    const request =
+      !job.deferDelivery && turnStatus && turnStatus !== "quiet"
+        ? transport.progressRequest?.(job)
+        : undefined;
+    const publishOutcome = (outcome: RequestOutcome) => {
+      if (request && !shutdown.aborted)
+        void this.slack
+          .requestSettled?.(job.channel, request, outcome, shutdown, () =>
+            allowed(job),
+          )
+          .catch(() => {});
+    };
     const readReceipt = async (active: boolean) => {
       if (
         bot?.slackReadReceipts &&
@@ -1811,7 +1845,6 @@ export class Gateway {
       ]);
       // Ends before delivery, so a typing indicator never outlasts the turn.
       const typing = new AbortController();
-      const turnStatus = transport.turnStatus?.(job);
       const observeProgress =
         !job.deferDelivery &&
         ((turnStatus === "notice" && config.backend.type === "opencode") ||
@@ -1827,6 +1860,7 @@ export class Gateway {
               () => allowed(job),
               turnStatus,
               observeProgress ? () => progress : undefined,
+              request,
             )
             .catch(() => {});
       const live = job.deferDelivery
@@ -2104,7 +2138,8 @@ export class Gateway {
             sourceContext,
             observeProgress
               ? (update) => {
-                  progress = update;
+                  // Backend completion can precede durable reply delivery.
+                  if (update.stage !== "completed") progress = update;
                   if (turnStatus === "live")
                     this.store.saveTurnProgress(job.id, update);
                 }
@@ -2283,7 +2318,18 @@ export class Gateway {
     } else {
       output = JSON.parse(job.response ?? "[]") as ReplyChunk[];
     }
-    await this.deliver(job, output, failure, shutdown, allowed, readReceipt);
+    const delivered = await this.deliver(
+      job,
+      output,
+      failure,
+      shutdown,
+      allowed,
+      readReceipt,
+    );
+    // Try the final reply first. A known failure can still be reported
+    // when its error reply remains unconfirmed.
+    if (failure && knownRequestFailure(failure)) publishOutcome("failed");
+    else if (delivered && !failure) publishOutcome("completed");
   }
 
   /** The store refused a transition: the job is not in the expected status. */
@@ -2399,7 +2445,8 @@ export class Gateway {
         shutdown,
       );
       if (output.length > 0) await readReceipt(false);
-      if (!this.store.finish(job.id)) this.refused(job, "finish");
+      if (this.store.finish(job.id)) return true;
+      this.refused(job, "finish");
     } catch {
       this.log.warn({ job: job.id }, "Slack delivery failed");
       if (job.attempts >= 7) {
