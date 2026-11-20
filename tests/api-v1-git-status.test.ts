@@ -680,15 +680,16 @@ test.each(["clean", "process"])(
   },
 );
 
-test("stalled removal does not delay Git status or unbound cleanup concurrency", async () => {
+test("stalled removal holds Git status permits beyond the caller deadline", async () => {
   const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const data = join(root, "data");
   const held = Promise.withResolvers<void>();
   const original = fs.rm;
-  const started = Promise.withResolvers<void>();
+  const full = Promise.withResolvers<void>();
+  let removing = 0;
   const removals = spyOn(fs, "rm").mockImplementation(async (path, options) => {
     if (String(path).startsWith(join(data, "stargate-git-status-"))) {
-      started.resolve();
+      if (++removing === 4) full.resolve();
       await held.promise;
     }
     return original(path, options);
@@ -707,23 +708,38 @@ test("stalled removal does not delay Git status or unbound cleanup concurrency",
     const reads = checkouts.map((path) =>
       read(path, new AbortController().signal),
     );
-    await started.promise;
     const first = await Promise.race([
       Promise.race(reads),
-      Bun.sleep(300).then(() => "blocked"),
+      Bun.sleep(1500).then(() => "blocked"),
     ]);
     expect(first).toMatchObject({ changedFiles: 0 });
-    await Bun.sleep(100);
-    expect(removals.mock.calls.length).toBeLessThanOrEqual(4);
+    await full.promise;
+    const results = await Promise.all(reads);
+    expect(results.filter((result) => result?.changedFiles === 0)).toHaveLength(
+      4,
+    );
+    expect(
+      results.filter((result) => result?.error === "Git read timed out."),
+    ).toHaveLength(4);
+    expect(removing).toBe(4);
+    const waiting =
+      checkouts[results.findIndex((result) => result?.changedFiles === null)];
+    await expect(read(waiting, AbortSignal.timeout(100))).rejects.toMatchObject(
+      { name: "TimeoutError" },
+    );
+    expect(removing).toBe(4);
     held.resolve();
-    await Promise.all(reads);
+    await waitForRemoval(data);
+    expect(await read(waiting, AbortSignal.timeout(1000))).toMatchObject({
+      changedFiles: 0,
+    });
     await waitForRemoval(data);
   } finally {
     held.resolve();
     removals.mockRestore();
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 8000);
 
 test("startup sweeps old private Git snapshots and keeps recent or unrelated entries", async () => {
   const data = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
