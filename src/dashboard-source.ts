@@ -155,6 +155,8 @@ export function dashboardSource(
     AgentBackend,
     {
       read: ReturnType<typeof createReadSlot<CrewRead>>;
+      // Bumped by invalidation; an attempt started before it stores nothing.
+      generation: number;
       latest?: CrewRead;
       last?: { sample: CrewRead; at: number };
       pending?: {
@@ -271,6 +273,7 @@ export function dashboardSource(
     if (!backend) return { status: null };
     const slot = fleetCrew.get(backend) ?? {
       read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
+      generation: 0,
     };
     fleetCrew.set(backend, slot);
     const unavailable = (): CrewRead => ({
@@ -282,6 +285,7 @@ export function dashboardSource(
     if (!current || slot.pending?.attempt !== current.result) {
       // The fleet owns the shared attempt. A caller only owns its wait.
       const attempt = slot.read.start(fleetSignal, read).result;
+      const generation = slot.generation;
       const last = slot.last;
       // A recent sample stays usable throughout this refresh. A cold caller
       // needs the shared result to establish availability.
@@ -300,6 +304,9 @@ export function dashboardSource(
         )
         .then((sample) => {
           if (fleetSignal.aborted) return unavailable();
+          // A reload invalidated the cache while this attempt ran: answer its
+          // callers, but do not keep a sample from before the reload.
+          if (generation !== slot.generation) return sample;
           if (!sample.error) slot.latest = sample;
           slot.last = { sample, at: performance.now() };
           return sample;
@@ -646,6 +653,7 @@ export function dashboardSource(
       for (const { backend } of ships) {
         const slot = fleetCrew.get(backend);
         if (!slot) continue;
+        slot.generation++;
         delete slot.latest;
         delete slot.last;
         if (slot.pending) slot.pending.fallback = undefined;
