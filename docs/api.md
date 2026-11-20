@@ -331,8 +331,9 @@ unset token
 
 ### IRC request progress
 
-With `irc.features.liveProgress` and turn status enabled, the captain projection
-includes up to 16 recent `requests`. Each entry has the gateway request ID,
+The IRC captain projection includes up to 16 recent `requests` by default.
+Set `irc[].features.liveProgress: false` to omit this field. Entries come from
+turns with live status observations. Each entry has the gateway request ID,
 a fixed lifecycle stage, observation timestamp, job status, a fixed failure code when applicable, and flags for stale
 observations and a disconnected OpenCode event stream. Staleness describes an
 active request whose last observation is over a minute old. The Fleet heartbeat

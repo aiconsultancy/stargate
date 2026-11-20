@@ -240,9 +240,10 @@ async function memberCertificates(members: readonly ShipMember[]) {
 
 /** Non-reloadable connection settings; includes each member's auth references. */
 function connection(config: IrcConfig, member: ShipMember) {
+  const { questions: _, ...connectionFeatures } = config.features;
   return JSON.stringify([
     config.server,
-    config.features,
+    connectionFeatures,
     config.questionOperator ?? null,
     config.channels,
     config.audit ?? null,
@@ -647,11 +648,7 @@ export class IrcShip {
     if (this.started) return;
     this.started = true;
     this.open = open;
-    if (
-      this.config.features.questions ||
-      this.config.access.humanWakeChannels?.length
-    )
-      this.track(this.maintain(this.controller.signal));
+    this.track(this.maintain(this.controller.signal));
     if (
       this.config.features.crewQuestionHandoff &&
       this.config.backend.type === "opencode" &&
@@ -674,6 +671,11 @@ export class IrcShip {
     while (!signal.aborted) {
       await delay(60_000, undefined, { signal }).catch(() => {});
       if (signal.aborted) return;
+      if (
+        !this.config.features.questions &&
+        !this.config.access.humanWakeChannels?.length
+      )
+        continue;
       try {
         for (const registration of this.current)
           this.store.pruneIrcHistory(registration.key, Date.now());
@@ -708,7 +710,7 @@ export class IrcShip {
    * but connects nothing and changes nothing. Throws, with no
    * change, when an added member's credential is invalid, the
    * registration ID changes, or a kept connection's settings change
-   * (server, features, channels, or a member's account, nick, credential
+   * (server, connection features, channels, or a member's account, nick, credential
    * reference, backend, display name or limits): those need a restart.
    */
   async prepareReload(
@@ -918,6 +920,7 @@ export class IrcShip {
           const status = /^@?([^\s:,]+)[:,]\s+status\s*$/i.exec(body);
           if (
             this.config.features.liveProgress &&
+            this.config.fleetPolicy?.humanAccounts.length &&
             message.command === "PRIVMSG" &&
             status &&
             [client.nick, identity.account].some(

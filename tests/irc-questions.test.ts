@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { ircSchema } from "../src/config";
+import { effectiveIrcConfig, ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway";
 import { IrcShip } from "../src/irc/ship";
 import { nativeQuestionSchema, type QuestionAnswer } from "../src/questions";
@@ -21,7 +21,7 @@ afterEach(async () => {
 
 async function fixture(
   multiline = false,
-  questions = true,
+  questions?: boolean,
   options: { wake?: boolean; nick?: string; crew?: boolean } = {},
 ) {
   const server = new FakeIrcServer({
@@ -45,7 +45,7 @@ async function fixture(
       ...(account === "captain" && options.nick ? { nick: options.nick } : {}),
       passwordEnv: "IRC_FIXTURE",
       channels: ["#ship"],
-      features: { questions },
+      ...(questions === undefined ? {} : { features: { questions } }),
       access: {
         allowedAccounts: ["jac", "other-human", "captain", "other"],
         channelRequests: "nick-mention",
@@ -450,21 +450,7 @@ for (const multiline of [false, true]) {
   }, 15_000);
 }
 
-test("native questions stay disabled by default while targeted controls never wake other ships", async () => {
-  expect(
-    Schema.decodeUnknownSync(ircSchema)({
-      id: "fixture",
-      server: { host: "localhost", port: 6697, tls: true },
-      account: "fixture",
-      passwordEnv: "FIXTURE",
-      channels: ["#ship"],
-      backend: {
-        type: "opencode",
-        url: "http://localhost:4096",
-        directory: "/project",
-      },
-    }).features.questions,
-  ).toBe(false);
+test("an explicit opt-out leaves native question controls quiet", async () => {
   const f = await fixture(false, false);
   const at = f.send(`captain: answer ${"a".repeat(32)} 1`, "disabled-control");
   await f.received(at);
@@ -486,9 +472,42 @@ test("enabling questions requires explicit human policy, while default-off non-f
       directory: "/project",
     },
   };
-  expect(Result.isSuccess(Schema.decodeUnknownResult(ircSchema)(raw))).toBe(
-    true,
-  );
+  const config = Schema.decodeUnknownSync(ircSchema)(raw);
+  expect(effectiveIrcConfig(config).features).toMatchObject({
+    questions: false,
+    crewQuestionHandoff: false,
+    fleetTyping: true,
+    liveProgress: true,
+  });
+  const policy = {
+    role: "captain",
+    humanAccounts: ["jac"],
+    assignedCheckout: "/project",
+    capabilities: ["read_code"],
+  };
+  for (const [backend, questions] of [
+    [raw.backend, true],
+    [
+      { type: "pi-durable", model: "openai/local", directory: "/project" },
+      false,
+    ],
+  ] as const) {
+    const registration = Schema.decodeUnknownSync(ircSchema)({
+      ...raw,
+      backend,
+      fleetPolicy: policy,
+    });
+    expect(effectiveIrcConfig(registration).features).toMatchObject({
+      questions,
+      crewQuestionHandoff: false,
+    });
+  }
+  expect(() =>
+    Schema.decodeUnknownSync(ircSchema)({
+      ...raw,
+      features: { crewQuestionHandoff: true },
+    }),
+  ).toThrow("Crew question handoff requires a pinned OpenCode registration");
   const enabled = Schema.decodeUnknownResult(ircSchema)({
     ...raw,
     features: { questions: true },

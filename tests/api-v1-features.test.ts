@@ -143,7 +143,7 @@ test("every IRC switch has its schema default and roster-aware features exclude 
     irc: [
       {
         ...base,
-        features: { typing: false, questions: true },
+        features: { typing: false },
         dmPolicy: "redirect",
         access: { peerTurnsPerHour: 0, allCallWords: [] },
       },
@@ -157,7 +157,18 @@ test("every IRC switch has its schema default and roster-aware features exclude 
   for (const [key, value] of Object.entries(ircFeatureDefaults))
     expect(byKey[`irc.${key}`]).toMatchObject({
       defaultEnabled: value,
-      enabled: key === "typing" ? false : key === "questions" ? true : value,
+      enabled: key === "typing" ? false : value,
+    });
+  const feedbackKeys = [
+    "questions",
+    "crewQuestionHandoff",
+    "liveProgress",
+    "fleetTyping",
+  ] as const;
+  for (const key of feedbackKeys)
+    expect(byKey[`irc.${key}`]).toMatchObject({
+      enabled: true,
+      defaultEnabled: true,
     });
   expect(byKey["irc.channelRequests"]).toMatchObject({
     enabled: true,
@@ -176,4 +187,28 @@ test("every IRC switch has its schema default and roster-aware features exclude 
   expect(JSON.stringify(features)).not.toMatch(
     /#private|\/private|example-human|IRC_EXAMPLE_PASSWORD/,
   );
+  const disabled = await registrationFeatures({
+    kind: "irc",
+    config:
+      Schema.decodeUnknownSync(configSchema)({
+        irc: [
+          {
+            ...base,
+            features: {
+              questions: false,
+              crewQuestionHandoff: false,
+              liveProgress: false,
+              fleetTyping: false,
+            },
+          },
+        ],
+      }).irc[0] ?? config,
+  });
+  for (const key of feedbackKeys)
+    expect(
+      disabled.find((feature) => feature.key === `irc.${key}`),
+    ).toMatchObject({
+      enabled: false,
+      defaultEnabled: true,
+    });
 });

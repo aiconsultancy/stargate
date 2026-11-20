@@ -38,7 +38,11 @@ import { CrewNotifications } from "./notifications";
 import { CrewPost } from "./post";
 import { effectProjectToolInput, projectToolInput } from "./project-options";
 import { CrewProjects } from "./projects";
-import { CrewQuestionHandoff, CrewQuestionRpc } from "./question-handoff";
+import {
+  CrewQuestionHandoff,
+  CrewQuestionRpc,
+  crewQuestionConsumerLeaseMs,
+} from "./question-handoff";
 import { CrewQuestions, crewQuestionInputSchema } from "./questions";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
@@ -110,7 +114,20 @@ const plugin = Plugin.define({
       return value;
     };
     const waiting = new CrewWaiting(engine);
-    const handoff = new CrewQuestionHandoff();
+    // Current and additional project contexts share a captain location, pin
+    // and team. The mailbox stays in the captain location's plugin instance.
+    const { captainDirectory, captainSessionID, team } = engine.options;
+    const captainLocation =
+      resolve(ctx.location.directory) === resolve(captainDirectory);
+    const handoff = new CrewQuestionHandoff(captainSessionID);
+    const canUseQuestionGateway =
+      team.questionGateway !== false && !!captainSessionID;
+    const autoQuestionGateway =
+      canUseQuestionGateway && team.questionGateway === undefined;
+    const waitsForGateway = autoQuestionGateway && !!team.historyAPI;
+    const workerBootstrap = !captainLocation && canUseQuestionGateway;
+    let consumerRecordedAt: number | undefined;
+    let unavailableReported = false;
     const questions = new Map<CrewEngine, CrewQuestions>();
     const questionsFor = (selected: CrewEngine) => {
       let bridge = questions.get(selected);
@@ -135,7 +152,17 @@ const plugin = Plugin.define({
             )
           )
             throw new CrewError("Native crew clarification identity changed.");
-          if (selected.options.team.questionGateway) {
+          // Choose one backend for this operation. An ambiguous gateway write
+          // must never be retried using direct native form access.
+          const route = handoff.route(
+            selected.options.team.questionGateway,
+            !!selected.options.team.historyAPI,
+          );
+          if (route === "unavailable")
+            throw new CrewError(
+              "Crew questions require the owning gateway with this history service.",
+            );
+          if (route === "gateway") {
             const member = selected.options.team.crew.find(
               (m) => m.id === task.crewID && !m.backend,
             );
@@ -179,6 +206,15 @@ const plugin = Plugin.define({
             [...projects.contexts].find(
               ([, value]) => value === selected,
             )?.[0] ?? "default",
+          enableWhenMissing: () =>
+            canUseQuestionGateway && handoff.hasConsumer(),
+          onUnavailable: () => {
+            if (unavailableReported) return;
+            unavailableReported = true;
+            console.warn(
+              "Stargate crew question routing requires the owning IRC gateway, but no matching gateway is polling. For standalone use with a history endpoint that supports native forms, set team.questionGateway to false.",
+            );
+          },
         },
       );
       questions.set(selected, bridge);
@@ -240,12 +276,7 @@ const plugin = Plugin.define({
     };
     try {
       for (const selected of projects.contexts.values()) {
-        if (
-          selected.options.team.questionGateway &&
-          resolve(ctx.location.directory) !==
-            resolve(selected.options.captainDirectory)
-        )
-          continue;
+        if (workerBootstrap && !autoQuestionGateway) continue;
         const bridge = questionsFor(selected);
         await resources.own(
           async () => {
@@ -254,9 +285,20 @@ const plugin = Plugin.define({
               abortable(async (signal) => {
                 while (!signal.aborted) {
                   try {
-                    await bridge.poll(
-                      AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
-                    );
+                    // Worker locations relinquish polling to a paired captain.
+                    // With a configured history service, waiting can report
+                    // the route from local state without touching native forms.
+                    const paired = workerBootstrap
+                      ? engine.state.hasCrewQuestionConsumer(
+                          Date.now(),
+                          crewQuestionConsumerLeaseMs,
+                        )
+                      : handoff.hasConsumer();
+                    if (!workerBootstrap || !paired)
+                      await bridge.poll(
+                        AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+                        !waitsForGateway || paired,
+                      );
                   } catch {
                     // Only safe structured tool errors are exposed; no raw SDK logs.
                   }
@@ -321,15 +363,23 @@ const plugin = Plugin.define({
         close: (input, context) =>
           report(context.signal, async () => maintenance.close(input)),
       });
-      if (
-        engine.options.team.questionGateway &&
-        engine.options.captainSessionID &&
-        resolve(ctx.location.directory) ===
-          resolve(engine.options.captainDirectory)
-      )
+      if (canUseQuestionGateway && captainLocation)
         await register(CrewQuestionRpc, {
           take: (input, context) =>
-            report(context.signal, async () => handoff.take(input.captain)),
+            report(context.signal, async () => {
+              if (autoQuestionGateway && input.captain === captainSessionID) {
+                const now = Date.now();
+                if (
+                  consumerRecordedAt === undefined ||
+                  now < consumerRecordedAt ||
+                  now - consumerRecordedAt >= 3000
+                ) {
+                  engine.state.noteCrewQuestionConsumer(now);
+                  consumerRecordedAt = now;
+                }
+              }
+              return handoff.take(input.captain);
+            }),
           confirm: (input, context) =>
             report(context.signal, async () =>
               handoff.confirm(input.captain, input.id),

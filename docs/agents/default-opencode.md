@@ -688,16 +688,37 @@ This operation applies to OpenCode crew tasks.
 
 ### Crew questions with a read-only history service
 
-On a pinned IRC ship, set the crew plugin's `team.questionGateway` and the IRC
-registration's `features.crewQuestionHandoff` to `true`. Enable native
-questions for the captain. Both handoff options default to off. The captain
-receives the existing task DM and answers with the existing `stargate_question`
-tool. Project, assignment, worker input and captain session stay the same.
+The IRC gateway enables `features.crewQuestionHandoff` by default on a pinned
+OpenCode registration. A matching crew plugin uses it after it receives polls
+for the pinned captain at its configured location. Unpinned plugins use their
+existing direct route. Pinned Slack, Teams and standalone captains using
+native service discovery also use direct access when no gateway is polling.
+The worker can start that direct path before the captain's plugin location
+loads. This also lets a newer plugin work while an older gateway has handoff
+disabled.
+
+Set `features.crewQuestionHandoff: false` to stop the IRC gateway polling.
+On a pinned crew with `team.historyAPI` configured, the plugin waits for
+the gateway before accessing native forms. This lets the history endpoint
+stay read-only through startup and reconnects. Set `team.questionGateway:
+false` to always use direct access with a form-capable endpoint. Set
+`team.questionGateway: true` to require gateway handoff.
+If a crew assignment is active and its saved settings enable questions while
+the gateway is unavailable, the plugin logs the waiting route and the direct
+opt-out once per plugin location.
+Once the owning gateway is polling, crew questions default on when the
+captain's per-agent question settings file is absent. An existing
+`enabled: false` disables them. Invalid and unreadable settings also keep
+them disabled. Standalone direct access keeps its existing per-agent setting.
+The captain receives the task DM and answers with the existing
+`stargate_question` tool. Project, assignment, worker input and captain
+session stay the same.
 
 The gateway takes commands from the plugin at its configured captain location.
 It verifies the worker's native session and running question, then checks the
 task with the plugin immediately before submitting an answer. The crew plugin
-keeps the durable answer claim. A lost acknowledgement leaves the claim spent.
+keeps the durable answer claim. Each attempt uses one route, and a lost
+acknowledgement leaves the claim spent.
 The gateway checks the form for its native outcome when it reconnects. If the
 form is still pending, inspect it in OpenCode. The history service needs only
 its existing read permissions.
@@ -707,6 +728,8 @@ binary and the pinned Mesij binary. It uses the installed crew plugin, SQLite,
 a local deterministic model and the 2.3.2 SDK. Optionally pass the read-only
 history broker script as the third argument. Add `--lose-ack` after the broker
 path to exercise gateway restart during answer delivery.
+Add `--standalone` instead of a broker path to exercise the native discovery
+route with a pinned captain and no gateway.
 
 ```sh
 mise exec -- bun scripts/crew-question-smoke.ts /path/to/opencode "$(mise which mesij)"

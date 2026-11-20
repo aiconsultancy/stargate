@@ -4,23 +4,30 @@
 
 ### Feature flags
 
-- New flags: `bots[].slack.inboundReactions` delivers listed reactions, and
-  their removal, on this bot's Slack messages to its session. IRC
-  `questionOperator` enables private handling of background questions on a
-  pinned captain with `features.questions`. IRC `features.liveProgress`
-  enables event-based request notices and status. IRC
-  `features.crewQuestionHandoff` and crew `team.questionGateway` route native
-  crew clarifications through the owning gateway. `api.listen: "unix"`
-  selects a private mode-0600 Fleet socket instead of TCP; omitted `api`
-  still defaults to off, with no `enabled` alias. All default off.
-- New flag: `notify.adapters.<name>.enabled` defaults to `false` for each HTTP
-  notification input. Enabled inputs require Unix API mode. No defaults change.
-- Default changes: none.
-- New opt-ins: Teams `livePresence` enables native typing and informative updates. IRC `features.fleetTyping` enables typing alongside fleet thread notices. Both default off.
-- Enabled by default: none.
+- New flags: Teams `livePresence` defaults off. IRC `features.fleetTyping`
+  defaults on. Fleet `api.pullRequestRepositories` enables pull request lookup
+  only for bound checkouts and defaults to no bindings.
+  HTTP notification inputs `notify.adapters.<name>.enabled` default off
+  and require Unix API mode when enabled.
+- Default changes: IRC `features.liveProgress` defaults on.
+  `features.questions` defaults on for OpenCode registrations with enrolled
+  humans. `features.crewQuestionHandoff` defaults on for pinned OpenCode IRC
+  registrations. An unspecified crew plugin `team.questionGateway` uses
+  handoff while the owning gateway is polling. Paired crew questions default
+  on when the captain's per-agent question settings are absent.
+  Pinned crews using a writable `team.historyAPI` without a polling IRC gateway
+  must set `team.questionGateway: false` to retain direct native questions.
+  When enabled questions lack the required gateway, Stargate logs the wait
+  once per plugin location.
+- Enabled by default: IRC live progress, fleet typing, native questions for
+  supported registrations, and paired crew question handoff. Background
+  question alerts still require a configured `questionOperator`.
 
 ### Changes
 
+- Reserve addressed IRC `status` in registrations with enrolled humans for
+  checking the original request. Disable live progress to use addressed
+  `status` as an ordinary message.
 - Isolate Fleet API Git status from checkout configuration and bound primary
   and shared indexes before Git loads them. Use copy-on-write index snapshots
   where supported on Linux and give snapshot preparation its own deadline.
@@ -55,18 +62,38 @@
   timestamp changes. Preserve the observation time when a crew sample is reused.
 - Publish Fleet events when gateway metadata changes, including when the OpenCode
   version first becomes available.
-- Route admitted people's thumbs up, thumbs down, tick, cross and eyes
-  reactions as conversation input, without interpreting their meaning.
-  Slack app owners must grant `reactions:read` and `users:read`, and subscribe to
-  `reaction_added` and `reaction_removed` before enabling the flag.
 - Add private authenticated HTTP notification ingestion, atomic durable outbox
   admission and literal Slack delivery without agent work. Freeze physical
   destinations and audiences, recheck current access and echo policy, and
   retain store ownership through send settlement or process termination.
   See [notification ingestion](docs/notification-ingestion.md).
+
+## 0.41.0
+
+### Feature flags
+
+- New flags: `bots[].slack.inboundReactions` delivers listed reactions, and
+  their removal, on this bot's Slack messages to its session. IRC
+  `questionOperator` enables private handling of background questions on a
+  pinned captain with `features.questions`. IRC `features.liveProgress`
+  enables event-based request notices and status. IRC
+  `features.crewQuestionHandoff` and crew `team.questionGateway` route native
+  crew clarifications through the owning gateway. `api.listen: "unix"`
+  selects a private mode-0600 Fleet socket instead of TCP; omitted `api`
+  still defaults to off, with no `enabled` alias. All default off.
+- Default changes: none.
+- Enabled by default: none.
+
+### Changes
+
+- Route admitted people's thumbs up, thumbs down, tick, cross and eyes
+  reactions as conversation input, without interpreting their meaning.
+  Slack app owners must grant `reactions:read` and `users:read`, and subscribe to
+  `reaction_added` and `reaction_removed` before enabling the flag.
 - Serve Fleet through one bounded HTTP host, preserving private TCP access,
   operator authentication, CORS and streamed events. Add the exclusive private
-  Unix mode and internal exact-route contract. See [Fleet API](docs/api.md).
+  Unix mode and internal exact-route contract. Notification routes are not yet
+  wired. See [Fleet API](docs/api.md).
 - Harden Fleet API Git reads against checkout-configured commands.
 - Report Fleet API task outcomes that complete between event polls.
 - Look up pull requests by head branch, keep cached results on refresh

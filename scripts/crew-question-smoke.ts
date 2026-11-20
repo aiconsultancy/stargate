@@ -1,20 +1,30 @@
-/** Offline crew round trip with the installed plugin and the owning gateway. */
+/** Offline crew round trip with the installed plugin. */
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { OpenCode } from "@opencode/client";
+import { Service } from "@opencode/client/service";
 import { crewFingerprint } from "../src/crew/identity";
 import { CrewState } from "../src/crew/state";
 import { CrewQuestionGateway } from "../src/irc/crew-question-gateway";
-import { saveQuestionSettings } from "../src/question-settings";
+import {
+  questionSettingsPath,
+  saveQuestionSettings,
+} from "../src/question-settings";
 
+const standalone = process.argv.includes("--standalone");
+const loseAck = process.argv.includes("--lose-ack");
 const [binary, mesij, brokerPath] = process.argv
   .slice(2)
-  .filter((arg) => arg !== "--lose-ack");
+  .filter((arg) => arg !== "--lose-ack" && arg !== "--standalone");
 if (!binary || !mesij)
   throw new Error(
     "Pass the OpenCode binary and pinned mesij paths; optionally the read-only history broker script",
+  );
+if (standalone && (brokerPath || loseAck))
+  throw new Error(
+    "--standalone uses native service discovery without a gateway or broker",
   );
 const home = await realpath(
   await mkdtemp(join(tmpdir(), "crew-clarification-")),
@@ -137,11 +147,14 @@ const plan = {
         permissionProfile: "research" as const,
       },
     ],
-    questionGateway: true,
-    historyAPI: {
-      url: "http://127.0.0.1:" + (brokerPort ?? 9),
-      headersEnv: { Authorization: "FIXTURE_BROKER_AUTH" },
-    },
+    ...(standalone
+      ? {}
+      : {
+          historyAPI: {
+            url: `http://127.0.0.1:${brokerPort ?? 9}`,
+            headersEnv: { Authorization: "FIXTURE_BROKER_AUTH" },
+          },
+        }),
   },
 };
 const state = await CrewState.open(
@@ -157,12 +170,13 @@ state.readyPeer("worker");
 const task = state.reserveTask(peer, captainID);
 assert.ok(task);
 state.running(task.id);
-await saveQuestionSettings(
-  captainDirectory,
-  "build",
-  { enabled: true, timeoutMs: 300_000, answer: "requester" },
-  new AbortController().signal,
-);
+if (standalone)
+  await saveQuestionSettings(
+    captainDirectory,
+    "build",
+    { enabled: true, timeoutMs: 300_000, answer: "requester" },
+    new AbortController().signal,
+  );
 const config = join(home, "config/opencode");
 await mkdir(config, { recursive: true });
 await writeFile(
@@ -195,7 +209,13 @@ await writeFile(
   }),
 );
 const engine = Bun.spawn(
-  [binary, "serve", "--hostname", "127.0.0.1", "--port", String(port)],
+  [
+    binary,
+    "serve",
+    "--hostname",
+    "127.0.0.1",
+    ...(standalone ? ["--service"] : ["--port", String(port)]),
+  ],
   {
     cwd: captainDirectory,
     env: {
@@ -214,13 +234,6 @@ const engine = Bun.spawn(
     stderr: "inherit",
   },
 );
-const client = OpenCode.make({
-  baseUrl: "http://127.0.0.1:" + port,
-  headers: {
-    Authorization:
-      "Basic " + Buffer.from("opencode:fixture").toString("base64"),
-  },
-});
 async function wait<T>(get: () => Promise<T | undefined>, label: string) {
   for (let i = 0; i < 160; i++) {
     const value = await get();
@@ -235,6 +248,24 @@ async function wait<T>(get: () => Promise<T | undefined>, label: string) {
 let stop = new AbortController();
 let gateway: Promise<void> | undefined;
 try {
+  const endpoint = standalone
+    ? await wait(
+        () =>
+          Service.discover({ file: join(home, "state/opencode/service.json") }),
+        "native service discovery",
+      )
+    : {
+        url: `http://127.0.0.1:${port}`,
+        auth: {
+          type: "basic" as const,
+          username: "opencode",
+          password: "fixture",
+        },
+      };
+  const client = OpenCode.make({
+    baseUrl: endpoint.url,
+    headers: Service.headers(endpoint) ?? {},
+  });
   await wait(
     () => client.session.active().catch(() => undefined),
     "native engine",
@@ -284,6 +315,10 @@ try {
         .status,
       405,
     );
+    // Allow an ordinary plugin poll before starting the matching gateway.
+    // The task should stay attached without publishing a question offer.
+    await Bun.sleep(3500);
+    assert.deepEqual(state.crewQuestionOffers(task.id), []);
   }
   let writes = 0;
   const traced = OpenCode.make({
@@ -297,7 +332,7 @@ try {
           new URL(request.url).pathname.endsWith("/form/" + form.id + "/reply");
         if (isWrite) writes++;
         const result = await fetch(request);
-        if (isWrite && process.argv.includes("--lose-ack")) {
+        if (isWrite && loseAck) {
           stop.abort();
           throw new Error("Disconnected after native delivery");
         }
@@ -314,8 +349,9 @@ try {
     headersEnv: {},
     permissions: [],
   };
-  gateway = new CrewQuestionGateway(config, {}, traced).run(stop.signal);
-  if (process.argv.includes("--lose-ack")) {
+  if (!standalone)
+    gateway = new CrewQuestionGateway(config, {}, traced).run(stop.signal);
+  if (loseAck) {
     await wait(
       async () => (writes === 1 && stop.signal.aborted) || undefined,
       "lost native acknowledgement",
@@ -341,8 +377,12 @@ try {
   assert.equal(offer.originCaptainID, captainID);
   assert.equal(offer.inputID, task.inputID);
   assert.equal(state.activeTask("worker")?.id, task.id);
-  assert.equal(writes, 1);
+  assert.equal(writes, standalone ? 0 : 1);
   assert.equal(captainAnswers, 1);
+  assert.equal(
+    await Bun.file(questionSettingsPath(captainDirectory, "build")).exists(),
+    standalone,
+  );
   const history = await client.message.list({
     sessionID: peer.sessionID,
     limit: 100,
@@ -355,7 +395,13 @@ try {
   );
   console.log(
     "PASS: installed crew plugin sent the original worker question to the owning captain. One native answer, one worker input, same task.",
-    { writes, captainAnswers, modelCalls, realHistoryBroker: !!brokerPort },
+    {
+      standalone,
+      gatewayWrites: writes,
+      captainAnswers,
+      modelCalls,
+      realHistoryBroker: !!brokerPort,
+    },
   );
 } finally {
   stop.abort();
