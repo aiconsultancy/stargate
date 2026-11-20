@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readCommand } from "../src/api/v1/command";
@@ -36,7 +36,7 @@ test("status ignores checkout configuration added immediately before it starts",
     );
     git(directory, "add", ".");
     git(directory, "commit", "-m", "Initial");
-    await writeFile(tracked, "modified\n");
+    await writeFile(tracked, "modified content\n");
     const read = createGitReader(Date.now, async (args, options) => {
       // A required driver without a command is inert, but rejects conversion
       // if status consults this newly added filter configuration.
@@ -48,6 +48,28 @@ test("status ignores checkout configuration added immediately before it starts",
       branch: "main",
       changedFiles: 1,
     });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("isolated status detects same-size edits with a racy index timestamp", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  try {
+    git(directory, "init", "-b", "main");
+    git(directory, "config", "core.trustctime", "false");
+    const tracked = join(directory, "tracked.txt");
+    const timestamp = 1_600_000_000;
+    await writeFile(tracked, "original\n");
+    await utimes(tracked, timestamp, timestamp);
+    git(directory, "add", ".");
+    git(directory, "commit", "-m", "Initial");
+    await writeFile(tracked, "modified\n");
+    await utimes(tracked, timestamp, timestamp);
+    await utimes(join(directory, ".git", "index"), timestamp, timestamp);
+    expect(
+      await createGitReader()(directory, new AbortController().signal),
+    ).toMatchObject({ changedFiles: 1 });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

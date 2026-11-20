@@ -91,6 +91,7 @@ test("reads real Git state, respects the 15-second cache and handles a detached 
       behind: 0,
       changedFiles: 0,
       repository: "example/project",
+      pushRepository: "example/project",
       checkedAt: now,
     });
     await writeFile(join(directory, "untracked"), "fixture");

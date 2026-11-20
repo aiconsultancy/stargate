@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
 import { constants, createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, open, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  open,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -97,19 +105,52 @@ async function copyStatusFile(
   });
   if (!file) return;
   try {
-    if (!(await file.stat()).isFile())
-      throw new Error("Git metadata unavailable");
+    const metadata = await file.stat();
+    if (!metadata.isFile()) throw new Error("Git metadata unavailable");
     await pipeline(
       file.createReadStream({ autoClose: false }),
       createWriteStream(target),
       { signal },
     );
+    // Git uses the index mtime to decide which same-timestamp files to rehash.
+    // Round down so the copy can never make a racy entry appear older.
+    await utimes(target, metadata.atime, Math.floor(metadata.mtimeMs / 1_000));
   } finally {
     await file.close();
   }
 }
 
 type RunGit = (...args: string[]) => Promise<{ code: number; stdout: string }>;
+
+async function readPushRepository(branch: string, run: RunGit) {
+  const config = await run(
+    "config",
+    "--null",
+    "--get-regexp",
+    "^(branch\\..*\\.(pushremote|remote)|remote\\.pushdefault)$",
+  );
+  if (config.code !== 0 && !(config.code === 1 && !config.stdout)) return null;
+  const values = new Map<string, string>();
+  for (const entry of config.stdout.split("\0")) {
+    const separator = entry.indexOf("\n");
+    if (separator >= 0)
+      values.set(entry.slice(0, separator), entry.slice(separator + 1));
+  }
+  const remote =
+    values.get(`branch.${branch}.pushremote`) ??
+    values.get("remote.pushdefault") ??
+    values.get(`branch.${branch}.remote`);
+  let name = remote;
+  if (name === undefined) {
+    const remotes = await run("remote");
+    if (remotes.code !== 0) return null;
+    const names = remotes.stdout.trimEnd().split("\n");
+    name = names.length === 1 && names[0] ? names[0] : "origin";
+  }
+  if (!name || name === ".") return null;
+  const url = await run("remote", "get-url", "--push", "--", name);
+  return url.code === 0 ? githubRepository(url.stdout.trim()) : null;
+}
 
 async function readStatus(
   directory: string,
@@ -309,22 +350,10 @@ async function inspect(
     const branchName = branchRef.startsWith("refs/heads/")
       ? safeRef(branchRef.slice("refs/heads/".length))
       : null;
-    const [remote, push] = await Promise.all([
+    const [remote, pushRepository] = await Promise.all([
       run("remote", "get-url", "origin"),
-      branchName && oid
-        ? run(
-            "for-each-ref",
-            "--count=1",
-            "--format=%(push:remotename)",
-            "--",
-            branchRef,
-          )
-        : undefined,
+      branchName && oid ? readPushRepository(branchName, run) : null,
     ]);
-    const pushRemote = push?.code === 0 ? push.stdout.trim() : "";
-    const pushUrl = pushRemote
-      ? await run("remote", "get-url", "--push", "--", pushRemote)
-      : undefined;
     let counts: ReturnType<typeof parseAheadBehind> = null;
     if (baseRef && head.code === 0) {
       const result = await run(
@@ -350,8 +379,7 @@ async function inspect(
       changedFiles,
       repository:
         remote.code === 0 ? githubRepository(remote.stdout.trim()) : null,
-      pushRepository:
-        pushUrl?.code === 0 ? githubRepository(pushUrl.stdout.trim()) : null,
+      pushRepository,
       checkedAt: now(),
     };
   } catch {
