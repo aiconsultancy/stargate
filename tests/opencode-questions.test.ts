@@ -3,6 +3,7 @@ import { OpenCode } from "@opencode/client";
 import { Schema } from "effect";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema } from "../src/config";
+import { CrewQuestionGateway } from "../src/irc/crew-question-gateway";
 
 const cleanup: (() => unknown)[] = [];
 afterEach(async () => {
@@ -41,6 +42,11 @@ function fixture(
       },
     ],
     state: { status: "pending" },
+  };
+  const workerIdentity = {
+    agent: "worker",
+    location: { directory: "/workspace" },
+    metadata: { stargateCrew: { namespace: "fixture", crewID: "crew" } },
   };
   const tool = {
     type: "tool",
@@ -153,6 +159,7 @@ function fixture(
       if (path === `/api/session/${session}`)
         return Response.json({
           data: {
+            ...workerIdentity,
             id: session,
             location: { directory: "/workspace" },
             time: {
@@ -180,6 +187,11 @@ function fixture(
   cleanup.push(() => server.stop(true));
   return {
     backend,
+    gateway: new CrewQuestionGateway(
+      { ...config, sessionID: "ses_captain" },
+      {},
+      OpenCode.make({ baseUrl: server.url.href }),
+    ),
     get historyReads() {
       return historyReads;
     },
@@ -211,6 +223,112 @@ function fixture(
     list: () => backend.pendingQuestions(session, AbortSignal.timeout(3000)),
   };
 }
+
+test("crew gateway checks the worker identity, delivered input and form before requesting permission to write", async () => {
+  const f = fixture();
+  const owner = {
+    captain: "ses_captain",
+    session,
+    input,
+    task: "task",
+    crew: "crew",
+    agent: "worker",
+    namespace: "fixture",
+    directory: "/workspace",
+  };
+  const work = { id: "read", owner, action: { kind: "list" as const } };
+  const signal = AbortSignal.timeout(3000);
+  let confirms = 0;
+  let permitted = false;
+  const confirm = async () => {
+    confirms++;
+    return permitted;
+  };
+  for (const change of [
+    { captain: "ses_wrong" },
+    { session: "ses_captain" },
+    { namespace: "other" },
+    { agent: "other" },
+    { crew: "other" },
+    { directory: "/other" },
+  ]) {
+    expect(
+      await f.gateway.execute(
+        { ...work, owner: { ...owner, ...change } },
+        confirm,
+        signal,
+      ),
+    ).toEqual({ status: "mismatch" });
+  }
+  const result = await f.gateway.execute(work, confirm, signal);
+  expect(result.status).toBe("ok");
+  expect(result.forms).toHaveLength(1);
+  const q = (await f.list())[0];
+  if (!q) throw new Error("Missing question");
+  const identity = { form: formID, fingerprint: q.fingerprint };
+  expect(
+    await f.gateway.execute(
+      { ...work, action: { kind: "check", ...identity } },
+      confirm,
+      signal,
+    ),
+  ).toEqual({ status: "ok" });
+  const write = {
+    ...work,
+    action: { kind: "write" as const, ...identity, answer: { q0: "wait" } },
+  };
+  expect(
+    await f.gateway.execute(
+      { ...write, owner: { ...owner, input: "wrong" } },
+      confirm,
+      signal,
+    ),
+  ).toEqual({ status: "mismatch" });
+  expect(
+    await f.gateway.execute(
+      { ...write, action: { ...write.action, fingerprint: "b".repeat(64) } },
+      confirm,
+      signal,
+    ),
+  ).toEqual({ status: "mismatch" });
+  expect(confirms).toBe(0);
+  expect(await f.gateway.execute(write, confirm, signal)).toEqual({
+    status: "mismatch",
+  });
+  expect(f.writes).toHaveLength(0);
+  permitted = true;
+  expect(await f.gateway.execute(write, confirm, signal)).toEqual({
+    status: "ok",
+  });
+  expect(f.writes).toHaveLength(1);
+  expect(
+    await f.gateway.execute(
+      { ...work, action: { kind: "outcome", ...identity } },
+      confirm,
+      signal,
+    ),
+  ).toEqual({ status: "answered" });
+  expect(await f.gateway.execute(write, confirm, signal)).toEqual({
+    status: "mismatch",
+  });
+  expect(f.writes).toHaveLength(1);
+  const other = fixture();
+  const probe = { ...work, action: { kind: "outcome" as const, ...identity } };
+  expect(await other.gateway.execute(probe, confirm, signal)).toEqual({
+    status: "unknown",
+  });
+  expect(
+    await other.gateway.execute(
+      { ...write, action: { ...write.action, answer: null } },
+      confirm,
+      signal,
+    ),
+  ).toEqual({ status: "ok" });
+  expect(await other.gateway.execute(probe, confirm, signal)).toEqual({
+    status: "cancelled",
+  });
+  expect(other.writes.map((row) => row.method)).toEqual(["DELETE"]);
+});
 
 test("OpenCode boundary corpus: question origin is strict at both object levels", async () => {
   const f = fixture();

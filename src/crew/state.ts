@@ -623,7 +623,7 @@ export class CrewState {
   ) {
     this.db
       .query(`UPDATE crew_questions SET outcome=?
-      WHERE token=? AND state='attempted' AND outcome IS NULL`)
+      WHERE token=? AND state='attempted' AND (outcome IS NULL OR outcome='uncertain')`)
       .run(outcome, token);
   }
 

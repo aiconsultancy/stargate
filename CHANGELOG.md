@@ -10,6 +10,7 @@
   instead of TCP. Omitted `api` still defaults to off. No `enabled` alias.
 - Default changes: none.
 - Enabled by default: none.
+- New opt-ins: IRC `features.crewQuestionHandoff` and crew `team.questionGateway` route native crew clarifications through the owning gateway. Both default off.
 
 ### Changes
 

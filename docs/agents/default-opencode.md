@@ -685,3 +685,29 @@ action. An exact retry for the same idle boundary uses the same native message
 ID, which OpenCode admits once. Stargate queues the continuation so it cannot
 steer an active turn.
 This operation applies to OpenCode crew tasks.
+
+### Crew questions with a read-only history service
+
+On a pinned IRC ship, set the crew plugin's `team.questionGateway` and the IRC
+registration's `features.crewQuestionHandoff` to `true`. Enable native
+questions for the captain. Both handoff options default to off. The captain
+receives the existing task DM and answers with the existing `stargate_question`
+tool. Project, assignment, worker input and captain session stay the same.
+
+The gateway takes commands from the plugin at its configured captain location.
+It verifies the worker's native session and running question, then checks the
+task with the plugin immediately before submitting an answer. The crew plugin
+keeps the durable answer claim. A lost acknowledgement leaves the claim spent.
+The gateway checks the form for its native outcome when it reconnects. If the
+form is still pending, inspect it in OpenCode. The history service needs only
+its existing read permissions.
+
+Run the disposable integration fixture with a locally installed OpenCode 2.2.7
+binary and the pinned Mesij binary. It uses the installed crew plugin, SQLite,
+a local deterministic model and the 2.3.2 SDK. Optionally pass the read-only
+history broker script as the third argument. Add `--lose-ack` after the broker
+path to exercise gateway restart during answer delivery.
+
+```sh
+mise exec -- bun scripts/crew-question-smoke.ts /path/to/opencode "$(mise which mesij)"
+```
