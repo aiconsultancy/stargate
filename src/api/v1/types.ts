@@ -269,10 +269,17 @@ export type V1Event =
   | { type: "activity"; data: V1ActivityEvent }
   | { type: "heartbeat"; data: { at: number } };
 
+export type V1ShipRead = (
+  signal: AbortSignal,
+) => Promise<V1ShipDetail | undefined>;
+
 /** What the projection provides to the HTTP layer. */
 export interface ApiV1Source {
-  /** Fleet without `host` and `gateway`, which the server adds. */
-  fleet(signal: AbortSignal): Promise<Omit<V1Fleet, "host" | "gateway">>;
+  /** Fleet without host/gateway. The poller can reuse its captured crew reads. */
+  fleet(
+    signal: AbortSignal,
+    captureShipRead?: (id: string, read: V1ShipRead) => void,
+  ): Promise<Omit<V1Fleet, "host" | "gateway">>;
   ship(id: string, signal: AbortSignal): Promise<V1ShipDetail | undefined>;
   crew(
     ship: string,

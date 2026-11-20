@@ -3,6 +3,7 @@ import type {
   V1Event,
   V1Fleet,
   V1Host,
+  V1ShipRead,
   V1Snapshot,
 } from "./types";
 
@@ -64,11 +65,17 @@ export function createEventStreams(options: Options, timing = streamTiming) {
         AbortSignal.timeout(20_000),
       ]);
       try {
-        const overview = await options.fleet(readSignal);
+        const reads = new Map<string, V1ShipRead>();
+        const overview = await options.fleet(readSignal, (id, read) =>
+          reads.set(id, read),
+        );
         readSignal.throwIfAborted();
         const [ships, fleet] = await Promise.all([
           Promise.all(
-            overview.ships.map(async ({ id }) => options.ship(id, readSignal)),
+            overview.ships.map(async ({ id }) => {
+              const read = reads.get(id);
+              return read ? read(readSignal) : options.ship(id, readSignal);
+            }),
           ),
           options.completeFleet(overview),
         ]);

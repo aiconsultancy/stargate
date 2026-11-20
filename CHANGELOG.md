@@ -16,6 +16,8 @@
   failure, and suppress PR activity when the previous lookup was unknown.
 - Label the Fleet API's data filesystem `data` in disk metrics.
 - Require an explicit Fleet API CORS origin for Windows WebView2 Spaces.
+- Reuse crew status across Fleet API event frames and avoid repeated
+  unsupported status calls on older OpenCode plugins.
 - A git checkout of a release now reports its `vX.Y.Z` tag at HEAD as the
   Fleet API's `gateway.version` when it has no `.stargate-release.json`.
   Fetch the tag, not only the commit. Other source checkouts still report the

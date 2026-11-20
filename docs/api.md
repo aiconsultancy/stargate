@@ -121,6 +121,9 @@ event per available ship detail. One shared poller reads the fleet every
 three seconds while clients are connected. It publishes changed fleet and
 ship summaries and `activity` transitions. The stream also sends `host`
 every ten seconds and `heartbeat` every fifteen seconds.
+The overview and ship details share one crew status read per ship per poll.
+If an older OpenCode plugin reports that it lacks `fleetStatus`, Stargate
+uses ordinary crew status and waits one minute before probing again.
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git
 recovery does not generate activity.

@@ -376,6 +376,12 @@ export function dashboardSource(
               : {}),
             ...(read.error ? { error: read.error } : {}),
             ...(read.metadata ? { metadata: read.metadata } : {}),
+            ...(selected
+              ? {
+                  readDetail: (reading: AbortSignal) =>
+                    readShip(ship.bot.id, reading, {}, read),
+                }
+              : {}),
           };
         }),
     );
@@ -386,12 +392,13 @@ export function dashboardSource(
     id: string,
     signal: AbortSignal,
     fleetInput?: CrewStatusInput,
-  ) {
+    sample?: CrewRead,
+  ): Promise<{ view: ShipView; metadata?: CrewRead["metadata"] } | undefined> {
     const ship = find(id);
     if (!ship) return undefined;
     const { bot } = ship;
     const [{ status, error, metadata }, sessions] = await Promise.all([
-      crew(ship, signal, fleetInput),
+      sample ?? crew(ship, signal, fleetInput),
       roots(ship, signal),
     ]);
     const named = agent(ship);

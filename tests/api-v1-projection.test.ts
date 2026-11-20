@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Schema } from "effect";
+import { diffEvents } from "../src/api/v1/diff";
+import { createEventStreams } from "../src/api/v1/events";
 import type { ApiV1Config } from "../src/api/v1/features";
 import { createApiV1Source } from "../src/api/v1/projection";
 import type { V1Git, V1QueueCounts, V1Task } from "../src/api/v1/types";
 import type { AgentBackend } from "../src/backend";
-import { configSchema } from "../src/config";
+import { OpenCodeBackend } from "../src/backends/opencode";
+import { backendSchema, configSchema } from "../src/config";
 import type { CrewStatus, CrewStatusInput } from "../src/crew-status";
 import { type DashboardShip, dashboardSource } from "../src/dashboard-source";
 import type {
@@ -285,6 +288,106 @@ function fixture() {
 }
 
 describe("Fleet API projection", () => {
+  test("an older OpenCode plugin skips repeated missing fleet-status calls", async () => {
+    const methods: string[] = [];
+    let missing = false;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        const method = new URL(request.url).pathname.split("/").at(-1) ?? "";
+        methods.push(method);
+        if (method === "fleetStatus")
+          return Response.json(
+            {
+              _tag: missing ? "RpcError" : "RpcInternalError",
+              type: missing ? "rpc.method_not_found" : "rpc.internal",
+              message: "Fixture RPC failure",
+            },
+            { status: missing ? 400 : 500 },
+          );
+        return Response.json({
+          output: { members: [], total: 0, truncated: false },
+        });
+      },
+    });
+    try {
+      const config = Schema.decodeUnknownSync(backendSchema)({
+        type: "opencode",
+        url: server.url.href,
+        directory: "/",
+      });
+      if (config.type !== "opencode")
+        throw new Error("Invalid backend fixture");
+      const backend = new OpenCodeBackend(config);
+      try {
+        expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+        missing = true;
+        expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+        expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+        expect(await backend.crewStatus({}, signal)).toMatchObject({
+          members: [],
+        });
+        expect(methods).toEqual(["fleetStatus", "fleetStatus", "status"]);
+      } finally {
+        await backend.close();
+      }
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("reuses the crew read for overview and detail in each event poll", async () => {
+    const f = fixture();
+    f.set("captain", [context("pilot")]);
+    const host = {
+      hostname: "example",
+      platform: "linux",
+      arch: "arm64",
+      uptimeSec: 1,
+      cpu: {
+        cores: 1,
+        usage: null,
+        load: [0, 0, 0] as [number, number, number],
+      },
+      memory: { totalBytes: 100, availableBytes: 50 },
+      disks: [],
+      sampledAt: 1,
+    };
+    const streams = createEventStreams({
+      ...f.source,
+      diff: diffEvents,
+      readHost: async () => host,
+      completeFleet: async (overview) => ({
+        ...overview,
+        host,
+        gateway: {
+          version: "1.0.0",
+          bunVersion: "1.0.0",
+          opencodeVersion: null,
+          startedAt: 1,
+          features: [],
+        },
+      }),
+    });
+    try {
+      const reader = streams.open(signal)?.getReader();
+      if (!reader) throw new Error("Cannot open event stream");
+      const decoder = new TextDecoder();
+      let frames = "";
+      while (!frames.includes('event: ship\ndata: {"id":"captain"')) {
+        const next = await reader.read();
+        if (next.done) throw new Error("Missing captain frame");
+        frames += decoder.decode(next.value, { stream: true });
+      }
+      expect(f.calls.status.filter((id) => id === "captain")).toEqual([
+        "captain",
+      ]);
+    } finally {
+      streams.stop();
+    }
+  });
+
   test("uses top-level registrations, splits the admiral and selects the longest known idle time", async () => {
     const f = fixture();
     f.useConfig((config) => ({
