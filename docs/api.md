@@ -148,18 +148,21 @@ is cached for 15 seconds. Timeouts spent mostly waiting for a read slot are
 cached for one read deadline (two seconds). Cleanup runs in the background
 within the same concurrency limit. Snapshots use a private
 `stargate-git-status` folder in the data directory when the data directory is
-outside the worktree, writable, owned by the service user, and has no
-ancestor that other users can write to without the sticky bit. Startup
-removes snapshots there that are older than 24 hours. If the temporary
-directory also fails those checks, Git status is reported unavailable. Otherwise each process uses its own private folder in
-the system temporary directory, removed when the gateway stops; a folder left
-by a crash is not swept and is cleared with the temporary directory.
+outside the worktree, writable and owned by the service user. Every directory
+on its path must be owned by root or the service user, and any that other
+users can write to must have the sticky bit. Startup removes snapshots there
+that are older than 24 hours. Otherwise each process uses its own private
+folder in the system temporary directory, which must pass the same path checks
+but may be owned by root. That folder is removed when the gateway stops; one
+left by a crash is not swept and is cleared with the temporary directory. If
+neither directory passes, Git status is reported unavailable.
 
 Copied ignore files, including `core.excludesFile`, must resolve inside
 the checkout or the Git directories Git reports for it. Those directories come
 from the checkout itself, so this limits which files are copied rather than
 forming a hard boundary: a checkout pointed at another repository on the host
-can affect its own changed-file count.
+can affect its own changed-file count, which can reveal to Fleet viewers
+whether that repository's ignore rules match files in the checkout.
 The 1 MiB limit applies to each copied pattern file.
 Unreadable ignore files are skipped, and `info/exclude` retains its usual
 precedence. Git reads worktree `.gitignore` files directly. Status reads
@@ -218,8 +221,9 @@ That fallback expires 75 seconds after the successful read and is discarded
 when the configured ship roster or a ship's backend identity changes. The
 poller also discards in-flight overviews from before the change. On expiry,
 the server closes the streams so clients can reconnect for a fresh
-snapshot. A change to the ship roster or to a ship's backend identity also
-closes the streams, and clients reconnect for a fresh snapshot. Host and
+snapshot. Once a stream has received a `fleet` frame, a change to the ship
+roster or to a ship's backend identity also closes it, and the client
+reconnects for a fresh snapshot. Host and
 heartbeat events continue while the poller waits for a stalled overview.
 At three times a read's deadline, another attempt can start. Each overview,
 enrichment, host metrics, crew sample, ship detail and OpenCode `fleetStatus`
