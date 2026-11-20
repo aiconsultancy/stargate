@@ -18,7 +18,6 @@ import { Semaphore } from "effect";
 import { containsCredential } from "../../credentials";
 import { abortable, runAbortable } from "../../effect";
 import { readCommand } from "./command";
-import { sharedIndexName } from "./git-index";
 import type { V1Git } from "./types";
 
 const ttl = 15_000;
@@ -215,7 +214,8 @@ async function readPushRepository(branch: string, run: RunGit) {
     "--get-regexp",
     "^(branch\\..*\\.(pushremote|remote)|remote\\.pushdefault)$",
   );
-  if (config.code !== 0 && !(config.code === 1 && !config.stdout)) return null;
+  if (config.code !== 0 && !(config.code === 1 && !config.stdout))
+    return { pushRepository: null };
   const values = new Map<string, string>();
   for (const entry of config.stdout.split("\0")) {
     const separator = entry.indexOf("\n");
@@ -229,13 +229,75 @@ async function readPushRepository(branch: string, run: RunGit) {
   let name = remote;
   if (name === undefined) {
     const remotes = await run("remote");
-    if (remotes.code !== 0) return null;
+    if (remotes.code !== 0) return { pushRepository: null };
     const names = remotes.stdout.trimEnd().split("\n");
     name = names.length === 1 && names[0] ? names[0] : "origin";
   }
-  if (!name || name === ".") return null;
-  const url = await run("remote", "get-url", "--push", "--", name);
-  return url.code === 0 ? githubRepository(url.stdout.trim()) : null;
+  if (!name || name === ".") return { pushRepository: null };
+  const urls = await run("remote", "get-url", "--push", "--all", "--", name);
+  if (urls.code !== 0) return { pushRepository: null };
+  let pushRepository: string | null = null;
+  for (const url of urls.stdout.split("\n")) {
+    const repo = githubRepository(url);
+    if (!repo) continue;
+    if (pushRepository && pushRepository.toLowerCase() !== repo.toLowerCase())
+      return { pushRepository: null, pushRepositoryAmbiguous: true as const };
+    pushRepository ??= repo;
+  }
+  return { pushRepository };
+}
+
+async function createStatusDirectory(checkout: string, dataDirectory?: string) {
+  if (dataDirectory) {
+    try {
+      const [root, data] = await Promise.all([
+        realpath(checkout),
+        realpath(dataDirectory),
+      ]);
+      const child = relative(root, data);
+      // The private snapshot would appear as untracked files inside the worktree.
+      if (child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child))
+        return await mkdtemp(join(dataDirectory, "stargate-git-status-"));
+    } catch (error) {
+      if (
+        !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
+          String(fileError(error)),
+        )
+      )
+        throw error;
+    }
+  }
+  return mkdtemp(join(tmpdir(), "stargate-git-status-"));
+}
+
+async function readSharedIndexName(
+  gitDir: string,
+  format: "sha1" | "sha256",
+  signal: AbortSignal,
+  command: typeof readCommand,
+) {
+  signal.throwIfAborted();
+  const result = await command(
+    [
+      process.execPath,
+      "--no-env-file",
+      "--config=/dev/null",
+      join(import.meta.dir, "git-index.ts"),
+      join(gitDir, "index"),
+      format,
+    ],
+    { cwd: gitDir, env: {}, timeout, signal },
+  );
+  signal.throwIfAborted();
+  if (result?.code !== 0) throw new Error("Invalid Git index");
+  const name = result.stdout;
+  if (!name) return undefined;
+  if (
+    !/^sharedindex\.[a-f0-9]+$/.test(name) ||
+    name.length !== "sharedindex.".length + (format === "sha1" ? 40 : 64)
+  )
+    throw new Error("Invalid Git index");
+  return name;
 }
 
 async function readStatus(
@@ -244,6 +306,8 @@ async function readStatus(
   signal: AbortSignal,
   run: RunGit,
   runWithEnv: (env: NodeJS.ProcessEnv, ...args: string[]) => ReturnType<RunGit>,
+  command: typeof readCommand,
+  dataDirectory?: string,
 ) {
   const [paths, settings, excludes] = await Promise.all([
     run(
@@ -305,7 +369,7 @@ async function readStatus(
 
   // Status only sees this repository's config, HEAD, index and object store.
   // Never copy executable settings, hooks, info/attributes or a commondir.
-  const gitDir = await mkdtemp(join(tmpdir(), "stargate-git-status-"));
+  const gitDir = await createStatusDirectory(directory, dataDirectory);
   try {
     const configuredExcludes =
       excludes.code === 0 &&
@@ -334,8 +398,7 @@ async function readStatus(
       mkdir(join(gitDir, "refs")),
     ]);
     if (await snapshotIndex(index, "index", "primary")) {
-      signal.throwIfAborted();
-      const shared = sharedIndexName(join(gitDir, "index"), format);
+      const shared = await readSharedIndexName(gitDir, format, signal, command);
       if (shared)
         await snapshotIndex(join(checkoutGit, shared), shared, "shared");
     }
@@ -392,11 +455,30 @@ async function readStatus(
   }
 }
 
+async function readHeadRef(run: RunGit) {
+  const ref = await run("symbolic-ref", "-q", "HEAD");
+  if (ref.code === 1) return "HEAD"; // Detached.
+  const name = ref.stdout.trim();
+  if (ref.code !== 0 || !name.startsWith("refs/"))
+    throw new Error("Git HEAD unavailable");
+  return name;
+}
+
+async function readCommit(run: RunGit, ref: string) {
+  const revision = await run("rev-parse", "--verify", "--end-of-options", ref);
+  if (revision.code !== 0) return undefined;
+  const oid = revision.stdout.trim();
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid))
+    throw new Error("Git HEAD unavailable");
+  return oid;
+}
+
 async function inspect(
   directory: string,
   now: () => number,
   signal: AbortSignal,
   command: typeof readCommand,
+  dataDirectory?: string,
 ): Promise<V1Git | null> {
   const state: V1Git = {
     branch: null,
@@ -461,16 +543,25 @@ async function inspect(
     );
     if (root.code !== 0 || root.stdout !== "true\n\n")
       throw new Error("Checkout root unavailable");
-    const [branch, fullHead, upstream] = await Promise.all([
-      run("symbolic-ref", "-q", "HEAD"),
-      run("rev-parse", "--verify", "HEAD"),
-      run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"),
+    const branchRef = await readHeadRef(run);
+    const branch = branchRef.startsWith("refs/heads/")
+      ? branchRef.slice("refs/heads/".length)
+      : null;
+    const [oid, upstream] = await Promise.all([
+      readCommit(run, branchRef),
+      branch
+        ? run(
+            "rev-parse",
+            "--verify",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "--end-of-options",
+            `${branch}@{upstream}`,
+          )
+        : undefined,
     ]);
-    const oid = fullHead.code === 0 ? fullHead.stdout.trim() : undefined;
-    if (oid !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid))
-      throw new Error("Git HEAD unavailable");
     const base =
-      upstream.code === 0
+      upstream?.code === 0
         ? upstream
         : await run(
             "symbolic-ref",
@@ -479,18 +570,29 @@ async function inspect(
             "refs/remotes/origin/HEAD",
           );
     const baseRef = base.code === 0 ? base.stdout.trim() : null;
-    const changed = await readStatus(directory, oid, deadline, run, runWithEnv);
+    const changed = await readStatus(
+      directory,
+      oid,
+      deadline,
+      run,
+      runWithEnv,
+      command,
+      dataDirectory,
+    );
+    if (
+      branchRef !== (await readHeadRef(run)) ||
+      oid !== (await readCommit(run, "HEAD"))
+    )
+      throw new Error("Git HEAD changed during status read");
     const changedFiles =
       changed.code === 0 ? countChangedPaths(changed.stdout) : null;
-    if (changedFiles === null || branch.code > 1)
-      throw new Error("Git state unavailable");
-    const branchRef = branch.code === 0 ? branch.stdout.trim() : "";
-    const branchName = branchRef.startsWith("refs/heads/")
-      ? safeRef(branchRef.slice("refs/heads/".length))
-      : null;
-    const [remote, pushRepository, head] = await Promise.all([
+    if (changedFiles === null) throw new Error("Git state unavailable");
+    const branchName = branch && safeRef(branch);
+    const [remote, push, head] = await Promise.all([
       run("remote", "get-url", "origin"),
-      branchName && oid ? readPushRepository(branchName, run) : null,
+      branchName && oid
+        ? readPushRepository(branchName, run)
+        : { pushRepository: null },
       oid ? run("rev-parse", "--short", "--verify", oid) : null,
     ]);
     const abbreviation = head?.code === 0 ? head.stdout.trim() : "";
@@ -519,7 +621,7 @@ async function inspect(
       changedFiles,
       repository:
         remote.code === 0 ? githubRepository(remote.stdout.trim()) : null,
-      pushRepository,
+      ...push,
       checkedAt: now(),
     };
   } catch (error) {
@@ -539,6 +641,7 @@ async function inspect(
 export function createGitReader(
   now: () => number = Date.now,
   command = readCommand,
+  dataDirectory?: string,
 ) {
   const permits = Semaphore.makeUnsafe(4);
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
@@ -553,7 +656,13 @@ export function createGitReader(
         abortable(async (reading) => {
           const saved = cache.get(directory);
           if (saved && saved.expiresAt > now()) return saved.value;
-          const value = await inspect(directory, now, reading, command);
+          const value = await inspect(
+            directory,
+            now,
+            reading,
+            command,
+            dataDirectory,
+          );
           for (const [path, entry] of cache)
             if (entry.expiresAt <= now()) cache.delete(path);
           cache.set(directory, { expiresAt: now() + ttl, value });

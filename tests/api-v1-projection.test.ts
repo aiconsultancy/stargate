@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { Schema } from "effect";
 import { diffEvents } from "../src/api/v1/diff";
 import { createEventStreams } from "../src/api/v1/events";
@@ -66,7 +66,13 @@ function session(
   return { id, harness: "opencode", kind: "subagent", ...extra };
 }
 
-function fixture(options?: Parameters<typeof dashboardSource>[4]) {
+function fixture(
+  options?: Parameters<typeof dashboardSource>[4],
+  overrides?: Pick<
+    Parameters<typeof createApiV1Source>[0],
+    "git" | "pullRequest"
+  >,
+) {
   let at = 4_000_000;
   let config: ApiV1Config = Schema.decodeUnknownSync(configSchema)({
     bots: [bot("captain")],
@@ -275,6 +281,7 @@ function fixture(options?: Parameters<typeof dashboardSource>[4]) {
       };
     },
     pullRequest: () => null,
+    ...overrides,
   });
   return {
     dashboard,
@@ -612,6 +619,45 @@ describe("Fleet API projection", () => {
     } finally {
       streams.stop();
     }
+  });
+
+  test("uses the fetch owner for PR lookup with an unresolved push URL and leaves ambiguous pushes unsettled", async () => {
+    let ambiguous = false;
+    const pullRequest = mock(() => null);
+    const f = fixture(undefined, {
+      git: async (directory): Promise<V1Git | null> =>
+        directory
+          ? {
+              branch: "test/change",
+              head: "123abcd",
+              base: null,
+              ahead: null,
+              behind: null,
+              changedFiles: 0,
+              repository: "example/project",
+              pushRepository: null,
+              checkedAt: 1,
+              ...(ambiguous ? { pushRepositoryAmbiguous: true } : {}),
+            }
+          : null,
+      pullRequest,
+    });
+    f.set("captain", [context("pilot", { provisioned: "ready" })]);
+    const read = async () =>
+      (await f.source.ship("captain", signal))?.crewMembers[0]?.contexts[0];
+    expect(await read()).toMatchObject({
+      pullRequest: null,
+      pullRequestKnown: true,
+    });
+    expect(pullRequest).toHaveBeenCalledWith(
+      "example/project",
+      "test/change",
+      null,
+    );
+    pullRequest.mockClear();
+    ambiguous = true;
+    expect(await read()).not.toHaveProperty("pullRequestKnown");
+    expect(pullRequest).not.toHaveBeenCalled();
   });
 
   test("publishes an initial crew error detail and a single recovery activity", async () => {

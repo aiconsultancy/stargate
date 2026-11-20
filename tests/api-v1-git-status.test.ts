@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   open,
+  readdir,
   rm,
   stat,
   symlink,
@@ -12,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { readCommand } from "../src/api/v1/command";
 import { createGitReader } from "../src/api/v1/git";
 
@@ -123,39 +124,144 @@ test("optional ignore metadata can be linked inside Git or skipped when unusable
   }
 });
 
-test("abbreviation, status and comparison use one HEAD even when the branch advances", async () => {
+test.each(["branch switch", "branch update"])(
+  "rejects a Git snapshot after a %s",
+  async (change) => {
+    const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+    try {
+      git(directory, "init", "-b", "main");
+      const tracked = join(directory, "tracked");
+      await writeFile(tracked, "first\n");
+      git(directory, "add", ".");
+      git(directory, "commit", "-m", "First");
+      const start = git(directory, "rev-parse", "HEAD");
+      await writeFile(tracked, "second\n");
+      git(directory, "commit", "-am", "Second");
+      const next = git(directory, "rev-parse", "HEAD");
+      git(directory, "branch", "other", start);
+      git(directory, "reset", "--hard", start);
+      git(directory, "update-ref", "refs/remotes/origin/main", start);
+      git(
+        directory,
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+      );
+      const read = createGitReader(Date.now, async (args, options) => {
+        const result = await readCommand(args, options);
+        if (args.includes("status")) {
+          if (change === "branch switch") git(directory, "switch", "other");
+          else git(directory, "update-ref", "refs/heads/main", next);
+        }
+        return result;
+      });
+      expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+        branch: null,
+        head: null,
+        changedFiles: null,
+        error: "Git state unavailable.",
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("index inspection runs outside the gateway thread and stops at its deadline", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const mmap = spyOn(Bun, "mmap");
+  const parsed = Promise.withResolvers<number | undefined>();
+  let heartbeats = 0;
+  const timer = setInterval(() => heartbeats++, 10);
+  try {
+    git(directory, "init", "-b", "main");
+    await writeFile(join(directory, "tracked"), "fixture\n");
+    git(directory, "add", "tracked");
+    const read = createGitReader(Date.now, async (args, options) => {
+      if (args[0] !== process.execPath) return readCommand(args, options);
+      const before = heartbeats;
+      const result = await readCommand(
+        [process.execPath, "-e", "for (;;) {}"],
+        options,
+      );
+      expect(heartbeats - before).toBeGreaterThan(1);
+      parsed.resolve(result?.code);
+      return result;
+    });
+    expect(await read(directory, AbortSignal.timeout(4000))).toMatchObject({
+      error: "Git read timed out.",
+    });
+    expect(await parsed.promise).not.toBe(0);
+    expect(mmap).not.toHaveBeenCalled();
+  } finally {
+    clearInterval(timer);
+    mmap.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test.each(["success", "failure"])(
+  "stores private index copies under the data directory and cleans up after %s",
+  async (outcome) => {
+    const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+    try {
+      const directory = join(root, "checkout");
+      const dataDirectory = join(root, "data");
+      await mkdir(directory);
+      await mkdir(dataDirectory, { mode: 0o700 });
+      git(directory, "init", "-b", "main");
+      await writeFile(join(directory, "tracked"), "fixture\n");
+      git(directory, "add", "tracked");
+      let parent: string | undefined;
+      let mode: number | undefined;
+      const read = createGitReader(
+        Date.now,
+        async (args, options) => {
+          const snapshot = options.env["GIT_DIR"];
+          if (snapshot && args.includes("status")) {
+            parent = dirname(snapshot);
+            mode = (await stat(snapshot)).mode & 0o777;
+            expect((await stat(join(snapshot, "index"))).size).toBeGreaterThan(
+              0,
+            );
+            if (outcome === "failure") return { code: 1, stdout: "" };
+          }
+          return readCommand(args, options);
+        },
+        dataDirectory,
+      );
+      const result = await read(directory, AbortSignal.timeout(3000));
+      expect(result?.error).toBe(
+        outcome === "failure" ? "Git state unavailable." : undefined,
+      );
+      expect(parent).toBe(dataDirectory);
+      expect(mode).toBe(0o700);
+      expect(await readdir(dataDirectory)).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test("the documented copy limit leaves a large worktree .gitignore usable", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   try {
     git(directory, "init", "-b", "main");
-    const tracked = join(directory, "tracked");
-    await writeFile(tracked, "first\n");
-    git(directory, "add", ".");
-    git(directory, "commit", "-m", "First");
-    const start = git(directory, "rev-parse", "HEAD");
-    const short = git(directory, "rev-parse", "--short", start);
-    await writeFile(tracked, "second\n");
-    git(directory, "commit", "-am", "Second");
-    const next = git(directory, "rev-parse", "HEAD");
-    git(directory, "reset", "--hard", start);
-    git(directory, "update-ref", "refs/remotes/origin/main", start);
-    git(
-      directory,
-      "symbolic-ref",
-      "refs/remotes/origin/HEAD",
-      "refs/remotes/origin/main",
+    await writeFile(
+      join(directory, ".gitignore"),
+      `${"# padding\n".repeat(210_000)}ignored\n`,
     );
-    const read = createGitReader(Date.now, async (args, options) => {
-      const result = await readCommand(args, options);
-      if (args.slice(-3).join(" ") === "rev-parse --verify HEAD")
-        git(directory, "update-ref", "refs/heads/main", next);
-      return result;
-    });
-    expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
-      head: short,
-      changedFiles: 0,
-      ahead: 0,
-      behind: 0,
-    });
+    await writeFile(join(directory, "ignored"), "fixture\n");
+    expect(
+      await createGitReader()(directory, AbortSignal.timeout(3000)),
+    ).toMatchObject({ changedFiles: 1 });
+    const docs = await Bun.file(
+      new URL("../docs/api.md", import.meta.url),
+    ).text();
+    expect(docs).toContain(
+      "The 1 MiB limit applies to each copied pattern file.",
+    );
+    expect(docs).toContain("Git reads worktree `.gitignore` files directly.");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

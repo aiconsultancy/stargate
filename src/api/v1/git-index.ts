@@ -1,5 +1,5 @@
 /** Read only the split-index reference from a private, size-checked copy. */
-export function sharedIndexName(path: string, format: "sha1" | "sha256") {
+function sharedIndexName(path: string, format: "sha1" | "sha256") {
   // The copy cannot change under this mapping. Map it without a second buffer.
   const mapped = Bun.mmap(path, { shared: false });
   const index = Buffer.from(
@@ -52,4 +52,11 @@ export function sharedIndexName(path: string, format: "sha1" | "sha256") {
     offset = data + size;
   }
   return shared;
+}
+
+if (import.meta.main) {
+  const [, , path, format] = process.argv;
+  if (!path || (format !== "sha1" && format !== "sha256")) process.exit(1);
+  const shared = sharedIndexName(path, format);
+  if (shared) process.stdout.write(shared);
 }

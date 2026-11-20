@@ -11,11 +11,14 @@
 ### Changes
 
 - Isolate Fleet API Git status from checkout configuration and bound primary
-  and shared indexes before Git loads them. Use one HEAD revision for the SHA,
-  status, and ahead/behind counts. Preserve readable ignore patterns within
-  the checkout and its Git directories.
-- Filter PR candidates by head owner and branch, verify the push repository,
-  and fetch checks for the matched PR.
+  and shared indexes before Git loads them. Inspect indexes off the gateway
+  thread using private copies under the data directory when available.
+  Resolve Git state from the captured branch and reject snapshots when HEAD
+  changes during the read. Preserve readable ignore patterns within the
+  checkout and its Git directories.
+- Filter PR candidates by head owner and branch, use the only distinct GitHub
+  push repository across all push URLs, and fall back to the fetch owner
+  when the push remote has no resolvable GitHub repository.
 - Keep recent crew samples usable during slow refreshes and wait for the
   shared crew read when no recent sample is available. Adapt the OpenCode
   fleet probe deadline for slower captains and back off after repeated failures.

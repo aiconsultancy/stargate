@@ -998,6 +998,7 @@ export function serve(
               source: createApiV1Source({
                 dashboard: dashboardSource(ships, store, cronStore),
                 config: () => reload?.current.config ?? config,
+                dataDirectory: config.dataDirectory,
               }),
               diff: diffEvents,
               gateway: {

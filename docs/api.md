@@ -106,27 +106,35 @@ when it is on a separate device.
 
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
 submodules. Status reads run in a private Git directory with a copy of the
-index and access to the checkout's objects. The displayed abbreviated SHA,
-status and ahead/behind counts use the same resolved HEAD. The snapshot
-copies both the primary and any shared index before passing them to Git.
-Repository ignore files, including `core.excludesFile`, are used only when
-they resolve inside the checkout or its Git directories. Unreadable ignore
-files are skipped, and `info/exclude` retains its usual precedence. Pattern
-files have a 1 MiB limit, each index file has a 128 MiB limit, and the
-snapshot has a 192 MiB aggregate limit. Oversized metadata produces a Git
-read error. Git versions with `GIT_ATTR_SOURCE` support read attributes from
+index and access to the checkout's objects. The SHA and upstream are resolved
+from the captured branch when attached. A change to the branch or commit during
+the snapshot produces a Git read error. The snapshot copies the primary and
+any shared index under the gateway's data directory when it can create the
+snapshot outside the worktree. Otherwise it uses the system temporary
+directory. Index inspection runs in a separate process under the Git read
+deadline. Copied ignore files, including `core.excludesFile`, are used only
+when they resolve inside the checkout or its Git directories. Unreadable
+ignore files are skipped, and `info/exclude` retains its usual precedence.
+The 1 MiB limit applies to each copied pattern file.
+Git reads worktree `.gitignore` files directly.
+Each index file has a 128 MiB limit, and the snapshot has a 192 MiB aggregate
+limit. Oversized snapshot metadata produces a Git read error.
+Git versions with `GIT_ATTR_SOURCE` support read attributes from
 the empty tree, so files that depend on attributes for content conversion may
 count as changed.
 
 Pull requests are looked up by head owner and branch, including branches
-with numeric names. The head repository's owner and name must match the
-branch's GitHub push repository, reported as `git.pushRepository` when
-resolvable. Stargate fetches check results for the matching PR. The
-lookup targets the GitHub repository at `origin`, or the push repository
-when `origin` has no GitHub URL. A failed or incomplete refresh retains the
-last successful result. For a crew context, `pullRequestKnown: true` means its
-branch has a settled lookup. With that field present, `pullRequest: null`
-means no matching PR was found.
+with numeric names. Stargate considers every URL on the branch's push remote.
+When exactly one distinct GitHub repository is found, `git.pushRepository`
+identifies it and the lookup requires a matching head owner and repository
+name. With no GitHub push repository, the lookup uses the GitHub `origin`
+and matches its owner. With multiple GitHub push repositories,
+`git.pushRepositoryAmbiguous` is `true` and the lookup remains unsettled.
+Stargate targets the GitHub repository at `origin` if available, or the push
+repository otherwise. Stargate fetches check results for the matching PR.
+A failed or incomplete refresh retains the last successful result. A crew
+context with `pullRequestKnown: true` and `pullRequest: null` has a settled
+lookup with no match or a checkout with no eligible branch or GitHub remote.
 
 ## Events
 

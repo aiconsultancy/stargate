@@ -80,13 +80,15 @@ test("reads real Git state, respects the 15-second cache and handles a detached 
     git("commit", "--allow-empty", "-m", "Initial");
     git("remote", "add", "origin", "git@github.com:example/project.git");
     git("update-ref", "refs/remotes/origin/main", "HEAD");
+    git("update-ref", "refs/remotes/origin/trunk", "HEAD");
     git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
     git("switch", "-c", "work");
+    git("branch", "--set-upstream-to=origin/trunk");
     git("commit", "--allow-empty", "-m", "Feature");
     expect(await read(directory, signal)).toMatchObject({
       branch: "work",
       head: expect.stringMatching(/^[a-f0-9]+$/),
-      base: "origin/main",
+      base: "origin/trunk",
       ahead: 1,
       behind: 0,
       changedFiles: 0,
@@ -193,7 +195,23 @@ test("uses the branch push remote instead of the fetch URL for the head reposito
       "set-url",
       "--push",
       "fork",
+      "ssh://git@mirror.example.test/contributor/renamed.git",
+    );
+    git(
+      "remote",
+      "set-url",
+      "--add",
+      "--push",
+      "fork",
       "git@github.com:contributor/renamed.git",
+    );
+    git(
+      "remote",
+      "set-url",
+      "--add",
+      "--push",
+      "fork",
+      "https://github.com/Contributor/Renamed",
     );
     git("config", "remote.pushDefault", "origin");
     git("config", "branch.main.pushRemote", "fork");
@@ -203,6 +221,17 @@ test("uses the branch push remote instead of the fetch URL for the head reposito
       repository: "example/project",
       pushRepository: "contributor/renamed",
     });
+    git(
+      "remote",
+      "set-url",
+      "--add",
+      "--push",
+      "fork",
+      "https://github.com/another/fork",
+    );
+    expect(
+      await createGitReader()(directory, new AbortController().signal),
+    ).toMatchObject({ pushRepository: null, pushRepositoryAmbiguous: true });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -284,6 +313,46 @@ test("finds the matching PR beyond same-named branches from other forks", async 
     pull("example/project", "without-a-match", "contributor/renamed"),
   ).toBeNull();
   expect(details).toEqual(["40"]);
+});
+
+test("an unresolved push URL can match a differently named head repo from the fetch owner", async () => {
+  const commands: string[][] = [];
+  const pull = createPullReader(Date.now, {
+    which: () => "/fixture/gh",
+    run: async (args) => {
+      commands.push(args);
+      if (args[1] === "auth") return { code: 0, stdout: "" };
+      if (args[1] === "api") {
+        return {
+          code: 0,
+          stdout: JSON.stringify([
+            { number: 42, repository: "another/project" },
+            { number: 41, repository: "Example/renamed" },
+          ]),
+        };
+      }
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          number: 41,
+          url: "https://github.com/Example/project/pull/41",
+          title: "Example",
+          state: "OPEN",
+          isDraft: false,
+          statusCheckRollup: [],
+        }),
+      };
+    },
+  });
+  expect(pull("Example/project", "change", null)).toBeUndefined();
+  await Bun.sleep(0);
+  expect(pull("Example/project", "change", null)?.number).toBe(41);
+  expect(commands.find((args) => args[1] === "api")).toContain(
+    "head=example:change",
+  );
+  expect(
+    commands.filter((args) => args[1] === "pr").map((args) => args[3]),
+  ).toEqual(["41"]);
 });
 
 test("PR refreshes deduplicate work, keep the last result on failure and clear it on confirmed absence", async () => {

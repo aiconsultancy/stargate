@@ -76,6 +76,8 @@ export type V1Git = {
   repository: string | null;
   /** GitHub repository of the branch's push remote, when resolvable. */
   pushRepository?: string | null;
+  /** True when the push remote names multiple distinct GitHub repositories. */
+  pushRepositoryAmbiguous?: true;
   checkedAt: number;
   /** A safe reason when the read failed; other fields are then null. */
   error?: string;

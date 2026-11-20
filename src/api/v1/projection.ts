@@ -39,6 +39,7 @@ export type ApiV1Deps = {
   /** Loaded settings, including any committed live reload. */
   config: () => ApiV1Config;
   now?: () => number;
+  dataDirectory?: string;
   git?: ReturnType<typeof createGitReader>;
   pullRequest?: ReturnType<typeof createPullReader>;
 };
@@ -233,7 +234,7 @@ function timeState(
 export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   const { dashboard } = deps;
   const now = deps.now ?? Date.now;
-  const git = deps.git ?? createGitReader(now);
+  const git = deps.git ?? createGitReader(now, undefined, deps.dataDirectory);
   const pullRequest = deps.pullRequest ?? createPullReader(now);
   const captains = new Map<string, Timing>();
   const members = new Map<string, Timing>();
@@ -464,12 +465,14 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
                     )?.directory
                   : undefined;
               const state = await git(path, signal);
-              const pushRepository = state?.pushRepository;
+              const pushRepository = state?.pushRepository ?? null;
               const repository = state?.repository ?? pushRepository;
               const pr =
-                repository && pushRepository && state?.branch && !state.error
-                  ? pullRequest(repository, state.branch, pushRepository)
-                  : undefined;
+                !state || state.error || state.pushRepositoryAmbiguous
+                  ? undefined
+                  : repository && state.branch && state.head
+                    ? pullRequest(repository, state.branch, pushRepository)
+                    : null;
               return {
                 ...context,
                 git: state,

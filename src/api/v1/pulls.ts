@@ -121,13 +121,14 @@ export function createPullReader(
   async function refresh(
     repository: string,
     branch: string,
-    headRepository: string,
+    headRepository: string | null,
   ) {
     if (!auth || auth.expiresAt <= now())
       auth = { expiresAt: now() + ttl, executable: authenticate() };
     const executable = await auth.executable;
     if (!executable) return undefined;
-    const owner = headRepository.slice(0, headRepository.indexOf("/"));
+    const headTarget = headRepository ?? repository.toLowerCase();
+    const owner = headTarget.slice(0, headTarget.indexOf("/"));
     const result = await run(
       [
         executable,
@@ -158,7 +159,13 @@ export function createPullReader(
           continue;
         }
         const { number, repository: head } = candidate.value;
-        if (head?.toLowerCase() !== headRepository) continue;
+        const candidateHead = head?.toLowerCase();
+        if (
+          headRepository
+            ? candidateHead !== headRepository
+            : !candidateHead?.startsWith(`${owner}/`)
+        )
+          continue;
         const details = await run(
           [
             executable,
@@ -182,8 +189,12 @@ export function createPullReader(
     }
   }
 
-  return (repository: string, branch: string, headRepository = repository) => {
-    const head = headRepository.toLowerCase();
+  return (
+    repository: string,
+    branch: string,
+    headRepository: string | null = repository,
+  ) => {
+    const head = headRepository?.toLowerCase() ?? null;
     const key = JSON.stringify([repository.toLowerCase(), branch, head]);
     const saved = cache.get(key);
     if (
