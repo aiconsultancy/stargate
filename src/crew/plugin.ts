@@ -420,7 +420,7 @@ const plugin = Plugin.define({
           name: "stargate_post",
           description:
             "Captain-only: post as this captain's own Slack bot to an allowed conversation, as a new top-level message or a reply with thread_ts. Use this instead of asking an operator to relay. Markdown text up to 3000 characters; <@U…> mentions pass through. Optional files: absolute paths inside the configured post directories, uploaded into the reply thread. reply_broadcast (default false) also shows a reply in the channel. Only conversation IDs listed in captainPost.channels that also pass access rules are allowed (denies win, DMs only when listed); otherwise nothing posts. Returns ts and permalink. The host tool-call ID is the default retry key: a retry returns the recorded outcome and never posts twice. uncertain means the message may exist; check the channel before a new call. Rate-limited per bot. Never post secrets or another thread's private content.",
-          input: postInputSchema,
+          input: messagePortableSchema(postInputSchema),
           options: { codemode: false, permission: "stargate_crew" },
           execute: (input, context) =>
             guard(

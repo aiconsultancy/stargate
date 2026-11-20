@@ -1,6 +1,6 @@
 import { isUtf8 } from "node:buffer";
 import type { WebClient } from "@slack/web-api";
-import { z } from "zod";
+import { Effect, Option, Schema, SchemaTransformation } from "effect";
 import {
   type Attachment,
   checkAttachments,
@@ -8,6 +8,11 @@ import {
   maxAttachments,
   maxAttachmentTotalBytes,
 } from "./attachments";
+import {
+  settingsPattern,
+  settingsRecord,
+  settingsStruct,
+} from "./settings-schema";
 
 export type SlackFilesFetch = (
   url: string | URL,
@@ -15,63 +20,84 @@ export type SlackFilesFetch = (
 ) => Promise<Response>;
 export type SlackUpload = { fileID: string; url: string };
 
-const fileID = z.string().regex(/^F[A-Z0-9]+$/);
-const channelID = z.string().regex(/^[CGD][A-Z0-9]+$/);
-const timestamp = z
-  .string()
-  .max(64)
-  .regex(/^\d+\.\d+$/);
-const displayTitle = z
-  .string()
-  .min(1)
-  .max(255)
-  .refine((value) =>
+const fileID = Schema.String.check(settingsPattern(/^F[A-Z0-9]+$/));
+const channelID = Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/));
+const timestamp = Schema.String.check(
+  Schema.isMaxCodePoints(64),
+  settingsPattern(/^\d+\.\d+$/),
+);
+const displayTitle = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(255),
+  Schema.makeFilter((value) =>
     [...value].every(
       (char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127,
     ),
-  );
-const filename = displayTitle.regex(/^[^\\/]+$/);
-const mime = z
-  .string()
-  .regex(/^[\w.+-]+\/[\w.+-]+$/)
-  .transform((value) => value.toLowerCase());
-const size = z.number().int().positive().max(maxAttachmentBytes);
-const share = z
-  .object({ ts: timestamp.optional(), thread_ts: timestamp.optional() })
-  .refine((value) => value.ts !== undefined || value.thread_ts !== undefined);
-const shares = z.strictObject({
-  public: z.record(z.string(), z.array(share)).optional(),
-  private: z.record(z.string(), z.array(share)).optional(),
+  ),
+);
+const filename = displayTitle.check(settingsPattern(/^[^\\/]+$/));
+const mime = Schema.String.check(settingsPattern(/^[\w.+-]+\/[\w.+-]+$/)).pipe(
+  Schema.decodeTo(
+    Schema.String,
+    SchemaTransformation.transform({
+      decode: (value) => value.toLowerCase(),
+      encode: (value) => value,
+    }),
+  ),
+);
+const size = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(maxAttachmentBytes),
+);
+const share = Schema.Struct({
+  ts: Schema.optional(timestamp),
+  thread_ts: Schema.optional(timestamp),
+}).check(
+  Schema.makeFilter(
+    (value) => value.ts !== undefined || value.thread_ts !== undefined,
+  ),
+);
+const shares = settingsStruct({
+  public: Schema.optional(settingsRecord(Schema.String, Schema.Array(share))),
+  private: Schema.optional(settingsRecord(Schema.String, Schema.Array(share))),
 });
-const slackFile = z.object({
+const slackFile = Schema.Struct({
   id: fileID,
   name: filename,
   mimetype: mime,
   size,
-  mode: z.enum(["hosted", "snippet"]),
-  is_external: z.literal(false),
-  channels: z.array(z.string()).optional(),
-  groups: z.array(z.string()).optional(),
-  ims: z.array(z.string()).optional(),
-  channel: z.string().optional(),
-  shares: shares.optional(),
-  url_private_download: z.string().max(8192).optional(),
-  url_private: z.string().max(8192).optional(),
-  duration_ms: z.number().int().positive().optional().catch(undefined),
+  mode: Schema.Literals(["hosted", "snippet"]),
+  is_external: Schema.Literal(false),
+  channels: Schema.optional(Schema.Array(Schema.String)),
+  groups: Schema.optional(Schema.Array(Schema.String)),
+  ims: Schema.optional(Schema.Array(Schema.String)),
+  channel: Schema.optional(Schema.String),
+  shares: Schema.optional(shares),
+  url_private_download: Schema.optional(
+    Schema.String.check(Schema.isMaxCodePoints(8192)),
+  ),
+  url_private: Schema.optional(
+    Schema.String.check(Schema.isMaxCodePoints(8192)),
+  ),
+  duration_ms: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).pipe(
+    Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+  ),
   // Slack's clip transcript. An unknown shape is treated as no transcript.
-  transcription: z
-    .object({
-      status: z.string(),
-      preview: z
-        .object({ content: z.string(), has_more: z.boolean().optional() })
-        .optional(),
-    })
-    .optional()
-    .catch(undefined),
+  transcription: Schema.optional(
+    Schema.Struct({
+      status: Schema.String,
+      preview: Schema.optional(
+        Schema.Struct({
+          content: Schema.String,
+          has_more: Schema.optional(Schema.Boolean),
+        }),
+      ),
+    }),
+  ).pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(undefined)))),
 });
 
 /** Only a finished, untruncated transcript replaces a provider request. */
-function slackTranscript(file: z.infer<typeof slackFile>) {
+function slackTranscript(file: typeof slackFile.Type) {
   const preview = file.transcription?.preview;
   return file.transcription?.status === "complete" &&
     preview &&
@@ -80,19 +106,24 @@ function slackTranscript(file: z.infer<typeof slackFile>) {
     ? preview.content
     : undefined;
 }
-const downloadResponse = z.object({ ok: z.literal(true), file: slackFile });
-const shareResponse = z.object({
-  ok: z.literal(true),
-  file: z.object({ id: fileID, shares }),
+const downloadResponse = Schema.Struct({
+  ok: Schema.Literal(true),
+  file: slackFile,
 });
-const uploadResponse = z.object({
-  ok: z.literal(true),
+const shareResponse = Schema.Struct({
+  ok: Schema.Literal(true),
+  file: Schema.Struct({ id: fileID, shares }),
+});
+const uploadResponse = Schema.Struct({
+  ok: Schema.Literal(true),
   file_id: fileID,
-  upload_url: z.string().max(8192),
+  upload_url: Schema.String.check(Schema.isMaxCodePoints(8192)),
 });
-const completeResponse = z.object({
-  ok: z.literal(true),
-  files: z.array(z.object({ id: fileID })).length(1),
+const completeResponse = Schema.Struct({
+  ok: Schema.Literal(true),
+  files: Schema.Array(Schema.Struct({ id: fileID })).check(
+    Schema.isBetweenLength(1, 1),
+  ),
 });
 
 function slackFileURL(value: string): string {
@@ -107,7 +138,7 @@ function slackFileURL(value: string): string {
   return url.href;
 }
 
-function hasChannel(file: z.infer<typeof slackFile>, channel: string): boolean {
+function hasChannel(file: typeof slackFile.Type, channel: string): boolean {
   return (
     file.channel === channel ||
     [file.channels, file.groups, file.ims].some((channels) =>
@@ -196,13 +227,15 @@ export class SlackFiles {
     signal: AbortSignal,
   ): Promise<Attachment[]> {
     return this.safe(signal, async (stop) => {
-      channelID.parse(channel);
-      z.array(fileID).max(maxAttachments).parse(ids);
+      Schema.decodeUnknownSync(channelID)(channel);
+      Schema.decodeUnknownSync(
+        Schema.Array(fileID).check(Schema.isMaxLength(maxAttachments)),
+      )(ids);
       const files: Attachment[] = [];
       let total = 0;
       for (const id of ids) {
         stop.throwIfAborted();
-        const { file } = downloadResponse.parse(
+        const { file } = Schema.decodeUnknownSync(downloadResponse)(
           await this.web(stop).files.info({ file: id }),
         );
         const snippet = file.mode === "snippet";
@@ -288,9 +321,9 @@ export class SlackFiles {
     signal: AbortSignal,
   ): Promise<SlackUpload> {
     return this.safe(signal, async (stop) => {
-      filename.parse(name);
-      size.parse(length);
-      const result = uploadResponse.parse(
+      Schema.decodeUnknownSync(filename)(name);
+      Schema.decodeUnknownSync(size)(length);
+      const result = Schema.decodeUnknownSync(uploadResponse)(
         await this.web(stop).files.getUploadURLExternal({
           filename: name,
           length,
@@ -307,7 +340,7 @@ export class SlackFiles {
   ): Promise<void> {
     return this.safe(signal, async (stop) => {
       const target = slackFileURL(url);
-      size.parse(data.byteLength);
+      Schema.decodeUnknownSync(size)(data.byteLength);
       const response = await this.request(target, {
         method: "POST",
         body: new Uint8Array(data),
@@ -331,12 +364,12 @@ export class SlackFiles {
     signal: AbortSignal,
   ): Promise<void> {
     return this.safe(signal, async (stop) => {
-      channelID.parse(channel);
-      timestamp.parse(thread);
-      fileID.parse(id);
-      displayTitle.parse(title);
+      Schema.decodeUnknownSync(channelID)(channel);
+      Schema.decodeUnknownSync(timestamp)(thread);
+      Schema.decodeUnknownSync(fileID)(id);
+      Schema.decodeUnknownSync(displayTitle)(title);
       // Never retry completion here: a lost response has an uncertain outcome.
-      const result = completeResponse.parse(
+      const result = Schema.decodeUnknownSync(completeResponse)(
         await this.web(stop).files.completeUploadExternal({
           channel_id: channel,
           thread_ts: thread,
@@ -355,10 +388,10 @@ export class SlackFiles {
     signal: AbortSignal,
   ): Promise<boolean> {
     return this.safe(signal, async (stop) => {
-      fileID.parse(id);
-      channelID.parse(channel);
-      timestamp.parse(thread);
-      const result = shareResponse.parse(
+      Schema.decodeUnknownSync(fileID)(id);
+      Schema.decodeUnknownSync(channelID)(channel);
+      Schema.decodeUnknownSync(timestamp)(thread);
+      const result = Schema.decodeUnknownSync(shareResponse)(
         await this.web(stop).files.info({ file: id }),
       );
       if (result.file.id !== id) throw new Error("Slack file identity changed");
