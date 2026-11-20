@@ -1,8 +1,12 @@
 import { expect, mock, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { request } from "node:http";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as wait } from "node:timers/promises";
+import {
+  setImmediate as nextTurn,
+  setTimeout as wait,
+} from "node:timers/promises";
 import type { ApiV1Config } from "../src/api/v1/config";
 import { diffEvents } from "../src/api/v1/diff";
 import { type ApiV1Diff, createEventStreams } from "../src/api/v1/events";
@@ -121,6 +125,7 @@ async function startFixture(
       url: server.url,
       shutdown,
       dataDirectory,
+      stop: server.stop,
       async close() {
         await server.stop();
         await rm(dataDirectory, { recursive: true, force: true });
@@ -387,6 +392,81 @@ test("bind errors fail startup with Fleet API context", async () => {
   } finally {
     await reservation.stop(true);
     await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("Unix Fleet uses the private socket and operator bearer, not TCP peer CIDRs", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-unix-"));
+  let server: Awaited<ReturnType<typeof startApiV1Server>> | undefined;
+  try {
+    server = await startApiV1Server({
+      config: { listen: "unix", allowedNetworks: ["10.0.0.0/8"] },
+      dataDirectory: directory,
+      source,
+      diff: () => [],
+      gateway,
+      signal: new AbortController().signal,
+    });
+    const token = await apiToken(directory);
+    const socketPath = join(directory, "api.sock");
+    expect((await lstat(socketPath)).mode & 0o777).toBe(0o600);
+    const get = (authorization?: string) =>
+      new Promise<number>((resolve, reject) => {
+        const client = request(
+          {
+            socketPath,
+            path: "/api/v1/fleet",
+            headers: authorization ? { Authorization: authorization } : {},
+          },
+          (response) => {
+            response.resume();
+            resolve(response.statusCode ?? 0);
+          },
+        );
+        client.once("error", reject);
+        client.end();
+      });
+    expect(await get()).toBe(401);
+    expect(await get(`Bearer ${token}`)).toBe(200);
+  } finally {
+    await server?.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Fleet abort observes cleanup rejection and retains explicit stop error", async () => {
+  const host = await startFixture({ config: { listen: "unix" } });
+  const moved = `${host.dataDirectory}.moved`;
+  const unhandled: unknown[] = [];
+  const onUnhandled = (error: unknown) => {
+    unhandled.push(error);
+  };
+  let directoryMoved = false;
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    await rename(host.dataDirectory, moved);
+    directoryMoved = true;
+    await writeFile(host.dataDirectory, "owned replacement");
+    host.shutdown.abort();
+    await nextTurn();
+    await nextTurn();
+    expect(unhandled).toEqual([]);
+    const stopping = host.stop();
+    const error: unknown = await stopping.catch((error: unknown) => error);
+    expect(error).toMatchObject({
+      code: "ENOTDIR",
+      path: join(host.dataDirectory, "api.sock"),
+    });
+    expect(host.stop()).toBe(stopping);
+    expect(await host.stop().catch((error: unknown) => error)).toBe(error);
+  } finally {
+    await host.stop().catch(() => {});
+    process.off("unhandledRejection", onUnhandled);
+    if (directoryMoved) {
+      await rm(host.dataDirectory, { force: true });
+      await rename(moved, host.dataDirectory);
+    }
+    await rm(host.dataDirectory, { recursive: true, force: true });
   }
 });
 

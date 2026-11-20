@@ -12,7 +12,14 @@ import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { ErrorCode } from "@slack/web-api";
-import { z } from "zod";
+import {
+  Effect,
+  Result,
+  Schema,
+  SchemaGetter,
+  SchemaIssue,
+  SchemaParser,
+} from "effect";
 import {
   AttachmentUnavailable,
   checkPreparedAttachments,
@@ -25,6 +32,12 @@ import {
 import { botToken, botWebClient } from "./bot-web";
 import { type BotConfig, loadConfig } from "./config";
 import { isAllowedChannel } from "./routing";
+import {
+  settingsCheck,
+  settingsDefault,
+  settingsPattern,
+  settingsStruct,
+} from "./settings-schema";
 import { SlackFiles, type SlackFilesFetch } from "./slack-files";
 import { slackContent } from "./slack-format";
 
@@ -37,30 +50,86 @@ const hourMs = 3_600_000;
  */
 export const uploadLeaseMs = 300_000;
 
-export const postInputSchema = z
-  .strictObject({
-    channel: z.string().regex(/^[CGD][A-Z0-9]{2,40}$/),
-    thread_ts: z
-      .string()
-      .regex(/^\d{1,12}\.\d{1,12}$/)
-      .optional(),
-    text: z
-      .string()
-      .refine(
-        (text) =>
-          text.trim() !== "" && Array.from(text).length <= maxPostLength,
-        `Use 1-${maxPostLength} characters of text`,
+const postInput = settingsStruct({
+  channel: Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]{2,40}$/)),
+  thread_ts: Schema.optional(
+    Schema.String.check(settingsPattern(/^\d{1,12}\.\d{1,12}$/)),
+  ),
+  text: Schema.String.check(
+    Schema.makeFilter(
+      (text) => text.trim() !== "" && Array.from(text).length <= maxPostLength,
+      { message: `Use 1-${maxPostLength} characters of text` },
+    ),
+  ),
+  files: Schema.mutable(
+    Schema.Array(
+      Schema.String.check(
+        Schema.isMinCodePoints(2),
+        Schema.isMaxCodePoints(4096),
       ),
-    files: z.array(z.string().min(2).max(4096)).max(maxAttachments).default([]),
-    reply_broadcast: z.boolean().default(false),
-    /** Retry key; the captain tool defaults it to the host tool-call ID. */
-    key: z.string().min(1).max(255).optional(),
-  })
-  .refine((input) => !input.reply_broadcast || input.thread_ts, {
-    message: "reply_broadcast requires thread_ts",
-    path: ["reply_broadcast"],
-  });
-export type PostInput = z.infer<typeof postInputSchema>;
+    ),
+  )
+    .check(Schema.isMaxLength(maxAttachments))
+    .pipe(settingsDefault([])),
+  reply_broadcast: Schema.Boolean.pipe(settingsDefault(false)),
+  /** Retry key; the captain tool defaults it to the host tool-call ID. */
+  key: Schema.optional(
+    Schema.String.check(Schema.isMinCodePoints(1), Schema.isMaxCodePoints(255)),
+  ),
+});
+const broadcastCheck = settingsCheck<typeof postInput.Type>(
+  (input, context) => {
+    if (input.reply_broadcast && !input.thread_ts)
+      context.addIssue({
+        code: "custom",
+        message: "reply_broadcast requires thread_ts",
+        path: ["reply_broadcast"],
+      });
+  },
+);
+const checkedPostInput = postInput.check(broadcastCheck);
+const decodePostInput = SchemaParser.decodeUnknownEffect(checkedPostInput);
+const structuralPostInput = Schema.decodeUnknownResult(checkedPostInput, {
+  disableChecks: true,
+});
+
+export const postInputSchema = Schema.Unknown.pipe(
+  Schema.decodeTo(checkedPostInput, {
+    decode: SchemaGetter.transformEffect((input, options) =>
+      decodePostInput(input, options).pipe(
+        Effect.catch((issue) => {
+          if (
+            issue._tag === "Composite" &&
+            issue.issues.some(
+              (child) =>
+                child._tag === "Filter" && child.filter === broadcastCheck,
+            )
+          )
+            return Effect.fail(issue);
+          // Non-aborting field constraints must not hide the original post
+          // refinement. Structural failures still stop it, as in Zod.
+          const structural = structuralPostInput(input);
+          if (Result.isFailure(structural)) return Effect.fail(issue);
+          const diagnostic = broadcastCheck.run(
+            structural.success,
+            checkedPostInput.ast,
+            options,
+          );
+          return Effect.fail(
+            diagnostic
+              ? new SchemaIssue.Composite(checkedPostInput.ast, [
+                  issue,
+                  new SchemaIssue.Filter(broadcastCheck, diagnostic),
+                ])
+              : issue,
+          );
+        }),
+      ),
+    ),
+    encode: SchemaGetter.passthrough(),
+  }),
+);
+export type PostInput = typeof postInputSchema.Type;
 
 /** Safe, caller-facing message; never contains Slack payloads or text. */
 export class CaptainPostError extends Error {}
@@ -110,9 +179,9 @@ type PostRow = {
   fingerprint: string;
 };
 
-const fileStateSchema = z.strictObject({
+const fileStateSchema = settingsStruct({
   file: preparedAttachmentSchema,
-  status: z.enum([
+  status: Schema.Literals([
     "pending",
     "uploading",
     "completing",
@@ -120,7 +189,7 @@ const fileStateSchema = z.strictObject({
     "unavailable",
     "uncertain",
   ]),
-  fileID: z.string().optional(),
+  fileID: Schema.optional(Schema.String),
 });
 
 /** Private SQLite record of each post: persisted before Slack is called. */
@@ -188,7 +257,9 @@ export class CaptainPostStore {
     if (!row) return;
     return {
       ...row,
-      files: z.array(fileStateSchema).parse(JSON.parse(row.files)),
+      files: Schema.decodeUnknownSync(
+        Schema.mutable(Schema.Array(fileStateSchema)),
+      )(JSON.parse(row.files)),
     } as PostRow;
   }
 
@@ -562,12 +633,12 @@ export async function runCaptainPost(
   signal: AbortSignal,
   dependencies: PostDependencies = defaults,
 ): Promise<unknown> {
-  const parsed = postInputSchema.safeParse(raw);
-  if (!parsed.success)
+  const parsed = Schema.decodeUnknownResult(postInputSchema)(raw);
+  if (Result.isFailure(parsed))
     throw new CaptainPostError(
       "Invalid stargate_post input; nothing was posted.",
     );
-  const input = parsed.data;
+  const input = parsed.success;
   let admitted = false;
   let store: CaptainPostStore | undefined;
   let release: (() => void) | undefined;

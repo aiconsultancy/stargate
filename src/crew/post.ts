@@ -1,3 +1,4 @@
+import { Result, Schema } from "effect";
 import {
   CaptainPostError,
   postInputSchema,
@@ -23,8 +24,8 @@ export class CrewPost {
   ) {}
 
   async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
-    const parsed = postInputSchema.safeParse(raw);
-    if (!parsed.success)
+    const parsed = Schema.decodeUnknownResult(postInputSchema)(raw);
+    if (Result.isFailure(parsed))
       throw new CrewError(
         "Invalid stargate_post input. Use the declared fields; nothing was posted.",
       );
@@ -51,9 +52,9 @@ export class CrewPost {
       );
     // Stable host tool identity makes a retry read its recorded outcome.
     const input =
-      !parsed.data.key && caller.id
-        ? { ...parsed.data, key: caller.id }
-        : parsed.data;
+      !parsed.success.key && caller.id
+        ? { ...parsed.success, key: caller.id }
+        : parsed.success;
     try {
       return await this.runner(
         input,

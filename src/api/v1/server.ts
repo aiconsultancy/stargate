@@ -1,5 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
+import { join } from "node:path";
+import type { ApiRoute } from "../route";
+import { startApiServer } from "../server";
 import type { ApiV1Config } from "./config";
 import { type ApiV1Diff, createEventStreams } from "./events";
 import { cacheOpenCodeVersion, type OpenCodeVersionLookup } from "./gateway";
@@ -24,6 +27,8 @@ type Options = {
     opencodeVersion: OpenCodeVersionLookup;
   };
   signal: AbortSignal;
+  routes?: readonly ApiRoute[];
+  timing?: { headersMs?: number; requestMs?: number };
 };
 
 const failureWindowMs = 60_000;
@@ -77,7 +82,10 @@ function routeId(encoded: string) {
 
 export async function startApiV1Server(options: Options) {
   const { config, dataDirectory, source } = options;
-  const listen = parseApiListen(config.listen);
+  const listen =
+    config.listen === "unix"
+      ? { unix: join(dataDirectory, "api.sock") }
+      : parseApiListen(config.listen);
   if (!listen)
     throw new Error(
       "Fleet API requires a private-network bind address and port",
@@ -125,18 +133,20 @@ export async function startApiV1Server(options: Options) {
     readHost: host.read,
   });
 
-  let server: Bun.Server<undefined>;
+  let server: Awaited<ReturnType<typeof startApiServer>>;
   try {
-    server = Bun.serve({
-      ...listen,
-      development: false,
-      idleTimeout: 30,
-      async fetch(request, server) {
+    server = await startApiServer({
+      listen,
+      ...(options.routes ? { routes: options.routes } : {}),
+      ...(options.timing ? { timing: options.timing } : {}),
+      signal: AbortSignal.any([lifetime.signal, options.signal]),
+      async fleet(request, remoteAddress) {
         const headers = responseHeaders();
         const empty = (status: number) =>
           new Response(null, { status, headers });
-        const address = peerAddress(server.requestIP(request)?.address);
-        if (!address || !allowsPeer(address)) return empty(403);
+        const address = peerAddress(remoteAddress);
+        if (config.listen !== "unix" && (!address || !allowsPeer(address)))
+          return empty(403);
         const requestedOrigin = request.headers.get("Origin");
         const origin = allowsOrigin(requestedOrigin) ? requestedOrigin : null;
         headers.set("Vary", "Origin");
@@ -157,7 +167,7 @@ export async function startApiV1Server(options: Options) {
           return empty(405);
         }
         const auth = authenticate(
-          address,
+          address ?? "unix",
           request.headers.get("Authorization"),
           headers,
         );
@@ -173,12 +183,11 @@ export async function startApiV1Server(options: Options) {
             }
             const stream = events.open(signal);
             if (!stream) return empty(503);
-            server.timeout(request, 60);
             headers.set("Content-Type", "text/event-stream");
             return new Response(stream, { headers });
           }
 
-          const read = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
+          const read = signal;
           let result:
             | V1Fleet
             | Awaited<ReturnType<ApiV1Source["ship"] | ApiV1Source["crew"]>>;
@@ -209,12 +218,11 @@ export async function startApiV1Server(options: Options) {
           return empty(500);
         }
       },
-      error() {
-        return new Response(null, { status: 500, headers: responseHeaders() });
-      },
     });
   } catch {
+    lifetime.abort();
     host.stop();
+    events.stop();
     throw new Error(
       `Cannot start Fleet API listener on ${config.listen}. Check that the private address is assigned and the port is free.`,
     );
@@ -227,13 +235,18 @@ export async function startApiV1Server(options: Options) {
     lifetime.abort();
     host.stop();
     events.stop();
-    stopping = server.stop(true);
+    stopping = server.stop();
     return stopping;
   };
   const onAbort = () => {
-    void stop();
+    void stop().catch(() => {});
   };
   options.signal.addEventListener("abort", onAbort, { once: true });
   if (options.signal.aborted) await stop();
-  return { url: server.url, stop };
+  return {
+    url: server.url,
+    socketPath: server.socketPath,
+    closeAdmission: server.closeAdmission,
+    stop,
+  };
 }
