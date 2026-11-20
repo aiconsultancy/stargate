@@ -4,7 +4,7 @@ import { validMsgid } from "./irc/protocol";
 /** Compact source identity; IRC optionally adds `;r=<encoded thread root>`. */
 export function sourceLine({ source }: PromptSourceContext) {
   const value = encodeURIComponent;
-  return `s=${source.transport ?? "slack"};c=${value(source.channel)};t=${value(source.thread)};m=${value(source.message)};u=${value(source.user)}${source.sender ? `;k=${source.sender}` : ""}${source.authority ? `;a=${source.authority}` : ""}${source.reference ? `;e=${value(source.reference)}` : ""}${source.transport === "irc" && validMsgid(source.replyParent) ? `;r=${value(source.replyParent)}` : ""}`;
+  return `s=${source.transport ?? "slack"};c=${value(source.channel)};t=${value(source.thread)};m=${value(source.message)};u=${value(source.user)}${source.sender ? `;k=${source.sender}` : ""}${source.authority ? `;a=${source.authority}` : ""}${source.reference ? `;e=${value(source.reference)}` : ""}${source.transport === "irc" && validMsgid(source.replyParent) ? `;r=${value(source.replyParent)}` : ""}${source.reaction ? `;reaction=${value(source.reaction.name)};action=${source.reaction.action}` : ""}`;
 }
 
 /**

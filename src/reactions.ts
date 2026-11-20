@@ -1,3 +1,27 @@
+import { Schema } from "effect";
+import { settingsPattern } from "./settings-schema";
+
+export const slackTimestamp = Schema.String.check(
+  settingsPattern(/^\d{1,16}\.\d{1,6}$/),
+);
+
+export const inboundReactionSchema = Schema.Struct({
+  name: Schema.Literals([
+    "+1",
+    "thumbsup",
+    "-1",
+    "thumbsdown",
+    "white_check_mark",
+    "heavy_check_mark",
+    "x",
+    "eyes",
+  ]),
+  action: Schema.Literals(["added", "removed"]),
+  ts: slackTimestamp,
+});
+
+export type InboundReaction = typeof inboundReactionSchema.Type;
+
 /** Only an explicit first-line model directive can request a reaction. */
 export const reactionNames = [
   "eyes",

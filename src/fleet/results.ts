@@ -24,7 +24,7 @@ export function fleetOrigin(
 }
 
 export function fleetResultSource(
-  job: Job,
+  job: Pick<Job, "fleet">,
 ): PromptSourceContext["source"] | undefined {
   if (job.fleet?.kind !== "result") return;
   const result = job.fleet.completion;

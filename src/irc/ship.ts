@@ -28,6 +28,7 @@ import {
 } from "./client";
 import { clientPem } from "./client-pem";
 import { type CrewLink, crewLink } from "./crew-link";
+import { CrewQuestionGateway } from "./crew-question-gateway";
 import { IrcDelivery } from "./delivery";
 import { Filehost, filehostURL } from "./filehost";
 import {
@@ -651,6 +652,17 @@ export class IrcShip {
       this.config.access.humanWakeChannels?.length
     )
       this.track(this.maintain(this.controller.signal));
+    if (
+      this.config.features.crewQuestionHandoff &&
+      this.config.backend.type === "opencode" &&
+      this.config.backend.sessionID
+    )
+      this.track(
+        new CrewQuestionGateway(
+          this.config.backend,
+          this.options.env ?? process.env,
+        ).run(this.controller.signal),
+      );
     if (this.audit) this.track(this.audit.run(this.controller.signal));
     if (this.link && this.config.crewMessaging.ircCopies)
       this.track(this.copies(this.link, this.controller.signal));

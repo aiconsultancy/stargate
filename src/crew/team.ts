@@ -68,6 +68,7 @@ export const teamSchema = settingsStruct({
   historyScope: Schema.optional(Schema.Literals(["team", "project", "server"])),
   toolAccess: Schema.optional(Schema.Literals(["curated", "direct"])),
   historyAPI: Schema.optional(historyAPISchema),
+  questionGateway: Schema.optional(Schema.Boolean),
   modelProviders: Schema.optional(
     Schema.mutable(
       Schema.Array(

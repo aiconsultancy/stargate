@@ -40,7 +40,13 @@ const decodeReceipt = Schema.decodeUnknownResult(
 type QuestionBackend = Pick<
   OpenCodeBackend,
   "pendingQuestions" | "questionBelongsToInput" | "replyQuestion"
->;
+> & {
+  outcome?: (
+    form: string,
+    fingerprint: string,
+    signal: AbortSignal,
+  ) => Promise<"answered" | "cancelled" | undefined>;
+};
 interface Authority {
   options: { captainDirectory: string; team: Team };
   state: CrewState;
@@ -83,6 +89,10 @@ export class CrewQuestions {
               authority.options.team.captain.id,
           },
         }));
+  }
+
+  active(task: CrewTask) {
+    return this.owner({ taskID: task.id, ...task });
   }
 
   private owner(
@@ -137,6 +147,20 @@ export class CrewQuestions {
       }
       try {
         const backend = await this.connect(task, signal);
+        if (backend.outcome) {
+          for (const offer of this.authority.state.crewQuestionOffers(
+            task.id,
+          )) {
+            if (offer.state !== "attempted" || offer.outcome !== "uncertain")
+              continue;
+            const outcome = await backend
+              .outcome(offer.formID, offer.fingerprint, signal)
+              .catch(() => undefined);
+            signal.throwIfAborted();
+            if (outcome)
+              this.authority.state.crewQuestionOutcome(offer.token, outcome);
+          }
+        }
         const pending = await backend.pendingQuestions(
           task.workerSessionID,
           signal,

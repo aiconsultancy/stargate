@@ -1298,16 +1298,11 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
     context,
   );
   if (!admitted) throw new Error("Expected peer context");
-  expect(
-    primary.transport.source({
-      ...admitted,
-      id: 1,
-      status: "queued",
-      response: null,
-      sent: 0,
-      attempts: 0,
-    }),
-  ).toMatchObject({ authority: "agent", user: "defiant", sender: "captain" });
+  expect(primary.transport.source(admitted)).toMatchObject({
+    authority: "agent",
+    user: "defiant",
+    sender: "captain",
+  });
 });
 
 test("results mode: an explicit other fleet recipient overrides later mentions, replies and own-channel wake", () => {

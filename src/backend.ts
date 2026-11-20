@@ -20,6 +20,7 @@ import type {
   QuestionAnswer,
 } from "./questions";
 import type { QuotaSnapshot } from "./quota";
+import type { InboundReaction } from "./reactions";
 import type { SessionHistory } from "./session-history";
 import type { TurnProgress } from "./turn-progress";
 import type { UpdateReceipt, UpdateSnapshot } from "./update-notice";
@@ -40,6 +41,8 @@ export type PromptSourceContext = {
     channel: string;
     thread: string;
     message: string;
+    /** A Slack reaction targets this message; it is not a message of its own. */
+    reaction?: Pick<InboundReaction, "name" | "action">;
     /** IRC thread root only; separate from this request's message identity. */
     replyParent?: string;
     user: string;

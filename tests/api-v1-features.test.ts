@@ -32,7 +32,11 @@ test("gateway and Slack features reflect parsed defaults and explicit overrides"
         configPanelEnabled: true,
         crewActivity: { detail: "detailed" },
         waiting: { delayMs: null },
-        slack: { ...base.slack, steerThreadFollowUps: true },
+        slack: {
+          ...base.slack,
+          steerThreadFollowUps: true,
+          inboundReactions: true,
+        },
         access: { ...base.access, channels: ["CPRIVATE"], peerCaptains: true },
       },
     ],
@@ -75,6 +79,11 @@ test("gateway and Slack features reflect parsed defaults and explicit overrides"
       expect.objectContaining({ key: "configPanelEnabled", enabled: true }),
       expect.objectContaining({
         key: "slack.steerThreadFollowUps",
+        enabled: true,
+        defaultEnabled: false,
+      }),
+      expect.objectContaining({
+        key: "slack.inboundReactions",
         enabled: true,
         defaultEnabled: false,
       }),

@@ -110,14 +110,19 @@ test.each([false, true])(
   },
 );
 
-test.each([false, true])(
-  "legacy provisioning identity ignores disabled steering but rejects enabling it (%s)",
-  async (steerThreadFollowUps) => {
+test.each([
+  ["steerThreadFollowUps", false],
+  ["steerThreadFollowUps", true],
+  ["inboundReactions", false],
+  ["inboundReactions", true],
+] as const)(
+  "legacy provisioning identity ignores disabled Slack flags but rejects enabling %s (%s)",
+  async (flag, enabled) => {
     const input = structuredClone(legacyProvisionInput);
     const options = await fixture(
       input.bots.map((entry) => ({
         ...entry,
-        slack: { ...entry.slack, steerThreadFollowUps },
+        slack: { ...entry.slack, [flag]: enabled },
       })),
     );
     await writeFile(
@@ -140,7 +145,7 @@ test.each([false, true])(
       fetch: noNetwork,
       environment: {},
     });
-    if (steerThreadFollowUps)
+    if (enabled)
       await expect(result).rejects.toThrow(
         "does not match the original plan/config",
       );
