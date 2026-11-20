@@ -380,6 +380,13 @@ function shipTransport(
     );
   };
   return {
+    progressRequest: (job) =>
+      job.received != null &&
+      job.eventId === `${job.channel}:${job.thread}` &&
+      validMsgid(job.thread) &&
+      !job.thread.startsWith("stargate-")
+        ? job.thread
+        : undefined,
     turnStatus: (job) => {
       const rank = config.fleetPolicy?.role;
       if (

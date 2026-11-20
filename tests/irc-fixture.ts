@@ -64,6 +64,8 @@ export class FakeIrcServer {
   readonly taken: Set<string>;
   /** `account target` pairs whose PRIVMSG the server refuses (404). */
   readonly refuse = new Set<string>();
+  /** `account target` pairs whose PRIVMSG is relayed without a sender receipt. */
+  readonly holdMessageConfirmation = new Set<string>();
   /** Multiline batches the server accepted from clients. */
   readonly batches: {
     account: string | undefined;
@@ -396,9 +398,14 @@ export class FakeIrcServer {
           );
         for (const other of this.recipients(target))
           if (other !== client) this.reply(other, out(false));
-        if (client.caps.has("echo-message")) this.reply(client, out(true));
-        else if (label !== undefined && client.caps.has("labeled-response"))
-          this.reply(client, `@label=${label} :fake ACK`);
+        if (
+          message.command !== "PRIVMSG" ||
+          !this.holdMessageConfirmation.has(`${client.account} ${target}`)
+        ) {
+          if (client.caps.has("echo-message")) this.reply(client, out(true));
+          else if (label !== undefined && client.caps.has("labeled-response"))
+            this.reply(client, `@label=${label} :fake ACK`);
+        }
         if (message.command === "PRIVMSG")
           this.onMessage?.(client.account, target);
         return;

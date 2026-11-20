@@ -25,6 +25,8 @@
 
 ### Changes
 
+- Tag IRC fleet request progress notices with a fixed stage and the triggering
+  message ID. Publish terminal stages from confirmed gateway outcomes.
 - Reserve addressed IRC `status` in registrations with enrolled humans for
   checking the original request. Disable live progress to use addressed
   `status` as an ordinary message.
