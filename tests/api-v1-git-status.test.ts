@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
-import { appendFileSync, fstatSync } from "node:fs";
+import { appendFileSync, constants, fstatSync } from "node:fs";
+import * as fs from "node:fs/promises";
 import {
   mkdir,
   mkdtemp,
@@ -13,7 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { readCommand } from "../src/api/v1/command";
 import { createGitReader } from "../src/api/v1/git";
 
@@ -36,6 +37,51 @@ function git(directory: string, ...args: string[]) {
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
   return result.stdout.toString().trim();
 }
+
+async function waitForRemoval(directory: string, name?: string) {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const entries = await readdir(directory);
+    if (name === undefined ? !entries.length : !entries.includes(name)) return;
+    await Bun.sleep(5);
+  }
+}
+
+test("reads a linked worktree split index without updating the checkout indexes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  try {
+    const repository = join(root, "repository");
+    const worktree = join(root, "worktree");
+    await mkdir(repository);
+    git(repository, "init", "-b", "main");
+    await writeFile(join(repository, "tracked"), "fixture\n");
+    git(repository, "add", "tracked");
+    git(repository, "commit", "-m", "Initial");
+    git(repository, "worktree", "add", "-b", "worktree", worktree);
+    git(worktree, "update-index", "--split-index");
+    const shared = resolve(
+      worktree,
+      git(worktree, "rev-parse", "--shared-index-path"),
+    );
+    const index = git(
+      worktree,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "index",
+    );
+    const before = await Promise.all([index, shared].map((path) => stat(path)));
+    await writeFile(join(worktree, "tracked"), "changed\n");
+    expect(
+      await createGitReader()(worktree, AbortSignal.timeout(4500)),
+    ).toMatchObject({ branch: "worktree", changedFiles: 1 });
+    const after = await Promise.all([index, shared].map((path) => stat(path)));
+    expect(after.map((entry) => entry.mtimeMs)).toEqual(
+      before.map((entry) => entry.mtimeMs),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test.each(["primary", "shared"])(
   "bounds an oversized %s index before invoking Git on either index",
@@ -124,7 +170,7 @@ test("optional ignore metadata can be linked inside Git or skipped when unusable
   }
 });
 
-test.each(["branch switch", "branch update"])(
+test.each(["branch switch", "branch update", "switch during comparison"])(
   "rejects a Git snapshot after a %s",
   async (change) => {
     const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
@@ -149,10 +195,13 @@ test.each(["branch switch", "branch update"])(
       );
       const read = createGitReader(Date.now, async (args, options) => {
         const result = await readCommand(args, options);
-        if (args.includes("status")) {
-          if (change === "branch switch") git(directory, "switch", "other");
-          else git(directory, "update-ref", "refs/heads/main", next);
-        }
+        if (
+          (change === "branch switch" && args.includes("status")) ||
+          (change === "switch during comparison" && args.includes("rev-list"))
+        )
+          git(directory, "switch", "other");
+        if (change === "branch update" && args.includes("status"))
+          git(directory, "update-ref", "refs/heads/main", next);
         return result;
       });
       expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
@@ -236,6 +285,7 @@ test.each(["success", "failure"])(
       );
       expect(parent).toBe(dataDirectory);
       expect(mode).toBe(0o700);
+      await waitForRemoval(dataDirectory);
       expect(await readdir(dataDirectory)).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -442,7 +492,7 @@ test("a metadata file growing during the snapshot still hits the byte limit", as
   }
 });
 
-test("the status index snapshots stream in large blocks", async () => {
+test("the index snapshot falls back to streaming in large blocks", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   try {
     git(directory, "init", "-b", "main");
@@ -463,18 +513,53 @@ test("the status index snapshots stream in large blocks", async () => {
         blockSizes.push(options?.highWaterMark);
       return createReadStream.call(this, options);
     });
+    const clone = spyOn(fs, "copyFile").mockRejectedValue(
+      new Error("Clone unsupported"),
+    );
     try {
       expect(
         await createGitReader()(directory, new AbortController().signal),
       ).toMatchObject({ changedFiles: 0 });
       expect(blockSizes).toEqual([1024 * 1024]);
     } finally {
+      clone.mockRestore();
       streams.mockRestore();
     }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test.skipIf(process.platform !== "linux")(
+  "uses the clone of the pinned index when supported",
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+    const copyFile = fs.copyFile;
+    const clones = spyOn(fs, "copyFile").mockImplementation(
+      async (source, target, flags) => {
+        expect(source).toMatch(/^\/proc\/self\/fd\/\d+$/);
+        expect(flags).toBe(constants.COPYFILE_FICLONE_FORCE);
+        // Model a successful reflink even on a test filesystem without support.
+        await copyFile(source, target);
+        // The original pathname may be replaced before Git loads the snapshot.
+        await rm(join(directory, ".git", "index"));
+      },
+    );
+    try {
+      git(directory, "init", "-b", "main");
+      await writeFile(join(directory, "tracked"), "fixture\n");
+      git(directory, "add", ".");
+      git(directory, "commit", "-m", "Initial");
+      expect(
+        await createGitReader()(directory, AbortSignal.timeout(4500)),
+      ).toMatchObject({ changedFiles: 0 });
+      expect(clones).toHaveBeenCalledTimes(1);
+    } finally {
+      clones.mockRestore();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 test("isolated status detects same-size edits with a racy index timestamp", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
@@ -594,3 +679,89 @@ test.each(["clean", "process"])(
     }
   },
 );
+
+test("stalled removal does not delay Git status or unbound cleanup concurrency", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const data = join(root, "data");
+  const held = Promise.withResolvers<void>();
+  const original = fs.rm;
+  const started = Promise.withResolvers<void>();
+  const removals = spyOn(fs, "rm").mockImplementation(async (path, options) => {
+    if (String(path).startsWith(join(data, "stargate-git-status-"))) {
+      started.resolve();
+      await held.promise;
+    }
+    return original(path, options);
+  });
+  try {
+    await mkdir(data);
+    const checkouts = await Promise.all(
+      Array.from({ length: 8 }, async (_, id) => {
+        const path = join(root, String(id));
+        await mkdir(path);
+        git(path, "init", "-b", "main");
+        return path;
+      }),
+    );
+    const read = createGitReader(Date.now, readCommand, data);
+    const reads = checkouts.map((path) =>
+      read(path, new AbortController().signal),
+    );
+    await started.promise;
+    const first = await Promise.race([
+      Promise.race(reads),
+      Bun.sleep(300).then(() => "blocked"),
+    ]);
+    expect(first).toMatchObject({ changedFiles: 0 });
+    await Bun.sleep(100);
+    expect(removals.mock.calls.length).toBeLessThanOrEqual(4);
+    held.resolve();
+    await Promise.all(reads);
+    await waitForRemoval(data);
+  } finally {
+    held.resolve();
+    removals.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("startup sweeps old private Git snapshots and keeps recent or unrelated entries", async () => {
+  const data = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  try {
+    const stale = join(data, "stargate-git-status-Stale1");
+    const fresh = join(data, "stargate-git-status-Fresh1");
+    const unrelated = join(data, "unrelated");
+    await Promise.all(
+      [stale, fresh, unrelated].map((path) => mkdir(path, { mode: 0o700 })),
+    );
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await Promise.all([stale, unrelated].map((path) => utimes(path, old, old)));
+    createGitReader(Date.now, readCommand, data);
+    await waitForRemoval(data, "stargate-git-status-Stale1");
+    expect((await readdir(data)).sort()).toEqual([
+      "stargate-git-status-Fresh1",
+      "unrelated",
+    ]);
+  } finally {
+    await rm(data, { recursive: true, force: true });
+  }
+});
+
+test("snapshot preparation leaves Git status its full two-second budget", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  try {
+    git(directory, "init", "-b", "main");
+    await writeFile(join(directory, "tracked"), "fixture");
+    git(directory, "add", ".");
+    const read = createGitReader(Date.now, async (args, options) => {
+      if (args[0] === process.execPath) await Bun.sleep(650);
+      if (args.includes("status")) await Bun.sleep(1450);
+      return readCommand(args, options);
+    });
+    expect(await read(directory, AbortSignal.timeout(4500))).toMatchObject({
+      changedFiles: 1,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -11,11 +11,10 @@
 ### Changes
 
 - Isolate Fleet API Git status from checkout configuration and bound primary
-  and shared indexes before Git loads them. Inspect indexes off the gateway
-  thread using private copies under the data directory when available.
-  Resolve Git state from the captured branch and reject snapshots when HEAD
-  changes during the read. Preserve readable ignore patterns within the
-  checkout and its Git directories.
+  and shared indexes before Git loads them. Use copy-on-write index snapshots
+  where supported on Linux and give snapshot preparation its own deadline.
+  Recheck HEAD after the ahead/behind comparison. Clean up Git snapshots in
+  the background and sweep stale directories on startup.
 - Look up Fleet pull requests only for checkouts bound to a GitHub repository
   in `api.pullRequestRepositories`. Require the PR head to belong to the
   bound repository. Unbound checkouts leave PR state unknown.

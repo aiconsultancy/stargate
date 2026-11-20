@@ -109,23 +109,31 @@ uses the latest host and gateway metrics. Before the first host sample, the
 fallback omits disk usage.
 
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
-submodules. Status reads run in a private Git directory with a copy of the
-index and access to the checkout's objects. The SHA and upstream are resolved
-from the captured branch when attached. A change to the branch or commit during
-the snapshot produces a Git read error. The snapshot copies the primary and
-any shared index under the gateway's data directory when it can create the
-snapshot outside the worktree. Otherwise it uses the system temporary
-directory. Index inspection runs in a separate process under the Git read
-deadline. Copied ignore files, including `core.excludesFile`, are used only
-when they resolve inside the checkout or its Git directories. Unreadable
-ignore files are skipped, and `info/exclude` retains its usual precedence.
-The 1 MiB limit applies to each copied pattern file.
-Git reads worktree `.gitignore` files directly.
-Each index file has a 128 MiB limit, and the snapshot has a 192 MiB aggregate
-limit. Oversized snapshot metadata produces a Git read error.
-Git versions with `GIT_ATTR_SOURCE` support read attributes from
-the empty tree, so files that depend on attributes for content conversion may
-count as changed.
+submodules. Status runs in a private Git directory with snapshots of the
+primary and shared indexes and access to the checkout's objects. The SHA and
+upstream come from the captured branch when attached. Stargate rechecks the
+branch and commit after comparing ahead and behind counts and rejects the
+snapshot if either changed.
+
+The reader checks the size of each index before snapshotting it. On Linux,
+it tries a copy-on-write clone of the open index and streams a bounded copy
+if cloning is unavailable. On other platforms it streams a bounded copy.
+The primary and shared indexes each have a 128 MiB limit, and all snapshot
+metadata has a 192 MiB aggregate limit. Snapshot preparation, including
+split-index inspection in a separate process, has a two-second budget before
+the two-second Git status and comparison budget starts. A read, including
+time waiting for a slot, has a four-second ceiling. Cleanup runs in the
+background within the same concurrency limit. Startup removes private
+snapshot directories older than 24 hours. Snapshots use the data directory
+when it is outside the worktree and writable, and the system temporary
+directory otherwise.
+
+Copied ignore files, including `core.excludesFile`, must resolve inside
+the checkout or its Git directories. The 1 MiB limit applies to each copied pattern file.
+Unreadable ignore files are skipped, and `info/exclude` retains its usual
+precedence. Git reads worktree `.gitignore` files directly. Git versions
+with `GIT_ATTR_SOURCE` support read attributes from the empty tree, so files
+that depend on attributes for content conversion may count as changed.
 
 To enable pull request lookups, set `api.pullRequestRepositories` in
 `stargate.json` and restart Stargate. Each key is the exact absolute,

@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import { constants, createWriteStream } from "node:fs";
 import {
+  copyFile,
   type FileHandle,
+  lstat,
   mkdir,
   mkdtemp,
   open,
+  readdir,
   realpath,
   rm,
   stat,
@@ -12,16 +15,19 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Semaphore } from "effect";
 import { containsCredential } from "../../credentials";
 import { abortable, runAbortable } from "../../effect";
+import { readWithDeadline } from "../../read-deadline";
 import { readCommand } from "./command";
 import type { V1Git } from "./types";
 
 const ttl = 15_000;
 const timeout = 2_000;
+const statusDirectoryPrefix = "stargate-git-status-";
+const staleDirectoryAge = 24 * 60 * 60_000;
 const mib = 1024 * 1024;
 const indexLimit = 128 * mib;
 const patternsLimit = mib;
@@ -146,6 +152,20 @@ async function openPattern(source: string, roots: string[]) {
   }
 }
 
+async function cloneIndex(file: FileHandle, target: string) {
+  if (process.platform !== "linux") return false;
+  // Clone the already-open file. Reopening its checkout path would race a
+  // replacement between the size check and clone.
+  return copyFile(
+    `/proc/self/fd/${file.fd}`,
+    target,
+    constants.COPYFILE_FICLONE_FORCE,
+  ).then(
+    () => true,
+    () => false,
+  );
+}
+
 async function copyStatusFile(
   openSource: () => Promise<FileHandle | undefined>,
   target: string,
@@ -174,25 +194,33 @@ async function copyStatusFile(
     }
     if (metadata.size > limit || metadata.size > budget.remaining)
       throw new MetadataLimitExceeded();
-    // Larger blocks avoid a read and write round trip for each 64 KiB of index.
-    const highWaterMark = limit === indexLimit ? mib : 64 * 1024;
-    await pipeline(
-      file.createReadStream({ autoClose: false, highWaterMark }),
-      async function* (chunks: AsyncIterable<Buffer>) {
-        let remaining = limit;
-        for await (const chunk of chunks) {
-          signal.throwIfAborted();
-          remaining -= chunk.byteLength;
-          budget.remaining -= chunk.byteLength;
-          copied += chunk.byteLength;
-          if (remaining < 0 || budget.remaining < 0)
-            throw new MetadataLimitExceeded();
-          yield chunk;
-        }
-      },
-      createWriteStream(target, { highWaterMark }),
-      { signal },
-    );
+    if (kind !== "pattern" && (await cloneIndex(file, target))) {
+      const { size } = await stat(target);
+      if (size > limit || size > budget.remaining)
+        throw new MetadataLimitExceeded();
+      budget.remaining -= size;
+    } else {
+      // Larger blocks avoid a read and write round trip for each 64 KiB of index.
+      const highWaterMark = limit === indexLimit ? mib : 64 * 1024;
+      await pipeline(
+        file.createReadStream({ autoClose: false, highWaterMark }),
+        async function* (chunks: AsyncIterable<Buffer>) {
+          let remaining = limit;
+          for await (const chunk of chunks) {
+            signal.throwIfAborted();
+            remaining -= chunk.byteLength;
+            budget.remaining -= chunk.byteLength;
+            copied += chunk.byteLength;
+            if (remaining < 0 || budget.remaining < 0)
+              throw new MetadataLimitExceeded();
+            yield chunk;
+          }
+        },
+        createWriteStream(target, { highWaterMark }),
+        { signal },
+      );
+    }
+    signal.throwIfAborted();
     // Git uses the index mtime to decide which same-timestamp files to rehash.
     // Round down so the copy can never make a racy entry appear older.
     await utimes(target, metadata.atime, Math.floor(metadata.mtimeMs / 1_000));
@@ -221,7 +249,7 @@ async function createStatusDirectory(checkout: string, dataDirectory?: string) {
       const child = relative(root, data);
       // The private snapshot would appear as untracked files inside the worktree.
       if (child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child))
-        return await mkdtemp(join(dataDirectory, "stargate-git-status-"));
+        return await mkdtemp(join(dataDirectory, statusDirectoryPrefix));
     } catch (error) {
       if (
         !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
@@ -231,7 +259,32 @@ async function createStatusDirectory(checkout: string, dataDirectory?: string) {
         throw error;
     }
   }
-  return mkdtemp(join(tmpdir(), "stargate-git-status-"));
+  return mkdtemp(join(tmpdir(), statusDirectoryPrefix));
+}
+
+async function removeStatusDirectory(path: string) {
+  await rm(path, { recursive: true, force: true }).catch(() => {});
+}
+
+async function sweepStatusDirectories(root: string) {
+  const cutoff = Date.now() - staleDirectoryAge;
+  const names = await readdir(root).catch(() => []);
+  for (const name of names) {
+    if (
+      !name.startsWith(statusDirectoryPrefix) ||
+      !/^[a-z\d]{6}$/i.test(name.slice(statusDirectoryPrefix.length))
+    )
+      continue;
+    const path = join(root, name);
+    const metadata = await lstat(path).catch(() => undefined);
+    if (
+      metadata?.isDirectory() &&
+      (metadata.mode & 0o777) === 0o700 &&
+      metadata.uid === process.getuid?.() &&
+      metadata.mtimeMs < cutoff
+    )
+      await removeStatusDirectory(path);
+  }
 }
 
 async function readSharedIndexName(
@@ -264,13 +317,14 @@ async function readSharedIndexName(
   return name;
 }
 
-async function readStatus(
+async function prepareStatus(
   directory: string,
   head: string | undefined,
   signal: AbortSignal,
   run: RunGit,
   runWithEnv: (env: NodeJS.ProcessEnv, ...args: string[]) => ReturnType<RunGit>,
   command: typeof readCommand,
+  ownDirectory: (path: string) => void,
   dataDirectory?: string,
 ) {
   const [paths, settings, excludes] = await Promise.all([
@@ -334,74 +388,74 @@ async function readStatus(
   // Status only sees this repository's config, HEAD, index and object store.
   // Never copy executable settings, hooks, info/attributes or a commondir.
   const gitDir = await createStatusDirectory(directory, dataDirectory);
-  try {
-    const configuredExcludes =
-      excludes.code === 0 &&
-      terminator === "" &&
-      !extraExcludes.length &&
-      excludesPath &&
-      resolve(directory, excludesPath);
-    const copiedExcludes = "info/configured-excludes";
-    const budget = { remaining: metadataLimit };
-    const snapshotIndex = (
-      source: string,
-      target: string,
-      kind: "primary" | "shared",
-    ) =>
-      copyStatusFile(
-        () => open(source, metadataFlags),
-        join(gitDir, target),
-        signal,
-        indexLimit,
-        budget,
-        kind,
-      );
-    await Promise.all([
-      mkdir(join(gitDir, "objects", "info"), { recursive: true }),
-      mkdir(join(gitDir, "info")),
-      mkdir(join(gitDir, "refs")),
-    ]);
-    if (await snapshotIndex(index, "index", "primary")) {
-      const shared = await readSharedIndexName(gitDir, format, signal, command);
-      if (shared)
-        await snapshotIndex(join(checkoutGit, shared), shared, "shared");
-    }
-    const roots = await Promise.all(
-      [directory, checkoutGit, commonGit].map((path) => realpath(path)),
+  ownDirectory(gitDir);
+  signal.throwIfAborted();
+  const configuredExcludes =
+    excludes.code === 0 &&
+    terminator === "" &&
+    !extraExcludes.length &&
+    excludesPath &&
+    resolve(directory, excludesPath);
+  const copiedExcludes = "info/configured-excludes";
+  const budget = { remaining: metadataLimit };
+  const snapshotIndex = (
+    source: string,
+    target: string,
+    kind: "primary" | "shared",
+  ) =>
+    copyStatusFile(
+      () => open(source, metadataFlags),
+      join(gitDir, target),
+      signal,
+      indexLimit,
+      budget,
+      kind,
     );
-    const snapshotPattern = (source: string, target: string) =>
-      copyStatusFile(
-        () => openPattern(source, roots),
-        join(gitDir, target),
-        signal,
-        patternsLimit,
-        budget,
-        "pattern",
-      );
-    const files = await Promise.allSettled([
-      writeFile(
-        join(gitDir, "HEAD"),
-        head ? `${head}\n` : "ref: refs/heads/unborn\n",
-      ),
-      writeFile(
-        join(gitDir, "config"),
-        format === "sha256"
-          ? "[core]\nrepositoryformatversion = 1\n[extensions]\nobjectformat = sha256\n"
-          : "[core]\nrepositoryformatversion = 0\n",
-      ),
-      writeFile(join(gitDir, "objects", "info", "alternates"), `${objects}\n`),
-      snapshotPattern(exclude, "info/exclude"),
-      snapshotPattern(sparse, "info/sparse-checkout"),
-      configuredExcludes && snapshotPattern(configuredExcludes, copiedExcludes),
-    ]);
-    for (const file of files) if (file.status === "rejected") throw file.reason;
-    return await runWithEnv(
-      {
-        GIT_DIR: gitDir,
-        GIT_WORK_TREE: directory,
-        GIT_ATTR_NOSYSTEM: "1",
-        GIT_ATTR_SOURCE: createHash(format).update("tree 0\0").digest("hex"),
-      },
+  await mkdir(join(gitDir, "objects", "info"), { recursive: true });
+  await mkdir(join(gitDir, "info"));
+  await mkdir(join(gitDir, "refs"));
+  if (await snapshotIndex(index, "index", "primary")) {
+    const shared = await readSharedIndexName(gitDir, format, signal, command);
+    if (shared)
+      await snapshotIndex(join(dirname(index), shared), shared, "shared");
+  }
+  const roots = await Promise.all(
+    [directory, checkoutGit, commonGit].map((path) => realpath(path)),
+  );
+  const snapshotPattern = (source: string, target: string) =>
+    copyStatusFile(
+      () => openPattern(source, roots),
+      join(gitDir, target),
+      signal,
+      patternsLimit,
+      budget,
+      "pattern",
+    );
+  const files = await Promise.allSettled([
+    writeFile(
+      join(gitDir, "HEAD"),
+      head ? `${head}\n` : "ref: refs/heads/unborn\n",
+    ),
+    writeFile(
+      join(gitDir, "config"),
+      format === "sha256"
+        ? "[core]\nrepositoryformatversion = 1\n[extensions]\nobjectformat = sha256\n"
+        : "[core]\nrepositoryformatversion = 0\n",
+    ),
+    writeFile(join(gitDir, "objects", "info", "alternates"), `${objects}\n`),
+    snapshotPattern(exclude, "info/exclude"),
+    snapshotPattern(sparse, "info/sparse-checkout"),
+    configuredExcludes && snapshotPattern(configuredExcludes, copiedExcludes),
+  ]);
+  for (const file of files) if (file.status === "rejected") throw file.reason;
+  return {
+    env: {
+      GIT_DIR: gitDir,
+      GIT_WORK_TREE: directory,
+      GIT_ATTR_NOSYSTEM: "1",
+      GIT_ATTR_SOURCE: createHash(format).update("tree 0\0").digest("hex"),
+    },
+    args: [
       ...statusOptions(settings.stdout),
       "-c",
       `core.excludesFile=${join(gitDir, copiedExcludes)}`,
@@ -413,10 +467,8 @@ async function readStatus(
       "--untracked-files=all",
       // Count changed gitlinks without reading submodule worktree configuration.
       "--ignore-submodules=dirty",
-    );
-  } finally {
-    await rm(gitDir, { recursive: true, force: true });
-  }
+    ],
+  };
 }
 
 async function readHeadRef(run: RunGit) {
@@ -437,14 +489,8 @@ async function readCommit(run: RunGit, ref: string) {
   return oid;
 }
 
-async function inspect(
-  directory: string,
-  now: () => number,
-  signal: AbortSignal,
-  command: typeof readCommand,
-  dataDirectory?: string,
-): Promise<V1Git | null> {
-  const state: V1Git = {
+function emptyState(checkedAt: number): V1Git {
+  return {
     branch: null,
     head: null,
     base: null,
@@ -452,9 +498,20 @@ async function inspect(
     behind: null,
     changedFiles: null,
     repository: null,
-    checkedAt: now(),
+    checkedAt,
   };
-  const deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
+}
+
+async function inspect(
+  directory: string,
+  now: () => number,
+  signal: AbortSignal,
+  command: typeof readCommand,
+  ownDirectory: (path: string) => void,
+  dataDirectory?: string,
+): Promise<V1Git | null> {
+  const state = emptyState(now());
+  let deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
   const runWithEnv = async (
     overrides: NodeJS.ProcessEnv,
     ...args: string[]
@@ -463,6 +520,7 @@ async function inspect(
     const result = await command(
       [
         "git",
+        "--no-optional-locks",
         "-c",
         "core.fsmonitor=false",
         "-c",
@@ -534,20 +592,20 @@ async function inspect(
             "refs/remotes/origin/HEAD",
           );
     const baseRef = base.code === 0 ? base.stdout.trim() : null;
-    const changed = await readStatus(
+    const status = await prepareStatus(
       directory,
       oid,
       deadline,
       run,
       runWithEnv,
       command,
+      ownDirectory,
       dataDirectory,
     );
-    if (
-      branchRef !== (await readHeadRef(run)) ||
-      oid !== (await readCommit(run, "HEAD"))
-    )
-      throw new Error("Git HEAD changed during status read");
+    deadline.throwIfAborted();
+    // Snapshot I/O and index inspection have a separate budget from status.
+    deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
+    const changed = await runWithEnv(status.env, ...status.args);
     const changedFiles =
       changed.code === 0 ? countChangedPaths(changed.stdout) : null;
     if (changedFiles === null) throw new Error("Git state unavailable");
@@ -570,6 +628,11 @@ async function inspect(
       counts = result.code === 0 ? parseAheadBehind(result.stdout) : null;
       if (!counts) throw new Error("Git comparison unavailable");
     }
+    if (
+      branchRef !== (await readHeadRef(run)) ||
+      oid !== (await readCommit(run, "HEAD"))
+    )
+      throw new Error("Git HEAD changed during status read");
     return {
       ...state,
       branch: branchName,
@@ -605,31 +668,65 @@ export function createGitReader(
 ) {
   const permits = Semaphore.makeUnsafe(4);
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
-  return (directory: string | undefined, signal: AbortSignal) => {
+  void runAbortable(
+    permits.withPermit(
+      abortable(async () => {
+        for (const root of new Set([dataDirectory, tmpdir()]))
+          if (root) await sweepStatusDirectories(root);
+      }),
+    ),
+    new AbortController().signal,
+  ).catch(() => {});
+  return async (directory: string | undefined, signal: AbortSignal) => {
     signal.throwIfAborted();
-    if (!directory || !isAbsolute(directory)) return Promise.resolve(null);
+    if (!directory || !isAbsolute(directory)) return null;
     const cached = cache.get(directory);
-    if (cached && cached.expiresAt > now())
-      return Promise.resolve(cached.value);
-    return runAbortable(
-      permits.withPermit(
-        abortable(async (reading) => {
-          const saved = cache.get(directory);
-          if (saved && saved.expiresAt > now()) return saved.value;
-          const value = await inspect(
-            directory,
-            now,
-            reading,
-            command,
-            dataDirectory,
-          );
-          for (const [path, entry] of cache)
-            if (entry.expiresAt <= now()) cache.delete(path);
-          cache.set(directory, { expiresAt: now() + ttl, value });
-          return value;
-        }),
-      ),
-      signal,
-    );
+    if (cached && cached.expiresAt > now()) return cached.value;
+    try {
+      return await readWithDeadline(signal, 2 * timeout, (deadline) => {
+        const reply = Promise.withResolvers<V1Git | null>();
+        void runAbortable(
+          permits.withPermit(
+            abortable(async (reading) => {
+              const saved = cache.get(directory);
+              if (saved && saved.expiresAt > now()) {
+                reply.resolve(saved.value);
+                return;
+              }
+              let snapshot: string | undefined;
+              try {
+                const value = await inspect(
+                  directory,
+                  now,
+                  reading,
+                  command,
+                  (path) => {
+                    snapshot = path;
+                  },
+                  dataDirectory,
+                );
+                for (const [path, entry] of cache)
+                  if (entry.expiresAt <= now()) cache.delete(path);
+                cache.set(directory, { expiresAt: now() + ttl, value });
+                reply.resolve(value);
+              } catch (error) {
+                reply.reject(error);
+              } finally {
+                // The caller already has its result. Keep the permit until
+                // removal finishes so stalled filesystems cannot queue copies.
+                if (snapshot) await removeStatusDirectory(snapshot);
+              }
+            }),
+          ),
+          deadline,
+        ).catch(reply.reject);
+        return reply.promise;
+      }).result;
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!(error instanceof DOMException && error.name === "TimeoutError"))
+        throw error;
+      return { ...emptyState(now()), error: "Git read timed out." };
+    }
   };
 }
