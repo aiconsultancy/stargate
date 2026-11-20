@@ -95,6 +95,7 @@ export function createEventStreams(
     let summaries = new Map<string, V1Ship>();
     let fleet: V1Fleet | undefined;
     let publishing = false;
+    let enriching = false;
     let readingHost = false;
 
     function broadcast(events: V1Event[]) {
@@ -221,6 +222,31 @@ export function createEventStreams(
       }
     }
 
+    function refreshMetrics(overview: V1Snapshot["fleet"], generation: number) {
+      if (enriching) return;
+      enriching = true;
+      void enrich(shutdown.signal, (signal) =>
+        options.completeFleet(overview, signal),
+      )
+        .then(({ host, gateway }) => {
+          if (shutdown.signal.aborted || syncIdentities() !== generation)
+            return;
+          expireOverview();
+          if (!cachedOverview || !fleet) return;
+          const hostChanged = !isDeepStrictEqual(fleet.host, host);
+          const next = { ...fleet, host, gateway };
+          if (isDeepStrictEqual(fleet.gateway, gateway)) fleet = next;
+          else publishFleet(next);
+          if (hostChanged) broadcast([{ type: "host", data: host }]);
+        })
+        .catch(() => {
+          // Keep the cached metrics and retry on a later poll.
+        })
+        .finally(() => {
+          enriching = false;
+        });
+    }
+
     async function poll() {
       expireOverview();
       if (publishing || shutdown.signal.aborted) return;
@@ -250,13 +276,7 @@ export function createEventStreams(
         const overview = sample
           ? sample.overview
           : { ...cachedOverview.overview, overviewStale: true as const };
-        const complete = await enrich(shutdown.signal, (signal) =>
-          options.completeFleet(overview, signal),
-        ).catch(() => undefined);
-        if (shutdown.signal.aborted || syncIdentities() !== generation) return;
-        expireOverview();
-        if (!cachedOverview) return;
-        const next = complete ?? options.fallbackFleet(overview);
+        const next = options.fallbackFleet(overview);
         publishFleet(next);
         for (const ship of next.ships) {
           if (!sample) {
@@ -271,6 +291,7 @@ export function createEventStreams(
             // A later poll can publish this ship if its projection fails.
           });
         }
+        refreshMetrics(overview, generation);
       } catch {
         // Keep the last overview and retry while clients are present.
       } finally {

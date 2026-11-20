@@ -734,7 +734,7 @@ test.each(["overview", "enrichment", "ship"])(
     const first = Promise.withResolvers<never>();
     const second = Promise.withResolvers<never>();
     const retried = Promise.withResolvers<void>();
-    const recovered = "Recovered sample";
+    const recovered = kind === "enrichment" ? "2.3.2" : "Recovered sample";
     const attempt = mock(async <T>(value: T) => {
       if (attempt.mock.calls.length === 1) return first.promise;
       if (attempt.mock.calls.length === 2) {
@@ -752,10 +752,15 @@ test.each(["overview", "enrichment", "ship"])(
             : overview,
         ship: async () =>
           kind === "ship" ? attempt({ ...ship, name: recovered }) : ship,
-        completeFleet: async (fleet) =>
-          kind === "enrichment"
-            ? attempt(fallbackFleet({ ...fleet, name: recovered }))
-            : fallbackFleet(fleet),
+        completeFleet: async (fleet) => {
+          const next = fallbackFleet(fleet);
+          return kind === "enrichment"
+            ? attempt({
+                ...next,
+                gateway: { ...next.gateway, opencodeVersion: recovered },
+              })
+            : next;
+        },
         diff: diffEvents,
         readHost: async () => host,
         snapshotHost: () => host,
@@ -830,6 +835,7 @@ test("an availability transition supersedes an older healthy detail read", async
 
 test("a joining client gets stale retained detail as soon as the captain is unavailable", async () => {
   const held = Promise.withResolvers<V1ShipDetail>();
+  const enrichment = Promise.withResolvers<V1Fleet>();
   const started = Promise.withResolvers<void>();
   const offline = { ...summary, available: false, error: "Crew unavailable." };
   const detailUpdatedAt = 123;
@@ -847,14 +853,15 @@ test("a joining client gets stale retained detail as soon as the captain is unav
         return held.promise;
       },
       diff: diffEvents,
-      completeFleet,
+      completeFleet: (fleet) =>
+        available ? completeFleet(fleet) : enrichment.promise,
       fallbackFleet,
       readHost: async () => host,
       snapshotHost: () => host,
     },
     { pollMs: 20, hostMs: 1000, heartbeatMs: 1000, readMs: 1000 },
   );
-  const signal = AbortSignal.timeout(1500);
+  const signal = AbortSignal.timeout(600);
   try {
     const reader = streams.open(signal)?.getReader();
     if (!reader) throw new Error("Cannot open event stream");
@@ -875,7 +882,18 @@ test("a joining client gets stale retained detail as soon as the captain is unav
       detailUpdatedAt,
       crewMembers: ship.crewMembers,
     });
+    const enriched = fallbackFleet(overview);
+    enrichment.resolve({
+      ...enriched,
+      gateway: { ...enriched.gateway, opencodeVersion: "2.3.2" },
+      host: { ...host, sampledAt: 987654321 },
+    });
+    const updated = await nextFrame(late, "fleet");
+    expect(updated).toContain('"opencodeVersion":"2.3.2"');
+    expect(updated).toContain('"available":false');
+    expect(await nextFrame(late, "host")).toContain('"sampledAt":987654321');
   } finally {
+    enrichment.resolve(fallbackFleet(overview));
     held.resolve({ ...offline, crewMembers: [] });
     streams.stop();
   }
@@ -1285,7 +1303,12 @@ test("timed-out enrichment keeps its slot while current overviews publish across
   let name: string = overview.name;
   const read = mock(async (value: typeof overview) => {
     started.resolve();
-    return read.mock.calls.length === 1 ? held.promise : completeFleet(value);
+    if (read.mock.calls.length === 1) return held.promise;
+    const next = fallbackFleet(value);
+    return {
+      ...next,
+      gateway: { ...next.gateway, opencodeVersion: "2.3.2" },
+    };
   });
   const streams = createEventStreams(
     {
@@ -1315,8 +1338,7 @@ test("timed-out enrichment keeps its slot while current overviews publish across
     expect(await nextFrame(reader, "fleet")).toContain(`"name":"${name}"`);
     expect(read).toHaveBeenCalledTimes(1);
     held.resolve(await completeFleet({ ...overview, name: "Expired" }));
-    name = "Recovered enrichment";
-    const fresh = await nextFrame(reader, "fleet");
+    const fresh = await nextFrame(reader, "fleet", '"opencodeVersion":"2.3.2"');
     expect(fresh).toContain(`"name":"${name}"`);
     expect(read.mock.calls.length).toBeGreaterThan(1);
   } finally {
