@@ -1,8 +1,10 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { z } from "zod";
+import { Schema } from "effect";
 import type { AttachmentTransport } from "../attachment-delivery";
 import type { DeliveryUnit, IrcTurnStatus, SlackDelivery } from "../gateway";
 import type { ReactionName } from "../reactions";
+import { settingsStruct } from "../settings-schema";
+import { type TurnProgress, turnProgressText } from "../turn-progress";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";
 import { cleanText, utf8Bytes } from "./protocol";
@@ -48,17 +50,21 @@ export type IrcProgress = {
   done(unit: DeliveryUnit, done: number): void;
 };
 
-const planSchema = z.strictObject({
-  batched: z.boolean(),
-  units: z.array(
-    z.strictObject({
-      lines: z
-        .array(z.strictObject({ text: z.string(), concat: z.boolean() }))
-        .min(1),
-    }),
+const planSchema = settingsStruct({
+  batched: Schema.Boolean,
+  units: Schema.mutable(
+    Schema.Array(
+      settingsStruct({
+        lines: Schema.mutable(
+          Schema.Array(
+            settingsStruct({ text: Schema.String, concat: Schema.Boolean }),
+          ),
+        ).check(Schema.isMinLength(1)),
+      }),
+    ),
   ),
 });
-type Plan = z.infer<typeof planSchema>;
+type Plan = typeof planSchema.Type;
 type Part = Plan["units"][number]["lines"][number];
 
 /** draft/multiline bytes as Stargate counts them (see packBatches). */
@@ -152,6 +158,7 @@ export class IrcDelivery implements SlackDelivery {
     signal: AbortSignal,
     allowed?: () => boolean,
     turnStatus?: IrcTurnStatus,
+    readProgress?: () => TurnProgress | undefined,
   ) {
     const finish = this.client.startStatus();
     if (signal.aborted) {
@@ -171,16 +178,28 @@ export class IrcDelivery implements SlackDelivery {
             signal,
             allowed,
           ).catch(() => {});
-          await delay(this.client.turnStatusMs, undefined, { signal }).catch(
-            () => {},
-          );
-          void this.turnNotice(
-            channel,
-            thread,
-            "This request is still open.",
-            signal,
-            allowed,
-          ).catch(() => {});
+          let reported: TurnProgress | undefined;
+          let first = true;
+          while (!signal.aborted) {
+            await delay(this.client.turnStatusMs, undefined, { signal }).catch(
+              () => {},
+            );
+            if (signal.aborted || (allowed && !allowed())) break;
+            const progress = readProgress?.();
+            if (!first && reported === progress) continue;
+            first = false;
+            reported = progress;
+            void this.turnNotice(
+              channel,
+              thread,
+              readProgress
+                ? turnProgressText(progress)
+                : "This request is still open.",
+              signal,
+              allowed,
+            ).catch(() => {});
+            if (!readProgress) break;
+          }
         }
         return;
       }
@@ -384,7 +403,7 @@ export class IrcDelivery implements SlackDelivery {
     let done = 0;
     if (tracked && this.progress) {
       const stored = this.progress.plan(tracked, JSON.stringify(plan));
-      plan = planSchema.parse(JSON.parse(stored.plan));
+      plan = Schema.decodeUnknownSync(planSchema)(JSON.parse(stored.plan));
       done = stored.done;
     }
     const limits = this.client.multiline;

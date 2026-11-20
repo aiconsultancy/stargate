@@ -33,6 +33,24 @@ wildcard binds such as `0.0.0.0` and `::` are rejected. The CIDR allowlist check
 the TCP peer address. With a local proxy or tunnel, allow its loopback
 address and enforce remote-client access at the proxy or tunnel.
 
+### Private Unix mode
+
+Set `"api": { "listen": "unix" }` to serve the same Fleet routes on
+`<dataDirectory>/api.sock` instead of TCP. This selects one listener, not an
+additional endpoint. Existing private TCP settings keep their meaning.
+The Unix mode requires an owner-controlled mode-0700 data directory and creates
+the socket with mode 0600. It refuses occupied live sockets, symlinks, foreign
+sockets and regular files. Shutdown removes only the socket it published.
+
+The operator bearer is still required. `allowedNetworks` applies only to TCP;
+Unix access uses filesystem ownership. Fleet browser-origin rules are unchanged.
+No notification routes, health routes or configuration routes are wired in this
+version. The internal exact-route contract does not enable them by itself.
+
+To roll back to a version without Unix mode, restore the prior private TCP
+`listen` setting, or omit `api` if no Fleet listener is needed. Keep `api-token`
+and other private state. Do not remove an existing TCP configuration blindly.
+
 ## Token
 
 Run `stargate api token [--config PATH]` as the service user. It prints the
@@ -236,6 +254,23 @@ Up to eight clients can stream at once. Further connections receive 503,
 and streams that fall behind are closed. Reconnect for a new snapshot.
 There is no event replay.
 
+## Host limits
+
+The shared HTTP host accepts at most 64 connections. Parsed headers are limited
+to 16 KiB and must complete within ten seconds of connection acceptance.
+Each connection serves one request and closes after the response. Rejected
+requests do not read their bodies. Ordinary Fleet reads have a twenty-second
+deadline and eight reserved work slots. Event streams have eight separate
+slots, bounded output buffering and a sixty-second idle timeout. Stream
+heartbeats continue every fifteen seconds.
+
+Trusted future notification routes use separate authorization, no browser
+Origin or CORS, at most 64 KiB per body, a twenty-second absolute request
+deadline, four work slots per route and eight in total. A timeout aborts the
+request but does not release its slot until the handler settles. These slots
+cannot consume the Fleet read or stream reservations. Connection limits cannot
+guarantee availability against a process-wide pre-header flood.
+
 ## Curl
 
 On the gateway host or through the SSH example:
@@ -249,5 +284,15 @@ printf 'Authorization: Bearer %s\n' "$token" |
 printf 'Authorization: Bearer %s\n' "$token" |
   curl --fail --no-buffer --header @- http://127.0.0.1:8484/api/v1/events
 
+unset token
+```
+
+For Unix mode, replace the URL and add `--unix-socket`:
+
+```sh
+token=$(stargate api token --config stargate.json)
+printf 'Authorization: Bearer %s\n' "$token" |
+  curl --fail --silent --show-error --header @- \
+    --unix-socket /absolute/dataDirectory/api.sock http://localhost/api/v1/fleet
 unset token
 ```

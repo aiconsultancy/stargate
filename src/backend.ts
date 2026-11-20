@@ -21,6 +21,7 @@ import type {
 } from "./questions";
 import type { QuotaSnapshot } from "./quota";
 import type { SessionHistory } from "./session-history";
+import type { TurnProgress } from "./turn-progress";
 import type { UpdateReceipt, UpdateSnapshot } from "./update-notice";
 
 export {
@@ -202,6 +203,7 @@ export interface AgentBackend {
     onInput?: (id: string) => void,
     files?: readonly Attachment[],
     context?: PromptSourceContext,
+    onProgress?: (progress: TurnProgress) => void,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
   /** Withdraw this input; interrupt only if raw history proves it is current. */

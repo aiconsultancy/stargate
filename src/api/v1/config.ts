@@ -23,10 +23,12 @@ const pullRequestRepositories = Schema.Record(
 ).check(Schema.isPropertyNames(checkoutPath));
 
 const fields = z.strictObject({
-  listen: z.string().refine(parseApiListen, {
-    message:
-      "Fleet API is private-network only. Use a private literal host and port 1–65535 (bracket IPv6), or :PORT for loopback.",
-  }),
+  listen: z
+    .string()
+    .refine((value) => value === "unix" || parseApiListen(value), {
+      message:
+        "Fleet API is private-network only. Use unix, a private literal host and port 1–65535 (bracket IPv6), or :PORT for loopback.",
+    }),
   allowedNetworks: z
     .array(
       z.string().refine(isPrivateNetwork, {

@@ -86,6 +86,11 @@ export function fleetInstructions(
       : "An ordinary Markdown link to that full URL is valid.",
     "Never use a bare PR number in agent messages, crew instructions, findings, hand-offs or issue records; do not assume the current repository.",
     "Every open question must include your recommendation and a short reason. Inspect the existing code and workflow first; complete routine issue summaries, titles and brief hygiene within the agreed request. Do not send incomplete question lists or label routine enrichment as Unrequested changes. Ask the human operator only for real judgement or approval choices; never invent missing facts, widen agreed scope or fabricate human approval.",
+    ...(transport === "irc"
+      ? [
+          "Use an interactive clarification form only in a verified human IRC turn that supports the question bridge. For peer, crew, or scheduled work, report a decision you need in the normal reply or task result and finish the turn so the session can accept another request.",
+        ]
+      : []),
     "stargate_mail and stargate_dm address your configured captain/crew team, not other ships or a rear admiral.",
     "When crew need the status of another member's task, have them ask their own captain. The captain checks the task with the existing crew tools and relays the relevant status or blocker. Keep detailed session contents private.",
     policy.role === "captain"

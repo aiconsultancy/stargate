@@ -12,8 +12,10 @@ import { join } from "node:path";
 import { Result, Schema } from "effect";
 import {
   CaptainPostError,
+  CaptainPostStore,
   type PostAudit,
   type PostDependencies,
+  postInputSchema,
   runCaptainPost,
 } from "../src/captain-post";
 import { configSchema } from "../src/config";
@@ -28,6 +30,59 @@ afterEach(async () => {
     await rm(path, { recursive: true, force: true });
 });
 const signal = () => new AbortController().signal;
+
+test("stored post files remain unbounded while new posts permit at most ten paths", () => {
+  const store = new CaptainPostStore(":memory:");
+  const file = {
+    path: "/report.txt",
+    caption: "report",
+    name: "report.txt",
+    mime: "Text/Plain",
+    size: 1,
+    sha256: "a".repeat(64),
+  };
+  const files = Array.from({ length: 11 }, () => ({
+    file,
+    status: "pending" as const,
+  }));
+  try {
+    store.admit(
+      "bot",
+      "key",
+      {
+        channel: "C123",
+        thread: null,
+        length: 4,
+        files,
+        fingerprint: "f",
+      },
+      1000,
+      10,
+      "owner",
+    );
+    const stored = store.get("bot", "key");
+    expect(stored?.files).toEqual(files);
+    expect(Object.keys(stored?.files[0]?.file ?? {})).toEqual([
+      "path",
+      "caption",
+      "name",
+      "mime",
+      "size",
+      "sha256",
+    ]);
+    expect(
+      Result.isFailure(
+        Schema.decodeUnknownResult(postInputSchema)({
+          channel: "C123",
+          text: "note",
+          files: Array(11).fill("/report.txt"),
+        }),
+      ),
+    ).toBe(true);
+  } finally {
+    store.close();
+  }
+});
 
 type Call = { method: string; params: URLSearchParams };
 

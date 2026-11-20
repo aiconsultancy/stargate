@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { Result, Schema } from "effect";
 import {
   AttachmentUnavailable,
   checkPreparedAttachments,
@@ -11,6 +12,7 @@ import {
   maxAttachments,
   type PreparedAttachment,
   parseAttachments,
+  preparedAttachmentSchema,
   readPreparedAttachment,
 } from "../src/attachments";
 import { ordinaryFileDirectory } from "./file-fixture";
@@ -39,6 +41,39 @@ const pdf = new TextEncoder().encode(
 );
 const sha256 = (bytes: Uint8Array) =>
   createHash("sha256").update(bytes).digest("hex");
+
+test("prepared metadata keeps code-point bounds, MIME spelling and strict fields", () => {
+  const input = {
+    sha256: "a".repeat(64),
+    size: 1,
+    mime: "Image/PNG",
+    name: "😀".repeat(255),
+    caption: "😀".repeat(1000),
+    path: "/report.png",
+  };
+  const decode = Schema.decodeUnknownResult(preparedAttachmentSchema);
+  const parsed = decode(input);
+  if (Result.isFailure(parsed))
+    throw new Error("Valid prepared metadata rejected");
+  expect(parsed.success).toEqual(input);
+  expect(Object.keys(parsed.success)).toEqual([
+    "path",
+    "caption",
+    "name",
+    "mime",
+    "size",
+    "sha256",
+  ]);
+  for (const invalid of [
+    { ...input, name: `${input.name}😀` },
+    { ...input, caption: `${input.caption}😀` },
+    { ...input, size: -0 },
+    { ...input, size: Infinity },
+    { ...input, extra: true },
+    Object.assign(Object.create({ extra: true }), input),
+  ])
+    expect(Result.isFailure(decode(invalid))).toBe(true);
+});
 
 async function rejection(work: Promise<unknown>) {
   try {
