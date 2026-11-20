@@ -672,10 +672,15 @@ export function createGitReader(
 ) {
   const permits = Semaphore.makeUnsafe(4);
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
+  let sweptAt = Number.NEGATIVE_INFINITY;
   function cacheResult(directory: string, value: V1Git | null) {
     const at = now();
-    for (const [path, entry] of cache)
-      if (entry.expiresAt <= at) cache.delete(path);
+    // Sweep at most once a second, so a burst of results stays linear.
+    if (at - sweptAt >= 1_000) {
+      sweptAt = at;
+      for (const [path, entry] of cache)
+        if (entry.expiresAt <= at) cache.delete(path);
+    }
     cache.set(directory, { expiresAt: at + ttl, value });
     return value;
   }
@@ -693,12 +698,16 @@ export function createGitReader(
     if (!directory || !isAbsolute(directory)) return null;
     const cached = cache.get(directory);
     if (cached && cached.expiresAt > now()) return cached.value;
+    // Set once this read holds a permit: a timeout spent only waiting for one
+    // says nothing about this checkout, so it is not cached.
+    let started = false;
     try {
       return await readWithDeadline(signal, 2 * timeout, (deadline) => {
         const reply = Promise.withResolvers<V1Git | null>();
         void runAbortable(
           permits.withPermit(
             abortable(async (reading) => {
+              started = true;
               const saved = cache.get(directory);
               if (saved && saved.expiresAt > now()) {
                 reply.resolve(saved.value);
@@ -738,10 +747,8 @@ export function createGitReader(
         throw error;
       const saved = cache.get(directory);
       if (saved && saved.expiresAt > now()) return saved.value;
-      return cacheResult(directory, {
-        ...emptyState(now()),
-        error: "Git read timed out.",
-      });
+      const timedOut = { ...emptyState(now()), error: "Git read timed out." };
+      return started ? cacheResult(directory, timedOut) : timedOut;
     }
   };
 }

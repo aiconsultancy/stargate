@@ -285,6 +285,38 @@ test("caches an outer Git read timeout for 15 seconds", async () => {
   }
 }, 10_000);
 
+test("does not cache a timeout spent only waiting for a read slot", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const held = Promise.withResolvers<null>();
+  let calls = 0;
+  const read = createGitReader(Date.now, async () => {
+    // The first four reads each hold a slot; later calls fail fast.
+    if (++calls <= 4) return held.promise;
+    return { code: 1, stdout: "" };
+  });
+  const signal = new AbortController().signal;
+  try {
+    for (const name of ["busy-1", "busy-2", "busy-3", "busy-4", "waiting"])
+      await mkdir(join(root, name));
+    const busy = [1, 2, 3, 4].map((n) => read(join(root, `busy-${n}`), signal));
+    const waiting = join(root, "waiting");
+    expect(await read(waiting, signal)).toMatchObject({
+      error: "Git read timed out.",
+    });
+    expect(calls).toBe(4);
+    held.resolve(null);
+    await Promise.all(busy);
+    // The queued timeout was not cached: this read runs and reaches Git.
+    expect(await read(waiting, signal)).toMatchObject({
+      error: "Git state unavailable.",
+    });
+    expect(calls).toBeGreaterThan(4);
+  } finally {
+    held.resolve(null);
+    await rm(root, { recursive: true, force: true });
+  }
+}, 15_000);
+
 test.each(["success", "failure"])(
   "stores private index copies under the data directory and cleans up after %s",
   async (outcome) => {
@@ -802,7 +834,7 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
         return path;
       }),
     );
-    let now = Date.now();
+    const now = Date.now();
     const read = createGitReader(() => now, readCommand, data);
     const reads = checkouts.map((path) =>
       read(path, new AbortController().signal),
@@ -823,10 +855,8 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
     expect(removing).toBe(4);
     const waiting =
       checkouts[results.findIndex((result) => result?.changedFiles === null)];
-    expect(await read(waiting, AbortSignal.timeout(100))).toMatchObject({
-      error: "Git read timed out.",
-    });
-    now += 15_000;
+    // Those timeouts only waited for a slot, so they are not cached: the next
+    // read waits for a slot again instead of reporting this checkout timed out.
     await expect(read(waiting, AbortSignal.timeout(100))).rejects.toMatchObject(
       { name: "TimeoutError" },
     );
