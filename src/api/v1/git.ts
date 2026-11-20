@@ -1,5 +1,9 @@
-import { stat } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { createHash } from "node:crypto";
+import { constants, createWriteStream } from "node:fs";
+import { mkdir, mkdtemp, open, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, isAbsolute, join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { Semaphore } from "effect";
 import { containsCredential } from "../../credentials";
 import { abortable, runAbortable } from "../../effect";
@@ -58,41 +62,160 @@ export function countChangedPaths(output: string): number | null {
 const safeRef = (ref: string) =>
   ref.length <= 255 && !containsCredential(ref) ? ref : null;
 
-function disabledFilters(output: string): NodeJS.ProcessEnv {
-  if (!output) return {};
-  const keys = output.split("\0");
-  if (keys.pop() !== "" || output.includes("\uFFFD"))
-    throw new Error("Git filter names unavailable");
-  const drivers = new Set<string>();
-  for (const key of keys) {
-    const separator = key.lastIndexOf(".");
-    if (separator < "filter.".length)
-      throw new Error("Git filter name unavailable");
-    drivers.add(key.slice(0, separator));
+const statusSettings =
+  /^(core\.(filemode|ignorecase|symlinks|precomposeunicode|autocrlf|eol|sparsecheckout|sparsecheckoutcone|checkstat|trustctime|ignorestat)|(diff|status)\.renames)$/;
+
+function statusOptions(output: string) {
+  const options: string[] = [];
+  for (const entry of output.split("\0")) {
+    if (!entry) continue;
+    const [key, value = "true", ...rest] = entry.split("\n");
+    if (key && statusSettings.test(key) && !rest.length)
+      options.push("-c", `${key}=${value}`);
   }
-  // Separate keys from values so even a subsection containing '=' is literal.
-  const env: NodeJS.ProcessEnv = {};
-  let index = 0;
-  for (const driver of drivers) {
-    for (const [option, value] of [
-      ["clean", ""],
-      ["smudge", ""],
-      ["process", ""],
-      ["required", "false"],
-    ]) {
-      env[`GIT_CONFIG_KEY_${index}`] = `${driver}.${option}`;
-      env[`GIT_CONFIG_VALUE_${index}`] = value;
-      index++;
-    }
+  return options;
+}
+
+async function copyStatusFile(
+  source: string,
+  target: string,
+  signal: AbortSignal,
+  optional = false,
+) {
+  const file = await open(
+    source,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  ).catch((error: unknown) => {
+    if (
+      optional &&
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ENOENT"
+    )
+      return undefined;
+    throw error;
+  });
+  if (!file) return;
+  try {
+    if (!(await file.stat()).isFile())
+      throw new Error("Git metadata unavailable");
+    await pipeline(
+      file.createReadStream({ autoClose: false }),
+      createWriteStream(target),
+      { signal },
+    );
+  } finally {
+    await file.close();
   }
-  env["GIT_CONFIG_COUNT"] = String(index);
-  return env;
+}
+
+type RunGit = (...args: string[]) => Promise<{ code: number; stdout: string }>;
+
+async function readStatus(
+  directory: string,
+  head: string | undefined,
+  signal: AbortSignal,
+  run: RunGit,
+  runWithEnv: (env: NodeJS.ProcessEnv, ...args: string[]) => ReturnType<RunGit>,
+) {
+  const [paths, settings] = await Promise.all([
+    run(
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "objects",
+      "--git-path",
+      "index",
+      "--git-path",
+      "info/exclude",
+      "--git-path",
+      "info/sparse-checkout",
+      "--show-object-format",
+      "--shared-index-path",
+    ),
+    run("config", "--null", "--get-regexp", statusSettings.source),
+  ]);
+  const [objects, index, exclude, sparse, format, shared, ...rest] =
+    paths.stdout.trimEnd().split("\n");
+  if (
+    paths.code !== 0 ||
+    (settings.code !== 0 && !(settings.code === 1 && !settings.stdout)) ||
+    !objects ||
+    !isAbsolute(objects) ||
+    !index ||
+    !isAbsolute(index) ||
+    !exclude ||
+    !isAbsolute(exclude) ||
+    !sparse ||
+    !isAbsolute(sparse) ||
+    (format !== "sha1" && format !== "sha256") ||
+    (shared &&
+      (!isAbsolute(shared) ||
+        !/^sharedindex\.[a-f0-9]+$/.test(basename(shared)))) ||
+    rest.length
+  )
+    throw new Error("Git metadata unavailable");
+
+  // Status only sees this repository's config, HEAD, index and object store.
+  // Never copy executable settings, hooks, info/attributes or a commondir.
+  const gitDir = await mkdtemp(join(tmpdir(), "stargate-git-status-"));
+  try {
+    await Promise.all([
+      mkdir(join(gitDir, "objects", "info"), { recursive: true }),
+      mkdir(join(gitDir, "info")),
+      mkdir(join(gitDir, "refs")),
+    ]);
+    const files = await Promise.allSettled([
+      writeFile(
+        join(gitDir, "HEAD"),
+        head ? `${head}\n` : "ref: refs/heads/unborn\n",
+      ),
+      writeFile(
+        join(gitDir, "config"),
+        format === "sha256"
+          ? "[core]\nrepositoryformatversion = 1\n[extensions]\nobjectformat = sha256\n"
+          : "[core]\nrepositoryformatversion = 0\n",
+      ),
+      writeFile(join(gitDir, "objects", "info", "alternates"), `${objects}\n`),
+      copyStatusFile(index, join(gitDir, "index"), signal, true),
+      copyStatusFile(exclude, join(gitDir, "info", "exclude"), signal, true),
+      copyStatusFile(
+        sparse,
+        join(gitDir, "info", "sparse-checkout"),
+        signal,
+        true,
+      ),
+      shared && copyStatusFile(shared, join(gitDir, basename(shared)), signal),
+    ]);
+    if (files.some((file) => file.status === "rejected"))
+      throw new Error("Git metadata unavailable");
+    return await runWithEnv(
+      {
+        GIT_DIR: gitDir,
+        GIT_WORK_TREE: directory,
+        GIT_ATTR_NOSYSTEM: "1",
+        GIT_ATTR_SOURCE: createHash(format).update("tree 0\0").digest("hex"),
+      },
+      ...statusOptions(settings.stdout),
+      "-c",
+      "core.attributesFile=/dev/null",
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=all",
+      // Count changed gitlinks without reading submodule worktree configuration.
+      "--ignore-submodules=dirty",
+    );
+  } finally {
+    await rm(gitDir, { recursive: true, force: true });
+  }
 }
 
 async function inspect(
   directory: string,
   now: () => number,
   signal: AbortSignal,
+  command: typeof readCommand,
 ): Promise<V1Git | null> {
   const state: V1Git = {
     branch: null,
@@ -110,7 +233,7 @@ async function inspect(
     ...args: string[]
   ) => {
     deadline.throwIfAborted();
-    const result = await readCommand(
+    const result = await command(
       [
         "git",
         "-c",
@@ -158,14 +281,15 @@ async function inspect(
     );
     if (root.code !== 0 || root.stdout !== "true\n\n")
       throw new Error("Checkout root unavailable");
-    const branch = await run("symbolic-ref", "--short", "-q", "HEAD");
-    const head = await run("rev-parse", "--short", "--verify", "HEAD");
-    const upstream = await run(
-      "rev-parse",
-      "--abbrev-ref",
-      "--symbolic-full-name",
-      "@{upstream}",
-    );
+    const [branch, head, fullHead, upstream] = await Promise.all([
+      run("symbolic-ref", "--short", "-q", "HEAD"),
+      run("rev-parse", "--short", "--verify", "HEAD"),
+      run("rev-parse", "--verify", "HEAD"),
+      run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"),
+    ]);
+    const oid = fullHead.code === 0 ? fullHead.stdout.trim() : undefined;
+    if (oid !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid))
+      throw new Error("Git HEAD unavailable");
     const base =
       upstream.code === 0
         ? upstream
@@ -176,24 +300,7 @@ async function inspect(
             "refs/remotes/origin/HEAD",
           );
     const baseRef = base.code === 0 ? base.stdout.trim() : null;
-    const filters = await run(
-      "config",
-      "--null",
-      "--name-only",
-      "--get-regexp",
-      "^filter\\..*\\.(clean|smudge|process|required)$",
-    );
-    if (filters.code !== 0 && !(filters.code === 1 && !filters.stdout))
-      throw new Error("Git filter names unavailable");
-    const changed = await runWithEnv(
-      disabledFilters(filters.stdout),
-      "status",
-      "--porcelain=v1",
-      "-z",
-      "--untracked-files=all",
-      // Count changed gitlinks without reading submodule worktree configuration.
-      "--ignore-submodules=dirty",
-    );
+    const changed = await readStatus(directory, oid, deadline, run, runWithEnv);
     const changedFiles =
       changed.code === 0 ? countChangedPaths(changed.stdout) : null;
     if (changedFiles === null || branch.code > 1)
@@ -238,7 +345,10 @@ async function inspect(
   }
 }
 
-export function createGitReader(now: () => number = Date.now) {
+export function createGitReader(
+  now: () => number = Date.now,
+  command = readCommand,
+) {
   const permits = Semaphore.makeUnsafe(4);
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
   return (directory: string | undefined, signal: AbortSignal) => {
@@ -252,7 +362,7 @@ export function createGitReader(now: () => number = Date.now) {
         abortable(async (reading) => {
           const saved = cache.get(directory);
           if (saved && saved.expiresAt > now()) return saved.value;
-          const value = await inspect(directory, now, reading);
+          const value = await inspect(directory, now, reading, command);
           for (const [path, entry] of cache)
             if (entry.expiresAt <= now()) cache.delete(path);
           cache.set(directory, { expiresAt: now() + ttl, value });
