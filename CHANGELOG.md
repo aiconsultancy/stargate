@@ -4,12 +4,17 @@
 
 ### Feature flags
 
-- New flags: none.
+- New opt-in: `api.listen: "unix"` selects a private mode-0600 Fleet socket
+  instead of TCP. Omitted `api` still defaults to off. No `enabled` alias.
 - Default changes: none.
 - Enabled by default: none.
 
 ### Changes
 
+- Serve Fleet through one bounded HTTP host, preserving private TCP access,
+  operator authentication, CORS and streamed events. Add the exclusive private
+  Unix mode and internal exact-route contract. Notification routes are not yet
+  wired. See [Fleet API](docs/api.md).
 - Harden Fleet API Git reads against checkout-configured commands.
 - Report Fleet API task outcomes that complete between event polls.
 - Look up pull requests by head branch, keep cached results on refresh
