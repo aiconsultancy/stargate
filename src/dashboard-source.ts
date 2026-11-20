@@ -115,6 +115,7 @@ const ROOT_CACHE_MS = 10_000;
 /** Subagents of subagents are rare; a deeper chain is refused, not followed. */
 const MAX_DEPTH = 8;
 const crewUnavailable = "Crew status unavailable.";
+const fleetCrewDeadlineMs = 20_000;
 type CrewRead = {
   status: CrewStatus | null;
   error?: string;
@@ -135,7 +136,7 @@ export function dashboardSource(
   >,
   cronStore: Pick<CronStore, "report" | "recentRuns">,
   now: () => number = Date.now,
-  { fleetCrewReadMs = 1_000 } = {},
+  { fleetCrewReadMs = 1_000, fleetCrewFreshMs = 5_000 } = {},
 ) {
   const crewRoots = new WeakMap<
     DashboardShip,
@@ -143,7 +144,7 @@ export function dashboardSource(
   >();
   const fleetCrew = new WeakMap<
     DashboardShip,
-    { latest?: CrewRead; pending?: Promise<CrewRead> }
+    { latest?: CrewRead; freshUntil: number; pending?: Promise<CrewRead> }
   >();
 
   const find = (id: string) => ships.find((ship) => ship.bot.id === id);
@@ -239,38 +240,47 @@ export function dashboardSource(
     read: (reading: AbortSignal) => Promise<CrewRead>,
   ): Promise<CrewRead> {
     signal.throwIfAborted();
-    let slot = fleetCrew.get(key);
-    if (!slot) {
-      slot = {};
-      fleetCrew.set(key, slot);
-    }
-    const unavailable = (latest?: CrewRead): CrewRead => ({
-      ...latest,
-      status: latest?.status ?? null,
+    const slot = fleetCrew.get(key) ?? { freshUntil: 0 };
+    fleetCrew.set(key, slot);
+    const unavailable = (): CrewRead => ({
+      ...slot.latest,
+      status: slot.latest?.status ?? null,
       error: crewUnavailable,
     });
-    const pending = slot.pending;
-    if (pending !== undefined)
-      return readWithDeadline(signal, fleetCrewReadMs, () => pending).result;
-
-    const attempt = readWithDeadline(signal, fleetCrewReadMs, read);
-    const entry = slot;
-    entry.pending = attempt.result.then(
-      (sample) => {
-        if (sample.error) return unavailable(entry.latest);
-        entry.latest = sample;
+    if (!slot.pending) {
+      // The backend read belongs to the shared slot. A caller only owns its wait.
+      const attempt = readWithDeadline(
+        new AbortController().signal,
+        fleetCrewDeadlineMs,
+        read,
+      );
+      const failed = () => {
+        slot.freshUntil = 0;
+        return unavailable();
+      };
+      slot.pending = attempt.result.then((sample) => {
+        if (sample.error) return failed();
+        slot.latest = sample;
+        slot.freshUntil = performance.now() + fleetCrewFreshMs;
         return sample;
-      },
-      () => unavailable(entry.latest),
-    );
-    void entry.pending
-      .then(() => attempt.settled)
-      .then(() => {
-        delete entry.pending;
-      });
-    const sample = await entry.pending;
-    signal.throwIfAborted();
-    return sample;
+      }, failed);
+      void slot.pending
+        .then(() => attempt.settled)
+        .then(() => {
+          delete slot.pending;
+        });
+    }
+    const pending = slot.pending;
+    try {
+      return await readWithDeadline(signal, fleetCrewReadMs, () => pending)
+        .result;
+    } catch {
+      signal.throwIfAborted();
+      // A successful read can arrive after an earlier caller's wait expired.
+      if (slot.latest && performance.now() < slot.freshUntil)
+        return slot.latest;
+      return unavailable();
+    }
   }
 
   /** A failed read is not cached, so the next request asks the backend again. */

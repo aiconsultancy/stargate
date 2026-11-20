@@ -66,7 +66,7 @@ function session(
   return { id, harness: "opencode", kind: "subagent", ...extra };
 }
 
-function fixture(options?: { fleetCrewReadMs?: number }) {
+function fixture(options?: Parameters<typeof dashboardSource>[4]) {
   let at = 4_000_000;
   let config: ApiV1Config = Schema.decodeUnknownSync(configSchema)({
     bots: [bot("captain")],
@@ -343,6 +343,106 @@ async function nextEvent(
 }
 
 describe("Fleet API projection", () => {
+  test("a timed-out OpenCode fleet probe leaves time for status and backs off", async () => {
+    const methods: string[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const method = new URL(request.url).pathname.split("/").at(-1) ?? "";
+        methods.push(method);
+        if (method === "fleetStatus") await Bun.sleep(1_300);
+        return Response.json({
+          output: { members: [], total: 0, truncated: false },
+        });
+      },
+    });
+    const config = Schema.decodeUnknownSync(backendSchema)({
+      type: "opencode",
+      url: server.url.href,
+      directory: "/",
+    });
+    if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+    const backend = new OpenCodeBackend(config);
+    try {
+      const caller = new AbortController();
+      const cancelled = backend.fleetCrewStatus({}, caller.signal);
+      while (!methods.length) await Bun.sleep(5);
+      caller.abort();
+      await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+      for (let i = 0; i < 4; i++) {
+        const reading = AbortSignal.timeout(1_000);
+        expect(await backend.fleetCrewStatus({}, reading)).toBeUndefined();
+        expect(await backend.crewStatus({}, reading)).toMatchObject({
+          members: [],
+        });
+      }
+      expect(methods).toEqual([
+        "fleetStatus",
+        "fleetStatus",
+        "status",
+        "fleetStatus",
+        "status",
+        "fleetStatus",
+        "status",
+        "status",
+      ]);
+    } finally {
+      await backend.close();
+      await server.stop(true);
+    }
+  });
+
+  test("a slow crew sample can become available after the fleet wait expires", async () => {
+    const f = fixture({ fleetCrewReadMs: 25 });
+    const held = Promise.withResolvers<CrewStatus>();
+    f.statuses.set("captain", held.promise);
+    const first = await f.source.fleet(signal);
+    expect(first.ships.find(({ id }) => id === "captain")?.available).toBe(
+      false,
+    );
+    held.resolve({ members: [context("pilot")], total: 1, truncated: false });
+    await Bun.sleep(0);
+    // The next read is slow too. It must be able to publish the late sample.
+    const next = Promise.withResolvers<CrewStatus>();
+    f.statuses.set("captain", next.promise);
+    try {
+      const fleet = await f.source.fleet(signal);
+      expect(fleet.ships.find(({ id }) => id === "captain")).toMatchObject({
+        available: true,
+        crew: { people: 1 },
+      });
+      expect(f.calls.status.filter((id) => id === "captain")).toHaveLength(2);
+    } finally {
+      next.resolve({ members: [], total: 0, truncated: false });
+    }
+  });
+
+  test("disconnecting the caller that started a crew sample leaves the shared read running", async () => {
+    const f = fixture({ fleetCrewReadMs: 300 });
+    const held = Promise.withResolvers<CrewStatus>();
+    f.statuses.set("captain", held.promise);
+    const caller = new AbortController();
+    const first = f.source.fleet(caller.signal);
+    await Bun.sleep(0);
+    const joined = f.source.fleet(signal);
+    await Bun.sleep(0);
+    caller.abort();
+    // Cancellation must finish even though the crew backend is still blocked.
+    try {
+      await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      held.resolve({ members: [context("pilot")], total: 1, truncated: false });
+    }
+    expect(
+      (await joined).ships.find(({ id }) => id === "captain"),
+    ).toMatchObject({
+      available: true,
+      crew: { people: 1 },
+    });
+    expect(f.calls.status.filter((id) => id === "captain")).toHaveLength(1);
+  });
+
   test("an older OpenCode plugin skips repeated missing fleet-status calls", async () => {
     const methods: string[] = [];
     let missing = false;

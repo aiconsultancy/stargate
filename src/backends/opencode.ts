@@ -60,6 +60,7 @@ import {
   questionFingerprint,
 } from "../questions";
 import { quotaSnapshotSchema } from "../quota";
+import { readWithDeadline } from "../read-deadline";
 import {
   BackendFailure,
   type BackendFailureKind,
@@ -850,12 +851,14 @@ export class OpenCodeBackend implements AgentBackend {
     try {
       signal.throwIfAborted();
       if (performance.now() < this.fleetStatusRetryAt) return undefined;
-      const result = fleetCrewStatusSchema.parse(
-        await this.client.rpc(CrewReporting).fleetStatus(input, {
+      // Reserve part of the fleet wait for the ordinary status RPC.
+      const { result: probe } = readWithDeadline(signal, 400, (reading) =>
+        this.client.rpc(CrewReporting).fleetStatus(input, {
           location: { directory: this.config.directory },
-          signal,
+          signal: reading,
         }),
       );
+      const result = fleetCrewStatusSchema.parse(await probe);
       signal.throwIfAborted();
       this.fleetStatusFailures = 0;
       return result;
