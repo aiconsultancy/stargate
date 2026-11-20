@@ -27,7 +27,8 @@ import type { V1Git } from "./types";
 
 const ttl = 15_000;
 const timeout = 2_000;
-const statusDirectoryPrefix = "stargate-git-status-";
+const statusDirectoryName = "stargate-git-status";
+const statusDirectoryPrefix = `${statusDirectoryName}-`;
 const staleDirectoryAge = 24 * 60 * 60_000;
 const mib = 1024 * 1024;
 const indexLimit = 128 * mib;
@@ -221,6 +222,17 @@ async function copyStatusFile(
 
 type RunGit = (...args: string[]) => Promise<{ code: number; stdout: string }>;
 
+async function privateStatusDirectory(path: string) {
+  const metadata = await lstat(path).catch(() => undefined);
+  if (
+    metadata?.isDirectory() &&
+    (metadata.mode & 0o777) === 0o700 &&
+    metadata.uid === process.getuid?.()
+  )
+    return metadata;
+  return undefined;
+}
+
 async function createStatusDirectory(
   checkout: string,
   dataDirectory?: string,
@@ -228,21 +240,28 @@ async function createStatusDirectory(
 ) {
   const root = await realpath(checkout);
   // The private snapshot would appear as untracked files inside the worktree.
-  // Returns the canonical directory, so the snapshot is created under the path
-  // that passed the check rather than a symlink to it. This assumes no other
-  // user can replace that directory or any of its ancestors between the check
-  // and mkdtemp (a sticky world-writable directory such as /tmp is fine).
-  const outsideCheckout = async (directory: string) => {
-    const canonical = await realpath(directory);
-    const child = relative(root, canonical);
-    return child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)
-      ? canonical
+  const outsideCheckout = (path: string) => {
+    const child = relative(root, path);
+    return child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child);
+  };
+  // The chosen root and its ancestors must be protected from replacement by
+  // other users. A sticky world-writable root such as /tmp is fine.
+  const create = async (directory: string) => {
+    const parent = join(await realpath(directory), statusDirectoryName);
+    if (!outsideCheckout(parent)) return undefined;
+    await mkdir(parent, { mode: 0o700 }).catch((error: unknown) => {
+      if (fileError(error) !== "EEXIST") throw error;
+    });
+    if (!(await privateStatusDirectory(parent))) return undefined;
+    const canonical = await realpath(parent);
+    return outsideCheckout(canonical)
+      ? mkdtemp(join(canonical, statusDirectoryPrefix))
       : undefined;
   };
   if (dataDirectory) {
     try {
-      const parent = await outsideCheckout(dataDirectory);
-      if (parent) return await mkdtemp(join(parent, statusDirectoryPrefix));
+      const path = await create(dataDirectory);
+      if (path) return path;
     } catch (error) {
       if (
         !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
@@ -252,10 +271,10 @@ async function createStatusDirectory(
         throw error;
     }
   }
-  const parent = await outsideCheckout(temporaryDirectory());
-  if (!parent)
-    throw new Error("Git status snapshot would be inside the checkout");
-  return mkdtemp(join(parent, statusDirectoryPrefix));
+  const path = await create(temporaryDirectory());
+  if (!path)
+    throw new Error("No private Git status directory outside checkout");
+  return path;
 }
 
 async function removeStatusDirectory(path: string) {
@@ -263,22 +282,21 @@ async function removeStatusDirectory(path: string) {
 }
 
 async function sweepStatusDirectories(root: string) {
+  const canonical = await realpath(root).catch(() => undefined);
+  if (!canonical) return;
+  const directory = join(canonical, statusDirectoryName);
+  if (!(await privateStatusDirectory(directory))) return;
   const cutoff = Date.now() - staleDirectoryAge;
-  const names = await readdir(root).catch(() => []);
+  const names = await readdir(directory).catch(() => []);
   for (const name of names) {
     if (
       !name.startsWith(statusDirectoryPrefix) ||
       !/^[a-z\d]{6}$/i.test(name.slice(statusDirectoryPrefix.length))
     )
       continue;
-    const path = join(root, name);
-    const metadata = await lstat(path).catch(() => undefined);
-    if (
-      metadata?.isDirectory() &&
-      (metadata.mode & 0o777) === 0o700 &&
-      metadata.uid === process.getuid?.() &&
-      metadata.mtimeMs < cutoff
-    )
+    const path = join(directory, name);
+    const metadata = await privateStatusDirectory(path);
+    if (metadata && metadata.mtimeMs < cutoff)
       await removeStatusDirectory(path);
   }
 }

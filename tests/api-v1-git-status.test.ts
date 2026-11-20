@@ -549,10 +549,15 @@ test.each(["success", "failure"])(
       expect(result?.error).toBe(
         outcome === "failure" ? "Git state unavailable." : undefined,
       );
-      expect(parent).toBe(await realpath(dataDirectory));
+      const snapshots = join(
+        await realpath(dataDirectory),
+        "stargate-git-status",
+      );
+      expect(parent).toBe(snapshots);
+      expect((await stat(snapshots)).mode & 0o777).toBe(0o700);
       expect(mode).toBe(0o700);
-      await waitForRemoval(dataDirectory);
-      expect(await readdir(dataDirectory)).toEqual([]);
+      await waitForRemoval(snapshots);
+      expect(await readdir(snapshots)).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -613,7 +618,7 @@ test("a temporary root reached through a symlink is checked and used canonically
         () => link,
       )(directory, AbortSignal.timeout(3000)),
     ).toMatchObject({ changedFiles: 1 });
-    expect(parent).toBe(await realpath(outside));
+    expect(parent).toBe(join(await realpath(outside), "stargate-git-status"));
   } finally {
     await rm(directory, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
@@ -1009,14 +1014,17 @@ test.each(["clean", "process"])(
 );
 
 test("stalled removal holds Git status permits beyond the caller deadline", async () => {
-  const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "stargate-api-git-")),
+  );
   const data = join(root, "data");
+  const snapshots = join(data, "stargate-git-status");
   const held = Promise.withResolvers<void>();
   const original = fs.rm;
   const full = Promise.withResolvers<void>();
   let removing = 0;
   const removals = spyOn(fs, "rm").mockImplementation(async (path, options) => {
-    if (String(path).startsWith(join(data, "stargate-git-status-"))) {
+    if (String(path).startsWith(join(snapshots, "stargate-git-status-"))) {
       if (++removing === 4) full.resolve();
       await held.promise;
     }
@@ -1070,11 +1078,11 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
     );
     expect(removing).toBe(4);
     held.resolve();
-    await waitForRemoval(data);
+    await waitForRemoval(snapshots);
     expect(await read(waiting, AbortSignal.timeout(1000))).toMatchObject({
       changedFiles: 0,
     });
-    await waitForRemoval(data);
+    await waitForRemoval(snapshots);
   } finally {
     held.resolve();
     removals.mockRestore();
@@ -1082,23 +1090,30 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
   }
 }, 8000);
 
-test("startup sweeps old private Git snapshots and keeps recent or unrelated entries", async () => {
+test("startup sweeps old Git snapshots only inside the private snapshot directory", async () => {
   const data = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   try {
-    const stale = join(data, "stargate-git-status-Stale1");
-    const fresh = join(data, "stargate-git-status-Fresh1");
-    const unrelated = join(data, "unrelated");
+    const snapshots = join(data, "stargate-git-status");
+    await mkdir(snapshots, { mode: 0o700 });
+    const stale = join(snapshots, "stargate-git-status-Stale1");
+    const fresh = join(snapshots, "stargate-git-status-Fresh1");
+    const unrelated = join(data, "stargate-git-status-Backup");
     await Promise.all(
       [stale, fresh, unrelated].map((path) => mkdir(path, { mode: 0o700 })),
     );
     const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
-    await Promise.all([stale, unrelated].map((path) => utimes(path, old, old)));
-    createGitReader(Date.now, readCommand, data);
-    await waitForRemoval(data, "stargate-git-status-Stale1");
-    expect((await readdir(data)).sort()).toEqual([
-      "stargate-git-status-Fresh1",
-      "unrelated",
-    ]);
+    const linkedRoot = join(data, "linked");
+    const linkedStale = join(unrelated, "stargate-git-status-Stale2");
+    await mkdir(linkedRoot);
+    await mkdir(linkedStale, { mode: 0o700 });
+    await symlink(unrelated, join(linkedRoot, "stargate-git-status"));
+    await Promise.all(
+      [stale, unrelated, linkedStale].map((path) => utimes(path, old, old)),
+    );
+    createGitReader(Date.now, readCommand, linkedRoot, () => data);
+    await waitForRemoval(snapshots, "stargate-git-status-Stale1");
+    expect(await readdir(unrelated)).toEqual(["stargate-git-status-Stale2"]);
+    expect(await readdir(snapshots)).toEqual(["stargate-git-status-Fresh1"]);
   } finally {
     await rm(data, { recursive: true, force: true });
   }
