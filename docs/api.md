@@ -134,9 +134,11 @@ upstream come from the captured branch when attached. Stargate rechecks the
 branch and commit after comparing ahead and behind counts and rejects the
 snapshot if either changed.
 
-The reader checks the size of each index before snapshotting it. On Linux,
-it tries a copy-on-write clone of the open index and streams a bounded copy
-if cloning is unavailable. On other platforms it streams a bounded copy.
+Git status requires the safe metadata opens supported on Linux and macOS.
+Other platforms report `Git state unavailable.` The reader checks the size of
+each index before snapshotting it. On Linux, it tries a copy-on-write clone
+of the open index and streams a bounded copy if cloning is unavailable.
+On macOS, it streams a bounded copy.
 The primary and shared indexes each have a 128 MiB limit, and all snapshot
 metadata has a 192 MiB aggregate limit. Snapshot preparation, including
 split-index inspection in a separate process, has a two-second budget before

@@ -709,12 +709,12 @@ export function createGitReader(
     const cached = cache.get(directory);
     if (cached && cached.expiresAt > monotonic()) return cached.value;
     // A timeout is this checkout's own when the read got its permit with at
-    // least one read deadline of its budget left; that answer is cached for
-    // the usual time. Otherwise the read mostly waited for a slot, which says
-    // little about the checkout: cache that answer only briefly, so polls under
-    // saturation stay fast without hiding the checkout for long. Measured from
-    // the budget, not from when the timeout handler runs, so a late timer
-    // cannot change the answer.
+    // least half of its budget left. Cache that answer for the usual time.
+    // A read that mostly waited for a slot says little about the checkout.
+    // Cache that answer briefly so polls under saturation stay fast without
+    // hiding the checkout for long. A late timer cannot change the answer
+    // because the cutoff uses the budget. readMs does not scale the
+    // per-command timeouts inside inspect.
     const budgetEnds = monotonic() + readMs;
     let startedAt: number | undefined;
     try {
