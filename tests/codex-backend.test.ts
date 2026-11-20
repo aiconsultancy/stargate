@@ -1434,3 +1434,23 @@ test("Codex maps what the CLI reports to one shared failure category", async () 
   // A message that names no provider failure keeps the generic failure.
   expect(await failure("fail")).toBe("Error: Codex turn failed");
 });
+
+test("Codex request progress exposes event kinds without tool data or reasoning", () => {
+  const turn = new CodexTurn();
+  const stages: string[] = [];
+  const stage = (s: string) => stages.push(s);
+  turn.add({ type: "turn.started" }, stage);
+  for (const type of ["reasoning", "command_execution", "agent_message"])
+    turn.add(
+      { type: "item.started", item: { id: type, type, text: "private" } },
+      stage,
+    );
+  turn.add(
+    {
+      type: "item.updated",
+      item: { id: "reasoning", type: "reasoning", text: "private" },
+    },
+    stage,
+  );
+  expect(stages).toEqual(["model", "reasoning", "tool", "reply"]);
+});

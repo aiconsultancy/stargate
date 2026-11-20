@@ -4,6 +4,8 @@
 
 ### Feature flags
 
+- New opt-ins: IRC `questionOperator` enables private handling of background questions on a pinned captain with `features.questions`. IRC `features.liveProgress` enables event-based request notices and status. Both default off.
+
 - New opt-in: `api.listen: "unix"` selects a private mode-0600 Fleet socket
   instead of TCP. Omitted `api` still defaults to off. No `enabled` alias.
 - Default changes: none.

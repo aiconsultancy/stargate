@@ -572,6 +572,8 @@ const ircFeaturesSchema = settingsStruct({
   multiline: Schema.Boolean.pipe(settingsDefault(true)),
   /** Send +typing while a turn runs (needs message-tags). */
   typing: Schema.Boolean.pipe(settingsDefault(true)),
+  /** Emit confirmed OpenCode lifecycle stages and enable read-only IRC status. */
+  liveProgress: Schema.optional(Schema.Boolean),
   /** Fleet captains acknowledge human requests and report long turns. */
   turnStatus: Schema.Boolean.pipe(settingsDefault(true)),
   /** +draft/react for reaction replies, and Stop by reaction. */
@@ -743,6 +745,8 @@ const ircConfiguredSchema = settingsStruct({
       }),
     ),
   ),
+  /** Authenticated private recipient for unowned native questions on a pinned captain. */
+  questionOperator: Schema.optional(ircAccount),
   /**
    * DM audit mirror: the captain connection posts a copy of every direct
    * message that the captain or a crew connection receives or sends to
@@ -957,6 +961,32 @@ export const ircSchema = ircConfiguredSchema.check(
         code: "custom",
         message: "Wake channels conflict with nick-mention-only admission",
       });
+    if (
+      irc.questionOperator &&
+      (!irc.features.questions ||
+        irc.access.deniedChannels.includes("*") ||
+        irc.access.deniedAccounts.some(
+          (a) => a === "*" || fold(a) === fold(irc.questionOperator ?? ""),
+        ) ||
+        (irc.access.allowedAccounts &&
+          !irc.access.allowedAccounts.some(
+            (a) => a === "*" || fold(a) === fold(irc.questionOperator ?? ""),
+          )) ||
+        irc.backend.type !== "opencode" ||
+        !irc.backend.sessionID ||
+        !irc.fleetPolicy?.humanAccounts.some(
+          (account) => fold(account) === fold(irc.questionOperator ?? ""),
+        ) ||
+        irc.fleetPolicy.agentAccounts.some(
+          (account) => fold(account) === fold(irc.questionOperator ?? ""),
+        ))
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "questionOperator requires native questions, a pinned OpenCode session and an enrolled human account",
+      });
+    }
     if (irc.features.questions && !irc.fleetPolicy?.humanAccounts.length)
       context.addIssue({
         code: "custom",

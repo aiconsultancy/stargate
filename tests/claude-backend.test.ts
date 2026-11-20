@@ -889,3 +889,37 @@ test("Claude maps what the CLI reports to one shared failure category", async ()
     "Error: Claude turn failed: error_max_turns",
   );
 });
+
+test("Claude request progress reports only the main turn's block type", () => {
+  const turn = new ClaudeTurn();
+  const stages: string[] = [];
+  const frame = (event: unknown, parent_tool_use_id: string | null = null) =>
+    turn.add({ type: "stream_event", parent_tool_use_id, event }, (s) =>
+      stages.push(s),
+    );
+  frame({ type: "message_start", message: { id: "first" } });
+  frame({
+    type: "content_block_start",
+    index: 0,
+    content_block: { type: "thinking", thinking: "private" },
+  });
+  frame({
+    type: "content_block_start",
+    index: 1,
+    content_block: { type: "tool_use", input: { secret: "private" } },
+  });
+  frame({
+    type: "content_block_start",
+    index: 2,
+    content_block: { type: "text", text: "" },
+  });
+  frame(
+    {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "tool_use" },
+    },
+    "child",
+  );
+  expect(stages).toEqual(["model", "reasoning", "tool", "reply"]);
+});

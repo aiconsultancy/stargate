@@ -648,6 +648,14 @@ export class IrcClient {
     return bound !== undefined && this.fold(bound) === this.fold(nick);
   }
 
+  /** Retain the authenticated sender only for this IRC connection. */
+  recipientGuard(account: string, nick: string) {
+    const connection = this.generation;
+    return () =>
+      this.registeredNow &&
+      this.generation === connection &&
+      this.holds(account, nick);
+  }
   /** Join an allowed channel; anything else is refused. */
   join(name: string) {
     const channel = this.channel(name);
@@ -678,6 +686,7 @@ export class IrcClient {
     guard?: () => boolean,
     priority: SendPriority = "normal",
     request?: string,
+    audit = true,
   ): Promise<void> {
     let echo: string | undefined;
     const result = this.transmit(
@@ -701,7 +710,11 @@ export class IrcClient {
       priority,
     );
     const [target, text = ""] = params;
-    if ((command === "PRIVMSG" || command === "NOTICE") && target !== undefined)
+    if (
+      audit &&
+      (command === "PRIVMSG" || command === "NOTICE") &&
+      target !== undefined
+    )
       this.whenSent(result, command, target, text);
     return result.catch((error: unknown) => {
       if (echo !== undefined) this.echoes.delete(echo);

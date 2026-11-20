@@ -1,5 +1,9 @@
 /** Fixed lifecycle metadata. No model text or tool data crosses this boundary. */
 const descriptions = {
+  retry: "OpenCode scheduled a retry.",
+  clarified: "OpenCode closed the clarification.",
+  waiting: "Waiting for a clarification answer.",
+  completed: "OpenCode finished this request.",
   submitting: "OpenCode has not confirmed receipt.",
   accepted:
     "OpenCode accepted the request. Delivery to the model is unconfirmed.",
@@ -12,11 +16,16 @@ const descriptions = {
 };
 
 export type TurnStage = keyof typeof descriptions;
-export type TurnProgress = { stage: TurnStage; observedAt: number };
+export type TurnProgress = {
+  stage: TurnStage;
+  observedAt: number;
+  disconnected?: boolean;
+  backend?: "claude" | "codex";
+};
 
 export function turnProgressText(progress?: TurnProgress) {
   if (!progress)
     return "Stargate has no confirmed backend activity for this request.";
   const time = new Date(progress.observedAt).toISOString().slice(11, 16);
-  return `${descriptions[progress.stage]} Observed at ${time} UTC.`;
+  return `${progress.disconnected ? "OpenCode event stream disconnected. " : ""}${descriptions[progress.stage].replace("OpenCode", progress.backend === "claude" ? "Claude" : progress.backend === "codex" ? "Codex" : "OpenCode")} Observed at ${time} UTC.`;
 }

@@ -157,6 +157,12 @@ function ircFeatures(config: IrcConfig): V1Feature[] {
         ircFeatureDefaults[key],
       ),
     ),
+    flag(
+      "irc.liveProgress",
+      "Live IRC request progress",
+      features.liveProgress ?? false,
+      false,
+    ),
     flag("irc.tls", "IRC TLS", config.server.tls, true),
     flag(
       "irc.sasl",
