@@ -44,10 +44,8 @@ export function cpuUsage(previous: CpuTotals, current: CpuTotals) {
 
 async function disk(path: string) {
   try {
-    const [{ dev }, usage] = await Promise.all([
-      stat(path, { bigint: true }),
-      statfs(path),
-    ]);
+    const { dev } = await stat(path, { bigint: true });
+    const usage = await statfs(path);
     const blockBytes = usage.frsize || usage.bsize;
     return {
       dev,
@@ -80,29 +78,51 @@ export function startHostMetrics(dataDirectory: string) {
     usage = cpuUsage(cpu, next);
     cpu = next;
   }, 5000);
+  function snapshot(
+    disks: V1Host["disks"] = [],
+    availableBytes = freemem(),
+  ): V1Host {
+    const [short = 0, medium = 0, long = 0] = loadavg();
+    return {
+      hostname: hostname(),
+      platform: platform(),
+      arch: arch(),
+      uptimeSec: uptime(),
+      cpu: { cores: cpu.cores, usage, load: [short, medium, long] },
+      memory: { totalBytes: totalmem(), availableBytes },
+      disks,
+      sampledAt: Date.now(),
+    };
+  }
+
+  async function sample() {
+    const [availableBytes, root, data] = await Promise.all([
+      availableMemory(),
+      disk("/"),
+      disk(dataDirectory),
+    ]);
+    const disks = [];
+    if (root) disks.push({ path: "/", ...root.metrics });
+    if (data && data.dev !== root?.dev)
+      disks.push({ path: "data", ...data.metrics });
+    return snapshot(disks, availableBytes);
+  }
+
+  let latest: V1Host | undefined;
+  let pending: Promise<V1Host> | undefined;
   return {
     stop: () => clearInterval(sampler),
-    async read(): Promise<V1Host> {
-      const [availableBytes, root, data] = await Promise.all([
-        availableMemory(),
-        disk("/"),
-        disk(dataDirectory),
-      ]);
-      const disks = [];
-      if (root) disks.push({ path: "/", ...root.metrics });
-      if (data && data.dev !== root?.dev)
-        disks.push({ path: "data", ...data.metrics });
-      const [short = 0, medium = 0, long = 0] = loadavg();
-      return {
-        hostname: hostname(),
-        platform: platform(),
-        arch: arch(),
-        uptimeSec: uptime(),
-        cpu: { cores: cpu.cores, usage, load: [short, medium, long] },
-        memory: { totalBytes: totalmem(), availableBytes },
-        disks,
-        sampledAt: Date.now(),
-      };
+    snapshot: () => latest ?? snapshot(),
+    read() {
+      pending ??= sample()
+        .then((data) => {
+          latest = data;
+          return data;
+        })
+        .finally(() => {
+          pending = undefined;
+        });
+      return pending;
     },
   };
 }

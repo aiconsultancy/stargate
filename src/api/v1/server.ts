@@ -1,7 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
 import type { ApiV1Config } from "./config";
-import { type ApiV1Diff, createEventStreams } from "./events";
+import {
+  type ApiV1Diff,
+  createEventStreams,
+  fleetOverviewReadMs,
+} from "./events";
 import { cacheOpenCodeVersion, type OpenCodeVersionLookup } from "./gateway";
 import { startHostMetrics } from "./host";
 import {
@@ -98,30 +102,41 @@ export async function startApiV1Server(options: Options) {
     ...(await source.fleet(signal, captureShipRead)),
     name: fleetName,
   });
+  let lastOpenCodeVersion: string | null = null;
+  const fleetWithMetrics = (
+    fleet: V1Snapshot["fleet"],
+    metrics: V1Fleet["host"],
+  ): V1Fleet => ({
+    ...fleet,
+    host: metrics,
+    gateway: {
+      version: options.gateway.version,
+      startedAt: options.gateway.startedAt,
+      bunVersion: Bun.version,
+      opencodeVersion: lastOpenCodeVersion,
+      features: source.gatewayFeatures(),
+    },
+  });
   const completeFleet = async (
     fleet: V1Snapshot["fleet"],
-  ): Promise<V1Fleet> => {
-    const [metrics, opencodeVersion] = await Promise.all([
+    signal: AbortSignal,
+  ) => {
+    signal.throwIfAborted();
+    const [metrics] = await Promise.all([
       host.read(),
-      lookupVersion(),
+      lookupVersion().then((version) => {
+        lastOpenCodeVersion = version;
+      }),
     ]);
-    return {
-      ...fleet,
-      host: metrics,
-      gateway: {
-        version: options.gateway.version,
-        startedAt: options.gateway.startedAt,
-        bunVersion: Bun.version,
-        opencodeVersion,
-        features: source.gatewayFeatures(),
-      },
-    };
+    signal.throwIfAborted();
+    return fleetWithMetrics(fleet, metrics);
   };
   const events = createEventStreams({
     fleet: readFleet,
     ship: (id, signal) => source.ship(id, signal),
     diff: options.diff,
     completeFleet,
+    fallbackFleet: (fleet) => fleetWithMetrics(fleet, host.snapshot()),
     readHost: host.read,
   });
 
@@ -178,7 +193,12 @@ export async function startApiV1Server(options: Options) {
             return new Response(stream, { headers });
           }
 
-          const read = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
+          const read = AbortSignal.any([
+            signal,
+            AbortSignal.timeout(
+              pathname === "/api/v1/fleet" ? fleetOverviewReadMs : 20_000,
+            ),
+          ]);
           let result:
             | V1Fleet
             | Awaited<ReturnType<ApiV1Source["ship"] | ApiV1Source["crew"]>>;
@@ -186,7 +206,7 @@ export async function startApiV1Server(options: Options) {
             if (method === "HEAD") return empty(200);
             const fleet = await readFleet(read);
             read.throwIfAborted();
-            result = await completeFleet(fleet);
+            result = await completeFleet(fleet, read);
           } else {
             const match =
               /^\/api\/v1\/ships\/([^/]+)(?:\/crew\/([^/]+))?$/.exec(pathname);

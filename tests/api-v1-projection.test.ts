@@ -307,22 +307,26 @@ function fleetEvents(
   source: ReturnType<typeof fixture>["source"],
   timing?: Parameters<typeof createEventStreams>[1],
 ) {
+  const fallbackFleet = (
+    overview: Awaited<ReturnType<typeof source.fleet>>,
+  ) => ({
+    ...overview,
+    host: eventHost,
+    gateway: {
+      version: "1.0.0",
+      bunVersion: "1.0.0",
+      opencodeVersion: null,
+      startedAt: 1,
+      features: [],
+    },
+  });
   return createEventStreams(
     {
       ...source,
       diff: diffEvents,
       readHost: async () => eventHost,
-      completeFleet: async (overview) => ({
-        ...overview,
-        host: eventHost,
-        gateway: {
-          version: "1.0.0",
-          bunVersion: "1.0.0",
-          opencodeVersion: null,
-          startedAt: 1,
-          features: [],
-        },
-      }),
+      completeFleet: async (overview) => fallbackFleet(overview),
+      fallbackFleet,
     },
     timing,
   );

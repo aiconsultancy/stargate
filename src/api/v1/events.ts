@@ -4,6 +4,7 @@ import type {
   V1Event,
   V1Fleet,
   V1Host,
+  V1Ship,
   V1ShipDetail,
   V1ShipRead,
   V1Snapshot,
@@ -17,7 +18,11 @@ export type ApiV1Diff = (
 
 type Options = Pick<ApiV1Source, "fleet" | "ship"> & {
   diff: ApiV1Diff;
-  completeFleet(fleet: V1Snapshot["fleet"]): Promise<V1Fleet>;
+  completeFleet(
+    fleet: V1Snapshot["fleet"],
+    signal: AbortSignal,
+  ): Promise<V1Fleet>;
+  fallbackFleet(fleet: V1Snapshot["fleet"]): V1Fleet;
   readHost(): Promise<V1Host>;
 };
 
@@ -30,6 +35,8 @@ const maxClients = 8;
 const bufferBytes = 256 * 1024;
 const encoder = new TextEncoder();
 const streamTiming = { pollMs: 3000, hostMs: 10_000, heartbeatMs: 15_000 };
+// Leave time for overview projection after a cold 20-second crew read.
+export const fleetOverviewReadMs = 25_000;
 
 function encodeEvents(events: V1Event[]) {
   return encoder.encode(
@@ -41,13 +48,32 @@ function encodeEvents(events: V1Event[]) {
   );
 }
 
+function holdRead<T>(readMs: number) {
+  let pending: ReturnType<typeof readWithDeadline<T>> | undefined;
+  return (parent: AbortSignal, read: (signal: AbortSignal) => Promise<T>) => {
+    if (!pending) {
+      pending = readWithDeadline(parent, readMs, read);
+      void pending.settled.then(() => {
+        pending = undefined;
+      });
+    }
+    return pending.result;
+  };
+}
+
 export function createEventStreams(
   options: Options,
   timing: typeof streamTiming & { readMs?: number } = streamTiming,
 ) {
   const readMs = timing.readMs ?? 20_000;
+  const readOverview = holdRead<{
+    overview: V1Snapshot["fleet"];
+    reads: Map<string, V1ShipRead>;
+  }>(timing.readMs ?? fleetOverviewReadMs);
+  const enrich = holdRead<V1Fleet>(readMs);
   const pendingShips = new Set<string>();
-  let polling = false;
+  const cachedShips = new Map<string, V1ShipDetail>();
+  let cachedOverview: V1Snapshot["fleet"] | undefined;
   let active: ReturnType<typeof startPolling> | undefined;
 
   function startPolling() {
@@ -56,10 +82,12 @@ export function createEventStreams(
     const ships = new Map<string, V1ShipDetail>();
     const pending = new Map<string, AbortController>();
     let fleet: V1Fleet | undefined;
+    let overviewExpired = false;
+    let publishing = false;
     let readingHost = false;
 
     function broadcast(events: V1Event[]) {
-      if (!fleet || events.length === 0) return;
+      if ((!fleet && !overviewExpired) || events.length === 0) return;
       const bytes = encodeEvents(events);
       for (const client of clients) client.send(bytes);
     }
@@ -70,6 +98,8 @@ export function createEventStreams(
       const ids = new Set(next.ships.map(({ id }) => id));
       for (const [id, attempt] of pending) if (!ids.has(id)) attempt.abort();
       for (const id of ships.keys()) if (!ids.has(id)) ships.delete(id);
+      for (const id of cachedShips.keys())
+        if (!ids.has(id)) cachedShips.delete(id);
       broadcast(
         previous
           ? options.diff(
@@ -81,34 +111,57 @@ export function createEventStreams(
       );
     }
 
-    async function refreshShip(id: string, read: V1ShipRead) {
-      if (pendingShips.has(id) || shutdown.signal.aborted) return;
+    function publishShip(
+      summary: V1Ship,
+      readAt: number,
+      detail?: V1ShipDetail,
+    ) {
+      if (!fleet) return;
+      const { id } = summary;
+      const previous = ships.get(id);
+      const prior = cachedShips.get(id);
+      const next: V1ShipDetail =
+        detail && (detail.available || !prior?.available)
+          ? { ...detail, detailUpdatedAt: readAt }
+          : prior?.available
+            ? { ...prior, detailStale: true }
+            : (prior ?? {
+                ...summary,
+                available: false,
+                error: summary.error ?? "Ship detail unavailable.",
+                crewMembers: [],
+                detailUpdatedAt: readAt,
+              });
+      const changes: V1Event[] = previous
+        ? options.diff(
+            { fleet, ships: { [id]: previous } },
+            { fleet, ships: { [id]: next } },
+            Date.now(),
+          )
+        : [{ type: "ship", data: next }];
+      ships.set(id, next);
+      cachedShips.set(id, next);
+      broadcast(changes);
+    }
+
+    async function refreshShip(summary: V1Ship, read: V1ShipRead) {
+      if (shutdown.signal.aborted) return;
+      const { id } = summary;
+      const readAt = Date.now();
+      if (pendingShips.has(id)) {
+        const own = pending.get(id);
+        // A prior stream or a removed ship already cancelled this wait.
+        if (!own || own.signal.aborted) publishShip(summary, readAt);
+        return;
+      }
       const attempt = new AbortController();
       pending.set(id, attempt);
       pendingShips.add(id);
       const parent = AbortSignal.any([shutdown.signal, attempt.signal]);
-      const readAt = Date.now();
       const { result, settled } = readWithDeadline(parent, readMs, read);
       try {
         const detail = await result.catch(() => undefined);
-        if (parent.aborted || !fleet) return;
-        const prior = ships.get(id);
-        const next =
-          detail && (detail.available || !prior?.available)
-            ? { ...detail, detailUpdatedAt: readAt }
-            : prior?.available && { ...prior, detailStale: true as const };
-        if (!next) return;
-        const changes: V1Event[] = prior
-          ? options.diff(
-              { fleet, ships: { [id]: prior } },
-              { fleet, ships: { [id]: next } },
-              Date.now(),
-            )
-          : [{ type: "ship", data: next }];
-        ships.set(id, next);
-        broadcast(changes);
-      } catch {
-        // A later poll can publish this ship if its projection fails.
+        if (!parent.aborted) publishShip(summary, readAt, detail);
       } finally {
         await settled;
         pending.delete(id);
@@ -117,34 +170,41 @@ export function createEventStreams(
     }
 
     async function poll() {
-      if (polling) return;
-      polling = true;
-      const reads = new Map<string, V1ShipRead>();
-      const { result, settled } = readWithDeadline(
-        shutdown.signal,
-        readMs,
-        async (signal) => {
+      if (publishing || shutdown.signal.aborted) return;
+      publishing = true;
+      try {
+        const sample = await readOverview(shutdown.signal, async (signal) => {
+          const reads = new Map<string, V1ShipRead>();
           const overview = await options.fleet(signal, (id, read) =>
             reads.set(id, read),
           );
-          signal.throwIfAborted();
-          return options.completeFleet(overview);
-        },
-      );
-      try {
-        const next = await result;
+          return { overview, reads };
+        }).catch(() => undefined);
         if (shutdown.signal.aborted) return;
+        if (sample) cachedOverview = sample.overview;
+        if (!cachedOverview) {
+          overviewExpired = true;
+          return;
+        }
+        const overview = cachedOverview;
+        const complete = await enrich(shutdown.signal, (signal) =>
+          options.completeFleet(overview, signal),
+        ).catch(() => undefined);
+        if (shutdown.signal.aborted) return;
+        const next = complete ?? options.fallbackFleet(overview);
         publishFleet(next);
-        for (const { id } of next.ships)
+        for (const ship of next.ships)
           void refreshShip(
-            id,
-            reads.get(id) ?? ((signal) => options.ship(id, signal)),
-          );
+            ship,
+            sample?.reads.get(ship.id) ??
+              ((signal) => options.ship(ship.id, signal)),
+          ).catch(() => {
+            // A later poll can publish this ship if its projection fails.
+          });
       } catch {
         // Keep the last overview and retry while clients are present.
       } finally {
-        await settled;
-        polling = false;
+        publishing = false;
       }
     }
 
