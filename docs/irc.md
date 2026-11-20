@@ -984,6 +984,10 @@ replayed after restart. An old cancellation flag, expiry, reconnect or outcome
 notification is never a new approval to issue native Stop. Native settlement
 still determines when the held queue is released.
 
+For a pinned captain with a read-only crew history service, enable
+`features.crewQuestionHandoff` and the plugin's `team.questionGateway`. See
+[the crew question setup](agents/default-opencode.md#crew-questions-with-a-read-only-history-service).
+
 ## Presence
 
 ### Agent waiting status (NET-1637, Step 1)
