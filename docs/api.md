@@ -97,6 +97,10 @@ five-second sample interval. The gateway caches the OpenCode V2 server version
 for ten minutes. If the probe fails or no OpenCode server is configured, the
 value is null.
 
+Checkout Git status counts changed gitlinks and skips worktree dirt inside
+submodules. Fleet reads disable checkout-configured filters, hooks and
+filesystem monitors.
+
 ## Events
 
 Use a streaming browser `fetch` with an `Authorization` header. A connection
