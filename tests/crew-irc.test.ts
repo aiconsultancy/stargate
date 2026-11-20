@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,6 +10,7 @@ import {
   type CrewOptions,
   type CrewSessions,
 } from "../src/crew/engine";
+import { IrcSessions } from "../src/crew/irc";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import { teamSchema } from "../src/crew/team";
 
@@ -384,9 +386,13 @@ test("crew irc outbox: every stored stargate_dm is listed once, in order; mail i
 });
 
 test("crew irc outbox: bounded by count and age", async () => {
-  const f = await fixture();
+  const directory = await mkdtemp(join(tmpdir(), "stargate-outbox-"));
+  const db = new Database(join(directory, "outbox.sqlite"), {
+    create: true,
+    strict: true,
+  });
   try {
-    const outbox = f.engine.state.ircSessions;
+    const outbox = new IrcSessions(db);
     const item = (n: number) => ({
       id: n.toString(16).padStart(32, "0"),
       from: { role: "captain" as const, id: "captain" },
@@ -394,8 +400,11 @@ test("crew irc outbox: bounded by count and age", async () => {
       text: `message ${n}`,
     });
     const day = 24 * 60 * 60_000;
-    outbox.enqueue(item(1), Date.now() - day - 1000);
-    for (let n = 2; n <= 1003; n++) outbox.enqueue(item(n));
+    // Exercise every enqueue and prune, without benchmarking 1003 disk flushes.
+    db.transaction(() => {
+      outbox.enqueue(item(1), Date.now() - day - 1000);
+      for (let n = 2; n <= 1003; n++) outbox.enqueue(item(n));
+    }).immediate();
     const all = outbox.outbox({ after: 0, limit: 2000 });
     expect(all.latest).toBe(1003);
     expect(all.items).toHaveLength(1000);
@@ -404,7 +413,8 @@ test("crew irc outbox: bounded by count and age", async () => {
     outbox.enqueue(item(1003));
     expect(outbox.outbox({ after: 1002, limit: 10 }).items).toHaveLength(1);
   } finally {
-    await f.close();
+    db.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });
 
