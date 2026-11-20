@@ -1,6 +1,26 @@
+import { isAbsolute, resolve } from "node:path";
 import { Effect, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
+import { legacySetting } from "../../settings-legacy";
+import { isGitHubRepositoryName } from "./git";
 import { isOriginPattern, isPrivateNetwork, parseApiListen } from "./network";
+
+const checkoutPath = Schema.String.check(
+  Schema.makeFilter(
+    (path) =>
+      (isAbsolute(path) && resolve(path) === path && !path.includes("\0")) ||
+      "Use an absolute, normalized checkout path.",
+  ),
+);
+const pullRequestRepositories = Schema.Record(
+  Schema.String,
+  Schema.String.check(
+    Schema.makeFilter(
+      (value) =>
+        isGitHubRepositoryName(value) || "Use GitHub owner/repository.",
+    ),
+  ),
+).check(Schema.isPropertyNames(checkoutPath));
 
 const fields = z.strictObject({
   listen: z.string().refine(parseApiListen, {
@@ -24,6 +44,7 @@ const fields = z.strictObject({
       }),
     )
     .optional(),
+  pullRequestRepositories: legacySetting(pullRequestRepositories).optional(),
   fleetName: z.string().trim().min(1).optional(),
 });
 

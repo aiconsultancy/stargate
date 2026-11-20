@@ -696,8 +696,7 @@ describe("Fleet API projection", () => {
     }
   });
 
-  test("uses the fetch owner for PR lookup with an unresolved push URL and leaves ambiguous pushes unsettled", async () => {
-    let ambiguous = false;
+  test("only a configured checkout binding can authorize a PR lookup", async () => {
     const pullRequest = mock(() => null);
     const f = fixture(undefined, {
       git: async (directory): Promise<V1Git | null> =>
@@ -709,30 +708,36 @@ describe("Fleet API projection", () => {
               ahead: null,
               behind: null,
               changedFiles: 0,
-              repository: "example/project",
-              pushRepository: null,
+              repository: null,
+              pushRepository: "untrusted/private",
               checkedAt: 1,
-              ...(ambiguous ? { pushRepositoryAmbiguous: true } : {}),
             }
           : null,
       pullRequest,
     });
-    f.set("captain", [context("pilot", { provisioned: "ready" })]);
+    f.set("captain", [context("pilot"), context("pilot", { project: "ops" })]);
     const read = async () =>
-      (await f.source.ship("captain", signal))?.crewMembers[0]?.contexts[0];
-    expect(await read()).toMatchObject({
+      (await f.source.ship("captain", signal))?.crewMembers[0]?.contexts;
+    expect((await read())?.[0]).not.toHaveProperty("pullRequestKnown");
+    expect(pullRequest).not.toHaveBeenCalled();
+
+    f.useConfig((config) => ({
+      ...config,
+      api: {
+        listen: ":8484",
+        pullRequestRepositories: {
+          [`${privateProject}-pilot-default`]: "example/approved",
+        },
+      },
+    }));
+    const contexts = await read();
+    expect(contexts?.[0]).toMatchObject({
       pullRequest: null,
       pullRequestKnown: true,
     });
-    expect(pullRequest).toHaveBeenCalledWith(
-      "example/project",
-      "test/change",
-      null,
-    );
-    pullRequest.mockClear();
-    ambiguous = true;
-    expect(await read()).not.toHaveProperty("pullRequestKnown");
-    expect(pullRequest).not.toHaveBeenCalled();
+    expect(contexts?.[1]).not.toHaveProperty("pullRequestKnown");
+    expect(pullRequest).toHaveBeenCalledTimes(1);
+    expect(pullRequest).toHaveBeenCalledWith("example/approved", "test/change");
   });
 
   test("publishes an initial crew error detail and a single recovery activity", async () => {

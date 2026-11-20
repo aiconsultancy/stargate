@@ -118,17 +118,12 @@ export function createPullReader(
     return result?.code === 0 ? executable : null;
   }
 
-  async function refresh(
-    repository: string,
-    branch: string,
-    headRepository: string | null,
-  ) {
+  async function refresh(repository: string, branch: string) {
     if (!auth || auth.expiresAt <= now())
       auth = { expiresAt: now() + ttl, executable: authenticate() };
     const executable = await auth.executable;
     if (!executable) return undefined;
-    const headTarget = headRepository ?? repository.toLowerCase();
-    const owner = headTarget.slice(0, headTarget.indexOf("/"));
+    const owner = repository.slice(0, repository.indexOf("/"));
     const result = await run(
       [
         executable,
@@ -159,13 +154,7 @@ export function createPullReader(
           continue;
         }
         const { number, repository: head } = candidate.value;
-        const candidateHead = head?.toLowerCase();
-        if (
-          headRepository
-            ? candidateHead !== headRepository
-            : !candidateHead?.startsWith(`${owner}/`)
-        )
-          continue;
+        if (head?.toLowerCase() !== repository) continue;
         const details = await run(
           [
             executable,
@@ -189,13 +178,9 @@ export function createPullReader(
     }
   }
 
-  return (
-    repository: string,
-    branch: string,
-    headRepository: string | null = repository,
-  ) => {
-    const head = headRepository?.toLowerCase() ?? null;
-    const key = JSON.stringify([repository.toLowerCase(), branch, head]);
+  return (repository: string, branch: string) => {
+    const target = repository.toLowerCase();
+    const key = JSON.stringify([target, branch]);
     const saved = cache.get(key);
     if (
       (!saved || saved.expiresAt <= now()) &&
@@ -203,7 +188,7 @@ export function createPullReader(
       pending.size < 2
     ) {
       pending.add(key);
-      void refresh(repository, branch, head)
+      void refresh(target, branch)
         .catch(() => undefined)
         .then((value) => {
           // A failed refresh leaves the last settled lookup intact.

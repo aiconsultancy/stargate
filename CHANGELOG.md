@@ -16,9 +16,9 @@
   Resolve Git state from the captured branch and reject snapshots when HEAD
   changes during the read. Preserve readable ignore patterns within the
   checkout and its Git directories.
-- Filter PR candidates by head owner and branch, use the only distinct GitHub
-  push repository across all push URLs, and fall back to the fetch owner
-  when the push remote has no resolvable GitHub repository.
+- Look up Fleet pull requests only for checkouts bound to a GitHub repository
+  in `api.pullRequestRepositories`. Require the PR head to belong to the
+  bound repository. Unbound checkouts leave PR state unknown.
 - Keep recent crew samples usable during slow refreshes and wait for the
   shared crew read when no recent sample is available. Adapt the OpenCode
   fleet probe deadline for slower captains and back off after repeated failures.

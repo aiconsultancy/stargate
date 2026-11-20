@@ -127,18 +127,31 @@ Git versions with `GIT_ATTR_SOURCE` support read attributes from
 the empty tree, so files that depend on attributes for content conversion may
 count as changed.
 
-Pull requests are looked up by head owner and branch, including branches
-with numeric names. Stargate considers every URL on the branch's push remote.
-When exactly one distinct GitHub repository is found, `git.pushRepository`
-identifies it and the lookup requires a matching head owner and repository
-name. With no GitHub push repository, the lookup uses the GitHub `origin`
-and matches its owner. With multiple GitHub push repositories,
-`git.pushRepositoryAmbiguous` is `true` and the lookup remains unsettled.
-Stargate targets the GitHub repository at `origin` if available, or the push
-repository otherwise. Stargate fetches check results for the matching PR.
-A failed or incomplete refresh retains the last successful result. A crew
-context with `pullRequestKnown: true` and `pullRequest: null` has a settled
-lookup with no match or a checkout with no eligible branch or GitHub remote.
+To enable pull request lookups, set `api.pullRequestRepositories` in
+`stargate.json` and restart Stargate. Each key is the exact absolute,
+normalized path of a local crew checkout as configured in the crew project
+registry. Each value is the GitHub `owner/repository` whose PR metadata
+you want to share with Fleet API viewers.
+
+```json
+{
+  "api": {
+    "listen": ":8484",
+    "pullRequestRepositories": {
+      "/srv/crew/example-worktree": "example/project"
+    }
+  }
+}
+```
+
+Stargate looks up a branch only in its bound repository and requires the PR
+head to belong to that same repository. Checkout remotes supply display
+metadata in `git.repository`. The optional legacy fields
+`git.pushRepository` and `git.pushRepositoryAmbiguous` are deprecated and
+omitted. With no binding or no readable branch and commit, `pullRequest` is
+null and `pullRequestKnown` is absent. A context with `pullRequestKnown: true`
+and `pullRequest: null` has a settled lookup with no matching PR. A failed
+or incomplete refresh retains the last successful lookup result.
 
 ## Events
 

@@ -436,6 +436,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     signal.throwIfAborted();
     if (!snapshot) return undefined;
     const { id } = registration.config;
+    const repositories = deps.config().api?.pullRequestRepositories;
     const { view, metadata } = snapshot;
     const at = view.generatedAt;
     const text = checkoutText(metadata);
@@ -465,14 +466,11 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
                     )?.directory
                   : undefined;
               const state = await git(path, signal);
-              const pushRepository = state?.pushRepository ?? null;
-              const repository = state?.repository ?? pushRepository;
+              const repository = path && repositories?.[path];
               const pr =
-                !state || state.error || state.pushRepositoryAmbiguous
-                  ? undefined
-                  : repository && state.branch && state.head
-                    ? pullRequest(repository, state.branch, pushRepository)
-                    : null;
+                repository && state?.branch && state.head && !state.error
+                  ? pullRequest(repository, state.branch)
+                  : undefined;
               return {
                 ...context,
                 git: state,

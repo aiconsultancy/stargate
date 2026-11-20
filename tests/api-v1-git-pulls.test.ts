@@ -93,7 +93,6 @@ test("reads real Git state, respects the 15-second cache and handles a detached 
       behind: 0,
       changedFiles: 0,
       repository: "example/project",
-      pushRepository: "example/project",
       checkedAt: now,
     });
     await writeFile(join(directory, "untracked"), "fixture");
@@ -168,154 +167,7 @@ test("maps PR state and check rollups and restricts URL and title output", () =>
   expect(parse({ statusCheckRollup: "unexpected" })).toBeNull();
 });
 
-test("uses the branch push remote instead of the fetch URL for the head repository", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
-  const git = (...args: string[]) => {
-    const result = Bun.spawnSync(["git", ...args], { cwd: directory });
-    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
-  };
-  try {
-    git("init", "-b", "main");
-    git(
-      "-c",
-      "user.name=Fixture",
-      "-c",
-      "user.email=fixture@example.test",
-      "-c",
-      "commit.gpgsign=false",
-      "commit",
-      "--allow-empty",
-      "-m",
-      "Initial",
-    );
-    git("remote", "add", "origin", "https://github.com/example/project.git");
-    git("remote", "add", "fork", "https://github.com/example/project.git");
-    git(
-      "remote",
-      "set-url",
-      "--push",
-      "fork",
-      "ssh://git@mirror.example.test/contributor/renamed.git",
-    );
-    git(
-      "remote",
-      "set-url",
-      "--add",
-      "--push",
-      "fork",
-      "git@github.com:contributor/renamed.git",
-    );
-    git(
-      "remote",
-      "set-url",
-      "--add",
-      "--push",
-      "fork",
-      "https://github.com/Contributor/Renamed",
-    );
-    git("config", "remote.pushDefault", "origin");
-    git("config", "branch.main.pushRemote", "fork");
-    expect(
-      await createGitReader()(directory, new AbortController().signal),
-    ).toMatchObject({
-      repository: "example/project",
-      pushRepository: "contributor/renamed",
-    });
-    git(
-      "remote",
-      "set-url",
-      "--add",
-      "--push",
-      "fork",
-      "https://github.com/another/fork",
-    );
-    expect(
-      await createGitReader()(directory, new AbortController().signal),
-    ).toMatchObject({ pushRepository: null, pushRepositoryAmbiguous: true });
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test("finds the matching PR beyond same-named branches from other forks", async () => {
-  const candidate = (number: number, owner: string, name: string) => ({
-    number,
-    url: `https://github.com/example/project/pull/${number}`,
-    title: "Example",
-    state: "OPEN",
-    isDraft: false,
-    statusCheckRollup: [],
-    headRepositoryOwner: { login: owner },
-    headRepository: { name },
-  });
-  const otherForks = Array.from({ length: 50 }, (_, index) =>
-    candidate(99 - index, "other", "renamed"),
-  );
-  const details: string[] = [];
-  const pull = createPullReader(Date.now, {
-    which: () => "/fixture/gh",
-    run: async (args) => {
-      if (args[1] === "auth") return { code: 0, stdout: "" };
-      if (args[2] === "view") {
-        const number = args[3] ?? "";
-        details.push(number);
-        expect(args.join(" ")).toContain("statusCheckRollup");
-        return {
-          code: 0,
-          stdout: JSON.stringify(
-            candidate(Number(number), "Contributor", "Renamed"),
-          ),
-        };
-      }
-      const rows = [
-        ...otherForks,
-        candidate(41, "contributor", "different"),
-        candidate(40, "Contributor", "Renamed"),
-      ];
-      if (args.at(-1)?.endsWith("without-a-match")) rows.pop();
-      if (args[1] === "api") {
-        expect(args.join(" ")).not.toContain("statusCheckRollup");
-        const head = args.at(-1);
-        const owner = head?.split(":")[0]?.slice("head=".length);
-        return {
-          code: 0,
-          stdout: JSON.stringify(
-            rows
-              .flatMap((row) =>
-                row.headRepositoryOwner.login.toLowerCase() === owner
-                  ? [
-                      {
-                        number: row.number,
-                        repository: `${row.headRepositoryOwner.login}/${row.headRepository.name}`,
-                      },
-                    ]
-                  : [],
-              )
-              .slice(0, 50),
-          ),
-        };
-      }
-      return {
-        code: 0,
-        stdout: JSON.stringify(
-          rows.slice(0, Number(args[args.indexOf("--limit") + 1])),
-        ),
-      };
-    },
-  });
-  pull("example/project", "patch-1", "contributor/renamed");
-  pull("example/project", "without-a-match", "contributor/renamed");
-  await Bun.sleep(0);
-  expect(
-    pull("example/project", "patch-1", "contributor/renamed")?.number,
-  ).toBe(40);
-  expect(
-    pull("example/project", "without-a-match", "contributor/renamed"),
-  ).toBeNull();
-  expect(details).toEqual(["40"]);
-});
-
-test("an unresolved push URL can match a differently named head repo from the fetch owner", async () => {
+test("looks up only the bound repository and requires an exact head repository", async () => {
   const commands: string[][] = [];
   const pull = createPullReader(Date.now, {
     which: () => "/fixture/gh",
@@ -323,19 +175,19 @@ test("an unresolved push URL can match a differently named head repo from the fe
       commands.push(args);
       if (args[1] === "auth") return { code: 0, stdout: "" };
       if (args[1] === "api") {
-        return {
-          code: 0,
-          stdout: JSON.stringify([
-            { number: 42, repository: "another/project" },
-            { number: 41, repository: "Example/renamed" },
-          ]),
-        };
+        const rows = [
+          { number: 42, repository: "another/project" },
+          { number: 41, repository: "Example/renamed" },
+        ];
+        if (args.at(-1) === "head=example:123")
+          rows.push({ number: 40, repository: "Example/project" });
+        return { code: 0, stdout: JSON.stringify(rows) };
       }
       return {
         code: 0,
         stdout: JSON.stringify({
-          number: 41,
-          url: "https://github.com/Example/project/pull/41",
+          number: 40,
+          url: "https://github.com/Example/project/pull/40",
           title: "Example",
           state: "OPEN",
           isDraft: false,
@@ -344,15 +196,17 @@ test("an unresolved push URL can match a differently named head repo from the fe
       };
     },
   });
-  expect(pull("Example/project", "change", null)).toBeUndefined();
+  expect(pull("Example/project", "123")).toBeUndefined();
+  expect(pull("Example/project", "absent")).toBeUndefined();
   await Bun.sleep(0);
-  expect(pull("Example/project", "change", null)?.number).toBe(41);
-  expect(commands.find((args) => args[1] === "api")).toContain(
-    "head=example:change",
+  expect(pull("Example/project", "123")?.number).toBe(40);
+  expect(pull("Example/project", "absent")).toBeNull();
+  expect(commands.find((args) => args[1] === "api")).toEqual(
+    expect.arrayContaining(["repos/example/project/pulls", "head=example:123"]),
   );
-  expect(
-    commands.filter((args) => args[1] === "pr").map((args) => args[3]),
-  ).toEqual(["41"]);
+  expect(commands.filter((args) => args[1] === "pr")).toEqual([
+    expect.arrayContaining(["40", "--repo", "example/project"]),
+  ]);
 });
 
 test("PR refreshes deduplicate work, keep the last result on failure and clear it on confirmed absence", async () => {

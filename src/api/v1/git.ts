@@ -42,11 +42,15 @@ export function githubRepository(remote: string): string | null {
       ? url.pathname.slice(1)
       : "");
   const repo = path.replace(/\/$/, "").replace(/\.git$/, "");
-  return /^[a-z\d][a-z\d-]{0,38}\/[a-z\d_.-]{1,100}$/i.test(repo) &&
+  return isGitHubRepositoryName(repo) ? repo : null;
+}
+
+export function isGitHubRepositoryName(repo: string) {
+  return (
+    /^[a-z\d][a-z\d-]{0,38}\/[a-z\d_.-]{1,100}$/i.test(repo) &&
     !/\/\.{1,2}$/.test(repo) &&
     !containsCredential(repo)
-    ? repo
-    : null;
+  );
 }
 
 export function parseAheadBehind(output: string) {
@@ -206,46 +210,6 @@ async function copyStatusFile(
 }
 
 type RunGit = (...args: string[]) => Promise<{ code: number; stdout: string }>;
-
-async function readPushRepository(branch: string, run: RunGit) {
-  const config = await run(
-    "config",
-    "--null",
-    "--get-regexp",
-    "^(branch\\..*\\.(pushremote|remote)|remote\\.pushdefault)$",
-  );
-  if (config.code !== 0 && !(config.code === 1 && !config.stdout))
-    return { pushRepository: null };
-  const values = new Map<string, string>();
-  for (const entry of config.stdout.split("\0")) {
-    const separator = entry.indexOf("\n");
-    if (separator >= 0)
-      values.set(entry.slice(0, separator), entry.slice(separator + 1));
-  }
-  const remote =
-    values.get(`branch.${branch}.pushremote`) ??
-    values.get("remote.pushdefault") ??
-    values.get(`branch.${branch}.remote`);
-  let name = remote;
-  if (name === undefined) {
-    const remotes = await run("remote");
-    if (remotes.code !== 0) return { pushRepository: null };
-    const names = remotes.stdout.trimEnd().split("\n");
-    name = names.length === 1 && names[0] ? names[0] : "origin";
-  }
-  if (!name || name === ".") return { pushRepository: null };
-  const urls = await run("remote", "get-url", "--push", "--all", "--", name);
-  if (urls.code !== 0) return { pushRepository: null };
-  let pushRepository: string | null = null;
-  for (const url of urls.stdout.split("\n")) {
-    const repo = githubRepository(url);
-    if (!repo) continue;
-    if (pushRepository && pushRepository.toLowerCase() !== repo.toLowerCase())
-      return { pushRepository: null, pushRepositoryAmbiguous: true as const };
-    pushRepository ??= repo;
-  }
-  return { pushRepository };
-}
 
 async function createStatusDirectory(checkout: string, dataDirectory?: string) {
   if (dataDirectory) {
@@ -588,11 +552,8 @@ async function inspect(
       changed.code === 0 ? countChangedPaths(changed.stdout) : null;
     if (changedFiles === null) throw new Error("Git state unavailable");
     const branchName = branch && safeRef(branch);
-    const [remote, push, head] = await Promise.all([
+    const [remote, head] = await Promise.all([
       run("remote", "get-url", "origin"),
-      branchName && oid
-        ? readPushRepository(branchName, run)
-        : { pushRepository: null },
       oid ? run("rev-parse", "--short", "--verify", oid) : null,
     ]);
     const abbreviation = head?.code === 0 ? head.stdout.trim() : "";
@@ -621,7 +582,6 @@ async function inspect(
       changedFiles,
       repository:
         remote.code === 0 ? githubRepository(remote.stdout.trim()) : null,
-      ...push,
       checkedAt: now(),
     };
   } catch (error) {
