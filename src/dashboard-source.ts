@@ -301,18 +301,19 @@ export function dashboardSource(
       slot.pending = { attempt, result, fallback };
     }
     const pending = slot.pending;
-    const fallback = pending.fallback;
+    const hasFallback = pending.fallback !== undefined;
     const wait = AbortSignal.any([signal, fleetSignal]);
     try {
       return await readWithDeadline(
         wait,
-        fallback ? fleetCrewReadMs : undefined,
+        hasFallback ? fleetCrewReadMs : undefined,
         () => pending.result,
       ).result;
     } catch (error) {
       wait.throwIfAborted();
-      if (fallback) return slot.last?.sample ?? fallback;
-      throw error;
+      if (!hasFallback) throw error;
+      if (pending.fallback) return slot.last?.sample ?? pending.fallback;
+      return readWithDeadline(wait, undefined, () => pending.result).result;
     }
   }
 

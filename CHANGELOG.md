@@ -33,7 +33,8 @@
   stale and close event streams on expiry after 75 seconds. Host and heartbeat
   frames continue while a new overview is pending. Configuration reloads
   invalidate cached crew samples and keep in-flight reads for unchanged
-  backends, including Fleet HTTP requests.
+  backends, including Fleet HTTP requests. Requests already waiting for crew
+  data continue to wait for the shared read after reload clears their fallback.
 - Publish lightweight `ship-sampled` events when only the ship detail
   timestamp changes. Preserve the observation time when a crew sample is reused.
 - Harden Fleet API Git reads against checkout-configured commands.

@@ -549,11 +549,12 @@ describe("Fleet API projection", () => {
       const last = reads[reads.length - 1] ?? first;
       expect(
         await Promise.race([
-          last.then(() => "cached"),
+          Promise.race([first, last]).then(() => "cached"),
           Bun.sleep(25).then(() => "pending"),
         ]),
       ).toBe("pending");
       held.resolve({ members: [context("pilot")], total: 1, truncated: false });
+      expect(await first).toEqual(await last);
       expect(
         (await last).ships.find(({ id }) => id === "captain"),
       ).toMatchObject({
