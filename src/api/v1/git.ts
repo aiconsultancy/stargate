@@ -598,6 +598,7 @@ async function inspect(
             "refs/remotes/origin/HEAD",
           );
     const baseRef = base.code === 0 ? base.stdout.trim() : null;
+    deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
     const status = await prepareStatus(
       directory,
       oid,

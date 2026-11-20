@@ -283,6 +283,36 @@ test("index inspection runs outside the gateway thread and stops at its deadline
   }
 });
 
+test("Git snapshot preparation gets a fresh deadline after the initial commands", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const initial = new AbortController();
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  let firstPhase = true;
+  const clock = spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    if (ms === 2000 && firstPhase) {
+      firstPhase = false;
+      return initial.signal;
+    }
+    return timeout(ms);
+  });
+  try {
+    git(directory, "init", "-b", "main");
+    const read = createGitReader(Date.now, (args, options) => {
+      if (args.includes("--absolute-git-dir"))
+        initial.abort(new DOMException("Initial Git deadline", "TimeoutError"));
+      return readCommand(args, options);
+    });
+    expect(await read(directory, new AbortController().signal)).toMatchObject({
+      branch: "main",
+      changedFiles: 0,
+    });
+    expect(initial.signal.aborted).toBe(true);
+  } finally {
+    clock.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("caches an outer Git read timeout for 15 seconds", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const held = Promise.withResolvers<null>();
