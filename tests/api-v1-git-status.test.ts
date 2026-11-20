@@ -383,6 +383,8 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
   const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const busy = [0, 1, 2, 3].map(() => Promise.withResolvers<null>());
   const late = Promise.withResolvers<null>();
+  const started = Promise.withResolvers<void>();
+  const deadline = new AbortController();
   let mono = 100;
   let calls = 0;
   const read = createGitReader(
@@ -390,7 +392,10 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
     async () => {
       const call = ++calls;
       if (call <= 4) return busy[call - 1]?.promise ?? null;
-      if (call === 5) return late.promise;
+      if (call === 5) {
+        started.resolve();
+        return late.promise;
+      }
       return { code: 1, stdout: "" };
     },
     undefined,
@@ -402,16 +407,21 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
   try {
     for (const name of ["busy-0", "busy-1", "busy-2", "busy-3", "late"])
       await mkdir(join(root, name));
+    const timeout = spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const busyReads = [0, 1, 2, 3].map((n) =>
       read(join(root, `busy-${n}`), signal),
     );
     const target = join(root, "late");
     // Its 400 ms budget ends at 500; it gets a slot at 350, with less than
     // half of it left.
+    timeout.mockReturnValue(deadline.signal);
     const pending = read(target, signal);
+    timeout.mockRestore();
     mono = 350;
     busy[0]?.resolve(null);
     await busyReads[0];
+    await started.promise;
+    deadline.abort(new DOMException("Read timed out", "TimeoutError"));
     const timedOut = await pending;
     expect(timedOut).toMatchObject({ error: "Git read timed out." });
     expect(calls).toBe(5);
