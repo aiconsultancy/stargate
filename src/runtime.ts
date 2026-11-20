@@ -1179,6 +1179,18 @@ export function serve(
               if (!ships.includes(entry.dashboard)) ships.push(entry.dashboard);
               binding.entries.set(registration.key, entry);
             }
+            // Retire all removed Fleet backends before a crew refresh can
+            // sample an alias that is waiting for asynchronous cleanup.
+            for (const { binding, plan } of plans) {
+              for (const registration of plan.removed) {
+                const entry = binding.entries.get(registration.key);
+                if (entry) {
+                  const index = ships.indexOf(entry.dashboard);
+                  if (index >= 0) ships.splice(index, 1);
+                  fleetDashboard?.retireFleetBackend(entry.resource.backend);
+                }
+              }
+            }
             committed = true;
             fleetDashboard?.invalidateFleetCrew();
             for (const { entry, start } of staged) {
@@ -1191,11 +1203,6 @@ export function serve(
               for (const registration of plan.removed) {
                 const entry = binding.entries.get(registration.key);
                 binding.entries.delete(registration.key);
-                if (entry) {
-                  const index = ships.indexOf(entry.dashboard);
-                  if (index >= 0) ships.splice(index, 1);
-                  fleetDashboard?.retireFleetBackend(entry.resource.backend);
-                }
                 await Effect.runPromise(
                   FiberMap.remove(fibers, registration.key),
                 ).catch(() => log.warn("Retired worker cleanup failed"));

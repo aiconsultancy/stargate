@@ -39,6 +39,7 @@ async function running(
     dashboard?: boolean;
     crewStatus?: (id: string, signal: AbortSignal) => Promise<CrewStatus>;
     pinned?: readonly string[];
+    closeBackend?: (id: string) => Promise<void>;
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-runtime-reload-"));
@@ -145,6 +146,7 @@ async function running(
         },
         async close() {
           closed.push(id);
+          await options.closeBackend?.(id);
         },
       } satisfies AgentBackend;
     },
@@ -580,40 +582,67 @@ test("dashboard follows IRC access reload and committed crew addition/removal wi
   expect(f.closed).toEqual(["fleet-chief"]);
 });
 
-test("removing an IRC backend cancels only its Fleet crew read", async () => {
+test("reload retires every removed Fleet crew read before backend cleanup", async () => {
   const server = new FakeIrcServer({
-    accounts: { galactica: "captain-pass", "galactica-chief": "chief-pass" },
+    accounts: {
+      galactica: "captain-pass",
+      "galactica-chief": "chief-pass",
+      "galactica-pilot": "pilot-pass",
+    },
   }).start();
   cleanup.push(() => server.stop());
   const registration = Schema.decodeUnknownSync(ircSchema)({
     ...irc(server.port),
-    crew: [chief],
+    crew: [
+      chief,
+      {
+        ...chief,
+        id: "pilot",
+        account: "galactica-pilot",
+        passwordEnv: "IRC_PILOT",
+      },
+    ],
   });
   const retired = Promise.withResolvers<AbortSignal>();
   const unchanged = Promise.withResolvers<AbortSignal>();
   const held = Promise.withResolvers<CrewStatus>();
+  const closing = Promise.withResolvers<void>();
+  const finishClose = Promise.withResolvers<void>();
   const status = { members: [], total: 0, truncated: false };
   const f = await running({
     irc: [registration],
-    environment: { IRC_MAIN: "captain-pass", IRC_CHIEF: "chief-pass" },
-    pinned: ["helper", "fleet-chief"],
+    environment: {
+      IRC_MAIN: "captain-pass",
+      IRC_CHIEF: "chief-pass",
+      IRC_PILOT: "pilot-pass",
+    },
+    pinned: ["helper", "fleet-pilot"],
     crewStatus: async (id, reading) => {
-      if (id === "fleet-chief") retired.resolve(reading);
+      if (id === "fleet-pilot") retired.resolve(reading);
       if (id === "fleet") unchanged.resolve(reading);
       return held.promise;
+    },
+    closeBackend: async (id) => {
+      if (id !== "fleet-chief") return;
+      closing.resolve();
+      await finishClose.promise;
     },
   });
   const response = f.fleet();
   void response.catch(() => {});
+  let reload: ReturnType<typeof f.reload.request> | undefined;
   try {
     const [removed, kept] = await Promise.all([
       retired.promise,
       unchanged.promise,
     ]);
     await f.write({ ...f.config, irc: [{ ...registration, crew: [] }] });
-    expect((await f.reload.request()).status).toBe("applied");
+    reload = f.reload.request();
+    await closing.promise;
     expect(removed.aborted).toBe(true);
     expect(kept.aborted).toBe(false);
+    finishClose.resolve();
+    expect((await reload).status).toBe("applied");
     held.resolve(status);
     expect((await response).status).toBe(200);
     expect(await (await f.fleet()).json()).toMatchObject({
@@ -623,7 +652,9 @@ test("removing an IRC backend cancels only its Fleet crew read", async () => {
       ],
     });
   } finally {
+    finishClose.resolve();
     held.resolve(status);
+    await reload;
     await response.catch(() => {});
   }
 });
