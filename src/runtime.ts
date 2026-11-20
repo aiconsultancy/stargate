@@ -9,9 +9,11 @@ import {
   Data,
   Deferred,
   Effect,
+  Exit,
   FiberMap,
   Result,
   Schema,
+  Scope,
 } from "effect";
 import pino, { type Logger } from "pino";
 import { diffEvents } from "./api/v1/diff";
@@ -57,7 +59,7 @@ import { sendFleetAssignment } from "./fleet-irc";
 import { Gateway, type SlackDelivery } from "./gateway";
 import { createHealthReader } from "./health";
 import { controlInteractions } from "./interactions";
-import { type IrcRegistration, IrcShip } from "./irc/ship";
+import { type IrcRegistration, IrcShip, ircKey } from "./irc/ship";
 import { DrainRuntime } from "./maintenance-drain";
 import { discoverCrews } from "./nightly/crews";
 import { MaintenanceOutbox } from "./nightly/outbox";
@@ -65,6 +67,20 @@ import type { Ready } from "./nightly/ready";
 import { packageDirectory, runningVersion, writeReady } from "./nightly/ready";
 import { NotificationStore } from "./notification-store";
 import { notificationKey } from "./notifications";
+import {
+  notifyConfigError,
+  resolveDestinations,
+  type SlackRegistration,
+} from "./notify/binding";
+import { coreLimits, notifyEnabled } from "./notify/config";
+import { notificationRoutes } from "./notify/http";
+import { ShuttingDown } from "./notify/model";
+import {
+  makeNotifications,
+  type NotificationCore,
+} from "./notify/notifications";
+import type { NotificationSink } from "./notify/sink";
+import { type NotificationSlack, slackNotificationSink } from "./notify/slack";
 import { PairingUI } from "./pairing";
 import { PeerDirectory } from "./peers";
 import { QuotaReader } from "./quota";
@@ -113,11 +129,10 @@ export class RuntimeStopped extends Data.TaggedError("RuntimeStopped")<{
 
 /** One registration's Slack surface: intake, Web API delivery and modals. */
 export interface SlackApp extends SlackDelivery, CronDelivery {
+  notification?: NotificationSlack["notification"];
   identity(signal?: AbortSignal): Promise<Identity>;
   readonly connectionState?: ConnectionState;
   watch?(): Promise<void>;
-  /** Slack `users.info`; required for peer captain admission. */
-  userInfo?(user: string, signal: AbortSignal): Promise<unknown>;
   start(
     accept: (body: unknown) => boolean | Promise<boolean>,
     log: Logger,
@@ -142,6 +157,13 @@ export type RuntimeDependencies = {
   connectionTiming?: { outageMs: number; pollMs: number };
   /** Host maintenance drain. Absent in tests, so nothing touches host state. */
   drain?: { directory?: string };
+  /** Isolated notification fixtures only; not operator configuration. */
+  notification?: {
+    environment?: NodeJS.ProcessEnv;
+    shutdownGraceMs?: number;
+    terminate?: () => never;
+    sink?: NotificationSink;
+  };
 };
 
 /** Programmatic callers may omit transports they do not use. */
@@ -307,9 +329,65 @@ export function serve(
       let open = true;
       const requests = new AbortController();
       const connections: (() => Promise<void>)[] = [];
+      const notify = notifyEnabled(config.notify) ? config.notify : undefined;
+      const notificationRegistrations: SlackRegistration[] = [];
+      let notificationView = {
+        notify: config.notify,
+        registrations:
+          notificationRegistrations as readonly SlackRegistration[],
+      };
+      const notificationConnections = new Map<string, NotificationSlack>();
+      let notificationCore: NotificationCore | undefined;
+      let notificationScope: Scope.Closeable | undefined;
+      let producer: ReturnType<typeof notificationRoutes> | undefined;
+      let apiServer: Awaited<ReturnType<typeof startApiV1Server>> | undefined;
+      let notificationTimer: ReturnType<typeof setTimeout> | undefined;
+      let notificationStop: Promise<void> | undefined;
+      let notificationClosing = false;
+      const beginNotificationClose = () => {
+        if (!notify || notificationClosing) return;
+        notificationClosing = true;
+        // Referenced and armed before interruption or any unbounded stop wait.
+        notificationTimer ??= setTimeout(
+          () => {
+            log.error(
+              "Notification shutdown did not settle; terminating process",
+            );
+            if (dependencies.notification?.terminate)
+              dependencies.notification.terminate();
+            process.exit(1);
+          },
+          Math.min(
+            dependencies.notification?.shutdownGraceMs ?? 25_000,
+            25_000,
+          ),
+        );
+        producer?.closeAdmission();
+        apiServer?.closeAdmission();
+        notificationCore?.closeAdmission();
+      };
+      const stopNotifications = () => {
+        if (!notify) return Promise.resolve();
+        beginNotificationClose();
+        notificationStop ??= (async () => {
+          const result = await notificationCore?.shutdown();
+          if (result?.state === "unresolved")
+            await new Promise<never>(() => {});
+          await apiServer?.stop();
+          if (notificationScope)
+            await Effect.runPromise(Scope.close(notificationScope, Exit.void));
+          if (notificationTimer) clearTimeout(notificationTimer);
+        })().catch(async () => {
+          // Cleanup failure cannot prove quiescence. Keep ownership to hard exit.
+          log.error("Notification cleanup did not establish settlement");
+          await new Promise<never>(() => {});
+        });
+        return notificationStop;
+      };
       const closeIntake = (only?: () => Promise<void>) =>
         Effect.sync(() => {
           open = false;
+          beginNotificationClose();
           requests.abort();
         }).pipe(
           Effect.andThen(
@@ -324,6 +402,8 @@ export function serve(
           Effect.timeoutOption("5 seconds"),
         );
       const stopped = yield* Deferred.make<void, RuntimeStopped>();
+      // Covers startup failure too. No timeout can release the outer lock.
+      yield* Effect.addFinalizer(() => Effect.promise(stopNotifications));
       const supervise = (
         botLog: Logger,
         worker: "gateway" | "cron" | "transport",
@@ -459,6 +539,17 @@ export function serve(
             new Error("Two registrations use the same Slack bot"),
           );
         identities.add(key);
+        const notificationRegistration = { bot, identity };
+        notificationRegistrations.push(notificationRegistration);
+        if (notify) {
+          if (!slack.notification)
+            return yield* Effect.die(
+              new Error("Slack notification delivery is unavailable"),
+            );
+          notificationConnections.set(bot.id, {
+            notification: slack.notification.bind(slack),
+          });
+        }
         const namespace = createHash("sha256")
           .update(botKey(bot, identity))
           .digest("hex");
@@ -744,6 +835,8 @@ export function serve(
           );
           registration.stopTurn = (conversation, thread) =>
             gateway.stopTurn(conversation, thread);
+          registration.operatorQuestion =
+            gateway.operatorQuestion.bind(gateway);
           registration.answerQuestion = (input, control) =>
             gateway.answerQuestion(input, control);
           return {
@@ -959,6 +1052,17 @@ export function serve(
         ]);
         log.info({ teams: team.config.id }, "Teams listener ready");
       }
+      const notificationDestinations = notify
+        ? resolveDestinations(notify, notificationRegistrations)
+        : undefined;
+      if (config.notify) {
+        const error = notifyConfigError(
+          config.notify,
+          config.bots,
+          config.api?.listen,
+        );
+        if (error) return yield* Effect.die(new Error(error));
+      }
       if (config.dashboard) {
         // Before the worker fork: a bind failure is an ordinary startup
         // failure. Released after workers drain and before backends close.
@@ -986,18 +1090,35 @@ export function serve(
         );
         log.info("Dashboard listening");
       }
+      let fleetDashboard: ReturnType<typeof dashboardSource> | undefined;
       if (config.api) {
         // Like the dashboard: a bind failure is an ordinary startup failure.
         const api = config.api;
         const viewers = new AbortController();
-        yield* Effect.acquireRelease(
+        const dashboard = dashboardSource(ships, store, cronStore, Date.now, {
+          fleetSignal: viewers.signal,
+        });
+        fleetDashboard = dashboard;
+        apiServer = yield* Effect.acquireRelease(
           Effect.promise(async () =>
             startApiV1Server({
               config: api,
               dataDirectory: config.dataDirectory,
               source: createApiV1Source({
-                dashboard: dashboardSource(ships, store, cronStore),
+                requests: (registration, at) => {
+                  if (registration.kind !== "irc") return [];
+                  const cfg = registration.config;
+                  return store.requestProgress(
+                    ircKey(cfg.id, cfg.server, cfg.account, cfg.backend),
+                    undefined,
+                    at,
+                  );
+                },
+                // This instance carries the viewers' signal, so shutdown and
+                // reload can cancel the shared crew reads.
+                dashboard,
                 config: () => reload?.current.config ?? config,
+                dataDirectory: config.dataDirectory,
               }),
               diff: diffEvents,
               gateway: {
@@ -1006,13 +1127,36 @@ export function serve(
                 opencodeVersion: (signal) => openCodeVersion(ships, signal),
               },
               signal: viewers.signal,
+              ...(notify
+                ? {
+                    composeRoutes: (token: string) => {
+                      producer = notificationRoutes(
+                        notify,
+                        dependencies.notification?.environment ??
+                          reload?.current.environment ??
+                          process.env,
+                        token,
+                        {
+                          publish: (source, input) =>
+                            notificationCore?.publish(source, input) ??
+                            Effect.fail(new ShuttingDown()),
+                        },
+                      );
+                      return producer.routes;
+                    },
+                  }
+                : {}),
             }),
           ),
           (server) =>
-            Effect.sync(() => viewers.abort()).pipe(
-              Effect.andThen(release(log, "Fleet API", () => server.stop())),
-              Effect.timeoutOption("5 seconds"),
-            ),
+            notify
+              ? Effect.promise(stopNotifications)
+              : Effect.sync(() => viewers.abort()).pipe(
+                  Effect.andThen(
+                    release(log, "Fleet API", () => server.stop()),
+                  ),
+                  Effect.timeoutOption("5 seconds"),
+                ),
         );
         log.info({ listen: api.listen }, "Fleet API listening");
       }
@@ -1160,7 +1304,31 @@ export function serve(
               if (!ships.includes(entry.dashboard)) ships.push(entry.dashboard);
               binding.entries.set(registration.key, entry);
             }
+            notificationView = {
+              notify: candidate.config.notify,
+              registrations: notificationRegistrations.map(
+                ({ bot, identity }) => ({
+                  bot:
+                    candidate.config.bots.find((next) => next.id === bot.id) ??
+                    bot,
+                  identity,
+                }),
+              ),
+            };
+            // Retire all removed Fleet backends before a crew refresh can
+            // sample an alias that is waiting for asynchronous cleanup.
+            for (const { binding, plan } of plans) {
+              for (const registration of plan.removed) {
+                const entry = binding.entries.get(registration.key);
+                if (entry) {
+                  const index = ships.indexOf(entry.dashboard);
+                  if (index >= 0) ships.splice(index, 1);
+                  fleetDashboard?.retireFleetBackend(entry.resource.backend);
+                }
+              }
+            }
             committed = true;
+            fleetDashboard?.invalidateFleetCrew();
             for (const { entry, start } of staged) {
               addedResources.push(entry);
               Effect.runSync(Deferred.succeed(start, undefined));
@@ -1171,10 +1339,6 @@ export function serve(
               for (const registration of plan.removed) {
                 const entry = binding.entries.get(registration.key);
                 binding.entries.delete(registration.key);
-                if (entry) {
-                  const index = ships.indexOf(entry.dashboard);
-                  if (index >= 0) ships.splice(index, 1);
-                }
                 await Effect.runPromise(
                   FiberMap.remove(fibers, registration.key),
                 ).catch(() => log.warn("Retired worker cleanup failed"));
@@ -1223,6 +1387,36 @@ export function serve(
           await delay(connectionTiming.pollMs, undefined, { signal: shutdown });
         }
       });
+      if (notify) {
+        const destinations = notificationDestinations ?? {};
+        notificationScope = yield* Scope.make();
+        notificationCore = yield* makeNotifications({
+          path: join(config.dataDirectory, "notify.sqlite"),
+          destinations,
+          subscriptions: notify.subscriptions,
+          limits: coreLimits(notify),
+          sink:
+            dependencies.notification?.sink ??
+            slackNotificationSink({
+              admitted: destinations,
+              current: () => notificationView,
+              connections: notificationConnections,
+            }),
+        }).pipe(Scope.provide(notificationScope));
+        yield* FiberMap.run(
+          fibers,
+          "notifications",
+          notificationCore.failure.pipe(
+            Effect.catch(() =>
+              Deferred.fail(stopped, new RuntimeStopped({ worker: "runtime" })),
+            ),
+          ),
+        );
+        // Latest owner also covers failures after acquisition but before ready.
+        yield* Effect.addFinalizer(() =>
+          closeIntake().pipe(Effect.andThen(Effect.promise(stopNotifications))),
+        );
+      }
       started = true;
       log.info("Stargate ready");
       const updateReceipts: UpdateReceipt[] = [];
@@ -1375,13 +1569,49 @@ export async function start(configPath: string) {
   const initial = await readReloadCandidate(configPath, baseEnvironment);
   // Startup still supplies companion references to backend modules. Reload
   // candidates never mutate process.env or connected transport credentials.
+  const producerReferences = new Set(
+    Object.values(initial.config.notify?.adapters ?? {})
+      .filter((adapter) => adapter.enabled)
+      .flatMap((adapter) => adapter.sources.map((source) => source.tokenEnv)),
+  );
+  const registrations = [
+    ...initial.config.bots,
+    ...initial.config.teams,
+    ...initial.config.irc,
+    ...initial.config.irc.flatMap((registration) => registration.crew),
+  ];
+  const existingReferences = new Set([
+    ...initial.config.bots.flatMap((bot) => [
+      bot.slack.appTokenEnv,
+      bot.slack.botTokenEnv,
+    ]),
+    ...initial.config.irc.flatMap((registration) =>
+      [registration, ...registration.crew].flatMap((member) =>
+        member.passwordEnv ? [member.passwordEnv] : [],
+      ),
+    ),
+    ...registrations.flatMap(({ backend }) => {
+      if (backend.type === "opencode") return Object.values(backend.headersEnv);
+      if (backend.type === "module") return [];
+      if (backend.provider) return [backend.provider.apiKeyEnv];
+      return [
+        backend.model.startsWith("anthropic/")
+          ? "ANTHROPIC_API_KEY"
+          : "OPENAI_API_KEY",
+      ];
+    }),
+  ]);
   for (const [key, value] of Object.entries(initial.environment))
-    if (process.env[key] === undefined && value !== undefined)
+    if (
+      (!producerReferences.has(key) || existingReferences.has(key)) &&
+      process.env[key] === undefined &&
+      value !== undefined
+    )
       process.env[key] = value;
   const log = pino({ level: "info" });
   const reload = new ConfigReload(
     initial,
-    () => readReloadCandidate(configPath, baseEnvironment),
+    () => readReloadCandidate(configPath, baseEnvironment, true),
     log,
   );
   const controller = new AbortController();

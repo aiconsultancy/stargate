@@ -99,8 +99,22 @@ Ergo, `force-nick-equals-account` keeps each nick equal to its account, and
 
 ### Optional features
 
-Fleet captains and rear admirals send an IRC notice when they start a verified
-human request, then one more if the request is still open after five minutes.
+With the default turn-status setting, fleet captains and rear admirals send an IRC notice when they start a verified
+human request. After five minutes, a notice shows the latest confirmed stage
+for that request. On OpenCode, Stargate checks every five minutes and reports
+new observations. A stage describes an observed event, which may have
+happened earlier in the turn. Notices can report submission, queueing,
+delivery, model steps, reasoning, tool calls and public replies. They contain
+only the stage and time. A timeout includes the last observation or reports
+that activity could not be confirmed. Other backends send a single notice
+if the request is still open after five minutes. The default request limit
+remains one hour.
+Before submitting another verified human request, Stargate checks for an
+unanswered OpenCode question in the active session. When it finds one, it
+reports the blocker without exposing or answering the question. Answer from
+the original conversation or resolve the form in OpenCode, then resend the
+new request. If the check is unavailable, normal submission continues.
+
 Notices follow the request's thread where supported. They replace continuous
 typing for these registrations and cannot wake other agents. Finishing,
 cancelling or timing out the turn stops its notices. Use
@@ -123,7 +137,8 @@ scheduler. Enabling it does not change any Slack registration's flag.
 Stargate uses each of these only when the server offers it. A switch under
 `irc[].features` turns one off; the protocol switches below default to `true`.
 The separate [native clarification bridge](#native-clarification-questions),
-`features.questions`, defaults to `false` and needs `message-tags`.
+`features.questions`, defaults on for OpenCode registrations with enrolled
+humans and needs `message-tags`.
 
 | Server offers                                                                   | Switch       | Stargate then                                                                                                                                                                                        |
 | ------------------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -801,17 +816,36 @@ starts there, and replayed messages older than that are ignored. On a first
 start without a cursor, Stargate sets the cursor to now and replays nothing, so
 an existing backlog is not answered. Replayed reactions never stop a turn.
 
+## Background questions and request status
+
+On a pinned OpenCode captain with native questions enabled, set
+`questionOperator` to one authenticated IRC account already admitted as a
+human. When an earlier standalone synthetic input has a supported question,
+the captain sends that account a private reference. Use `show Q…` in the DM
+to see the form and `answer Q… 1` to select the first option. The answer
+window lasts 30 minutes after showing the form. Both commands work when
+ordinary DMs redirect to the ship channel. The gateway keeps these exchanges
+out of the DM audit mirror. Once a native reply is attempted, its IRC token is spent, including when OpenCode rejects the reply or the acknowledgement is lost. A confirmed native outcome is retained. Use OpenCode to inspect a question that still shows an uncertain outcome.
+
+Live progress is on by default for enrolled humans' captain and rear admiral
+requests when turn status is enabled and the backend emits progress events.
+Fast turns finish quietly. After three seconds, a longer turn shows the
+latest observed stage. Routine updates are coalesced. In a registration with
+enrolled humans, `captain: status` is reserved for checking a request. Reply to
+your original request using the ship's account or nick. The gateway checks that
+you own the request before returning its latest observation. Set
+`features.liveProgress: false` to disable these notices and release the status
+command for ordinary messages. The Fleet API captain summary includes up to 16
+recent observations. Private content stays in the backend.
+
 ## Native clarification questions
 
 OpenCode clarification forms can be answered from the original IRC conversation.
-This bridge is **off by default**. Enable it for an IRC registration with:
-
-```json
-"features": { "questions": true }
-```
-
-Enabling it also requires a `fleetPolicy` with an explicit, nonempty
-`humanAccounts` list. A broad IRC access allow-list and absence of a bot tag do
+For OpenCode registrations with an explicit, nonempty `fleetPolicy.humanAccounts`
+list, native questions are on by default. Set `features.questions: false` to
+opt out. Changes to live IRC access rules apply to pending questions as well
+as new requests.
+A broad IRC access allow-list and absence of a bot tag do
 not prove that an account is human. Stable current access/human policy is separate from live IRC registration and
 channel readiness. Readiness gates publication; a disconnect or a not-yet-joined
 startup cannot discard native ownership or permanently deny an outcome notice.
@@ -950,7 +984,19 @@ replayed after restart. An old cancellation flag, expiry, reconnect or outcome
 notification is never a new approval to issue native Stop. Native settlement
 still determines when the held queue is released.
 
+Pinned OpenCode IRC captains offer gateway handoff by default. The paired
+crew plugin uses it when the captain's gateway is polling. See
+[the crew question setup](agents/default-opencode.md#crew-questions-with-a-read-only-history-service).
+
 ## Presence
+
+### Fleet typing indicators
+
+By default, Stargate sends IRCv3 `+typing` alongside a human
+request's normal captain or rear-admiral thread notices. This requires
+`features.typing`, negotiated `message-tags` and a client that renders the tag.
+The gateway refreshes the indicator during the turn and sends `done` at the
+end. Set `features.fleetTyping: false` to disable fleet typing.
 
 ### Agent waiting status (NET-1637, Step 1)
 
@@ -1465,3 +1511,15 @@ model of their agent definition. Nightly model upgrades do not switch them.
 TLS, SASL accounts and an invite-only channel when
 `~/.local/share/ergo/current/ergo` (or `STARGATE_ERGO_BIN`) and `openssl` exist,
 and is skipped otherwise. It never uses the operator's server or accounts.
+
+Run the disposable clarification fixture with a local OpenCode 2.2.7 binary:
+
+```sh
+mise exec -- bun scripts/irc-question-smoke.ts /path/to/opencode
+mise exec -- bun scripts/irc-question-smoke.ts /path/to/opencode --lose-answer-ack
+mise exec -- bun scripts/irc-question-smoke.ts /path/to/opencode --drop-answer
+```
+
+The fixture uses a loopback model and IRC server. It starts with an open native
+form, restarts the gateway after the operator sees it, and checks the native
+answer and submission count on the original input.

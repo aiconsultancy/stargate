@@ -20,6 +20,7 @@ import {
   type PromptSourceContext,
   type SteerInput,
   type SteerResult,
+  sourceLine,
   type Transcript,
   type TranscriptEntry,
   TranscriptUnavailable,
@@ -42,6 +43,7 @@ import { MetaCommands, type MetaOptions, metaCandidate } from "./meta-commands";
 import { type NotificationReader, notificationNote } from "./notifications";
 import {
   botSender,
+  isSlackHuman,
   type PeerDirectory,
   type PeerSender,
   peerLookupMs,
@@ -60,6 +62,8 @@ import {
   AttachmentInputUnavailable,
   BackendFailure,
   failureText,
+  PendingBackendQuestion,
+  PromptNotSubmitted,
   providerFailure,
   type RequestFailure,
 } from "./request-failure";
@@ -71,9 +75,10 @@ import {
   isAllowedChannel,
   isAllowedUser,
   routeEvent,
+  routeReaction,
   transcriptChunks,
 } from "./routing";
-import type { SocketRequest } from "./slack";
+import type { ReactionTargetRequest, SocketRequest } from "./slack";
 import { type ReplyChunk, replyText, type SlackContent } from "./slack-format";
 import { SlackQuestionControls } from "./slack-questions";
 import {
@@ -100,6 +105,7 @@ import {
   TranscriptionUnavailable,
   transcribeMedia,
 } from "./transcription";
+import { type TurnProgress, turnProgressText } from "./turn-progress";
 import type { UpdateReceipt } from "./update-notice";
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
 
@@ -156,7 +162,7 @@ export type DeliveryUnit = {
   allowed?: () => boolean;
 };
 
-export type IrcTurnStatus = "notice" | "quiet";
+export type IrcTurnStatus = "notice" | "live" | "quiet";
 
 export interface SlackDelivery {
   /** Undefined (or absent) while the transport cannot move files. */
@@ -176,6 +182,9 @@ export interface SlackDelivery {
     signal?: AbortSignal,
   ): Promise<string>;
   threadContext?(input: ThreadContextRequest): Promise<ThreadContext>;
+  /** Slack user directory, used when an event has no reliable bot marker. */
+  userInfo?(user: string, signal: AbortSignal): Promise<unknown>;
+  reactionThread?(input: ReactionTargetRequest): Promise<string | undefined>;
   readReceipt?(channel: string, ts: string, active: boolean): Promise<void>;
   ephemeral?(
     channel: string,
@@ -215,7 +224,7 @@ export interface SlackDelivery {
   ): Promise<void>;
   /**
    * Show that a turn is running until `signal` aborts. When requested, send
-   * an acknowledgement and an open-request notice. Best effort only.
+   * an acknowledgement and backend status notices. Best effort only.
    */
   working?(
     channel: string,
@@ -223,6 +232,7 @@ export interface SlackDelivery {
     signal: AbortSignal,
     allowed?: () => boolean,
     turnStatus?: IrcTurnStatus,
+    readProgress?: () => TurnProgress | undefined,
   ): Promise<void>;
 }
 
@@ -250,9 +260,11 @@ export type GatewayAccessContext = Readonly<
     Partial<Pick<Incoming, "text" | "eventId">>
 >;
 
+type SlackAdmission = (write: () => boolean) => boolean | Promise<boolean>;
+
 /** Transport rules the gateway applies to every job of one registration. */
 export interface GatewayTransport {
-  /** Opt-in clarification channel; never a native permission-approval surface. */
+  /** Clarification channel; never a native permission-approval surface. */
   questions?: QuestionPort;
   /** Session title and source label. */
   readonly name: "slack" | "irc" | "teams";
@@ -261,7 +273,7 @@ export interface GatewayTransport {
   /** Current access rules, rechecked before work and before delivery. */
   allowed(user: string, channel: string, job?: GatewayAccessContext): boolean;
   /** Model-visible source of a chat message; undefined for other jobs. */
-  source(job: Job): PromptSourceContext["source"] | undefined;
+  source(input: Incoming): PromptSourceContext["source"] | undefined;
   /** Prompt prefix naming the sender when no source line is sent. */
   note(job: Job): string | undefined;
   instructions?(job: Job): string;
@@ -276,6 +288,7 @@ export interface GatewayTransport {
 /** The failure a thrown error names when no signal ended the turn. */
 function errorFailure(error: unknown): RequestFailure {
   if (error instanceof BackendFailure) return error.failure;
+  if (error instanceof PendingBackendQuestion) return "pending-question";
   if (error instanceof ThreadContextUnavailable) return "context";
   if (error instanceof AttachmentInputUnavailable) return "attachments";
   if (error instanceof TranscriptionUnavailable) return "transcription";
@@ -293,6 +306,14 @@ export function slackTransport(
     allowed: (user, channel) =>
       isAllowedUser(config, user) && isAllowedChannel(config, channel),
     source(job) {
+      if (job.slackReaction)
+        return {
+          channel: job.channel,
+          thread: job.thread,
+          message: job.slackReaction.ts,
+          user: job.user,
+          reaction: job.slackReaction,
+        };
       const message = job.eventId.slice(job.channel.length + 1);
       if (
         !job.eventId.startsWith(`${job.channel}:`) ||
@@ -314,6 +335,7 @@ export function slackTransport(
 
 export class Gateway {
   private followUpTask: Promise<void> | undefined;
+  private slackAdmissionTail = Promise.resolve();
   private readonly meta: MetaCommands;
   private readonly activity: ActivityDelivery;
   private readonly cancellations = new Map<number, AbortController>();
@@ -334,7 +356,8 @@ export class Gateway {
   /** Every job a worker holds, with the transport rules of its start. */
   private readonly turnPolicies = new Map<number, GatewayTransport>();
   readonly key: string;
-  private readonly questions: Questions | undefined;
+  private questions: Questions | undefined;
+  private readonly supportsQuestions: boolean;
   private readonly slackQuestions: SlackQuestionControls | undefined;
   private readonly questionLifetime = new AbortController();
   constructor(
@@ -400,23 +423,14 @@ export class Gateway {
         },
       );
     }
-    if (
-      (selected.questions || this.slackQuestions) &&
+    this.supportsQuestions = !!(
       backend.pendingQuestions &&
       backend.questionState &&
       backend.questionBelongsToInput &&
       backend.replyQuestion &&
       backend.questionInputSettled
-    )
-      this.questions = new Questions(
-        this.key,
-        store,
-        backend,
-        () => this.questionPort(),
-        (job) => this.allowed(job),
-        (session) => this.settle(session),
-        this.questionLifetime.signal,
-      );
+    );
+    this.enableQuestions();
     this.activity = new ActivityDelivery(
       backend,
       slack,
@@ -432,6 +446,23 @@ export class Gateway {
       log,
       { store },
     );
+  }
+
+  private enableQuestions() {
+    if (
+      !this.questions &&
+      this.supportsQuestions &&
+      (this.transport.questions || this.slackQuestions)
+    )
+      this.questions = new Questions(
+        this.key,
+        this.store,
+        this.backend,
+        () => this.questionPort(),
+        (job) => this.allowed(job),
+        (session) => this.settle(session),
+        this.questionLifetime.signal,
+      );
   }
 
   private questionPort(): QuestionPort | undefined {
@@ -473,6 +504,9 @@ export class Gateway {
     this.bot = bot;
     this.transcriber = transcriber;
     this.transport = selected;
+    // An IRC policy reload can enrol or remove the last human. Keep any
+    // existing bridge for settlement, while its port reads current authority.
+    this.enableQuestions();
   }
 
   /** Stop taking new slots while an idle roster member is detached. */
@@ -576,11 +610,21 @@ export class Gateway {
       this.log.warn("Peer captain thread limit reached; message not admitted");
       return false;
     }
+    return this.admitChat(input, bot);
+  }
+
+  private admitChat(input: Incoming, bot: BotConfig) {
     const accepted =
       (bot.slack.steerThreadFollowUps && this.backend.sessionID
         ? this.store.admitFollowUp(input, this.backend.sessionID)
         : undefined) ?? this.store.enqueue(input);
-    if (accepted && this.slackQuestions && !input.sender && !input.fleet)
+    if (
+      accepted &&
+      this.slackQuestions &&
+      !input.sender &&
+      !input.fleet &&
+      !input.slackReaction
+    )
       this.store.recordQuestionSource(input);
     return accepted;
   }
@@ -602,12 +646,11 @@ export class Gateway {
       const input = this.store.followUpInput(receipt);
       let state = receipt.state;
       const owner = this.store.jobByInput(this.key, receipt.inputID);
-      const source = owner
-        ? this.transport.source({ ...owner, ...input })
-        : undefined;
+      const source = owner ? this.transport.source(input) : undefined;
       const allowed = () =>
         !this.drain?.held() &&
         this.allowed(input) &&
+        this.reactionNotificationsOpen(input) &&
         this.backend.sessionID === receipt.sessionID &&
         (this.bot
           ? this.bot.slack.steerThreadFollowUps
@@ -660,12 +703,22 @@ export class Gateway {
       }
       if ((receipt.notified && state === receipt.state) || !this.allowed(input))
         continue;
+      if (!this.reactionNotificationsOpen(input)) {
+        const queued =
+          state === "queued" &&
+          this.store.jobByEvent(input.botKey, input.eventId);
+        if (queued) this.notificationDispatch(queued);
+        this.store.notifiedFollowUp(receipt);
+        continue;
+      }
       try {
         if (state === "accepted") {
-          const message = input.eventId.slice(input.channel.length + 1);
-          await this.slack.react?.(input.channel, message, "eyes", () =>
-            this.allowed(input),
-          );
+          if (!input.slackReaction) {
+            const message = input.eventId.slice(input.channel.length + 1);
+            await this.slack.react?.(input.channel, message, "eyes", () =>
+              this.allowed(input),
+            );
+          }
         } else if (state === "queued" || state === "uncertain") {
           await this.slack.post(
             input.channel,
@@ -689,13 +742,15 @@ export class Gateway {
   private route(body: unknown, peer?: PeerSender) {
     const bot = this.bot;
     if (!bot) return;
+    return this.routeNotifications((read) =>
+      routeEvent(body, bot, this.identity, peer, read),
+    );
+  }
+
+  private routeNotifications<T>(route: (read?: NotificationReader) => T) {
     let muted = false;
     try {
-      const routed = routeEvent(
-        body,
-        bot,
-        this.identity,
-        peer,
+      const routed = route(
         this.notifications
           ? (channel, thread) => {
               const state = this.notifications?.(channel, thread);
@@ -726,6 +781,19 @@ export class Gateway {
       this.notificationUnavailable();
       // Transient preference faults must not ACK and lose the live event.
       throw new Error("Notification preferences unavailable; retry admission.");
+    }
+  }
+
+  private reactionNotificationsOpen(input: Incoming) {
+    if (!input.slackReaction || !input.notification || !this.notifications)
+      return true;
+    try {
+      const state = this.notifications(input.channel, input.thread);
+      this.notificationFault = false;
+      return state.mode === "normal";
+    } catch {
+      this.notificationUnavailable();
+      return false;
     }
   }
 
@@ -813,28 +881,59 @@ export class Gateway {
   async receive(body: unknown, open: () => boolean = () => true) {
     const bot = this.bot;
     if (!bot || !open()) return false;
-    const question = this.slackQuestions?.receive(
-      body,
-      () => open() && this.bot === bot,
-    );
+    const current = () => open() && this.bot === bot;
+    const reaction = routeReaction(body, bot, this.identity);
+    if (reaction)
+      return this.orderSlackAdmission(current, (admit) =>
+        this.receiveReaction(reaction, bot, current, admit),
+      );
+    const question = this.slackQuestions?.receive(body, current);
     if (question && (await question)) return false;
-    const meta = this.meta.receive(
-      body,
-      bot,
-      this.identity,
-      () => open() && this.bot === bot,
-    );
+    const meta = this.meta.receive(body, bot, this.identity, current);
     if (meta !== false) {
       await meta;
       return false;
     }
+    return bot.slack.inboundReactions
+      ? this.orderSlackAdmission(current, (admit) =>
+          this.receiveMessage(body, bot, current, admit),
+        )
+      : this.receiveMessage(body, bot, open);
+  }
+
+  /** Start lookups on arrival; only the durable writes wait their turn. */
+  private async orderSlackAdmission(
+    open: () => boolean,
+    receive: (admit: SlackAdmission) => Promise<boolean>,
+  ) {
+    const before = this.slackAdmissionTail;
+    const slot = Promise.withResolvers<void>();
+    this.slackAdmissionTail = slot.promise;
+    try {
+      return await receive(async (write) => {
+        await before;
+        return open() && write();
+      });
+    } finally {
+      // A rejected event must not let a later event pass an earlier lookup.
+      await before;
+      slot.resolve();
+    }
+  }
+
+  private async receiveMessage(
+    body: unknown,
+    bot: BotConfig,
+    open: () => boolean,
+    admit: SlackAdmission = (write) => write(),
+  ) {
     const sender = botSender(body);
     if (sender && bot.access.peerCaptains && this.peers) {
       const verified = await this.peers
         .verify(sender, AbortSignal.timeout(peerLookupMs))
         .catch(() => false);
       if (!open()) return false;
-      return this.accept(body, verified ? sender : undefined);
+      return admit(() => this.accept(body, verified ? sender : undefined));
     }
     if (bot.resumeSlackThreads && this.slack.threadContext && !sender) {
       const input = this.route(body);
@@ -858,14 +957,72 @@ export class Gateway {
           signal: AbortSignal.timeout(1800),
         });
         if (!open() || this.bot !== bot) return false;
-        return this.accept(
-          body,
-          undefined,
-          history.messages.some((message) => message.author === "this_bot"),
+        return admit(() =>
+          this.accept(
+            body,
+            undefined,
+            history.messages.some((message) => message.author === "this_bot"),
+          ),
         );
       }
     }
-    return this.accept(body);
+    return admit(() => this.accept(body));
+  }
+
+  private async receiveReaction(
+    input: NonNullable<ReturnType<typeof routeReaction>>,
+    bot: BotConfig,
+    open: () => boolean,
+    admit: SlackAdmission,
+  ) {
+    const {
+      channel,
+      user,
+      slackReaction: { ts, name, action },
+    } = input;
+    let thread = this.store.slackReplyThread(this.key, channel, ts);
+    if (!this.slack.userInfo || (!thread && !this.slack.reactionThread))
+      return false;
+    // Both reads share the Socket Mode acknowledgement budget.
+    const signal = AbortSignal.any([
+      this.questionLifetime.signal,
+      AbortSignal.timeout(2200),
+    ]);
+    try {
+      if (!isSlackHuman(await this.slack.userInfo(user, signal), user))
+        return false;
+      if (signal.aborted || !open()) return false;
+      thread ??= await this.slack.reactionThread?.({
+        channel,
+        ts,
+        appId: bot.slack.appId,
+        identity: this.identity,
+        signal,
+      });
+    } catch {
+      return false;
+    }
+    if (!thread || signal.aborted) return false;
+    const root = thread;
+    return admit(() => {
+      if (!this.allowed(input)) return false;
+      const admission = this.routeNotifications((read) => {
+        const notification = channel.startsWith("D")
+          ? undefined
+          : read?.(channel, root);
+        if (notification?.mode === "addressed-only") return;
+        return {
+          ...input,
+          conversation: conversationKey(this.key, channel, root),
+          thread: root,
+          text: `Slack reaction :${name}: ${action}.`,
+          ...(notification
+            ? { notification: { wake: "ordinary" as const } }
+            : {}),
+        };
+      });
+      return admission ? this.admitChat(admission, bot) : false;
+    });
   }
 
   /** Commit the exact requester-authorized target before Socket Mode ACK. */
@@ -917,6 +1074,22 @@ export class Gateway {
         this.questionLifetime.signal,
         AbortSignal.timeout(10_000),
       ]),
+    );
+  }
+
+  async operatorQuestion(
+    actor: string,
+    text: string,
+    connected: () => boolean,
+  ) {
+    await this.questions?.operatorAnswer(
+      actor,
+      text,
+      AbortSignal.any([
+        this.questionLifetime.signal,
+        AbortSignal.timeout(/^show /i.test(text.trim()) ? 60_000 : 10_000),
+      ]),
+      connected,
     );
   }
 
@@ -991,7 +1164,10 @@ export class Gateway {
     return Effect.scoped(
       Effect.gen(function* () {
         yield* abortable((signal) => gateway.recover(signal));
-        if (gateway.questions)
+        if (
+          gateway.questions ||
+          (gateway.transport.name === "irc" && gateway.supportsQuestions)
+        )
           yield* Effect.forkScoped(
             abortable(async (signal) => {
               while (!signal.aborted) {
@@ -1018,6 +1194,9 @@ export class Gateway {
                 gateway.backend,
                 (session) => gateway.settle(session),
                 signal,
+                gateway.transport.questions?.operator
+                  ? () => gateway.questions?.reconcileBackground()
+                  : undefined,
               ),
             ).pipe(
               Effect.catchCause(() =>
@@ -1593,6 +1772,7 @@ export class Gateway {
       if (
         bot?.slackReadReceipts &&
         job.received != null &&
+        !job.slackReaction &&
         !job.sender &&
         !job.deferDelivery &&
         allowed(job)
@@ -1631,6 +1811,12 @@ export class Gateway {
       ]);
       // Ends before delivery, so a typing indicator never outlasts the turn.
       const typing = new AbortController();
+      const turnStatus = transport.turnStatus?.(job);
+      const observeProgress =
+        !job.deferDelivery &&
+        ((turnStatus === "notice" && config.backend.type === "opencode") ||
+          turnStatus === "live");
+      let progress: TurnProgress | undefined;
       const working = job.deferDelivery
         ? undefined
         : this.slack
@@ -1639,7 +1825,8 @@ export class Gateway {
               job.thread,
               AbortSignal.any([typing.signal, signal]),
               () => allowed(job),
-              transport.turnStatus?.(job),
+              turnStatus,
+              observeProgress ? () => progress : undefined,
             )
             .catch(() => {});
       const live = job.deferDelivery
@@ -1680,6 +1867,7 @@ export class Gateway {
           allowed(job) &&
           this.slack.react &&
           parsed.reaction &&
+          !job.slackReaction &&
           !reacted &&
           !signal.aborted
         ) {
@@ -1713,6 +1901,9 @@ export class Gateway {
             : (fleetResultSource(job) ?? transport.source(job));
           const sourceContext: PromptSourceContext | undefined =
             pinned && source ? { source } : undefined;
+          // Unpinned adapters, including Pi, do not receive ordinary source context.
+          if (!pinned && source?.reaction)
+            text = `${sourceLine({ source })}\n\n${text}`;
           // Without a source line, the prompt itself names a special sender.
           const note = sourceContext ? undefined : transport.note(job);
           if (note) text = `${note}\n\n${text}`;
@@ -1724,7 +1915,12 @@ export class Gateway {
           // greybeard: pinned turns carry IDs only; missing history needs explicit retrieval.
           if (!pinned && !session && bot) {
             // Roots (including scheduled runs) have no earlier thread messages.
-            if (bot.threadContext && source && source.message !== job.thread) {
+            if (
+              bot.threadContext &&
+              source &&
+              !source.reaction &&
+              source.message !== job.thread
+            ) {
               if (!this.slack.threadContext)
                 throw new ThreadContextUnavailable();
               const history = await this.slack.threadContext({
@@ -1893,7 +2089,9 @@ export class Gateway {
             text,
             signal,
             live ? (text) => live.push(reply(text, false)) : undefined,
-            pinned || this.questions
+            pinned ||
+              (this.questions &&
+                (this.transport.questions || this.slackQuestions))
               ? (input) => {
                   this.store.saveInput(this.key, job.id, input, pinned);
                   if (pinned && captain?.cursor === undefined) {
@@ -1904,7 +2102,20 @@ export class Gateway {
               : undefined,
             inputFiles,
             sourceContext,
+            observeProgress
+              ? (update) => {
+                  progress = update;
+                  if (turnStatus === "live")
+                    this.store.saveTurnProgress(job.id, update);
+                }
+              : undefined,
+            turnStatus === "live",
           );
+          if (turnStatus === "live")
+            this.store.saveTurnProgress(job.id, {
+              stage: "completed",
+              observedAt: Date.now(),
+            });
           // A concurrent native receipt must settle before final link capture.
           await this.followUpTask;
           // History may become readable only as the original turn settles.
@@ -1963,6 +2174,7 @@ export class Gateway {
           if (cancellation.signal.aborted || maintenanceFailure.signal.aborted)
             activity?.cancel();
           else if (!shutdown.aborted) activity?.finish();
+          if (error instanceof PromptNotSubmitted) admitted = false;
           silent = false;
           failure = cancellation.signal.aborted
             ? "cancelled"
@@ -1978,12 +2190,22 @@ export class Gateway {
               job: job.id,
               backend: config.backend.type,
               failure: detail?.kind ?? failure,
+              ...(failure === "timeout" && progress
+                ? {
+                    lastStage: progress.stage,
+                    lastStageAgeMs: Date.now() - progress.observedAt,
+                  }
+                : {}),
               ...(detail?.status ? { status: detail.status } : {}),
               ...(detail ? { ran: detail.ran } : {}),
             },
             "Agent request failed or timed out",
           );
-          output = [statusText(failure)];
+          output = [
+            failure === "timeout" && observeProgress
+              ? `${statusText(failure)} ${turnProgressText(progress)}`
+              : statusText(failure),
+          ];
           transcript = undefined;
           // A request refused before admission submitted no input and owns no
           // text: reading history for it could assign another source's reply
@@ -2113,20 +2335,32 @@ export class Gateway {
         // Persisted classification is final: never derive it again here.
         const content = typeof chunk === "string" ? undefined : chunk.content;
         const ts = previews.get(i);
+        let posted: string | undefined;
         // Only the final chunk is the status; earlier chunks are public text.
         if (failure && this.slack.failure && i === output.length - 1) {
-          if (
-            (await this.slack.failure(job.channel, job.thread, failure, ts)) ===
-            false
-          ) {
+          const result = await this.slack.failure(
+            job.channel,
+            job.thread,
+            failure,
+            ts,
+          );
+          if (result === false) {
             this.store.removePreview(job.id, i);
-            await this.slack.failure(job.channel, job.thread, failure);
+            const replacement = await this.slack.failure(
+              job.channel,
+              job.thread,
+              failure,
+            );
+            if (typeof replacement === "string") posted = replacement;
+          } else if (!ts && typeof result === "string") {
+            posted = result;
           }
-        } else if (ts) {
-          if (!this.slack.update)
+        } else {
+          if (ts && !this.slack.update)
             throw new Error("Slack preview update unavailable");
           if (
-            (await this.slack.update(
+            !ts ||
+            (await this.slack.update?.(
               job.channel,
               ts,
               text,
@@ -2134,27 +2368,21 @@ export class Gateway {
               content,
             )) === false
           ) {
-            this.store.removePreview(job.id, i);
-            await this.slack.post(
-              job.channel,
-              job.thread,
-              text,
-              undefined,
-              { job: job.id, part: i, allowed: () => allowed(job) },
-              content,
-            );
+            if (ts) this.store.removePreview(job.id, i);
+            posted =
+              (await this.slack.post(
+                job.channel,
+                job.thread,
+                text,
+                undefined,
+                { job: job.id, part: i, allowed: () => allowed(job) },
+                content,
+              )) || undefined;
           }
-        } else {
-          await this.slack.post(
-            job.channel,
-            job.thread,
-            text,
-            undefined,
-            { job: job.id, part: i, allowed: () => allowed(job) },
-            content,
-          );
         }
-        if (!this.store.sent(job.id, i + 1)) return this.refused(job, "sent");
+        const slackTs = this.bot ? posted : undefined;
+        if (!this.store.sent(job.id, i + 1, slackTs))
+          return this.refused(job, "sent");
       }
       await deliverAttachments(
         job,

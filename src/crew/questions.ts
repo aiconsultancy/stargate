@@ -40,7 +40,13 @@ const decodeReceipt = Schema.decodeUnknownResult(
 type QuestionBackend = Pick<
   OpenCodeBackend,
   "pendingQuestions" | "questionBelongsToInput" | "replyQuestion"
->;
+> & {
+  outcome?: (
+    form: string,
+    fingerprint: string,
+    signal: AbortSignal,
+  ) => Promise<"answered" | "cancelled" | undefined>;
+};
 interface Authority {
   options: { captainDirectory: string; team: Team };
   state: CrewState;
@@ -49,6 +55,8 @@ interface Authority {
 }
 type Options = {
   settings?: () => Promise<QuestionSettings>;
+  enableWhenMissing?: () => boolean;
+  onUnavailable?: () => void;
   now?: () => number;
   project?: string;
 };
@@ -71,18 +79,25 @@ export class CrewQuestions {
     this.settings =
       options.settings ??
       (() =>
-        resolveQuestionSettings({
-          backend: {
-            type: "opencode",
-            url: "http://localhost",
-            headersEnv: {},
-            permissions: [],
-            directory: authority.options.captainDirectory,
-            agent:
-              authority.options.team.captain.agent ??
-              authority.options.team.captain.id,
+        resolveQuestionSettings(
+          {
+            backend: {
+              type: "opencode",
+              url: "http://localhost",
+              headersEnv: {},
+              permissions: [],
+              directory: authority.options.captainDirectory,
+              agent:
+                authority.options.team.captain.agent ??
+                authority.options.team.captain.id,
+            },
           },
-        }));
+          options.enableWhenMissing?.() === true,
+        ));
+  }
+
+  active(task: CrewTask) {
+    return this.owner({ taskID: task.id, ...task });
   }
 
   private owner(
@@ -115,7 +130,7 @@ export class CrewQuestions {
     return task;
   }
 
-  async poll(signal: AbortSignal) {
+  async poll(signal: AbortSignal, available = true) {
     const settings = await this.settings();
     if (!settings.enabled) return;
     const members = this.authority.options.team.crew.filter((m) => !m.backend);
@@ -127,6 +142,10 @@ export class CrewQuestions {
       if (!member) continue;
       const task = this.authority.state.activeTask(member.id);
       if (!task || !this.owner({ taskID: task.id, ...task })) continue;
+      if (!available) {
+        this.options.onUnavailable?.();
+        return;
+      }
       for (const offer of this.authority.state.crewQuestionOffers(task.id)) {
         if (
           offer.state === "attempted" &&
@@ -137,6 +156,20 @@ export class CrewQuestions {
       }
       try {
         const backend = await this.connect(task, signal);
+        if (backend.outcome) {
+          for (const offer of this.authority.state.crewQuestionOffers(
+            task.id,
+          )) {
+            if (offer.state !== "attempted" || offer.outcome !== "uncertain")
+              continue;
+            const outcome = await backend
+              .outcome(offer.formID, offer.fingerprint, signal)
+              .catch(() => undefined);
+            signal.throwIfAborted();
+            if (outcome)
+              this.authority.state.crewQuestionOutcome(offer.token, outcome);
+          }
+        }
         const pending = await backend.pendingQuestions(
           task.workerSessionID,
           signal,

@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -9,8 +10,10 @@ import {
   type CrewOptions,
   type CrewSessions,
 } from "../src/crew/engine";
+import { IrcSessions } from "../src/crew/irc";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import { teamSchema } from "../src/crew/team";
+import { outboxFixture, outboxNow } from "./fixtures/irc-outbox";
 
 const pin = "ses_captainpin";
 
@@ -384,27 +387,36 @@ test("crew irc outbox: every stored stargate_dm is listed once, in order; mail i
 });
 
 test("crew irc outbox: bounded by count and age", async () => {
-  const f = await fixture();
+  const directory = await mkdtemp(join(tmpdir(), "stargate-outbox-"));
+  await copyFile(outboxFixture, join(directory, "outbox.sqlite"));
+  const db = new Database(join(directory, "outbox.sqlite"), {
+    create: true,
+    strict: true,
+  });
   try {
-    const outbox = f.engine.state.ircSessions;
+    const outbox = new IrcSessions(db);
     const item = (n: number) => ({
       id: n.toString(16).padStart(32, "0"),
       from: { role: "captain" as const, id: "captain" },
       to: { role: "crew" as const, id: "worker" },
       text: `message ${n}`,
     });
-    const day = 24 * 60 * 60_000;
-    outbox.enqueue(item(1), Date.now() - day - 1000);
-    for (let n = 2; n <= 1003; n++) outbox.enqueue(item(n));
-    const all = outbox.outbox({ after: 0, limit: 2000 });
+    // Saved rows cover setup; remaining writes still exercise count/age pruning.
+    db.transaction(() => {
+      for (let n = 1001; n <= 1003; n++) outbox.enqueue(item(n), outboxNow);
+    }).immediate();
+    const all = outbox.outbox({ after: 0, limit: 2000 }, outboxNow);
     expect(all.latest).toBe(1003);
     expect(all.items).toHaveLength(1000);
     expect(all.items[0]?.text).toBe("message 4");
     // The same receipt is listed once.
-    outbox.enqueue(item(1003));
-    expect(outbox.outbox({ after: 1002, limit: 10 }).items).toHaveLength(1);
+    outbox.enqueue(item(1003), outboxNow);
+    expect(
+      outbox.outbox({ after: 1002, limit: 10 }, outboxNow).items,
+    ).toHaveLength(1);
   } finally {
-    await f.close();
+    db.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

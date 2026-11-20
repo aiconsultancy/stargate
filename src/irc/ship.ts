@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { type PromptSourceContext, sourceLine } from "../backend";
+import { operatorControl } from "../background-questions";
 import {
   type BackendConfig,
   effectiveIrcConfig,
@@ -16,6 +17,7 @@ import type { GatewayConfig, GatewayTransport } from "../gateway";
 import { questionControl, questionFingerprint } from "../questions";
 import { backendFingerprint, type Identity } from "../routing";
 import type { Incoming, Store } from "../store";
+import { turnProgressText } from "../turn-progress";
 import { ctcp, IrcAudit, sensitive, serviceNick } from "./audit";
 import { ircBurstEligible } from "./burst";
 import {
@@ -26,6 +28,7 @@ import {
 } from "./client";
 import { clientPem } from "./client-pem";
 import { type CrewLink, crewLink } from "./crew-link";
+import { CrewQuestionGateway } from "./crew-question-gateway";
 import { IrcDelivery } from "./delivery";
 import { Filehost, filehostURL } from "./filehost";
 import {
@@ -53,6 +56,11 @@ import { ircLines } from "./text";
 export type IrcRegistration = IrcMember & {
   /** Set by the runtime: stop the active turn of one request. */
   stopTurn?: (conversation: string, thread: string) => boolean;
+  operatorQuestion?: (
+    actor: string,
+    text: string,
+    connected: () => boolean,
+  ) => Promise<void>;
   answerQuestion?: (
     input: Incoming,
     control: NonNullable<ReturnType<typeof questionControl>>,
@@ -232,9 +240,11 @@ async function memberCertificates(members: readonly ShipMember[]) {
 
 /** Non-reloadable connection settings; includes each member's auth references. */
 function connection(config: IrcConfig, member: ShipMember) {
+  const { questions: _, ...connectionFeatures } = config.features;
   return JSON.stringify([
     config.server,
-    config.features,
+    connectionFeatures,
+    config.questionOperator ?? null,
     config.channels,
     config.audit ?? null,
     member,
@@ -382,13 +392,55 @@ function shipTransport(
         !job.sender &&
         job.eventId.startsWith(`${job.channel}:`) &&
         questionHuman(config, job.user, client.fold)
-        ? "notice"
+        ? config.features.liveProgress &&
+          ["claude", "codex", "opencode"].includes(config.backend.type)
+          ? "live"
+          : "notice"
         : "quiet";
     },
     ...(config.features.questions
       ? {
           questions: {
             account: member.account,
+            ...(member.role === "captain" && config.questionOperator
+              ? {
+                  operator: {
+                    account: client.fold(config.questionOperator),
+                    ready: () =>
+                      client.registered &&
+                      client.hasCap("message-tags") &&
+                      !!config.questionOperator &&
+                      questionHuman(
+                        config,
+                        config.questionOperator,
+                        client.fold,
+                      ) &&
+                      ircAllowed(
+                        config,
+                        member,
+                        config.questionOperator,
+                        config.questionOperator,
+                        client.fold,
+                      ),
+                    send: async (text: string, allowed: () => boolean) => {
+                      const account = config.questionOperator;
+                      if (!account || !allowed()) return;
+                      const nick = await client.verifiedNick(account);
+                      for (const line of ircLines(text, 300)) {
+                        await client.send(
+                          "PRIVMSG",
+                          [nick, line],
+                          {},
+                          () => allowed() && client.holds(account, nick),
+                          "normal",
+                          undefined,
+                          false,
+                        );
+                      }
+                    },
+                  },
+                }
+              : {}),
             authorized: (job) => authorized(job.user, job.channel, job),
             ready: (job) =>
               client.registered &&
@@ -596,11 +648,18 @@ export class IrcShip {
     if (this.started) return;
     this.started = true;
     this.open = open;
+    this.track(this.maintain(this.controller.signal));
     if (
-      this.config.features.questions ||
-      this.config.access.humanWakeChannels?.length
+      this.config.features.crewQuestionHandoff &&
+      this.config.backend.type === "opencode" &&
+      this.config.backend.sessionID
     )
-      this.track(this.maintain(this.controller.signal));
+      this.track(
+        new CrewQuestionGateway(
+          this.config.backend,
+          this.options.env ?? process.env,
+        ).run(this.controller.signal),
+      );
     if (this.audit) this.track(this.audit.run(this.controller.signal));
     if (this.link && this.config.crewMessaging.ircCopies)
       this.track(this.copies(this.link, this.controller.signal));
@@ -612,6 +671,11 @@ export class IrcShip {
     while (!signal.aborted) {
       await delay(60_000, undefined, { signal }).catch(() => {});
       if (signal.aborted) return;
+      if (
+        !this.config.features.questions &&
+        !this.config.access.humanWakeChannels?.length
+      )
+        continue;
       try {
         for (const registration of this.current)
           this.store.pruneIrcHistory(registration.key, Date.now());
@@ -646,7 +710,7 @@ export class IrcShip {
    * but connects nothing and changes nothing. Throws, with no
    * change, when an added member's credential is invalid, the
    * registration ID changes, or a kept connection's settings change
-   * (server, features, channels, or a member's account, nick, credential
+   * (server, connection features, channels, or a member's account, nick, credential
    * reference, backend, display name or limits): those need a restart.
    */
   async prepareReload(
@@ -797,6 +861,7 @@ export class IrcShip {
     const lifetime: Lifetime = { controller: new AbortController() };
     // A removed connection's late events never count.
     const detached = () => lifetime.controller.signal.aborted;
+    const lastStatus = new Map<string, number>();
     const ca = this.ca;
     const client: IrcClient = new IrcClient(
       {
@@ -849,6 +914,121 @@ export class IrcShip {
           // as the sender's outgoing DM. Never a turn, never mirrored twice.
           if (this.ownCopy(client, message)) {
             this.advance(identity, client, message);
+            return;
+          }
+          const body = message.params[1] ?? "";
+          const status = /^@?([^\s:,]+)[:,]\s+status\s*$/i.exec(body);
+          if (
+            this.config.features.liveProgress &&
+            this.config.fleetPolicy?.humanAccounts.length &&
+            message.command === "PRIVMSG" &&
+            status &&
+            [client.nick, identity.account].some(
+              (n) => client.fold(n) === client.fold(status[1] ?? ""),
+            )
+          ) {
+            const actor = message.tags.get("account");
+            const target = message.params[0] ?? "";
+            const channel = client.isChannel(target)
+              ? client.fold(target)
+              : client.fold(actor ?? "");
+            const root = message.tags.get("+draft/reply");
+            const authorized = () =>
+              !detached() &&
+              this.open() &&
+              !!actor &&
+              questionHuman(this.config, actor, client.fold) &&
+              ircAllowed(this.config, identity, actor, channel, client.fold);
+            if (
+              !replay &&
+              validMsgid(message.tags.get("msgid")) &&
+              !message.tags.has("bot") &&
+              authorized() &&
+              actor
+            ) {
+              this.mirrorIncoming(identity, client, message, false);
+              const user = client.fold(actor);
+              if ((lastStatus.get(user) ?? 0) > Date.now() - 2000) return;
+              lastStatus.set(user, Date.now());
+              const requested =
+                root &&
+                this.store.jobByEvent(identity.key, `${channel}:${root}`);
+              const anchor = requested
+                ? root
+                : root &&
+                  this.store.ircRequestAnchor(identity.key, channel, root);
+              const job =
+                requested ||
+                (anchor &&
+                  this.store.jobByEvent(identity.key, `${channel}:${anchor}`));
+              let text = "Reply to your original request to check its status.";
+              if (
+                job &&
+                anchor &&
+                job.channel === channel &&
+                job.user === user
+              ) {
+                const row = this.store.requestProgress(identity.key, job.id)[0];
+                text = row
+                  ? `${row.failure ? "Request ended: " + row.failure + ". " : ""}${turnProgressText({ stage: row.stage, observedAt: row.observedAt, disconnected: row.disconnected, ...(this.config.backend.type === "claude" || this.config.backend.type === "codex" ? { backend: this.config.backend.type } : {}) })}`
+                  : `Stargate request is ${job.status}. Backend activity is unconfirmed.`;
+              }
+              void registration.delivery
+                .post(
+                  channel,
+                  message.tags.get("msgid") ?? "",
+                  text,
+                  undefined,
+                  { allowed: authorized },
+                )
+                .catch(() => {});
+            }
+            return;
+          }
+          const actor = message.tags.get("account");
+          const operator = this.config.questionOperator;
+          const privateControl =
+            member.role === "captain" &&
+            this.config.features.questions &&
+            operator &&
+            message.command === "PRIVMSG" &&
+            client.fold(message.params[0] ?? "") === client.fold(client.nick) &&
+            operatorControl(body);
+          const isOperator =
+            !!actor &&
+            !!operator &&
+            client.fold(actor) === client.fold(operator);
+          if (
+            privateControl &&
+            (isOperator ||
+              this.store.backgroundCases.find(
+                key,
+                privateControl[2] ?? "",
+                privateControl[1]?.toLowerCase() === "answer",
+              ))
+          ) {
+            // Real tokens, including duplicates, never become model inputs.
+            if (
+              !replay &&
+              this.open() &&
+              actor &&
+              isOperator &&
+              !message.tags.has("bot") &&
+              validMsgid(message.tags.get("msgid"))
+            ) {
+              void registration
+                .operatorQuestion?.(
+                  client.fold(actor),
+                  body,
+                  client.recipientGuard(
+                    actor,
+                    sourceNick(message.source ?? ""),
+                  ),
+                )
+                .catch(() =>
+                  this.log.warn("Private question control unavailable"),
+                );
+            }
             return;
           }
           this.mirrorIncoming(identity, client, message, replay);
@@ -954,6 +1134,7 @@ export class IrcShip {
         },
         {
           typing: config.features.typing,
+          fleetTyping: config.features.fleetTyping === true,
           reactions: config.features.reactions,
         },
         (thread) => this.store.ircReplyParent(key, thread),

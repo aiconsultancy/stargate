@@ -10,6 +10,7 @@ import {
   totalmem,
   uptime,
 } from "node:os";
+import { createReadSlot } from "../../read-deadline";
 import type { V1Host } from "./types";
 
 export function memAvailableBytes(meminfo: string) {
@@ -44,10 +45,8 @@ export function cpuUsage(previous: CpuTotals, current: CpuTotals) {
 
 async function disk(path: string) {
   try {
-    const [{ dev }, usage] = await Promise.all([
-      stat(path, { bigint: true }),
-      statfs(path),
-    ]);
+    const { dev } = await stat(path, { bigint: true });
+    const usage = await statfs(path);
     const blockBytes = usage.frsize || usage.bsize;
     return {
       dev,
@@ -72,7 +71,18 @@ async function availableMemory() {
   return freemem();
 }
 
+// The order in which samples were taken, independent of the wall clock, so a
+// clock change cannot make a newer sample look older.
+const sampleOrder = new WeakMap<V1Host, number>();
+let sampleSequence = 0;
+
+/** When `host` was taken relative to other samples, if this module took it. */
+export function hostSampleOrder(host: V1Host): number | undefined {
+  return sampleOrder.get(host);
+}
+
 export function startHostMetrics(dataDirectory: string) {
+  const lifetime = new AbortController();
   let cpu = cpuTotals(cpus());
   let usage: number | null = null;
   const sampler = setInterval(() => {
@@ -80,29 +90,56 @@ export function startHostMetrics(dataDirectory: string) {
     usage = cpuUsage(cpu, next);
     cpu = next;
   }, 5000);
+  function snapshot(
+    disks: V1Host["disks"] = [],
+    availableBytes = freemem(),
+  ): V1Host {
+    const [short = 0, medium = 0, long = 0] = loadavg();
+    const sample: V1Host = {
+      hostname: hostname(),
+      platform: platform(),
+      arch: arch(),
+      uptimeSec: uptime(),
+      cpu: { cores: cpu.cores, usage, load: [short, medium, long] },
+      memory: { totalBytes: totalmem(), availableBytes },
+      disks,
+      sampledAt: Date.now(),
+    };
+    sampleOrder.set(sample, ++sampleSequence);
+    return sample;
+  }
+
+  async function sample() {
+    const [availableBytes, root, data] = await Promise.all([
+      availableMemory(),
+      disk("/"),
+      disk(dataDirectory),
+    ]);
+    const disks = [];
+    if (root) disks.push({ path: "/", ...root.metrics });
+    if (data && data.dev !== root?.dev)
+      disks.push({ path: "data", ...data.metrics });
+    return snapshot(disks, availableBytes);
+  }
+
+  let latest: V1Host | undefined;
+  const reads = createReadSlot<V1Host>(20_000);
   return {
-    stop: () => clearInterval(sampler),
-    async read(): Promise<V1Host> {
-      const [availableBytes, root, data] = await Promise.all([
-        availableMemory(),
-        disk("/"),
-        disk(dataDirectory),
-      ]);
-      const disks = [];
-      if (root) disks.push({ path: "/", ...root.metrics });
-      if (data && data.dev !== root?.dev)
-        disks.push({ path: "data", ...data.metrics });
-      const [short = 0, medium = 0, long = 0] = loadavg();
-      return {
-        hostname: hostname(),
-        platform: platform(),
-        arch: arch(),
-        uptimeSec: uptime(),
-        cpu: { cores: cpu.cores, usage, load: [short, medium, long] },
-        memory: { totalBytes: totalmem(), availableBytes },
-        disks,
-        sampledAt: Date.now(),
-      };
+    stop() {
+      lifetime.abort();
+      clearInterval(sampler);
+    },
+    snapshot: () => latest ?? snapshot(),
+    read() {
+      return (
+        reads.pending ??
+        reads.start(lifetime.signal, async (signal) => {
+          const data = await sample();
+          signal.throwIfAborted();
+          latest = data;
+          return data;
+        })
+      ).result;
     },
   };
 }

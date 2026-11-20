@@ -295,3 +295,7 @@ Claude Code CLI against a loopback Messages fixture with canary credentials
 in a fake home directory. No test contacts a provider.
 
 [sdk]: https://platform.claude.com/docs/en/agent-sdk/overview
+
+With IRC live progress enabled, Claude reports the main turn's model, reasoning, tool
+and reply stages as its SDK emits them. IRC receives fixed stage descriptions
+and timestamps. Native clarification recovery is available on OpenCode.

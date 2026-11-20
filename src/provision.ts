@@ -273,15 +273,20 @@ export async function provisionBots(
   const environment = dependencies.environment ?? process.env;
   const request = dependencies.fetch ?? fetch;
   const now = dependencies.now ?? Date.now;
-  // Disabled steering preserves pre-flag journal identity. Enabling it still
-  // changes the plan hash; no mismatch may replay a remote app creation.
+  // Omit disabled Slack flags to keep pre-flag journal identities. Enabling a
+  // flag still changes the hash; a mismatch must not replay app creation.
   const hashPlan = {
     ...plan,
     bots: plan.bots.map((entry) => {
-      const { steerThreadFollowUps, ...legacySlack } = entry.slack;
+      const { steerThreadFollowUps, inboundReactions, ...legacySlack } =
+        entry.slack;
       return {
         ...entry,
-        slack: steerThreadFollowUps ? entry.slack : legacySlack,
+        slack: {
+          ...(steerThreadFollowUps ? { steerThreadFollowUps } : {}),
+          ...(inboundReactions ? { inboundReactions } : {}),
+          ...legacySlack,
+        },
       };
     }),
   };

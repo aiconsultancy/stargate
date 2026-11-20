@@ -1,5 +1,6 @@
 import { SocketModeClient } from "@slack/socket-mode";
 import { LogLevel, WebClient, type WebClientOptions } from "@slack/web-api";
+import { Result, Schema } from "effect";
 import type { Logger } from "pino";
 import type { ActivityView } from "./activity";
 import { activityContent } from "./activity-slack";
@@ -7,7 +8,10 @@ import { stopBlock } from "./cancellation";
 import type { CrewUIApi } from "./crew-ui";
 import type { CronUIApi } from "./cron-ui";
 import type { SlackDelivery } from "./gateway";
-import type { ReactionName } from "./reactions";
+import type { DisplayPayload } from "./notify/model";
+import type { SinkOutcome } from "./notify/sink";
+import { notificationContent, notificationOutcome } from "./notify/slack";
+import { type ReactionName, slackTimestamp } from "./reactions";
 import { failureContent, type RequestFailure } from "./request-failure";
 import type { Identity } from "./routing";
 import { retrySlack, SlackSocket } from "./slack-connection";
@@ -36,6 +40,31 @@ export type SocketRequest = {
   body: unknown;
   ack: (payload?: Record<string, unknown>) => Promise<void>;
 };
+
+export type ReactionTargetRequest = {
+  channel: string;
+  ts: string;
+  appId: string;
+  identity: Identity;
+  signal: AbortSignal;
+};
+
+const reactionTargetSchema = Schema.Struct({
+  ok: Schema.Literal(true),
+  type: Schema.Literal("message"),
+  channel: Schema.String,
+  message: Schema.Struct({
+    type: Schema.Literal("message"),
+    ts: slackTimestamp,
+    thread_ts: Schema.optional(slackTimestamp),
+    user: Schema.String,
+    team: Schema.optional(Schema.String),
+    channel: Schema.optional(Schema.String),
+    app_id: Schema.optional(Schema.String),
+    parent_user_id: Schema.optional(Schema.String),
+    hidden: Schema.optional(Schema.Literal(false)),
+  }),
+});
 
 export interface SlackInteractions {
   command(body: unknown, ack: SocketRequest["ack"]): Promise<void>;
@@ -145,6 +174,32 @@ export class SlackConnection implements SlackDelivery {
     return this.historyWeb(signal).users.info({ user });
   }
 
+  /** Exact message lookup only; the event's item_user is not authorship proof. */
+  async reactionThread({
+    channel,
+    ts,
+    appId,
+    identity,
+    signal,
+  }: ReactionTargetRequest) {
+    const result = Schema.decodeUnknownResult(reactionTargetSchema)(
+      await this.historyWeb(signal).reactions.get({ channel, timestamp: ts }),
+    );
+    if (Result.isFailure(result) || result.success.channel !== channel) return;
+    const message = result.success.message;
+    if (
+      message.ts !== ts ||
+      message.user !== identity.user ||
+      (message.team !== undefined && message.team !== identity.team) ||
+      (message.channel !== undefined && message.channel !== channel) ||
+      (message.parent_user_id !== undefined &&
+        message.thread_ts === undefined) ||
+      (message.app_id !== undefined && message.app_id !== appId)
+    )
+      return;
+    return message.thread_ts ?? message.ts;
+  }
+
   async identity(signal?: AbortSignal): Promise<Identity> {
     const auth = await retrySlack(() => this.web.auth.test(), signal);
     if (!auth.team_id || !auth.user_id || !auth.bot_id)
@@ -221,6 +276,31 @@ export class SlackConnection implements SlackDelivery {
   async announce(channel: string, text: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
     return this.send(channel, "", text, "plain");
+  }
+
+  async notification(
+    channel: string,
+    payload: DisplayPayload,
+    signal: AbortSignal,
+  ): Promise<SinkOutcome> {
+    if (signal.aborted) return { state: "refused", retryable: true };
+    try {
+      const result = await this.historyWeb(signal).chat.postMessage({
+        channel,
+        ...notificationContent(payload),
+        mrkdwn: false,
+        parse: "none",
+        unfurl_links: false,
+        unfurl_media: false,
+      });
+      return result.ok === true &&
+        typeof result.ts === "string" &&
+        /^\d+\.\d+$/.test(result.ts)
+        ? { state: "sent" }
+        : { state: "unknown" };
+    } catch (error) {
+      return notificationOutcome(error);
+    }
   }
 
   async ephemeral(channel: string, user: string, thread: string, text: string) {

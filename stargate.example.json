@@ -1,6 +1,31 @@
 {
   "dataDirectory": ".stargate",
   "api": { "listen": "127.0.0.1:8484" },
+  "notify": {
+    "adapters": {
+      "local-http": {
+        "type": "http",
+        "enabled": false,
+        "path": "/v1/notifications/local",
+        "sources": [
+          {
+            "id": "release-ci",
+            "tokenEnv": "STARGATE_NOTIFY_RELEASE_CI",
+            "topics": ["release.*"],
+            "audience": "internal",
+            "perMinute": 60
+          }
+        ]
+      }
+    },
+    "destinations": {
+      "release-log": {
+        "slack": { "bot": "code-helper", "channel": "C123" },
+        "audience": "internal"
+      }
+    },
+    "subscriptions": [{ "topic": "release.*", "to": ["release-log"] }]
+  },
   "bots": [
     {
       "id": "code-helper",

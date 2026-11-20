@@ -203,28 +203,37 @@ test("review: raw unknown keys survive structural child failures safely", () => 
   expect(parentCalls).toBe(0);
 });
 
+function withoutInboundReactions(value: unknown): unknown {
+  if (!Predicate.isObject(value) || !Predicate.isObject(value["slack"]))
+    return value;
+  const { inboundReactions: _inboundReactions, ...slack } = value[
+    "slack"
+  ] as Record<string, unknown>;
+  return { ...value, slack };
+}
+
 // Captured from Zod 4.6.7 at base4ff23cb, before replacing production schemas.
 // Include raw wire order: provisioning hashes JSON.stringify(decoded plan).
 for (const [name, codec] of Object.entries(codecs))
   test(`settings legacy acceptance, values and wire order: ${name}`, () => {
-    // NET-1730 adds an intentional defaulted field after the legacy capture.
-    // Keep the independent legacy oracle unchanged; only this new field is
-    // tested separately by nightly-idle defaults/validation and run tests.
+    // Keep the legacy oracle independent. New flags are covered separately
+    // by their configuration and behaviour tests.
     const legacy = (value: unknown): unknown => {
       if (!Predicate.isObject(value) || Array.isArray(value)) return value;
+      if (name === "botSchema") return withoutInboundReactions(value);
       if (name === "maintenanceSchema") {
         const { drain: _drain, ...rest } = value as Record<string, unknown>;
         return rest;
       }
-      if (
-        name === "configSchema" &&
-        "maintenance" in value &&
-        Predicate.isObject(value["maintenance"])
-      ) {
-        const { drain: _drain, ...maintenance } = value[
+      if (name === "configSchema") {
+        const config = Array.isArray(value["bots"])
+          ? { ...value, bots: value["bots"].map(withoutInboundReactions) }
+          : value;
+        if (!Predicate.isObject(config["maintenance"])) return config;
+        const { drain: _drain, ...maintenance } = config[
           "maintenance"
         ] as Record<string, unknown>;
-        return { ...value, maintenance };
+        return { ...config, maintenance };
       }
       return value;
     };

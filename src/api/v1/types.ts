@@ -74,6 +74,10 @@ export type V1Git = {
   changedFiles: number | null;
   /** `owner/name` parsed from the `origin` remote, when it is a GitHub URL. */
   repository: string | null;
+  /** @deprecated Legacy optional field. */
+  pushRepository?: string | null;
+  /** @deprecated Legacy optional field. */
+  pushRepositoryAmbiguous?: true;
   checkedAt: number;
   /** A safe reason when the read failed; other fields are then null. */
   error?: string;
@@ -155,7 +159,17 @@ export type V1Backend =
   | "codex"
   | "module";
 
+export type V1RequestProgress = {
+  request: number;
+  stage: import("../../turn-progress").TurnStage;
+  observedAt: number;
+  disconnected: boolean;
+  stale: boolean;
+  status: import("../../store").JobStatus;
+  failure: import("../../request-failure").RequestFailure | null;
+};
 export type V1Captain = {
+  requests?: V1RequestProgress[];
   /** Configured registration ID. */
   id: string;
   name: string;
@@ -195,7 +209,7 @@ export type V1Ship = {
 
 export type V1ShipDetail = V1Ship & {
   crewMembers: V1CrewMember[];
-  /** In a ship event, when the detail was sampled. */
+  /** In a ship event, when the crew state was observed. */
   detailUpdatedAt?: number;
   /** In a ship event, true if the last successful detail is being retained. */
   detailStale?: true;
@@ -238,6 +252,8 @@ export type V1Gateway = {
 export type V1Fleet = {
   apiVersion: typeof API_V1_VERSION;
   generatedAt: number;
+  /** In a fleet event, true while a previous overview is being retained. */
+  overviewStale?: true;
   /** The configured fleet name, or the hostname. */
   name: string;
   host: V1Host;
@@ -269,6 +285,7 @@ export type V1ActivityEvent = {
 export type V1Event =
   | { type: "fleet"; data: V1Fleet }
   | { type: "ship"; data: V1ShipDetail }
+  | { type: "ship-sampled"; data: { id: string; detailUpdatedAt: number } }
   | { type: "host"; data: V1Host }
   | { type: "activity"; data: V1ActivityEvent }
   | { type: "heartbeat"; data: { at: number } };
@@ -279,11 +296,15 @@ export type V1ShipRead = (
 
 /** What the projection provides to the HTTP layer. */
 export interface ApiV1Source {
+  stop?(): Promise<void>;
   /** Fleet without host/gateway. The poller can reuse its captured crew reads. */
   fleet(
     signal: AbortSignal,
     captureShipRead?: (id: string, read: V1ShipRead) => void,
+    crewDeadline?: AbortSignal,
   ): Promise<Omit<V1Fleet, "host" | "gateway">>;
+  /** Internal identity of the current top-level captains, independent of read availability. */
+  shipIdentities?(): ReadonlyMap<string, string>;
   ship(id: string, signal: AbortSignal): Promise<V1ShipDetail | undefined>;
   crew(
     ship: string,

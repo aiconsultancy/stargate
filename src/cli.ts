@@ -494,7 +494,14 @@ export async function runCli(args: string[]): Promise<CliResult> {
   else if (command === "config" && p[1] === "check" && p.length === 2) {
     const config = await readConfiguration(configPath);
     if (!v["schema-only"]) {
-      await checkCredentials(configPath, config.bots, process.env, config.irc);
+      await checkCredentials(
+        configPath,
+        config.bots,
+        process.env,
+        config.irc,
+        config.notify,
+        config.dataDirectory,
+      );
       await checkCodexConfiguration(config, configPath);
     }
     console.log("Configuration valid.");

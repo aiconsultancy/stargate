@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   chmod,
+  lstat,
   mkdtemp,
   readdir,
   rm,
@@ -112,6 +113,46 @@ test("question settings are private, atomic, isolated and fail closed", async ()
     await rm(path);
     await import("node:fs/promises").then(({ mkdir }) => mkdir(path));
     expect(await resolveQuestionSettings(config)).toEqual(defaults);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("the paired default applies only to an absent settings file without creating it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "questions-settings-"));
+  try {
+    const config = bot();
+    if (config.backend.type !== "opencode")
+      throw new Error("Expected OpenCode");
+    config.backend.directory = directory;
+    config.backend.agent = "captain";
+    const path = questionSettingsPath(directory, "captain");
+    expect((await resolveQuestionSettings(config, true)).enabled).toBe(true);
+    expect((await resolveQuestionSettings(config)).enabled).toBe(false);
+    await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    const off = {
+      enabled: false,
+      timeoutMs: 300_000,
+      answer: "allowed",
+    } as const;
+    await saveQuestionSettings(
+      directory,
+      "captain",
+      off,
+      AbortSignal.timeout(5000),
+    );
+    expect(await resolveQuestionSettings(config, true)).toEqual(off);
+    await writeFile(path, "invalid");
+    expect((await resolveQuestionSettings(config, true)).enabled).toBe(false);
+    await chmod(path, 0o644);
+    expect((await resolveQuestionSettings(config, true)).enabled).toBe(false);
+    await rm(path);
+    expect((await resolveQuestionSettings(config, true)).enabled).toBe(true);
+    await symlink(join(directory, "missing"), path);
+    expect((await resolveQuestionSettings(config, true)).enabled).toBe(false);
+    await rm(dirname(path), { recursive: true, force: true });
+    await symlink(join(directory, "missing"), dirname(path));
+    expect((await resolveQuestionSettings(config, true)).enabled).toBe(false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

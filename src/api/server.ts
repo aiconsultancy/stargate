@@ -21,7 +21,7 @@ type Options = {
 const maxConnections = 64;
 const maxHeaders = 16 * 1024;
 const maxNotificationWork = 8;
-const maxFleetReads = 8;
+export const maxFleetReads = 8;
 const maxFleetStreams = 8;
 
 function failure(status: number, code: string) {
@@ -37,6 +37,9 @@ function failure(status: number, code: string) {
     },
   );
 }
+
+/** The default, and the largest allowed, request deadline in milliseconds. */
+export const apiRequestMs = 20_000;
 
 function deadline(value: number | undefined, ceiling: number) {
   if (value === undefined) return ceiling;
@@ -153,7 +156,7 @@ export async function startApiServer(options: Options) {
   if (routes.length && !("unix" in options.listen))
     throw new Error("Additional API routes require private Unix mode");
   const headersMs = deadline(options.timing?.headersMs, 10_000);
-  const requestMs = deadline(options.timing?.requestMs, 20_000);
+  const requestMs = deadline(options.timing?.requestMs, apiRequestMs);
   options.signal.throwIfAborted();
   const sockets = new Map<Socket, ReturnType<typeof setTimeout>>();
   const started = new WeakSet<Socket>();

@@ -312,6 +312,59 @@ test("a fleet request reads shared captain crew once and retries only a failed e
   expect((await source.fleet(signal)).ships[0]?.captain).toBeUndefined();
 });
 
+test("retiring a pinned captain alias aborts its read and discards its late sample", async () => {
+  const store = new Store(":memory:");
+  const cron = new CronStore(":memory:");
+  cleanup.push(store, cron);
+  const primary = registration("captain", "irc");
+  const alias = registration("captain-teams", "teams");
+  const started = Promise.withResolvers<AbortSignal>();
+  const late = Promise.withResolvers<CrewStatus>();
+  const recovery = Promise.withResolvers<CrewStatus>();
+  primary.backend.crewStatus = async () => {
+    throw new Error("Fixture unavailable");
+  };
+  alias.backend.crewStatus = async (_input, reading) => {
+    started.resolve(reading);
+    return late.promise;
+  };
+  const ships = [primary, alias];
+  const source = dashboardSource(ships, store, cron, Date.now, {
+    fleetCrewReadMs: 5,
+    fleetCrewDeadlineMs: 500,
+  });
+  const read = () => source.fleetWithCrew(signal, new Set([primary.bot.id]));
+  const first = read();
+  try {
+    const reading = await started.promise;
+    source.invalidateFleetCrew();
+    ships.pop();
+    source.retireFleetBackend(alias.backend);
+    expect(reading.aborted).toBe(true);
+    late.resolve(roster());
+    expect((await first).ships[0]).toMatchObject({
+      error: "Crew status unavailable.",
+      summary: { crew: null },
+    });
+    await Bun.sleep(0);
+
+    primary.backend.crewStatus = () => recovery.promise;
+    const next = read();
+    expect(
+      await Promise.race([
+        next.then(() => "cached"),
+        Bun.sleep(25).then(() => "waiting"),
+      ]),
+    ).toBe("waiting");
+    recovery.resolve(roster());
+    expect((await next).ships[0]?.error).toBeUndefined();
+  } finally {
+    late.resolve(roster());
+    recovery.resolve(roster());
+    await first;
+  }
+});
+
 /** Execute the real page functions with a small DOM fixture; no browser/provider. */
 async function page() {
   const html = await readFile(

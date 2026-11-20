@@ -20,7 +20,9 @@ import type {
   QuestionAnswer,
 } from "./questions";
 import type { QuotaSnapshot } from "./quota";
+import type { InboundReaction } from "./reactions";
 import type { SessionHistory } from "./session-history";
+import type { TurnProgress } from "./turn-progress";
 import type { UpdateReceipt, UpdateSnapshot } from "./update-notice";
 
 export {
@@ -39,6 +41,8 @@ export type PromptSourceContext = {
     channel: string;
     thread: string;
     message: string;
+    /** A Slack reaction targets this message; it is not a message of its own. */
+    reaction?: Pick<InboundReaction, "name" | "action">;
     /** IRC thread root only; separate from this request's message identity. */
     replyParent?: string;
     user: string;
@@ -123,6 +127,7 @@ export interface AgentBackend {
   resumeMaintenance?(
     signal: AbortSignal,
   ): Promise<{ resumed: number; remaining: number }>;
+  pinnedBackgroundQuestions?(signal: AbortSignal): Promise<NativeQuestion[]>;
   pendingQuestions?(
     sessionID: string,
     signal: AbortSignal,
@@ -140,10 +145,17 @@ export interface AgentBackend {
     fingerprint: string,
     signal: AbortSignal,
   ): Promise<boolean>;
+  backgroundOutcome?(
+    session: string,
+    form: string,
+    fingerprint: string,
+    signal: AbortSignal,
+  ): Promise<"answered" | "cancelled" | undefined>;
   replyQuestion?(
     question: NativeQuestion,
     answer: QuestionAnswer | null,
     signal: AbortSignal,
+    allowed?: () => boolean,
   ): Promise<void>;
   questionInputSettled?(
     sessionID: string,
@@ -202,6 +214,8 @@ export interface AgentBackend {
     onInput?: (id: string) => void,
     files?: readonly Attachment[],
     context?: PromptSourceContext,
+    onProgress?: (progress: TurnProgress) => void,
+    liveProgress?: boolean,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
   /** Withdraw this input; interrupt only if raw history proves it is current. */
@@ -231,6 +245,7 @@ export interface AgentBackend {
   watch?(
     onSettled: (sessionId?: string) => void,
     signal: AbortSignal,
+    onForm?: () => void,
   ): Promise<void>;
   startActivity?(
     sessionId: string,

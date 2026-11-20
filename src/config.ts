@@ -17,6 +17,8 @@ import {
   textMentionRuleSchema,
 } from "./mentions";
 import { maintenanceSchema } from "./nightly/config";
+import { notifyConfigError } from "./notify/binding";
+import { notifySchema } from "./notify/config";
 import {
   piModelSchema,
   piProviderSchema,
@@ -374,6 +376,7 @@ export const botSchema = settingsStruct({
   ),
   slack: settingsStruct({
     steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
+    inboundReactions: Schema.Boolean.pipe(settingsDefault(false)),
     appId: Schema.String.check(settingsPattern(/^A[A-Z0-9]+$/)),
     appTokenEnv: envName,
     botTokenEnv: envName,
@@ -558,24 +561,31 @@ const ircCrewSchema = settingsStruct({
 
 /**
  * Optional IRCv3 features. Each is used only when the server offers it;
- * these switches can turn one off. The separate native-question bridge is opt-in.
+ * these switches can turn one off. Question defaults depend on the registration.
  */
 const ircFeaturesSchema = settingsStruct({
   steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
   /** Bridge native clarification forms to their original authenticated requester. */
-  questions: Schema.Boolean.pipe(settingsDefault(false)),
+  questions: Schema.optional(Schema.Boolean),
   /** Download FILEHOST links in admitted messages as attachments. */
   filesIn: Schema.Boolean.pipe(settingsDefault(true)),
   /** Upload published reply files to FILEHOST and post their links. */
   filesOut: Schema.Boolean.pipe(settingsDefault(true)),
   /** Send each reply chunk as one draft/multiline batch. */
   multiline: Schema.Boolean.pipe(settingsDefault(true)),
+  /** Also refresh typing during verified human fleet requests. */
+  fleetTyping: Schema.optional(Schema.Boolean),
   /** Send +typing while a turn runs (needs message-tags). */
   typing: Schema.Boolean.pipe(settingsDefault(true)),
+  /** Emit confirmed OpenCode lifecycle stages and enable read-only IRC status. */
+  liveProgress: Schema.optional(Schema.Boolean),
   /** Fleet captains acknowledge human requests and report long turns. */
   turnStatus: Schema.Boolean.pipe(settingsDefault(true)),
   /** +draft/react for reaction replies, and Stop by reaction. */
   reactions: Schema.Boolean.pipe(settingsDefault(true)),
+  /** Native crew questions use the pinned owner gateway. */
+  crewQuestionHandoff: Schema.optional(Schema.Boolean),
+
   /** CHATHISTORY catch-up of missed messages (persisted cursor). */
   catchUp: Schema.Boolean.pipe(settingsDefault(true)),
   /** draft/persistence: ask the server to keep the account always-on. */
@@ -587,7 +597,6 @@ const ircFeaturesSchema = settingsStruct({
 });
 export const ircFeatureDefaults = {
   steerThreadFollowUps: false,
-  questions: false,
   filesIn: true,
   filesOut: true,
   multiline: true,
@@ -743,6 +752,8 @@ const ircConfiguredSchema = settingsStruct({
       }),
     ),
   ),
+  /** Authenticated private recipient for unowned native questions on a pinned captain. */
+  questionOperator: Schema.optional(ircAccount),
   /**
    * DM audit mirror: the captain connection posts a copy of every direct
    * message that the captain or a crew connection receives or sends to
@@ -783,7 +794,19 @@ const ircConfiguredSchema = settingsStruct({
 
 /** Persisted operator configuration: fleet-derived fields remain absent. */
 export type IrcConfig = typeof ircConfiguredSchema.Type;
+export function ircFeedbackDefaults(config: IrcConfig) {
+  const native = config.backend.type === "opencode";
+  return {
+    questions: native && !!config.fleetPolicy?.humanAccounts.length,
+    crewQuestionHandoff:
+      config.backend.type === "opencode" && !!config.backend.sessionID,
+    liveProgress: true,
+    fleetTyping: true,
+  };
+}
+
 export type EffectiveIrcConfig = IrcConfig & {
+  features: IrcConfig["features"] & ReturnType<typeof ircFeedbackDefaults>;
   access: IrcConfig["access"] & { peerCaptains: string[] };
 };
 
@@ -813,6 +836,15 @@ export function effectiveIrcConfig(config: IrcConfig): EffectiveIrcConfig {
     ...config.access,
     peerCaptains: config.access.peerCaptains ?? [],
   };
+  const defaults = ircFeedbackDefaults(config);
+  const features = {
+    ...config.features,
+    questions: config.features.questions ?? defaults.questions,
+    crewQuestionHandoff:
+      config.features.crewQuestionHandoff ?? defaults.crewQuestionHandoff,
+    liveProgress: config.features.liveProgress ?? defaults.liveProgress,
+    fleetTyping: config.features.fleetTyping ?? defaults.fleetTyping,
+  };
   const metadata = config.fleetChannels;
   if (
     !metadata ||
@@ -820,7 +852,7 @@ export function effectiveIrcConfig(config: IrcConfig): EffectiveIrcConfig {
     !config.fleetControl ||
     config.fleetPolicy.role === "crew"
   )
-    return { ...config, access };
+    return { ...config, access, features };
   const roster = fleetRoster(config);
   // Explicit legacy wake configuration retains its complete admission policy.
   if (access.channelRequests === undefined && access.wakeChannels === undefined)
@@ -859,7 +891,7 @@ export function effectiveIrcConfig(config: IrcConfig): EffectiveIrcConfig {
     seen.add(key);
     return true;
   });
-  return { ...config, access, channels };
+  return { ...config, access, channels, features };
 }
 
 export const ircSchema = ircConfiguredSchema.check(
@@ -941,6 +973,16 @@ export const ircSchema = ircConfiguredSchema.check(
           "Fleet control needs an explicit policy and pinned OpenCode root",
       });
     if (
+      irc.features.crewQuestionHandoff &&
+      (irc.backend.type !== "opencode" || !irc.backend.sessionID)
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "Crew question handoff requires a pinned OpenCode registration",
+      });
+
+    if (
       irc.access.wakeChannels?.some(
         (channel) => !irc.channels.includes(channel),
       )
@@ -957,7 +999,33 @@ export const ircSchema = ircConfiguredSchema.check(
         code: "custom",
         message: "Wake channels conflict with nick-mention-only admission",
       });
-    if (irc.features.questions && !irc.fleetPolicy?.humanAccounts.length)
+    if (
+      irc.questionOperator &&
+      (!irc.features.questions ||
+        irc.access.deniedChannels.includes("*") ||
+        irc.access.deniedAccounts.some(
+          (a) => a === "*" || fold(a) === fold(irc.questionOperator ?? ""),
+        ) ||
+        (irc.access.allowedAccounts &&
+          !irc.access.allowedAccounts.some(
+            (a) => a === "*" || fold(a) === fold(irc.questionOperator ?? ""),
+          )) ||
+        irc.backend.type !== "opencode" ||
+        !irc.backend.sessionID ||
+        !irc.fleetPolicy?.humanAccounts.some(
+          (account) => fold(account) === fold(irc.questionOperator ?? ""),
+        ) ||
+        irc.fleetPolicy.agentAccounts.some(
+          (account) => fold(account) === fold(irc.questionOperator ?? ""),
+        ))
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "questionOperator requires native questions, a pinned OpenCode session and an enrolled human account",
+      });
+    }
+    if (configured.features.questions && !irc.fleetPolicy?.humanAccounts.length)
       context.addIssue({
         code: "custom",
         message:
@@ -1046,6 +1114,7 @@ export const ircSchema = ircConfiguredSchema.check(
 
 /** Bot Framework transport: exact sender IDs, no credential values in config. */
 export const teamsSchema = settingsStruct({
+  livePresence: Schema.optional(Schema.Boolean),
   id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
   displayName: Schema.optional(
     Schema.String.check(Schema.isMinCodePoints(1)).check(
@@ -1149,10 +1218,11 @@ export function pinnedSessionIDs(config: {
   ];
 }
 
-export const configSchema = settingsStruct({
+const configFields = settingsStruct({
   dataDirectory: Schema.String.pipe(settingsDefault(".stargate")),
   /** Opt in to the private-network Fleet API; see docs/api.md. */
   api: Schema.optional(apiV1ConfigSchema),
+  notify: Schema.optional(notifySchema),
   /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
   dashboard: Schema.optional(Schema.Boolean),
   /** Explicit operator-group socket; the private default is unchanged. */
@@ -1177,12 +1247,33 @@ export const configSchema = settingsStruct({
   maintenance: Schema.optional(maintenanceSchema),
   /** Read subscription quota and announce changes to crew availability. */
   quotaWatch: Schema.optional(quotaWatchSchema),
-}).check(
-  settingsCheck(
+});
+const configCheck = (liveNotificationPolicy = false) =>
+  settingsCheck<typeof configFields.Type>(
     (
-      { bots, irc, teams, maintenance, quotaWatch, dashboard, dashboardSocket },
+      {
+        bots,
+        irc,
+        teams,
+        maintenance,
+        quotaWatch,
+        dashboard,
+        dashboardSocket,
+        notify,
+        api,
+      },
       context,
     ) => {
+      if (notify) {
+        const message = notifyConfigError(
+          notify,
+          bots,
+          api?.listen,
+          liveNotificationPolicy,
+        );
+        if (message)
+          context.addIssue({ code: "custom", path: ["notify"], message });
+      }
       if (dashboardSocket && dashboard !== true)
         context.addIssue({
           code: "custom",
@@ -1331,8 +1422,11 @@ export const configSchema = settingsStruct({
         }
       }
     },
-  ),
-);
+  );
+export const configSchema = configFields.check(configCheck());
+/** Live access changes may revoke pending display work, never redirect it.
+ * The reload planner still requires identical notification topology. */
+export const reloadConfigSchema = configFields.check(configCheck(true));
 
 export type BackendConfig = typeof backendSchema.Type;
 export type BotConfig = typeof botSchema.Type;

@@ -85,6 +85,11 @@ releasing the source. IRC uses its own
 [follow-up steering](operations.md#follow-up-steering) for refusal, uncertain
 delivery and content limits.
 
+`bots[].slack.inboundReactions` also defaults to `false` and requires a restart.
+It admits the fixed reaction list and removal events only on this bot's
+messages. The app owner must add the reaction read scope and subscriptions.
+See [inbound Slack reactions](operations.md#inbound-slack-reactions).
+
 Slack registrations can set optional `health` paths and freshness limits for
 the read-only `@captain /health` command. See [health configuration and
 coverage](meta-commands.md#health-configuration-and-coverage). Missing telemetry
@@ -98,6 +103,12 @@ staleness, access and Slack app prerequisites. This field requires a restart.
 Use SIGHUP for the live changes below. Other changes require a restart.
 
 ## Reload configuration without restarting
+
+Optional [external notification ingestion](notification-ingestion.md) uses the
+top-level `notify` subtree. Each built-in HTTP adapter defaults to disabled.
+Enabled HTTP requires `api.listen: "unix"`; producer credentials never grant
+Fleet operator access. All notification topology and limits require restart.
+Current live-safe access revocations apply to pending sends immediately.
 
 Validate the file, then signal the running gateway (replace the unit name if
 this installation uses another name):
@@ -161,12 +172,13 @@ The optional top-level `api` object enables the read-only
 [Fleet API](api.md). Omit it to keep the listener off. Every `api` setting
 requires a restart.
 
-| Field             | Default                                                                                                | Accepted values                                                                                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `listen`          | Required                                                                                               | `unix` for `<dataDirectory>/api.sock`, private IPv4 literal as `host:port`, private IPv6 as `[address]:port`, or `:port` to use `127.0.0.1`. Ports are 1–65535. |
-| `allowedNetworks` | `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `::1/128`, `fc00::/7` | Nonempty list of CIDRs wholly contained in the default ranges. Bind addresses must also be in these ranges.                                                     |
-| `corsOrigins`     | `["subspace://*"]`                                                                                     | Exact serialized origins or hostname patterns with a whole-label `*`. An empty list disables CORS.                                                              |
-| `fleetName`       | Hostname                                                                                               | Nonempty display name.                                                                                                                                          |
+| Field                     | Default                                                                                                | Accepted values                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listen`                  | Required                                                                                               | `unix` for `<dataDirectory>/api.sock`, private IPv4 literal as `host:port`, private IPv6 as `[address]:port`, or `:port` to use `127.0.0.1`. Ports are 1–65535. |
+| `allowedNetworks`         | `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `::1/128`, `fc00::/7` | Nonempty list of CIDRs wholly contained in the default ranges. Bind addresses must also be in these ranges.                                                     |
+| `corsOrigins`             | `["subspace://*"]`                                                                                     | Exact serialized origins or hostname patterns with a whole-label `*`. An empty list disables CORS.                                                              |
+| `fleetName`               | Hostname                                                                                               | Nonempty display name.                                                                                                                                          |
+| `pullRequestRepositories` | Omitted                                                                                                | Map of exact absolute, normalized crew checkout paths to GitHub `owner/repository` values for [Fleet PR lookup](api.md).                                        |
 
 `listen: "unix"` replaces TCP with one owner-only mode-0600 socket. The data
 directory must be owned by the service user with mode 0700 and safe ancestors.

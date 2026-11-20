@@ -68,6 +68,28 @@ export type UserLookup = (
   signal: AbortSignal,
 ) => Promise<unknown>;
 
+const humanUserInfo = Schema.Struct({
+  ok: Schema.Literal(true),
+  user: Schema.Struct({
+    id: Schema.String,
+    is_bot: Schema.Literal(false),
+    deleted: Schema.Literal(false),
+    is_agentforce_bot: Schema.optional(Schema.Literal(false)),
+    is_workflow_bot: Schema.optional(Schema.Literal(false)),
+    profile: Schema.optional(
+      Schema.Struct({
+        bot_id: Schema.optional(Schema.Literal("")),
+      }),
+    ),
+  }),
+});
+
+/** The verified actor can belong to a different home team in Slack Connect. */
+export function isSlackHuman(raw: unknown, user: string): boolean {
+  const parsed = Schema.decodeUnknownResult(humanUserInfo)(raw);
+  return Result.isSuccess(parsed) && parsed.success.user.id === user;
+}
+
 /**
  * Verified peer captains, cached for ten minutes. A failed or slow lookup is
  * not cached and admits nothing: Stargate fails closed.

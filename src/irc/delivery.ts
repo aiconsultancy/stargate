@@ -4,6 +4,7 @@ import type { AttachmentTransport } from "../attachment-delivery";
 import type { DeliveryUnit, IrcTurnStatus, SlackDelivery } from "../gateway";
 import type { ReactionName } from "../reactions";
 import { settingsStruct } from "../settings-schema";
+import { type TurnProgress, turnProgressText } from "../turn-progress";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";
 import { cleanText, utf8Bytes } from "./protocol";
@@ -37,6 +38,7 @@ export type IrcFiles = {
 export type IrcPresence = {
   /** features.typing: +typing while a turn runs. */
   typing: boolean;
+  fleetTyping?: boolean;
   /** features.reactions: +draft/react for reaction replies. */
   reactions?: boolean;
 };
@@ -157,6 +159,7 @@ export class IrcDelivery implements SlackDelivery {
     signal: AbortSignal,
     allowed?: () => boolean,
     turnStatus?: IrcTurnStatus,
+    readProgress?: () => TurnProgress | undefined,
   ) {
     const finish = this.client.startStatus();
     if (signal.aborted) {
@@ -166,8 +169,45 @@ export class IrcDelivery implements SlackDelivery {
     // Typing may stop early (for example a DM nick changed hands); the turn
     // still owns its aggregate status handle until its actual lifecycle ends.
     signal.addEventListener("abort", finish, { once: true });
+    const fleetTyping =
+      turnStatus && turnStatus !== "quiet" && this.presence.fleetTyping
+        ? this.typing(channel, signal, allowed).catch(() => {})
+        : undefined;
     try {
       if (turnStatus) {
+        if (turnStatus === "live") {
+          let previous: TurnProgress | undefined;
+          let sent = false;
+          await delay(Math.min(3000, this.client.turnStatusMs), undefined, {
+            signal,
+          }).catch(() => {});
+          while (!signal.aborted && (allowed?.() ?? true)) {
+            const observed = readProgress?.();
+            if (
+              !sent ||
+              (observed &&
+                (!previous ||
+                  previous.stage !== observed.stage ||
+                  !!previous.disconnected !== !!observed.disconnected))
+            ) {
+              previous = observed;
+              sent = true;
+              await this.turnNotice(
+                channel,
+                thread,
+                observed
+                  ? turnProgressText(observed)
+                  : "Stargate received your request. Waiting for backend activity.",
+                signal,
+                allowed,
+              ).catch(() => {});
+            }
+            await delay(Math.min(30_000, this.client.turnStatusMs), undefined, {
+              signal,
+            }).catch(() => {});
+          }
+          return;
+        }
         if (turnStatus === "notice") {
           void this.turnNotice(
             channel,
@@ -176,38 +216,59 @@ export class IrcDelivery implements SlackDelivery {
             signal,
             allowed,
           ).catch(() => {});
-          await delay(this.client.turnStatusMs, undefined, { signal }).catch(
-            () => {},
-          );
-          void this.turnNotice(
-            channel,
-            thread,
-            "This request is still open.",
-            signal,
-            allowed,
-          ).catch(() => {});
+          let reported: TurnProgress | undefined;
+          let first = true;
+          while (!signal.aborted) {
+            await delay(this.client.turnStatusMs, undefined, { signal }).catch(
+              () => {},
+            );
+            if (signal.aborted || (allowed && !allowed())) break;
+            const progress = readProgress?.();
+            if (!first && reported === progress) continue;
+            first = false;
+            reported = progress;
+            void this.turnNotice(
+              channel,
+              thread,
+              readProgress
+                ? turnProgressText(progress)
+                : "This request is still open.",
+              signal,
+              allowed,
+            ).catch(() => {});
+            if (!readProgress) break;
+          }
         }
         return;
       }
-      if (!this.presence.typing || !this.client.hasCap("message-tags")) {
-        if (!signal.aborted)
-          await new Promise<void>((resolve) =>
-            signal.addEventListener("abort", () => resolve(), { once: true }),
-          );
-        return;
-      }
-      const target = await this.target(channel);
-      const guard = this.guard(channel, target, allowed);
-      const timer = this.client.typingMs;
-      while (!signal.aborted) {
-        if (guard && !guard()) return;
-        this.client.notify(target, { "+typing": "active" }, guard);
-        await delay(timer, undefined, { signal }).catch(() => {});
-      }
-      this.client.notify(target, { "+typing": "done" }, guard);
+      await this.typing(channel, signal, allowed);
     } finally {
+      await fleetTyping;
       if (signal.aborted) finish();
     }
+  }
+
+  private async typing(
+    channel: string,
+    signal: AbortSignal,
+    allowed?: () => boolean,
+  ) {
+    if (!this.presence.typing || !this.client.hasCap("message-tags")) {
+      if (!signal.aborted)
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      return;
+    }
+    const target = await this.target(channel);
+    const guard = this.guard(channel, target, allowed);
+    const timer = this.client.typingMs;
+    while (!signal.aborted) {
+      if (guard && !guard()) return;
+      this.client.notify(target, { "+typing": "active" }, guard);
+      await delay(timer, undefined, { signal }).catch(() => {});
+    }
+    this.client.notify(target, { "+typing": "done" }, guard);
   }
 
   /** NOTICE cannot wake another bot or count as the captain joining a thread. */

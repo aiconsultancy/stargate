@@ -51,6 +51,7 @@ async function fixture() {
   let enabled = true;
   let now = 1000;
   let pending = [question];
+  let confirmedOutcome: "answered" | "cancelled" | undefined;
   let failWrite = false;
   let failNotice = false;
   let reads = 0;
@@ -75,12 +76,19 @@ async function fixture() {
       return { stored: failNotice ? "uncertain" : true };
     },
   };
-  const bridge = (persisted = false) =>
+  const bridge = (
+    persisted = false,
+    enableWhenMissing?: () => boolean,
+    onUnavailable?: () => void,
+  ) =>
     new CrewQuestions(
       authority,
       async () => {
         reads++;
         return {
+          async outcome() {
+            return confirmedOutcome;
+          },
           async pendingQuestions() {
             onRead();
             return pending;
@@ -106,7 +114,7 @@ async function fixture() {
       },
       {
         ...(persisted
-          ? {}
+          ? { ...(enableWhenMissing ? { enableWhenMissing } : {}) }
           : {
               settings: async () => ({
                 enabled,
@@ -115,6 +123,7 @@ async function fixture() {
               }),
             }),
         now: () => now,
+        ...(onUnavailable ? { onUnavailable } : {}),
       },
     );
   const caller: CrewCaller = {
@@ -139,6 +148,9 @@ async function fixture() {
     },
     pending: (value: NativeQuestion[]) => {
       pending = value;
+    },
+    confirmed: (v: "answered" | "cancelled") => {
+      confirmedOutcome = v;
     },
     failWrite: () => {
       failWrite = true;
@@ -335,4 +347,68 @@ test("persisted gate uses the native captain definition, not its logical crew ID
     f.bridge(true).run({ op: "cancel", token: offer?.token }, f.caller),
   ).rejects.toThrow("disabled");
   expect(f.replies).toEqual([]);
+});
+
+test("paired crew enables missing settings, honours explicit off, and waits if unpaired", async () => {
+  const f = await fixture();
+  let paired = false;
+  const bridge = f.bridge(true, () => paired);
+  await bridge.poll(signal);
+  expect(f.reads()).toBe(0);
+  paired = true;
+  await bridge.poll(signal);
+  expect(f.notices).toHaveLength(1);
+  const offer = f.state().crewQuestionOffers(f.task.id)[0];
+  if (!offer) throw new Error("Expected paired question offer");
+  const input = { op: "answer", token: offer.token, answer: "1" };
+  paired = false;
+  await expect(bridge.run(input, f.caller)).rejects.toThrow("disabled");
+  paired = true;
+  await saveQuestionSettings(
+    f.directory,
+    "native-captain",
+    { enabled: false, timeoutMs: 900_000, answer: "requester" },
+    signal,
+  );
+  await expect(bridge.run(input, f.caller)).rejects.toThrow("disabled");
+  expect(f.replies).toEqual([]);
+  expect(f.state().crewQuestion(offer.token)?.state).toBe("offered");
+});
+
+test("a disabled route reports only an enabled, active native task and does no form work", async () => {
+  const f = await fixture();
+  let diagnostics = 0;
+  const bridge = f.bridge(false, undefined, () => {
+    diagnostics++;
+  });
+  f.enabled(false);
+  await bridge.poll(signal, false);
+  expect(diagnostics).toBe(0);
+  f.enabled(true);
+  await bridge.poll(signal, false);
+  expect(diagnostics).toBe(1);
+  f.state().complete(f.task.id, f.task.workerSessionID, "Done");
+  await bridge.poll(signal, false);
+  expect(diagnostics).toBe(1);
+  expect(f.reads()).toBe(0);
+  expect(f.notices).toEqual([]);
+  expect(f.replies).toEqual([]);
+  expect(f.state().crewQuestionOffers(f.task.id)).toEqual([]);
+});
+
+test("gateway restart reconciles an uncertain crew answer once and retains its confirmed outcome", async () => {
+  const f = await fixture();
+  const bridge = f.bridge();
+  await bridge.poll(signal);
+  const offer = f.state().crewQuestionOffers(f.task.id)[0];
+  if (!offer) throw new Error("Missing offer");
+  f.failWrite();
+  await bridge.run({ op: "answer", token: offer.token, answer: "1" }, f.caller);
+  expect(f.state().crewQuestion(offer.token)?.outcome).toBe("uncertain");
+  await f.reopen();
+  f.confirmed("answered");
+  await f.bridge().poll(signal);
+  f.state().crewQuestionOutcome(offer.token, "cancelled");
+  expect(f.state().crewQuestion(offer.token)?.outcome).toBe("answered");
+  expect(f.replies).toHaveLength(1);
 });

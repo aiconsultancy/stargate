@@ -38,6 +38,12 @@ gateway queue and native synthetic-input mechanism as crew steering. Only the
 exact thread owning the active input is eligible. Durable admission receipts
 separate accepted steering, definite refusal and uncertain native writes;
 another thread stays queued. No second scheduler selects follow-ups.
+Opt-in [inbound Slack reactions](operations.md#inbound-slack-reactions) reuse
+that admission path. Slack intake verifies a human actor and the bot-authored
+target, preferring stored posted-message timestamps over an exact API lookup.
+Reaction jobs retain the target timestamp separately from their deduplication
+ID, so source lines identify the reaction without treating it as a new message
+or issuing read receipts against it.
 `attachment-delivery.ts` publishes the files of a stored reply. `store.ts` owns
 the queue, delivery cursor, and session mappings. `runtime.ts` owns startup,
 the exclusive process lock, cancellation, and resource cleanup.
@@ -67,6 +73,18 @@ lock close last. A failure after startup stops every bot and exits with code
 1, so the service manager restarts Stargate.
 
 ## Maintenance restart drain
+
+The default-off [notification path](notification-ingestion.md) runs alongside
+agent work, not through `Gateway` or backends. The existing Unix API owner
+authenticates configured producer sources. The Effect core commits dedup and
+per-destination rows to private `notify.sqlite` under the instance lock before
+returning `202`. The Slack sink checks current physical bindings, audiences,
+access and echo exclusion immediately before a request-scoped literal send.
+Notification topology is restart-only; current access publishes atomically
+with successful live reload. Early intake close stops admission and claims,
+then actual send settlement precedes store/lock release. A referenced process
+hard-exit timer covers nonsettling notification shutdown, including startup
+failure. Existing maintenance drain and agent steering are unchanged.
 
 The optional [maintenance restart drain](maintenance.md#restart-drain) uses a
 same-user host barrier and private live-participant metadata under

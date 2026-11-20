@@ -4,13 +4,92 @@
 
 ### Feature flags
 
-- New opt-in: `api.listen: "unix"` selects a private mode-0600 Fleet socket
-  instead of TCP. Omitted `api` still defaults to off. No `enabled` alias.
+- New flags: Teams `livePresence` defaults off. IRC `features.fleetTyping`
+  defaults on. Fleet `api.pullRequestRepositories` enables pull request lookup
+  only for bound checkouts and defaults to no bindings.
+  HTTP notification inputs `notify.adapters.<name>.enabled` default off
+  and require Unix API mode when enabled.
+- Default changes: IRC `features.liveProgress` defaults on.
+  `features.questions` defaults on for OpenCode registrations with enrolled
+  humans. `features.crewQuestionHandoff` defaults on for pinned OpenCode IRC
+  registrations. An unspecified crew plugin `team.questionGateway` uses
+  handoff while the owning gateway is polling. Paired crew questions default
+  on when the captain's per-agent question settings are absent.
+  Pinned crews using a writable `team.historyAPI` without a polling IRC gateway
+  must set `team.questionGateway: false` to retain direct native questions.
+  When enabled questions lack the required gateway, Stargate logs the wait
+  once per plugin location.
+- Enabled by default: IRC live progress, fleet typing, native questions for
+  supported registrations, and paired crew question handoff. Background
+  question alerts still require a configured `questionOperator`.
+
+### Changes
+
+- Reserve addressed IRC `status` in registrations with enrolled humans for
+  checking the original request. Disable live progress to use addressed
+  `status` as an ordinary message.
+- Isolate Fleet API Git status from checkout configuration and bound primary
+  and shared indexes before Git loads them. Use copy-on-write index snapshots
+  where supported on Linux and give snapshot preparation its own deadline.
+  Recheck HEAD after the ahead/behind comparison. Clean up Git snapshots in
+  the background and sweep stale directories on startup. Report Git state
+  unavailable if the temporary snapshot fallback is inside the checkout.
+  Cache a checkout's own timeout for 15 seconds and a timeout spent mostly
+  waiting for a read slot for one read deadline (two seconds).
+- Look up Fleet pull requests only for checkouts bound to a GitHub repository
+  in `api.pullRequestRepositories`. Require the PR head to belong to the
+  bound repository. Unbound checkouts leave PR state unknown.
+- Keep recent crew samples usable during slow refreshes and wait for the
+  shared crew read when no recent sample is available. Adapt the OpenCode
+  fleet probe deadline for slower captains and back off after repeated failures.
+- Retry stalled Fleet API reads after a hard cap with at most one abandoned
+  read per slot. Serve cached metrics when fleet HTTP enrichment times out and
+  publish fresh host samples when ready within one second, falling back to
+  the latest sample during slower refreshes. Retained ship details
+  report captain unavailability immediately and preserve the last successful
+  crew data and sample time.
+  Availability transitions supersede older detail reads. Recovering ships
+  wait for fresh detail when no successful sample is cached. Replacement
+  backends get independent detail read slots. Retained overviews are marked
+  stale and close event streams on expiry after 75 seconds. Host and heartbeat
+  frames continue while a new overview is pending. Configuration reloads
+  invalidate cached crew samples and keep in-flight reads for unchanged
+  backends, including Fleet HTTP requests. Requests already waiting for crew
+  data continue to wait for the shared read after reload clears their fallback.
+  Event streams discard in-flight overviews when the roster or a ship's
+  backend identity changes.
+- Publish lightweight `ship-sampled` events when only the ship detail
+  timestamp changes. Preserve the observation time when a crew sample is reused.
+- Publish Fleet events when gateway metadata changes, including when the OpenCode
+  version first becomes available.
+- Add private authenticated HTTP notification ingestion, atomic durable outbox
+  admission and literal Slack delivery without agent work. Freeze physical
+  destinations and audiences, recheck current access and echo policy, and
+  retain store ownership through send settlement or process termination.
+  See [notification ingestion](docs/notification-ingestion.md).
+
+## 0.41.0
+
+### Feature flags
+
+- New flags: `bots[].slack.inboundReactions` delivers listed reactions, and
+  their removal, on this bot's Slack messages to its session. IRC
+  `questionOperator` enables private handling of background questions on a
+  pinned captain with `features.questions`. IRC `features.liveProgress`
+  enables event-based request notices and status. IRC
+  `features.crewQuestionHandoff` and crew `team.questionGateway` route native
+  crew clarifications through the owning gateway. `api.listen: "unix"`
+  selects a private mode-0600 Fleet socket instead of TCP; omitted `api`
+  still defaults to off, with no `enabled` alias. All default off.
 - Default changes: none.
 - Enabled by default: none.
 
 ### Changes
 
+- Route admitted people's thumbs up, thumbs down, tick, cross and eyes
+  reactions as conversation input, without interpreting their meaning.
+  Slack app owners must grant `reactions:read` and `users:read`, and subscribe to
+  `reaction_added` and `reaction_removed` before enabling the flag.
 - Serve Fleet through one bounded HTTP host, preserving private TCP access,
   operator authentication, CORS and streamed events. Add the exclusive private
   Unix mode and internal exact-route contract. Notification routes are not yet
@@ -29,6 +108,8 @@
   Fleet API's `gateway.version` when it has no `.stargate-release.json`.
   Fetch the tag, not only the commit. Other source checkouts still report the
   package version.
+- Report OpenCode turn progress in IRC and flag earlier pending questions
+  before submitting a new request.
 
 ## 0.40.1
 
