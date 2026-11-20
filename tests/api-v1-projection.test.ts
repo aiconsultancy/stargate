@@ -419,15 +419,27 @@ describe("Fleet API projection", () => {
     }
   });
 
-  test("a timed-out fleet probe keeps checkout metadata with fresh crew status", async () => {
-    const metadata = { projectDirectory: "/fixture", contexts: [] };
+  test("a timed-out fleet probe leaves ordinary crew status without old checkout metadata", async () => {
+    const metadata = {
+      projectDirectory: "/fixture",
+      contexts: [{ member: "pilot", project: "ops", directory: "/old" }],
+    };
     const held = Promise.withResolvers<void>();
     let stall = false;
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       async fetch(request) {
-        const status = { members: [], total: stall ? 1 : 0, truncated: stall };
+        const status = {
+          members: [
+            context("pilot", {
+              project: "ops",
+              name: stall ? "Reprovisioned pilot" : "Test Pilot",
+            }),
+          ],
+          total: 1,
+          truncated: false,
+        };
         if (!new URL(request.url).pathname.endsWith("/fleetStatus"))
           return Response.json({ output: status });
         if (stall) await held.promise;
@@ -443,15 +455,14 @@ describe("Fleet API projection", () => {
     const backend = new OpenCodeBackend(config);
     try {
       expect(await backend.fleetCrewStatus({}, signal)).toMatchObject({
-        status: { total: 0 },
+        status: { members: [{ id: "pilot", project: "ops" }] },
         metadata,
       });
       stall = true;
-      expect(
-        await backend.fleetCrewStatus({}, AbortSignal.timeout(1000)),
-      ).toMatchObject({
-        status: { total: 1 },
-        metadata,
+      const reading = AbortSignal.timeout(1000);
+      expect(await backend.fleetCrewStatus({}, reading)).toBeUndefined();
+      expect(await backend.crewStatus({}, reading)).toMatchObject({
+        members: [{ id: "pilot", project: "ops", name: "Reprovisioned pilot" }],
       });
     } finally {
       held.resolve();

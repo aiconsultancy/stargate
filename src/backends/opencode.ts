@@ -27,10 +27,7 @@ import {
   TranscriptUnavailable,
 } from "../backend-values";
 import { type BackendConfig, secret } from "../config";
-import {
-  type FleetCrewStatus,
-  fleetCrewStatusSchema,
-} from "../crew/fleet-status";
+import { fleetCrewStatusSchema } from "../crew/fleet-status";
 import { isNativeInstructionContext } from "../crew/instruction-context";
 import { crewMessageMetadataKey } from "../crew/message-protocol";
 import { CrewReporting } from "../crew/report-rpc";
@@ -179,11 +176,6 @@ export class OpenCodeBackend implements AgentBackend {
   private fleetStatusRetryAt = 0;
   private fleetStatusFailures = 0;
   private fleetStatusProbeMs = 400;
-  private fleetStatusMetadata?: FleetCrewStatus["metadata"];
-  private fleetStatusMemberMetadata?: {
-    member: string;
-    metadata: FleetCrewStatus["metadata"];
-  };
 
   // Native messages/form IDs are immutable. Recheck their live tool/input state,
   // but do not traverse the entire session twice every second for the same form.
@@ -954,15 +946,6 @@ export class OpenCodeBackend implements AgentBackend {
       const result = fleetCrewStatusSchema.parse(await probe);
       signal.throwIfAborted();
       this.fleetStatusFailures = 0;
-      if (input.member)
-        this.fleetStatusMemberMetadata = {
-          member: input.member,
-          metadata: result.metadata,
-        };
-      else {
-        this.fleetStatusMetadata = result.metadata;
-        delete this.fleetStatusMemberMetadata;
-      }
       return result;
     } catch (error) {
       signal.throwIfAborted();
@@ -986,13 +969,7 @@ export class OpenCodeBackend implements AgentBackend {
           this.fleetStatusFailures = 0;
         }
       }
-      const scoped = this.fleetStatusMemberMetadata;
-      const metadata =
-        scoped && scoped.member === input.member
-          ? scoped.metadata
-          : this.fleetStatusMetadata;
-      if (timedOut && metadata)
-        return { status: await this.crewStatus(input, signal), metadata };
+      // Ordinary status cannot verify which checkout is provisioned.
       return undefined;
     }
   }
