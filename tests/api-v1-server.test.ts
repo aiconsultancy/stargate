@@ -1,4 +1,5 @@
-import { expect, mock, test } from "bun:test";
+import { expect, mock, spyOn, test } from "bun:test";
+import * as fs from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,6 +94,7 @@ async function startFixture(
     config?: Partial<ApiV1Config>;
     source?: ApiV1Source;
     diff?: ApiV1Diff;
+    fleetReadMs?: number;
   } = {},
 ) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-"));
@@ -107,6 +109,9 @@ async function startFixture(
       source: options.source ?? source,
       diff: options.diff ?? (() => []),
       gateway,
+      ...(options.fleetReadMs !== undefined
+        ? { fleetReadMs: options.fleetReadMs }
+        : {}),
       signal: shutdown.signal,
     });
     const token = await apiToken(dataDirectory);
@@ -131,6 +136,39 @@ async function startFixture(
     throw error;
   }
 }
+
+test("HTTP fleet returns cached host metrics when enrichment exceeds the request deadline", async () => {
+  const server = await startFixture({ fleetReadMs: 150 });
+  const held = Promise.withResolvers<never>();
+  const entered = Promise.withResolvers<void>();
+  try {
+    const first = await server.get("/api/v1/fleet");
+    expect(first.status).toBe(200);
+    const before = (await first.json()) as V1Fleet;
+    const stall = spyOn(fs, "statfs").mockImplementation(() => {
+      entered.resolve();
+      return held.promise;
+    });
+    try {
+      const response = server.get("/api/v1/fleet", {
+        signal: AbortSignal.timeout(650),
+      });
+      await Promise.race([entered.promise, response]);
+      expect(stall).toHaveBeenCalled();
+      const fallback = await response;
+      expect(fallback.status).toBe(200);
+      expect((await fallback.json()) as V1Fleet).toMatchObject({
+        host: before.host,
+      });
+    } finally {
+      stall.mockRestore();
+      held.reject(new Error("Fixture closed"));
+      await held.promise.catch(() => {});
+    }
+  } finally {
+    await server.close();
+  }
+});
 
 test("peer allowlist applies before CORS or authentication and ignores forwarded headers", async () => {
   const server = await startFixture({
@@ -505,6 +543,103 @@ async function completeFleet(fleet: Omit<V1Fleet, "host" | "gateway">) {
   return fallbackFleet(fleet);
 }
 
+test("a stalled disk sample leaves periodic host frames using the latest snapshot", async () => {
+  const cached = { ...host, sampledAt: host.sampledAt + 100 };
+  const held = Promise.withResolvers<V1Host>();
+  let latest = host;
+  const readHost = mock(async () => {
+    if (readHost.mock.calls.length === 1) {
+      latest = cached;
+      return latest;
+    }
+    return held.promise;
+  });
+  const streams = createEventStreams(
+    {
+      ...source,
+      diff: diffEvents,
+      readHost,
+      snapshotHost: () => latest,
+      completeFleet,
+      fallbackFleet,
+    },
+    { pollMs: 10, hostMs: 15, heartbeatMs: 20 },
+  );
+  try {
+    const reader = streams.open(AbortSignal.timeout(400))?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    for (let i = 0; i < 3; i++) {
+      const frame = await nextFrame(reader, "host");
+      expect(frame).toContain(
+        `"sampledAt":${i === 0 ? host.sampledAt : cached.sampledAt}`,
+      );
+    }
+    expect(readHost).toHaveBeenCalledTimes(2);
+  } finally {
+    streams.stop();
+    held.resolve(host);
+  }
+});
+
+test.each(["overview", "enrichment", "ship"])(
+  "a hung %s read can retry after its hard cap with at most one abandoned read",
+  async (kind) => {
+    const first = Promise.withResolvers<never>();
+    const second = Promise.withResolvers<never>();
+    const retried = Promise.withResolvers<void>();
+    const recovered = "Recovered sample";
+    const attempt = mock(async <T>(value: T) => {
+      if (attempt.mock.calls.length === 1) return first.promise;
+      if (attempt.mock.calls.length === 2) {
+        retried.resolve();
+        return second.promise;
+      }
+      return value;
+    });
+    const streams = createEventStreams(
+      {
+        ...source,
+        fleet: async () =>
+          kind === "overview"
+            ? attempt({ ...overview, name: recovered })
+            : overview,
+        ship: async () =>
+          kind === "ship" ? attempt({ ...ship, name: recovered }) : ship,
+        completeFleet: async (fleet) =>
+          kind === "enrichment"
+            ? attempt(fallbackFleet({ ...fleet, name: recovered }))
+            : fallbackFleet(fleet),
+        diff: diffEvents,
+        readHost: async () => host,
+        snapshotHost: () => host,
+        fallbackFleet,
+      },
+      { pollMs: 10, hostMs: 1000, heartbeatMs: 15, readMs: 25 },
+    );
+    try {
+      const reader = streams.open(AbortSignal.timeout(700))?.getReader();
+      if (!reader) throw new Error("Cannot open event stream");
+      await Promise.race([
+        retried.promise,
+        wait(350).then(() => {
+          throw new Error("Read slot did not retry");
+        }),
+      ]);
+      await Bun.sleep(110);
+      expect(attempt).toHaveBeenCalledTimes(2);
+      first.reject(new Error("Abandoned read settled"));
+      expect(
+        await nextFrame(reader, kind === "ship" ? "ship" : "fleet", recovered),
+      ).toContain(recovered);
+    } finally {
+      streams.stop();
+      first.reject(new Error("Fixture closed"));
+      second.reject(new Error("Fixture closed"));
+      await Promise.allSettled([first.promise, second.promise]);
+    }
+  },
+);
+
 test("a slow ship does not delay the overview or other ship details, and retained detail is marked stale", async () => {
   const slow = { ...ship, id: "survey", name: "Survey" };
   const { crewMembers: _crew, ...slowSummary } = slow;
@@ -532,6 +667,7 @@ test("a slow ship does not delay the overview or other ship details, and retaine
       completeFleet,
       fallbackFleet,
       readHost: async () => host,
+      snapshotHost: () => host,
     },
     timing,
   );
@@ -601,6 +737,7 @@ test("unchanged ship details publish each successful sample time", async () => {
       completeFleet,
       fallbackFleet,
       readHost: async () => host,
+      snapshotHost: () => host,
     },
     { pollMs: 20, hostMs: 1000, heartbeatMs: 1000 },
   );
@@ -629,6 +766,7 @@ test("event poller shares reads, diffs each ship against its prior detail and st
       fleet,
       diff,
       readHost: async () => host,
+      snapshotHost: () => host,
       completeFleet,
       fallbackFleet,
     },
@@ -684,6 +822,7 @@ test("event poller aborts the in-flight snapshot when its last client disconnect
     },
     diff: () => [],
     readHost: async () => host,
+    snapshotHost: () => host,
     completeFleet,
     fallbackFleet,
   });
@@ -712,6 +851,7 @@ test("timed-out enrichment keeps its slot while current overviews publish across
       fleet: async () => ({ ...overview, name }),
       diff: diffEvents,
       readHost: async () => host,
+      snapshotHost: () => host,
       completeFleet: read,
       fallbackFleet,
     },
@@ -761,6 +901,7 @@ test("a hung overview publishes keepalives before its first sample and cached da
       completeFleet,
       fallbackFleet,
       readHost: async () => host,
+      snapshotHost: () => host,
     },
     { pollMs: 10, hostMs: 1000, heartbeatMs: 15, readMs: 25 },
   );
@@ -808,6 +949,7 @@ test("a reconnect publishes stale detail while an expired read still holds its s
       completeFleet,
       fallbackFleet,
       readHost: async () => host,
+      snapshotHost: () => host,
     },
     { pollMs: 15, hostMs: 1000, heartbeatMs: 1000, readMs: 40 },
   );
@@ -847,6 +989,7 @@ test("the event poller drops a stream whose unread frames fill its buffer", asyn
         return Array.from({ length: 2500 }, () => activity);
       },
       readHost: async () => host,
+      snapshotHost: () => host,
       completeFleet,
       fallbackFleet,
     },

@@ -10,6 +10,7 @@ import {
   totalmem,
   uptime,
 } from "node:os";
+import { createReadSlot } from "../../read-deadline";
 import type { V1Host } from "./types";
 
 export function memAvailableBytes(meminfo: string) {
@@ -71,6 +72,7 @@ async function availableMemory() {
 }
 
 export function startHostMetrics(dataDirectory: string) {
+  const lifetime = new AbortController();
   let cpu = cpuTotals(cpus());
   let usage: number | null = null;
   const sampler = setInterval(() => {
@@ -109,20 +111,23 @@ export function startHostMetrics(dataDirectory: string) {
   }
 
   let latest: V1Host | undefined;
-  let pending: Promise<V1Host> | undefined;
+  const reads = createReadSlot<V1Host>(20_000);
   return {
-    stop: () => clearInterval(sampler),
+    stop() {
+      lifetime.abort();
+      clearInterval(sampler);
+    },
     snapshot: () => latest ?? snapshot(),
     read() {
-      pending ??= sample()
-        .then((data) => {
+      return (
+        reads.pending ??
+        reads.start(lifetime.signal, async (signal) => {
+          const data = await sample();
+          signal.throwIfAborted();
           latest = data;
           return data;
         })
-        .finally(() => {
-          pending = undefined;
-        });
-      return pending;
+      ).result;
     },
   };
 }

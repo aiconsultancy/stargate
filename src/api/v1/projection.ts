@@ -514,7 +514,13 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       view.crewError,
       metadata,
     );
-    return { ...summary, crewMembers };
+    return {
+      ...summary,
+      crewMembers,
+      ...(snapshot?.crewObservedAt !== undefined
+        ? { detailUpdatedAt: snapshot.crewObservedAt }
+        : {}),
+    };
   }
 
   return {

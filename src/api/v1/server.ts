@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
+import { readWithDeadline } from "../../read-deadline";
 import type { ApiV1Config } from "./config";
 import {
   type ApiV1Diff,
@@ -28,6 +29,7 @@ type Options = {
     opencodeVersion: OpenCodeVersionLookup;
   };
   signal: AbortSignal;
+  fleetReadMs?: number;
 };
 
 const failureWindowMs = 60_000;
@@ -123,7 +125,7 @@ export async function startApiV1Server(options: Options) {
   ) => {
     signal.throwIfAborted();
     const [metrics] = await Promise.all([
-      host.read(),
+      host.read().catch(() => host.snapshot()),
       lookupVersion().then((version) => {
         lastOpenCodeVersion = version;
       }),
@@ -131,13 +133,16 @@ export async function startApiV1Server(options: Options) {
     signal.throwIfAborted();
     return fleetWithMetrics(fleet, metrics);
   };
+  const fallbackFleet = (fleet: V1Snapshot["fleet"]) =>
+    fleetWithMetrics(fleet, host.snapshot());
   const events = createEventStreams({
     fleet: readFleet,
     ship: (id, signal) => source.ship(id, signal),
     diff: options.diff,
     completeFleet,
-    fallbackFleet: (fleet) => fleetWithMetrics(fleet, host.snapshot()),
+    fallbackFleet,
     readHost: host.read,
+    snapshotHost: host.snapshot,
   });
 
   let server: Bun.Server<undefined>;
@@ -196,30 +201,37 @@ export async function startApiV1Server(options: Options) {
           const read = AbortSignal.any([
             signal,
             AbortSignal.timeout(
-              pathname === "/api/v1/fleet" ? fleetOverviewReadMs : 20_000,
+              pathname === "/api/v1/fleet"
+                ? (options.fleetReadMs ?? fleetOverviewReadMs)
+                : 20_000,
             ),
           ]);
-          let result:
-            | V1Fleet
-            | Awaited<ReturnType<ApiV1Source["ship"] | ApiV1Source["crew"]>>;
           if (pathname === "/api/v1/fleet") {
             if (method === "HEAD") return empty(200);
-            const fleet = await readFleet(read);
+            const fleet = await readWithDeadline(read, undefined, readFleet)
+              .result;
             read.throwIfAborted();
-            result = await completeFleet(fleet, read);
-          } else {
-            const match =
-              /^\/api\/v1\/ships\/([^/]+)(?:\/crew\/([^/]+))?$/.exec(pathname);
-            const id = match?.[1] && routeId(match[1]);
-            if (!id) return empty(404);
-            if (match?.[2]) {
-              const member = routeId(match[2]);
-              if (!member) return empty(404);
-              result = await source.crew(id, member, read);
-            } else {
-              result = await source.ship(id, read);
-            }
+            const result = await readWithDeadline(read, undefined, (reading) =>
+              completeFleet(fleet, reading),
+            ).result.catch((error: unknown) => {
+              signal.throwIfAborted();
+              if (read.aborted && error === read.reason)
+                return fallbackFleet(fleet);
+              throw error;
+            });
+            signal.throwIfAborted();
+            return Response.json(result, { headers });
           }
+          const match = /^\/api\/v1\/ships\/([^/]+)(?:\/crew\/([^/]+))?$/.exec(
+            pathname,
+          );
+          const id = match?.[1] && routeId(match[1]);
+          if (!id) return empty(404);
+          const member = match?.[2] && routeId(match[2]);
+          if (match?.[2] && !member) return empty(404);
+          const result = member
+            ? await source.crew(id, member, read)
+            : await source.ship(id, read);
           read.throwIfAborted();
           if (!result) return empty(404);
           return method === "HEAD"

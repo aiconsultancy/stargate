@@ -1,4 +1,4 @@
-import { readWithDeadline } from "../../read-deadline";
+import { createReadSlot } from "../../read-deadline";
 import type {
   ApiV1Source,
   V1Event,
@@ -24,6 +24,7 @@ type Options = Pick<ApiV1Source, "fleet" | "ship"> & {
   ): Promise<V1Fleet>;
   fallbackFleet(fleet: V1Snapshot["fleet"]): V1Fleet;
   readHost(): Promise<V1Host>;
+  snapshotHost(): V1Host;
 };
 
 type Client = {
@@ -49,16 +50,9 @@ function encodeEvents(events: V1Event[]) {
 }
 
 function holdRead<T>(readMs: number) {
-  let pending: ReturnType<typeof readWithDeadline<T>> | undefined;
-  return (parent: AbortSignal, read: (signal: AbortSignal) => Promise<T>) => {
-    if (!pending) {
-      pending = readWithDeadline(parent, readMs, read);
-      void pending.settled.then(() => {
-        pending = undefined;
-      });
-    }
-    return pending.result;
-  };
+  const slot = createReadSlot<T>(readMs);
+  return (parent: AbortSignal, read: (signal: AbortSignal) => Promise<T>) =>
+    (slot.pending ?? slot.start(parent, read)).result;
 }
 
 export function createEventStreams(
@@ -71,7 +65,10 @@ export function createEventStreams(
     reads: Map<string, V1ShipRead>;
   }>(timing.readMs ?? fleetOverviewReadMs);
   const enrich = holdRead<V1Fleet>(readMs);
-  const pendingShips = new Set<string>();
+  const shipReads = new Map<
+    string,
+    ReturnType<typeof createReadSlot<V1ShipDetail | undefined>>
+  >();
   const cachedShips = new Map<string, V1ShipDetail>();
   let cachedOverview: V1Snapshot["fleet"] | undefined;
   let active: ReturnType<typeof startPolling> | undefined;
@@ -81,6 +78,7 @@ export function createEventStreams(
     const clients = new Set<Client>();
     const ships = new Map<string, V1ShipDetail>();
     const pending = new Map<string, AbortController>();
+    let summaries = new Map<string, V1Ship>();
     let fleet: V1Fleet | undefined;
     let overviewExpired = false;
     let publishing = false;
@@ -95,11 +93,12 @@ export function createEventStreams(
     function publishFleet(next: V1Fleet) {
       const previous = fleet;
       fleet = next;
-      const ids = new Set(next.ships.map(({ id }) => id));
-      for (const [id, attempt] of pending) if (!ids.has(id)) attempt.abort();
-      for (const id of ships.keys()) if (!ids.has(id)) ships.delete(id);
+      summaries = new Map(next.ships.map((ship) => [ship.id, ship]));
+      for (const [id, attempt] of pending)
+        if (!summaries.has(id)) attempt.abort();
+      for (const id of ships.keys()) if (!summaries.has(id)) ships.delete(id);
       for (const id of cachedShips.keys())
-        if (!ids.has(id)) cachedShips.delete(id);
+        if (!summaries.has(id)) cachedShips.delete(id);
       broadcast(
         previous
           ? options.diff(
@@ -111,27 +110,29 @@ export function createEventStreams(
       );
     }
 
-    function publishShip(
-      summary: V1Ship,
-      readAt: number,
-      detail?: V1ShipDetail,
-    ) {
-      if (!fleet) return;
-      const { id } = summary;
+    function publishShip(id: string, readAt: number, detail?: V1ShipDetail) {
+      const summary = summaries.get(id);
+      if (!fleet || !summary) return;
       const previous = ships.get(id);
       const prior = cachedShips.get(id);
-      const next: V1ShipDetail =
-        detail && (detail.available || !prior?.available)
-          ? { ...detail, detailUpdatedAt: readAt }
-          : prior?.available
-            ? { ...prior, detailStale: true }
-            : (prior ?? {
-                ...summary,
-                available: false,
-                error: summary.error ?? "Ship detail unavailable.",
-                crewMembers: [],
-                detailUpdatedAt: readAt,
-              });
+      const error = detail?.error ?? summary.error;
+      const next: V1ShipDetail = detail?.available
+        ? { ...detail, detailUpdatedAt: detail.detailUpdatedAt ?? readAt }
+        : prior
+          ? {
+              ...prior,
+              available: summary.available && detail?.available !== false,
+              ...(error ? { error } : {}),
+              detailStale: true,
+            }
+          : {
+              ...(detail ?? summary),
+              available: false,
+              error: error ?? "Ship detail unavailable.",
+              crewMembers: detail?.crewMembers ?? [],
+              detailUpdatedAt:
+                detail?.detailUpdatedAt ?? previous?.detailUpdatedAt ?? readAt,
+            };
       const changes: V1Event[] = previous
         ? options.diff(
             { fleet, ships: { [id]: previous } },
@@ -140,32 +141,34 @@ export function createEventStreams(
           )
         : [{ type: "ship", data: next }];
       ships.set(id, next);
-      cachedShips.set(id, next);
+      if (next.available && !next.detailStale) cachedShips.set(id, next);
       broadcast(changes);
     }
 
-    async function refreshShip(summary: V1Ship, read: V1ShipRead) {
+    async function refreshShip(id: string, read: V1ShipRead) {
       if (shutdown.signal.aborted) return;
-      const { id } = summary;
       const readAt = Date.now();
-      if (pendingShips.has(id)) {
+      const slot =
+        shipReads.get(id) ??
+        createReadSlot<V1ShipDetail | undefined>(readMs, () =>
+          shipReads.delete(id),
+        );
+      if (slot.pending) {
         const own = pending.get(id);
         // A prior stream or a removed ship already cancelled this wait.
-        if (!own || own.signal.aborted) publishShip(summary, readAt);
+        if (!own || own.signal.aborted) publishShip(id, readAt);
         return;
       }
+      shipReads.set(id, slot);
       const attempt = new AbortController();
       pending.set(id, attempt);
-      pendingShips.add(id);
       const parent = AbortSignal.any([shutdown.signal, attempt.signal]);
-      const { result, settled } = readWithDeadline(parent, readMs, read);
+      const { result } = slot.start(parent, read);
       try {
         const detail = await result.catch(() => undefined);
-        if (!parent.aborted) publishShip(summary, readAt, detail);
+        if (!parent.aborted) publishShip(id, readAt, detail);
       } finally {
-        await settled;
-        pending.delete(id);
-        pendingShips.delete(id);
+        if (pending.get(id) === attempt) pending.delete(id);
       }
     }
 
@@ -195,7 +198,7 @@ export function createEventStreams(
         publishFleet(next);
         for (const ship of next.ships)
           void refreshShip(
-            ship,
+            ship.id,
             sample?.reads.get(ship.id) ??
               ((signal) => options.ship(ship.id, signal)),
           ).catch(() => {
@@ -209,11 +212,11 @@ export function createEventStreams(
     }
 
     async function publishHost() {
-      if (readingHost) return;
+      broadcast([{ type: "host", data: options.snapshotHost() }]);
+      if (readingHost || shutdown.signal.aborted) return;
       readingHost = true;
       try {
-        const data = await options.readHost();
-        if (!shutdown.signal.aborted) broadcast([{ type: "host", data }]);
+        await options.readHost();
       } catch {
         // The next sample can succeed even if a metric read failed.
       } finally {

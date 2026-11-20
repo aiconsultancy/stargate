@@ -22,11 +22,12 @@
 - Keep recent crew samples usable during slow refreshes and wait for the
   shared crew read when no recent sample is available. Adapt the OpenCode
   fleet probe deadline for slower captains and back off after repeated failures.
-- Keep timed-out overview, enrichment, and detail reads in their slots while
-  continuing to publish cached or stale event data across reconnects. Publish
-  initial crew errors and emit one availability event per transition.
+- Retry stalled Fleet API reads after a hard cap with at most one abandoned
+  read per slot. Serve cached metrics when fleet HTTP enrichment times out and
+  continue periodic host events while metrics refresh. Retained ship details
+  report captain unavailability and preserve the last successful crew data.
 - Publish lightweight `ship-sampled` events when only the ship detail
-  timestamp changes.
+  timestamp changes. Preserve the observation time when a crew sample is reused.
 - Harden Fleet API Git reads against checkout-configured commands.
 - Report Fleet API task outcomes that complete between event polls.
 - Look up pull requests by head branch, keep cached results on refresh

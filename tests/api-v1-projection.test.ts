@@ -332,6 +332,7 @@ function fleetEvents(
       ...source,
       diff: diffEvents,
       readHost: async () => eventHost,
+      snapshotHost: () => eventHost,
       completeFleet: async (overview) => fallbackFleet(overview),
       fallbackFleet,
     },
@@ -609,6 +610,7 @@ describe("Fleet API projection", () => {
       );
       const at = /"detailUpdatedAt":(\d+)/.exec(initial)?.[1];
       expect(at).toBeDefined();
+      f.advance();
       f.statuses.set("captain", new Error("Crew offline"));
       const unavailable = await nextEvent(reader, '"available":false');
       expect(unavailable).toContain("event: fleet");
@@ -616,8 +618,81 @@ describe("Fleet API projection", () => {
       const stale = await nextEvent(reader, '"detailStale":true');
       expect(stale).toContain('"id":"running"');
       expect(stale).toContain(`"detailUpdatedAt":${at}`);
+      const detail = stale
+        .split("\n")
+        .find(
+          (line) =>
+            line.startsWith('data: {"id":"captain"') &&
+            line.includes('"detailStale":true'),
+        );
+      expect(detail && JSON.parse(detail.slice(6))).toMatchObject({
+        available: false,
+        error: "Crew status unavailable.",
+      });
     } finally {
       streams.stop();
+    }
+  });
+
+  test("a reused crew sample keeps its observation time when other detail changes", async () => {
+    const f = fixture({ fleetCrewReadMs: 5, fleetCrewDeadlineMs: 180 });
+    const held = Promise.withResolvers<CrewStatus>();
+    f.set("captain", [context("pilot")]);
+    const streams = fleetEvents(f.source, {
+      pollMs: 30,
+      hostMs: 1000,
+      heartbeatMs: 1000,
+    });
+    try {
+      const reader = streams.open(AbortSignal.timeout(750))?.getReader();
+      if (!reader) throw new Error("Cannot open event stream");
+      const marker = 'event: ship\ndata: {"id":"captain"';
+      const detailLine = (frames: string) =>
+        frames
+          .split("\n")
+          .find(
+            (line) =>
+              line.startsWith('data: {"id":"captain"') &&
+              line.includes('"crewMembers"'),
+          ) ?? "";
+      const initial = detailLine(await nextEvent(reader, marker));
+      const at = /"detailUpdatedAt":(\d+)/.exec(initial)?.[1];
+      expect(at).toBeDefined();
+      f.advance();
+      f.statuses.set("captain", held.promise);
+      f.queue("captain", { running: 7 });
+      const refreshed = detailLine(await nextEvent(reader, marker));
+      expect(refreshed).toContain('"running":7');
+      expect(refreshed).toContain('"id":"pilot"');
+      expect(refreshed).toContain(`"detailUpdatedAt":${at}`);
+    } finally {
+      streams.stop();
+      held.resolve({ members: [], total: 0, truncated: false });
+    }
+  });
+
+  test("a crew refresh can recover after an abort-ignoring read reaches its hard cap", async () => {
+    const f = fixture({ fleetCrewReadMs: 5, fleetCrewDeadlineMs: 25 });
+    const held = Promise.withResolvers<CrewStatus>();
+    f.statuses.set("captain", held.promise);
+    const streams = fleetEvents(f.source, {
+      pollMs: 10,
+      hostMs: 1000,
+      heartbeatMs: 1000,
+    });
+    try {
+      const reader = streams.open(AbortSignal.timeout(450))?.getReader();
+      if (!reader) throw new Error("Cannot open event stream");
+      expect(
+        await nextEvent(reader, '"error":"Crew status unavailable."'),
+      ).toContain('"available":false');
+      f.set("captain", [context("recovered-after-cap")]);
+      expect(await nextEvent(reader, '"id":"recovered-after-cap"')).toContain(
+        '"available":true',
+      );
+    } finally {
+      streams.stop();
+      held.resolve({ members: [], total: 0, truncated: false });
     }
   });
 

@@ -199,7 +199,7 @@ export type V1Ship = {
 
 export type V1ShipDetail = V1Ship & {
   crewMembers: V1CrewMember[];
-  /** In a ship event, when the detail was sampled. */
+  /** In a ship event, when the crew state was observed. */
   detailUpdatedAt?: number;
   /** In a ship event, true if the last successful detail is being retained. */
   detailStale?: true;

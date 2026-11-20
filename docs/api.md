@@ -103,6 +103,10 @@ value is null.
 `host.disks[].path` labels the filesystem. `/` represents the root
 filesystem, and `data` represents the filesystem holding the data directory
 when it is on a separate device.
+`GET /api/v1/fleet` gives the overview and enrichment a shared 25-second
+deadline. If enrichment times out after the overview is ready, the response
+uses the latest host and gateway metrics. Before the first host sample, the
+fallback omits disk usage.
 
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
 submodules. Status reads run in a private Git directory with a copy of the
@@ -144,16 +148,22 @@ initial `ship` details. One shared poller reads the overview every three
 seconds while clients are connected and publishes changed overviews independently
 of ship details. Overview reads have a 25-second deadline. Host and gateway
 enrichment and individual ship details each have a 20-second deadline.
-Reads keep their slots until they settle. After a deadline, the poller can
-publish the last overview or host sample while the original read is still
-pending. If the first overview stalls, host and heartbeat events can arrive
-before the initial fleet frame. If the first host sample stalls, the
-overview uses host metrics without disk usage. Changed details emit a full
-`ship` event with `detailUpdatedAt`. Timestamp-only refreshes emit
+After a deadline, the poller can publish the last overview or host sample while
+the original read is still pending. At three times a read's deadline, another
+attempt can start. Each overview, enrichment, host metrics, crew sample, and
+ship detail slot allows one outstanding abandoned read alongside the current
+attempt. If the first overview stalls, host and heartbeat events can arrive
+before the initial fleet frame. The host timer publishes the latest snapshot
+while a new disk sample is pending. Before the first successful host sample,
+the snapshot omits disk usage. Changed details emit a full `ship` event with
+`detailUpdatedAt`. Reused crew data retains its observation time, even when
+other detail changes. Timestamp-only refreshes emit
 `ship-sampled` with `id` and `detailUpdatedAt`. Clients can use this event
 to update the timestamp on the cached detail. If a refresh fails,
 `detailStale` is set to `true` on the last successful detail, which keeps
-its original sample time, including across reconnects. A detail failure
+its original sample time, including across reconnects. When the captain is
+unavailable, retained detail reports `available: false` and includes the
+current error if supplied. A detail failure
 before the first successful detail emits an unavailable `ship` with an
 `error` field. A successful refresh clears `detailStale`. Availability
 activity follows the overview's

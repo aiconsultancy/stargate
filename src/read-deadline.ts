@@ -27,3 +27,31 @@ export function readWithDeadline<T>(
   );
   return { result, settled };
 }
+
+/** Share one attempt and allow one retry while an abort-ignoring read drains. */
+export function createReadSlot<T>(timeout: number, onIdle?: () => void) {
+  type Attempt = { result: Promise<T>; abandonAt: number };
+  let pending: Attempt | undefined;
+  let abandoned: Attempt | undefined;
+  return {
+    get pending() {
+      // Check on demand so stopped pollers do not leave recovery timers behind.
+      if (pending && !abandoned && performance.now() >= pending.abandonAt) {
+        abandoned = pending;
+        pending = undefined;
+      }
+      return pending;
+    },
+    start(parent: AbortSignal, read: (signal: AbortSignal) => Promise<T>) {
+      const { result, settled } = readWithDeadline(parent, timeout, read);
+      const attempt = { result, abandonAt: performance.now() + 3 * timeout };
+      pending = attempt;
+      void settled.then(() => {
+        if (pending === attempt) pending = undefined;
+        if (abandoned === attempt) abandoned = undefined;
+        if (!pending && !abandoned) onIdle?.();
+      });
+      return attempt;
+    },
+  };
+}

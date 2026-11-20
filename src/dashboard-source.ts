@@ -21,7 +21,7 @@ import {
   dashboardCrewSummary,
 } from "./dashboard-projection";
 import type { IrcRegistration } from "./irc/ship";
-import { readWithDeadline } from "./read-deadline";
+import { createReadSlot, readWithDeadline } from "./read-deadline";
 import { backendFingerprint, type Identity } from "./routing";
 import {
   HISTORY_PAGE,
@@ -120,6 +120,7 @@ type CrewRead = {
   status: CrewStatus | null;
   error?: string;
   metadata?: FleetCrewStatus["metadata"];
+  observedAt?: number;
 };
 
 /**
@@ -145,9 +146,14 @@ export function dashboardSource(
   const fleetCrew = new WeakMap<
     DashboardShip,
     {
+      read: ReturnType<typeof createReadSlot<CrewRead>>;
       latest?: CrewRead;
       last?: { sample: CrewRead; at: number };
-      pending?: { result: Promise<CrewRead>; fallback: CrewRead | undefined };
+      pending?: {
+        attempt: Promise<CrewRead>;
+        result: Promise<CrewRead>;
+        fallback: CrewRead | undefined;
+      };
     }
   >();
 
@@ -244,20 +250,22 @@ export function dashboardSource(
     read: (reading: AbortSignal) => Promise<CrewRead>,
   ): Promise<CrewRead> {
     signal.throwIfAborted();
-    const slot = fleetCrew.get(key) ?? {};
+    const slot = fleetCrew.get(key) ?? {
+      read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
+    };
     fleetCrew.set(key, slot);
     const unavailable = (): CrewRead => ({
       ...slot.latest,
       status: slot.latest?.status ?? null,
       error: crewUnavailable,
     });
-    if (!slot.pending) {
+    const current = slot.read.pending;
+    if (!current || slot.pending?.attempt !== current.result) {
       // The backend read belongs to the shared slot. A caller only owns its wait.
-      const attempt = readWithDeadline(
+      const attempt = slot.read.start(
         new AbortController().signal,
-        fleetCrewDeadlineMs,
         read,
-      );
+      ).result;
       const last = slot.last;
       // A recent sample stays usable throughout this refresh. A cold caller
       // needs the shared result to establish availability.
@@ -268,19 +276,18 @@ export function dashboardSource(
             fleetCrewDeadlineMs + crewPollIntervalMs)
           ? last.sample
           : undefined;
-      const result = attempt.result
-        .then((sample) => (sample.error ? unavailable() : sample), unavailable)
+      const result = attempt
+        .then(
+          (sample) =>
+            sample.error ? unavailable() : { ...sample, observedAt: now() },
+          unavailable,
+        )
         .then((sample) => {
           if (!sample.error) slot.latest = sample;
           slot.last = { sample, at: performance.now() };
           return sample;
         });
-      slot.pending = { result, fallback };
-      void result
-        .then(() => attempt.settled)
-        .then(() => {
-          delete slot.pending;
-        });
+      slot.pending = { attempt, result, fallback };
     }
     const pending = slot.pending;
     try {
@@ -469,14 +476,22 @@ export function dashboardSource(
     signal: AbortSignal,
     fleetInput?: CrewStatusInput,
     sample?: CrewRead,
-  ): Promise<{ view: ShipView; metadata?: CrewRead["metadata"] } | undefined> {
+  ): Promise<
+    | {
+        view: ShipView;
+        metadata?: CrewRead["metadata"];
+        crewObservedAt?: number;
+      }
+    | undefined
+  > {
     const ship = find(id);
     if (!ship) return undefined;
     const { bot } = ship;
-    const [{ status, error, metadata }, sessions] = await Promise.all([
-      sample ?? crew(ship, signal, fleetInput),
-      roots(ship, signal),
-    ]);
+    const [{ status, error, metadata, observedAt }, sessions] =
+      await Promise.all([
+        sample ?? crew(ship, signal, fleetInput),
+        roots(ship, signal),
+      ]);
     const named = agent(ship);
     const model =
       bot.backend.type === "opencode"
@@ -555,7 +570,11 @@ export function dashboardSource(
       },
       ...sessions,
     };
-    return { view, metadata };
+    return {
+      view,
+      metadata,
+      ...(observedAt !== undefined ? { crewObservedAt: observedAt } : {}),
+    };
   }
 
   return {
