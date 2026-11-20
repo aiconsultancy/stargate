@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { readWithDeadline } from "../../read-deadline";
 import type { ApiRoute } from "../route";
-import { startApiServer } from "../server";
+import { apiRequestMs, startApiServer } from "../server";
 import type { ApiV1Config } from "./config";
 import {
   type ApiV1Diff,
@@ -101,6 +101,11 @@ export async function startApiV1Server(options: Options) {
   const allowsOrigin = originMatcher(config.corsOrigins ?? defaultCorsOrigins);
   const authenticate = authentication(await apiToken(dataDirectory));
   options.signal.throwIfAborted();
+  const hostRequestMs = options.timing?.requestMs ?? apiRequestMs;
+  const httpReadMs = Math.max(
+    1,
+    hostRequestMs - Math.min(1_000, Math.ceil(hostRequestMs / 10)),
+  );
   const lifetime = new AbortController();
   const lookupVersion = cacheOpenCodeVersion(
     options.gateway.opencodeVersion,
@@ -209,12 +214,18 @@ export async function startApiV1Server(options: Options) {
             return new Response(stream, { headers });
           }
 
+          // The shared host answers 503 and drops the response when its request
+          // deadline passes, so HTTP reads end a margin earlier: the fleet
+          // fallback, or the route's own error, can still be sent.
           const read = AbortSignal.any([
             signal,
             AbortSignal.timeout(
               pathname === "/api/v1/fleet"
-                ? (options.fleetReadMs ?? fleetOverviewReadMs)
-                : 20_000,
+                ? Math.min(
+                    options.fleetReadMs ?? fleetOverviewReadMs,
+                    httpReadMs,
+                  )
+                : httpReadMs,
             ),
           ]);
           if (pathname === "/api/v1/fleet") {

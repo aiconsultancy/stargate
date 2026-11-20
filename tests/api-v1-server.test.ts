@@ -99,6 +99,7 @@ async function startFixture(
     source?: ApiV1Source;
     diff?: ApiV1Diff;
     fleetReadMs?: number;
+    timing?: { headersMs?: number; requestMs?: number };
   } = {},
 ) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-"));
@@ -116,6 +117,7 @@ async function startFixture(
       ...(options.fleetReadMs !== undefined
         ? { fleetReadMs: options.fleetReadMs }
         : {}),
+      ...(options.timing ? { timing: options.timing } : {}),
       signal: shutdown.signal,
     });
     const token = await apiToken(dataDirectory);
@@ -161,6 +163,33 @@ test("HTTP fleet returns cached host metrics when enrichment exceeds the request
       await Promise.race([entered.promise, response]);
       expect(stall).toHaveBeenCalled();
       const fallback = await response;
+      expect(fallback.status).toBe(200);
+      expect((await fallback.json()) as V1Fleet).toMatchObject({
+        host: before.host,
+      });
+    } finally {
+      stall.mockRestore();
+      held.reject(new Error("Fixture closed"));
+      await held.promise.catch(() => {});
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test("HTTP fleet fallback answers before the host request deadline with default read settings", async () => {
+  // No fleetReadMs: the route must derive its deadline from the host's.
+  const server = await startFixture({ timing: { requestMs: 600 } });
+  const held = Promise.withResolvers<never>();
+  try {
+    const first = await server.get("/api/v1/fleet");
+    expect(first.status).toBe(200);
+    const before = (await first.json()) as V1Fleet;
+    const stall = spyOn(fs, "statfs").mockImplementation(() => held.promise);
+    try {
+      const fallback = await server.get("/api/v1/fleet", {
+        signal: AbortSignal.timeout(2_000),
+      });
       expect(fallback.status).toBe(200);
       expect((await fallback.json()) as V1Fleet).toMatchObject({
         host: before.host,

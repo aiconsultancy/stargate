@@ -121,9 +121,10 @@ value is null.
 `host.disks[].path` labels the filesystem. `/` represents the root
 filesystem, and `data` represents the filesystem holding the data directory
 when it is on a separate device.
-`GET /api/v1/fleet` gives the overview and enrichment a shared 25-second
-deadline. If enrichment times out after the overview is ready, the response
-uses the latest host and gateway metrics. Before the first host sample, the
+`GET /api/v1/fleet` gives the overview and enrichment a shared deadline that
+ends one second before the HTTP request deadline (19 seconds by default). If
+enrichment times out after the overview is ready, the response uses the latest
+host and gateway metrics. Before the first host sample, the
 fallback omits disk usage.
 
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
@@ -188,8 +189,10 @@ Use a streaming browser `fetch` with an `Authorization` header. A connection
 gets a `fleet` event with host and gateway information, followed by the
 initial `ship` details. One shared poller reads the overview every three
 seconds while clients are connected and publishes changed overviews independently
-of ship details. Overview reads have a 25-second deadline. Host and gateway
-enrichment and individual ship details each have a 20-second deadline.
+of ship details. In the event stream, overview reads have a 25-second deadline,
+and host and gateway enrichment and individual ship details each have a
+20-second deadline. Over HTTP, every read ends one second before the request
+deadline, so a fallback or an error can still be sent.
 When an overview read fails or times out, the poller can republish the last
 successful overview with `overviewStale: true` and its original `generatedAt`.
 That fallback expires 75 seconds after the successful read and is discarded
