@@ -176,6 +176,7 @@ export class OpenCodeBackend implements AgentBackend {
   private fleetStatusRetryAt = 0;
   private fleetStatusFailures = 0;
   private fleetStatusProbeMs = 400;
+  private fleetStatusPending = false;
 
   // Native messages/form IDs are immutable. Recheck their live tool/input state,
   // but do not traverse the entire session twice every second for the same form.
@@ -935,14 +936,25 @@ export class OpenCodeBackend implements AgentBackend {
     const probeMs = this.fleetStatusProbeMs;
     try {
       signal.throwIfAborted();
-      if (performance.now() < this.fleetStatusRetryAt) return undefined;
+      if (
+        this.fleetStatusPending ||
+        performance.now() < this.fleetStatusRetryAt
+      )
+        return undefined;
       // Start with a short probe and leave time for ordinary crew status.
-      const { result: probe } = readWithDeadline(signal, probeMs, (reading) =>
-        this.client.rpc(CrewReporting).fleetStatus(input, {
-          location: { directory: this.config.directory },
-          signal: reading,
-        }),
+      const { result: probe, settled } = readWithDeadline(
+        signal,
+        probeMs,
+        (reading) =>
+          this.client.rpc(CrewReporting).fleetStatus(input, {
+            location: { directory: this.config.directory },
+            signal: reading,
+          }),
       );
+      this.fleetStatusPending = true;
+      void settled.then(() => {
+        this.fleetStatusPending = false;
+      });
       const result = fleetCrewStatusSchema.parse(await probe);
       signal.throwIfAborted();
       this.fleetStatusFailures = 0;

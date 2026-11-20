@@ -2,6 +2,7 @@ import { describe, expect, mock, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OpenCode } from "@opencode/client";
 import { Schema } from "effect";
 import { diffEvents } from "../src/api/v1/diff";
 import { createEventStreams } from "../src/api/v1/events";
@@ -494,17 +495,79 @@ describe("Fleet API projection", () => {
     const backend = new OpenCodeBackend(config);
     try {
       expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
-      for (let i = 0; i < 2; i++)
-        expect(await backend.fleetCrewStatus({}, signal)).toMatchObject({
-          metadata: { projectDirectory: "/fixture" },
-        });
+      let recovered: Awaited<ReturnType<typeof backend.fleetCrewStatus>>;
+      for (let i = 0; i < 20 && !recovered; i++) {
+        await Bun.sleep(5); // Fetch may still be aborting after the deadline.
+        recovered = await backend.fleetCrewStatus({}, signal);
+      }
+      expect(recovered).toMatchObject({
+        metadata: { projectDirectory: "/fixture" },
+      });
+      expect(await backend.fleetCrewStatus({}, signal)).toMatchObject({
+        metadata: { projectDirectory: "/fixture" },
+      });
     } finally {
       await backend.close();
       await server.stop(true);
     }
   });
 
-  test("a timed-out OpenCode fleet probe leaves time for status and honours caller cancellation", async () => {
+  test("OpenCode waits for a timed-out fleet probe to settle before probing again", async () => {
+    const held = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const status = { members: [], total: 0, truncated: false };
+    const metadata = { projectDirectory: "/fixture", contexts: [] };
+    let probes = 0;
+    const mockFetch = async (url: URL | RequestInfo) => {
+      const path = new URL(url instanceof Request ? url.url : url).pathname;
+      if (!path.endsWith("/fleetStatus"))
+        return Response.json({ output: status });
+      if (++probes === 1) {
+        started.resolve();
+        await held.promise;
+      }
+      return Response.json({ output: { status, metadata } });
+    };
+    const config = Schema.decodeUnknownSync(backendSchema)({
+      type: "opencode",
+      url: "http://127.0.0.1:1",
+      directory: "/",
+    });
+    if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+    const backend = new OpenCodeBackend(
+      config,
+      OpenCode.make({
+        baseUrl: config.url,
+        fetch: Object.assign(mockFetch, { preconnect: fetch.preconnect }),
+      }),
+    );
+    const deadline = new AbortController();
+    const timeout = spyOn(AbortSignal, "timeout").mockReturnValueOnce(
+      deadline.signal,
+    );
+    try {
+      const first = backend.fleetCrewStatus({}, signal);
+      await started.promise;
+      deadline.abort(new DOMException("Fixture deadline", "TimeoutError"));
+      expect(await first).toBeUndefined();
+      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(await backend.crewStatus({}, signal)).toEqual(status);
+      expect(probes).toBe(1);
+      held.resolve();
+      await Bun.sleep(0);
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        status,
+        metadata,
+      });
+      expect(probes).toBe(2);
+    } finally {
+      timeout.mockRestore();
+      held.resolve();
+      await backend.close();
+    }
+  });
+
+  test("a cancelled OpenCode fleet probe leaves ordinary status available", async () => {
     const methods: string[] = [];
     const server = Bun.serve({
       hostname: "127.0.0.1",
@@ -532,11 +595,10 @@ describe("Fleet API projection", () => {
       caller.abort();
       await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
       const reading = AbortSignal.timeout(1_000);
-      expect(await backend.fleetCrewStatus({}, reading)).toBeUndefined();
       expect(await backend.crewStatus({}, reading)).toMatchObject({
         members: [],
       });
-      expect(methods).toEqual(["fleetStatus", "fleetStatus", "status"]);
+      expect(methods).toEqual(["fleetStatus", "status"]);
     } finally {
       await backend.close();
       await server.stop(true);
