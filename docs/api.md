@@ -199,8 +199,8 @@ and host and gateway enrichment and individual ship details each have a
 deadline, so a fallback or an error can still be sent. Within that, `GET
 /api/v1/fleet` stops waiting for crew reads 5 seconds before its own deadline
 (14 seconds by default) and reports any captain that hasn't answered as
-unavailable. Ship and crew detail routes answer 503 while eight earlier detail
-reads are still settling.
+unavailable. The fleet overview, ship detail, and crew detail routes share
+eight HTTP read slots. These routes answer 503 when all eight slots are occupied.
 When an overview read fails or times out, the poller can republish the last
 successful overview with `overviewStale: true` and its original `generatedAt`.
 That fallback expires 75 seconds after the successful read and is discarded
@@ -236,9 +236,10 @@ fifteen seconds.
 
 The overview and ship details share one crew read per ship. When availability
 is unknown, the caller waits for that result for up to 20 seconds. During a
-refresh, a caller can use a recent sample after one second. A successful
-sample up to 23 seconds old at the start of a refresh remains usable until
-the shared read completes. A disconnected caller cancels its own wait.
+refresh, a caller can use a recent sample after one second. A sample up to
+23 seconds old at the start of a refresh remains usable until the shared read
+completes. A failed sample can also be served with its `error` field set.
+A disconnected caller cancels its own wait.
 Fleet API shutdown cancels shared crew reads. A committed configuration
 reload invalidates cached crew samples and cancels reads for retired backends.
 Unchanged backends keep their in-flight reads, including reads shared with
