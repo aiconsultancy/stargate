@@ -9,6 +9,7 @@ import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway";
 import { IrcShip } from "../src/irc/ship";
 import { Store } from "../src/store";
+import type { TurnProgress } from "../src/turn-progress";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -22,6 +23,7 @@ async function setup(
     features?: Record<string, boolean>;
     role?: "captain" | "rear_admiral" | "crew";
     turnStatusMs?: number;
+    turnTimeoutMs?: number;
   } = {},
 ) {
   const fake = new FakeIrcServer({
@@ -40,6 +42,9 @@ async function setup(
     passwordEnv: "STARGATE_IRC_GALACTICA",
     channels: ["#galactica"],
     ...(options.features ? { features: options.features } : {}),
+    ...(options.turnTimeoutMs === undefined
+      ? {}
+      : { turnTimeoutMs: options.turnTimeoutMs }),
     ...(options.role
       ? {
           access: { allowedAccounts: ["jack", "visitor"] },
@@ -71,12 +76,23 @@ async function setup(
     readyMs: 2000,
   });
   let release = Promise.withResolvers<void>();
+  let report: ((progress: TurnProgress) => void) | undefined;
   const backend: AgentBackend = {
     sessionID: "ses_captain",
     async createSession() {
       return "ses_captain";
     },
-    async prompt() {
+    async prompt(
+      _session,
+      _text,
+      _signal,
+      _onText,
+      _onInput,
+      _files,
+      _context,
+      onProgress,
+    ) {
+      report = onProgress;
       await release.promise;
       release = Promise.withResolvers<void>();
       return "Done.";
@@ -105,7 +121,13 @@ async function setup(
     await ship.close();
   });
   await until(() => captain.client.inChannel("#galactica"), 5000, "joined");
-  return { fake, store, captain, finish: () => release.resolve() };
+  return {
+    fake,
+    store,
+    captain,
+    finish: () => release.resolve(),
+    progress: (progress: TurnProgress) => report?.(progress),
+  };
 }
 
 const typing = (lines: readonly string[], target: string) =>
@@ -211,8 +233,8 @@ test("irc typing: off without message-tags or with features.typing false", async
 });
 
 for (const role of ["captain", "rear_admiral"] as const) {
-  test(`irc fleet ${role}: acknowledges a human turn and reports an open request once`, async () => {
-    const { fake, store, captain, finish } = await setup({
+  test(`irc fleet ${role}: reports confirmed progress without repeating it`, async () => {
+    const { fake, store, captain, finish, progress } = await setup({
       role,
       turnStatusMs: 30,
     });
@@ -224,20 +246,29 @@ for (const role of ["captain", "rear_admiral"] as const) {
     );
     const notices = () => lineOf(fake.received("galactica"), "NOTICE");
     await until(() => notices().length === 2, 3000, "request status");
-    const [ack, progress] = notices();
+    const [ack, unconfirmed] = notices();
     expect(ack?.params).toEqual(["#galactica", "Checking that now…"]);
-    expect(progress?.params).toEqual([
+    expect(unconfirmed?.params).toEqual([
       "#galactica",
-      "This request is still open.",
+      "Stargate has no confirmed backend activity for this request.",
+    ]);
+    progress({ stage: "reasoning", observedAt: Date.UTC(2026, 10, 20, 2, 23) });
+    await until(() => notices().length === 3, 3000, "reasoning status");
+    const latest = notices().at(-1);
+    expect(latest?.params).toEqual([
+      "#galactica",
+      "OpenCode reported model reasoning. Observed at 02:23 UTC.",
     ]);
     expect(ack?.tags.get("+draft/reply")).toBeTruthy();
-    expect(progress?.tags.get("+draft/reply")).toBe(
+    expect(latest?.tags.get("+draft/reply")).toBe(
       ack?.tags.get("+draft/reply"),
     );
     expect(typing(fake.received("galactica"), "#galactica")).toEqual([]);
+    await Bun.sleep(90);
+    expect(notices()).toHaveLength(3);
     finish();
     await until(() => store.queueCounts(captain.key).done === 1, 3000, "done");
-    expect(notices()).toHaveLength(2);
+    expect(notices()).toHaveLength(3);
   });
 }
 
@@ -253,6 +284,29 @@ test("irc fleet: a settled turn cancels its delayed progress notice", async () =
   await until(() => store.queueCounts(captain.key).done === 1, 3000, "done");
   await Bun.sleep(550);
   expect(notices()).toHaveLength(1);
+});
+
+test("irc fleet: timeout reports the last confirmed stage", async () => {
+  const { fake, store, captain, finish, progress } = await setup({
+    role: "captain",
+    turnStatusMs: 2000,
+    turnTimeoutMs: 1000,
+  });
+  fake.say({ nick: "jack", account: "jack" }, "#galactica", "@galactica check");
+  await until(
+    () => store.queueCounts(captain.key).running === 1,
+    3000,
+    "running",
+  );
+  progress({ stage: "queued", observedAt: Date.UTC(2026, 10, 20, 2, 20) });
+  await Bun.sleep(1050);
+  finish();
+  await until(() => store.queueCounts(captain.key).done === 1, 3000, "done");
+  const replies = lineOf(fake.received("galactica"), "PRIVMSG");
+  expect(replies.map((line) => line.params[1]).join(" ")).toContain(
+    "OpenCode queued the request. Delivery to the model is unconfirmed. Observed at 02:20 UTC.",
+  );
+  expect(lineOf(fake.received("galactica"), "NOTICE")).toHaveLength(1);
 });
 
 test("irc fleet: a configuration with crew rank keeps its typing behaviour", async () => {

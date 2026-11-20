@@ -15,6 +15,8 @@ import { latestInput } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { PiDurableBackend, piPartialText } from "../src/backends/pi-durable";
 import { backendSchema } from "../src/config";
+import { PendingBackendQuestion } from "../src/request-failure";
+import type { TurnProgress, TurnStage } from "../src/turn-progress";
 
 test("OpenCode V2 creates, queues, waits and reads paginated replies", async () => {
   const requests: { path: string; body: unknown }[] = [];
@@ -384,6 +386,7 @@ function openCodeStreamFixture(
     batched?: boolean;
   },
   headersEnv: Record<string, string> = {},
+  pendingQuestion?: { active: boolean },
 ) {
   const waiting = Promise.withResolvers<void>();
   const finish = Promise.withResolvers<void>();
@@ -399,6 +402,15 @@ function openCodeStreamFixture(
   let historyReads = 0;
   let inputId = "";
   let admissions = 0;
+  const form = {
+    id: "form_earlier",
+    sessionID: "session-current",
+    state: { status: "pending" },
+    metadata: {
+      kind: "question",
+      tool: { messageID: "old-answer", id: "call_earlier" },
+    },
+  };
   const encoder = new TextEncoder();
   const emit = (type: string, data: Record<string, unknown>) => {
     if (!stream) throw new Error("Fixture SSE connection is not open");
@@ -419,6 +431,14 @@ function openCodeStreamFixture(
     hostname: "127.0.0.1",
     async fetch(request) {
       const path = new URL(request.url).pathname;
+      if (path.endsWith("/form"))
+        return Response.json({ data: pendingQuestion ? [form] : [] });
+      if (path.endsWith("/form/form_earlier"))
+        return Response.json({ data: form });
+      if (path === "/api/session/active")
+        return Response.json({
+          data: pendingQuestion?.active ? { "session-current": true } : {},
+        });
       if (path === "/api/event") {
         return new Response(
           new ReadableStream<Uint8Array>({
@@ -762,6 +782,132 @@ test("OpenCode streams only current-session visible text before canonical histor
     expect(await result).toBe("Canonical final answer.");
     expect(fixture.historyReads()).toBe(2);
     await fixture.disconnected;
+  } finally {
+    controller.abort();
+    await result.catch(() => {});
+    await fixture.close();
+  }
+});
+
+const humanIrcSource = {
+  source: {
+    transport: "irc",
+    authority: "human",
+    channel: "#command",
+    thread: "irc-thread",
+    message: "irc-message",
+    user: "jac",
+  },
+} as const;
+
+test("OpenCode refuses a new IRC prompt behind an active question even without status notices", async () => {
+  const fixture = openCodeStreamFixture(
+    false,
+    false,
+    undefined,
+    {},
+    { active: true },
+  );
+  try {
+    await expect(
+      fixture.backend.prompt(
+        "session-current",
+        "New IRC request",
+        AbortSignal.timeout(3000),
+        undefined,
+        undefined,
+        undefined,
+        humanIrcSource,
+      ),
+    ).rejects.toBeInstanceOf(PendingBackendQuestion);
+    expect(fixture.admissions()).toBe(0);
+    expect(fixture.interrupts()).toBe(0);
+    expect(fixture.withdrawals()).toEqual([]);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("OpenCode reports metadata for the exact inbox item and its own assistant", async () => {
+  const fixture = openCodeStreamFixture(
+    true,
+    false,
+    undefined,
+    {},
+    {
+      active: false,
+    },
+  );
+  const controller = new AbortController();
+  const observed: TurnProgress[] = [];
+  const stages = new Map<
+    TurnStage,
+    ReturnType<typeof Promise.withResolvers<void>>
+  >();
+  for (const stage of ["queued", "reasoning", "tool"] as const)
+    stages.set(stage, Promise.withResolvers<void>());
+  const result = fixture.backend.prompt(
+    "session-current",
+    "Public request",
+    controller.signal,
+    undefined,
+    undefined,
+    undefined,
+    humanIrcSource,
+    (progress) => {
+      observed.push(progress);
+      stages.get(progress.stage)?.resolve();
+    },
+  );
+  try {
+    await fixture.waiting;
+    const sessionID = "session-current";
+    fixture.emit("session.inbox.delivered", { sessionID, inboxID: "other" });
+    fixture.emit("session.inbox.enqueued", {
+      sessionID,
+      inboxID: fixture.input(),
+    });
+    await stages.get("queued")?.promise;
+    const owner = { sessionID, assistantMessageID: "answer-current" };
+    fixture.emit("session.inbox.delivered", {
+      sessionID,
+      inboxID: fixture.input(),
+    });
+    fixture.emit("session.reasoning.started", {
+      sessionID,
+      assistantMessageID: "old-answer",
+      ordinal: 0,
+    });
+    fixture.emit("session.reasoning.started", {
+      ...owner,
+      sessionID: "other-session",
+      ordinal: 0,
+    });
+    fixture.emit("session.reasoning.started", { ...owner, ordinal: 0 });
+    await fixture.checked;
+    expect(observed.at(-1)?.stage).toBe("delivered");
+    // The assistant projection becomes readable without a second owned event.
+    fixture.place();
+    await stages.get("reasoning")?.promise;
+    fixture.emit("session.tool.called", {
+      ...owner,
+      id: "tool-call",
+      input: { token: "PRIVATE TOOL INPUT" },
+      executed: true,
+    });
+    await stages.get("tool")?.promise;
+    fixture.finish();
+    expect(await result).toBe("Canonical final answer.");
+    expect(observed.map(({ stage }) => stage)).toEqual([
+      "submitting",
+      "accepted",
+      "queued",
+      "delivered",
+      "reasoning",
+      "tool",
+    ]);
+    expect(JSON.stringify(observed)).not.toContain("PRIVATE TOOL INPUT");
+    expect(fixture.admissions()).toBe(1);
   } finally {
     controller.abort();
     await result.catch(() => {});

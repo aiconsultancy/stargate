@@ -10,6 +10,9 @@
 
 ### Changes
 
+- Report OpenCode turn progress in IRC and flag earlier pending questions
+  before submitting a new request.
+
 - Harden Fleet API Git reads against checkout-configured commands.
 - Report Fleet API task outcomes that complete between event polls.
 - Look up pull requests by head branch, keep cached results on refresh

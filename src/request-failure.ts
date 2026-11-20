@@ -2,6 +2,7 @@ import { cancellationNotice } from "./cancellation";
 import { slackContent } from "./slack-format";
 
 export class AttachmentInputUnavailable extends Error {}
+export class PendingBackendQuestion extends Error {}
 
 /**
  * What a backend saw when the model provider or the agent process failed.
@@ -105,6 +106,7 @@ export type ProviderFailure =
 /** Only fixed safe causes cross the durable queue and Slack boundary. */
 export type RequestFailure =
   | "timeout"
+  | "pending-question"
   | "cancelled"
   | "backend"
   | "context"
@@ -203,6 +205,10 @@ const failures = {
     text: "Stargate reached the request time limit and requested cancellation. Work may have run; it was not repeated. Check agent state before trying again. For longer work, increase turnTimeoutMs or split the request.",
   },
   cancelled: { title: "Stop requested", text: cancellationNotice },
+  "pending-question": {
+    title: "Earlier question needs an answer",
+    text: "OpenCode is waiting on a question from earlier work. Stargate did not submit this request. Answer the earlier question in its own thread or ask an operator to resolve it in OpenCode, then resend this request.",
+  },
   backend: {
     title: "Agent unavailable",
     text: "Stargate could not finish this request because the backend failed or became unavailable. Work may have run; it was not repeated. Check agent state and backend availability before trying again.",

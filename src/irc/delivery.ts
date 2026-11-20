@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AttachmentTransport } from "../attachment-delivery";
 import type { DeliveryUnit, IrcTurnStatus, SlackDelivery } from "../gateway";
 import type { ReactionName } from "../reactions";
+import { type TurnProgress, turnProgressText } from "../turn-progress";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";
 import { cleanText, utf8Bytes } from "./protocol";
@@ -152,6 +153,7 @@ export class IrcDelivery implements SlackDelivery {
     signal: AbortSignal,
     allowed?: () => boolean,
     turnStatus?: IrcTurnStatus,
+    readProgress?: () => TurnProgress | undefined,
   ) {
     const finish = this.client.startStatus();
     if (signal.aborted) {
@@ -171,16 +173,28 @@ export class IrcDelivery implements SlackDelivery {
             signal,
             allowed,
           ).catch(() => {});
-          await delay(this.client.turnStatusMs, undefined, { signal }).catch(
-            () => {},
-          );
-          void this.turnNotice(
-            channel,
-            thread,
-            "This request is still open.",
-            signal,
-            allowed,
-          ).catch(() => {});
+          let reported: TurnProgress | undefined;
+          let first = true;
+          while (!signal.aborted) {
+            await delay(this.client.turnStatusMs, undefined, { signal }).catch(
+              () => {},
+            );
+            if (signal.aborted || (allowed && !allowed())) break;
+            const progress = readProgress?.();
+            if (!first && reported === progress) continue;
+            first = false;
+            reported = progress;
+            void this.turnNotice(
+              channel,
+              thread,
+              readProgress
+                ? turnProgressText(progress)
+                : "This request is still open.",
+              signal,
+              allowed,
+            ).catch(() => {});
+            if (!readProgress) break;
+          }
         }
         return;
       }

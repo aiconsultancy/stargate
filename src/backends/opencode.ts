@@ -64,8 +64,10 @@ import {
   BackendFailure,
   type BackendFailureKind,
   connectionFailure,
+  PendingBackendQuestion,
   statusKind,
 } from "../request-failure";
+import type { TurnProgress, TurnStage } from "../turn-progress";
 import { scopedUpdate, type UpdateSnapshot } from "../update-notice";
 import { OpenCodeHistory } from "./opencode-history";
 
@@ -104,6 +106,14 @@ const decodeQuestionOrigin = Schema.decodeUnknownOption(questionOriginSchema, {
 });
 const agentReadyMs = 30_000;
 const agentReadyPollMs = 250;
+const assistantProgress = {
+  "session.step.started": "model",
+  "session.reasoning.started": "reasoning",
+  "session.tool.called": "tool",
+  "session.text.started": "reply",
+} as const satisfies Record<string, TurnStage>;
+const previewEvents = ["session.text.delta", "session.text.ended"] as const;
+const ownershipRetryMs = 250;
 const pairingCode = Schema.Struct({
   code: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,512}$/)),
   expires_in: Schema.Int.check(
@@ -1177,6 +1187,32 @@ export class OpenCodeBackend implements AgentBackend {
     return { status: "uncertain" };
   }
 
+  /** A pending form from earlier work can hold the native queue indefinitely. */
+  private async waitingForAnswer(sessionID: string, signal: AbortSignal) {
+    const forms = await this.client.session.form.list(
+      { sessionID },
+      { signal },
+    );
+    if (!forms.length) return false;
+    const active = await this.client.session.active({ signal });
+    if (!active[sessionID]) return false;
+    for (const form of forms.slice(0, 16)) {
+      if (form.sessionID !== sessionID) continue;
+      const detail = await this.client.session.form.get(
+        { sessionID, formID: form.id },
+        { signal },
+      );
+      if (
+        detail.sessionID === sessionID &&
+        detail.id === form.id &&
+        detail.state.status === "pending" &&
+        Option.isSome(decodeQuestionOrigin(detail.metadata))
+      )
+        return true;
+    }
+    return false;
+  }
+
   async prompt(
     sessionId: string,
     text: string,
@@ -1185,10 +1221,23 @@ export class OpenCodeBackend implements AgentBackend {
     onInput?: (id: string) => void,
     files: readonly Attachment[] = [],
     context?: PromptSourceContext,
+    onProgress?: (progress: TurnProgress) => void,
   ) {
     checkAttachments(files);
     this.inputs.delete(sessionId);
     signal.throwIfAborted();
+    if (
+      context?.source.transport === "irc" &&
+      context.source.authority === "human" &&
+      !context.source.sender
+    ) {
+      const check = AbortSignal.any([signal, AbortSignal.timeout(2000)]);
+      const waiting = await this.waitingForAnswer(sessionId, check).catch(
+        () => false,
+      );
+      signal.throwIfAborted();
+      if (waiting) throw new PendingBackendQuestion();
+    }
     const stop = new AbortController();
     const timer = new AbortController();
     const connected = Promise.withResolvers<void>();
@@ -1202,8 +1251,31 @@ export class OpenCodeBackend implements AgentBackend {
     let admitted = false;
     const currentPhase = (): Phase => phase;
     const messages = new Map<string, Map<number, string>>();
-    const ownership = new Map<string, "checking" | "owned" | "foreign">();
-    const checks: Promise<void>[] = [];
+    const ownership = new Map<
+      string,
+      "checking" | "owned" | "foreign" | { retryAt: number }
+    >();
+    const checks = new Set<Promise<void>>();
+    const pendingProgress = new Map<
+      string,
+      { progress: TurnProgress; order: number }
+    >();
+    // Reserve orders one and two for submission and its HTTP acknowledgement.
+    let eventOrder = 2;
+    let publishedOrder = 0;
+    const report = (progress: TurnProgress, order: number) => {
+      if (!signal.aborted && order > publishedOrder) {
+        publishedOrder = order;
+        onProgress?.(progress);
+      }
+    };
+    const reportOwned = (assistant: string) => {
+      const observed = pendingProgress.get(assistant);
+      if (observed) {
+        pendingProgress.delete(assistant);
+        report(observed.progress, observed.order);
+      }
+    };
     const publish = () => {
       if (phase.type !== "submitted" || !onText) return;
       const text = [...messages]
@@ -1218,10 +1290,23 @@ export class OpenCodeBackend implements AgentBackend {
       if (text) onText(text);
     };
     // Consume promptly: slow Slack writes must not block the shared event source.
-    const events = onText
+    const watch = onText || onProgress;
+    const events = watch
       ? (async () => {
           for await (const event of this.client.event.subscribe({
-            types: ["session.text.delta", "session.text.ended"],
+            types: [
+              ...previewEvents,
+              ...(onProgress
+                ? ([
+                    "session.inbox.enqueued",
+                    "session.inbox.delivered",
+                    "session.step.started",
+                    "session.reasoning.started",
+                    "session.tool.called",
+                    "session.text.started",
+                  ] as const)
+                : []),
+            ],
             signal: AbortSignal.any([signal, stop.signal]),
           })) {
             if (event.type === "server.connected") {
@@ -1230,47 +1315,116 @@ export class OpenCodeBackend implements AgentBackend {
             }
             const current = currentPhase();
             if (
-              current.type !== "submitted" ||
+              (current.type !== "submitting" && current.type !== "submitted") ||
               event.data.sessionID !== sessionId
             )
               continue;
-            const { assistantMessageID, ordinal } = event.data;
-            if (ownership.get(assistantMessageID) === "foreign") continue;
-            let parts = messages.get(assistantMessageID);
-            if (!parts) {
-              parts = new Map();
-              messages.set(assistantMessageID, parts);
+            if (
+              event.type === "session.inbox.enqueued" ||
+              event.type === "session.inbox.delivered"
+            ) {
+              if (event.data.inboxID === current.input)
+                report(
+                  {
+                    stage:
+                      event.type === "session.inbox.enqueued"
+                        ? "queued"
+                        : "delivered",
+                    observedAt: Date.now(),
+                  },
+                  ++eventOrder,
+                );
+              continue;
             }
-            parts.set(
-              ordinal,
-              event.type === "session.text.delta"
-                ? (parts.get(ordinal) ?? "") + event.data.delta
-                : event.data.text,
-            );
-            if (ownership.get(assistantMessageID) === "owned") publish();
-            else if (!ownership.has(assistantMessageID)) {
+            const { assistantMessageID } = event.data;
+            const status = ownership.get(assistantMessageID);
+            if (status === "foreign") continue;
+            if (
+              onProgress &&
+              event.type !== "session.text.delta" &&
+              event.type !== "session.text.ended"
+            ) {
+              pendingProgress.set(assistantMessageID, {
+                progress: {
+                  stage: assistantProgress[event.type],
+                  observedAt: Date.now(),
+                },
+                order: ++eventOrder,
+              });
+            }
+            if (
+              onText &&
+              current.type === "submitted" &&
+              (event.type === "session.text.delta" ||
+                event.type === "session.text.ended")
+            ) {
+              let parts = messages.get(assistantMessageID);
+              if (!parts) {
+                parts = new Map();
+                messages.set(assistantMessageID, parts);
+              }
+              const { ordinal } = event.data;
+              parts.set(
+                ordinal,
+                event.type === "session.text.delta"
+                  ? (parts.get(ordinal) ?? "") + event.data.delta
+                  : event.data.text,
+              );
+            } else if (!onProgress) continue;
+            if (status === "owned") {
+              reportOwned(assistantMessageID);
+              publish();
+            } else if (
+              status === undefined ||
+              (typeof status === "object" && Date.now() >= status.retryAt)
+            ) {
               ownership.set(assistantMessageID, "checking");
               // Events identify the session and assistant, not its input.
               // Only transcript placement proves this is not a queued prior turn.
-              checks.push(
-                this.followsInput(
+              const readSignal = AbortSignal.any([signal, stop.signal]);
+              const readOwner = () =>
+                this.inputOwnership(
                   sessionId,
                   current.input,
-                  AbortSignal.any([signal, stop.signal]),
+                  readSignal,
                   assistantMessageID,
-                )
-                  .then((owned) => {
-                    ownership.set(
-                      assistantMessageID,
-                      owned ? "owned" : "foreign",
-                    );
-                    if (owned) publish();
-                    else messages.delete(assistantMessageID);
-                  })
-                  .catch(() => {
-                    // Uncertain previews stay private; final history still wins.
-                  }),
-              );
+                ).catch(() => undefined);
+              const check = readOwner()
+                .then(async (owned) => {
+                  if (
+                    owned !== undefined ||
+                    status !== undefined ||
+                    !onProgress
+                  )
+                    return owned;
+                  await delay(ownershipRetryMs, undefined, {
+                    signal: readSignal,
+                  });
+                  return readOwner();
+                })
+                .then((owned) => {
+                  if (owned === undefined) {
+                    ownership.set(assistantMessageID, {
+                      retryAt: Date.now() + ownershipRetryMs,
+                    });
+                    return;
+                  }
+                  ownership.set(
+                    assistantMessageID,
+                    owned ? "owned" : "foreign",
+                  );
+                  if (owned) {
+                    if (currentPhase().type !== "settled")
+                      reportOwned(assistantMessageID);
+                    publish();
+                  } else {
+                    pendingProgress.delete(assistantMessageID);
+                    messages.delete(assistantMessageID);
+                  }
+                })
+                .catch(() => {})
+                .finally(() => checks.delete(check));
+              checks.add(check);
             }
           }
         })().catch(() => {
@@ -1279,7 +1433,7 @@ export class OpenCodeBackend implements AgentBackend {
         })
       : Promise.resolve();
     try {
-      if (onText) {
+      if (watch) {
         await Promise.race([
           connected.promise,
           delay(2000, undefined, { signal: timer.signal }),
@@ -1292,6 +1446,8 @@ export class OpenCodeBackend implements AgentBackend {
       signal.throwIfAborted();
       phase = { type: "submitting", input: id };
       this.inputs.set(sessionId, id);
+      if (onProgress)
+        report({ stage: "submitting", observedAt: Date.now() }, 1);
       const input = await this.client.session.prompt(
         {
           sessionID: sessionId,
@@ -1313,6 +1469,7 @@ export class OpenCodeBackend implements AgentBackend {
       if (input.id !== id) throw new Error("OpenCode input identity changed");
       phase = { type: "submitted", input: id };
       admitted = true;
+      if (onProgress) report({ stage: "accepted", observedAt: Date.now() }, 2);
       await this.waitForIdle({ sessionID: sessionId }, { signal });
       phase = { type: "settled" };
       // Read backwards to the submitted input; do not resend earlier replies.
@@ -1433,6 +1590,17 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
     assistant?: string,
   ) {
+    return (
+      (await this.inputOwnership(sessionID, input, signal, assistant)) === true
+    );
+  }
+
+  private async inputOwnership(
+    sessionID: string,
+    input: string,
+    signal: AbortSignal,
+    assistant?: string,
+  ) {
     if (assistant !== undefined) {
       // Inbox list is unpaginated in this SDK. Presence proves we still queue;
       // absence proves nothing, so delivered candidates still need history.
@@ -1440,7 +1608,7 @@ export class OpenCodeBackend implements AgentBackend {
         { sessionID },
         { signal },
       );
-      if (inbox.some((item) => item.id === input)) return false;
+      if (inbox.some((item) => item.id === input)) return undefined;
     }
     const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
     let found = assistant === undefined;
@@ -1456,7 +1624,7 @@ export class OpenCodeBackend implements AgentBackend {
       );
       for (const message of page.data) {
         if (!found) {
-          if (message.id === input) return false;
+          if (message.id === input) return undefined;
           if (message.id === assistant && message.type === "assistant")
             found = true;
           continue;
@@ -1476,7 +1644,7 @@ export class OpenCodeBackend implements AgentBackend {
         throw new Error("OpenCode history cursor repeated");
       if (cursor) cursors.add(cursor);
     } while (cursor);
-    return resolveBoundaryContext(chain) === input;
+    return found ? resolveBoundaryContext(chain) === input : undefined;
   }
 
   async close() {

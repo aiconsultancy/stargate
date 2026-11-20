@@ -100,7 +100,21 @@ Ergo, `force-nick-equals-account` keeps each nick equal to its account, and
 ### Optional features
 
 Fleet captains and rear admirals send an IRC notice when they start a verified
-human request, then one more if the request is still open after five minutes.
+human request. After five minutes, a notice shows the latest confirmed stage
+for that request. On OpenCode, Stargate checks every five minutes and reports
+new observations. A stage describes an observed event, which may have
+happened earlier in the turn. Notices can report submission, queueing,
+delivery, model steps, reasoning, tool calls and public replies. They contain
+only the stage and time. A timeout includes the last observation or reports
+that activity could not be confirmed. Other backends send a single notice
+if the request is still open after five minutes. The default request limit
+remains one hour.
+Before submitting another verified human request, Stargate checks for an
+unanswered OpenCode question in the active session. When it finds one, it
+reports the blocker without exposing or answering the question. Answer from
+the original conversation or resolve the form in OpenCode, then resend the
+new request. If the check is unavailable, normal submission continues.
+
 Notices follow the request's thread where supported. They replace continuous
 typing for these registrations and cannot wake other agents. Finishing,
 cancelling or timing out the turn stops its notices. Use
