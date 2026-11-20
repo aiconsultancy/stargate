@@ -198,6 +198,9 @@ test("looks up only the bound repository and requires an exact head repository",
           state: "OPEN",
           isDraft: false,
           statusCheckRollup: [],
+          headRefName: "123",
+          headRepository: { name: "Project" },
+          headRepositoryOwner: { login: "Example" },
         }),
       };
     },
@@ -211,9 +214,55 @@ test("looks up only the bound repository and requires an exact head repository",
     expect.arrayContaining(["repos/example/project/pulls", "head=example:123"]),
   );
   expect(commands.filter((args) => args[1] === "pr")).toEqual([
-    expect.arrayContaining(["40", "--repo", "example/project"]),
+    expect.arrayContaining([
+      "40",
+      "--repo",
+      "example/project",
+      "number,url,title,state,isDraft,statusCheckRollup,headRefName,headRepository,headRepositoryOwner",
+    ]),
   ]);
 });
+
+test.each([
+  ["owner", { headRepositoryOwner: { login: "fork" } }],
+  ["repository", { headRepository: { name: "other" } }],
+  ["branch", { headRefName: "Feature" }],
+] as const)(
+  "rejects a mismatched head %s from PR detail",
+  async (_field, mismatch) => {
+    const pull = createPullReader(Date.now, {
+      which: () => "/fixture/gh",
+      run: async (command) => {
+        if (command[1] === "auth") return { code: 0, stdout: "" };
+        if (command[1] === "api")
+          return {
+            code: 0,
+            stdout: JSON.stringify([
+              { number: 1, repository: "example/project" },
+            ]),
+          };
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            number: 1,
+            url: "https://github.com/example/project/pull/1",
+            title: "Example",
+            state: "OPEN",
+            isDraft: false,
+            statusCheckRollup: [],
+            headRepositoryOwner: { login: "example" },
+            headRepository: { name: "project" },
+            headRefName: "feature",
+            ...mismatch,
+          }),
+        };
+      },
+    });
+    pull("example/project", "feature");
+    await Bun.sleep(0);
+    expect(pull("example/project", "feature")).toBeUndefined();
+  },
+);
 
 test("PR refreshes deduplicate work, keep the last result on failure and clear it on confirmed absence", async () => {
   let now = 1_000;
@@ -242,6 +291,9 @@ test("PR refreshes deduplicate work, keep the last result on failure and clear i
             state: "OPEN",
             isDraft: false,
             statusCheckRollup: [],
+            headRefName: "first",
+            headRepository: { name: "project" },
+            headRepositoryOwner: { login: "example" },
           }),
         };
       const branch = command.at(-1)?.replace(/^head=example:/, "");
@@ -298,6 +350,7 @@ test.each(["123", "#123"])(
       state: "OPEN",
       isDraft: false,
       statusCheckRollup: [],
+      headRefName: branch,
       headRepositoryOwner: { login: "example" },
       headRepository: { name: "project" },
     };

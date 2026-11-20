@@ -28,6 +28,13 @@ const decodeCandidate = Schema.decodeUnknownOption(
     repository: Schema.NullOr(Schema.String),
   }),
 );
+const decodeHead = Schema.decodeUnknownSync(
+  Schema.Struct({
+    headRefName: Schema.String,
+    headRepository: Schema.Struct({ name: Schema.String }),
+    headRepositoryOwner: Schema.Struct({ login: Schema.String }),
+  }),
+);
 const failures = new Set([
   "FAILURE",
   "ERROR",
@@ -164,12 +171,21 @@ export function createPullReader(
             "--repo",
             repository,
             "--json",
-            "number,url,title,state,isDraft,statusCheckRollup",
+            "number,url,title,state,isDraft,statusCheckRollup,headRefName,headRepository,headRepositoryOwner",
           ],
           { env, timeout },
         );
         if (details?.code !== 0) return undefined;
-        const pr = mapPullRequest(JSON.parse(details.stdout), repository);
+        const input: unknown = JSON.parse(details.stdout);
+        const { headRefName, headRepository, headRepositoryOwner } =
+          decodeHead(input);
+        if (
+          headRefName !== branch ||
+          `${headRepositoryOwner.login}/${headRepository.name}`.toLowerCase() !==
+            repository
+        )
+          return undefined;
+        const pr = mapPullRequest(input, repository);
         return pr?.number === number ? pr : undefined;
       }
       return incomplete ? undefined : null;
