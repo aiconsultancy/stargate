@@ -146,16 +146,25 @@ the two-second Git status and comparison budget starts. A read, including
 time waiting for a slot, has a four-second ceiling. A checkout's own timeout
 is cached for 15 seconds. Timeouts spent mostly waiting for a read slot are
 cached for one read deadline (two seconds). Cleanup runs in the background
-within the same concurrency limit. Startup removes private snapshot directories
-older than 24 hours. Snapshots use the data directory when it is outside the
-worktree and writable, and the system temporary directory otherwise.
+within the same concurrency limit. Snapshots use a private
+`stargate-git-status` folder in the data directory when the data directory is
+outside the worktree and writable, and startup removes snapshots there that
+are older than 24 hours. Otherwise each process uses its own private folder in
+the system temporary directory, removed when the gateway stops; a folder left
+by a crash is not swept and is cleared with the temporary directory.
 
 Copied ignore files, including `core.excludesFile`, must resolve inside
-the checkout or its Git directories. The 1 MiB limit applies to each copied pattern file.
+the checkout or the Git directories Git reports for it. Those directories come
+from the checkout itself, so this limits which files are copied rather than
+forming a hard boundary: a checkout pointed at another repository on the host
+can affect its own changed-file count. The 1 MiB limit applies to each copied
+pattern file.
 Unreadable ignore files are skipped, and `info/exclude` retains its usual
 precedence. Git reads worktree `.gitignore` files directly. Status reads
 disable filters for safety. Git versions that support `GIT_ATTR_SOURCE`
 read attributes from the empty tree and ignore worktree `.gitattributes`.
+The private Git directory also has no replacement refs, so a checkout that
+relies on `git replace` can show different status counts.
 When Git rehashes a racily clean file because its timestamp is too close to
 the index timestamp, `text` or `eol` attributes or Git LFS can occasionally
 cause an unchanged file to count as changed.
@@ -207,8 +216,9 @@ That fallback expires 75 seconds after the successful read and is discarded
 when the configured ship roster or a ship's backend identity changes. The
 poller also discards in-flight overviews from before the change. On expiry,
 the server closes the streams so clients can reconnect for a fresh
-snapshot. Host and heartbeat events continue while the poller waits for a
-fresh overview, including after a backend change.
+snapshot. A change to the ship roster or to a ship's backend identity also
+closes the streams, and clients reconnect for a fresh snapshot. Host and
+heartbeat events continue while the poller waits for a stalled overview.
 At three times a read's deadline, another attempt can start. Each overview,
 enrichment, host metrics, crew sample, and ship detail slot allows one
 outstanding abandoned read alongside the current attempt. If the first
