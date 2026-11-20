@@ -168,19 +168,25 @@ export async function startApiV1Server(options: Options) {
     snapshotHost: host.snapshot,
   });
   const httpReads = new Map<Promise<void>, number>();
+  const abandonedReads = new Set<Promise<void>>();
   function startHttpRead<T>(
     signal: AbortSignal,
     read: (signal: AbortSignal) => Promise<T>,
   ) {
     const now = performance.now();
-    // Hold capacity after the response deadline, but abandon stuck reads on
-    // demand so they cannot block the routes forever.
-    for (const [settled, abandonAt] of httpReads)
-      if (abandonAt <= now) httpReads.delete(settled);
+    // Reserve a bounded number of retries while stuck reads drain.
+    for (const [settled, abandonAt] of httpReads) {
+      if (abandonedReads.size >= maxFleetReads || abandonAt > now) break;
+      httpReads.delete(settled);
+      abandonedReads.add(settled);
+    }
     if (httpReads.size >= maxFleetReads) return undefined;
     const { result, settled } = readWithDeadline(signal, undefined, read);
     httpReads.set(settled, now + 3 * httpReadMs);
-    void settled.then(() => httpReads.delete(settled));
+    void settled.then(() => {
+      httpReads.delete(settled);
+      abandonedReads.delete(settled);
+    });
     return result;
   }
 

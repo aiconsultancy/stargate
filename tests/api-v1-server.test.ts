@@ -490,12 +490,14 @@ test.each([
     ["/api/v1/ships/explorer", "/api/v1/ships/explorer/crew/engineer"],
   ],
 ] as const)(
-  "HTTP %s reads hold capacity up to three HTTP deadlines",
+  "HTTP %s reads bound active and abandoned work",
   async (_kind, paths) => {
     const held = Promise.withResolvers<void>();
-    let blocked = true;
+    const retry = Promise.withResolvers<void>();
+    let gate: Promise<void> | undefined = held.promise;
+    const reads = mock(async () => gate);
     const read = async <T>(value: T) => {
-      if (blocked) await held.promise;
+      await reads();
       return value;
     };
     const server = await startFixture({
@@ -510,21 +512,35 @@ test.each([
     });
     const clock = spyOn(performance, "now").mockReturnValue(0);
     try {
-      const results = await Promise.all(
-        Array.from({ length: 8 }, (_, index) =>
-          server.get(paths.at(index % paths.length) ?? paths[0]),
-        ),
+      const batch = () =>
+        Promise.all(
+          Array.from({ length: 8 }, (_, index) =>
+            server.get(paths.at(index % paths.length) ?? paths[0]),
+          ),
+        );
+      expect((await batch()).map(({ status }) => status)).toEqual(
+        Array(8).fill(500),
       );
-      expect(results.map(({ status }) => status)).toEqual(Array(8).fill(500));
-      blocked = false;
       // A 160 ms host deadline leaves 144 ms for the HTTP read.
       clock.mockReturnValue(431);
       expect((await server.get(paths[0])).status).toBe(503);
       clock.mockReturnValue(432);
+      gate = retry.promise;
+      expect((await batch()).map(({ status }) => status)).toEqual(
+        Array(8).fill(500),
+      );
+      gate = undefined;
+      for (const now of [864, 1296, 1728]) {
+        clock.mockReturnValue(now);
+        expect((await server.get(paths[0])).status).toBe(503);
+      }
+      expect(reads).toHaveBeenCalledTimes(16);
+      held.resolve();
       expect((await server.get(paths[0])).status).toBe(200);
     } finally {
       clock.mockRestore();
       held.resolve();
+      retry.resolve();
       await server.close();
     }
   },
