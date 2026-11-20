@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   chmod,
+  copyFile,
   mkdir,
   mkdtemp,
   readdir,
@@ -31,6 +32,7 @@ import { updateState } from "../src/nightly/state";
 import { buildDroidUnits } from "../src/nightly/timer";
 import { stableJitter } from "../src/nightly/window";
 import { Store } from "../src/store";
+import { nightlyStoreFixture } from "./fixtures/database-reuse";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-droid-"));
 afterAll(async () => {
@@ -237,7 +239,10 @@ const healthyUnits = (): Units => ({
   "cpa.service": { LoadState: "loaded", ActiveState: "active" },
 });
 
-async function install(droid: Record<string, unknown> = {}) {
+async function install(
+  droid: Record<string, unknown> = {},
+  seededStore = true,
+) {
   const dir = await mkdtemp(join(base, "case-"));
   host.dir = dir;
   host.units = healthyUnits();
@@ -314,8 +319,10 @@ async function install(droid: Record<string, unknown> = {}) {
   const config: Config = Schema.decodeUnknownSync(configSchema)(raw);
   await ready();
   // One Stargate-owned OpenCode session: the gateway's mapping of a thread.
-  const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
-  store.saveSession('["k","C123","1.0"]', "ses_captain");
+  const storePath = join(config.dataDirectory, "stargate.sqlite");
+  if (seededStore) await copyFile(nightlyStoreFixture, storePath);
+  const store = new Store(storePath);
+  if (!seededStore) store.saveSession('["k","C123","1.0"]', "ses_captain");
   store.close();
   return { config, path: join(dir, "stargate.json") };
 }
@@ -567,7 +574,7 @@ describe("maintenance droid", () => {
       ],
     ];
     for (const [code, setup] of cases) {
-      const { config, path } = await install();
+      const { config, path } = await install({}, true);
       await setup(config);
       const result = await check(config, path);
       expect(result.findings).toEqual([code]);

@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmod,
+  copyFile,
   lstat,
   mkdir,
   mkdtemp,
@@ -54,6 +55,7 @@ import {
 import type { ModelRef } from "../src/nightly/versions";
 import { botKey } from "../src/routing";
 import { Store } from "../src/store";
+import { nightlyStoreFixture } from "./fixtures/database-reuse";
 import { tarball } from "./tar";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-run-"));
@@ -270,6 +272,7 @@ async function writeNpm(prefix: string, name: string, version: string) {
 
 async function install(
   overrides: Record<string, unknown> = {},
+  savedStore = true,
 ): Promise<{ config: Config; path: string }> {
   const dir = await mkdtemp(join(base, "case-"));
   fixture.dir = dir;
@@ -393,9 +396,16 @@ async function install(
   await writeFile(path, `${JSON.stringify(raw, null, 2)}\n`);
   const config = Schema.decodeUnknownSync(configSchema)(raw);
   await mkdir(config.dataDirectory, { recursive: true });
-  const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
-  store.saveSession('["k","C123","1.0"]', "ses_captain");
-  store.close();
+  if (savedStore) {
+    await copyFile(
+      nightlyStoreFixture,
+      join(config.dataDirectory, "stargate.sqlite"),
+    );
+  } else {
+    const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
+    store.saveSession('["k","C123","1.0"]', "ses_captain");
+    store.close();
+  }
   return { config, path };
 }
 
@@ -2926,7 +2936,7 @@ describe("journal recovery", () => {
         },
       },
     ]) {
-      const { config } = await install();
+      const { config } = await install({}, true);
       const path = await writeJournal(config, journal);
       fixture.commands = [];
       const result = await recoverInterruptedRun(config, deps());
