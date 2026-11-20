@@ -561,12 +561,12 @@ const ircCrewSchema = settingsStruct({
 
 /**
  * Optional IRCv3 features. Each is used only when the server offers it;
- * these switches can turn one off. The separate native-question bridge is opt-in.
+ * these switches can turn one off. Question defaults depend on the registration.
  */
 const ircFeaturesSchema = settingsStruct({
   steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
   /** Bridge native clarification forms to their original authenticated requester. */
-  questions: Schema.Boolean.pipe(settingsDefault(false)),
+  questions: Schema.optional(Schema.Boolean),
   /** Download FILEHOST links in admitted messages as attachments. */
   filesIn: Schema.Boolean.pipe(settingsDefault(true)),
   /** Upload published reply files to FILEHOST and post their links. */
@@ -597,7 +597,6 @@ const ircFeaturesSchema = settingsStruct({
 });
 export const ircFeatureDefaults = {
   steerThreadFollowUps: false,
-  questions: false,
   filesIn: true,
   filesOut: true,
   multiline: true,
@@ -795,7 +794,19 @@ const ircConfiguredSchema = settingsStruct({
 
 /** Persisted operator configuration: fleet-derived fields remain absent. */
 export type IrcConfig = typeof ircConfiguredSchema.Type;
+export function ircFeedbackDefaults(config: IrcConfig) {
+  const native = config.backend.type === "opencode";
+  return {
+    questions: native && !!config.fleetPolicy?.humanAccounts.length,
+    crewQuestionHandoff:
+      config.backend.type === "opencode" && !!config.backend.sessionID,
+    liveProgress: true,
+    fleetTyping: true,
+  };
+}
+
 export type EffectiveIrcConfig = IrcConfig & {
+  features: IrcConfig["features"] & ReturnType<typeof ircFeedbackDefaults>;
   access: IrcConfig["access"] & { peerCaptains: string[] };
 };
 
@@ -825,6 +836,15 @@ export function effectiveIrcConfig(config: IrcConfig): EffectiveIrcConfig {
     ...config.access,
     peerCaptains: config.access.peerCaptains ?? [],
   };
+  const defaults = ircFeedbackDefaults(config);
+  const features = {
+    ...config.features,
+    questions: config.features.questions ?? defaults.questions,
+    crewQuestionHandoff:
+      config.features.crewQuestionHandoff ?? defaults.crewQuestionHandoff,
+    liveProgress: config.features.liveProgress ?? defaults.liveProgress,
+    fleetTyping: config.features.fleetTyping ?? defaults.fleetTyping,
+  };
   const metadata = config.fleetChannels;
   if (
     !metadata ||
@@ -832,7 +852,7 @@ export function effectiveIrcConfig(config: IrcConfig): EffectiveIrcConfig {
     !config.fleetControl ||
     config.fleetPolicy.role === "crew"
   )
-    return { ...config, access };
+    return { ...config, access, features };
   const roster = fleetRoster(config);
   // Explicit legacy wake configuration retains its complete admission policy.
   if (access.channelRequests === undefined && access.wakeChannels === undefined)
@@ -871,7 +891,7 @@ export function effectiveIrcConfig(config: IrcConfig): EffectiveIrcConfig {
     seen.add(key);
     return true;
   });
-  return { ...config, access, channels };
+  return { ...config, access, channels, features };
 }
 
 export const ircSchema = ircConfiguredSchema.check(
@@ -1005,7 +1025,7 @@ export const ircSchema = ircConfiguredSchema.check(
           "questionOperator requires native questions, a pinned OpenCode session and an enrolled human account",
       });
     }
-    if (irc.features.questions && !irc.fleetPolicy?.humanAccounts.length)
+    if (configured.features.questions && !irc.fleetPolicy?.humanAccounts.length)
       context.addIssue({
         code: "custom",
         message:

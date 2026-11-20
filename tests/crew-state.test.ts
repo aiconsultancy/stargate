@@ -6,6 +6,40 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CrewState, pendingTaskLimit } from "../src/crew/state";
 
+test("worker locations observe a gateway poll only for the same daemon and pinned captain", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-crew-state-"));
+  const options = [
+    directory,
+    "custom",
+    "identity-v2",
+    undefined,
+    false,
+  ] as const;
+  const captain = await CrewState.open(...options, "ses_captain");
+  const worker = await CrewState.open(...options, "ses_captain");
+  const anotherPin = await CrewState.open(...options, "ses_other");
+  try {
+    expect(worker.hasCrewQuestionConsumer(5000, 1000)).toBe(false);
+    captain.noteCrewQuestionConsumer(5000);
+    expect(worker.hasCrewQuestionConsumer(4999, 1000)).toBe(false);
+    expect(worker.hasCrewQuestionConsumer(5999, 1000)).toBe(true);
+    expect(worker.hasCrewQuestionConsumer(6000, 1000)).toBe(false);
+    expect(anotherPin.hasCrewQuestionConsumer(5000, 1000)).toBe(false);
+    const previousDaemon = new Database(captain.path);
+    try {
+      previousDaemon.exec("UPDATE crew_question_consumer SET daemonPID=0");
+    } finally {
+      previousDaemon.close();
+    }
+    expect(worker.hasCrewQuestionConsumer(5000, 1000)).toBe(false);
+  } finally {
+    anotherPin.close();
+    worker.close();
+    captain.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("legacy state upgrades identity without replacing peers, results or cursors", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-crew-state-"));
   const namespace = "legacy";

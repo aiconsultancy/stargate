@@ -237,6 +237,10 @@ export class CrewState {
           outcome TEXT CHECK(outcome IN ('answered','cancelled','uncertain')),
           UNIQUE(taskID,formID)
         );
+        CREATE TABLE IF NOT EXISTS crew_question_consumer (
+          slot INTEGER PRIMARY KEY CHECK(slot=1), captain TEXT NOT NULL,
+          daemonPID INTEGER NOT NULL, seenAt INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS pi_peers (
           sessionID TEXT PRIMARY KEY REFERENCES peers(sessionID),
           conversationID TEXT
@@ -546,6 +550,26 @@ export class CrewState {
         "SELECT * FROM tasks WHERE crewID=? AND released=0",
       )
       .get(crewID);
+  }
+
+  /** Share gateway presence across the daemon's separate plugin locations. */
+  noteCrewQuestionConsumer(at: number) {
+    if (!this.captainSessionID) return;
+    this.db
+      .query(`INSERT INTO crew_question_consumer VALUES (1,?,?,?)
+        ON CONFLICT(slot) DO UPDATE SET captain=excluded.captain,
+        daemonPID=excluded.daemonPID, seenAt=excluded.seenAt`)
+      .run(this.captainSessionID, process.pid, at);
+  }
+
+  hasCrewQuestionConsumer(at: number, leaseMs: number) {
+    return (
+      !!this.captainSessionID &&
+      !!this.db
+        .query(`SELECT 1 FROM crew_question_consumer
+          WHERE slot=1 AND captain=? AND daemonPID=? AND seenAt>? AND seenAt<=?`)
+        .get(this.captainSessionID, process.pid, at - leaseMs, at)
+    );
   }
 
   offerCrewQuestion(offer: CrewQuestionOffer): CrewQuestionOffer | null {

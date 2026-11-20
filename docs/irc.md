@@ -137,7 +137,8 @@ scheduler. Enabling it does not change any Slack registration's flag.
 Stargate uses each of these only when the server offers it. A switch under
 `irc[].features` turns one off; the protocol switches below default to `true`.
 The separate [native clarification bridge](#native-clarification-questions),
-`features.questions`, defaults to `false` and needs `message-tags`.
+`features.questions`, defaults on for OpenCode registrations with enrolled
+humans and needs `message-tags`.
 
 | Server offers                                                                   | Switch       | Stargate then                                                                                                                                                                                        |
 | ------------------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -826,26 +827,25 @@ window lasts 30 minutes after showing the form. Both commands work when
 ordinary DMs redirect to the ship channel. The gateway keeps these exchanges
 out of the DM audit mirror. Once a native reply is attempted, its IRC token is spent, including when OpenCode rejects the reply or the acknowledgement is lost. A confirmed native outcome is retained. Use OpenCode to inspect a question that still shows an uncertain outcome.
 
-Enable `features.liveProgress` for short, request-specific notices. Fast turns
-finish quietly. After three seconds, a longer turn shows the latest observed
-OpenCode stage. Routine updates are coalesced. Reply to your request with
-`captain: status` using the ship's actual account or nick. The Fleet API
-captain summary includes up to 16 recent observations with timestamps.
-Claude Agent SDK and Codex SDK turns also report model, reasoning, tool and
-reply events when their SDK emits them. Private content stays in the backend.
-Native form discovery and replies require OpenCode.
+Live progress is on by default for enrolled humans' captain and rear admiral
+requests when turn status is enabled and the backend emits progress events.
+Fast turns finish quietly. After three seconds, a longer turn shows the
+latest observed stage. Routine updates are coalesced. In a registration with
+enrolled humans, `captain: status` is reserved for checking a request. Reply to
+your original request using the ship's account or nick. The gateway checks that
+you own the request before returning its latest observation. Set
+`features.liveProgress: false` to disable these notices and release the status
+command for ordinary messages. The Fleet API captain summary includes up to 16
+recent observations. Private content stays in the backend.
 
 ## Native clarification questions
 
 OpenCode clarification forms can be answered from the original IRC conversation.
-This bridge is **off by default**. Enable it for an IRC registration with:
-
-```json
-"features": { "questions": true }
-```
-
-Enabling it also requires a `fleetPolicy` with an explicit, nonempty
-`humanAccounts` list. A broad IRC access allow-list and absence of a bot tag do
+For OpenCode registrations with an explicit, nonempty `fleetPolicy.humanAccounts`
+list, native questions are on by default. Set `features.questions: false` to
+opt out. Changes to live IRC access rules apply to pending questions as well
+as new requests.
+A broad IRC access allow-list and absence of a bot tag do
 not prove that an account is human. Stable current access/human policy is separate from live IRC registration and
 channel readiness. Readiness gates publication; a disconnect or a not-yet-joined
 startup cannot discard native ownership or permanently deny an outcome notice.
@@ -984,19 +984,19 @@ replayed after restart. An old cancellation flag, expiry, reconnect or outcome
 notification is never a new approval to issue native Stop. Native settlement
 still determines when the held queue is released.
 
-For a pinned captain with a read-only crew history service, enable
-`features.crewQuestionHandoff` and the plugin's `team.questionGateway`. See
+Pinned OpenCode IRC captains offer gateway handoff by default. The paired
+crew plugin uses it when the captain's gateway is polling. See
 [the crew question setup](agents/default-opencode.md#crew-questions-with-a-read-only-history-service).
 
 ## Presence
 
 ### Fleet typing indicators
 
-Set `features.fleetTyping: true` to send IRCv3 `+typing` alongside a human
+By default, Stargate sends IRCv3 `+typing` alongside a human
 request's normal captain or rear-admiral thread notices. This requires
 `features.typing`, negotiated `message-tags` and a client that renders the tag.
 The gateway refreshes the indicator during the turn and sends `done` at the
-end. Clients without typing support still receive the ordinary notices.
+end. Set `features.fleetTyping: false` to disable fleet typing.
 
 ### Agent waiting status (NET-1637, Step 1)
 

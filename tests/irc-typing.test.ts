@@ -138,7 +138,7 @@ const typing = (lines: readonly string[], target: string) =>
 test("IRC fleet typing accompanies the thread notice and clears before the reply", async () => {
   const { fake, store, captain, finish } = await setup({
     role: "rear_admiral",
-    features: { fleetTyping: true },
+    features: { liveProgress: false },
   });
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "@galactica check");
   const states = () => typing(fake.received("galactica"), "#galactica");
@@ -255,6 +255,7 @@ for (const role of ["captain", "rear_admiral"] as const) {
   test(`irc fleet ${role}: reports confirmed progress without repeating it`, async () => {
     const { fake, store, captain, finish, progress } = await setup({
       role,
+      features: { liveProgress: false, fleetTyping: false },
       turnStatusMs: 30,
     });
     expect(captain.settings.turnTimeoutMs).toBe(3_600_000);
@@ -294,6 +295,7 @@ for (const role of ["captain", "rear_admiral"] as const) {
 test("irc fleet: a settled turn cancels its delayed progress notice", async () => {
   const { fake, store, captain, finish } = await setup({
     role: "captain",
+    features: { liveProgress: false },
     turnStatusMs: 500,
   });
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "@galactica check");
@@ -308,6 +310,7 @@ test("irc fleet: a settled turn cancels its delayed progress notice", async () =
 test("irc fleet: timeout reports the last confirmed stage", async () => {
   const { fake, store, captain, finish, progress } = await setup({
     role: "captain",
+    features: { liveProgress: false },
     turnStatusMs: 2000,
     turnTimeoutMs: 1000,
   });
@@ -344,7 +347,6 @@ test("irc fleet: a configuration with crew rank keeps its typing behaviour", asy
 test("live IRC status reads the request observation while its model turn is still open", async () => {
   const { fake, store, captain, progress, finish } = await setup({
     role: "captain",
-    features: { liveProgress: true },
     turnStatusMs: 40,
   });
   const user = { nick: "jack", account: "jack" };
@@ -394,10 +396,13 @@ test("live IRC status reads the request observation while its model turn is stil
     "read-only status",
   );
   expect(store.queueCounts(captain.key).queued).toBe(0);
+  expect(typing(fake.received("galactica"), "#galactica")).toContain("active");
   expect(
     lineOf(fake.received("galactica"), "NOTICE").some((m) =>
       m.params[1]?.includes("Checking that now"),
     ),
   ).toBe(false);
   finish();
+  await until(() => store.queueCounts(captain.key).done === 1, 3000, "reply");
+  expect(typing(fake.received("galactica"), "#galactica").at(-1)).toBe("done");
 });

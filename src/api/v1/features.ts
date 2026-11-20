@@ -4,6 +4,7 @@ import {
   effectiveIrcConfig,
   type IrcConfig,
   ircFeatureDefaults,
+  ircFeedbackDefaults,
   type TeamsConfig,
 } from "../../config";
 import { resolveQuestionSettings } from "../../question-settings";
@@ -131,7 +132,6 @@ export function gatewayFeatures(config: ApiV1Config): V1Feature[] {
 
 const ircLabels: Record<keyof typeof ircFeatureDefaults, string> = {
   steerThreadFollowUps: "IRC follow-up steering",
-  questions: "IRC questions",
   filesIn: "IRC incoming files",
   filesOut: "IRC outgoing files",
   multiline: "IRC multiline replies",
@@ -146,13 +146,21 @@ const ircLabels: Record<keyof typeof ircFeatureDefaults, string> = {
 
 function ircFeatures(config: IrcConfig): V1Feature[] {
   const { access, features } = effectiveIrcConfig(config);
+  const defaults = ircFeedbackDefaults(config);
   const mode = access.channelRequests ?? "standard";
   const keys = Object.keys(ircLabels) as (keyof typeof ircLabels)[];
   return [
     flag(
       "irc.crewQuestionHandoff",
       "Gateway-owned crew questions",
-      features.crewQuestionHandoff === true,
+      features.crewQuestionHandoff,
+      defaults.crewQuestionHandoff,
+    ),
+    flag(
+      "irc.questions",
+      "IRC questions",
+      features.questions,
+      defaults.questions,
     ),
     ...keys.map((key) =>
       flag(
@@ -165,14 +173,15 @@ function ircFeatures(config: IrcConfig): V1Feature[] {
     flag(
       "irc.liveProgress",
       "Live IRC request progress",
-      features.liveProgress ?? false,
-      false,
+      features.liveProgress,
+      defaults.liveProgress,
     ),
     flag("irc.tls", "IRC TLS", config.server.tls, true),
     flag(
       "irc.fleetTyping",
       "IRC fleet typing indicators",
-      features.fleetTyping === true,
+      features.fleetTyping,
+      defaults.fleetTyping,
     ),
     flag(
       "irc.sasl",

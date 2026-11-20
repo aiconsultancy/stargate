@@ -1,6 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  open,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Schema } from "effect";
 import type { BotConfig } from "./config";
@@ -32,9 +40,26 @@ export function questionSettingsPath(directory: string, agent: string): string {
   return join(directory, ".local", "stargate-questions", `${id}.json`);
 }
 
-/** Missing, invalid or unreadable settings never enable questions. */
+const missing = (error: unknown) =>
+  error instanceof Error && "code" in error && error.code === "ENOENT";
+
+/** Distinguish a missing file from a broken link or invalid state directory. */
+async function questionSettingsAbsent(directory: string, path: string) {
+  if (!(await stat(directory)).isDirectory()) return false;
+  for (const parent of [join(directory, ".local"), dirname(path)]) {
+    try {
+      if (!(await lstat(parent)).isDirectory()) return false;
+    } catch (error) {
+      return missing(error);
+    }
+  }
+  return lstat(path).then(() => false, missing);
+}
+
+/** Invalid or unreadable settings always fail closed. */
 export async function resolveQuestionSettings(
   bot: Pick<BotConfig, "backend">,
+  enableWhenMissing = false,
 ): Promise<QuestionSettings> {
   const backend = bot.backend;
   if (backend.type === "opencode" && backend.agent) {
@@ -43,7 +68,16 @@ export async function resolveQuestionSettings(
       const file = await open(
         path,
         constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-      );
+      ).catch(async (error: unknown) => {
+        if (
+          enableWhenMissing &&
+          missing(error) &&
+          (await questionSettingsAbsent(backend.directory, path))
+        )
+          return undefined;
+        throw error;
+      });
+      if (!file) return { ...defaults, enabled: true };
       try {
         const before = await file.stat({ bigint: true });
         const uid = process.getuid?.();

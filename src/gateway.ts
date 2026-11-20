@@ -264,7 +264,7 @@ type SlackAdmission = (write: () => boolean) => boolean | Promise<boolean>;
 
 /** Transport rules the gateway applies to every job of one registration. */
 export interface GatewayTransport {
-  /** Opt-in clarification channel; never a native permission-approval surface. */
+  /** Clarification channel; never a native permission-approval surface. */
   questions?: QuestionPort;
   /** Session title and source label. */
   readonly name: "slack" | "irc" | "teams";
@@ -356,7 +356,8 @@ export class Gateway {
   /** Every job a worker holds, with the transport rules of its start. */
   private readonly turnPolicies = new Map<number, GatewayTransport>();
   readonly key: string;
-  private readonly questions: Questions | undefined;
+  private questions: Questions | undefined;
+  private readonly supportsQuestions: boolean;
   private readonly slackQuestions: SlackQuestionControls | undefined;
   private readonly questionLifetime = new AbortController();
   constructor(
@@ -422,23 +423,14 @@ export class Gateway {
         },
       );
     }
-    if (
-      (selected.questions || this.slackQuestions) &&
+    this.supportsQuestions = !!(
       backend.pendingQuestions &&
       backend.questionState &&
       backend.questionBelongsToInput &&
       backend.replyQuestion &&
       backend.questionInputSettled
-    )
-      this.questions = new Questions(
-        this.key,
-        store,
-        backend,
-        () => this.questionPort(),
-        (job) => this.allowed(job),
-        (session) => this.settle(session),
-        this.questionLifetime.signal,
-      );
+    );
+    this.enableQuestions();
     this.activity = new ActivityDelivery(
       backend,
       slack,
@@ -454,6 +446,23 @@ export class Gateway {
       log,
       { store },
     );
+  }
+
+  private enableQuestions() {
+    if (
+      !this.questions &&
+      this.supportsQuestions &&
+      (this.transport.questions || this.slackQuestions)
+    )
+      this.questions = new Questions(
+        this.key,
+        this.store,
+        this.backend,
+        () => this.questionPort(),
+        (job) => this.allowed(job),
+        (session) => this.settle(session),
+        this.questionLifetime.signal,
+      );
   }
 
   private questionPort(): QuestionPort | undefined {
@@ -495,6 +504,9 @@ export class Gateway {
     this.bot = bot;
     this.transcriber = transcriber;
     this.transport = selected;
+    // An IRC policy reload can enrol or remove the last human. Keep any
+    // existing bridge for settlement, while its port reads current authority.
+    this.enableQuestions();
   }
 
   /** Stop taking new slots while an idle roster member is detached. */
@@ -1152,7 +1164,10 @@ export class Gateway {
     return Effect.scoped(
       Effect.gen(function* () {
         yield* abortable((signal) => gateway.recover(signal));
-        if (gateway.questions)
+        if (
+          gateway.questions ||
+          (gateway.transport.name === "irc" && gateway.supportsQuestions)
+        )
           yield* Effect.forkScoped(
             abortable(async (signal) => {
               while (!signal.aborted) {
@@ -2074,7 +2089,9 @@ export class Gateway {
             text,
             signal,
             live ? (text) => live.push(reply(text, false)) : undefined,
-            pinned || this.questions
+            pinned ||
+              (this.questions &&
+                (this.transport.questions || this.slackQuestions))
               ? (input) => {
                   this.store.saveInput(this.key, job.id, input, pinned);
                   if (pinned && captain?.cursor === undefined) {

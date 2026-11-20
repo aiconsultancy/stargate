@@ -1,6 +1,7 @@
 import { hostname } from "node:os";
 import { Semaphore } from "effect";
 import type { AgentBackend } from "../../backend";
+import { ircFeedbackDefaults } from "../../config";
 import { redactCredentials } from "../../credentials";
 import type { FleetCrewStatus } from "../../crew/fleet-status";
 import {
@@ -270,7 +271,8 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       id,
       name: redactCredentials(name, 100),
       ...(registration.kind === "irc" &&
-      registration.config.features.liveProgress &&
+      (registration.config.features.liveProgress ??
+        ircFeedbackDefaults(registration.config).liveProgress) &&
       deps.requests
         ? { requests: deps.requests(registration, at) }
         : {}),

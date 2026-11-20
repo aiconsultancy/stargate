@@ -84,12 +84,35 @@ type Pending = {
   finish: (result: CrewQuestionReceipt) => void;
 };
 
+// Allow one full gateway RPC deadline and a retry before forgetting the owner.
+export const crewQuestionConsumerLeaseMs = 15_000;
+
 /** Captain-location RPC mailbox. An in-flight write is never delivered twice.
  * CrewState holds the durable answer claim. Lost messages only lose observation. */
 export class CrewQuestionHandoff {
   private readonly pending = new Map<string, Pending>();
+  private lastTake = -Infinity;
+
+  constructor(
+    private readonly captain: string | undefined,
+    private readonly now = () => performance.now(),
+  ) {}
+
+  hasConsumer() {
+    return this.now() - this.lastTake < crewQuestionConsumerLeaseMs;
+  }
+
+  route(preference?: boolean, externalHistory = false) {
+    if (preference === false) return "direct";
+    if (preference || this.hasConsumer()) return "gateway";
+    // A configured history service may be read-only. Its URL and credentials
+    // do not establish authority to read the exact form or submit an answer.
+    return this.captain && externalHistory ? "unavailable" : "direct";
+  }
 
   take(captain: string) {
+    if (captain !== this.captain) return { work: null };
+    this.lastTake = this.now();
     for (const entry of this.pending.values()) {
       if (
         entry.work.owner.captain !== captain ||

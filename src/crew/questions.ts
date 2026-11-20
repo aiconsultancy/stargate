@@ -55,6 +55,8 @@ interface Authority {
 }
 type Options = {
   settings?: () => Promise<QuestionSettings>;
+  enableWhenMissing?: () => boolean;
+  onUnavailable?: () => void;
   now?: () => number;
   project?: string;
 };
@@ -77,18 +79,21 @@ export class CrewQuestions {
     this.settings =
       options.settings ??
       (() =>
-        resolveQuestionSettings({
-          backend: {
-            type: "opencode",
-            url: "http://localhost",
-            headersEnv: {},
-            permissions: [],
-            directory: authority.options.captainDirectory,
-            agent:
-              authority.options.team.captain.agent ??
-              authority.options.team.captain.id,
+        resolveQuestionSettings(
+          {
+            backend: {
+              type: "opencode",
+              url: "http://localhost",
+              headersEnv: {},
+              permissions: [],
+              directory: authority.options.captainDirectory,
+              agent:
+                authority.options.team.captain.agent ??
+                authority.options.team.captain.id,
+            },
           },
-        }));
+          options.enableWhenMissing?.() === true,
+        ));
   }
 
   active(task: CrewTask) {
@@ -125,7 +130,7 @@ export class CrewQuestions {
     return task;
   }
 
-  async poll(signal: AbortSignal) {
+  async poll(signal: AbortSignal, available = true) {
     const settings = await this.settings();
     if (!settings.enabled) return;
     const members = this.authority.options.team.crew.filter((m) => !m.backend);
@@ -137,6 +142,10 @@ export class CrewQuestions {
       if (!member) continue;
       const task = this.authority.state.activeTask(member.id);
       if (!task || !this.owner({ taskID: task.id, ...task })) continue;
+      if (!available) {
+        this.options.onUnavailable?.();
+        return;
+      }
       for (const offer of this.authority.state.crewQuestionOffers(task.id)) {
         if (
           offer.state === "attempted" &&

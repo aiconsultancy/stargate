@@ -10,7 +10,12 @@ import type { ApiV1Config } from "../src/api/v1/features";
 import { createApiV1Source } from "../src/api/v1/projection";
 import { startApiV1Server } from "../src/api/v1/server";
 import { apiToken } from "../src/api/v1/token";
-import type { V1Git, V1QueueCounts, V1Task } from "../src/api/v1/types";
+import type {
+  V1Git,
+  V1QueueCounts,
+  V1RequestProgress,
+  V1Task,
+} from "../src/api/v1/types";
 import type { AgentBackend } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { backendSchema, configSchema } from "../src/config";
@@ -76,7 +81,7 @@ function fixture(
   options?: Parameters<typeof dashboardSource>[4],
   overrides?: Pick<
     Parameters<typeof createApiV1Source>[0],
-    "git" | "pullRequest"
+    "git" | "pullRequest" | "requests"
   >,
 ) {
   let at = 4_000_000;
@@ -310,6 +315,35 @@ function fixture(
       statuses.set(id, { members, total: members.length, truncated }),
   };
 }
+
+test("IRC Fleet detail includes live request progress unless explicitly disabled", async () => {
+  const progress: V1RequestProgress = {
+    request: 1,
+    stage: "reasoning",
+    observedAt: 4_000_000,
+    status: "running",
+    disconnected: false,
+    stale: false,
+    failure: null,
+  };
+  const requests = mock(() => [progress]);
+  const f = fixture(undefined, { requests });
+  expect((await f.source.ship("other", signal))?.captain.requests).toEqual([
+    progress,
+  ]);
+  f.useConfig((config) => ({
+    ...config,
+    irc:
+      config.irc?.map((registration) => ({
+        ...registration,
+        features: { ...registration.features, liveProgress: false },
+      })) ?? [],
+  }));
+  expect((await f.source.ship("other", signal))?.captain).not.toHaveProperty(
+    "requests",
+  );
+  expect(requests).toHaveBeenCalledTimes(1);
+});
 
 const eventHost = {
   hostname: "example",

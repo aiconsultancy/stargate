@@ -1,9 +1,9 @@
-// Legacy Zod 4.6.7 corpus at4ff23cb, with approved IRC turn defaults and
-// NET-1736 default-off follow-up steering contracts recalculated below.
+// Legacy Zod 4.6.7 corpus at 4ff23cb, with the IRC turn defaults,
+// NET-1736 follow-up steering and optional IRC questions contracts.
 export const settingsGolden = {
   configSchema: {
-    count: 6702,
-    hash: "16bb211b1f12ee6f3510cd5773e7df05c1526046f55fc8117ffdaa818ef1ad93",
+    count: 6688,
+    hash: "ac44815557e0bd194a6378137b05640e7110fdcafbb6699a4fdbc2929049fb6b",
   },
   botSchema: {
     count: 2646,
@@ -14,8 +14,8 @@ export const settingsGolden = {
     hash: "b54a366b9892b4d5dfa3a4b422ed54d701b04e74874a43b0f54feff3415dfad9",
   },
   ircSchema: {
-    count: 2964,
-    hash: "961a9431362d584070f4e32a588c8c886e0397f9ef7095ee7f63dbae2b91fbba",
+    count: 2950,
+    hash: "b93d0e12061d7c8a19470a7bff9ff4d55c57cc88b9a7e1aac207dfac5923b938",
   },
   teamsSchema: {
     count: 580,

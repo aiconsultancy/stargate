@@ -3,6 +3,31 @@ import { CrewQuestionHandoff } from "../src/crew/question-handoff";
 import type { CrewTask } from "../src/crew/state";
 import type { NativeQuestion } from "../src/questions";
 
+test("an unspecified route follows a current poll from the owning pinned captain", () => {
+  let now = 0;
+  const box = new CrewQuestionHandoff("ses_captain", () => now);
+  expect(box.route()).toBe("direct");
+  expect(box.route(undefined, true)).toBe("unavailable");
+  expect(box.route(true, true)).toBe("gateway");
+  expect(box.take("ses_other")).toEqual({ work: null });
+  expect(box.route()).toBe("direct");
+  expect(box.route(undefined, true)).toBe("unavailable");
+
+  expect(box.take("ses_captain")).toEqual({ work: null });
+  expect(box.route()).toBe("gateway");
+  expect(box.route(undefined, true)).toBe("gateway");
+  expect(box.route(false, true)).toBe("direct");
+  now += 20_000;
+  expect(box.route()).toBe("direct");
+  expect(box.route(undefined, true)).toBe("unavailable");
+  expect(box.route(true, true)).toBe("gateway");
+  box.take("ses_captain");
+  expect(box.route(undefined, true)).toBe("gateway");
+  expect(new CrewQuestionHandoff(undefined).route(undefined, true)).toBe(
+    "direct",
+  );
+});
+
 test("a gateway write has one delivery and one final ownership check on the captain route", async () => {
   const task: CrewTask = {
     id: "task_fixture",
@@ -26,7 +51,7 @@ test("a gateway write has one delivery and one final ownership check on the capt
     title: "Colour?",
     fields: [{ type: "string", key: "q0" }],
   };
-  const box = new CrewQuestionHandoff();
+  const box = new CrewQuestionHandoff(task.originCaptainID);
   let current = true;
   const backend = box.backend(
     task,
