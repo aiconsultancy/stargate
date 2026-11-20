@@ -543,12 +543,13 @@ async function completeFleet(fleet: Omit<V1Fleet, "host" | "gateway">) {
   return fallbackFleet(fleet);
 }
 
-test("a stalled disk sample leaves periodic host frames using the latest snapshot", async () => {
+test("host frames use the fresh sample and keep it while the next disk read stalls", async () => {
   const cached = { ...host, sampledAt: host.sampledAt + 100 };
   const held = Promise.withResolvers<V1Host>();
   let latest = host;
   const readHost = mock(async () => {
     if (readHost.mock.calls.length === 1) {
+      await Bun.sleep(1);
       latest = cached;
       return latest;
     }
@@ -570,9 +571,7 @@ test("a stalled disk sample leaves periodic host frames using the latest snapsho
     if (!reader) throw new Error("Cannot open event stream");
     for (let i = 0; i < 3; i++) {
       const frame = await nextFrame(reader, "host");
-      expect(frame).toContain(
-        `"sampledAt":${i === 0 ? host.sampledAt : cached.sampledAt}`,
-      );
+      expect(frame).toContain(`"sampledAt":${cached.sampledAt}`);
     }
     expect(readHost).toHaveBeenCalledTimes(2);
   } finally {
@@ -681,6 +680,118 @@ test("an availability transition supersedes an older healthy detail read", async
   }
 });
 
+test("availability recovery waits for fresh detail while an older read drains", async () => {
+  const held = Promise.withResolvers<V1ShipDetail>();
+  const started = Promise.withResolvers<void>();
+  const offline = { ...summary, available: false };
+  let available = false;
+  const streams = createEventStreams(
+    {
+      ...source,
+      fleet: async () => ({
+        ...overview,
+        ships: [available ? summary : offline],
+      }),
+      ship: async () => {
+        if (available) return ship;
+        started.resolve();
+        return held.promise;
+      },
+      diff: diffEvents,
+      completeFleet,
+      fallbackFleet,
+      readHost: async () => host,
+      snapshotHost: () => host,
+    },
+    { pollMs: 10, hostMs: 1000, heartbeatMs: 30, readMs: 500 },
+  );
+  try {
+    const reader = streams.open(AbortSignal.timeout(500))?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    expect(await nextFrame(reader, "fleet")).toContain('"available":false');
+    await started.promise;
+    available = true;
+    expect(await nextFrame(reader, "fleet")).toContain('"available":true');
+    expect(await nextFrame(reader, "heartbeat")).not.toContain("event: ship");
+    held.resolve({ ...offline, crewMembers: [] });
+    expect(await nextFrame(reader, "ship")).toContain('"available":true');
+  } finally {
+    held.resolve(ship);
+    streams.stop();
+  }
+});
+
+test("a replacement backend can publish detail while its predecessor still holds a read slot", async () => {
+  const held = Promise.withResolvers<V1ShipDetail>();
+  const started = Promise.withResolvers<AbortSignal>();
+  let backend = "original";
+  const streams = createEventStreams(
+    {
+      ...source,
+      shipIdentities: () => new Map([[ship.id, backend]]),
+      ship: async (_id, signal) => {
+        if (backend === "replacement") return { ...ship, name: "Replacement" };
+        started.resolve(signal);
+        return held.promise;
+      },
+      diff: diffEvents,
+      completeFleet,
+      fallbackFleet,
+      readHost: async () => host,
+      snapshotHost: () => host,
+    },
+    { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
+  );
+  try {
+    const reader = streams.open(AbortSignal.timeout(500))?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    await nextFrame(reader, "fleet");
+    const original = await started.promise;
+    backend = "replacement";
+    await nextFrame(reader, "fleet");
+    expect(await nextFrame(reader, "ship")).toContain('"name":"Replacement"');
+    expect(original.aborted).toBe(true);
+  } finally {
+    held.resolve(ship);
+    streams.stop();
+  }
+});
+
+test("host and heartbeat frames continue while an identity change stalls the overview", async () => {
+  const held = Promise.withResolvers<typeof overview>();
+  const started = Promise.withResolvers<void>();
+  let backend = "original";
+  const streams = createEventStreams(
+    {
+      ...source,
+      shipIdentities: () => new Map([[ship.id, backend]]),
+      fleet: async () => {
+        if (backend === "original") return overview;
+        started.resolve();
+        return held.promise;
+      },
+      diff: diffEvents,
+      completeFleet,
+      fallbackFleet,
+      readHost: async () => host,
+      snapshotHost: () => host,
+    },
+    { pollMs: 10, hostMs: 30, heartbeatMs: 35, readMs: 1000 },
+  );
+  try {
+    const reader = streams.open(AbortSignal.timeout(350))?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    await nextFrame(reader, "ship");
+    backend = "replacement";
+    await started.promise;
+    expect(await nextFrame(reader, "host")).not.toContain("event: fleet");
+    expect(await nextFrame(reader, "heartbeat")).not.toContain("event: fleet");
+  } finally {
+    held.resolve(overview);
+    streams.stop();
+  }
+});
+
 test("a failed overview is marked stale and expires from connection snapshots", async () => {
   let failing = false;
   const streams = createEventStreams(
@@ -705,7 +816,15 @@ test("a failed overview is marked stale and expires from connection snapshots", 
     await nextFrame(reader, "ship");
     failing = true;
     expect(await nextFrame(reader, "fleet")).toContain('"overviewStale":true');
-    await Bun.sleep(210);
+    const closed = async () => {
+      while (!(await reader.read()).done) {
+        // Drain queued frames before observing the stream close.
+      }
+      return true;
+    };
+    expect(
+      await Promise.race([closed(), Bun.sleep(350).then(() => false)]),
+    ).toBe(true);
     const late = streams.open(AbortSignal.timeout(500))?.getReader();
     if (!late) throw new Error("Cannot reopen event stream");
     const first = await late.read();
@@ -964,10 +1083,16 @@ test("timed-out enrichment keeps its slot while current overviews publish across
 
 test("a hung overview publishes keepalives before its first sample and cached data after a reconnect", async () => {
   const first = Promise.withResolvers<Omit<V1Fleet, "host" | "gateway">>();
+  const deadline = Promise.withResolvers<void>();
   const later = Promise.withResolvers<typeof overview>();
   const hung = Promise.withResolvers<void>();
-  const fleet = mock(async (_signal: AbortSignal) => {
-    if (fleet.mock.calls.length === 1) return first.promise;
+  const fleet = mock(async (signal: AbortSignal) => {
+    if (fleet.mock.calls.length === 1) {
+      signal.addEventListener("abort", () => deadline.resolve(), {
+        once: true,
+      });
+      return first.promise;
+    }
     if (fleet.mock.calls.length === 2) return overview;
     hung.resolve();
     return later.promise;
@@ -989,6 +1114,7 @@ test("a hung overview publishes keepalives before its first sample and cached da
     if (!reader) throw new Error("Cannot open event stream");
     expect(await nextFrame(reader, "heartbeat")).not.toContain("event: fleet");
     expect(fleet).toHaveBeenCalledTimes(1);
+    await deadline.promise;
     first.resolve({ ...overview, name: "Expired" });
     // The expired first result is suppressed. The following read can publish.
     expect(await nextFrame(reader, "fleet")).toContain(

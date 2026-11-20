@@ -838,14 +838,16 @@ describe("Fleet API projection", () => {
         await nextEvent(first, '"id":"old-crew"');
         f.set("captain", [context("old-pending")]);
         const reading = await started.promise;
-        if (connection === "across reconnects") await first.cancel();
-        f.useConfig((config) => ({
-          ...config,
-          bots: config.bots.map((bot) => ({
-            ...bot,
-            backend: { ...bot.backend, directory: "/replacement" },
-          })),
-        }));
+        if (connection === "across reconnects") {
+          await first.cancel();
+          f.useConfig((config) => ({
+            ...config,
+            bots: config.bots.map((bot) => ({
+              ...bot,
+              backend: { ...bot.backend, directory: "/replacement" },
+            })),
+          }));
+        }
         f.replaceBackend("captain");
         f.statuses.set("captain", new Error("Replacement offline"));
         const next = streams.open(AbortSignal.timeout(700))?.getReader();

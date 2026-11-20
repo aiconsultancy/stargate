@@ -1,5 +1,6 @@
 import { hostname } from "node:os";
 import { Semaphore } from "effect";
+import type { AgentBackend } from "../../backend";
 import { redactCredentials } from "../../credentials";
 import type { FleetCrewStatus } from "../../crew/fleet-status";
 import {
@@ -240,6 +241,8 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   const captains = new Map<string, Timing>();
   const members = new Map<string, Timing>();
   const childReads = Semaphore.makeUnsafe(4);
+  const backendIdentities = new WeakMap<AgentBackend, number>();
+  let nextBackendIdentity = 0;
 
   function captain(
     registration: Registration,
@@ -528,12 +531,19 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       for (const [id, registration] of registrations(deps.config())) {
         if (role(registration) === "rear_admiral") continue;
         const { backend } = registration.config;
+        const instance = dashboard.fleetBackend(id);
+        let identity = instance && backendIdentities.get(instance);
+        if (instance && identity === undefined) {
+          identity = ++nextBackendIdentity;
+          backendIdentities.set(instance, identity);
+        }
         identities.set(
           id,
           JSON.stringify([
             registration.kind,
             backendFingerprint(registration.config),
             backend.type === "opencode" ? backend.sessionID : undefined,
+            identity,
           ]),
         );
       }

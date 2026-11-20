@@ -23,12 +23,16 @@
   fleet probe deadline for slower captains and back off after repeated failures.
 - Retry stalled Fleet API reads after a hard cap with at most one abandoned
   read per slot. Serve cached metrics when fleet HTTP enrichment times out and
-  continue periodic host events while metrics refresh. Retained ship details
+  publish fresh host samples when ready within one second, falling back to
+  the latest sample during slower refreshes. Retained ship details
   report captain unavailability and preserve the last successful crew data.
-  Availability transitions supersede older detail reads. Replaced backends
-  discard their cached and pending details. Retained overviews are marked
-  stale and expire after 75 seconds. Shutdown and configuration reload cancel
-  shared crew reads.
+  Availability transitions supersede older detail reads. Recovering ships
+  wait for fresh detail when no successful sample is cached. Replacement
+  backends get independent detail read slots. Retained overviews are marked
+  stale and close event streams on expiry after 75 seconds. Host and heartbeat
+  frames continue while a new overview is pending. Configuration reloads
+  invalidate cached crew samples and keep in-flight reads for unchanged
+  backends, including Fleet HTTP requests.
 - Publish lightweight `ship-sampled` events when only the ship detail
   timestamp changes. Preserve the observation time when a crew sample is reused.
 - Harden Fleet API Git reads against checkout-configured commands.

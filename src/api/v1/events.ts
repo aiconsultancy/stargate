@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { createReadSlot } from "../../read-deadline";
+import { createReadSlot, readWithDeadline } from "../../read-deadline";
 import type {
   ApiV1Source,
   V1Event,
@@ -78,6 +78,12 @@ export function createEventStreams(
     | undefined;
   let active: ReturnType<typeof startPolling> | undefined;
 
+  function expireOverview() {
+    if (!cachedOverview || cachedOverview.expiresAt > performance.now()) return;
+    cachedOverview = undefined;
+    if (active) for (const client of active.clients) client.close();
+  }
+
   function startPolling() {
     const shutdown = new AbortController();
     const clients = new Set<Client>();
@@ -85,12 +91,11 @@ export function createEventStreams(
     const pending = new Map<string, AbortController>();
     let summaries = new Map<string, V1Ship>();
     let fleet: V1Fleet | undefined;
-    let overviewExpired = false;
     let publishing = false;
     let readingHost = false;
 
     function broadcast(events: V1Event[]) {
-      if ((!fleet && !overviewExpired) || events.length === 0) return;
+      if (events.length === 0) return;
       const bytes = encodeEvents(events);
       for (const client of clients) client.send(bytes);
     }
@@ -108,15 +113,6 @@ export function createEventStreams(
       ships.clear();
       identities = current;
       return identities;
-    }
-
-    function expireOverview() {
-      if (!cachedOverview || cachedOverview.expiresAt > performance.now())
-        return;
-      cachedOverview = undefined;
-      fleet = undefined;
-      ships.clear();
-      overviewExpired = true;
     }
 
     function publishFleet(next: V1Fleet) {
@@ -181,18 +177,23 @@ export function createEventStreams(
     async function refreshShip(id: string, read: V1ShipRead) {
       if (shutdown.signal.aborted) return;
       const readAt = Date.now();
+      const key = JSON.stringify([id, identities?.get(id)]);
       const slot =
-        shipReads.get(id) ??
+        shipReads.get(key) ??
         createReadSlot<V1ShipDetail | undefined>(readMs, () =>
-          shipReads.delete(id),
+          shipReads.delete(key),
         );
       if (slot.pending) {
         const own = pending.get(id);
         // A prior stream or overview generation already cancelled this wait.
-        if (!own || own.signal.aborted) publishShip(id, readAt);
+        if (
+          (!own || own.signal.aborted) &&
+          (!summaries.get(id)?.available || cachedShips.has(id))
+        )
+          publishShip(id, readAt);
         return;
       }
-      shipReads.set(id, slot);
+      shipReads.set(key, slot);
       // This wait belongs to the current ship availability and identity.
       // Publishing a transition cancels that generation even if the read drains later.
       const generation = new AbortController();
@@ -210,11 +211,11 @@ export function createEventStreams(
     }
 
     async function poll() {
+      expireOverview();
       if (publishing || shutdown.signal.aborted) return;
       publishing = true;
       try {
         const roster = syncIdentities();
-        expireOverview();
         const sample = await readOverview(shutdown.signal, async (signal) => {
           const reads = new Map<string, V1ShipRead>();
           const overview = await options.fleet(signal, (id, read) =>
@@ -229,10 +230,7 @@ export function createEventStreams(
             expiresAt: performance.now() + 3 * overviewReadMs,
           };
         expireOverview();
-        if (!cachedOverview) {
-          overviewExpired = true;
-          return;
-        }
+        if (!cachedOverview) return;
         const overview = sample
           ? sample.overview
           : { ...cachedOverview.overview, overviewStale: true as const };
@@ -265,16 +263,20 @@ export function createEventStreams(
     }
 
     async function publishHost() {
-      broadcast([{ type: "host", data: options.snapshotHost() }]);
-      if (readingHost || shutdown.signal.aborted) return;
-      readingHost = true;
-      try {
-        await options.readHost();
-      } catch {
-        // The next sample can succeed even if a metric read failed.
-      } finally {
-        readingHost = false;
+      if (shutdown.signal.aborted) return;
+      if (readingHost) {
+        broadcast([{ type: "host", data: options.snapshotHost() }]);
+        return;
       }
+      readingHost = true;
+      const { result, settled } = readWithDeadline(shutdown.signal, 1000, () =>
+        options.readHost(),
+      );
+      void settled.then(() => {
+        readingHost = false;
+      });
+      const data = await result.catch(() => options.snapshotHost());
+      if (!shutdown.signal.aborted) broadcast([{ type: "host", data }]);
     }
 
     const pollTimer = setInterval(() => void poll(), timing.pollMs);
@@ -288,7 +290,6 @@ export function createEventStreams(
       add(client: Client) {
         clients.add(client);
         syncIdentities();
-        expireOverview();
         if (fleet) {
           client.send(
             encodeEvents([
@@ -312,6 +313,7 @@ export function createEventStreams(
 
   return {
     open(signal: AbortSignal) {
+      expireOverview();
       if (signal.aborted || (active?.clients.size ?? 0) >= maxClients)
         return undefined;
       active ??= startPolling();
