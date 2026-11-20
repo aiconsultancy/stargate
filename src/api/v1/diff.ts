@@ -16,12 +16,13 @@ export type V1EventSnapshot = V1Snapshot & { fleet: V1Fleet };
 
 function fleetSummary({
   apiVersion,
+  overviewStale,
   name,
   admiral,
   ships,
   longestIdle,
 }: V1Snapshot["fleet"]) {
-  return { apiVersion, name, admiral, ships, longestIdle };
+  return { apiVersion, overviewStale, name, admiral, ships, longestIdle };
 }
 
 function shipDetail({

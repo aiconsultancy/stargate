@@ -25,6 +25,10 @@
   read per slot. Serve cached metrics when fleet HTTP enrichment times out and
   continue periodic host events while metrics refresh. Retained ship details
   report captain unavailability and preserve the last successful crew data.
+  Availability transitions supersede older detail reads. Replaced backends
+  discard their cached and pending details. Retained overviews are marked
+  stale and expire after 75 seconds. Shutdown and configuration reload cancel
+  shared crew reads.
 - Publish lightweight `ship-sampled` events when only the ship detail
   timestamp changes. Preserve the observation time when a crew sample is reused.
 - Harden Fleet API Git reads against checkout-configured commands.

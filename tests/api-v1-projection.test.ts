@@ -125,6 +125,7 @@ function fixture(
     ],
   });
   const statuses = new Map<string, CrewStatus | Error | Promise<CrewStatus>>();
+  const crewSignals = new Map<string, AbortSignal>();
   const queue = new Map<string, V1QueueCounts>();
   const calls = {
     status: [] as string[],
@@ -187,7 +188,8 @@ function fixture(
       },
       ...(id === "captain"
         ? {
-            async fleetCrewStatus(input: CrewStatusInput) {
+            async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+              crewSignals.set(id, signal);
               const scoped = await status(id, input);
               return {
                 status: scoped,
@@ -276,7 +278,6 @@ function fixture(
         behind: 0,
         changedFiles: 0,
         repository: "example/project",
-        pushRepository: "example/project",
         checkedAt: at,
       };
     },
@@ -288,7 +289,12 @@ function fixture(
     source,
     calls,
     statuses,
+    crewSignals,
     advance: () => ++at,
+    replaceBackend: (id: string) => {
+      const ship = ships.find((entry) => entry.bot.id === id);
+      if (ship) ship.backend = { ...ship.backend };
+    },
     useConfig: (next: (current: ApiV1Config) => ApiV1Config) => {
       config = next(config);
     },
@@ -500,6 +506,39 @@ describe("Fleet API projection", () => {
       crew: { people: 1 },
     });
     expect(f.calls.status.filter((id) => id === "captain")).toHaveLength(1);
+  });
+
+  test("shutdown and reload cancel the shared crew sample", async () => {
+    const shutdown = new AbortController();
+    let reload = new AbortController();
+    const f = fixture({
+      fleetSignal: () => AbortSignal.any([shutdown.signal, reload.signal]),
+    });
+    for (const stop of [() => reload.abort(), () => shutdown.abort()]) {
+      const held = Promise.withResolvers<CrewStatus>();
+      f.statuses.set("captain", held.promise);
+      const read = f.source.fleet(signal);
+      void read.catch(() => {});
+      await Bun.sleep(0);
+      const backendRead = f.crewSignals.get("captain");
+      expect(backendRead?.aborted).toBe(false);
+      stop();
+      try {
+        const outcome = await Promise.race([
+          read.then(
+            () => "completed",
+            (error: Error) => error.name,
+          ),
+          Bun.sleep(100).then(() => "pending"),
+        ]);
+        expect(outcome).toBe("AbortError");
+        expect(backendRead?.aborted).toBe(true);
+      } finally {
+        held.resolve({ members: [], total: 0, truncated: false });
+        await read.catch(() => {});
+      }
+      reload = new AbortController();
+    }
   });
 
   test("an older OpenCode plugin skips repeated missing fleet-status calls", async () => {
@@ -739,6 +778,70 @@ describe("Fleet API projection", () => {
     expect(pullRequest).toHaveBeenCalledTimes(1);
     expect(pullRequest).toHaveBeenCalledWith("example/approved", "test/change");
   });
+
+  test.each(["while connected", "across reconnects"])(
+    "a replacement backend invalidates old crew details %s",
+    async (connection) => {
+      const f = fixture();
+      f.set("captain", [context("old-crew")]);
+      const held = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<AbortSignal>();
+      const streams = fleetEvents(
+        {
+          ...f.source,
+          fleet: (signal, capture) =>
+            f.source.fleet(signal, (id, read) =>
+              capture?.(id, async (reading) => {
+                const detail = await read(reading);
+                if (
+                  detail?.crewMembers.some(
+                    (member) => member.id === "old-pending",
+                  )
+                ) {
+                  started.resolve(reading);
+                  await held.promise;
+                }
+                return detail;
+              }),
+            ),
+        },
+        { pollMs: 15, hostMs: 1000, heartbeatMs: 1000, readMs: 1000 },
+      );
+      try {
+        const first = streams.open(AbortSignal.timeout(700))?.getReader();
+        if (!first) throw new Error("Cannot open stream");
+        await nextEvent(first, '"id":"old-crew"');
+        f.set("captain", [context("old-pending")]);
+        const reading = await started.promise;
+        if (connection === "across reconnects") await first.cancel();
+        f.useConfig((config) => ({
+          ...config,
+          bots: config.bots.map((bot) => ({
+            ...bot,
+            backend: { ...bot.backend, directory: "/replacement" },
+          })),
+        }));
+        f.replaceBackend("captain");
+        f.statuses.set("captain", new Error("Replacement offline"));
+        const next = streams.open(AbortSignal.timeout(700))?.getReader();
+        if (!next) throw new Error("Cannot reopen stream");
+        const unavailable = await nextEvent(
+          next,
+          'event: ship\ndata: {"id":"captain"',
+        );
+        expect(reading.aborted).toBe(true);
+        expect(unavailable).toContain('"crewMembers":[]');
+        expect(unavailable).not.toContain("old-crew");
+        held.resolve();
+        f.set("captain", [context("new-crew")]);
+        const recovered = await nextEvent(next, '"id":"new-crew"');
+        expect(recovered).not.toContain("old-pending");
+      } finally {
+        held.resolve();
+        streams.stop();
+      }
+    },
+  );
 
   test("publishes an initial crew error detail and a single recovery activity", async () => {
     const f = fixture();

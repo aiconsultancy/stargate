@@ -640,6 +640,85 @@ test.each(["overview", "enrichment", "ship"])(
   },
 );
 
+test("an availability transition supersedes an older healthy detail read", async () => {
+  const held = Promise.withResolvers<V1ShipDetail>();
+  const started = Promise.withResolvers<AbortSignal>();
+  const offline = { ...summary, available: false, error: "Crew unavailable." };
+  let available = true;
+  const streams = createEventStreams(
+    {
+      ...source,
+      fleet: async (_signal, capture) => {
+        capture?.(ship.id, async (signal) => {
+          if (!available) return { ...offline, crewMembers: [] };
+          started.resolve(signal);
+          return held.promise;
+        });
+        return { ...overview, ships: [available ? summary : offline] };
+      },
+      diff: diffEvents,
+      completeFleet,
+      fallbackFleet,
+      readHost: async () => host,
+      snapshotHost: () => host,
+    },
+    { pollMs: 20, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
+  );
+  try {
+    const reader = streams.open(AbortSignal.timeout(750))?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    await nextFrame(reader, "fleet");
+    const reading = await started.promise;
+    available = false;
+    expect(await nextFrame(reader, "fleet")).toContain('"available":false');
+    held.resolve({ ...ship, name: "Superseded healthy detail" });
+    const detail = await nextFrame(reader, "ship");
+    expect(detail).toContain('"available":false');
+    expect(reading.aborted).toBe(true);
+  } finally {
+    held.resolve(ship);
+    streams.stop();
+  }
+});
+
+test("a failed overview is marked stale and expires from connection snapshots", async () => {
+  let failing = false;
+  const streams = createEventStreams(
+    {
+      ...source,
+      fleet: async () => {
+        if (failing) throw new Error("Overview offline");
+        return overview;
+      },
+      diff: diffEvents,
+      completeFleet,
+      fallbackFleet,
+      readHost: async () => host,
+      snapshotHost: () => host,
+    },
+    { pollMs: 15, hostMs: 1000, heartbeatMs: 10, readMs: 60 },
+  );
+  try {
+    const reader = streams.open(AbortSignal.timeout(650))?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    expect(await nextFrame(reader, "fleet")).not.toContain("overviewStale");
+    await nextFrame(reader, "ship");
+    failing = true;
+    expect(await nextFrame(reader, "fleet")).toContain('"overviewStale":true');
+    await Bun.sleep(210);
+    const late = streams.open(AbortSignal.timeout(500))?.getReader();
+    if (!late) throw new Error("Cannot reopen event stream");
+    const first = await late.read();
+    expect(new TextDecoder().decode(first.value)).toStartWith(
+      "event: heartbeat",
+    );
+    failing = false;
+    expect(await nextFrame(late, "fleet")).not.toContain("overviewStale");
+  } finally {
+    streams.stop();
+  }
+});
+
 test("a slow ship does not delay the overview or other ship details, and retained detail is marked stale", async () => {
   const slow = { ...ship, id: "survey", name: "Survey" };
   const { crewMembers: _crew, ...slowSummary } = slow;

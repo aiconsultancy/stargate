@@ -135,8 +135,10 @@ export async function startApiV1Server(options: Options) {
   };
   const fallbackFleet = (fleet: V1Snapshot["fleet"]) =>
     fleetWithMetrics(fleet, host.snapshot());
+  const shipIdentities = source.shipIdentities?.bind(source);
   const events = createEventStreams({
     fleet: readFleet,
+    ...(shipIdentities && { shipIdentities }),
     ship: (id, signal) => source.ship(id, signal),
     diff: options.diff,
     completeFleet,

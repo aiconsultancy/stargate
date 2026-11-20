@@ -242,6 +242,8 @@ export type V1Gateway = {
 export type V1Fleet = {
   apiVersion: typeof API_V1_VERSION;
   generatedAt: number;
+  /** In a fleet event, true while a previous overview is being retained. */
+  overviewStale?: true;
   /** The configured fleet name, or the hostname. */
   name: string;
   host: V1Host;
@@ -289,6 +291,8 @@ export interface ApiV1Source {
     signal: AbortSignal,
     captureShipRead?: (id: string, read: V1ShipRead) => void,
   ): Promise<Omit<V1Fleet, "host" | "gateway">>;
+  /** Internal identity of the current top-level captains, independent of read availability. */
+  shipIdentities?(): ReadonlyMap<string, string>;
   ship(id: string, signal: AbortSignal): Promise<V1ShipDetail | undefined>;
   crew(
     ship: string,

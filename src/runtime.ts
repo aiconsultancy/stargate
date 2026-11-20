@@ -986,6 +986,7 @@ export function serve(
         );
         log.info("Dashboard listening");
       }
+      let fleetReads = new AbortController();
       if (config.api) {
         // Like the dashboard: a bind failure is an ordinary startup failure.
         const api = config.api;
@@ -996,7 +997,10 @@ export function serve(
               config: api,
               dataDirectory: config.dataDirectory,
               source: createApiV1Source({
-                dashboard: dashboardSource(ships, store, cronStore),
+                dashboard: dashboardSource(ships, store, cronStore, Date.now, {
+                  fleetSignal: () =>
+                    AbortSignal.any([viewers.signal, fleetReads.signal]),
+                }),
                 config: () => reload?.current.config ?? config,
                 dataDirectory: config.dataDirectory,
               }),
@@ -1162,6 +1166,8 @@ export function serve(
               binding.entries.set(registration.key, entry);
             }
             committed = true;
+            fleetReads.abort();
+            fleetReads = new AbortController();
             for (const { entry, start } of staged) {
               addedResources.push(entry);
               Effect.runSync(Deferred.succeed(start, undefined));

@@ -12,6 +12,7 @@ import { dashboardCrewSummary } from "../../dashboard-projection";
 import type { DashboardFleetSource } from "../../dashboard-source";
 import { abortable, runAbortable } from "../../effect";
 import { isLoopbackHost } from "../../loopback";
+import { backendFingerprint } from "../../routing";
 import { HISTORY_PAGE, type HistorySession } from "../../session-history";
 import {
   type ApiV1Config,
@@ -522,6 +523,22 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   }
 
   return {
+    shipIdentities() {
+      const identities = new Map<string, string>();
+      for (const [id, registration] of registrations(deps.config())) {
+        if (role(registration) === "rear_admiral") continue;
+        const { backend } = registration.config;
+        identities.set(
+          id,
+          JSON.stringify([
+            registration.kind,
+            backendFingerprint(registration.config),
+            backend.type === "opencode" ? backend.sessionID : undefined,
+          ]),
+        );
+      }
+      return identities;
+    },
     async fleet(signal, captureShipRead) {
       signal.throwIfAborted();
       const config = deps.config();

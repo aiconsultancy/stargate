@@ -169,11 +169,14 @@ initial `ship` details. One shared poller reads the overview every three
 seconds while clients are connected and publishes changed overviews independently
 of ship details. Overview reads have a 25-second deadline. Host and gateway
 enrichment and individual ship details each have a 20-second deadline.
-After a deadline, the poller can publish the last overview or host sample while
-the original read is still pending. At three times a read's deadline, another
-attempt can start. Each overview, enrichment, host metrics, crew sample, and
-ship detail slot allows one outstanding abandoned read alongside the current
-attempt. If the first overview stalls, host and heartbeat events can arrive
+When an overview read fails or times out, the poller can republish the last
+successful overview with `overviewStale: true` and its original `generatedAt`.
+That fallback expires 75 seconds after the successful read and is discarded
+when the configured ship roster or a ship's backend identity changes. Host
+and heartbeat events continue while the poller waits for a fresh overview.
+At three times a read's deadline, another attempt can start. Each overview,
+enrichment, host metrics, crew sample, and ship detail slot allows one
+outstanding abandoned read alongside the current attempt. If the first overview stalls, host and heartbeat events can arrive
 before the initial fleet frame. The host timer publishes the latest snapshot
 while a new disk sample is pending. Before the first successful host sample,
 the snapshot omits disk usage. Changed details emit a full `ship` event with
@@ -186,16 +189,19 @@ its original sample time, including across reconnects. When the captain is
 unavailable, retained detail reports `available: false` and includes the
 current error if supplied. A detail failure
 before the first successful detail emits an unavailable `ship` with an
-`error` field. A successful refresh clears `detailStale`. Availability
-activity follows the overview's
-availability transitions. The stream also sends `host` every ten seconds
-and `heartbeat` every fifteen seconds.
+`error` field. A successful refresh clears `detailStale`. An overview
+availability transition supersedes in-flight detail reads for that ship.
+Removal or a change of backend identity also discards cached detail for
+that ship. Availability activity follows the overview. The stream also sends
+`host` every ten seconds and `heartbeat` every fifteen seconds.
 
 The overview and ship details share one crew read per ship. When availability
 is unknown, the caller waits for that result for up to 20 seconds. During a
 refresh, a caller can use a recent sample after one second. A successful
 sample up to 23 seconds old at the start of a refresh remains usable until
 the shared read completes. A disconnected caller cancels its own wait.
+Fleet API shutdown and committed configuration reloads cancel the shared
+backend read.
 After a shared read fails or reaches its deadline, the overview marks the
 ship unavailable and retains its last successful crew counts if available.
 OpenCode `fleetStatus` probes start with a 400 ms budget that doubles after

@@ -137,8 +137,17 @@ export function dashboardSource(
   >,
   cronStore: Pick<CronStore, "report" | "recentRuns">,
   now: () => number = Date.now,
-  { fleetCrewReadMs = 1_000, fleetCrewDeadlineMs = 20_000 } = {},
+  {
+    fleetCrewReadMs = 1_000,
+    fleetCrewDeadlineMs = 20_000,
+    fleetSignal,
+  }: {
+    fleetCrewReadMs?: number;
+    fleetCrewDeadlineMs?: number;
+    fleetSignal?: () => AbortSignal;
+  } = {},
 ) {
+  const defaultFleetSignal = new AbortController().signal;
   const crewRoots = new WeakMap<
     DashboardShip,
     { at: number; sessions: HistorySession[] }
@@ -147,6 +156,8 @@ export function dashboardSource(
     DashboardShip,
     {
       read: ReturnType<typeof createReadSlot<CrewRead>>;
+      lifetime: AbortSignal;
+      backend: AgentBackend;
       latest?: CrewRead;
       last?: { sample: CrewRead; at: number };
       pending?: {
@@ -250,9 +261,17 @@ export function dashboardSource(
     read: (reading: AbortSignal) => Promise<CrewRead>,
   ): Promise<CrewRead> {
     signal.throwIfAborted();
-    const slot = fleetCrew.get(key) ?? {
-      read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
-    };
+    const lifetime = fleetSignal?.() ?? defaultFleetSignal;
+    lifetime.throwIfAborted();
+    const cached = fleetCrew.get(key);
+    const slot =
+      cached && !cached.lifetime.aborted && cached.backend === key.backend
+        ? cached
+        : {
+            read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
+            lifetime,
+            backend: key.backend,
+          };
     fleetCrew.set(key, slot);
     const unavailable = (): CrewRead => ({
       ...slot.latest,
@@ -262,10 +281,7 @@ export function dashboardSource(
     const current = slot.read.pending;
     if (!current || slot.pending?.attempt !== current.result) {
       // The backend read belongs to the shared slot. A caller only owns its wait.
-      const attempt = slot.read.start(
-        new AbortController().signal,
-        read,
-      ).result;
+      const attempt = slot.read.start(lifetime, read).result;
       const last = slot.last;
       // A recent sample stays usable throughout this refresh. A cold caller
       // needs the shared result to establish availability.
@@ -283,6 +299,7 @@ export function dashboardSource(
           unavailable,
         )
         .then((sample) => {
+          if (lifetime.aborted) return sample;
           if (!sample.error) slot.latest = sample;
           slot.last = { sample, at: performance.now() };
           return sample;
@@ -290,14 +307,15 @@ export function dashboardSource(
       slot.pending = { attempt, result, fallback };
     }
     const pending = slot.pending;
+    const wait = AbortSignal.any([signal, lifetime]);
     try {
       return await readWithDeadline(
-        signal,
+        wait,
         pending.fallback ? fleetCrewReadMs : undefined,
         () => pending.result,
       ).result;
     } catch (error) {
-      signal.throwIfAborted();
+      wait.throwIfAborted();
       if (pending.fallback) return slot.last?.sample ?? pending.fallback;
       throw error;
     }
@@ -438,6 +456,7 @@ export function dashboardSource(
       ships
         .filter((ship) => !selected || selected.has(ship.bot.id))
         .map(async (ship) => {
+          const { backend } = ship;
           const read = await sharedCrew(ship);
           const named = agent(ship);
           const captainView = groups.get(ship)?.view;
@@ -462,7 +481,9 @@ export function dashboardSource(
             ...(selected
               ? {
                   readDetail: (reading: AbortSignal) =>
-                    readShip(ship.bot.id, reading, {}, read),
+                    find(ship.bot.id)?.backend === backend
+                      ? readShip(ship.bot.id, reading, {}, read)
+                      : Promise.resolve(undefined),
                 }
               : {}),
           };
