@@ -374,6 +374,7 @@ export const botSchema = settingsStruct({
   ),
   slack: settingsStruct({
     steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
+    inboundReactions: Schema.Boolean.pipe(settingsDefault(false)),
     appId: Schema.String.check(settingsPattern(/^A[A-Z0-9]+$/)),
     appTokenEnv: envName,
     botTokenEnv: envName,

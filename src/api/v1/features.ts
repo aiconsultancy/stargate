@@ -315,6 +315,11 @@ export async function registrationFeatures(
         config.slack.steerThreadFollowUps,
       ),
       flag(
+        "slack.inboundReactions",
+        "Slack inbound reactions",
+        config.slack.inboundReactions,
+      ),
+      flag(
         "slack.readReceipts",
         "Slack read receipts",
         config.slackReadReceipts === true,
