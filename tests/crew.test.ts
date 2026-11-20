@@ -47,6 +47,7 @@ import { Store } from "../src/store";
 import { buildUpdateSnapshot, noticeTools } from "../src/update-notice";
 import { waitingSettingsPath } from "../src/waiting";
 import { bot, event, identity } from "./fixtures";
+import { copyCrewDatabase } from "./fixtures/database-reuse";
 
 async function boundedOutcome<T>(work: Promise<T>): Promise<T> {
   const stop = new AbortController();
@@ -549,7 +550,7 @@ test("bounded wait preserves completion, notices, idle failure and caller abort 
     "complete-abort",
   ] as const) {
     const clock = waitClock();
-    const f = await fixture(undefined, clock.options);
+    const f = await fixture(undefined, clock.options, false, true);
     const idle = Effect.runSync(Deferred.make<void>());
     const stop = new AbortController();
     try {
@@ -1792,6 +1793,7 @@ async function fixture(
   team?: Team,
   waitOptions?: CrewWaitOptions,
   pin = false,
+  seededSchema = true,
 ) {
   const definition = team ?? defaultTeam;
   const directory = await mkdtemp(join(tmpdir(), "stargate-crew-"));
@@ -1981,6 +1983,7 @@ async function fixture(
       },
     },
   };
+  if (seededSchema) await copyCrewDatabase(directory, options.namespace);
   const engine = await CrewEngine.open(
     options,
     client,
@@ -2589,7 +2592,8 @@ test("queued prompt uncertainty never replays and preserves later FIFO work", as
 });
 
 test("default Bowser legacy fingerprint reopens with the same task and worker IDs", async () => {
-  const f = await fixture();
+  // Keep first-create setup on the constructor path for this migration case.
+  const f = await fixture(undefined, undefined, false, false);
   try {
     const task = (
       await f.engine.run(
