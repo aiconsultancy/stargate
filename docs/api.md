@@ -44,8 +44,9 @@ sockets and regular files. Shutdown removes only the socket it published.
 
 The operator bearer is still required. `allowedNetworks` applies only to TCP;
 Unix access uses filesystem ownership. Fleet browser-origin rules are unchanged.
-No notification routes, health routes or configuration routes are wired in this
-version. The internal exact-route contract does not enable them by itself.
+Optional [notification inputs](notification-ingestion.md) use separate producer
+credentials and exact POST mounts on this Unix owner. Each defaults to off.
+Health and configuration routes are not implemented.
 
 To roll back to a version without Unix mode, restore the prior private TCP
 `listen` setting, or omit `api` if no Fleet listener is needed. Keep `api-token`
@@ -174,7 +175,7 @@ deadline and eight reserved work slots. Event streams have eight separate
 slots, bounded output buffering and a sixty-second idle timeout. Stream
 heartbeats continue every fifteen seconds.
 
-Trusted future notification routes use separate authorization, no browser
+Enabled notification routes use separate authorization, no browser
 Origin or CORS, at most 64 KiB per body, a twenty-second absolute request
 deadline, four work slots per route and eight in total. A timeout aborts the
 request but does not release its slot until the handler settles. These slots

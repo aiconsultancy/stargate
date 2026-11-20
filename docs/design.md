@@ -74,6 +74,18 @@ lock close last. A failure after startup stops every bot and exits with code
 
 ## Maintenance restart drain
 
+The default-off [notification path](notification-ingestion.md) runs alongside
+agent work, not through `Gateway` or backends. The existing Unix API owner
+authenticates configured producer sources. The Effect core commits dedup and
+per-destination rows to private `notify.sqlite` under the instance lock before
+returning `202`. The Slack sink checks current physical bindings, audiences,
+access and echo exclusion immediately before a request-scoped literal send.
+Notification topology is restart-only; current access publishes atomically
+with successful live reload. Early intake close stops admission and claims,
+then actual send settlement precedes store/lock release. A referenced process
+hard-exit timer covers nonsettling notification shutdown, including startup
+failure. Existing maintenance drain and agent steering are unchanged.
+
 The optional [maintenance restart drain](maintenance.md#restart-drain) uses a
 same-user host barrier and private live-participant metadata under
 `~/.local/state/stargate/maintenance-drain`. Independent gateways retain their

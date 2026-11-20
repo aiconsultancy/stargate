@@ -17,6 +17,8 @@ import {
   textMentionRuleSchema,
 } from "./mentions";
 import { maintenanceSchema } from "./nightly/config";
+import { notifyConfigError } from "./notify/binding";
+import { notifySchema } from "./notify/config";
 import {
   piModelSchema,
   piProviderSchema,
@@ -1196,10 +1198,11 @@ export function pinnedSessionIDs(config: {
   ];
 }
 
-export const configSchema = settingsStruct({
+const configFields = settingsStruct({
   dataDirectory: Schema.String.pipe(settingsDefault(".stargate")),
   /** Opt in to the private-network Fleet API; see docs/api.md. */
   api: Schema.optional(apiV1ConfigSchema),
+  notify: Schema.optional(notifySchema),
   /** Serve the read-only fleet dashboard on `<dataDirectory>/dashboard.sock`. */
   dashboard: Schema.optional(Schema.Boolean),
   /** Explicit operator-group socket; the private default is unchanged. */
@@ -1224,12 +1227,33 @@ export const configSchema = settingsStruct({
   maintenance: Schema.optional(maintenanceSchema),
   /** Read subscription quota and announce changes to crew availability. */
   quotaWatch: Schema.optional(quotaWatchSchema),
-}).check(
-  settingsCheck(
+});
+const configCheck = (liveNotificationPolicy = false) =>
+  settingsCheck<typeof configFields.Type>(
     (
-      { bots, irc, teams, maintenance, quotaWatch, dashboard, dashboardSocket },
+      {
+        bots,
+        irc,
+        teams,
+        maintenance,
+        quotaWatch,
+        dashboard,
+        dashboardSocket,
+        notify,
+        api,
+      },
       context,
     ) => {
+      if (notify) {
+        const message = notifyConfigError(
+          notify,
+          bots,
+          api?.listen,
+          liveNotificationPolicy,
+        );
+        if (message)
+          context.addIssue({ code: "custom", path: ["notify"], message });
+      }
       if (dashboardSocket && dashboard !== true)
         context.addIssue({
           code: "custom",
@@ -1378,8 +1402,11 @@ export const configSchema = settingsStruct({
         }
       }
     },
-  ),
-);
+  );
+export const configSchema = configFields.check(configCheck());
+/** Live access changes may revoke pending display work, never redirect it.
+ * The reload planner still requires identical notification topology. */
+export const reloadConfigSchema = configFields.check(configCheck(true));
 
 export type BackendConfig = typeof backendSchema.Type;
 export type BotConfig = typeof botSchema.Type;

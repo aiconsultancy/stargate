@@ -13,6 +13,8 @@
   crew clarifications through the owning gateway. `api.listen: "unix"`
   selects a private mode-0600 Fleet socket instead of TCP; omitted `api`
   still defaults to off, with no `enabled` alias. All default off.
+- New flag: `notify.adapters.<name>.enabled` defaults to `false` for each HTTP
+  notification input. Enabled inputs require Unix API mode. No defaults change.
 - Default changes: none.
 - New opt-ins: Teams `livePresence` enables native typing and informative updates. IRC `features.fleetTyping` enables typing alongside fleet thread notices. Both default off.
 - Enabled by default: none.
@@ -23,10 +25,14 @@
   reactions as conversation input, without interpreting their meaning.
   Slack app owners must grant `reactions:read` and `users:read`, and subscribe to
   `reaction_added` and `reaction_removed` before enabling the flag.
+- Add private authenticated HTTP notification ingestion, atomic durable outbox
+  admission and literal Slack delivery without agent work. Freeze physical
+  destinations and audiences, recheck current access and echo policy, and
+  retain store ownership through send settlement or process termination.
+  See [notification ingestion](docs/notification-ingestion.md).
 - Serve Fleet through one bounded HTTP host, preserving private TCP access,
   operator authentication, CORS and streamed events. Add the exclusive private
-  Unix mode and internal exact-route contract. Notification routes are not yet
-  wired. See [Fleet API](docs/api.md).
+  Unix mode and internal exact-route contract. See [Fleet API](docs/api.md).
 - Harden Fleet API Git reads against checkout-configured commands.
 - Report Fleet API task outcomes that complete between event polls.
 - Look up pull requests by head branch, keep cached results on refresh

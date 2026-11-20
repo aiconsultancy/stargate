@@ -19,8 +19,10 @@ import {
   botSchema,
   configSchema,
   type IrcConfig,
+  reloadConfigSchema,
 } from "./config";
 import { clientPem } from "./irc/client-pem";
+import { checkProducerCredentials, type NotifyConfig } from "./notify/config";
 import { settingsIssues } from "./settings-schema";
 
 export function buildManifest(name = "Stargate") {
@@ -122,6 +124,8 @@ export async function checkCredentials(
   bots: readonly BotConfig[],
   environment: NodeJS.ProcessEnv = process.env,
   irc: readonly IrcConfig[] = [],
+  notify?: NotifyConfig,
+  dataDirectory = ".stargate",
 ): Promise<NodeJS.ProcessEnv> {
   let companion: NodeJS.ProcessEnv = {};
   try {
@@ -131,6 +135,11 @@ export async function checkCredentials(
       throw new Error("Cannot read credential companion.");
   }
   const env = { ...companion, ...environment };
+  await checkProducerCredentials(
+    notify,
+    env,
+    resolve(dirname(resolve(path)), dataDirectory),
+  );
   // Presence only: values are never printed or sent anywhere.
   for (const registration of irc) {
     for (const name of [
@@ -166,7 +175,10 @@ export async function checkCredentials(
   return env;
 }
 
-export async function readConfiguration(path: string) {
+export async function readConfiguration(
+  path: string,
+  notificationReload = false,
+) {
   const invalid =
     "Cannot read a valid configuration. Check path, JSON, bot IDs, and allowlists.";
   let input: unknown;
@@ -176,7 +188,9 @@ export async function readConfiguration(path: string) {
   } catch {
     throw new Error(invalid);
   }
-  const parsed = Schema.decodeUnknownResult(configSchema)(input);
+  const parsed = Schema.decodeUnknownResult(
+    notificationReload ? reloadConfigSchema : configSchema,
+  )(input);
   if (Result.isSuccess(parsed)) return parsed.success;
   const apiIssues = settingsIssues(parsed.failure.issue).issues.flatMap(
     ({ path, message }) =>

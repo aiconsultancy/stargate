@@ -28,6 +28,8 @@ type Options = {
   };
   signal: AbortSignal;
   routes?: readonly ApiRoute[];
+  /** Compose trusted producer policies against the exact loaded operator token. */
+  composeRoutes?: (operatorToken: string) => readonly ApiRoute[];
   timing?: { headersMs?: number; requestMs?: number };
 };
 
@@ -93,7 +95,12 @@ export async function startApiV1Server(options: Options) {
   options.signal.throwIfAborted();
   const allowsPeer = networkMatcher(config.allowedNetworks ?? privateNetworks);
   const allowsOrigin = originMatcher(config.corsOrigins ?? defaultCorsOrigins);
-  const authenticate = authentication(await apiToken(dataDirectory));
+  const operatorToken = await apiToken(dataDirectory);
+  const authenticate = authentication(operatorToken);
+  const routes = [
+    ...(options.routes ?? []),
+    ...(options.composeRoutes?.(operatorToken) ?? []),
+  ];
   options.signal.throwIfAborted();
   const lifetime = new AbortController();
   const lookupVersion = cacheOpenCodeVersion(
@@ -137,7 +144,7 @@ export async function startApiV1Server(options: Options) {
   try {
     server = await startApiServer({
       listen,
-      ...(options.routes ? { routes: options.routes } : {}),
+      routes,
       ...(options.timing ? { timing: options.timing } : {}),
       signal: AbortSignal.any([lifetime.signal, options.signal]),
       async fleet(request, remoteAddress) {
