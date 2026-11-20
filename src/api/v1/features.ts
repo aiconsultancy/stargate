@@ -165,6 +165,11 @@ function ircFeatures(config: IrcConfig): V1Feature[] {
     ),
     flag("irc.tls", "IRC TLS", config.server.tls, true),
     flag(
+      "irc.fleetTyping",
+      "IRC fleet typing indicators",
+      features.fleetTyping === true,
+    ),
+    flag(
       "irc.sasl",
       "IRC authentication",
       true,
@@ -360,6 +365,11 @@ export async function registrationFeatures(
     features.push(...ircFeatures(config));
   } else {
     features.push(
+      flag(
+        "teams.livePresence",
+        "Teams typing and progress",
+        config.livePresence === true,
+      ),
       flag(
         "teams.approvals",
         "Teams approvals",

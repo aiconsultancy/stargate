@@ -570,6 +570,8 @@ const ircFeaturesSchema = settingsStruct({
   filesOut: Schema.Boolean.pipe(settingsDefault(true)),
   /** Send each reply chunk as one draft/multiline batch. */
   multiline: Schema.Boolean.pipe(settingsDefault(true)),
+  /** Also refresh typing during verified human fleet requests. */
+  fleetTyping: Schema.optional(Schema.Boolean),
   /** Send +typing while a turn runs (needs message-tags). */
   typing: Schema.Boolean.pipe(settingsDefault(true)),
   /** Emit confirmed OpenCode lifecycle stages and enable read-only IRC status. */
@@ -1076,6 +1078,7 @@ export const ircSchema = ircConfiguredSchema.check(
 
 /** Bot Framework transport: exact sender IDs, no credential values in config. */
 export const teamsSchema = settingsStruct({
+  livePresence: Schema.optional(Schema.Boolean),
   id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
   displayName: Schema.optional(
     Schema.String.check(Schema.isMinCodePoints(1)).check(

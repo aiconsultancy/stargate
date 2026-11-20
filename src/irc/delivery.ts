@@ -38,6 +38,7 @@ export type IrcFiles = {
 export type IrcPresence = {
   /** features.typing: +typing while a turn runs. */
   typing: boolean;
+  fleetTyping?: boolean;
   /** features.reactions: +draft/react for reaction replies. */
   reactions?: boolean;
 };
@@ -168,6 +169,10 @@ export class IrcDelivery implements SlackDelivery {
     // Typing may stop early (for example a DM nick changed hands); the turn
     // still owns its aggregate status handle until its actual lifecycle ends.
     signal.addEventListener("abort", finish, { once: true });
+    const fleetTyping =
+      turnStatus && turnStatus !== "quiet" && this.presence.fleetTyping
+        ? this.typing(channel, signal, allowed).catch(() => {})
+        : undefined;
     try {
       if (turnStatus) {
         if (turnStatus === "live") {
@@ -236,25 +241,34 @@ export class IrcDelivery implements SlackDelivery {
         }
         return;
       }
-      if (!this.presence.typing || !this.client.hasCap("message-tags")) {
-        if (!signal.aborted)
-          await new Promise<void>((resolve) =>
-            signal.addEventListener("abort", () => resolve(), { once: true }),
-          );
-        return;
-      }
-      const target = await this.target(channel);
-      const guard = this.guard(channel, target, allowed);
-      const timer = this.client.typingMs;
-      while (!signal.aborted) {
-        if (guard && !guard()) return;
-        this.client.notify(target, { "+typing": "active" }, guard);
-        await delay(timer, undefined, { signal }).catch(() => {});
-      }
-      this.client.notify(target, { "+typing": "done" }, guard);
+      await this.typing(channel, signal, allowed);
     } finally {
+      await fleetTyping;
       if (signal.aborted) finish();
     }
+  }
+
+  private async typing(
+    channel: string,
+    signal: AbortSignal,
+    allowed?: () => boolean,
+  ) {
+    if (!this.presence.typing || !this.client.hasCap("message-tags")) {
+      if (!signal.aborted)
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      return;
+    }
+    const target = await this.target(channel);
+    const guard = this.guard(channel, target, allowed);
+    const timer = this.client.typingMs;
+    while (!signal.aborted) {
+      if (guard && !guard()) return;
+      this.client.notify(target, { "+typing": "active" }, guard);
+      await delay(timer, undefined, { signal }).catch(() => {});
+    }
+    this.client.notify(target, { "+typing": "done" }, guard);
   }
 
   /** NOTICE cannot wake another bot or count as the captain joining a thread. */

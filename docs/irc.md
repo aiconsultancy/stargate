@@ -986,6 +986,14 @@ still determines when the held queue is released.
 
 ## Presence
 
+### Fleet typing indicators
+
+Set `features.fleetTyping: true` to send IRCv3 `+typing` alongside a human
+request's normal captain or rear-admiral thread notices. This requires
+`features.typing`, negotiated `message-tags` and a client that renders the tag.
+The gateway refreshes the indicator during the turn and sends `done` at the
+end. Clients without typing support still receive the ordinary notices.
+
 ### Agent waiting status (NET-1637, Step 1)
 
 Captain and crew connections publish their existing Slack waiting phrases as

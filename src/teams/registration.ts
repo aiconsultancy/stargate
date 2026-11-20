@@ -26,6 +26,7 @@ import {
 import { ConnectorClient, ManagedIdentityTokenProvider } from "./connector";
 import { createTeamsListener } from "./http";
 import { teamsImageTransport } from "./images";
+import { TeamsPresence } from "./presence";
 import { isAllowedServiceUrl } from "./service-url";
 import { chunkText, extractText, TEAMS_MESSAGE_BYTE_BUDGET } from "./teams";
 import {
@@ -184,7 +185,20 @@ export class TeamsRegistration {
           clientId: config.botClientId,
         }),
       });
+    const presence = config.livePresence ? new TeamsPresence() : undefined;
     this.transport = {
+      ...(presence
+        ? {
+            turnStatus: (job) =>
+              !job.fleet &&
+              !job.sender &&
+              job.eventId === `${job.channel}:${job.thread}` &&
+              job.received &&
+              Math.abs(Date.now() - job.received) <= 120_000
+                ? ("notice" as const)
+                : ("quiet" as const),
+          }
+        : {}),
       name: "teams",
       key: this.key,
       allowed: (user, channel) => this.allowed(user, channel),
@@ -219,6 +233,35 @@ export class TeamsRegistration {
         : {}),
     };
     this.delivery = {
+      ...(presence
+        ? {
+            working: async (channel, thread, signal, allowed, mode, read) => {
+              const ref = this.reference(channel);
+              if (mode !== "notice" || !ref || !allowed) return;
+              const active = () =>
+                allowed() &&
+                this.allowed(ref.user, channel) &&
+                this.reference(channel)?.service === ref.service;
+              await presence.working(
+                channel,
+                thread,
+                AbortSignal.any([signal, this.abort.signal]),
+                active,
+                read ?? (() => undefined),
+                async (activity, signal) => {
+                  if (!active())
+                    throw new Error("Teams presence no longer available");
+                  return this.connector.sendToConversation(
+                    ref.service,
+                    channel,
+                    activity,
+                    { signal, retryServerErrors: false },
+                  );
+                },
+              );
+            },
+          }
+        : {}),
       files: teamsImageTransport(
         async (channel, _thread, activity, signal, allowed) => {
           const reference = this.reference(channel);
@@ -241,6 +284,34 @@ export class TeamsRegistration {
       ),
       post: async (channel, thread, text, _stop, unit) => {
         if (unit?.allowed && !(await unit.allowed())) return;
+        if (
+          presence &&
+          unit &&
+          "part" in unit &&
+          unit.part === 0 &&
+          this.store.jobByEvent(this.key, `${channel}:${thread}`)?.id ===
+            unit.job
+        ) {
+          const ref = this.reference(channel);
+          if (
+            ref &&
+            this.allowed(ref.user, channel) &&
+            (await presence.final(
+              channel,
+              thread,
+              { type: "message", text },
+              this.abort.signal,
+              (activity, signal) =>
+                this.connector.sendToConversation(
+                  ref.service,
+                  channel,
+                  activity,
+                  { signal, retryServerErrors: false },
+                ),
+            ))
+          )
+            return;
+        }
         await this.send(channel, text, thread);
       },
       prepareReply: (text) =>
@@ -340,6 +411,13 @@ export class TeamsRegistration {
       conversation: JSON.stringify([this.key, conversation]),
       channel: conversation,
       thread: activity.id,
+      ...(this.config.livePresence
+        ? {
+            received: activity.timestamp
+              ? Date.parse(activity.timestamp)
+              : Date.now(),
+          }
+        : {}),
       user,
       text,
     });

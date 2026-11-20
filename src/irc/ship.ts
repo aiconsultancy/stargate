@@ -1119,6 +1119,7 @@ export class IrcShip {
         },
         {
           typing: config.features.typing,
+          fleetTyping: config.features.fleetTyping === true,
           reactions: config.features.reactions,
         },
         (thread) => this.store.ircReplyParent(key, thread),

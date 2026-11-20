@@ -90,13 +90,14 @@ export class TeamsBackend implements AgentBackend {
 }
 
 export function registrationFixture(
-  options: { approvals?: boolean; fleet?: boolean } = {},
+  options: { approvals?: boolean; fleet?: boolean; presence?: boolean } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "sg-teams-"));
   const storePath = join(directory, "queue.sqlite");
   const path = join(directory, "teams.sqlite");
   const config = Schema.decodeUnknownSync(teamsSchema)({
     id: "test-admiral",
+    livePresence: options.presence === true,
     botClientId: APP_ID,
     tenantId: TENANT_ID,
     socketPath: join(directory, "bridge.sock"),

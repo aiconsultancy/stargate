@@ -9,6 +9,7 @@
 - New opt-in: `api.listen: "unix"` selects a private mode-0600 Fleet socket
   instead of TCP. Omitted `api` still defaults to off. No `enabled` alias.
 - Default changes: none.
+- New opt-ins: Teams `livePresence` enables native typing and informative updates. IRC `features.fleetTyping` enables typing alongside fleet thread notices. Both default off.
 - Enabled by default: none.
 
 ### Changes
