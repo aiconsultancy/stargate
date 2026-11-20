@@ -285,28 +285,36 @@ test("caches an outer Git read timeout for 15 seconds", async () => {
   }
 }, 10_000);
 
-test("does not cache a timeout spent only waiting for a read slot", async () => {
+test("caches a timeout spent only waiting for a read slot briefly", async () => {
   const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const held = Promise.withResolvers<null>();
+  let now = 100;
   let calls = 0;
-  const read = createGitReader(Date.now, async () => {
-    // The first four reads each hold a slot; later calls fail fast.
-    if (++calls <= 4) return held.promise;
-    return { code: 1, stdout: "" };
-  });
+  const read = createGitReader(
+    () => now,
+    async () => {
+      // The first four reads each hold a slot; later calls fail fast.
+      if (++calls <= 4) return held.promise;
+      return { code: 1, stdout: "" };
+    },
+  );
   const signal = new AbortController().signal;
   try {
     for (const name of ["busy-1", "busy-2", "busy-3", "busy-4", "waiting"])
       await mkdir(join(root, name));
     const busy = [1, 2, 3, 4].map((n) => read(join(root, `busy-${n}`), signal));
     const waiting = join(root, "waiting");
-    expect(await read(waiting, signal)).toMatchObject({
-      error: "Git read timed out.",
-    });
+    const timedOut = await read(waiting, signal);
+    expect(timedOut).toMatchObject({ error: "Git read timed out." });
+    // Under saturation the next poll answers at once from the short cache.
+    const started = performance.now();
+    expect(await read(waiting, signal)).toBe(timedOut);
+    expect(performance.now() - started).toBeLessThan(100);
     expect(calls).toBe(4);
     held.resolve(null);
     await Promise.all(busy);
-    // The queued timeout was not cached: this read runs and reaches Git.
+    // After one read deadline the queue-only timeout is gone: this read runs.
+    now += 2_000;
     expect(await read(waiting, signal)).toMatchObject({
       error: "Git state unavailable.",
     });
@@ -834,7 +842,7 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
         return path;
       }),
     );
-    const now = Date.now();
+    let now = Date.now();
     const read = createGitReader(() => now, readCommand, data);
     const reads = checkouts.map((path) =>
       read(path, new AbortController().signal),
@@ -855,8 +863,12 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
     expect(removing).toBe(4);
     const waiting =
       checkouts[results.findIndex((result) => result?.changedFiles === null)];
-    // Those timeouts only waited for a slot, so they are not cached: the next
-    // read waits for a slot again instead of reporting this checkout timed out.
+    // Those timeouts only waited for a slot, so they are cached only for one
+    // read deadline: answered at once now, then the read waits for a slot.
+    expect(await read(waiting, AbortSignal.timeout(100))).toMatchObject({
+      error: "Git read timed out.",
+    });
+    now += 2_000;
     await expect(read(waiting, AbortSignal.timeout(100))).rejects.toMatchObject(
       { name: "TimeoutError" },
     );
