@@ -4,13 +4,12 @@ import type { AttachmentTransport } from "../attachment-delivery";
 import type { DeliveryUnit, IrcTurnStatus, SlackDelivery } from "../gateway";
 import type { ReactionName } from "../reactions";
 import { settingsStruct } from "../settings-schema";
+import { type TurnProgress, turnProgressText } from "../turn-progress";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";
 import { cleanText, utf8Bytes } from "./protocol";
 import { isIrcChannel, validMsgid } from "./routing";
 import { ircLines, ircParts, plainText } from "./text";
-
-import { type TurnProgress, turnProgressText } from "../turn-progress";
 
 /** IRCv3 `+draft/react` values for the gateway's reaction names. */
 const emoji: Record<ReactionName, string> = {
