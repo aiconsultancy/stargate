@@ -99,10 +99,7 @@ export function networkMatcher(networks: readonly string[]) {
   };
 }
 
-export const defaultCorsOrigins = [
-  "subspace://*",
-  "https://subspace.*",
-] as const;
+export const defaultCorsOrigins = ["subspace://*"] as const;
 
 export function isOriginPattern(pattern: string) {
   const match =

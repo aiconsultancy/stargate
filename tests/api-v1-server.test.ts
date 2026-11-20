@@ -6,6 +6,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import type { ApiV1Config } from "../src/api/v1/config";
 import { type ApiV1Diff, createEventStreams } from "../src/api/v1/events";
 import { cacheOpenCodeVersion } from "../src/api/v1/gateway";
+import { startHostMetrics } from "../src/api/v1/host";
 import { startApiV1Server } from "../src/api/v1/server";
 import { apiToken } from "../src/api/v1/token";
 import type {
@@ -158,7 +159,7 @@ test("preflight validates origin without a bearer token and limits methods and h
   const server = await startFixture();
   try {
     const url = new URL("/api/v1/events", server.url);
-    const origin = "https://subspace.abcdef";
+    const origin = "subspace://space-1";
     const response = await fetch(url, {
       method: "OPTIONS",
       headers: {
@@ -180,6 +181,8 @@ test("preflight validates origin without a bearer token and limits methods and h
     for (const init of [
       {},
       { headers: { Origin: "https://subspace.fake.example" } },
+      { headers: { Origin: "https://subspace.com" } },
+      { headers: { Origin: "https://subspace.dev" } },
     ]) {
       const denied = await fetch(url, { ...init, method: "OPTIONS" });
       expect(denied.status).toBe(403);
@@ -196,6 +199,33 @@ test("preflight validates origin without a bearer token and limits methods and h
     );
   } finally {
     await server.close();
+  }
+});
+
+test("an explicit WebView2 Space origin receives CORS headers", async () => {
+  const origin = "https://subspace.fleet-console";
+  const server = await startFixture({ config: { corsOrigins: [origin] } });
+  try {
+    const response = await server.get("/api/v1/fleet", {
+      headers: { Origin: origin },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+  } finally {
+    await server.close();
+  }
+});
+
+test("host metrics use a label for a data directory on a different filesystem", async () => {
+  // /dev is mounted separately on Linux (devtmpfs/tmpfs) and macOS (devfs).
+  const metrics = startHostMetrics("/dev/fd");
+  try {
+    expect((await metrics.read()).disks.map(({ path }) => path)).toEqual([
+      "/",
+      "data",
+    ]);
+  } finally {
+    metrics.stop();
   }
 });
 

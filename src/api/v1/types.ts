@@ -215,7 +215,7 @@ export type V1Host = {
     load: [number, number, number];
   };
   memory: { totalBytes: number; availableBytes: number };
-  /** The filesystems holding `/` and the data directory, deduplicated. */
+  /** The filesystems labelled `/` and `data`, deduplicated by device. */
   disks: { path: string; totalBytes: number; freeBytes: number }[];
   sampledAt: number;
 };

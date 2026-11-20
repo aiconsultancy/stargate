@@ -70,14 +70,17 @@ token is still required.
 
 ## Browser origins
 
-By default the API allows `subspace://*` for macOS Spaces and
-`https://subspace.*` for Windows Spaces. Each `*` matches one nonempty
-label using lowercase ASCII letters, digits, or hyphens. Set `corsOrigins`
-to the exact Space origin to narrow the allowlist, such as
-`["subspace://example-space"]`. Include the port when the serialized origin
-has a port. Matching origins receive CORS headers on responses, including
-event streams. An `OPTIONS` preflight for a matching origin allows `GET`,
-`Authorization`, and `Last-Event-ID` without a token.
+By default the API allows `subspace://*` for macOS Spaces. On Windows,
+add the exact WebView2 Space origin to `corsOrigins`, for example
+`["subspace://*", "https://subspace.fleet-console"]`. Use your Space's ID
+in the Windows hostname. The `https://subspace.*` pattern also matches
+public domains.
+
+Each `*` matches one nonempty label using lowercase ASCII letters, digits,
+or hyphens. Include the port when the serialized origin has a port. Matching
+origins receive CORS headers on responses, including event streams. An
+`OPTIONS` preflight for a matching origin allows `GET`, `Authorization`,
+and `Last-Event-ID` without a token.
 
 ## Routes
 
@@ -96,6 +99,10 @@ seconds, and CPU usage is a fraction that becomes available after the first
 five-second sample interval. The gateway caches the OpenCode V2 server version
 for ten minutes. If the probe fails or no OpenCode server is configured, the
 value is null.
+
+`host.disks[].path` labels the filesystem. `/` represents the root
+filesystem, and `data` represents the filesystem holding the data directory
+when it is on a separate device.
 
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
 submodules. Fleet reads disable checkout-configured filters, hooks and
