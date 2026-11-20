@@ -546,9 +546,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         const { readDetail } = row;
         if (captureShipRead && readDetail)
           captureShipRead(summary.id, async (reading) =>
-            error
-              ? undefined
-              : shipDetail(registration, await readDetail(reading), reading),
+            shipDetail(registration, await readDetail(reading), reading),
           );
         const text = checkoutText(metadata);
         const people = (row.members ?? []).flatMap((person) =>

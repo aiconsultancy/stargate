@@ -271,6 +271,7 @@ export type V1ActivityEvent = {
 export type V1Event =
   | { type: "fleet"; data: V1Fleet }
   | { type: "ship"; data: V1ShipDetail }
+  | { type: "ship-sampled"; data: { id: string; detailUpdatedAt: number } }
   | { type: "host"; data: V1Host }
   | { type: "activity"; data: V1ActivityEvent }
   | { type: "heartbeat"; data: { at: number } };

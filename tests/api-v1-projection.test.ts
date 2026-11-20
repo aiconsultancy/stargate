@@ -563,8 +563,39 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("publishes an initial crew error detail and a single recovery activity", async () => {
+    const f = fixture();
+    f.statuses.set("captain", new Error("Crew offline"));
+    f.queue("captain", { queued: 2 });
+    const streams = fleetEvents(f.source, {
+      pollMs: 20,
+      hostMs: 1000,
+      heartbeatMs: 1000,
+    });
+    try {
+      const reader = streams.open(AbortSignal.timeout(700))?.getReader();
+      if (!reader) throw new Error("Cannot open event stream");
+      const failed = (
+        await nextEvent(reader, 'event: ship\ndata: {"id":"captain"')
+      )
+        .split("\n")
+        .find((line) => line.startsWith('data: {"id":"captain"'));
+      expect(failed && JSON.parse(failed.slice(6))).toMatchObject({
+        available: false,
+        error: "Crew status unavailable.",
+        captain: { queue: { queued: 2 } },
+        crewMembers: [],
+      });
+      f.set("captain", [context("recovered")]);
+      const recovered = await nextEvent(reader, '"id":"recovered"');
+      expect(recovered.match(/"kind":"availability"/g)).toHaveLength(1);
+    } finally {
+      streams.stop();
+    }
+  });
+
   test("a stalled crew backend leaves healthy overview and detail updates streaming", async () => {
-    const f = fixture({ fleetCrewReadMs: 40 });
+    const f = fixture({ fleetCrewReadMs: 40, fleetCrewFreshMs: 40 });
     f.set("other", [context("remote")]);
     f.set("captain", [context("pilot")]);
     const streams = fleetEvents(f.source, {

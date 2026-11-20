@@ -47,6 +47,7 @@ export function createEventStreams(
 ) {
   const readMs = timing.readMs ?? 20_000;
   const pendingShips = new Set<string>();
+  let polling = false;
   let active: ReturnType<typeof startPolling> | undefined;
 
   function startPolling() {
@@ -55,7 +56,6 @@ export function createEventStreams(
     const ships = new Map<string, V1ShipDetail>();
     const pending = new Map<string, AbortController>();
     let fleet: V1Fleet | undefined;
-    let polling = false;
     let readingHost = false;
 
     function broadcast(events: V1Event[]) {
@@ -93,9 +93,10 @@ export function createEventStreams(
         const detail = await result.catch(() => undefined);
         if (parent.aborted || !fleet) return;
         const prior = ships.get(id);
-        const next = detail
-          ? { ...detail, detailUpdatedAt: readAt }
-          : prior && { ...prior, detailStale: true as const };
+        const next =
+          detail && (detail.available || !prior?.available)
+            ? { ...detail, detailUpdatedAt: readAt }
+            : prior?.available && { ...prior, detailStale: true as const };
         if (!next) return;
         const changes: V1Event[] = prior
           ? options.diff(
@@ -118,19 +119,19 @@ export function createEventStreams(
     async function poll() {
       if (polling) return;
       polling = true;
+      const reads = new Map<string, V1ShipRead>();
+      const { result, settled } = readWithDeadline(
+        shutdown.signal,
+        readMs,
+        async (signal) => {
+          const overview = await options.fleet(signal, (id, read) =>
+            reads.set(id, read),
+          );
+          signal.throwIfAborted();
+          return options.completeFleet(overview);
+        },
+      );
       try {
-        const reads = new Map<string, V1ShipRead>();
-        const { result } = readWithDeadline(
-          shutdown.signal,
-          readMs,
-          async (signal) => {
-            const overview = await options.fleet(signal, (id, read) =>
-              reads.set(id, read),
-            );
-            signal.throwIfAborted();
-            return options.completeFleet(overview);
-          },
-        );
         const next = await result;
         if (shutdown.signal.aborted) return;
         publishFleet(next);
@@ -142,6 +143,7 @@ export function createEventStreams(
       } catch {
         // Keep the last overview and retry while clients are present.
       } finally {
+        await settled;
         polling = false;
       }
     }

@@ -24,7 +24,10 @@ function fleetSummary({
   return { apiVersion, name, admiral, ships, longestIdle };
 }
 
-function shipDetail(ship: V1ShipDetail) {
+function shipDetail({
+  detailUpdatedAt: _detailUpdatedAt,
+  ...ship
+}: V1ShipDetail) {
   return {
     ...ship,
     crewMembers: ship.crewMembers.map((member) => ({
@@ -173,11 +176,7 @@ export function diffEvents(
     const prior = new Map(prev.fleet.ships.map((ship) => [ship.id, ship]));
     for (const ship of next.fleet.ships) {
       const previous = prior.get(ship.id);
-      if (
-        previous &&
-        previous.available !== ship.available &&
-        !Object.hasOwn(next.ships, ship.id)
-      )
+      if (previous && previous.available !== ship.available)
         events.push(availability(ship, now));
     }
   }
@@ -187,6 +186,14 @@ export function diffEvents(
     const previous = Object.hasOwn(prev.ships, id) ? prev.ships[id] : undefined;
     if (!previous || !isDeepStrictEqual(shipDetail(previous), shipDetail(ship)))
       events.push({ type: "ship", data: ship });
+    else if (
+      ship.detailUpdatedAt !== undefined &&
+      ship.detailUpdatedAt !== previous.detailUpdatedAt
+    )
+      events.push({
+        type: "ship-sampled",
+        data: { id, detailUpdatedAt: ship.detailUpdatedAt },
+      });
     if (!previous) continue;
     const activity = (
       member: string | null,
@@ -198,8 +205,6 @@ export function diffEvents(
         type: "activity",
         data: { ship: id, member, kind, text, at: now, ...extra },
       });
-    if (previous.available !== ship.available)
-      events.push(availability(ship, now));
     const oldMembers = new Map(
       previous.crewMembers.map((member) => [member.id, member]),
     );

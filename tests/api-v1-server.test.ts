@@ -599,7 +599,9 @@ test("unchanged ship details publish each successful sample time", async () => {
     const timestamp = (frame: string) =>
       Number(/"detailUpdatedAt":(\d+)/.exec(frame)?.[1]);
     const first = timestamp(await nextFrame(reader, "ship"));
-    expect(timestamp(await nextFrame(reader, "ship"))).toBeGreaterThan(first);
+    const update = await nextFrame(reader, "ship-sampled");
+    expect(timestamp(update)).toBeGreaterThan(first);
+    expect(update).not.toContain('"crewMembers"');
   } finally {
     streams.stop();
   }
@@ -679,6 +681,41 @@ test("event poller aborts the in-flight snapshot when its last client disconnect
     await stream?.cancel();
     expect(signal.aborted).toBe(true);
   } finally {
+    streams.stop();
+  }
+});
+
+test("timed-out overviews keep their slot through subsequent polls and reconnects", async () => {
+  const held = Promise.withResolvers<V1Fleet>();
+  const started = Promise.withResolvers<void>();
+  const read = mock(async (value: typeof overview) => {
+    started.resolve();
+    return read.mock.calls.length === 1 ? held.promise : completeFleet(value);
+  });
+  const streams = createEventStreams(
+    {
+      ...source,
+      diff: diffEvents,
+      readHost: async () => host,
+      completeFleet: read,
+    },
+    { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 25 },
+  );
+  try {
+    const stream = streams.open(new AbortController().signal);
+    await started.promise;
+    await Bun.sleep(60);
+    expect(read).toHaveBeenCalledTimes(1);
+    await stream?.cancel();
+    const reader = streams.open(AbortSignal.timeout(500))?.getReader();
+    if (!reader) throw new Error("Cannot reopen event stream");
+    await Bun.sleep(40);
+    expect(read).toHaveBeenCalledTimes(1);
+    held.resolve(await completeFleet({ ...overview, name: "Expired" }));
+    const frame = await nextFrame(reader, "fleet");
+    expect(frame).toContain(`"name":"${overview.name}"`);
+  } finally {
+    held.resolve(await completeFleet(overview));
     streams.stop();
   }
 });
