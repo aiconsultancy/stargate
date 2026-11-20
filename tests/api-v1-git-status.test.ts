@@ -320,6 +320,30 @@ test("cache lifetimes follow the monotonic clock, not the wall clock", async () 
   }
 });
 
+test("the default cache clock ignores an injected wall clock", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  let wall = 10_000_000;
+  let calls = 0;
+  // No fifth argument: cache lifetimes must not follow the injected wall clock.
+  const read = createGitReader(
+    () => wall,
+    async () => {
+      calls++;
+      return { code: 1, stdout: "" };
+    },
+  );
+  const signal = new AbortController().signal;
+  try {
+    const first = await read(directory, signal);
+    const reads = calls;
+    wall += 3_600_000;
+    expect(await read(directory, signal)).toBe(first);
+    expect(calls).toBe(reads);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("a read that gets its slot late caches its timeout only briefly", async () => {
   const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const busy = [0, 1, 2, 3].map(() => Promise.withResolvers<null>());
