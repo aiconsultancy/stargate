@@ -105,6 +105,8 @@ session receives a new turn. With `slack.steerThreadFollowUps` enabled, an
 eligible reaction in the running turn's exact conversation can steer that
 turn; otherwise it remains queued. Duplicate events and Slack retries do not
 repeat accepted delivery. This does not promise exactly-once external effects.
+Queued or uncertain reaction follow-ups receive the same short status notice
+as text follow-ups. Removing a reaction can also produce that notice.
 
 ## Linux user service
 
