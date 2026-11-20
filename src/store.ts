@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { Result, Schema } from "effect";
 import type { PreparedAttachment, PublishedFile } from "./attachments";
+import { BackgroundCases } from "./background-questions";
 import { cancellationNotice } from "./cancellation";
 import {
   type FleetJob,
@@ -26,6 +27,7 @@ import { type InboundReaction, inboundReactionSchema } from "./reactions";
 import { failureText, type RequestFailure } from "./request-failure";
 import { settingsPattern, settingsStruct } from "./settings-schema";
 import type { ReplyChunk } from "./slack-format";
+import type { TurnProgress } from "./turn-progress";
 import { UpdateNotices } from "./update-notice";
 
 export type Incoming = {
@@ -318,10 +320,12 @@ export interface ConfigPanelRecord {
 }
 
 export class Store {
+  readonly backgroundCases: BackgroundCases;
   private readonly db: Database;
   readonly updateNotices: UpdateNotices;
   constructor(path: string) {
     this.db = new Database(path, { create: true, strict: true });
+    this.backgroundCases = new BackgroundCases(this.db);
     this.updateNotices = new UpdateNotices(this.db);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
@@ -439,6 +443,9 @@ export class Store {
     };
     column("slack_questions", "progress", "TEXT NOT NULL DEFAULT '{}'");
     column("slack_questions", "revision", "INTEGER NOT NULL DEFAULT 0");
+    column("jobs", "progressStage", "TEXT");
+    column("jobs", "progressAt", "INTEGER");
+    column("jobs", "progressDisconnected", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "question_stop_attempted", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "failure", "TEXT");
@@ -2087,6 +2094,44 @@ export class Store {
       );
   }
 
+  saveTurnProgress(id: number, progress: TurnProgress) {
+    this.db
+      .query(
+        "UPDATE jobs SET progressStage=?,progressAt=?,progressDisconnected=? WHERE id=? AND status='running'",
+      )
+      .run(
+        progress.stage,
+        progress.observedAt,
+        progress.disconnected ? 1 : 0,
+        id,
+      );
+  }
+  requestProgress(ship: string, request?: number, at = Date.now()) {
+    return this.db
+      .query<
+        {
+          request: number;
+          stage: TurnProgress["stage"];
+          observedAt: number;
+          offline: number;
+          status: JobStatus;
+          failure: RequestFailure | null;
+        },
+        [string, number | null]
+      >(
+        `SELECT id AS request,progressStage AS stage,progressAt AS observedAt,progressDisconnected AS offline,status,failure FROM jobs
+       WHERE botKey=? AND progressStage IS NOT NULL AND id=COALESCE(?,id) ORDER BY id DESC LIMIT 16`,
+      )
+      .all(ship, request ?? null)
+      .map(({ offline, ...row }) => ({
+        ...row,
+        disconnected: !!offline,
+        stale:
+          row.status === "running" &&
+          row.stage !== "completed" &&
+          at - row.observedAt > 60_000,
+      }));
+  }
   offerQuestion(offer: QuestionOffer): QuestionOffer | undefined {
     return this.db.transaction(() => {
       this.db

@@ -162,7 +162,7 @@ export type DeliveryUnit = {
   allowed?: () => boolean;
 };
 
-export type IrcTurnStatus = "notice" | "quiet";
+export type IrcTurnStatus = "notice" | "live" | "quiet";
 
 export interface SlackDelivery {
   /** Undefined (or absent) while the transport cannot move files. */
@@ -1065,6 +1065,22 @@ export class Gateway {
     );
   }
 
+  async operatorQuestion(
+    actor: string,
+    text: string,
+    connected: () => boolean,
+  ) {
+    await this.questions?.operatorAnswer(
+      actor,
+      text,
+      AbortSignal.any([
+        this.questionLifetime.signal,
+        AbortSignal.timeout(/^show /i.test(text.trim()) ? 60_000 : 10_000),
+      ]),
+      connected,
+    );
+  }
+
   async pollQuestions(signal: AbortSignal) {
     await this.questions?.poll(signal);
   }
@@ -1163,6 +1179,9 @@ export class Gateway {
                 gateway.backend,
                 (session) => gateway.settle(session),
                 signal,
+                gateway.transport.questions?.operator
+                  ? () => gateway.questions?.reconcileBackground()
+                  : undefined,
               ),
             ).pipe(
               Effect.catchCause(() =>
@@ -1780,8 +1799,8 @@ export class Gateway {
       const turnStatus = transport.turnStatus?.(job);
       const observeProgress =
         !job.deferDelivery &&
-        turnStatus === "notice" &&
-        config.backend.type === "opencode";
+        ((turnStatus === "notice" && config.backend.type === "opencode") ||
+          turnStatus === "live");
       let progress: TurnProgress | undefined;
       const working = job.deferDelivery
         ? undefined
@@ -2069,9 +2088,17 @@ export class Gateway {
             observeProgress
               ? (update) => {
                   progress = update;
+                  if (turnStatus === "live")
+                    this.store.saveTurnProgress(job.id, update);
                 }
               : undefined,
+            turnStatus === "live",
           );
+          if (turnStatus === "live")
+            this.store.saveTurnProgress(job.id, {
+              stage: "completed",
+              observedAt: Date.now(),
+            });
           // A concurrent native receipt must settle before final link capture.
           await this.followUpTask;
           // History may become readable only as the original turn settles.

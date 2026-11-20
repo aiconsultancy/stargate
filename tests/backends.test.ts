@@ -443,6 +443,36 @@ function openCodeStreamFixture(
         form,
       ]
     : [];
+  const currentForm = {
+    ...form,
+    id: "form_current",
+    title: "Choose",
+    fields: [
+      {
+        key: "q0",
+        type: "string",
+        options: [{ value: "blue", label: "Blue" }],
+      },
+    ],
+    metadata: {
+      kind: "question",
+      tool: { messageID: "answer-current", id: "call_current" },
+    },
+  };
+  const questionMessage = {
+    id: "answer-current",
+    type: "assistant",
+    time: { created: 1 },
+    content: [
+      {
+        type: "tool",
+        id: "call_current",
+        name: "question",
+        state: { status: "running" },
+        time: { created: 1 },
+      },
+    ],
+  };
   const encoder = new TextEncoder();
   const emit = (type: string, data: Record<string, unknown>) => {
     if (!stream) throw new Error("Fixture SSE connection is not open");
@@ -468,6 +498,10 @@ function openCodeStreamFixture(
         await pendingQuestion?.waitForList;
         return Response.json({ data: forms });
       }
+      if (path.endsWith("/form/form_current"))
+        return Response.json({ data: currentForm });
+      if (path.endsWith("/message/answer-current"))
+        return Response.json({ data: questionMessage });
       const detail = forms.find(({ id }) => path.endsWith(`/form/${id}`));
       if (detail) return Response.json({ data: detail });
       if (path.endsWith("/message/settled-answer"))
@@ -633,6 +667,7 @@ function openCodeStreamFixture(
     },
     interrupts: () => interrupts,
     cancelled: () => cancelled,
+    currentForm,
     withdrawals: () => withdrawals,
     emit,
     disconnect(kind: "eof" | "error" = "eof") {
@@ -1142,6 +1177,7 @@ test.each(["eof", "error"] as const)(
     const controller = new AbortController();
     const queued = Promise.withResolvers<void>();
     const reasoning = Promise.withResolvers<void>();
+    const connectionStates: boolean[] = [];
     const result = fixture.backend.prompt(
       "session-current",
       "New IRC request",
@@ -1150,10 +1186,12 @@ test.each(["eof", "error"] as const)(
       undefined,
       undefined,
       humanIrcSource,
-      ({ stage }) => {
+      ({ stage, disconnected }) => {
+        if (stage === "queued") connectionStates.push(!!disconnected);
         if (stage === "queued") queued.resolve();
         if (stage === "reasoning") reasoning.resolve();
       },
+      true,
     );
     try {
       await fixture.waiting;
@@ -1172,6 +1210,7 @@ test.each(["eof", "error"] as const)(
       await reasoning.promise;
       fixture.finish();
       expect(await result).toBe("Canonical final answer.");
+      expect(connectionStates).toEqual([false, true, false]);
       expect(fixture.admissions()).toBe(1);
       expect(fixture.withdrawals()).toEqual([]);
     } finally {
@@ -1674,5 +1713,65 @@ test("real Pi Durable harness persists sessions under Bun SQLite", async () => {
     if (previous === undefined) delete process.env["OPENAI_API_KEY"];
     else process.env["OPENAI_API_KEY"] = previous;
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("live progress reports the exact waiting form and its closure, without retry payloads", async () => {
+  const f = openCodeStreamFixture();
+  const stop = new AbortController();
+  const stages: TurnProgress[] = [];
+  const wanted = new Map(
+    ["retry", "waiting", "clarified"].map((stage) => [
+      stage,
+      Promise.withResolvers<void>(),
+    ]),
+  );
+  const result = f.backend.prompt(
+    "session-current",
+    "work",
+    stop.signal,
+    undefined,
+    undefined,
+    [],
+    humanIrcSource,
+    (p) => {
+      stages.push(p);
+      wanted.get(p.stage)?.resolve();
+    },
+    true,
+  );
+  try {
+    await f.waiting;
+    const sessionID = "session-current";
+    f.emit("session.retry.scheduled", {
+      sessionID,
+      assistantMessageID: "answer-current",
+      attempt: 1,
+      at: 1,
+      error: { message: "private retry detail" },
+    });
+    await wanted.get("retry")?.promise;
+    f.emit("form.created", { form: f.currentForm });
+    await wanted.get("waiting")?.promise;
+    f.emit("form.replied", {
+      sessionID,
+      id: "form_other",
+      answer: { q0: "private" },
+    });
+    f.emit("form.replied", {
+      sessionID,
+      id: f.currentForm.id,
+      answer: { q0: "private" },
+    });
+    await wanted.get("clarified")?.promise;
+    expect(stages.filter((s) => s.stage === "clarified")).toHaveLength(1);
+    expect(JSON.stringify(stages)).not.toContain("private");
+    f.finish();
+    await result;
+  } finally {
+    stop.abort();
+    f.finish();
+    await result.catch(() => {});
+    await f.close();
   }
 });

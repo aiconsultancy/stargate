@@ -127,6 +127,7 @@ export interface AgentBackend {
   resumeMaintenance?(
     signal: AbortSignal,
   ): Promise<{ resumed: number; remaining: number }>;
+  pinnedBackgroundQuestions?(signal: AbortSignal): Promise<NativeQuestion[]>;
   pendingQuestions?(
     sessionID: string,
     signal: AbortSignal,
@@ -144,10 +145,17 @@ export interface AgentBackend {
     fingerprint: string,
     signal: AbortSignal,
   ): Promise<boolean>;
+  backgroundOutcome?(
+    session: string,
+    form: string,
+    fingerprint: string,
+    signal: AbortSignal,
+  ): Promise<"answered" | "cancelled" | undefined>;
   replyQuestion?(
     question: NativeQuestion,
     answer: QuestionAnswer | null,
     signal: AbortSignal,
+    allowed?: () => boolean,
   ): Promise<void>;
   questionInputSettled?(
     sessionID: string,
@@ -207,6 +215,7 @@ export interface AgentBackend {
     files?: readonly Attachment[],
     context?: PromptSourceContext,
     onProgress?: (progress: TurnProgress) => void,
+    liveProgress?: boolean,
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
   /** Withdraw this input; interrupt only if raw history proves it is current. */
@@ -236,6 +245,7 @@ export interface AgentBackend {
   watch?(
     onSettled: (sessionId?: string) => void,
     signal: AbortSignal,
+    onForm?: () => void,
   ): Promise<void>;
   startActivity?(
     sessionId: string,

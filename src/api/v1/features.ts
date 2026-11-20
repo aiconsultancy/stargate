@@ -149,6 +149,11 @@ function ircFeatures(config: IrcConfig): V1Feature[] {
   const mode = access.channelRequests ?? "standard";
   const keys = Object.keys(ircLabels) as (keyof typeof ircLabels)[];
   return [
+    flag(
+      "irc.crewQuestionHandoff",
+      "Gateway-owned crew questions",
+      features.crewQuestionHandoff === true,
+    ),
     ...keys.map((key) =>
       flag(
         `irc.${key}`,
@@ -156,6 +161,12 @@ function ircFeatures(config: IrcConfig): V1Feature[] {
         features[key],
         ircFeatureDefaults[key],
       ),
+    ),
+    flag(
+      "irc.liveProgress",
+      "Live IRC request progress",
+      features.liveProgress ?? false,
+      false,
     ),
     flag("irc.tls", "IRC TLS", config.server.tls, true),
     flag(
