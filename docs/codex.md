@@ -425,3 +425,7 @@ the sandbox cannot start with the backend's `PATH`. No test contacts a
 provider.
 
 [sdk]: https://developers.openai.com/codex/sdk
+
+With IRC live progress enabled, Codex reports the main turn's model, reasoning, tool
+and reply stages as its SDK emits them. IRC receives fixed stage descriptions
+and timestamps. Native clarification recovery is available on OpenCode.

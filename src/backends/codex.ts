@@ -34,6 +34,7 @@ import {
   type BackendFailureKind,
   statusKind,
 } from "../request-failure";
+import type { TurnProgress, TurnStage } from "../turn-progress";
 import {
   bootTicks,
   inherited,
@@ -382,7 +383,12 @@ export class CodexTurn {
   failure: ReturnType<typeof codexFailureKind>;
 
   /** Returns true when the visible text may have changed. */
-  add(raw: unknown): boolean {
+  add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
+    if (
+      stage &&
+      Schema.is(Schema.Struct({ type: Schema.Literal("turn.started") }))(raw)
+    )
+      stage("model");
     const started = decodeStartedEvent(raw);
     if (Option.isSome(started)) {
       this.thread = started.value.thread_id;
@@ -391,6 +397,11 @@ export class CodexTurn {
     const item = decodeItemEvent(raw);
     if (Option.isSome(item)) {
       const { id, type, text } = item.value.item;
+      if (item.value.type === "item.started") {
+        if (type === "reasoning") stage?.("reasoning");
+        else if (workItems.has(type)) stage?.("tool");
+        else if (type === "agent_message") stage?.("reply");
+      }
       if (workItems.has(type)) this.worked = true;
       if (type !== "agent_message" || text === undefined) return false;
       if (this.messages.get(id) === text) return false;
@@ -552,7 +563,12 @@ export class CodexBackend implements AgentBackend {
     _onInput?: (id: string) => void,
     files: readonly Attachment[] = [],
     context?: PromptSourceContext,
+    onProgress?: (value: TurnProgress) => void,
   ): Promise<string> {
+    const stage = onProgress
+      ? (value: TurnStage) =>
+          onProgress({ stage: value, observedAt: Date.now(), backend: "codex" })
+      : undefined;
     signal.throwIfAborted();
     if (this.closed) throw new Error("Codex backend is closing");
     if (!isID(sessionId))
@@ -695,7 +711,7 @@ export class CodexBackend implements AgentBackend {
           const event = step.value;
           // Leaving the loop closes the stream: no SDK abort after that.
           live = false;
-          const changed = turn.add(event);
+          const changed = turn.add(event, stage);
           if (turn.thread !== undefined && turn.thread !== known) {
             if (known !== undefined || !isID(turn.thread))
               throw new CodexTurnError("Codex thread identity changed");

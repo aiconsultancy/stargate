@@ -155,7 +155,17 @@ export type V1Backend =
   | "codex"
   | "module";
 
+export type V1RequestProgress = {
+  request: number;
+  stage: import("../../turn-progress").TurnStage;
+  observedAt: number;
+  disconnected: boolean;
+  stale: boolean;
+  status: import("../../store").JobStatus;
+  failure: import("../../request-failure").RequestFailure | null;
+};
 export type V1Captain = {
+  requests?: V1RequestProgress[];
   /** Configured registration ID. */
   id: string;
   name: string;

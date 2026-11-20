@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Schema } from "effect";
 import type { AgentBackend } from "./backend";
+import { type OperatorRoute, operatorControl } from "./background-questions";
 import { containsCredential } from "./credentials";
 import {
   settingsCheck,
@@ -293,11 +294,7 @@ export function questionAnswer(
   return parsed;
 }
 
-export function questionText(
-  question: NativeQuestion,
-  account: string,
-  token: string,
-): string {
+function questionFields(question: NativeQuestion) {
   const lines = [
     "OpenCode needs clarification (not a permission approval):",
     question.title,
@@ -312,6 +309,15 @@ export function questionText(
       );
     });
   }
+  return lines;
+}
+
+export function questionText(
+  question: NativeQuestion,
+  account: string,
+  token: string,
+): string {
+  const lines = questionFields(question);
   lines.push(
     `Only the original requester may reply in this thread: ${account}: answer ${token} ${question.fields.length === 1 ? "<choice number or answer>" : '<JSON object, for example {"q0":"choice"}>'}`,
   );
@@ -331,6 +337,7 @@ export function questionText(
 }
 
 export type QuestionPort = {
+  operator?: OperatorRoute;
   account: string;
   settings?(): Promise<{
     enabled: boolean;
@@ -470,7 +477,215 @@ export class Questions {
     return true;
   }
 
+  reconcileBackground() {
+    this.nextBackgroundPoll = 0;
+  }
+  private nextBackgroundPoll = 0;
+
+  private async checkBackground(signal: AbortSignal) {
+    const route = this.port()?.operator;
+    if (
+      !route ||
+      !this.backend.pinnedBackgroundQuestions ||
+      Date.now() < this.nextBackgroundPoll
+    )
+      return;
+    this.nextBackgroundPoll = Date.now() + 10_000;
+    const pending = await this.backend.pinnedBackgroundQuestions(signal);
+    for (const row of this.store.backgroundCases.unsettled(this.key)) {
+      this.store.backgroundCases.checked(row.reference);
+      if (pending.some((q) => q.id === row.form && q.sessionID === row.session))
+        continue;
+      const outcome = await this.backend
+        .backgroundOutcome?.(row.session, row.form, row.fingerprint, signal)
+        .catch(() => undefined);
+      if (outcome) this.store.backgroundCases.close(row.reference, outcome);
+    }
+    for (const q of pending) {
+      if (this.store.jobByInput(this.key, q.inputID)) continue;
+      const found = this.store.backgroundCases.remember(
+        this.key,
+        route.account,
+        q,
+      );
+      if (
+        !found ||
+        found.owner !== route.account ||
+        found.fingerprint !== q.fingerprint ||
+        found.state !== "new" ||
+        !route.ready()
+      )
+        continue;
+      const allowed = () =>
+        !signal.aborted && this.port()?.operator === route && route.ready();
+      await route.send(
+        `An earlier task has a question. Send show ${found.reference} here to answer it.`,
+        allowed,
+      );
+      if (allowed()) this.store.backgroundCases.alerted(found.reference);
+    }
+  }
+
+  async operatorAnswer(
+    actor: string,
+    text: string,
+    signal: AbortSignal,
+    connected = () => true,
+  ) {
+    const control = operatorControl(text);
+    const route = this.port()?.operator;
+    if (!control || !route || actor !== route.account || !route.ready()) return;
+    const key = control[2]?.toLowerCase() ?? "";
+    if (this.inFlight.has(key)) return;
+    this.inFlight.add(key);
+    try {
+      await this.operatorControl(actor, control, route, signal, connected);
+    } finally {
+      this.inFlight.delete(key);
+    }
+  }
+
+  private async operatorControl(
+    actor: string,
+    control: RegExpExecArray,
+    route: OperatorRoute,
+    signal: AbortSignal,
+    connected: () => boolean,
+  ) {
+    const answering = control[1]?.toLowerCase() === "answer";
+    const value = control[2] ?? "";
+    const found = this.store.backgroundCases.find(this.key, value, answering);
+    if (
+      !found ||
+      found.owner !== actor ||
+      found.session !== this.backend.sessionID
+    ) {
+      if (connected() && !this.lifetime.aborted)
+        await route.send(
+          "No current question matches that reference.",
+          () =>
+            connected() &&
+            !this.lifetime.aborted &&
+            this.port()?.operator === route &&
+            route.ready(),
+        );
+      return;
+    }
+    const allowed = () =>
+      connected() &&
+      !this.lifetime.aborted &&
+      this.port()?.operator === route &&
+      route.ready() &&
+      !this.store.jobByInput(this.key, found.input);
+    const q = (await this.backend.pinnedBackgroundQuestions?.(signal))?.find(
+      (v) =>
+        v.id === found.form &&
+        v.sessionID === found.session &&
+        v.inputID === found.input &&
+        v.fingerprint === found.fingerprint,
+    );
+    if (!allowed()) return;
+    if (
+      !q ||
+      found.state === "attempted" ||
+      found.state === "answered" ||
+      found.state === "cancelled"
+    ) {
+      await route.send(
+        "This question is no longer available for an IRC answer.",
+        allowed,
+      );
+      return;
+    }
+    if (!answering) {
+      const token = this.store.backgroundCases.show(found.reference);
+      if (token) {
+        const lines = questionFields(q);
+        if (q.fields.some((field) => field.type === "multiselect"))
+          lines.push("Use comma-separated numbers for multiple choices.");
+        lines.push(
+          `Send answer ${token} <choice or answer> here within 30 minutes.`,
+        );
+        const text = lines.join("\n");
+        await route.send(
+          Buffer.byteLength(text) <= 16_000
+            ? text
+            : "This question is too large for IRC. Open it in OpenCode.",
+          allowed,
+        );
+      }
+      return;
+    }
+    let answer: QuestionAnswer;
+    try {
+      answer = questionAnswer(q, control[3] ?? "");
+    } catch {
+      await route.send(
+        "Use a displayed choice or a supported field value.",
+        allowed,
+      );
+      return;
+    }
+    if (!this.backend.replyQuestion || !allowed()) return;
+    if (found.expires <= Date.now()) {
+      await route.send(
+        `Use show ${found.reference} to get a fresh answer token.`,
+        allowed,
+      );
+      return;
+    }
+    let claimed = false;
+    try {
+      await this.backend.replyQuestion(q, answer, signal, () => {
+        claimed =
+          !signal.aborted &&
+          allowed() &&
+          this.store.backgroundCases.attempt(value);
+        return claimed;
+      });
+    } catch {
+      if (!claimed) {
+        if (allowed())
+          await route.send(
+            "The answer was not submitted. Show the current question before answering.",
+            allowed,
+          );
+        return;
+      }
+      const outcome = await this.backend
+        .backgroundOutcome?.(
+          found.session,
+          found.form,
+          found.fingerprint,
+          AbortSignal.any([this.lifetime, AbortSignal.timeout(3000)]),
+        )
+        .catch(() => undefined);
+      if (outcome) {
+        this.store.backgroundCases.close(found.reference, outcome);
+        await route.send(
+          `OpenCode reports the question was ${outcome}.`,
+          allowed,
+        );
+        return;
+      }
+      await route.send(
+        "Answer delivery is unconfirmed. Check OpenCode before taking further action.",
+        allowed,
+      );
+      return;
+    }
+    this.store.backgroundCases.close(found.reference, "answered");
+    await route.send("OpenCode accepted your answer.", allowed);
+  }
+
   async poll(signal: AbortSignal) {
+    await Promise.all([
+      this.checkBackground(signal).catch(() => signal.throwIfAborted()),
+      this.pollOwned(signal),
+    ]);
+  }
+
+  private async pollOwned(signal: AbortSignal) {
     const offers = this.store.questionOffers(this.key);
     const tokens = new Set(offers.map((o) => o.token));
     for (const token of this.noticeFailures.keys())

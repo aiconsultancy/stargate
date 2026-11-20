@@ -99,7 +99,7 @@ Ergo, `force-nick-equals-account` keeps each nick equal to its account, and
 
 ### Optional features
 
-Fleet captains and rear admirals send an IRC notice when they start a verified
+With the default turn-status setting, fleet captains and rear admirals send an IRC notice when they start a verified
 human request. After five minutes, a notice shows the latest confirmed stage
 for that request. On OpenCode, Stargate checks every five minutes and reports
 new observations. A stage describes an observed event, which may have
@@ -815,6 +815,26 @@ starts there, and replayed messages older than that are ignored. On a first
 start without a cursor, Stargate sets the cursor to now and replays nothing, so
 an existing backlog is not answered. Replayed reactions never stop a turn.
 
+## Background questions and request status
+
+On a pinned OpenCode captain with native questions enabled, set
+`questionOperator` to one authenticated IRC account already admitted as a
+human. When an earlier standalone synthetic input has a supported question,
+the captain sends that account a private reference. Use `show Q…` in the DM
+to see the form and `answer Q… 1` to select the first option. The answer
+window lasts 30 minutes after showing the form. Both commands work when
+ordinary DMs redirect to the ship channel. The gateway keeps these exchanges
+out of the DM audit mirror. Once a native reply is attempted, its IRC token is spent, including when OpenCode rejects the reply or the acknowledgement is lost. A confirmed native outcome is retained. Use OpenCode to inspect a question that still shows an uncertain outcome.
+
+Enable `features.liveProgress` for short, request-specific notices. Fast turns
+finish quietly. After three seconds, a longer turn shows the latest observed
+OpenCode stage. Routine updates are coalesced. Reply to your request with
+`captain: status` using the ship's actual account or nick. The Fleet API
+captain summary includes up to 16 recent observations with timestamps.
+Claude Agent SDK and Codex SDK turns also report model, reasoning, tool and
+reply events when their SDK emits them. Private content stays in the backend.
+Native form discovery and replies require OpenCode.
+
 ## Native clarification questions
 
 OpenCode clarification forms can be answered from the original IRC conversation.
@@ -1479,3 +1499,15 @@ model of their agent definition. Nightly model upgrades do not switch them.
 TLS, SASL accounts and an invite-only channel when
 `~/.local/share/ergo/current/ergo` (or `STARGATE_ERGO_BIN`) and `openssl` exist,
 and is skipped otherwise. It never uses the operator's server or accounts.
+
+Run the disposable clarification fixture with a local OpenCode 2.2.7 binary:
+
+```sh
+mise exec -- bun scripts/irc-question-smoke.ts /path/to/opencode
+mise exec -- bun scripts/irc-question-smoke.ts /path/to/opencode --lose-answer-ack
+mise exec -- bun scripts/irc-question-smoke.ts /path/to/opencode --drop-answer
+```
+
+The fixture uses a loopback model and IRC server. It starts with an open native
+form, restarts the gateway after the operator sees it, and checks the native
+answer and submission count on the original input.

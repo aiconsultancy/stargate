@@ -170,6 +170,39 @@ export class IrcDelivery implements SlackDelivery {
     signal.addEventListener("abort", finish, { once: true });
     try {
       if (turnStatus) {
+        if (turnStatus === "live") {
+          let previous: TurnProgress | undefined;
+          let sent = false;
+          await delay(Math.min(3000, this.client.turnStatusMs), undefined, {
+            signal,
+          }).catch(() => {});
+          while (!signal.aborted && (allowed?.() ?? true)) {
+            const observed = readProgress?.();
+            if (
+              !sent ||
+              (observed &&
+                (!previous ||
+                  previous.stage !== observed.stage ||
+                  !!previous.disconnected !== !!observed.disconnected))
+            ) {
+              previous = observed;
+              sent = true;
+              await this.turnNotice(
+                channel,
+                thread,
+                observed
+                  ? turnProgressText(observed)
+                  : "Stargate received your request. Waiting for backend activity.",
+                signal,
+                allowed,
+              ).catch(() => {});
+            }
+            await delay(Math.min(30_000, this.client.turnStatusMs), undefined, {
+              signal,
+            }).catch(() => {});
+          }
+          return;
+        }
         if (turnStatus === "notice") {
           void this.turnNotice(
             channel,

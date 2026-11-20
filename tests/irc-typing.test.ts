@@ -321,3 +321,64 @@ test("irc fleet: a configuration with crew rank keeps its typing behaviour", asy
   finish();
   await until(() => store.queueCounts(captain.key).done === 1, 3000, "done");
 });
+
+test("live IRC status reads the request observation while its model turn is still open", async () => {
+  const { fake, store, captain, progress, finish } = await setup({
+    role: "captain",
+    features: { liveProgress: true },
+    turnStatusMs: 40,
+  });
+  const user = { nick: "jack", account: "jack" };
+  const root = fake.say(user, "#galactica", "@galactica check");
+  await until(
+    () => store.queueCounts(captain.key).running === 1,
+    3000,
+    "open request",
+  );
+  const update = { stage: "reasoning" as const, observedAt: Date.now() };
+  await until(
+    () => {
+      progress(update);
+      return store.requestProgress(captain.key).length === 1;
+    },
+    3000,
+    "observation",
+  );
+  await until(
+    () =>
+      lineOf(fake.received("galactica"), "NOTICE").some((x) =>
+        x.params[1]?.includes("reported model reasoning"),
+      ),
+    3000,
+    "first confirmed notice",
+  );
+  const job = store.jobByEvent(captain.key, `#galactica:${root}`);
+  if (!job) throw new Error("Missing request");
+  expect(
+    store.requestProgress(captain.key, job.id, update.observedAt + 60_001)[0],
+  ).toMatchObject({ request: job.id, stale: true, disconnected: false });
+  expect(store.requestProgress(captain.key, job.id + 1)).toEqual([]);
+  expect(store.requestProgress("other", job.id)).toEqual([]);
+  fake.say(
+    { nick: "visitor", account: "visitor" },
+    "#galactica",
+    "galactica: status",
+    { "+draft/reply": root },
+  );
+  fake.say(user, "#galactica", "galactica: status", { "+draft/reply": root });
+  await until(
+    () =>
+      lineOf(fake.received("galactica"), "PRIVMSG").some((m) =>
+        m.params[1]?.includes("reported model reasoning"),
+      ),
+    3000,
+    "read-only status",
+  );
+  expect(store.queueCounts(captain.key).queued).toBe(0);
+  expect(
+    lineOf(fake.received("galactica"), "NOTICE").some((m) =>
+      m.params[1]?.includes("Checking that now"),
+    ),
+  ).toBe(false);
+  finish();
+});

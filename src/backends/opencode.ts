@@ -109,6 +109,7 @@ const agentReadyMs = 30_000;
 const agentReadyPollMs = 250;
 const assistantProgress = {
   "session.step.started": "model",
+  "session.retry.scheduled": "retry",
   "session.reasoning.started": "reasoning",
   "session.tool.called": "tool",
   "session.text.started": "reply",
@@ -345,6 +346,31 @@ export class OpenCodeBackend implements AgentBackend {
     throw new Error("Question ancestry exceeds history bound");
   }
 
+  async pinnedBackgroundQuestions(signal: AbortSignal) {
+    if (!this.sessionID) return [];
+    const session = await this.createSession({
+      key: this.sessionID,
+      title: "",
+      signal,
+    });
+    const forms = await this.pendingQuestions(session, signal);
+    const verified: NativeQuestion[] = [];
+    for (const q of forms) {
+      if ("unsupported" in q) continue;
+      const input = await this.client.session.message.get(
+        { sessionID: session, messageID: q.inputID },
+        { signal },
+      );
+      if (
+        input.id === q.inputID &&
+        input.type === "synthetic" &&
+        !input.metadata
+      )
+        verified.push(q);
+    }
+    return verified;
+  }
+
   async pendingQuestions(
     sessionID: string,
     signal: AbortSignal,
@@ -402,10 +428,39 @@ export class OpenCodeBackend implements AgentBackend {
     );
   }
 
+  async backgroundOutcome(
+    sessionID: string,
+    formID: string,
+    fingerprint: string,
+    signal: AbortSignal,
+  ) {
+    if (sessionID !== this.sessionID) return;
+    const form = await this.client.session.form.get(
+      { sessionID, formID },
+      { signal },
+    );
+    if (
+      form.id !== formID ||
+      form.sessionID !== sessionID ||
+      questionFingerprint({
+        id: form.id,
+        sessionID,
+        title: form.title,
+        metadata: form.metadata,
+        fields: form.fields,
+      }) !== fingerprint
+    )
+      return;
+    if (form.state.status === "answered" || form.state.status === "cancelled")
+      return form.state.status;
+    return;
+  }
+
   async replyQuestion(
     question: NativeQuestion,
     answer: QuestionAnswer | null,
     signal: AbortSignal,
+    allowed?: () => boolean,
   ) {
     const live = await this.nativeQuestion(
       question.sessionID,
@@ -420,6 +475,7 @@ export class OpenCodeBackend implements AgentBackend {
     )
       throw new Error("Native question is stale or has no owned input");
     const input = { sessionID: question.sessionID, formID: question.id };
+    if (allowed && !allowed()) throw new Error("Question route changed");
     if (answer === null)
       await this.client.session.form.cancel(input, { signal });
     else await this.client.session.form.reply({ ...input, answer }, { signal });
@@ -1240,6 +1296,7 @@ export class OpenCodeBackend implements AgentBackend {
     files: readonly Attachment[] = [],
     context?: PromptSourceContext,
     onProgress?: (progress: TurnProgress) => void,
+    liveProgress = false,
   ) {
     checkAttachments(files);
     if (
@@ -1285,9 +1342,14 @@ export class OpenCodeBackend implements AgentBackend {
     // Reserve orders one and two for submission and its HTTP acknowledgement.
     let eventOrder = 2;
     let publishedOrder = 0;
+    let waitingForm: string | undefined;
+    const inspectingForms = new Map<string, number>();
+    let disconnected = false;
+    let lastProgress: TurnProgress | undefined;
     const report = (progress: TurnProgress, order: number) => {
       if (!signal.aborted && order > publishedOrder) {
         publishedOrder = order;
+        lastProgress = progress;
         onProgress?.(progress);
       }
     };
@@ -1323,6 +1385,14 @@ export class OpenCodeBackend implements AgentBackend {
                 "session.inbox.enqueued",
                 "session.inbox.delivered",
                 "session.step.started",
+                ...(liveProgress
+                  ? ([
+                      "session.retry.scheduled",
+                      "form.created",
+                      "form.replied",
+                      "form.cancelled",
+                    ] as const)
+                  : []),
                 "session.reasoning.started",
                 "session.tool.called",
                 "session.text.started",
@@ -1332,10 +1402,57 @@ export class OpenCodeBackend implements AgentBackend {
         signal: eventSignal,
       })) {
         if (event.type === "server.connected") {
+          if (disconnected && lastProgress) onProgress?.(lastProgress);
+          disconnected = false;
           connected.resolve();
           continue;
         }
         const current = currentPhase();
+        if (event.type === "form.replied" || event.type === "form.cancelled") {
+          if (event.data.sessionID === sessionId)
+            inspectingForms.delete(event.data.id);
+          if (
+            event.data.sessionID === sessionId &&
+            event.data.id === waitingForm
+          ) {
+            waitingForm = undefined;
+            report(
+              { stage: "clarified", observedAt: Date.now() },
+              ++eventOrder,
+            );
+          }
+          continue;
+        }
+        if (event.type === "form.created") {
+          const form = event.data.form;
+          if (
+            form.sessionID !== sessionId ||
+            (current.type !== "submitting" && current.type !== "submitted")
+          )
+            continue;
+          const order = ++eventOrder;
+          const observedAt = Date.now();
+          inspectingForms.set(form.id, order);
+          const check = this.nativeQuestion(sessionId, form.id, eventSignal)
+            .then((question) => {
+              if (
+                inspectingForms.get(form.id) === order &&
+                question?.inputID === current.input &&
+                order > publishedOrder
+              ) {
+                waitingForm = form.id;
+                report({ stage: "waiting", observedAt }, order);
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              if (inspectingForms.get(form.id) === order)
+                inspectingForms.delete(form.id);
+              checks.delete(check);
+            });
+          checks.add(check);
+          continue;
+        }
         if (
           (current.type !== "submitting" && current.type !== "submitted") ||
           event.data.sessionID !== sessionId
@@ -1459,6 +1576,10 @@ export class OpenCodeBackend implements AgentBackend {
             // The SDK closes subscribers when its underlying stream ends.
             // Reattach progress observation, never replay the native prompt.
             await consumeEvents().catch(() => {});
+            if (liveProgress && !eventSignal.aborted && lastProgress) {
+              disconnected = true;
+              onProgress?.({ ...lastProgress, disconnected: true });
+            }
             connected.resolve();
             if (!onProgress || eventSignal.aborted) return;
             await delay(retryMs, undefined, { signal: eventSignal });
@@ -1964,17 +2085,33 @@ export class OpenCodeBackend implements AgentBackend {
   async watch(
     onSettled: (sessionId?: string) => void,
     signal: AbortSignal,
+    onForm?: () => void,
   ): Promise<void> {
     let wait = 1000;
     while (!signal.aborted) {
       try {
         for await (const event of this.client.event.subscribe({
-          types: settledEvents,
+          types: onForm
+            ? [
+                ...settledEvents,
+                "form.created",
+                "form.replied",
+                "form.cancelled",
+              ]
+            : settledEvents,
           signal,
         })) {
           if (event.type === "server.connected") {
             wait = 1000;
             onSettled();
+            onForm?.();
+          } else if (event.type === "form.created") {
+            if (event.data.form.sessionID === this.sessionID) onForm?.();
+          } else if (
+            event.type === "form.replied" ||
+            event.type === "form.cancelled"
+          ) {
+            if (event.data.sessionID === this.sessionID) onForm?.();
           } else if (
             event.type === "session.execution.succeeded" ||
             event.type === "session.execution.failed" ||
