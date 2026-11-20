@@ -4,6 +4,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 import type { ApiV1Config } from "../src/api/v1/config";
+import { diffEvents } from "../src/api/v1/diff";
 import { type ApiV1Diff, createEventStreams } from "../src/api/v1/events";
 import { cacheOpenCodeVersion } from "../src/api/v1/gateway";
 import { startHostMetrics } from "../src/api/v1/host";
@@ -439,7 +440,11 @@ test("HTTP event streams send initial frames with CORS, cap clients and clean up
       name: hostname(),
       gateway: { version: "1.2.3" },
     });
-    expect(shipFrame).toBe(`event: ship\ndata: ${JSON.stringify(ship)}`);
+    expect(shipFrame?.split("\n")[0]).toBe("event: ship");
+    expect(JSON.parse(shipFrame?.split("\n")[1]?.slice(6) ?? "")).toEqual({
+      ...ship,
+      detailUpdatedAt: expect.any(Number),
+    });
     expect(fleet).toHaveBeenCalledTimes(1);
     expect((await server.get(route)).status).toBe(503);
 
@@ -495,9 +500,92 @@ function completeFleet(
   });
 }
 
-test("event poller is shared, diffs sequential snapshots, emits timers and stops with the last client", async () => {
+test("a slow ship does not delay the overview or other ship details, and retained detail is marked stale", async () => {
+  const slow = { ...ship, id: "survey", name: "Survey" };
+  const { crewMembers: _crew, ...slowSummary } = slow;
+  let fleetName: string = overview.name;
+  let surveyed = 0;
+  const held = Promise.withResolvers<AbortSignal>();
+  const recover = Promise.withResolvers<void>();
+  const timing = { pollMs: 25, hostMs: 1000, heartbeatMs: 1000, readMs: 160 };
+  const streams = createEventStreams(
+    {
+      fleet: async () => ({
+        ...overview,
+        name: fleetName,
+        ships: [summary, slowSummary],
+      }),
+      ship: async (id, signal) => {
+        if (id === ship.id) return { ...ship, name: fleetName };
+        if (++surveyed === 2) {
+          held.resolve(signal);
+          return new Promise(() => {});
+        }
+        if (surveyed > 2) await recover.promise;
+        return slow;
+      },
+      diff: diffEvents,
+      completeFleet,
+      readHost: async () => host,
+    },
+    timing,
+  );
+  const shutdown = new AbortController();
+  const timeout = setTimeout(() => shutdown.abort(), 650);
+  try {
+    const reader = streams.open(shutdown.signal)?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    let initial = await nextFrame(reader, "ship");
+    while (
+      !initial.includes('event: ship\ndata: {"id":"survey"') ||
+      !initial.includes('event: ship\ndata: {"id":"explorer"')
+    )
+      initial += await nextFrame(reader, "ship");
+    fleetName = "Updated fleet";
+    const signal = await held.promise;
+    let update = await nextFrame(reader, "fleet");
+    if (!update.includes("event: ship"))
+      update += await nextFrame(reader, "ship");
+    expect(update).toContain('"name":"Updated fleet"');
+    expect(update).toContain('"id":"explorer"');
+    expect(signal.aborted).toBe(false);
+    fleetName = "Another fleet update";
+    expect(await nextFrame(reader, "fleet")).toContain(
+      '"name":"Another fleet update"',
+    );
+    expect(await nextFrame(reader, "ship")).toContain(
+      '"id":"explorer","name":"Another fleet update"',
+    );
+    expect(signal.aborted).toBe(false);
+    const stale = await nextFrame(reader, "ship");
+    expect(stale).toContain('"id":"survey"');
+    expect(stale).toContain('"detailStale":true');
+    expect(signal.aborted).toBe(true);
+    const freshTimestamp = /"id":"survey".*?"detailUpdatedAt":(\d+)/.exec(
+      initial,
+    )?.[1];
+    expect(freshTimestamp).toBeDefined();
+    expect(stale).toContain(`"detailUpdatedAt":${freshTimestamp}`);
+    const late = streams.open(shutdown.signal)?.getReader();
+    if (!late) throw new Error("Cannot join event stream");
+    expect(await nextFrame(late, "ship")).toContain('"detailStale":true');
+    await late.cancel();
+    recover.resolve();
+    const fresh = await nextFrame(reader, "ship");
+    expect(fresh).toContain('"id":"survey"');
+    expect(fresh).not.toContain('"detailStale":true');
+  } finally {
+    recover.resolve();
+    clearTimeout(timeout);
+    streams.stop();
+  }
+});
+
+test("event poller shares reads, diffs each ship against its prior detail and stops with the last client", async () => {
   const fleet = mock(source.fleet);
-  const diff = mock<ApiV1Diff>((previous) => (previous ? [activity] : []));
+  const diff = mock<ApiV1Diff>((previous, next) =>
+    previous?.ships[ship.id] && next.ships[ship.id] ? [activity] : [],
+  );
   const streams = createEventStreams(
     {
       ...source,
@@ -516,12 +604,18 @@ test("event poller is shared, diffs sequential snapshots, emits timers and stops
     if (!left || !right) throw new Error("Cannot open event streams");
     const initial = await nextFrame(left, "ship");
     expect(await nextFrame(right, "ship")).toBe(initial);
-    expect(diff.mock.calls[0]?.[0]).toBeUndefined();
-    expect(diff.mock.calls[0]?.[1].ships[ship.id]).toEqual(ship);
     expect(await nextFrame(left, "activity")).toContain(
       `event: activity\ndata: ${JSON.stringify(activity.data)}\n\n`,
     );
-    expect(diff.mock.calls[1]?.[0]).toBe(diff.mock.calls[0]?.[1]);
+    const details = diff.mock.calls.find(([, next]) => next.ships[ship.id]);
+    expect(details?.[0]?.ships[ship.id]).toEqual({
+      ...ship,
+      detailUpdatedAt: expect.any(Number),
+    });
+    expect(details?.[1].ships[ship.id]).toEqual({
+      ...ship,
+      detailUpdatedAt: expect.any(Number),
+    });
     await left.cancel();
     const timed = await nextFrame(right, "heartbeat");
     expect(timed).toContain(`event: host\ndata: ${JSON.stringify(host)}\n\n`);
@@ -529,10 +623,11 @@ test("event poller is shared, diffs sequential snapshots, emits timers and stops
     const count = fleet.mock.calls.length;
     await Bun.sleep(75);
     expect(fleet).toHaveBeenCalledTimes(count);
+    diff.mockClear();
     const next = streams.open(signal)?.getReader();
     if (!next) throw new Error("Cannot reopen event stream");
     await nextFrame(next, "ship");
-    expect(diff.mock.calls.at(-1)?.[0]).toBeUndefined();
+    expect(diff).toHaveBeenCalledTimes(0);
     streams.stop();
     expect((await next.read()).done).toBe(true);
   } finally {

@@ -116,14 +116,20 @@ With that field present, `pullRequest: null` means no PR was found.
 ## Events
 
 Use a streaming browser `fetch` with an `Authorization` header. A connection
-gets one `fleet` event with host and gateway information, then one `ship`
-event per available ship detail. One shared poller reads the fleet every
-three seconds while clients are connected. It publishes changed fleet and
-ship summaries and `activity` transitions. The stream also sends `host`
+gets a `fleet` event with host and gateway information, followed by the
+available `ship` details. One shared poller reads the overview every three
+seconds while clients are connected and publishes changed overviews independently
+of ship details. Each ship detail has its own 20-second deadline, with at most
+one read in flight per ship. Ship events include `detailUpdatedAt`, the
+sample time of that detail. If a refresh fails, `detailStale` is set to
+`true` on the last successful detail, which keeps its original sample time.
+A successful refresh clears `detailStale`. The stream also sends `host`
 every ten seconds and `heartbeat` every fifteen seconds.
+
 The overview and ship details share one crew status read per ship per poll.
 If an older OpenCode plugin reports that it lacks `fleetStatus`, Stargate
 uses ordinary crew status and waits one minute before probing again.
+
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git
 recovery does not generate activity.

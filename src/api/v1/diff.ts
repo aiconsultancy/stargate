@@ -23,7 +23,10 @@ function fleetSummary({
   return { apiVersion, name, admiral, ships, longestIdle };
 }
 
-function shipDetail(ship: V1ShipDetail) {
+function shipDetail({
+  detailUpdatedAt: _detailUpdatedAt,
+  ...ship
+}: V1ShipDetail) {
   return {
     ...ship,
     crewMembers: ship.crewMembers.map((member) => ({
