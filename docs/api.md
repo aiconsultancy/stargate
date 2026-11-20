@@ -131,9 +131,12 @@ directory otherwise.
 Copied ignore files, including `core.excludesFile`, must resolve inside
 the checkout or its Git directories. The 1 MiB limit applies to each copied pattern file.
 Unreadable ignore files are skipped, and `info/exclude` retains its usual
-precedence. Git reads worktree `.gitignore` files directly. Git versions
-with `GIT_ATTR_SOURCE` support read attributes from the empty tree, so files
-that depend on attributes for content conversion may count as changed.
+precedence. Git reads worktree `.gitignore` files directly. Status reads
+disable filters for safety. Git versions that support `GIT_ATTR_SOURCE`
+read attributes from the empty tree and ignore worktree `.gitattributes`.
+When Git rehashes a racily clean file because its timestamp is too close to
+the index timestamp, `text` or `eol` attributes or Git LFS can occasionally
+cause an unchanged file to count as changed.
 
 To enable pull request lookups, set `api.pullRequestRepositories` in
 `stargate.json` and restart Stargate. Each key is the exact absolute,
