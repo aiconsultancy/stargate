@@ -35,6 +35,17 @@ type Client = {
   close(error?: Error): void;
 };
 
+type ShipReadSlot = {
+  slot: ReturnType<typeof createReadSlot<V1ShipDetail | undefined>>;
+  attempt?: {
+    controller: AbortController;
+    available: boolean;
+    readAt: number;
+    result: Promise<V1ShipDetail | undefined>;
+    failed: boolean;
+  };
+};
+
 const maxClients = 8;
 const bufferBytes = 256 * 1024;
 const encoder = new TextEncoder();
@@ -62,6 +73,7 @@ export function createEventStreams(
   options: Options,
   timing: typeof streamTiming & { readMs?: number } = streamTiming,
 ) {
+  const lifetime = new AbortController();
   const readMs = timing.readMs ?? 20_000;
   const overviewReadMs = timing.readMs ?? fleetOverviewReadMs;
   const readOverview = holdRead<{
@@ -70,10 +82,7 @@ export function createEventStreams(
     reads: Map<string, V1ShipRead>;
   }>(overviewReadMs);
   const enrich = holdRead<V1Fleet>(readMs);
-  const shipReads = new Map<
-    string,
-    ReturnType<typeof createReadSlot<V1ShipDetail | undefined>>
-  >();
+  const shipReads = new Map<string, ShipReadSlot>();
   const cachedShips = new Map<string, V1ShipDetail>();
   let identities: ReadonlyMap<string, string> | undefined;
   let rosterGeneration = 0;
@@ -82,6 +91,10 @@ export function createEventStreams(
     | { overview: V1Snapshot["fleet"]; expiresAt: number }
     | undefined;
   let active: ReturnType<typeof startPolling> | undefined;
+
+  function shipKey(id: string, identity = identities?.get(id)) {
+    return JSON.stringify([id, identity]);
+  }
 
   function expireOverview() {
     if (!cachedOverview || cachedOverview.expiresAt > performance.now()) return;
@@ -93,7 +106,7 @@ export function createEventStreams(
     const shutdown = new AbortController();
     const clients = new Set<Client>();
     const ships = new Map<string, V1ShipDetail>();
-    const pending = new Map<string, AbortController>();
+    const pending = new Set<string>();
     let summaries = new Map<string, V1Ship>();
     let fleet: V1Fleet | undefined;
     let latestHost: V1Host | undefined;
@@ -137,7 +150,7 @@ export function createEventStreams(
         return rosterGeneration;
       for (const [id, identity] of identities ?? []) {
         if (current.get(id) === identity) continue;
-        pending.get(id)?.abort();
+        shipReads.get(shipKey(id, identity))?.attempt?.controller.abort();
         cachedShips.delete(id);
       }
       rosterRead.abort();
@@ -156,9 +169,9 @@ export function createEventStreams(
       fleet = next;
       const prior = summaries;
       summaries = new Map(next.ships.map((ship) => [ship.id, ship]));
-      for (const [id, generation] of pending)
-        if (summaries.get(id)?.available !== prior.get(id)?.available)
-          generation.abort();
+      for (const [id, previous] of prior)
+        if (summaries.get(id)?.available !== previous.available)
+          shipReads.get(shipKey(id))?.attempt?.controller.abort();
       for (const id of ships.keys()) if (!summaries.has(id)) ships.delete(id);
       for (const id of cachedShips.keys())
         if (!summaries.has(id)) cachedShips.delete(id);
@@ -217,46 +230,57 @@ export function createEventStreams(
       broadcast(changes);
     }
 
-    async function refreshShip(id: string, read: V1ShipRead) {
-      if (shutdown.signal.aborted) return;
+    async function refreshShip({ id, available }: V1Ship, read: V1ShipRead) {
+      if (shutdown.signal.aborted || pending.has(id)) return;
       const readAt = Date.now();
-      const key = JSON.stringify([id, identities?.get(id)]);
-      const slot =
-        shipReads.get(key) ??
-        createReadSlot<V1ShipDetail | undefined>(readMs, () =>
+      const key = shipKey(id);
+      const shared = shipReads.get(key) ?? {
+        slot: createReadSlot<V1ShipDetail | undefined>(readMs, () =>
           shipReads.delete(key),
-        );
-      if (slot.pending) {
-        const own = pending.get(id);
-        // A prior stream or overview generation already cancelled this wait.
-        if (
-          (!own || own.signal.aborted) &&
-          (!summaries.get(id)?.available || cachedShips.has(id))
-        )
-          publishShip(id, readAt);
+        ),
+      };
+      let attempt = shared.slot.pending ? shared.attempt : undefined;
+      if (attempt && attempt.available !== available)
+        attempt.controller.abort();
+      if (attempt && (attempt.failed || attempt.controller.signal.aborted)) {
+        if (!available || cachedShips.has(id)) publishShip(id, readAt);
         return;
       }
-      shipReads.set(key, slot);
-      // This wait belongs to the current ship availability and identity.
-      // Publishing a transition cancels that generation even if the read drains later.
-      const generation = new AbortController();
-      pending.set(id, generation);
-      const parent = AbortSignal.any([shutdown.signal, generation.signal]);
-      const { result } = slot.start(parent, read);
+      if (!attempt) {
+        const controller = new AbortController();
+        const parent = AbortSignal.any([lifetime.signal, controller.signal]);
+        const { result } = shared.slot.start(parent, read);
+        const current = {
+          controller,
+          available,
+          readAt,
+          result,
+          failed: false,
+        };
+        void result.catch(() => {
+          current.failed = true;
+        });
+        attempt = current;
+        shared.attempt = attempt;
+        shipReads.set(key, shared);
+      }
+      pending.add(id);
+      const cancelled = () =>
+        shutdown.signal.aborted || attempt.controller.signal.aborted;
       try {
-        const detail = await result.catch(() => undefined);
-        if (parent.aborted) return;
+        const detail = await attempt.result.catch(() => undefined);
+        if (cancelled()) return;
         syncIdentities();
-        if (!parent.aborted) publishShip(id, readAt, detail);
+        if (!cancelled()) publishShip(id, attempt.readAt, detail);
       } finally {
-        if (pending.get(id) === generation) pending.delete(id);
+        pending.delete(id);
       }
     }
 
     function refreshMetrics(overview: V1Snapshot["fleet"], generation: number) {
       if (enriching) return;
       enriching = true;
-      void enrich(shutdown.signal, (signal) =>
+      void enrich(lifetime.signal, (signal) =>
         options.completeFleet(overview, signal),
       )
         .then(({ host, gateway }) => {
@@ -280,12 +304,21 @@ export function createEventStreams(
 
     async function poll() {
       expireOverview();
-      const generation = syncIdentities();
-      if (publishing || shutdown.signal.aborted) return;
+      if (shutdown.signal.aborted) return;
+      try {
+        const generation = syncIdentities();
+        if (!publishing && !shutdown.signal.aborted)
+          await refreshOverview(generation);
+      } catch {
+        // Keep the last overview and retry while clients are present.
+      }
+    }
+
+    async function refreshOverview(generation: number) {
       publishing = true;
       try {
         const sample = await readOverview(
-          AbortSignal.any([shutdown.signal, rosterRead.signal]),
+          AbortSignal.any([lifetime.signal, rosterRead.signal]),
           async (signal) => {
             const reads = new Map<string, V1ShipRead>();
             const overview = await options.fleet(signal, (id, read) =>
@@ -318,7 +351,7 @@ export function createEventStreams(
             continue;
           }
           void refreshShip(
-            ship.id,
+            ship,
             sample.reads.get(ship.id) ??
               ((signal) => options.ship(ship.id, signal)),
           ).catch(() => {
@@ -326,8 +359,6 @@ export function createEventStreams(
           });
         }
         refreshMetrics(overview, generation);
-      } catch {
-        // Keep the last overview and retry while clients are present.
       } finally {
         publishing = false;
       }
@@ -386,7 +417,11 @@ export function createEventStreams(
     open(signal: AbortSignal) {
       expireOverview();
       active?.syncIdentities();
-      if (signal.aborted || (active?.clients.size ?? 0) >= maxClients)
+      if (
+        lifetime.signal.aborted ||
+        signal.aborted ||
+        (active?.clients.size ?? 0) >= maxClients
+      )
         return undefined;
       active ??= startPolling();
       const session = active;
@@ -431,6 +466,7 @@ export function createEventStreams(
       );
     },
     stop() {
+      lifetime.abort();
       if (active) for (const client of active.clients) client.close();
     },
   };

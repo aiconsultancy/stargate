@@ -1452,13 +1452,13 @@ test("event poller shares reads, diffs each ship against its prior detail and st
   }
 });
 
-test("event poller aborts the in-flight snapshot when its last client disconnects", async () => {
+test("stopping event streams aborts the shared snapshot after the last client disconnects", async () => {
   const entered = Promise.withResolvers<AbortSignal>();
   const streams = createEventStreams({
     ...source,
     fleet: async (signal) => {
       entered.resolve(signal);
-      await wait(3000, undefined, { signal });
+      await wait(500, undefined, { signal });
       return overview;
     },
     diff: () => [],
@@ -1472,11 +1472,71 @@ test("event poller aborts the in-flight snapshot when its last client disconnect
     const signal = await entered.promise;
     expect(signal.aborted).toBe(false);
     await stream?.cancel();
+    expect(signal.aborted).toBe(false);
+    streams.stop();
     expect(signal.aborted).toBe(true);
   } finally {
     streams.stop();
   }
 });
+
+test.each(["overview", "ship", "enrichment"] as const)(
+  "a reconnect can use a pending %s read from the last poller",
+  async (kind) => {
+    const entered = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<void>();
+    const read = mock(async <T>(value: T) => {
+      if (read.mock.calls.length === 1) {
+        entered.resolve();
+        await held.promise;
+      }
+      return value;
+    });
+    const streams = createEventStreams(
+      {
+        ...source,
+        fleet: async () => (kind === "overview" ? read(overview) : overview),
+        ship: async () => (kind === "ship" ? read(ship) : ship),
+        completeFleet: async (snapshot) => {
+          const next = fallbackFleet(snapshot);
+          return kind === "enrichment"
+            ? read({
+                ...next,
+                gateway: { ...next.gateway, opencodeVersion: "2.3.2" },
+              })
+            : next;
+        },
+        diff: diffEvents,
+        fallbackFleet,
+        readHost: async () => host,
+        snapshotHost: () => host,
+      },
+      { pollMs: 250, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
+    );
+    const signal = AbortSignal.timeout(175);
+    try {
+      const first = streams.open(signal);
+      if (!first) throw new Error("Cannot open event stream");
+      await entered.promise;
+      await first.cancel();
+      const next = streams.open(signal)?.getReader();
+      if (!next) throw new Error("Cannot reopen event stream");
+      if (kind !== "overview") await nextFrame(next, "fleet");
+      held.resolve();
+      if (kind === "ship")
+        expect(await nextFrame(next, "ship")).toContain('"id":"explorer"');
+      else if (kind === "enrichment")
+        expect(
+          await nextFrame(next, "fleet", '"opencodeVersion":"2.3.2"'),
+        ).toContain('"opencodeVersion":"2.3.2"');
+      else expect(await nextFrame(next, "fleet")).toContain('"name":"Example"');
+      expect(read).toHaveBeenCalledTimes(1);
+    } finally {
+      held.resolve();
+      streams.stop();
+    }
+  },
+);
 
 test("timed-out enrichment keeps its slot while current overviews publish across reconnects", async () => {
   const held = Promise.withResolvers<V1Fleet>();
@@ -1611,7 +1671,10 @@ test("a reconnect publishes stale detail while an expired read still holds its s
     const initial = await nextFrame(first, "ship");
     const signal = await entered.promise;
     await first.cancel();
-    expect(signal.aborted).toBe(true);
+    if (!signal.aborted)
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
     const next = streams.open(AbortSignal.timeout(500))?.getReader();
     if (!next) throw new Error("Cannot reopen event stream");
     const stale = await nextFrame(next, "ship");
