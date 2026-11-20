@@ -241,6 +241,14 @@ and the one-time migration.
 
 ## Guarantees and limits
 
+[External notifications](notification-ingestion.md) are separate from agent
+work and thread mute preferences. All inputs default to off. Accepted display
+work persists in private `notify.sqlite`; `202` means admission, not delivery.
+Unknown sends may replay. Shutdown retains store and instance ownership until
+local notification users settle, or exits nonzero after a 25-second grace.
+Do not delete notification state to repair startup. See the guide for rollback
+and separately approved live-proof steps.
+
 - Bot/app/workspace/backend identity separates session namespaces. Ordinary
   bots add channel/thread identity; a pinned captain shares one session across
   its allowed chat sources. Its memory is shared, not a privacy boundary.

@@ -104,6 +104,12 @@ Use SIGHUP for the live changes below. Other changes require a restart.
 
 ## Reload configuration without restarting
 
+Optional [external notification ingestion](notification-ingestion.md) uses the
+top-level `notify` subtree. Each built-in HTTP adapter defaults to disabled.
+Enabled HTTP requires `api.listen: "unix"`; producer credentials never grant
+Fleet operator access. All notification topology and limits require restart.
+Current live-safe access revocations apply to pending sends immediately.
+
 Validate the file, then signal the running gateway (replace the unit name if
 this installation uses another name):
 

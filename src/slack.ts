@@ -8,6 +8,9 @@ import { stopBlock } from "./cancellation";
 import type { CrewUIApi } from "./crew-ui";
 import type { CronUIApi } from "./cron-ui";
 import type { SlackDelivery } from "./gateway";
+import type { DisplayPayload } from "./notify/model";
+import type { SinkOutcome } from "./notify/sink";
+import { notificationContent, notificationOutcome } from "./notify/slack";
 import { type ReactionName, slackTimestamp } from "./reactions";
 import { failureContent, type RequestFailure } from "./request-failure";
 import type { Identity } from "./routing";
@@ -273,6 +276,31 @@ export class SlackConnection implements SlackDelivery {
   async announce(channel: string, text: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
     return this.send(channel, "", text, "plain");
+  }
+
+  async notification(
+    channel: string,
+    payload: DisplayPayload,
+    signal: AbortSignal,
+  ): Promise<SinkOutcome> {
+    if (signal.aborted) return { state: "refused", retryable: true };
+    try {
+      const result = await this.historyWeb(signal).chat.postMessage({
+        channel,
+        ...notificationContent(payload),
+        mrkdwn: false,
+        parse: "none",
+        unfurl_links: false,
+        unfurl_media: false,
+      });
+      return result.ok === true &&
+        typeof result.ts === "string" &&
+        /^\d+\.\d+$/.test(result.ts)
+        ? { state: "sent" }
+        : { state: "unknown" };
+    } catch (error) {
+      return notificationOutcome(error);
+    }
   }
 
   async ephemeral(channel: string, user: string, thread: string, text: string) {

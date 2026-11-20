@@ -89,6 +89,9 @@ permissions control what the agent can do on the host.
   [nightly maintenance](docs/maintenance.md) each have separate setup.
 - The [Fleet API](docs/api.md) serves read-only fleet status and events to
   Subspace over a private network.
+- Optional [notification ingestion](docs/notification-ingestion.md) accepts
+  authenticated facts on the private Unix API and displays literal Slack text
+  without agent work. Every input defaults to off.
 - See [architecture](docs/design.md), [development](docs/development.md), and
   [contributing](CONTRIBUTING.md) to work on Stargate.
 

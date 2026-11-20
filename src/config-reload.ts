@@ -20,13 +20,16 @@ export interface ReloadCandidate {
 export async function readReloadCandidate(
   path: string,
   baseEnvironment: NodeJS.ProcessEnv,
+  notificationReload = false,
 ): Promise<ReloadCandidate> {
-  const config = await readConfiguration(path);
+  const config = await readConfiguration(path, notificationReload);
   const environment = await checkCredentials(
     path,
     config.bots,
     baseEnvironment,
     config.irc,
+    config.notify,
+    config.dataDirectory,
   );
   return {
     config: {
