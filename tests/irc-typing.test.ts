@@ -135,6 +135,25 @@ const typing = (lines: readonly string[], target: string) =>
     .filter((m) => m.params[0] === target)
     .map((m) => m.tags.get("+typing"));
 
+test("IRC fleet typing accompanies the thread notice and clears before the reply", async () => {
+  const { fake, store, captain, finish } = await setup({
+    role: "rear_admiral",
+    features: { fleetTyping: true },
+  });
+  fake.say({ nick: "jack", account: "jack" }, "#galactica", "@galactica check");
+  const states = () => typing(fake.received("galactica"), "#galactica");
+  await until(
+    () =>
+      states().includes("active") &&
+      lineOf(fake.received("galactica"), "NOTICE").length === 1,
+    3000,
+    "typing and acknowledgement",
+  );
+  finish();
+  await until(() => store.queueCounts(captain.key).done === 1, 3000, "reply");
+  expect(states().at(-1)).toBe("done");
+});
+
 test("irc typing: active while a turn runs, refreshed, then done before the reply", async () => {
   const { fake, store, captain, finish } = await setup();
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "galactica: think");
