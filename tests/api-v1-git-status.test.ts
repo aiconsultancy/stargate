@@ -6,6 +6,7 @@ import {
   open,
   rm,
   stat,
+  symlink,
   truncate,
   utimes,
   writeFile,
@@ -32,7 +33,133 @@ function git(directory: string, ...args: string[]) {
     { cwd: directory },
   );
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+  return result.stdout.toString().trim();
 }
+
+test.each(["primary", "shared"])(
+  "bounds an oversized %s index before invoking Git on either index",
+  async (kind) => {
+    const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+    try {
+      git(directory, "init", "-b", "main");
+      await writeFile(join(directory, "tracked"), "fixture\n");
+      git(directory, "add", "tracked");
+      git(directory, "update-index", "--split-index");
+      const index =
+        kind === "primary"
+          ? join(directory, ".git", "index")
+          : join(directory, git(directory, "rev-parse", "--shared-index-path"));
+      await truncate(index, 129 * 1024 * 1024);
+      const indexCommands: string[][] = [];
+      const read = createGitReader(Date.now, (args, options) => {
+        if (args.includes("--shared-index-path") || args.includes("status"))
+          indexCommands.push(args);
+        return readCommand(args, options);
+      });
+      expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+        changedFiles: null,
+        error: "Git metadata exceeds the status read limit.",
+      });
+      expect(indexCommands).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each(["absolute", "symlinked parent"])(
+  "ignores a checkout excludes file outside the repository via a %s path",
+  async (kind) => {
+    const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+    try {
+      const checkout = join(directory, "checkout");
+      const external = join(directory, "external");
+      await mkdir(checkout);
+      await mkdir(external);
+      git(checkout, "init", "-b", "main");
+      await writeFile(join(external, "patterns"), "untracked\n");
+      await writeFile(join(checkout, "untracked"), "");
+      const gitDir = join(checkout, ".git");
+      await symlink(external, join(gitDir, "linked"), "dir");
+      git(
+        checkout,
+        "config",
+        "core.excludesFile",
+        kind === "absolute"
+          ? join(external, "patterns")
+          : ".git/linked/patterns",
+      );
+      expect(
+        await createGitReader()(checkout, AbortSignal.timeout(3000)),
+      ).toMatchObject({ changedFiles: 1 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("optional ignore metadata can be linked inside Git or skipped when unusable", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  try {
+    git(directory, "init", "-b", "main");
+    const gitDir = join(directory, ".git");
+    const exclude = join(gitDir, "info", "exclude");
+    await rm(exclude);
+    await writeFile(join(gitDir, "local-patterns"), "ignored\n");
+    await symlink("../local-patterns", exclude);
+    git(directory, "config", "core.excludesFile", ".git/info");
+    await writeFile(join(directory, "ignored"), "");
+    await writeFile(join(directory, "visible"), "");
+    expect(
+      await createGitReader()(directory, AbortSignal.timeout(3000)),
+    ).toMatchObject({ changedFiles: 1 });
+    await rm(exclude);
+    await symlink("missing", exclude);
+    expect(
+      await createGitReader()(directory, AbortSignal.timeout(3000)),
+    ).toMatchObject({ changedFiles: 2 });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("abbreviation, status and comparison use one HEAD even when the branch advances", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  try {
+    git(directory, "init", "-b", "main");
+    const tracked = join(directory, "tracked");
+    await writeFile(tracked, "first\n");
+    git(directory, "add", ".");
+    git(directory, "commit", "-m", "First");
+    const start = git(directory, "rev-parse", "HEAD");
+    const short = git(directory, "rev-parse", "--short", start);
+    await writeFile(tracked, "second\n");
+    git(directory, "commit", "-am", "Second");
+    const next = git(directory, "rev-parse", "HEAD");
+    git(directory, "reset", "--hard", start);
+    git(directory, "update-ref", "refs/remotes/origin/main", start);
+    git(
+      directory,
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/main",
+    );
+    const read = createGitReader(Date.now, async (args, options) => {
+      const result = await readCommand(args, options);
+      if (args.slice(-3).join(" ") === "rev-parse --verify HEAD")
+        git(directory, "update-ref", "refs/heads/main", next);
+      return result;
+    });
+    expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+      head: short,
+      changedFiles: 0,
+      ahead: 0,
+      behind: 0,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("status ignores checkout configuration added immediately before it starts", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
@@ -139,29 +266,30 @@ test("split index files share one aggregate metadata budget", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   try {
     git(directory, "init", "-b", "main");
-    const gitDir = join(directory, ".git");
-    const index = join(gitDir, "index");
-    const shared = join(gitDir, `sharedindex.${"a".repeat(40)}`);
-    for (const path of [index, shared]) {
-      await writeFile(path, "");
-      // Each file fits its individual limit.
-      await truncate(path, 97 * 1024 * 1024);
+    await writeFile(join(directory, "tracked"), "fixture\n");
+    git(directory, "add", "tracked");
+    git(directory, "update-index", "--split-index");
+    const shared = join(
+      directory,
+      git(directory, "rev-parse", "--shared-index-path"),
+    );
+    const index = join(directory, ".git", "index");
+    const size = 97 * 1024 * 1024;
+    const file = await open(index, "r+");
+    try {
+      // Leave the real link extension intact and pad the primary index with an
+      // optional extension. Each file fits its individual limit.
+      const trailer = (await file.stat()).size - 20;
+      const padding = Buffer.from("TEST\0\0\0\0");
+      padding.writeUInt32BE(size - trailer - padding.length - 20, 4);
+      await file.write(padding, 0, padding.length, trailer);
+      await file.truncate(size);
+    } finally {
+      await file.close();
     }
+    await truncate(shared, size);
     let ranStatus = false;
     const read = createGitReader(Date.now, (args, options) => {
-      if (args.includes("--shared-index-path"))
-        return Promise.resolve({
-          code: 0,
-          stdout: [
-            join(gitDir, "objects"),
-            index,
-            join(gitDir, "info", "exclude"),
-            join(gitDir, "info", "sparse-checkout"),
-            "sha1",
-            shared,
-            "",
-          ].join("\n"),
-        });
       ranStatus ||= args.includes("status");
       return readCommand(args, options);
     });
@@ -295,30 +423,45 @@ test("status ignores worktree and info attributes", async () => {
   }
 });
 
-test("isolated status preserves changes and excludes in a linked worktree with a split index", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
-  const checkout = join(directory, "checkout");
-  const worktree = join(directory, "worktree");
-  try {
-    await mkdir(checkout);
-    git(checkout, "init", "-b", "main");
-    await writeFile(join(checkout, "tracked.txt"), "original\n");
-    git(checkout, "add", ".");
-    git(checkout, "commit", "-m", "Initial");
-    git(checkout, "worktree", "add", "-b", "work", worktree);
-    await writeFile(join(checkout, ".git", "info", "exclude"), "ignored\n");
-    await writeFile(join(worktree, "ignored"), "ignore\n");
-    await writeFile(join(worktree, "tracked.txt"), "modified\n");
-    await writeFile(join(worktree, "staged"), "staged\n");
-    git(worktree, "add", "staged");
-    git(worktree, "update-index", "--split-index");
-    expect(
-      await createGitReader()(worktree, new AbortController().signal),
-    ).toMatchObject({ branch: "work", changedFiles: 2 });
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+test.each(["sha1", "sha256"])(
+  "isolated status preserves changes and excludes in a linked worktree with a %s version 4 split index",
+  async (format) => {
+    const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+    const checkout = join(directory, "checkout");
+    const worktree = join(directory, "worktree");
+    try {
+      await mkdir(checkout);
+      git(checkout, "init", "-b", "main", `--object-format=${format}`);
+      await writeFile(join(checkout, "tracked.txt"), "original\n");
+      git(checkout, "add", ".");
+      git(checkout, "commit", "-m", "Initial");
+      git(checkout, "worktree", "add", "-b", "work", worktree);
+      await writeFile(join(checkout, ".git", "info", "exclude"), "ignored\n");
+      await writeFile(join(worktree, "ignored"), "ignore\n");
+      await writeFile(join(worktree, "tracked.txt"), "modified\n");
+      await writeFile(join(worktree, "staged"), "staged\n");
+      git(worktree, "add", "staged");
+      git(worktree, "config", "splitIndex.maxPercentChange", "100");
+      git(worktree, "update-index", "--index-version=4", "--split-index");
+      await writeFile(join(worktree, "new-entry"), "new\n");
+      git(worktree, "add", "new-entry");
+      const index = git(
+        worktree,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-path",
+        "index",
+      );
+      const header = Buffer.from(await Bun.file(index).slice(0, 12).bytes());
+      expect(header.readUInt32BE(4)).toBe(4);
+      expect(
+        await createGitReader()(worktree, new AbortController().signal),
+      ).toMatchObject({ branch: "work", changedFiles: 3 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 test.each(["clean", "process"])(
   "reads changed paths with a checkout-configured %s filter disabled",

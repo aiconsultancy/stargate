@@ -1,21 +1,24 @@
 import { createHash } from "node:crypto";
 import { constants, createWriteStream } from "node:fs";
 import {
+  type FileHandle,
   mkdir,
   mkdtemp,
   open,
+  realpath,
   rm,
   stat,
   utimes,
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Semaphore } from "effect";
 import { containsCredential } from "../../credentials";
 import { abortable, runAbortable } from "../../effect";
 import { readCommand } from "./command";
+import { sharedIndexName } from "./git-index";
 import type { V1Git } from "./types";
 
 const ttl = 15_000;
@@ -90,33 +93,84 @@ function statusOptions(output: string) {
   return options;
 }
 
+const metadataFlags =
+  constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+
+function fileError(error: unknown) {
+  return error instanceof Error && "code" in error ? error.code : undefined;
+}
+
+async function openPattern(source: string, roots: string[]) {
+  // Resolve links first, then prevent the open from following a replacement
+  // symlink in any component of the canonical path.
+  const path = await realpath(source);
+  if (
+    !roots.some((root) => {
+      const child = relative(root, path);
+      return (
+        child &&
+        child !== ".." &&
+        !child.startsWith(`..${sep}`) &&
+        !isAbsolute(child)
+      );
+    })
+  )
+    return undefined;
+  if (process.platform === "darwin") {
+    const noFollowAny = 0x20000000; // Darwin O_NOFOLLOW_ANY
+    return open(path, constants.O_RDONLY | constants.O_NONBLOCK | noFollowAny);
+  }
+  if (process.platform !== "linux") return undefined;
+  // Linux exposes directory descriptors through procfs. Open each component
+  // relative to its pinned parent, forbidding symlinks at each step.
+  const parts = path.split(sep).slice(1);
+  const name = parts.pop();
+  if (!name) return undefined;
+  const directoryFlags = metadataFlags | constants.O_DIRECTORY;
+  let parent = await open(sep, directoryFlags);
+  try {
+    for (const part of parts) {
+      const next = await open(
+        `/proc/self/fd/${parent.fd}/${part}`,
+        directoryFlags,
+      );
+      await parent.close();
+      parent = next;
+    }
+    return await open(`/proc/self/fd/${parent.fd}/${name}`, metadataFlags);
+  } finally {
+    await parent.close();
+  }
+}
+
 async function copyStatusFile(
-  source: string,
+  openSource: () => Promise<FileHandle | undefined>,
   target: string,
   signal: AbortSignal,
   limit: number,
   budget: { remaining: number },
-  optional = false,
+  kind: "primary" | "shared" | "pattern",
 ) {
   signal.throwIfAborted();
-  const file = await open(
-    source,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-  ).catch((error: unknown) => {
+  const file = await openSource().catch((error: unknown) => {
+    signal.throwIfAborted();
     if (
-      optional &&
-      error instanceof Error &&
-      "code" in error &&
-      error.code === "ENOENT"
+      kind === "pattern" ||
+      (kind === "primary" && fileError(error) === "ENOENT")
     )
       return undefined;
     throw error;
   });
-  if (!file) return;
+  if (!file) return false;
+  let copied = 0;
   try {
     const metadata = await file.stat();
-    if (!metadata.isFile()) throw new Error("Git metadata unavailable");
-    if (metadata.size > limit) throw new MetadataLimitExceeded();
+    if (!metadata.isFile()) {
+      if (kind === "pattern") return false;
+      throw new Error("Git metadata unavailable");
+    }
+    if (metadata.size > limit || metadata.size > budget.remaining)
+      throw new MetadataLimitExceeded();
     // Larger blocks avoid a read and write round trip for each 64 KiB of index.
     const highWaterMark = limit === indexLimit ? mib : 64 * 1024;
     await pipeline(
@@ -127,6 +181,7 @@ async function copyStatusFile(
           signal.throwIfAborted();
           remaining -= chunk.byteLength;
           budget.remaining -= chunk.byteLength;
+          copied += chunk.byteLength;
           if (remaining < 0 || budget.remaining < 0)
             throw new MetadataLimitExceeded();
           yield chunk;
@@ -138,6 +193,14 @@ async function copyStatusFile(
     // Git uses the index mtime to decide which same-timestamp files to rehash.
     // Round down so the copy can never make a racy entry appear older.
     await utimes(target, metadata.atime, Math.floor(metadata.mtimeMs / 1_000));
+    return true;
+  } catch (error) {
+    signal.throwIfAborted();
+    if (kind !== "pattern" || error instanceof MetadataLimitExceeded)
+      throw error;
+    await rm(target, { force: true });
+    budget.remaining += copied;
+    return false;
   } finally {
     await file.close();
   }
@@ -194,8 +257,9 @@ async function readStatus(
       "info/exclude",
       "--git-path",
       "info/sparse-checkout",
+      "--absolute-git-dir",
+      "--git-common-dir",
       "--show-object-format",
-      "--shared-index-path",
     ),
     run("config", "--null", "--get-regexp", statusSettings.source),
     runWithEnv(
@@ -207,16 +271,21 @@ async function readStatus(
       "core.excludesFile",
     ),
   ]);
-  const [objects, index, exclude, sparse, format, shared, ...rest] =
-    paths.stdout.trimEnd().split("\n");
+  const [
+    objects,
+    index,
+    exclude,
+    sparse,
+    checkoutGit,
+    commonGit,
+    format,
+    ...rest
+  ] = paths.stdout.trimEnd().split("\n");
   const [excludesPath, terminator, ...extraExcludes] =
     excludes.stdout.split("\0");
   if (
     paths.code !== 0 ||
     (settings.code !== 0 && !(settings.code === 1 && !settings.stdout)) ||
-    !(excludes.code === 0
-      ? terminator === "" && !extraExcludes.length
-      : excludes.code === 1 && !excludes.stdout) ||
     !objects ||
     !isAbsolute(objects) ||
     !index ||
@@ -225,10 +294,11 @@ async function readStatus(
     !isAbsolute(exclude) ||
     !sparse ||
     !isAbsolute(sparse) ||
+    !checkoutGit ||
+    !isAbsolute(checkoutGit) ||
+    !commonGit ||
+    !isAbsolute(commonGit) ||
     (format !== "sha1" && format !== "sha256") ||
-    (shared &&
-      (!isAbsolute(shared) ||
-        !/^sharedindex\.[a-f0-9]+$/.test(basename(shared)))) ||
     rest.length
   )
     throw new Error("Git metadata unavailable");
@@ -237,28 +307,50 @@ async function readStatus(
   // Never copy executable settings, hooks, info/attributes or a commondir.
   const gitDir = await mkdtemp(join(tmpdir(), "stargate-git-status-"));
   try {
-    const configuredExcludes = excludesPath && resolve(directory, excludesPath);
+    const configuredExcludes =
+      excludes.code === 0 &&
+      terminator === "" &&
+      !extraExcludes.length &&
+      excludesPath &&
+      resolve(directory, excludesPath);
     const copiedExcludes = "info/configured-excludes";
     const budget = { remaining: metadataLimit };
-    const snapshot = (
+    const snapshotIndex = (
       source: string,
       target: string,
-      limit: number,
-      optional = true,
+      kind: "primary" | "shared",
     ) =>
       copyStatusFile(
-        source,
+        () => open(source, metadataFlags),
         join(gitDir, target),
         signal,
-        limit,
+        indexLimit,
         budget,
-        optional,
+        kind,
       );
     await Promise.all([
       mkdir(join(gitDir, "objects", "info"), { recursive: true }),
       mkdir(join(gitDir, "info")),
       mkdir(join(gitDir, "refs")),
     ]);
+    if (await snapshotIndex(index, "index", "primary")) {
+      signal.throwIfAborted();
+      const shared = sharedIndexName(join(gitDir, "index"), format);
+      if (shared)
+        await snapshotIndex(join(checkoutGit, shared), shared, "shared");
+    }
+    const roots = await Promise.all(
+      [directory, checkoutGit, commonGit].map((path) => realpath(path)),
+    );
+    const snapshotPattern = (source: string, target: string) =>
+      copyStatusFile(
+        () => openPattern(source, roots),
+        join(gitDir, target),
+        signal,
+        patternsLimit,
+        budget,
+        "pattern",
+      );
     const files = await Promise.allSettled([
       writeFile(
         join(gitDir, "HEAD"),
@@ -271,13 +363,9 @@ async function readStatus(
           : "[core]\nrepositoryformatversion = 0\n",
       ),
       writeFile(join(gitDir, "objects", "info", "alternates"), `${objects}\n`),
-      snapshot(index, "index", indexLimit),
-      snapshot(exclude, "info/exclude", patternsLimit),
-      snapshot(sparse, "info/sparse-checkout", patternsLimit),
-      shared && snapshot(shared, basename(shared), indexLimit, false),
-      configuredExcludes &&
-        configuredExcludes !== "/dev/null" &&
-        snapshot(configuredExcludes, copiedExcludes, patternsLimit),
+      snapshotPattern(exclude, "info/exclude"),
+      snapshotPattern(sparse, "info/sparse-checkout"),
+      configuredExcludes && snapshotPattern(configuredExcludes, copiedExcludes),
     ]);
     for (const file of files) if (file.status === "rejected") throw file.reason;
     return await runWithEnv(
@@ -363,8 +451,7 @@ async function inspect(
     try {
       if (!(await stat(directory)).isDirectory()) return null;
     } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT")
-        return null;
+      if (fileError(error) === "ENOENT") return null;
       throw error;
     }
     const root = await run(
@@ -374,9 +461,8 @@ async function inspect(
     );
     if (root.code !== 0 || root.stdout !== "true\n\n")
       throw new Error("Checkout root unavailable");
-    const [branch, head, fullHead, upstream] = await Promise.all([
+    const [branch, fullHead, upstream] = await Promise.all([
       run("symbolic-ref", "-q", "HEAD"),
-      run("rev-parse", "--short", "--verify", "HEAD"),
       run("rev-parse", "--verify", "HEAD"),
       run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"),
     ]);
@@ -402,18 +488,20 @@ async function inspect(
     const branchName = branchRef.startsWith("refs/heads/")
       ? safeRef(branchRef.slice("refs/heads/".length))
       : null;
-    const [remote, pushRepository] = await Promise.all([
+    const [remote, pushRepository, head] = await Promise.all([
       run("remote", "get-url", "origin"),
       branchName && oid ? readPushRepository(branchName, run) : null,
+      oid ? run("rev-parse", "--short", "--verify", oid) : null,
     ]);
+    const abbreviation = head?.code === 0 ? head.stdout.trim() : "";
     let counts: ReturnType<typeof parseAheadBehind> = null;
-    if (baseRef && head.code === 0) {
+    if (baseRef && oid) {
       const result = await run(
         "rev-list",
         "--left-right",
         "--count",
         "--end-of-options",
-        `${baseRef}...HEAD`,
+        `${baseRef}...${oid}`,
         "--",
       );
       counts = result.code === 0 ? parseAheadBehind(result.stdout) : null;
@@ -423,8 +511,8 @@ async function inspect(
       ...state,
       branch: branchName,
       head:
-        head.code === 0 && /^[a-f0-9]{4,64}$/.test(head.stdout.trim())
-          ? head.stdout.trim()
+        oid?.startsWith(abbreviation) && /^[a-f0-9]{4,64}$/.test(abbreviation)
+          ? abbreviation
           : null,
       base: baseRef ? safeRef(baseRef) : null,
       ...counts,
