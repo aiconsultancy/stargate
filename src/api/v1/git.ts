@@ -670,9 +670,8 @@ export function createGitReader(
   dataDirectory?: string,
   temporaryDirectory: () => string = tmpdir,
   // Cache expiry and read timing use a monotonic clock, so a wall-clock change
-  // cannot stretch or shrink cache lifetimes. Tests that inject `now` get it
-  // here too, so one fake clock drives both.
-  monotonic: () => number = now === Date.now ? () => performance.now() : now,
+  // cannot stretch or shrink cache lifetimes. `now` only stamps `checkedAt`.
+  monotonic: () => number = () => performance.now(),
 ) {
   const permits = Semaphore.makeUnsafe(4);
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();

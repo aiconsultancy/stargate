@@ -261,6 +261,9 @@ test("caches an outer Git read timeout for 15 seconds", async () => {
       if (++calls === 1) return held.promise;
       return { code: 1, stdout: "" };
     },
+    undefined,
+    undefined,
+    () => now,
   );
   const signal = new AbortController().signal;
   try {
@@ -317,6 +320,58 @@ test("cache lifetimes follow the monotonic clock, not the wall clock", async () 
   }
 });
 
+test("a read that gets its slot late caches its timeout only briefly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const busy = [0, 1, 2, 3].map(() => Promise.withResolvers<null>());
+  const late = Promise.withResolvers<null>();
+  let mono = 100;
+  let calls = 0;
+  const read = createGitReader(
+    Date.now,
+    async () => {
+      const call = ++calls;
+      if (call <= 4) return busy[call - 1]?.promise ?? null;
+      if (call === 5) return late.promise;
+      return { code: 1, stdout: "" };
+    },
+    undefined,
+    undefined,
+    () => mono,
+  );
+  const signal = new AbortController().signal;
+  try {
+    for (const name of ["busy-0", "busy-1", "busy-2", "busy-3", "late"])
+      await mkdir(join(root, name));
+    const busyReads = [0, 1, 2, 3].map((n) =>
+      read(join(root, `busy-${n}`), signal),
+    );
+    const target = join(root, "late");
+    // Its four-second budget ends at 4100; it gets a slot at 3000, with less
+    // than one two-second read deadline left.
+    const pending = read(target, signal);
+    mono = 3_000;
+    busy[0]?.resolve(null);
+    await busyReads[0];
+    const timedOut = await pending;
+    expect(timedOut).toMatchObject({ error: "Git read timed out." });
+    expect(calls).toBe(5);
+    for (const hold of busy) hold.resolve(null);
+    late.resolve(null);
+    await Promise.all(busyReads);
+    mono += 1_999;
+    expect(await read(target, signal)).toBe(timedOut);
+    // The short lifetime, not the 15-second one, has now passed.
+    mono += 1;
+    expect(await read(target, signal)).toMatchObject({
+      error: "Git state unavailable.",
+    });
+  } finally {
+    for (const hold of busy) hold.resolve(null);
+    late.resolve(null);
+    await rm(root, { recursive: true, force: true });
+  }
+}, 15_000);
+
 test("caches a timeout spent only waiting for a read slot briefly", async () => {
   const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const held = Promise.withResolvers<null>();
@@ -329,6 +384,9 @@ test("caches a timeout spent only waiting for a read slot briefly", async () => 
       if (++calls <= 4) return held.promise;
       return { code: 1, stdout: "" };
     },
+    undefined,
+    undefined,
+    () => now,
   );
   const signal = new AbortController().signal;
   try {
@@ -874,7 +932,13 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
       }),
     );
     let now = Date.now();
-    const read = createGitReader(() => now, readCommand, data);
+    const read = createGitReader(
+      () => now,
+      readCommand,
+      data,
+      undefined,
+      () => now,
+    );
     const reads = checkouts.map((path) =>
       read(path, new AbortController().signal),
     );

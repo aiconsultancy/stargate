@@ -58,7 +58,13 @@ test("reads real Git state, respects the 15-second cache and handles a detached 
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const signal = new AbortController().signal;
   let now = 1_000;
-  const read = createGitReader(() => now);
+  const read = createGitReader(
+    () => now,
+    undefined,
+    undefined,
+    undefined,
+    () => now,
+  );
   const git = (...args: string[]) => {
     const command = Bun.spawnSync(
       [
