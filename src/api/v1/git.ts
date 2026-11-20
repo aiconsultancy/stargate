@@ -672,6 +672,13 @@ export function createGitReader(
 ) {
   const permits = Semaphore.makeUnsafe(4);
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
+  function cacheResult(directory: string, value: V1Git | null) {
+    const at = now();
+    for (const [path, entry] of cache)
+      if (entry.expiresAt <= at) cache.delete(path);
+    cache.set(directory, { expiresAt: at + ttl, value });
+    return value;
+  }
   void runAbortable(
     permits.withPermit(
       abortable(async () => {
@@ -710,10 +717,8 @@ export function createGitReader(
                   dataDirectory,
                   temporaryDirectory,
                 );
-                for (const [path, entry] of cache)
-                  if (entry.expiresAt <= now()) cache.delete(path);
-                cache.set(directory, { expiresAt: now() + ttl, value });
-                reply.resolve(value);
+                deadline.throwIfAborted();
+                reply.resolve(cacheResult(directory, value));
               } catch (error) {
                 reply.reject(error);
               } finally {
@@ -731,7 +736,12 @@ export function createGitReader(
       signal.throwIfAborted();
       if (!(error instanceof DOMException && error.name === "TimeoutError"))
         throw error;
-      return { ...emptyState(now()), error: "Git read timed out." };
+      const saved = cache.get(directory);
+      if (saved && saved.expiresAt > now()) return saved.value;
+      return cacheResult(directory, {
+        ...emptyState(now()),
+        error: "Git read timed out.",
+      });
     }
   };
 }

@@ -250,6 +250,41 @@ test("index inspection runs outside the gateway thread and stops at its deadline
   }
 });
 
+test("caches an outer Git read timeout for 15 seconds", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const held = Promise.withResolvers<null>();
+  let now = 100;
+  let calls = 0;
+  const read = createGitReader(
+    () => now,
+    async () => {
+      if (++calls === 1) return held.promise;
+      return { code: 1, stdout: "" };
+    },
+  );
+  const signal = new AbortController().signal;
+  try {
+    const result = await read(directory, signal);
+    expect(result).toMatchObject({
+      checkedAt: now,
+      error: "Git read timed out.",
+    });
+    held.resolve(null);
+    now += 14_999;
+    expect(await read(directory, signal)).toBe(result);
+    expect(calls).toBe(1);
+    now++;
+    expect(await read(directory, signal)).toMatchObject({
+      checkedAt: now,
+      error: "Git state unavailable.",
+    });
+    expect(calls).toBe(2);
+  } finally {
+    held.resolve(null);
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 10_000);
+
 test.each(["success", "failure"])(
   "stores private index copies under the data directory and cleans up after %s",
   async (outcome) => {
@@ -767,7 +802,8 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
         return path;
       }),
     );
-    const read = createGitReader(Date.now, readCommand, data);
+    let now = Date.now();
+    const read = createGitReader(() => now, readCommand, data);
     const reads = checkouts.map((path) =>
       read(path, new AbortController().signal),
     );
@@ -787,6 +823,10 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
     expect(removing).toBe(4);
     const waiting =
       checkouts[results.findIndex((result) => result?.changedFiles === null)];
+    expect(await read(waiting, AbortSignal.timeout(100))).toMatchObject({
+      error: "Git read timed out.",
+    });
+    now += 15_000;
     await expect(read(waiting, AbortSignal.timeout(100))).rejects.toMatchObject(
       { name: "TimeoutError" },
     );

@@ -141,11 +141,11 @@ The primary and shared indexes each have a 128 MiB limit, and all snapshot
 metadata has a 192 MiB aggregate limit. Snapshot preparation, including
 split-index inspection in a separate process, has a two-second budget before
 the two-second Git status and comparison budget starts. A read, including
-time waiting for a slot, has a four-second ceiling. Cleanup runs in the
-background within the same concurrency limit. Startup removes private
-snapshot directories older than 24 hours. Snapshots use the data directory
-when it is outside the worktree and writable, and the system temporary
-directory otherwise.
+time waiting for a slot, has a four-second ceiling. Timeouts are cached for
+15 seconds per checkout. Cleanup runs in the background within the same
+concurrency limit. Startup removes private snapshot directories older than
+24 hours. Snapshots use the data directory when it is outside the worktree
+and writable, and the system temporary directory otherwise.
 
 Copied ignore files, including `core.excludesFile`, must resolve inside
 the checkout or its Git directories. The 1 MiB limit applies to each copied pattern file.
