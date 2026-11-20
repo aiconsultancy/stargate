@@ -27,7 +27,10 @@ import {
   TranscriptUnavailable,
 } from "../backend-values";
 import { type BackendConfig, secret } from "../config";
-import { fleetCrewStatusSchema } from "../crew/fleet-status";
+import {
+  type FleetCrewStatus,
+  fleetCrewStatusSchema,
+} from "../crew/fleet-status";
 import { isNativeInstructionContext } from "../crew/instruction-context";
 import { crewMessageMetadataKey } from "../crew/message-protocol";
 import { CrewReporting } from "../crew/report-rpc";
@@ -176,6 +179,11 @@ export class OpenCodeBackend implements AgentBackend {
   private fleetStatusRetryAt = 0;
   private fleetStatusFailures = 0;
   private fleetStatusProbeMs = 400;
+  private fleetStatusMetadata?: FleetCrewStatus["metadata"];
+  private fleetStatusMemberMetadata?: {
+    member: string;
+    metadata: FleetCrewStatus["metadata"];
+  };
 
   // Native messages/form IDs are immutable. Recheck their live tool/input state,
   // but do not traverse the entire session twice every second for the same form.
@@ -946,31 +954,45 @@ export class OpenCodeBackend implements AgentBackend {
       const result = fleetCrewStatusSchema.parse(await probe);
       signal.throwIfAborted();
       this.fleetStatusFailures = 0;
+      if (input.member)
+        this.fleetStatusMemberMetadata = {
+          member: input.member,
+          metadata: result.metadata,
+        };
+      else {
+        this.fleetStatusMetadata = result.metadata;
+        delete this.fleetStatusMemberMetadata;
+      }
       return result;
     } catch (error) {
       signal.throwIfAborted();
       const maxProbeMs = 6_400;
-      if (
-        error instanceof DOMException &&
-        error.name === "TimeoutError" &&
-        probeMs < maxProbeMs
-      ) {
+      const timedOut =
+        error instanceof DOMException && error.name === "TimeoutError";
+      if (timedOut && probeMs < maxProbeMs) {
         this.fleetStatusProbeMs = Math.max(
           this.fleetStatusProbeMs,
           Math.min(probeMs * 2, maxProbeMs),
         );
-        return undefined;
+      } else {
+        // Older plugins still serve ordinary status. Probe again after an upgrade.
+        const unsupported =
+          error &&
+          typeof error === "object" &&
+          "type" in error &&
+          error.type === "rpc.method_not_found";
+        if (++this.fleetStatusFailures >= 3 || unsupported) {
+          this.fleetStatusRetryAt = performance.now() + 60_000;
+          this.fleetStatusFailures = 0;
+        }
       }
-      // Older plugins still serve ordinary status. Probe again after an upgrade.
-      const unsupported =
-        error &&
-        typeof error === "object" &&
-        "type" in error &&
-        error.type === "rpc.method_not_found";
-      if (++this.fleetStatusFailures >= 3 || unsupported) {
-        this.fleetStatusRetryAt = performance.now() + 60_000;
-        this.fleetStatusFailures = 0;
-      }
+      const scoped = this.fleetStatusMemberMetadata;
+      const metadata =
+        scoped && scoped.member === input.member
+          ? scoped.metadata
+          : this.fleetStatusMetadata;
+      if (timedOut && metadata)
+        return { status: await this.crewStatus(input, signal), metadata };
       return undefined;
     }
   }

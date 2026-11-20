@@ -419,6 +419,47 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("a timed-out fleet probe keeps checkout metadata with fresh crew status", async () => {
+    const metadata = { projectDirectory: "/fixture", contexts: [] };
+    const held = Promise.withResolvers<void>();
+    let stall = false;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const status = { members: [], total: stall ? 1 : 0, truncated: stall };
+        if (!new URL(request.url).pathname.endsWith("/fleetStatus"))
+          return Response.json({ output: status });
+        if (stall) await held.promise;
+        return Response.json({ output: { status, metadata } });
+      },
+    });
+    const config = Schema.decodeUnknownSync(backendSchema)({
+      type: "opencode",
+      url: server.url.href,
+      directory: "/",
+    });
+    if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+    const backend = new OpenCodeBackend(config);
+    try {
+      expect(await backend.fleetCrewStatus({}, signal)).toMatchObject({
+        status: { total: 0 },
+        metadata,
+      });
+      stall = true;
+      expect(
+        await backend.fleetCrewStatus({}, AbortSignal.timeout(1000)),
+      ).toMatchObject({
+        status: { total: 1 },
+        metadata,
+      });
+    } finally {
+      held.resolve();
+      await backend.close();
+      await server.stop(true);
+    }
+  });
+
   test("OpenCode adapts to a fleet probe slower than its initial budget", async () => {
     const server = Bun.serve({
       hostname: "127.0.0.1",
