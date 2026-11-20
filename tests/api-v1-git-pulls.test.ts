@@ -219,16 +219,53 @@ test("finds the matching PR beyond same-named branches from other forks", async 
     headRepositoryOwner: { login: owner },
     headRepository: { name },
   });
+  const otherForks = Array.from({ length: 50 }, (_, index) =>
+    candidate(99 - index, "other", "renamed"),
+  );
+  const details: string[] = [];
   const pull = createPullReader(Date.now, {
     which: () => "/fixture/gh",
     run: async (args) => {
       if (args[1] === "auth") return { code: 0, stdout: "" };
+      if (args[2] === "view") {
+        const number = args[3] ?? "";
+        details.push(number);
+        expect(args.join(" ")).toContain("statusCheckRollup");
+        return {
+          code: 0,
+          stdout: JSON.stringify(
+            candidate(Number(number), "Contributor", "Renamed"),
+          ),
+        };
+      }
       const rows = [
-        candidate(42, "other", "renamed"),
+        ...otherForks,
         candidate(41, "contributor", "different"),
         candidate(40, "Contributor", "Renamed"),
       ];
-      if (args.at(-1) === "without-a-match") rows.pop();
+      if (args.at(-1)?.endsWith("without-a-match")) rows.pop();
+      if (args[1] === "api") {
+        expect(args.join(" ")).not.toContain("statusCheckRollup");
+        const head = args.at(-1);
+        const owner = head?.split(":")[0]?.slice("head=".length);
+        return {
+          code: 0,
+          stdout: JSON.stringify(
+            rows
+              .flatMap((row) =>
+                row.headRepositoryOwner.login.toLowerCase() === owner
+                  ? [
+                      {
+                        number: row.number,
+                        repository: `${row.headRepositoryOwner.login}/${row.headRepository.name}`,
+                      },
+                    ]
+                  : [],
+              )
+              .slice(0, 50),
+          ),
+        };
+      }
       return {
         code: 0,
         stdout: JSON.stringify(
@@ -246,6 +283,7 @@ test("finds the matching PR beyond same-named branches from other forks", async 
   expect(
     pull("example/project", "without-a-match", "contributor/renamed"),
   ).toBeNull();
+  expect(details).toEqual(["40"]);
 });
 
 test("PR refreshes deduplicate work, keep the last result on failure and clear it on confirmed absence", async () => {
@@ -265,7 +303,19 @@ test("PR refreshes deduplicate work, keep the last result on failure and clear i
         authChecks++;
         return { code: authCode, stdout: "" };
       }
-      const branch = command.at(-1);
+      if (command[2] === "view")
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            number: 1,
+            url: "https://github.com/example/project/pull/1",
+            title: "Example",
+            state: "OPEN",
+            isDraft: false,
+            statusCheckRollup: [],
+          }),
+        };
+      const branch = command.at(-1)?.replace(/^head=example:/, "");
       if (!branch) throw new Error("Missing branch");
       const response = Promise.withResolvers<Response>();
       views.set(branch, response);
@@ -282,18 +332,7 @@ test("PR refreshes deduplicate work, keep the last result on failure and clear i
   expect([...views.keys()]).toEqual(["first", "second"]);
   views.get("first")?.resolve({
     code: 0,
-    stdout: JSON.stringify([
-      {
-        number: 1,
-        url: "https://github.com/example/project/pull/1",
-        title: "Example",
-        state: "OPEN",
-        isDraft: false,
-        statusCheckRollup: [],
-        headRepositoryOwner: { login: "example" },
-        headRepository: { name: "project" },
-      },
-    ]),
+    stdout: JSON.stringify([{ number: 1, repository: "example/project" }]),
   });
   views.get("second")?.resolve({ code: 1, stdout: "" });
   await Bun.sleep(0);
@@ -342,21 +381,22 @@ test.each(["123", "#123"])(
             code: 0,
             stdout: JSON.stringify({
               ...pr,
-              number: 123,
-              url: "https://github.com/example/project/pull/123",
+              number: Number(command[3]),
+              url: `https://github.com/example/project/pull/${command[3]}`,
             }),
           };
-        const head = command.indexOf("--head");
-        const state = command.indexOf("--state");
         if (
-          command[2] !== "list" ||
-          head < 0 ||
-          command[head + 1] !== branch ||
-          state < 0 ||
-          command[state + 1] !== "all"
+          command[1] !== "api" ||
+          !command.includes(`head=example:${branch}`) ||
+          !command.includes("state=all")
         )
           return { code: 1, stdout: "" };
-        return { code: 0, stdout: JSON.stringify([pr]) };
+        return {
+          code: 0,
+          stdout: JSON.stringify([
+            { number: 42, repository: "example/project" },
+          ]),
+        };
       },
     });
     pull("example/project", branch);

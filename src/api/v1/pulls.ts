@@ -6,6 +6,7 @@ import type { V1PullRequest } from "./types";
 const ttl = 60_000;
 const timeout = 4_000;
 const candidateLimit = 50;
+const pullNumber = Schema.Int.check(Schema.isGreaterThan(0));
 const checks = Schema.Struct({
   status: Schema.optional(Schema.String),
   state: Schema.optional(Schema.String),
@@ -13,7 +14,7 @@ const checks = Schema.Struct({
 });
 const decode = Schema.decodeUnknownSync(
   Schema.Struct({
-    number: Schema.Int.check(Schema.isGreaterThan(0)),
+    number: pullNumber,
     url: Schema.String,
     title: Schema.String,
     state: Schema.Literals(["OPEN", "MERGED", "CLOSED"]),
@@ -21,10 +22,10 @@ const decode = Schema.decodeUnknownSync(
     statusCheckRollup: Schema.NullOr(Schema.Array(checks)),
   }),
 );
-const decodeHead = Schema.decodeUnknownOption(
+const decodeCandidate = Schema.decodeUnknownOption(
   Schema.Struct({
-    headRepository: Schema.NullOr(Schema.Struct({ name: Schema.String })),
-    headRepositoryOwner: Schema.NullOr(Schema.Struct({ login: Schema.String })),
+    number: pullNumber,
+    repository: Schema.NullOr(Schema.String),
   }),
 );
 const failures = new Set([
@@ -126,21 +127,22 @@ export function createPullReader(
       auth = { expiresAt: now() + ttl, executable: authenticate() };
     const executable = await auth.executable;
     if (!executable) return undefined;
+    const owner = headRepository.slice(0, headRepository.indexOf("/"));
     const result = await run(
       [
         executable,
-        "pr",
-        "list",
-        "--repo",
-        repository,
-        "--state",
-        "all",
-        "--limit",
-        String(candidateLimit),
-        "--json",
-        "number,url,title,state,isDraft,statusCheckRollup,headRepository,headRepositoryOwner",
-        "--head",
-        branch,
+        "api",
+        `repos/${repository}/pulls`,
+        "--method",
+        "GET",
+        "--jq",
+        "map({number, repository: .head.repo.full_name})",
+        "--raw-field",
+        "state=all",
+        "--raw-field",
+        `per_page=${candidateLimit}`,
+        "--raw-field",
+        `head=${owner}:${branch}`,
       ],
       { env, timeout },
     );
@@ -150,18 +152,29 @@ export function createPullReader(
       if (!Array.isArray(list)) return undefined;
       let incomplete = list.length >= candidateLimit;
       for (const entry of list) {
-        const head = decodeHead(entry);
-        if (head._tag === "None") {
+        const candidate = decodeCandidate(entry);
+        if (candidate._tag === "None") {
           incomplete = true;
           continue;
         }
-        const { headRepository: repo, headRepositoryOwner: owner } = head.value;
-        if (!repo || !owner) continue;
-        if (`${owner.login}/${repo.name}`.toLowerCase() !== headRepository)
-          continue;
-        const pr = mapPullRequest(entry, repository);
-        if (pr) return pr;
-        incomplete = true;
+        const { number, repository: head } = candidate.value;
+        if (head?.toLowerCase() !== headRepository) continue;
+        const details = await run(
+          [
+            executable,
+            "pr",
+            "view",
+            String(number),
+            "--repo",
+            repository,
+            "--json",
+            "number,url,title,state,isDraft,statusCheckRollup",
+          ],
+          { env, timeout },
+        );
+        if (details?.code !== 0) return undefined;
+        const pr = mapPullRequest(JSON.parse(details.stdout), repository);
+        return pr?.number === number ? pr : undefined;
       }
       return incomplete ? undefined : null;
     } catch {
