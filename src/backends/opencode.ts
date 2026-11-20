@@ -1224,9 +1224,8 @@ export class OpenCodeBackend implements AgentBackend {
     onProgress?: (progress: TurnProgress) => void,
   ) {
     checkAttachments(files);
-    this.inputs.delete(sessionId);
-    signal.throwIfAborted();
     if (
+      !signal.aborted &&
       context?.source.transport === "irc" &&
       context.source.authority === "human" &&
       !context.source.sender
@@ -1238,6 +1237,8 @@ export class OpenCodeBackend implements AgentBackend {
       signal.throwIfAborted();
       if (waiting) throw new PendingBackendQuestion();
     }
+    this.inputs.delete(sessionId);
+    signal.throwIfAborted();
     const stop = new AbortController();
     const timer = new AbortController();
     const connected = Promise.withResolvers<void>();
@@ -1251,10 +1252,7 @@ export class OpenCodeBackend implements AgentBackend {
     let admitted = false;
     const currentPhase = (): Phase => phase;
     const messages = new Map<string, Map<number, string>>();
-    const ownership = new Map<
-      string,
-      "checking" | "owned" | "foreign" | { retryAt: number }
-    >();
+    const ownership = new Map<string, "checking" | "owned" | "excluded">();
     const checks = new Set<Promise<void>>();
     const pendingProgress = new Map<
       string,
@@ -1338,7 +1336,7 @@ export class OpenCodeBackend implements AgentBackend {
             }
             const { assistantMessageID } = event.data;
             const status = ownership.get(assistantMessageID);
-            if (status === "foreign") continue;
+            if (status === "excluded") continue;
             if (
               onProgress &&
               event.type !== "session.text.delta" &&
@@ -1374,10 +1372,7 @@ export class OpenCodeBackend implements AgentBackend {
             if (status === "owned") {
               reportOwned(assistantMessageID);
               publish();
-            } else if (
-              status === undefined ||
-              (typeof status === "object" && Date.now() >= status.retryAt)
-            ) {
+            } else if (status === undefined) {
               ownership.set(assistantMessageID, "checking");
               // Events identify the session and assistant, not its input.
               // Only transcript placement proves this is not a queued prior turn.
@@ -1391,27 +1386,18 @@ export class OpenCodeBackend implements AgentBackend {
                 ).catch(() => undefined);
               const check = readOwner()
                 .then(async (owned) => {
-                  if (
-                    owned !== undefined ||
-                    status !== undefined ||
-                    !onProgress
-                  )
-                    return owned;
+                  // Retry one early/unreadable observation. Previous turns
+                  // cannot trigger a new history walk on each streamed delta.
+                  if (owned !== undefined || !onProgress) return owned;
                   await delay(ownershipRetryMs, undefined, {
                     signal: readSignal,
                   });
                   return readOwner();
                 })
                 .then((owned) => {
-                  if (owned === undefined) {
-                    ownership.set(assistantMessageID, {
-                      retryAt: Date.now() + ownershipRetryMs,
-                    });
-                    return;
-                  }
                   ownership.set(
                     assistantMessageID,
-                    owned ? "owned" : "foreign",
+                    owned ? "owned" : "excluded",
                   );
                   if (owned) {
                     if (currentPhase().type !== "settled")

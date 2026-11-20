@@ -1979,6 +1979,7 @@ export class Gateway {
           if (cancellation.signal.aborted || maintenanceFailure.signal.aborted)
             activity?.cancel();
           else if (!shutdown.aborted) activity?.finish();
+          if (error instanceof PendingBackendQuestion) admitted = false;
           silent = false;
           failure = cancellation.signal.aborted
             ? "cancelled"
@@ -2014,18 +2015,13 @@ export class Gateway {
           // A request refused before admission submitted no input and owns no
           // text: reading history for it could assign another source's reply
           // to this thread. Earlier continuations stay with catch-up.
-          if (
-            this.backend.transcript &&
-            session &&
-            (!admitted || failure === "pending-question")
-          )
+          if (this.backend.transcript && session && !admitted)
             this.queueTranscript(this.catchUpKey(job.conversation));
           // Keep public text that settled before the failure; shutdown recovers later.
           if (
             this.backend.transcript &&
             session &&
             admitted &&
-            failure !== "pending-question" &&
             failure !== "interrupted"
           ) {
             transcript = await this.finalTranscript(
