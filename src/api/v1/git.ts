@@ -9,8 +9,8 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, isAbsolute, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Semaphore } from "effect";
 import { containsCredential } from "../../credentials";
@@ -20,6 +20,12 @@ import type { V1Git } from "./types";
 
 const ttl = 15_000;
 const timeout = 2_000;
+const mib = 1024 * 1024;
+const indexLimit = 128 * mib;
+const patternsLimit = mib;
+const metadataLimit = 192 * mib;
+
+class MetadataLimitExceeded extends Error {}
 
 export function githubRepository(remote: string): string | null {
   const scp = /^(?:[^@/:\s]+@)?github\.com:([^\s]+)$/i.exec(remote);
@@ -88,8 +94,11 @@ async function copyStatusFile(
   source: string,
   target: string,
   signal: AbortSignal,
+  limit: number,
+  budget: { remaining: number },
   optional = false,
 ) {
+  signal.throwIfAborted();
   const file = await open(
     source,
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
@@ -107,9 +116,23 @@ async function copyStatusFile(
   try {
     const metadata = await file.stat();
     if (!metadata.isFile()) throw new Error("Git metadata unavailable");
+    if (metadata.size > limit) throw new MetadataLimitExceeded();
+    // Larger blocks avoid a read and write round trip for each 64 KiB of index.
+    const highWaterMark = limit === indexLimit ? mib : 64 * 1024;
     await pipeline(
-      file.createReadStream({ autoClose: false }),
-      createWriteStream(target),
+      file.createReadStream({ autoClose: false, highWaterMark }),
+      async function* (chunks: AsyncIterable<Buffer>) {
+        let remaining = limit;
+        for await (const chunk of chunks) {
+          signal.throwIfAborted();
+          remaining -= chunk.byteLength;
+          budget.remaining -= chunk.byteLength;
+          if (remaining < 0 || budget.remaining < 0)
+            throw new MetadataLimitExceeded();
+          yield chunk;
+        }
+      },
+      createWriteStream(target, { highWaterMark }),
       { signal },
     );
     // Git uses the index mtime to decide which same-timestamp files to rehash.
@@ -159,7 +182,7 @@ async function readStatus(
   run: RunGit,
   runWithEnv: (env: NodeJS.ProcessEnv, ...args: string[]) => ReturnType<RunGit>,
 ) {
-  const [paths, settings] = await Promise.all([
+  const [paths, settings, excludes] = await Promise.all([
     run(
       "rev-parse",
       "--path-format=absolute",
@@ -175,12 +198,25 @@ async function readStatus(
       "--shared-index-path",
     ),
     run("config", "--null", "--get-regexp", statusSettings.source),
+    runWithEnv(
+      { HOME: homedir() },
+      "config",
+      "--null",
+      "--path",
+      "--get",
+      "core.excludesFile",
+    ),
   ]);
   const [objects, index, exclude, sparse, format, shared, ...rest] =
     paths.stdout.trimEnd().split("\n");
+  const [excludesPath, terminator, ...extraExcludes] =
+    excludes.stdout.split("\0");
   if (
     paths.code !== 0 ||
     (settings.code !== 0 && !(settings.code === 1 && !settings.stdout)) ||
+    !(excludes.code === 0
+      ? terminator === "" && !extraExcludes.length
+      : excludes.code === 1 && !excludes.stdout) ||
     !objects ||
     !isAbsolute(objects) ||
     !index ||
@@ -201,6 +237,23 @@ async function readStatus(
   // Never copy executable settings, hooks, info/attributes or a commondir.
   const gitDir = await mkdtemp(join(tmpdir(), "stargate-git-status-"));
   try {
+    const configuredExcludes = excludesPath && resolve(directory, excludesPath);
+    const copiedExcludes = "info/configured-excludes";
+    const budget = { remaining: metadataLimit };
+    const snapshot = (
+      source: string,
+      target: string,
+      limit: number,
+      optional = true,
+    ) =>
+      copyStatusFile(
+        source,
+        join(gitDir, target),
+        signal,
+        limit,
+        budget,
+        optional,
+      );
     await Promise.all([
       mkdir(join(gitDir, "objects", "info"), { recursive: true }),
       mkdir(join(gitDir, "info")),
@@ -218,18 +271,15 @@ async function readStatus(
           : "[core]\nrepositoryformatversion = 0\n",
       ),
       writeFile(join(gitDir, "objects", "info", "alternates"), `${objects}\n`),
-      copyStatusFile(index, join(gitDir, "index"), signal, true),
-      copyStatusFile(exclude, join(gitDir, "info", "exclude"), signal, true),
-      copyStatusFile(
-        sparse,
-        join(gitDir, "info", "sparse-checkout"),
-        signal,
-        true,
-      ),
-      shared && copyStatusFile(shared, join(gitDir, basename(shared)), signal),
+      snapshot(index, "index", indexLimit),
+      snapshot(exclude, "info/exclude", patternsLimit),
+      snapshot(sparse, "info/sparse-checkout", patternsLimit),
+      shared && snapshot(shared, basename(shared), indexLimit, false),
+      configuredExcludes &&
+        configuredExcludes !== "/dev/null" &&
+        snapshot(configuredExcludes, copiedExcludes, patternsLimit),
     ]);
-    if (files.some((file) => file.status === "rejected"))
-      throw new Error("Git metadata unavailable");
+    for (const file of files) if (file.status === "rejected") throw file.reason;
     return await runWithEnv(
       {
         GIT_DIR: gitDir,
@@ -238,6 +288,8 @@ async function readStatus(
         GIT_ATTR_SOURCE: createHash(format).update("tree 0\0").digest("hex"),
       },
       ...statusOptions(settings.stdout),
+      "-c",
+      `core.excludesFile=${join(gitDir, copiedExcludes)}`,
       "-c",
       "core.attributesFile=/dev/null",
       "status",
@@ -382,14 +434,16 @@ async function inspect(
       pushRepository,
       checkedAt: now(),
     };
-  } catch {
+  } catch (error) {
     signal.throwIfAborted();
     return {
       ...state,
       checkedAt: now(),
       error: deadline.aborted
         ? "Git read timed out."
-        : "Git state unavailable.",
+        : error instanceof MetadataLimitExceeded
+          ? "Git metadata exceeds the status read limit."
+          : "Git state unavailable.",
     };
   }
 }
