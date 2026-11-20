@@ -7,6 +7,7 @@
 // is born mode 0660 with no chmod race, and the setgid directory gives it the
 // group that may connect: cloudflared for the Teams socket, fleet for the bus.
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import type { BigIntStats, Stats } from "node:fs";
 import {
   closeSync,
@@ -14,6 +15,7 @@ import {
   fstatSync,
   lstatSync,
   openSync,
+  renameSync,
   unlinkSync,
 } from "node:fs";
 import type { Server } from "node:http";
@@ -58,6 +60,8 @@ const sameFile = (a: SocketIdentity, b: SocketIdentity) =>
 // signal stops a start in progress. uid, umask, connectTo, lockWaitMs and
 // lockCommand are overridable only so tests can exercise the checks.
 export type Ownership = {
+  /** Private API opt-in. Existing group sockets retain mode 0660. */
+  mode?: 0o600;
   uid?: number;
   umask?: number;
   connectTo?: (path: string) => Socket;
@@ -156,6 +160,8 @@ export function checkPrivateDirectory(
       `socket directory ${dir} is writable by its group or by others (mode ${(stats.mode & 0o7777).toString(8)})`,
     );
   }
+  if (options.mode === 0o600 && (stats.mode & 0o7777) !== 0o700)
+    throw new Error(`private socket directory ${dir} must have mode 0700`);
 }
 
 // Whoever can write a directory can rename what is in it, so anyone able to write
@@ -445,16 +451,40 @@ async function checkAndBind(
   // Nothing yields between this check and the bind, because listenNow binds
   // synchronously (see there).
   ensureStillHeld(lock, path, "binding");
-  await listenNow(server, path, options.umask ?? SOCKET_UMASK);
-  // Losing the lock from here on needs nothing: the socket is bound and live, so a
-  // starter that takes the lock next finds it served and leaves it alone.
-  const stats = lstatSync(path, { bigint: true });
-  const mode = Number(stats.mode) & 0o777;
-  if (!stats.isSocket() || mode !== SOCKET_MODE) {
+  // libuv unlinks its original bind path on native close, without checking
+  // identity. Publish a private socket by rename so native close cannot remove
+  // a successor at the public path. Explicit cleanup still checks identity.
+  const bindPath =
+    options.mode === 0o600
+      ? resolve(dirname(path), `.${randomBytes(3).toString("hex")}`)
+      : path;
+  const mode = options.mode ?? SOCKET_MODE;
+  await listenNow(
+    server,
+    bindPath,
+    options.umask ?? (options.mode === 0o600 ? 0o177 : SOCKET_UMASK),
+  );
+  // Group mode is live at its final path. Private mode must still check the
+  // startup lock before publishing its bound socket.
+  let stats = lstatSync(bindPath, { bigint: true });
+  const actualMode = Number(stats.mode) & 0o777;
+  if (!stats.isSocket() || actualMode !== mode) {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     throw new Error(
-      `${path} was created with mode ${mode.toString(8)}, not ${SOCKET_MODE.toString(8)}`,
+      `${path} was created with mode ${actualMode.toString(8)}, not ${mode.toString(8)}`,
     );
+  }
+  if (bindPath !== path) {
+    try {
+      ensureStillHeld(lock, path, "publishing the private socket");
+      if (lstatSocketOrUndefined(path))
+        throw new SocketBusyError(`${path} was replaced before publication`);
+      renameSync(bindPath, path);
+      stats = lstatSync(path, { bigint: true });
+    } catch (error) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw error;
+    }
   }
   return identityOf(stats);
 }

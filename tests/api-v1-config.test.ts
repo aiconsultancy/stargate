@@ -134,6 +134,16 @@ test("Fleet API settings are restart-only", () => {
   expect(restartRequired(on, changed)).toEqual(["api.listen"]);
 });
 
+test("Unix API mode is an explicit exclusive opt-in without an enabled alias", () => {
+  const api = { listen: "unix", allowedNetworks: ["127.0.0.1/32"] };
+  expect(decodeSettings(configSchema, { ...example, api }).api).toEqual(api);
+  for (const extra of [{ enabled: true }, { socket: "/other.sock" }]) {
+    expect(() =>
+      decodeSettings(configSchema, { ...example, api: { ...api, ...extra } }),
+    ).toThrow();
+  }
+});
+
 test("origin wildcards match exactly one ASCII label", () => {
   const allows = originMatcher([
     ...defaultCorsOrigins,
