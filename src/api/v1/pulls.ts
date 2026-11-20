@@ -5,6 +5,8 @@ import type { V1PullRequest } from "./types";
 
 const ttl = 60_000;
 const timeout = 4_000;
+const candidateLimit = 50;
+const pullNumber = Schema.Int.check(Schema.isGreaterThan(0));
 const checks = Schema.Struct({
   status: Schema.optional(Schema.String),
   state: Schema.optional(Schema.String),
@@ -12,12 +14,25 @@ const checks = Schema.Struct({
 });
 const decode = Schema.decodeUnknownSync(
   Schema.Struct({
-    number: Schema.Int.check(Schema.isGreaterThan(0)),
+    number: pullNumber,
     url: Schema.String,
     title: Schema.String,
     state: Schema.Literals(["OPEN", "MERGED", "CLOSED"]),
     isDraft: Schema.Boolean,
     statusCheckRollup: Schema.NullOr(Schema.Array(checks)),
+  }),
+);
+const decodeCandidate = Schema.decodeUnknownOption(
+  Schema.Struct({
+    number: pullNumber,
+    repository: Schema.NullOr(Schema.String),
+  }),
+);
+const decodeHead = Schema.decodeUnknownSync(
+  Schema.Struct({
+    headRefName: Schema.String,
+    headRepository: Schema.Struct({ name: Schema.String }),
+    headRepositoryOwner: Schema.Struct({ login: Schema.String }),
   }),
 );
 const failures = new Set([
@@ -115,21 +130,22 @@ export function createPullReader(
       auth = { expiresAt: now() + ttl, executable: authenticate() };
     const executable = await auth.executable;
     if (!executable) return undefined;
+    const owner = repository.slice(0, repository.indexOf("/"));
     const result = await run(
       [
         executable,
-        "pr",
-        "list",
-        "--repo",
-        repository,
-        "--state",
-        "all",
-        "--limit",
-        "1",
-        "--json",
-        "number,url,title,state,isDraft,statusCheckRollup",
-        "--head",
-        branch,
+        "api",
+        `repos/${repository}/pulls`,
+        "--method",
+        "GET",
+        "--jq",
+        "map({number, repository: .head.repo.full_name})",
+        "--raw-field",
+        "state=all",
+        "--raw-field",
+        `per_page=${candidateLimit}`,
+        "--raw-field",
+        `head=${owner}:${branch}`,
       ],
       { env, timeout },
     );
@@ -137,15 +153,50 @@ export function createPullReader(
     try {
       const list: unknown = JSON.parse(result.stdout);
       if (!Array.isArray(list)) return undefined;
-      if (!list.length) return null;
-      return mapPullRequest(list[0], repository) ?? undefined;
+      let incomplete = list.length >= candidateLimit;
+      for (const entry of list) {
+        const candidate = decodeCandidate(entry);
+        if (candidate._tag === "None") {
+          incomplete = true;
+          continue;
+        }
+        const { number, repository: head } = candidate.value;
+        if (head?.toLowerCase() !== repository) continue;
+        const details = await run(
+          [
+            executable,
+            "pr",
+            "view",
+            String(number),
+            "--repo",
+            repository,
+            "--json",
+            "number,url,title,state,isDraft,statusCheckRollup,headRefName,headRepository,headRepositoryOwner",
+          ],
+          { env, timeout },
+        );
+        if (details?.code !== 0) return undefined;
+        const input: unknown = JSON.parse(details.stdout);
+        const { headRefName, headRepository, headRepositoryOwner } =
+          decodeHead(input);
+        if (
+          headRefName !== branch ||
+          `${headRepositoryOwner.login}/${headRepository.name}`.toLowerCase() !==
+            repository
+        )
+          return undefined;
+        const pr = mapPullRequest(input, repository);
+        return pr?.number === number ? pr : undefined;
+      }
+      return incomplete ? undefined : null;
     } catch {
       return undefined;
     }
   }
 
   return (repository: string, branch: string) => {
-    const key = JSON.stringify([repository.toLowerCase(), branch]);
+    const target = repository.toLowerCase();
+    const key = JSON.stringify([target, branch]);
     const saved = cache.get(key);
     if (
       (!saved || saved.expiresAt <= now()) &&
@@ -153,7 +204,7 @@ export function createPullReader(
       pending.size < 2
     ) {
       pending.add(key);
-      void refresh(repository, branch)
+      void refresh(target, branch)
         .catch(() => undefined)
         .then((value) => {
           // A failed refresh leaves the last settled lookup intact.

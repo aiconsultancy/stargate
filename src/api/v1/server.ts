@@ -1,10 +1,15 @@
 import { timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
 import { join } from "node:path";
+import { readWithDeadline } from "../../read-deadline";
 import type { ApiRoute } from "../route";
-import { startApiServer } from "../server";
+import { apiRequestMs, maxFleetReads, startApiServer } from "../server";
 import type { ApiV1Config } from "./config";
-import { type ApiV1Diff, createEventStreams } from "./events";
+import {
+  type ApiV1Diff,
+  createEventStreams,
+  fleetOverviewReadMs,
+} from "./events";
 import { cacheOpenCodeVersion, type OpenCodeVersionLookup } from "./gateway";
 import { startHostMetrics } from "./host";
 import {
@@ -27,6 +32,7 @@ type Options = {
     opencodeVersion: OpenCodeVersionLookup;
   };
   signal: AbortSignal;
+  fleetReadMs?: number;
   routes?: readonly ApiRoute[];
   /** Compose trusted producer policies against the exact loaded operator token. */
   composeRoutes?: (operatorToken: string) => readonly ApiRoute[];
@@ -102,6 +108,15 @@ export async function startApiV1Server(options: Options) {
     ...(options.composeRoutes?.(operatorToken) ?? []),
   ];
   options.signal.throwIfAborted();
+  const hostRequestMs = options.timing?.requestMs ?? apiRequestMs;
+  const httpReadMs = Math.max(
+    1,
+    hostRequestMs - Math.min(1_000, Math.ceil(hostRequestMs / 10)),
+  );
+  const fleetReadMs = Math.min(
+    options.fleetReadMs ?? fleetOverviewReadMs,
+    httpReadMs,
+  );
   const lifetime = new AbortController();
   const lookupVersion = cacheOpenCodeVersion(
     options.gateway.opencodeVersion,
@@ -109,36 +124,78 @@ export async function startApiV1Server(options: Options) {
   );
   const host = startHostMetrics(dataDirectory);
   const fleetName = config.fleetName ?? hostname();
-  const readFleet: ApiV1Source["fleet"] = async (signal, captureShipRead) => ({
-    ...(await source.fleet(signal, captureShipRead)),
+  const readFleet: ApiV1Source["fleet"] = async (
+    signal,
+    captureShipRead,
+    crewDeadline,
+  ) => ({
+    ...(await source.fleet(signal, captureShipRead, crewDeadline)),
     name: fleetName,
+  });
+  let lastOpenCodeVersion: string | null = null;
+  const fleetWithMetrics = (
+    fleet: V1Snapshot["fleet"],
+    metrics: V1Fleet["host"],
+  ): V1Fleet => ({
+    ...fleet,
+    host: metrics,
+    gateway: {
+      version: options.gateway.version,
+      startedAt: options.gateway.startedAt,
+      bunVersion: Bun.version,
+      opencodeVersion: lastOpenCodeVersion,
+      features: source.gatewayFeatures(),
+    },
   });
   const completeFleet = async (
     fleet: V1Snapshot["fleet"],
-  ): Promise<V1Fleet> => {
-    const [metrics, opencodeVersion] = await Promise.all([
-      host.read(),
-      lookupVersion(),
+    signal: AbortSignal,
+  ) => {
+    signal.throwIfAborted();
+    const [metrics] = await Promise.all([
+      host.read().catch(() => host.snapshot()),
+      lookupVersion().then((version) => {
+        lastOpenCodeVersion = version;
+      }),
     ]);
-    return {
-      ...fleet,
-      host: metrics,
-      gateway: {
-        version: options.gateway.version,
-        startedAt: options.gateway.startedAt,
-        bunVersion: Bun.version,
-        opencodeVersion,
-        features: source.gatewayFeatures(),
-      },
-    };
+    signal.throwIfAborted();
+    return fleetWithMetrics(fleet, metrics);
   };
+  const fallbackFleet = (fleet: V1Snapshot["fleet"]) =>
+    fleetWithMetrics(fleet, host.snapshot());
+  const shipIdentities = source.shipIdentities?.bind(source);
   const events = createEventStreams({
     fleet: readFleet,
+    ...(shipIdentities && { shipIdentities }),
     ship: (id, signal) => source.ship(id, signal),
     diff: options.diff,
     completeFleet,
+    fallbackFleet,
     readHost: host.read,
+    snapshotHost: host.snapshot,
   });
+  const httpReads = new Map<Promise<void>, number>();
+  const abandonedReads = new Set<Promise<void>>();
+  function startHttpRead<T>(
+    signal: AbortSignal,
+    read: (signal: AbortSignal) => Promise<T>,
+  ) {
+    const now = performance.now();
+    // Reserve a bounded number of retries while stuck reads drain.
+    for (const [settled, abandonAt] of httpReads) {
+      if (abandonedReads.size >= maxFleetReads || abandonAt > now) break;
+      httpReads.delete(settled);
+      abandonedReads.add(settled);
+    }
+    if (httpReads.size >= maxFleetReads) return undefined;
+    const { result, settled } = readWithDeadline(signal, undefined, read);
+    httpReads.set(settled, now + 3 * httpReadMs);
+    void settled.then(() => {
+      httpReads.delete(settled);
+      abandonedReads.delete(settled);
+    });
+    return result;
+  }
 
   let server: Awaited<ReturnType<typeof startApiServer>>;
   try {
@@ -194,28 +251,52 @@ export async function startApiV1Server(options: Options) {
             return new Response(stream, { headers });
           }
 
-          const read = signal;
-          let result:
-            | V1Fleet
-            | Awaited<ReturnType<ApiV1Source["ship"] | ApiV1Source["crew"]>>;
+          // The shared host answers 503 and drops the response when its request
+          // deadline passes, so HTTP reads end a margin earlier: the fleet
+          // fallback, or the route's own error, can still be sent.
+          const read = AbortSignal.any([
+            signal,
+            AbortSignal.timeout(
+              pathname === "/api/v1/fleet" ? fleetReadMs : httpReadMs,
+            ),
+          ]);
           if (pathname === "/api/v1/fleet") {
             if (method === "HEAD") return empty(200);
-            const fleet = await readFleet(read);
-            read.throwIfAborted();
-            result = await completeFleet(fleet);
-          } else {
-            const match =
-              /^\/api\/v1\/ships\/([^/]+)(?:\/crew\/([^/]+))?$/.exec(pathname);
-            const id = match?.[1] && routeId(match[1]);
-            if (!id) return empty(404);
-            if (match?.[2]) {
-              const member = routeId(match[2]);
-              if (!member) return empty(404);
-              result = await source.crew(id, member, read);
-            } else {
-              result = await source.ship(id, read);
-            }
+            // Leave room for checkout projection and a response after crew waits.
+            const crewDeadline = AbortSignal.timeout(
+              fleetReadMs - Math.min(5_000, Math.ceil(fleetReadMs / 3)),
+            );
+            let fleet: V1Snapshot["fleet"] | undefined;
+            const overview = startHttpRead(read, async (reading) => {
+              const sample = await readFleet(reading, undefined, crewDeadline);
+              reading.throwIfAborted();
+              fleet = sample;
+              return completeFleet(sample, reading);
+            });
+            if (!overview) return empty(503);
+            const result = await overview.catch((error: unknown) => {
+              signal.throwIfAborted();
+              if (fleet && read.aborted && error === read.reason)
+                return fallbackFleet(fleet);
+              throw error;
+            });
+            signal.throwIfAborted();
+            return Response.json(result, { headers });
           }
+          const match = /^\/api\/v1\/ships\/([^/]+)(?:\/crew\/([^/]+))?$/.exec(
+            pathname,
+          );
+          const id = match?.[1] && routeId(match[1]);
+          if (!id) return empty(404);
+          const member = match?.[2] && routeId(match[2]);
+          if (match?.[2] && !member) return empty(404);
+          const detail = startHttpRead(read, async (reading) =>
+            member
+              ? source.crew(id, member, reading)
+              : source.ship(id, reading),
+          );
+          if (!detail) return empty(503);
+          const result = await detail;
           read.throwIfAborted();
           if (!result) return empty(404);
           return method === "HEAD"
@@ -230,6 +311,7 @@ export async function startApiV1Server(options: Options) {
     lifetime.abort();
     host.stop();
     events.stop();
+    await source.stop?.();
     throw new Error(
       `Cannot start Fleet API listener on ${config.listen}. Check that the private address is assigned and the port is free.`,
     );
@@ -237,12 +319,14 @@ export async function startApiV1Server(options: Options) {
 
   let stopping: Promise<void> | undefined;
   const stop = () => {
-    if (stopping) return stopping;
+    if (stopping !== undefined) return stopping;
     options.signal.removeEventListener("abort", onAbort);
     lifetime.abort();
     host.stop();
     events.stop();
-    stopping = server.stop();
+    stopping = Promise.all([server.stop(), source.stop?.()]).then(
+      () => undefined,
+    );
     return stopping;
   };
   const onAbort = () => {

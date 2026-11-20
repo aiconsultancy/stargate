@@ -1,14 +1,26 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   countChangedPaths,
-  createGitReader,
   githubRepository,
+  createGitReader as makeGitReader,
   parseAheadBehind,
 } from "../src/api/v1/git";
 import { createPullReader, mapPullRequest } from "../src/api/v1/pulls";
+
+// Every reader made here is stopped after the file, so no private temporary
+// snapshot folder is left behind.
+const readers: { stop(): Promise<void> }[] = [];
+function createGitReader(
+  ...args: Parameters<typeof makeGitReader>
+): ReturnType<typeof makeGitReader> {
+  const reader = makeGitReader(...args);
+  readers.push(reader);
+  return reader;
+}
+afterAll(() => Promise.all(readers.map((reader) => reader.stop())));
 
 test("porcelain -z counts rename/copy records once and accepts literal path whitespace", () => {
   expect(countChangedPaths("")).toBe(0);
@@ -58,7 +70,13 @@ test("reads real Git state, respects the 15-second cache and handles a detached 
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const signal = new AbortController().signal;
   let now = 1_000;
-  const read = createGitReader(() => now);
+  const read = createGitReader(
+    () => now,
+    undefined,
+    undefined,
+    undefined,
+    () => now,
+  );
   const git = (...args: string[]) => {
     const command = Bun.spawnSync(
       [
@@ -80,13 +98,15 @@ test("reads real Git state, respects the 15-second cache and handles a detached 
     git("commit", "--allow-empty", "-m", "Initial");
     git("remote", "add", "origin", "git@github.com:example/project.git");
     git("update-ref", "refs/remotes/origin/main", "HEAD");
+    git("update-ref", "refs/remotes/origin/trunk", "HEAD");
     git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
     git("switch", "-c", "work");
+    git("branch", "--set-upstream-to=origin/trunk");
     git("commit", "--allow-empty", "-m", "Feature");
     expect(await read(directory, signal)).toMatchObject({
       branch: "work",
       head: expect.stringMatching(/^[a-f0-9]+$/),
-      base: "origin/main",
+      base: "origin/trunk",
       ahead: 1,
       behind: 0,
       changedFiles: 0,
@@ -165,6 +185,97 @@ test("maps PR state and check rollups and restricts URL and title output", () =>
   expect(parse({ statusCheckRollup: "unexpected" })).toBeNull();
 });
 
+test("looks up only the bound repository and requires an exact head repository", async () => {
+  const commands: string[][] = [];
+  const pull = createPullReader(Date.now, {
+    which: () => "/fixture/gh",
+    run: async (args) => {
+      commands.push(args);
+      if (args[1] === "auth") return { code: 0, stdout: "" };
+      if (args[1] === "api") {
+        const rows = [
+          { number: 42, repository: "another/project" },
+          { number: 41, repository: "Example/renamed" },
+        ];
+        if (args.at(-1) === "head=example:123")
+          rows.push({ number: 40, repository: "Example/project" });
+        return { code: 0, stdout: JSON.stringify(rows) };
+      }
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          number: 40,
+          url: "https://github.com/Example/project/pull/40",
+          title: "Example",
+          state: "OPEN",
+          isDraft: false,
+          statusCheckRollup: [],
+          headRefName: "123",
+          headRepository: { name: "Project" },
+          headRepositoryOwner: { login: "Example" },
+        }),
+      };
+    },
+  });
+  expect(pull("Example/project", "123")).toBeUndefined();
+  expect(pull("Example/project", "absent")).toBeUndefined();
+  await Bun.sleep(0);
+  expect(pull("Example/project", "123")?.number).toBe(40);
+  expect(pull("Example/project", "absent")).toBeNull();
+  expect(commands.find((args) => args[1] === "api")).toEqual(
+    expect.arrayContaining(["repos/example/project/pulls", "head=example:123"]),
+  );
+  expect(commands.filter((args) => args[1] === "pr")).toEqual([
+    expect.arrayContaining([
+      "40",
+      "--repo",
+      "example/project",
+      "number,url,title,state,isDraft,statusCheckRollup,headRefName,headRepository,headRepositoryOwner",
+    ]),
+  ]);
+});
+
+test.each([
+  ["owner", { headRepositoryOwner: { login: "fork" } }],
+  ["repository", { headRepository: { name: "other" } }],
+  ["branch", { headRefName: "Feature" }],
+] as const)(
+  "rejects a mismatched head %s from PR detail",
+  async (_field, mismatch) => {
+    const pull = createPullReader(Date.now, {
+      which: () => "/fixture/gh",
+      run: async (command) => {
+        if (command[1] === "auth") return { code: 0, stdout: "" };
+        if (command[1] === "api")
+          return {
+            code: 0,
+            stdout: JSON.stringify([
+              { number: 1, repository: "example/project" },
+            ]),
+          };
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            number: 1,
+            url: "https://github.com/example/project/pull/1",
+            title: "Example",
+            state: "OPEN",
+            isDraft: false,
+            statusCheckRollup: [],
+            headRepositoryOwner: { login: "example" },
+            headRepository: { name: "project" },
+            headRefName: "feature",
+            ...mismatch,
+          }),
+        };
+      },
+    });
+    pull("example/project", "feature");
+    await Bun.sleep(0);
+    expect(pull("example/project", "feature")).toBeUndefined();
+  },
+);
+
 test("PR refreshes deduplicate work, keep the last result on failure and clear it on confirmed absence", async () => {
   let now = 1_000;
   let authChecks = 0;
@@ -182,7 +293,22 @@ test("PR refreshes deduplicate work, keep the last result on failure and clear i
         authChecks++;
         return { code: authCode, stdout: "" };
       }
-      const branch = command.at(-1);
+      if (command[2] === "view")
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            number: 1,
+            url: "https://github.com/example/project/pull/1",
+            title: "Example",
+            state: "OPEN",
+            isDraft: false,
+            statusCheckRollup: [],
+            headRefName: "first",
+            headRepository: { name: "project" },
+            headRepositoryOwner: { login: "example" },
+          }),
+        };
+      const branch = command.at(-1)?.replace(/^head=example:/, "");
       if (!branch) throw new Error("Missing branch");
       const response = Promise.withResolvers<Response>();
       views.set(branch, response);
@@ -199,16 +325,7 @@ test("PR refreshes deduplicate work, keep the last result on failure and clear i
   expect([...views.keys()]).toEqual(["first", "second"]);
   views.get("first")?.resolve({
     code: 0,
-    stdout: JSON.stringify([
-      {
-        number: 1,
-        url: "https://github.com/example/project/pull/1",
-        title: "Example",
-        state: "OPEN",
-        isDraft: false,
-        statusCheckRollup: [],
-      },
-    ]),
+    stdout: JSON.stringify([{ number: 1, repository: "example/project" }]),
   });
   views.get("second")?.resolve({ code: 1, stdout: "" });
   await Bun.sleep(0);
@@ -245,6 +362,9 @@ test.each(["123", "#123"])(
       state: "OPEN",
       isDraft: false,
       statusCheckRollup: [],
+      headRefName: branch,
+      headRepositoryOwner: { login: "example" },
+      headRepository: { name: "project" },
     };
     const pull = createPullReader(Date.now, {
       which: () => "/fixture/gh",
@@ -255,21 +375,22 @@ test.each(["123", "#123"])(
             code: 0,
             stdout: JSON.stringify({
               ...pr,
-              number: 123,
-              url: "https://github.com/example/project/pull/123",
+              number: Number(command[3]),
+              url: `https://github.com/example/project/pull/${command[3]}`,
             }),
           };
-        const head = command.indexOf("--head");
-        const state = command.indexOf("--state");
         if (
-          command[2] !== "list" ||
-          head < 0 ||
-          command[head + 1] !== branch ||
-          state < 0 ||
-          command[state + 1] !== "all"
+          command[1] !== "api" ||
+          !command.includes(`head=example:${branch}`) ||
+          !command.includes("state=all")
         )
           return { code: 1, stdout: "" };
-        return { code: 0, stdout: JSON.stringify([pr]) };
+        return {
+          code: 0,
+          stdout: JSON.stringify([
+            { number: 42, repository: "example/project" },
+          ]),
+        };
       },
     });
     pull("example/project", branch);

@@ -62,6 +62,23 @@ test("Fleet API bind is limited to supported private literal addresses", () => {
   ).toBeUndefined();
 });
 
+test("Fleet PR bindings require exact absolute paths and GitHub repository names", () => {
+  const config = (pullRequestRepositories: Record<string, string>) =>
+    decodeSettings(configSchema, {
+      ...example,
+      api: { listen: ":8484", pullRequestRepositories },
+    }).api?.pullRequestRepositories;
+  const binding = { "/srv/crew/checkout": "Example/project" };
+  expect(config(binding)).toEqual(binding);
+  for (const invalid of [
+    { "crew/checkout": "example/project" },
+    { "/srv/../checkout": "example/project" },
+    { "/srv/crew/checkout": "https://github.com/example/project" },
+    { "/srv/crew/checkout": "example/.." },
+  ])
+    expect(() => config(invalid)).toThrow();
+});
+
 test("Fleet API rejects CIDRs reaching outside private ranges and unknown config keys", () => {
   const listen = "127.0.0.1:8080";
   for (const cidr of [

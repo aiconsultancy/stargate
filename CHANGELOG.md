@@ -21,6 +21,40 @@
 
 ### Changes
 
+- Isolate Fleet API Git status from checkout configuration and bound primary
+  and shared indexes before Git loads them. Use copy-on-write index snapshots
+  where supported on Linux and give snapshot preparation its own deadline.
+  Recheck HEAD after the ahead/behind comparison. Clean up Git snapshots in
+  the background and sweep stale directories on startup. Report Git state
+  unavailable if the temporary snapshot fallback is inside the checkout.
+  Cache a checkout's own timeout for 15 seconds and a timeout spent mostly
+  waiting for a read slot for one read deadline (two seconds).
+- Look up Fleet pull requests only for checkouts bound to a GitHub repository
+  in `api.pullRequestRepositories`. Require the PR head to belong to the
+  bound repository. Unbound checkouts leave PR state unknown.
+- Keep recent crew samples usable during slow refreshes and wait for the
+  shared crew read when no recent sample is available. Adapt the OpenCode
+  fleet probe deadline for slower captains and back off after repeated failures.
+- Retry stalled Fleet API reads after a hard cap with at most one abandoned
+  read per slot. Serve cached metrics when fleet HTTP enrichment times out and
+  publish fresh host samples when ready within one second, falling back to
+  the latest sample during slower refreshes. Retained ship details
+  report captain unavailability immediately and preserve the last successful
+  crew data and sample time.
+  Availability transitions supersede older detail reads. Recovering ships
+  wait for fresh detail when no successful sample is cached. Replacement
+  backends get independent detail read slots. Retained overviews are marked
+  stale and close event streams on expiry after 75 seconds. Host and heartbeat
+  frames continue while a new overview is pending. Configuration reloads
+  invalidate cached crew samples and keep in-flight reads for unchanged
+  backends, including Fleet HTTP requests. Requests already waiting for crew
+  data continue to wait for the shared read after reload clears their fallback.
+  Event streams discard in-flight overviews when the roster or a ship's
+  backend identity changes.
+- Publish lightweight `ship-sampled` events when only the ship detail
+  timestamp changes. Preserve the observation time when a crew sample is reused.
+- Publish Fleet events when gateway metadata changes, including when the OpenCode
+  version first becomes available.
 - Route admitted people's thumbs up, thumbs down, tick, cross and eyes
   reactions as conversation input, without interpreting their meaning.
   Slack app owners must grant `reactions:read` and `users:read`, and subscribe to

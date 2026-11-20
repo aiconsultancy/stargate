@@ -134,6 +134,20 @@ test("initial snapshot emits nothing and volatile sampling timestamps are ignore
   expect(diffEvents(before, after, at)).toEqual([]);
 });
 
+test("a gateway-only change emits a fleet event", () => {
+  const before = snapshot();
+  const after = {
+    ...before,
+    fleet: {
+      ...before.fleet,
+      gateway: { ...before.fleet.gateway, opencodeVersion: "2.3.2" },
+    },
+  };
+  expect(diffEvents(before, after, at)).toEqual([
+    { type: "fleet", data: after.fleet },
+  ]);
+});
+
 test("fleet summary changes emit a full fleet and ship detail changes emit only their ship", () => {
   const before = snapshot();
   const after = snapshot([context({ observed: true })]);
@@ -348,9 +362,13 @@ test("availability flips emit an event without a member", () => {
   const before = snapshot();
   const after = snapshot();
   after.ships.ship.available = false;
-  const events = diffEvents(before, after, at);
+  const summary = after.fleet.ships[0];
+  if (!summary) throw new Error("Missing summary");
+  summary.available = false;
+  const overview = (sample: V1EventSnapshot) => ({ ...sample, ships: {} });
+  const events = diffEvents(overview(before), overview(after), at);
   expect(events).toEqual([
-    { type: "ship", data: after.ships.ship },
+    { type: "fleet", data: after.fleet },
     {
       type: "activity",
       data: {
@@ -362,8 +380,24 @@ test("availability flips emit an event without a member", () => {
       },
     },
   ]);
-  expect(diffEvents(after, before, at).at(-1)).toMatchObject({
+  const recovery = diffEvents(overview(after), overview(before), at);
+  expect(recovery.at(-1)).toMatchObject({
     type: "activity",
     data: { kind: "availability", text: "Test Ship is available." },
   });
+  expect(diffEvents({ ...after, fleet: before.fleet }, before, at)).toEqual([
+    { type: "ship", data: before.ships.ship },
+  ]);
+});
+
+test("a timestamp-only refresh publishes a lightweight ship sample event", () => {
+  function sample(detailUpdatedAt: number) {
+    const { fleet, ships } = snapshot([context()]);
+    return { fleet, ships: { ship: { ...ships.ship, detailUpdatedAt } } };
+  }
+  const before = sample(at - 1);
+  const after = sample(at);
+  expect(diffEvents(before, after, at)).toEqual([
+    { type: "ship-sampled", data: { id: "ship", detailUpdatedAt: at } },
+  ]);
 });

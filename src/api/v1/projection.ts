@@ -1,5 +1,6 @@
 import { hostname } from "node:os";
 import { Semaphore } from "effect";
+import type { AgentBackend } from "../../backend";
 import { redactCredentials } from "../../credentials";
 import type { FleetCrewStatus } from "../../crew/fleet-status";
 import {
@@ -12,6 +13,7 @@ import { dashboardCrewSummary } from "../../dashboard-projection";
 import type { DashboardFleetSource } from "../../dashboard-source";
 import { abortable, runAbortable } from "../../effect";
 import { isLoopbackHost } from "../../loopback";
+import { backendFingerprint } from "../../routing";
 import { HISTORY_PAGE, type HistorySession } from "../../session-history";
 import {
   type ApiV1Config,
@@ -29,6 +31,7 @@ import {
   type V1CrewContext,
   type V1CrewMember,
   type V1Fleet,
+  type V1Git,
   type V1Ship,
   type V1Subagent,
   type V1Task,
@@ -43,7 +46,13 @@ export type ApiV1Deps = {
   /** Loaded settings, including any committed live reload. */
   config: () => ApiV1Config;
   now?: () => number;
-  git?: ReturnType<typeof createGitReader>;
+  dataDirectory?: string;
+  git?: ((
+    directory: string | undefined,
+    signal: AbortSignal,
+  ) => Promise<V1Git | null>) & {
+    stop?(): Promise<void>;
+  };
   pullRequest?: ReturnType<typeof createPullReader>;
 };
 
@@ -237,11 +246,13 @@ function timeState(
 export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   const { dashboard } = deps;
   const now = deps.now ?? Date.now;
-  const git = deps.git ?? createGitReader(now);
+  const git = deps.git ?? createGitReader(now, undefined, deps.dataDirectory);
   const pullRequest = deps.pullRequest ?? createPullReader(now);
   const captains = new Map<string, Timing>();
   const members = new Map<string, Timing>();
   const childReads = Semaphore.makeUnsafe(4);
+  const backendIdentities = new WeakMap<AgentBackend, number>();
+  let nextBackendIdentity = 0;
 
   function captain(
     registration: Registration,
@@ -444,6 +455,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     signal.throwIfAborted();
     if (!snapshot) return undefined;
     const { id } = registration.config;
+    const repositories = deps.config().api?.pullRequestRepositories;
     const { view, metadata } = snapshot;
     const at = view.generatedAt;
     const text = checkoutText(metadata);
@@ -473,9 +485,10 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
                     )?.directory
                   : undefined;
               const state = await git(path, signal);
+              const repository = path && repositories?.[path];
               const pr =
-                state?.repository && state.branch && !state.error
-                  ? pullRequest(state.repository, state.branch)
+                repository && state?.branch && state.head && !state.error
+                  ? pullRequest(repository, state.branch)
                   : undefined;
               return {
                 ...context,
@@ -518,17 +531,50 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       view.crewError,
       metadata,
     );
-    return { ...summary, crewMembers };
+    return {
+      ...summary,
+      crewMembers,
+      ...(snapshot?.crewObservedAt !== undefined
+        ? { detailUpdatedAt: snapshot.crewObservedAt }
+        : {}),
+    };
   }
 
   return {
-    async fleet(signal, captureShipRead) {
+    async stop() {
+      await git.stop?.();
+    },
+    shipIdentities() {
+      const identities = new Map<string, string>();
+      for (const [id, registration] of registrations(deps.config())) {
+        if (role(registration) === "rear_admiral") continue;
+        const { backend } = registration.config;
+        const instance = dashboard.fleetBackend(id);
+        let identity = instance && backendIdentities.get(instance);
+        if (instance && identity === undefined) {
+          identity = ++nextBackendIdentity;
+          backendIdentities.set(instance, identity);
+        }
+        identities.set(
+          id,
+          JSON.stringify([
+            registration.kind,
+            backendFingerprint(registration.config),
+            backend.type === "opencode" ? backend.sessionID : undefined,
+            identity,
+          ]),
+        );
+      }
+      return identities;
+    },
+    async fleet(signal, captureShipRead, crewDeadline) {
       signal.throwIfAborted();
       const config = deps.config();
       const configured = registrations(config);
       const fleet = await dashboard.fleetWithCrew(
         signal,
         new Set(configured.keys()),
+        crewDeadline,
       );
       signal.throwIfAborted();
       let admiral: V1Captain | null = null;
