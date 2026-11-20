@@ -6,6 +6,7 @@ import {
   mkdtemp,
   open,
   readdir,
+  realpath,
   rm,
   stat,
   symlink,
@@ -283,7 +284,7 @@ test.each(["success", "failure"])(
       expect(result?.error).toBe(
         outcome === "failure" ? "Git state unavailable." : undefined,
       );
-      expect(parent).toBe(dataDirectory);
+      expect(parent).toBe(await realpath(dataDirectory));
       expect(mode).toBe(0o700);
       await waitForRemoval(dataDirectory);
       expect(await readdir(dataDirectory)).toEqual([]);
@@ -330,17 +331,24 @@ test("a temporary root reached through a symlink is checked and used canonically
         () => link,
       )(directory, AbortSignal.timeout(3000)),
     ).toMatchObject({ changedFiles: null, error: "Git state unavailable." });
-    // Points outside the checkout: the read works.
+    // Points outside the checkout: the read works, and Git gets a snapshot under
+    // the resolved directory, not under the link.
     await rm(link);
     await symlink(outside, link);
+    let parent: string | undefined;
     expect(
       await createGitReader(
         Date.now,
-        undefined,
+        async (args, options) => {
+          const snapshot = options.env["GIT_DIR"];
+          if (snapshot && args.includes("status")) parent = dirname(snapshot);
+          return readCommand(args, options);
+        },
         undefined,
         () => link,
       )(directory, AbortSignal.timeout(3000)),
     ).toMatchObject({ changedFiles: 1 });
+    expect(parent).toBe(await realpath(outside));
   } finally {
     await rm(directory, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
