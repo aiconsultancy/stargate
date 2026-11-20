@@ -1,5 +1,6 @@
 import { SocketModeClient } from "@slack/socket-mode";
 import { LogLevel, WebClient, type WebClientOptions } from "@slack/web-api";
+import { Result, Schema } from "effect";
 import type { Logger } from "pino";
 import type { ActivityView } from "./activity";
 import { activityContent } from "./activity-slack";
@@ -7,7 +8,7 @@ import { stopBlock } from "./cancellation";
 import type { CrewUIApi } from "./crew-ui";
 import type { CronUIApi } from "./cron-ui";
 import type { SlackDelivery } from "./gateway";
-import type { ReactionName } from "./reactions";
+import { type ReactionName, slackTimestamp } from "./reactions";
 import { failureContent, type RequestFailure } from "./request-failure";
 import type { Identity } from "./routing";
 import { retrySlack, SlackSocket } from "./slack-connection";
@@ -36,6 +37,31 @@ export type SocketRequest = {
   body: unknown;
   ack: (payload?: Record<string, unknown>) => Promise<void>;
 };
+
+export type ReactionTargetRequest = {
+  channel: string;
+  ts: string;
+  appId: string;
+  identity: Identity;
+  signal: AbortSignal;
+};
+
+const reactionTargetSchema = Schema.Struct({
+  ok: Schema.Literal(true),
+  type: Schema.Literal("message"),
+  channel: Schema.String,
+  message: Schema.Struct({
+    type: Schema.Literal("message"),
+    ts: slackTimestamp,
+    thread_ts: Schema.optional(slackTimestamp),
+    user: Schema.String,
+    team: Schema.optional(Schema.String),
+    channel: Schema.optional(Schema.String),
+    app_id: Schema.optional(Schema.String),
+    parent_user_id: Schema.optional(Schema.String),
+    hidden: Schema.optional(Schema.Literal(false)),
+  }),
+});
 
 export interface SlackInteractions {
   command(body: unknown, ack: SocketRequest["ack"]): Promise<void>;
@@ -143,6 +169,32 @@ export class SlackConnection implements SlackDelivery {
   /** Slack `users.info`; the caller parses the untrusted result. */
   async userInfo(user: string, signal: AbortSignal): Promise<unknown> {
     return this.historyWeb(signal).users.info({ user });
+  }
+
+  /** Exact message lookup only; the event's item_user is not authorship proof. */
+  async reactionThread({
+    channel,
+    ts,
+    appId,
+    identity,
+    signal,
+  }: ReactionTargetRequest) {
+    const result = Schema.decodeUnknownResult(reactionTargetSchema)(
+      await this.historyWeb(signal).reactions.get({ channel, timestamp: ts }),
+    );
+    if (Result.isFailure(result) || result.success.channel !== channel) return;
+    const message = result.success.message;
+    if (
+      message.ts !== ts ||
+      message.user !== identity.user ||
+      (message.team !== undefined && message.team !== identity.team) ||
+      (message.channel !== undefined && message.channel !== channel) ||
+      (message.parent_user_id !== undefined &&
+        message.thread_ts === undefined) ||
+      (message.app_id !== undefined && message.app_id !== appId)
+    )
+      return;
+    return message.thread_ts ?? message.ts;
   }
 
   async identity(signal?: AbortSignal): Promise<Identity> {

@@ -63,6 +63,49 @@ The OpenCode SDK does not offer an atomic expected-input condition for steering.
 Stargate checks the current native input and local ownership immediately before
 the write, but a native turn change between that check and write remains possible.
 
+## Inbound Slack reactions
+
+`bots[].slack.inboundReactions` defaults to `false`. Enable it separately for
+each registration, after the owner has applied the
+[Slack manifest additions](setup.md#receiving-reactions-on-bot-messages).
+Changing the flag uses the normal restart-only configuration procedure.
+Merging code neither enables it nor changes a live Slack app.
+
+Stargate delivers `reaction_added` and `reaction_removed` on messages posted
+by this bot, from people and channels admitted by its existing access rules.
+Only these Slack emoji names are admitted:
+
+| Meaning     | Slack names                            |
+| ----------- | -------------------------------------- |
+| Thumbs up   | `+1`, `thumbsup`                       |
+| Thumbs down | `-1`, `thumbsdown`                     |
+| Tick        | `white_check_mark`, `heavy_check_mark` |
+| Cross       | `x`                                    |
+| Eyes        | `eyes`                                 |
+
+The gateway first uses its persisted posted-message records to resolve the
+thread. If no record exists, an exact `reactions.get` lookup must confirm the
+same bot's authorship and return the target's thread. Unverified or unavailable
+targets are ignored. `users.info` verifies the human actor; its `users:read`
+scope is required even when the target is already stored locally. Registrations
+that require a mention on every message also ignore reactions, which cannot
+contain a mention. Ordinary notification mutes apply.
+
+Stargate supplies the reacting person's `u=` identity, reaction name, whether
+it was added or removed, and target message timestamp. It does not decide that
+a reaction means approval or rejection. The receiving agent uses the existing
+conversation context to interpret it.
+
+For example, an added thumbs-up can carry
+`s=slack;c=C123;t=1.000;m=2.000;u=U123;reaction=%2B1;action=added`.
+Here `m=` names the bot message, not a new human message.
+
+Reactions use the same durable admission path as follow-up messages. An idle
+session receives a new turn. With `slack.steerThreadFollowUps` enabled, an
+eligible reaction in the running turn's exact conversation can steer that
+turn; otherwise it remains queued. Duplicate events and Slack retries do not
+repeat accepted delivery. This does not promise exactly-once external effects.
+
 ## Linux user service
 
 Maintenance can opt into a [restart drain](maintenance.md#restart-drain) with

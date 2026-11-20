@@ -503,6 +503,42 @@ Set `slackReadReceipts: true` on a bot to add 👀 to a human request when its
 turn starts and remove it after a text reply is delivered. The bot needs
 `reactions:write`.
 
+#### Receiving reactions on bot messages
+
+Inbound reactions are separate from outbound reactions and read receipts.
+They default to off. To use them, the Slack app owner must first update the
+existing app manifest and reinstall the app to grant the new bot scope:
+
+```yaml
+oauth_config:
+  scopes:
+    bot:
+      # Keep the app's existing bot scopes.
+      - reactions:read
+      - users:read
+settings:
+  event_subscriptions:
+    bot_events:
+      # Keep the app's existing event subscriptions.
+      - reaction_added
+      - reaction_removed
+```
+
+This is an additive excerpt, not a replacement manifest. The default generated
+manifest stays unchanged. `reactions:write` does not grant reaction-event access.
+The new scope and subscriptions are required for both
+[`reaction_added`](https://docs.slack.dev/reference/events/reaction_added/) and
+[`reaction_removed`](https://docs.slack.dev/reference/events/reaction_removed/).
+Editing gateway configuration alone does not update a live Slack app or grant
+scopes. `users:read` verifies that the reacting user is a human, because
+reaction events do not reliably identify bot actors. Reuse this scope if the
+app already has it. Missing or failed identity verification admits nothing.
+App and credential changes require the owner's approval.
+
+Then set `inboundReactions: true` inside that registration's `slack` object.
+See [inbound reactions](operations.md#inbound-slack-reactions) for filtering,
+conversation routing and delivery limits.
+
 Set `resumeSlackThreads: true` to accept an untagged reply in an allowed Slack
 thread that Stargate has not seen before, when bounded Slack history confirms the
 same bot previously replied there. The normal sender and channel rules still

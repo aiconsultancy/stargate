@@ -22,6 +22,7 @@ import {
   notificationContextSchema,
 } from "./notifications";
 import type { NativeQuestion, QuestionOffer } from "./questions";
+import { type InboundReaction, inboundReactionSchema } from "./reactions";
 import { failureText, type RequestFailure } from "./request-failure";
 import { settingsPattern, settingsStruct } from "./settings-schema";
 import type { ReplyChunk } from "./slack-format";
@@ -59,6 +60,8 @@ export type Incoming = {
   fleet?: FleetJob;
   /** Trusted Slack ingress classification; absent on legacy/scheduled/native jobs. */
   notification?: NotificationContext;
+  /** Present only for a verified Slack reaction, not a Slack message. */
+  slackReaction?: InboundReaction;
 };
 
 /**
@@ -139,6 +142,7 @@ const followUpSchema = Schema.Struct({
   notBefore: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   deferDelivery: Schema.optionalKey(Schema.Boolean),
   fleet: Schema.optionalKey(fleetJobSchema),
+  slackReaction: Schema.optionalKey(inboundReactionSchema),
   notification: Schema.optionalKey(
     Schema.Struct({
       wake: Schema.Literals(["ordinary", "direct", "broadcast"]),
@@ -163,7 +167,7 @@ export type ThreadFollowUp = {
 
 type StoredJob = Omit<
   Job,
-  "deferDelivery" | "fleet" | "makers" | "notification"
+  "deferDelivery" | "fleet" | "makers" | "notification" | "slackReaction"
 > & {
   deferDelivery: number;
   fleet_context: string | null;
@@ -171,6 +175,7 @@ type StoredJob = Omit<
   fleet_exported: number;
   notification_context: string | null;
   notification_held: number;
+  slack_reaction: string | null;
 };
 
 function decodeStoredJob(row: StoredJob): Job {
@@ -180,11 +185,19 @@ function decodeStoredJob(row: StoredJob): Job {
     fleet_exported: _exported,
     notification_context,
     notification_held: _notificationHeld,
+    slack_reaction,
     ...job
   } = row;
   return {
     ...job,
     deferDelivery: row.deferDelivery === 1,
+    ...(slack_reaction
+      ? {
+          slackReaction: Schema.decodeUnknownSync(inboundReactionSchema)(
+            JSON.parse(slack_reaction),
+          ),
+        }
+      : {}),
     ...(notification_context
       ? {
           notification: notificationContextSchema.parse(
@@ -333,6 +346,7 @@ export class Store {
         job INTEGER NOT NULL REFERENCES jobs(id), part INTEGER NOT NULL,
         ts TEXT NOT NULL, PRIMARY KEY(job, part)
       );
+      CREATE INDEX IF NOT EXISTS previews_ts ON previews(ts);
       CREATE TABLE IF NOT EXISTS ignored_events (
         botKey TEXT NOT NULL, eventId TEXT NOT NULL, PRIMARY KEY(botKey, eventId)
       );
@@ -437,6 +451,7 @@ export class Store {
     column("jobs", "gate", "TEXT");
     column("jobs", "textMention", "TEXT");
     column("jobs", "notification_context", "TEXT");
+    column("jobs", "slack_reaction", "TEXT");
     column("jobs", "notification_held", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "received", "INTEGER");
     column("jobs", "replyParent", "TEXT");
@@ -480,6 +495,8 @@ export class Store {
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS jobs_received ON jobs(sender,received) WHERE received IS NOT NULL",
     );
+    this.db.exec(`CREATE INDEX IF NOT EXISTS jobs_activity_ts
+      ON jobs(botKey,channel,json_extract(activity,'$.ts')) WHERE activity IS NOT NULL`);
     // Preserve source-first context and legacy ownership; keep statuses intact.
     if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
       this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
@@ -515,8 +532,8 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at,fleet_context,notification_context)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt,$fleet,$notification)`)
+      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at,fleet_context,notification_context,slack_reaction)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt,$fleet,$notification,$slackReaction)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
@@ -535,6 +552,9 @@ export class Store {
             ? JSON.stringify(
                 notificationContextSchema.parse(input.notification),
               )
+            : null,
+          $slackReaction: input.slackReaction
+            ? JSON.stringify(input.slackReaction)
             : null,
           $received: input.received ?? null,
           $retryAt: input.notBefore ?? 0,
@@ -741,7 +761,9 @@ export class Store {
         const input = Schema.decodeUnknownSync(followUpSchema)(
           JSON.parse(row.payload),
         );
-        const message = input.eventId.slice(input.channel.length + 1);
+        const message =
+          input.slackReaction?.ts ??
+          input.eventId.slice(input.channel.length + 1);
         return row.transport === "slack"
           ? `https://slack.com/archives/${input.channel}/p${message.replace(".", "")}`
           : `irc follow-up ${message}`;
@@ -1850,13 +1872,35 @@ export class Store {
   }
 
   /** Chunks confirmed so far: forward only, within the stored reply. */
-  sent(id: number, count: number) {
-    return (
+  sent(id: number, count: number, slackTs?: string) {
+    const advance = () =>
       this.db
         .query(`UPDATE jobs SET sent=? WHERE id=? AND status='responding'
         AND ?>=sent AND ?<=json_array_length(response)`)
-        .run(count, id, count, count).changes > 0
-    );
+        .run(count, id, count, count).changes > 0;
+    if (!slackTs) return advance();
+    return this.db.transaction(() => {
+      if (!advance()) return false;
+      this.savePreview(id, count - 1, slackTs);
+      return true;
+    })();
+  }
+
+  /** Confirmed reply chunks (including previews) and crew activity posts. */
+  slackReplyThread(botKey: string, channel: string, ts: string) {
+    const matches = this.db
+      .query<
+        { thread: string },
+        { $botKey: string; $channel: string; $ts: string }
+      >(
+        `SELECT j.thread FROM previews p JOIN jobs j ON j.id=p.job
+         WHERE p.ts=$ts AND j.botKey=$botKey AND j.channel=$channel
+         UNION
+         SELECT thread FROM jobs WHERE botKey=$botKey AND channel=$channel
+         AND activity IS NOT NULL AND json_extract(activity,'$.ts')=$ts LIMIT 2`,
+      )
+      .all({ $ts: ts, $botKey: botKey, $channel: channel });
+    return matches.length === 1 ? matches[0]?.thread : undefined;
   }
 
   previews(id: number): { part: number; ts: string }[] {

@@ -10,6 +10,11 @@ import {
   notificationNote,
 } from "./notifications";
 import type { PeerSender } from "./peers";
+import {
+  type InboundReaction,
+  inboundReactionSchema,
+  slackTimestamp,
+} from "./reactions";
 import { settingsDefault, settingsPattern } from "./settings-schema";
 
 const eventSchema = Schema.Struct({
@@ -43,6 +48,26 @@ export const envelopeSchema = Schema.Struct({
   team_id: Schema.String,
   event_id: Schema.String,
   event: Schema.optional(Schema.Unknown),
+});
+
+const reactionEventSchema = Schema.Struct({
+  type: Schema.Literals(["reaction_added", "reaction_removed"]),
+  user: Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
+  bot_id: Schema.optional(Schema.Never),
+  reaction: inboundReactionSchema.fields.name,
+  item: Schema.Struct({
+    type: Schema.Literal("message"),
+    channel: Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
+    ts: slackTimestamp,
+  }),
+  item_user: Schema.String,
+  event_ts: slackTimestamp,
+});
+
+const reactionEnvelopeSchema = Schema.Struct({
+  ...envelopeSchema.fields,
+  event_id: Schema.String.check(settingsPattern(/^Ev[A-Za-z0-9]{1,128}$/)),
+  event: reactionEventSchema,
 });
 
 export type Identity = { team: string; user: string };
@@ -85,6 +110,39 @@ export function isAllowedChannel(config: BotConfig, channel: string) {
     !matchesId(config.access.deniedChannels, channel) &&
     matchesId(config.access.channels, channel)
   );
+}
+
+/** Candidate only. Slack intake must still prove target ownership and a human actor. */
+export function routeReaction(
+  raw: unknown,
+  config: BotConfig,
+  identity: Identity,
+) {
+  if (!config.slack.inboundReactions || config.access.mentionOnly) return;
+  const parsed = Schema.decodeUnknownResult(reactionEnvelopeSchema)(raw);
+  if (Result.isFailure(parsed)) return;
+  const { api_app_id, team_id, event_id, event } = parsed.success;
+  if (
+    api_app_id !== config.slack.appId ||
+    team_id !== identity.team ||
+    event.item_user !== identity.user ||
+    event.user === identity.user ||
+    event.user === "USLACKBOT" ||
+    !isAllowedUser(config, event.user) ||
+    !isAllowedChannel(config, event.item.channel)
+  )
+    return;
+  return {
+    eventId: `reaction:${event_id}`,
+    botKey: botKey(config, identity),
+    channel: event.item.channel,
+    user: event.user,
+    slackReaction: {
+      name: event.reaction,
+      action: event.type === "reaction_added" ? "added" : "removed",
+      ts: event.item.ts,
+    } satisfies InboundReaction,
+  };
 }
 
 /**
