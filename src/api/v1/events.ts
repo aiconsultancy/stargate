@@ -94,6 +94,7 @@ export function createEventStreams(
     const pending = new Map<string, AbortController>();
     let summaries = new Map<string, V1Ship>();
     let fleet: V1Fleet | undefined;
+    let latestHost: V1Host | undefined;
     let publishing = false;
     let enriching = false;
     let readingHost = false;
@@ -102,6 +103,18 @@ export function createEventStreams(
       if (events.length === 0) return;
       const bytes = encodeEvents(events);
       for (const client of clients) client.send(bytes);
+    }
+
+    function newestHost(host: V1Host) {
+      if (!latestHost || host.sampledAt >= latestHost.sampledAt)
+        latestHost = host;
+      return latestHost;
+    }
+
+    function publishHostSample(host: V1Host) {
+      if (newestHost(host) !== host) return;
+      if (fleet) fleet = { ...fleet, host };
+      broadcast([{ type: "host", data: host }]);
     }
 
     function syncIdentities() {
@@ -122,6 +135,7 @@ export function createEventStreams(
 
     function publishFleet(next: V1Fleet) {
       const previous = fleet;
+      next = { ...next, host: newestHost(next.host) };
       fleet = next;
       const prior = summaries;
       summaries = new Map(next.ships.map((ship) => [ship.id, ship]));
@@ -233,11 +247,11 @@ export function createEventStreams(
             return;
           expireOverview();
           if (!cachedOverview || !fleet) return;
-          const hostChanged = !isDeepStrictEqual(fleet.host, host);
-          const next = { ...fleet, host, gateway };
+          const next = { ...fleet, host: newestHost(host), gateway };
+          const hostChanged = !isDeepStrictEqual(fleet.host, next.host);
           if (isDeepStrictEqual(fleet.gateway, gateway)) fleet = next;
           else publishFleet(next);
-          if (hostChanged) broadcast([{ type: "host", data: host }]);
+          if (hostChanged) publishHostSample(next.host);
         })
         .catch(() => {
           // Keep the cached metrics and retry on a later poll.
@@ -302,7 +316,7 @@ export function createEventStreams(
     async function publishHost() {
       if (shutdown.signal.aborted) return;
       if (readingHost) {
-        broadcast([{ type: "host", data: options.snapshotHost() }]);
+        publishHostSample(options.snapshotHost());
         return;
       }
       readingHost = true;
@@ -313,7 +327,7 @@ export function createEventStreams(
         readingHost = false;
       });
       const data = await result.catch(() => options.snapshotHost());
-      if (!shutdown.signal.aborted) broadcast([{ type: "host", data }]);
+      if (!shutdown.signal.aborted) publishHostSample(data);
     }
 
     const pollTimer = setInterval(() => void poll(), timing.pollMs);

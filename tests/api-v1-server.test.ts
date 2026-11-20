@@ -728,6 +728,50 @@ test("host frames use the fresh sample and keep it while the next disk read stal
   }
 });
 
+test("delayed gateway enrichment keeps the newest host sample in the stream", async () => {
+  const latest = { ...host, sampledAt: host.sampledAt + 100 };
+  const enrichment = Promise.withResolvers<V1Fleet>();
+  const readHost = mock(async () =>
+    readHost.mock.calls.length === 2 ? host : latest,
+  );
+  const streams = createEventStreams(
+    {
+      ...source,
+      diff: diffEvents,
+      completeFleet: () => enrichment.promise,
+      fallbackFleet,
+      readHost,
+      snapshotHost: () => host,
+    },
+    { pollMs: 1000, hostMs: 15, heartbeatMs: 1000 },
+  );
+  try {
+    const reader = streams.open(AbortSignal.timeout(750))?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    expect(await nextFrame(reader, "host")).toContain(
+      `"sampledAt":${latest.sampledAt}`,
+    );
+    const enriched = fallbackFleet(overview);
+    enrichment.resolve({
+      ...enriched,
+      gateway: { ...enriched.gateway, opencodeVersion: "2.3.2" },
+    });
+    const fleetFrame = await nextFrame(
+      reader,
+      "fleet",
+      '"opencodeVersion":"2.3.2"',
+    );
+    expect(fleetFrame).toContain(`"sampledAt":${latest.sampledAt}`);
+    expect(await nextFrame(reader, "host")).toContain(
+      `"sampledAt":${latest.sampledAt}`,
+    );
+    expect(readHost.mock.calls.length).toBeGreaterThanOrEqual(3);
+  } finally {
+    streams.stop();
+    enrichment.resolve(fallbackFleet(overview));
+  }
+});
+
 test.each(["overview", "enrichment", "ship"])(
   "a hung %s read can retry after its hard cap with at most one abandoned read",
   async (kind) => {
