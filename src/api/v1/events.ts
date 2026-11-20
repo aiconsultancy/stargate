@@ -64,6 +64,7 @@ export function createEventStreams(
   const readMs = timing.readMs ?? 20_000;
   const overviewReadMs = timing.readMs ?? fleetOverviewReadMs;
   const readOverview = holdRead<{
+    generation: number;
     overview: V1Snapshot["fleet"];
     reads: Map<string, V1ShipRead>;
   }>(overviewReadMs);
@@ -74,6 +75,7 @@ export function createEventStreams(
   >();
   const cachedShips = new Map<string, V1ShipDetail>();
   let identities: ReadonlyMap<string, string> | undefined;
+  let rosterGeneration = 0;
   let cachedOverview:
     | { overview: V1Snapshot["fleet"]; expiresAt: number }
     | undefined;
@@ -103,7 +105,8 @@ export function createEventStreams(
 
     function syncIdentities() {
       const current = options.shipIdentities?.();
-      if (!current || isDeepStrictEqual(current, identities)) return identities;
+      if (!current || isDeepStrictEqual(current, identities))
+        return rosterGeneration;
       for (const [id, identity] of identities ?? []) {
         if (current.get(id) === identity) continue;
         pending.get(id)?.abort();
@@ -113,7 +116,7 @@ export function createEventStreams(
       fleet = undefined;
       ships.clear();
       identities = current;
-      return identities;
+      return ++rosterGeneration;
     }
 
     function publishFleet(next: V1Fleet) {
@@ -223,15 +226,20 @@ export function createEventStreams(
       if (publishing || shutdown.signal.aborted) return;
       publishing = true;
       try {
-        const roster = syncIdentities();
+        const generation = syncIdentities();
         const sample = await readOverview(shutdown.signal, async (signal) => {
           const reads = new Map<string, V1ShipRead>();
           const overview = await options.fleet(signal, (id, read) =>
             reads.set(id, read),
           );
-          return { overview, reads };
+          return { generation, overview, reads };
         }).catch(() => undefined);
-        if (shutdown.signal.aborted || syncIdentities() !== roster) return;
+        if (
+          shutdown.signal.aborted ||
+          syncIdentities() !== generation ||
+          (sample && sample.generation !== generation)
+        )
+          return;
         if (sample)
           cachedOverview = {
             overview: sample.overview,
@@ -245,7 +253,7 @@ export function createEventStreams(
         const complete = await enrich(shutdown.signal, (signal) =>
           options.completeFleet(overview, signal),
         ).catch(() => undefined);
-        if (shutdown.signal.aborted || syncIdentities() !== roster) return;
+        if (shutdown.signal.aborted || syncIdentities() !== generation) return;
         expireOverview();
         if (!cachedOverview) return;
         const next = complete ?? options.fallbackFleet(overview);

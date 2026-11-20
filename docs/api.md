@@ -197,8 +197,9 @@ deadline, so a fallback or an error can still be sent.
 When an overview read fails or times out, the poller can republish the last
 successful overview with `overviewStale: true` and its original `generatedAt`.
 That fallback expires 75 seconds after the successful read and is discarded
-when the configured ship roster or a ship's backend identity changes. On
-expiry, the server closes the streams so clients can reconnect for a fresh
+when the configured ship roster or a ship's backend identity changes. The
+poller also discards in-flight overviews from before the change. On expiry,
+the server closes the streams so clients can reconnect for a fresh
 snapshot. Host and heartbeat events continue while the poller waits for a
 fresh overview, including after a backend change.
 At three times a read's deadline, another attempt can start. Each overview,

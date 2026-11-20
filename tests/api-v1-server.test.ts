@@ -954,6 +954,49 @@ test("host and heartbeat frames continue while an identity change stalls the ove
   }
 });
 
+test("a reload discards an in-flight overview even if the original roster returns", async () => {
+  const original = new Map([[ship.id, "original"]]);
+  const removed = new Map<string, string>();
+  const held = Promise.withResolvers<typeof overview>();
+  const started = Promise.withResolvers<void>();
+  let roster = original;
+  let reads = 0;
+  const streams = createEventStreams(
+    {
+      ...source,
+      shipIdentities: () => roster,
+      fleet: async () => {
+        if (++reads === 1) return overview;
+        if (reads > 2) return { ...overview, name: "After reload" };
+        started.resolve();
+        return held.promise;
+      },
+      diff: diffEvents,
+      completeFleet,
+      fallbackFleet,
+      readHost: async () => host,
+      snapshotHost: () => host,
+    },
+    { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
+  );
+  const signal = AbortSignal.timeout(750);
+  try {
+    const reader = streams.open(signal)?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    await nextFrame(reader, "ship");
+    await started.promise;
+    roster = removed;
+    expect(streams.open(signal)).toBeDefined();
+    roster = original;
+    expect(streams.open(signal)).toBeDefined();
+    held.resolve(overview);
+    expect(await nextFrame(reader, "fleet")).toContain('"name":"After reload"');
+  } finally {
+    held.resolve(overview);
+    streams.stop();
+  }
+});
+
 test("a failed overview is marked stale and expires from connection snapshots", async () => {
   let failing = false;
   const streams = createEventStreams(

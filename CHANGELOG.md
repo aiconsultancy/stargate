@@ -39,6 +39,8 @@
   invalidate cached crew samples and keep in-flight reads for unchanged
   backends, including Fleet HTTP requests. Requests already waiting for crew
   data continue to wait for the shared read after reload clears their fallback.
+  Event streams discard in-flight overviews when the roster or a ship's
+  backend identity changes.
 - Publish lightweight `ship-sampled` events when only the ship detail
   timestamp changes. Preserve the observation time when a crew sample is reused.
 - Publish Fleet events when gateway metadata changes, including when the OpenCode
