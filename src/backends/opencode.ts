@@ -160,6 +160,8 @@ function generationFailureKind(error: {
 }
 
 export class OpenCodeBackend implements AgentBackend {
+  private fleetStatusRetryAt = 0;
+
   // Native messages/form IDs are immutable. Recheck their live tool/input state,
   // but do not traverse the entire session twice every second for the same form.
   private readonly questionAncestry = new Map<
@@ -846,15 +848,23 @@ export class OpenCodeBackend implements AgentBackend {
   async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
     try {
       signal.throwIfAborted();
+      if (performance.now() < this.fleetStatusRetryAt) return undefined;
       return fleetCrewStatusSchema.parse(
         await this.client.rpc(CrewReporting).fleetStatus(input, {
           location: { directory: this.config.directory },
           signal,
         }),
       );
-    } catch {
+    } catch (error) {
       signal.throwIfAborted();
-      // A plugin that predates fleet metadata still serves ordinary status.
+      // Older plugins still serve ordinary status. Probe again after an upgrade.
+      if (
+        error &&
+        typeof error === "object" &&
+        "type" in error &&
+        error.type === "rpc.method_not_found"
+      )
+        this.fleetStatusRetryAt = performance.now() + 60_000;
       return undefined;
     }
   }

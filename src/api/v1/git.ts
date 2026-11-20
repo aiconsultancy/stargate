@@ -58,6 +58,37 @@ export function countChangedPaths(output: string): number | null {
 const safeRef = (ref: string) =>
   ref.length <= 255 && !containsCredential(ref) ? ref : null;
 
+function disabledFilters(output: string): NodeJS.ProcessEnv {
+  if (!output) return {};
+  const keys = output.split("\0");
+  if (keys.pop() !== "" || output.includes("\uFFFD"))
+    throw new Error("Git filter names unavailable");
+  const drivers = new Set<string>();
+  for (const key of keys) {
+    const separator = key.lastIndexOf(".");
+    if (separator < "filter.".length)
+      throw new Error("Git filter name unavailable");
+    drivers.add(key.slice(0, separator));
+  }
+  // Separate keys from values so even a subsection containing '=' is literal.
+  const env: NodeJS.ProcessEnv = {};
+  let index = 0;
+  for (const driver of drivers) {
+    for (const [option, value] of [
+      ["clean", ""],
+      ["smudge", ""],
+      ["process", ""],
+      ["required", "false"],
+    ]) {
+      env[`GIT_CONFIG_KEY_${index}`] = `${driver}.${option}`;
+      env[`GIT_CONFIG_VALUE_${index}`] = value;
+      index++;
+    }
+  }
+  env["GIT_CONFIG_COUNT"] = String(index);
+  return env;
+}
+
 async function inspect(
   directory: string,
   now: () => number,
@@ -74,7 +105,10 @@ async function inspect(
     checkedAt: now(),
   };
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
-  const run = async (...args: string[]) => {
+  const runWithEnv = async (
+    overrides: NodeJS.ProcessEnv,
+    ...args: string[]
+  ) => {
     deadline.throwIfAborted();
     const result = await readCommand(
       [
@@ -83,18 +117,22 @@ async function inspect(
         "core.fsmonitor=false",
         "-c",
         "core.untrackedCache=false",
+        "-c",
+        "core.hooksPath=/dev/null",
         ...args,
       ],
       {
         cwd: directory,
         env: {
           PATH: process.env["PATH"],
+          GIT_ALLOW_PROTOCOL: "",
           GIT_CONFIG_GLOBAL: "/dev/null",
           GIT_CONFIG_NOSYSTEM: "1",
           GIT_NO_LAZY_FETCH: "1",
           GIT_OPTIONAL_LOCKS: "0",
           GIT_TERMINAL_PROMPT: "0",
           LC_ALL: "C",
+          ...overrides,
         },
         timeout,
         signal: deadline,
@@ -104,6 +142,7 @@ async function inspect(
     if (!result) throw new Error("Git unavailable");
     return result;
   };
+  const run = (...args: string[]) => runWithEnv({}, ...args);
   try {
     try {
       if (!(await stat(directory)).isDirectory()) return null;
@@ -137,11 +176,23 @@ async function inspect(
             "refs/remotes/origin/HEAD",
           );
     const baseRef = base.code === 0 ? base.stdout.trim() : null;
-    const changed = await run(
+    const filters = await run(
+      "config",
+      "--null",
+      "--name-only",
+      "--get-regexp",
+      "^filter\\..*\\.(clean|smudge|process|required)$",
+    );
+    if (filters.code !== 0 && !(filters.code === 1 && !filters.stdout))
+      throw new Error("Git filter names unavailable");
+    const changed = await runWithEnv(
+      disabledFilters(filters.stdout),
       "status",
       "--porcelain=v1",
       "-z",
       "--untracked-files=all",
+      // Count changed gitlinks without reading submodule worktree configuration.
+      "--ignore-submodules=dirty",
     );
     const changedFiles =
       changed.code === 0 ? countChangedPaths(changed.stdout) : null;

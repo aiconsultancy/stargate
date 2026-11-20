@@ -10,6 +10,16 @@
 
 ### Changes
 
+- Harden Fleet API Git reads against checkout-configured commands.
+- Report Fleet API task outcomes that complete between event polls.
+- Look up pull requests by head branch, keep cached results on refresh
+  failure, and suppress PR activity when the previous lookup was unknown.
+- Label the Fleet API's data filesystem `data` in disk metrics.
+- Require an explicit Fleet API CORS origin for Windows WebView2 Spaces.
+- Reuse crew status across Fleet API event frames and avoid repeated
+  unsupported status calls on older OpenCode plugins.
+- Keep Fleet API overviews and healthy ship details streaming when another
+  ship's detail read fails, and mark retained detail as stale.
 - A git checkout of a release now reports its `vX.Y.Z` tag at HEAD as the
   Fleet API's `gateway.version` when it has no `.stargate-release.json`.
   Fetch the tag, not only the commit. Other source checkouts still report the

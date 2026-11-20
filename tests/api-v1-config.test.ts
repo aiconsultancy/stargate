@@ -137,6 +137,7 @@ test("Fleet API settings are restart-only", () => {
 test("origin wildcards match exactly one ASCII label", () => {
   const allows = originMatcher([
     ...defaultCorsOrigins,
+    "https://subspace.*",
     "https://console.example.com:8443",
   ]);
   for (const origin of [
@@ -162,6 +163,10 @@ test("origin wildcards match exactly one ASCII label", () => {
     "http://subspace.space",
   ])
     expect(allows(origin)).toBe(false);
+  const defaults = originMatcher(defaultCorsOrigins);
+  expect(defaults("subspace://space-123")).toBe(true);
+  expect(defaults("https://subspace.space-123")).toBe(false);
+  expect(defaults("https://subspace.com")).toBe(false);
   expect(peerAddress("0:0:0:0:0:ffff:7f00:1")).toBe("127.0.0.1");
   expect(peerAddress("0:0:0:0:0:0:0:1")).toBe("::1");
 });

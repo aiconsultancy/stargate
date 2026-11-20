@@ -414,18 +414,27 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       }));
   }
 
-  async function detail(id: string, signal: AbortSignal, only?: string) {
+  function configuredShip(id: string, signal: AbortSignal) {
     signal.throwIfAborted();
     const registration = registrations(deps.config()).get(id);
-    if (!registration || role(registration) === "rear_admiral")
-      return undefined;
-    const snapshot = await dashboard.shipWithCrew(
-      id,
-      signal,
-      only ? { member: only } : {},
-    );
-    if (!snapshot) return undefined;
+    return registration && role(registration) !== "rear_admiral"
+      ? registration
+      : undefined;
+  }
+
+  type DashboardDetail = Awaited<
+    ReturnType<DashboardFleetSource["shipWithCrew"]>
+  >;
+
+  async function detail(
+    registration: Registration,
+    snapshot: DashboardDetail,
+    signal: AbortSignal,
+    only?: string,
+  ) {
     signal.throwIfAborted();
+    if (!snapshot) return undefined;
+    const { id } = registration.config;
     const { view, metadata } = snapshot;
     const at = view.generatedAt;
     const text = checkoutText(metadata);
@@ -455,13 +464,17 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
                     )?.directory
                   : undefined;
               const state = await git(path, signal);
+              const pr =
+                state?.repository && state.branch && !state.error
+                  ? pullRequest(state.repository, state.branch)
+                  : undefined;
               return {
                 ...context,
                 git: state,
-                pullRequest:
-                  state?.repository && state.branch
-                    ? pullRequest(state.repository, state.branch)
-                    : null,
+                pullRequest: pr ?? null,
+                ...(pr !== undefined
+                  ? { pullRequestKnown: true as const }
+                  : {}),
               };
             }),
           ),
@@ -476,11 +489,31 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         return { ...member, contexts, subagents: children };
       }),
     );
-    return { registration, officer, view, metadata, crewMembers: enriched };
+    return { officer, view, metadata, crewMembers: enriched };
+  }
+
+  async function shipDetail(
+    registration: Registration,
+    snapshot: DashboardDetail,
+    signal: AbortSignal,
+  ) {
+    const result = await detail(registration, snapshot, signal);
+    if (!result) return undefined;
+    const { officer, view, metadata, crewMembers } = result;
+    const summary = await shipSummary(
+      registration,
+      officer,
+      view.crew && dashboardCrewSummary(view.crew),
+      crewMembers,
+      signal,
+      view.crewError,
+      metadata,
+    );
+    return { ...summary, crewMembers };
   }
 
   return {
-    async fleet(signal) {
+    async fleet(signal, captureShipRead) {
       signal.throwIfAborted();
       const config = deps.config();
       const configured = registrations(config);
@@ -508,6 +541,11 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
           admiral ??= officer;
           continue;
         }
+        const { readDetail } = row;
+        if (captureShipRead && readDetail)
+          captureShipRead(summary.id, async (reading) =>
+            shipDetail(registration, await readDetail(reading), reading),
+          );
         const text = checkoutText(metadata);
         const people = (row.members ?? []).flatMap((person) =>
           crewMember(summary.id, person, fleet.generatedAt, text, metadata),
@@ -549,23 +587,24 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       };
     },
     async ship(id, signal) {
-      const result = await detail(id, signal);
-      if (!result) return undefined;
-      const { registration, officer, view, metadata, crewMembers } = result;
-      const summary = await shipSummary(
+      const registration = configuredShip(id, signal);
+      if (!registration) return undefined;
+      return shipDetail(
         registration,
-        officer,
-        view.crew && dashboardCrewSummary(view.crew),
-        crewMembers,
+        await dashboard.shipWithCrew(id, signal),
         signal,
-        view.crewError,
-        metadata,
       );
-      return { ...summary, crewMembers };
     },
     async crew(ship, member, signal) {
       if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(member)) return undefined;
-      const result = await detail(ship, signal, member);
+      const registration = configuredShip(ship, signal);
+      if (!registration) return undefined;
+      const result = await detail(
+        registration,
+        await dashboard.shipWithCrew(ship, signal, { member }),
+        signal,
+        member,
+      );
       const person = result?.crewMembers[0];
       return person ? { ship, member: person } : undefined;
     },

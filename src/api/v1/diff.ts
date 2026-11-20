@@ -7,6 +7,7 @@ import type {
   V1Fleet,
   V1ShipDetail,
   V1Snapshot,
+  V1Task,
 } from "./types";
 
 /** The HTTP layer adds host and gateway fields before emitting fleet events. */
@@ -22,7 +23,10 @@ function fleetSummary({
   return { apiVersion, name, admiral, ships, longestIdle };
 }
 
-function shipDetail(ship: V1ShipDetail) {
+function shipDetail({
+  detailUpdatedAt: _detailUpdatedAt,
+  ...ship
+}: V1ShipDetail) {
   return {
     ...ship,
     crewMembers: ship.crewMembers.map((member) => ({
@@ -43,6 +47,20 @@ function quoted(prefix: string, text: string, suffix = "") {
   return `${prefix}“${clean(text, 197 - prefix.length - suffix.length) || "Task"}”${suffix}.`;
 }
 
+function outcomes({ recent, lastOutcome }: V1CrewContext) {
+  const tasks = new Map<string, V1Task>();
+  for (const task of [...recent].reverse().concat(lastOutcome ?? [])) {
+    if (
+      task.status === "completed" ||
+      task.status === "cancelled" ||
+      task.status === "uncertain" ||
+      task.status === "abandoned"
+    )
+      tasks.set(task.id, task);
+  }
+  return tasks;
+}
+
 function contextEvents(
   previous: V1CrewContext,
   next: V1CrewContext,
@@ -53,24 +71,20 @@ function contextEvents(
     extra?: Pick<V1ActivityEvent, "status" | "branch">,
   ) => void,
 ) {
-  const { current, lastOutcome } = next;
+  const { current } = next;
   const old = previous.current;
-  if (
-    old &&
-    old.id !== current?.id &&
-    lastOutcome?.id === old.id &&
-    (previous.lastOutcome?.id !== old.id ||
-      previous.lastOutcome.status !== lastOutcome.status)
-  ) {
+  const priorOutcomes = outcomes(previous);
+  for (const [id, outcome] of outcomes(next)) {
+    if (priorOutcomes.get(id)?.status === outcome.status) continue;
     emit(
       "outcome",
       quoted(
         `${name} reported `,
-        lastOutcome.summary || old.summary,
-        ` as ${lastOutcome.status}`,
+        outcome.summary || (old?.id === id ? old.summary : ""),
+        ` as ${outcome.status}`,
       ),
       {
-        status: lastOutcome.status,
+        status: outcome.status,
       },
     );
   }
@@ -101,15 +115,18 @@ function contextEvents(
   }
 
   const branch = next.git?.branch ?? null;
-  const changed =
-    previous.git &&
-    !previous.git.error &&
-    next.git &&
-    !next.git.error &&
-    branch !== previous.git.branch;
+  const priorGit = previous.git;
+  const gitReadable =
+    priorGit && !priorGit.error && next.git && !next.git.error;
+  const changed = gitReadable && branch !== priorGit.branch;
   const pr = next.pullRequest;
   const appeared =
     pr &&
+    gitReadable &&
+    (previous.pullRequest ||
+      (previous.pullRequestKnown &&
+        branch === priorGit.branch &&
+        next.git?.repository === priorGit.repository)) &&
     (pr.number !== previous.pullRequest?.number ||
       pr.url !== previous.pullRequest.url);
   if (appeared) {

@@ -52,7 +52,6 @@ async function disk(path: string) {
     return {
       dev,
       metrics: {
-        path,
         totalBytes: blockBytes * usage.blocks,
         freeBytes: blockBytes * usage.bavail,
       },
@@ -90,8 +89,9 @@ export function startHostMetrics(dataDirectory: string) {
         disk(dataDirectory),
       ]);
       const disks = [];
-      if (root) disks.push(root.metrics);
-      if (data && data.dev !== root?.dev) disks.push(data.metrics);
+      if (root) disks.push({ path: "/", ...root.metrics });
+      if (data && data.dev !== root?.dev)
+        disks.push({ path: "data", ...data.metrics });
       const [short = 0, medium = 0, long = 0] = loadavg();
       return {
         hostname: hostname(),

@@ -3,6 +3,8 @@ import type {
   V1Event,
   V1Fleet,
   V1Host,
+  V1ShipDetail,
+  V1ShipRead,
   V1Snapshot,
 } from "./types";
 
@@ -38,67 +40,132 @@ function encodeEvents(events: V1Event[]) {
   );
 }
 
-export function createEventStreams(options: Options, timing = streamTiming) {
+async function readWithDeadline<T>(
+  parent: AbortSignal,
+  timeout: number,
+  read: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  parent.throwIfAborted();
+  const signal = AbortSignal.any([parent, AbortSignal.timeout(timeout)]);
+  const aborted = Promise.withResolvers<never>();
+  const abort = () => aborted.reject(signal.reason);
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    const result = await Promise.race([
+      aborted.promise,
+      Promise.resolve().then(() => {
+        signal.throwIfAborted();
+        return read(signal);
+      }),
+    ]);
+    signal.throwIfAborted();
+    return result;
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
+export function createEventStreams(
+  options: Options,
+  timing: typeof streamTiming & { readMs?: number } = streamTiming,
+) {
+  const readMs = timing.readMs ?? 20_000;
   let active: ReturnType<typeof startPolling> | undefined;
 
   function startPolling() {
     const shutdown = new AbortController();
-    const clients = new Map<Client, boolean>();
-    let previous: V1Snapshot | undefined;
-    let initial: Uint8Array | undefined;
+    const clients = new Set<Client>();
+    const ships = new Map<string, V1ShipDetail>();
+    const pending = new Map<string, AbortController>();
+    let fleet: V1Fleet | undefined;
     let polling = false;
     let readingHost = false;
 
-    function broadcast(bytes: Uint8Array) {
-      for (const [client, ready] of clients) if (ready) client.send(bytes);
+    function broadcast(events: V1Event[]) {
+      if (!fleet || events.length === 0) return;
+      const bytes = encodeEvents(events);
+      for (const client of clients) client.send(bytes);
+    }
+
+    function publishFleet(next: V1Fleet) {
+      const previous = fleet;
+      fleet = next;
+      const ids = new Set(next.ships.map(({ id }) => id));
+      for (const [id, attempt] of pending) {
+        if (ids.has(id)) continue;
+        pending.delete(id);
+        attempt.abort();
+      }
+      for (const id of ships.keys()) if (!ids.has(id)) ships.delete(id);
+      broadcast(
+        previous
+          ? options.diff(
+              { fleet: previous, ships: {} },
+              { fleet: next, ships: {} },
+              Date.now(),
+            )
+          : [{ type: "fleet", data: next }],
+      );
+    }
+
+    async function refreshShip(id: string, read: V1ShipRead) {
+      if (pending.has(id) || shutdown.signal.aborted) return;
+      const attempt = new AbortController();
+      pending.set(id, attempt);
+      const parent = AbortSignal.any([shutdown.signal, attempt.signal]);
+      const readAt = Date.now();
+      try {
+        const detail = await readWithDeadline(parent, readMs, read).catch(
+          () => undefined,
+        );
+        if (parent.aborted || !fleet) return;
+        const prior = ships.get(id);
+        const next = detail
+          ? { ...detail, detailUpdatedAt: readAt }
+          : prior && { ...prior, detailStale: true as const };
+        if (!next) return;
+        const changes: V1Event[] = prior
+          ? options.diff(
+              { fleet, ships: { [id]: prior } },
+              { fleet, ships: { [id]: next } },
+              Date.now(),
+            )
+          : [{ type: "ship", data: next }];
+        ships.set(id, next);
+        broadcast(changes);
+      } catch {
+        // A later poll can publish this ship if its projection fails.
+      } finally {
+        if (pending.get(id) === attempt) pending.delete(id);
+      }
     }
 
     async function poll() {
       if (polling) return;
       polling = true;
-      // Cancel sibling reads if a read fails, as well as on stop or timeout.
-      const attempt = new AbortController();
-      const readSignal = AbortSignal.any([
-        shutdown.signal,
-        attempt.signal,
-        AbortSignal.timeout(20_000),
-      ]);
       try {
-        const overview = await options.fleet(readSignal);
-        readSignal.throwIfAborted();
-        const [ships, fleet] = await Promise.all([
-          Promise.all(
-            overview.ships.map(async ({ id }) => options.ship(id, readSignal)),
-          ),
-          options.completeFleet(overview),
-        ]);
-        readSignal.throwIfAborted();
-        const details = ships.filter((ship) => ship !== undefined);
-        const next: V1Snapshot & { fleet: V1Fleet } = {
-          fleet,
-          ships: Object.fromEntries(details.map((ship) => [ship.id, ship])),
-        };
-        const changes = options.diff(previous, next, Date.now());
-        const frames = encodeEvents(
-          changes.map((event) =>
-            event.type === "fleet" ? { type: "fleet", data: fleet } : event,
-          ),
+        const reads = new Map<string, V1ShipRead>();
+        const next = await readWithDeadline(
+          shutdown.signal,
+          readMs,
+          async (signal) => {
+            const overview = await options.fleet(signal, (id, read) =>
+              reads.set(id, read),
+            );
+            signal.throwIfAborted();
+            return options.completeFleet(overview);
+          },
         );
-        initial = encodeEvents([
-          { type: "fleet", data: fleet },
-          ...details.map((data) => ({ type: "ship" as const, data })),
-        ]);
-        previous = next;
-        if (frames.length) broadcast(frames);
-        for (const [client, ready] of clients) {
-          if (ready) continue;
-          clients.set(client, true);
-          client.send(initial);
-        }
+        if (shutdown.signal.aborted) return;
+        publishFleet(next);
+        for (const { id } of next.ships)
+          void refreshShip(
+            id,
+            reads.get(id) ?? ((signal) => options.ship(id, signal)),
+          );
       } catch {
-        // Keep the last completed snapshot and retry while clients are present.
+        // Keep the last overview and retry while clients are present.
       } finally {
-        attempt.abort();
         polling = false;
       }
     }
@@ -108,8 +175,7 @@ export function createEventStreams(options: Options, timing = streamTiming) {
       readingHost = true;
       try {
         const data = await options.readHost();
-        if (!shutdown.signal.aborted)
-          broadcast(encodeEvents([{ type: "host", data }]));
+        if (!shutdown.signal.aborted) broadcast([{ type: "host", data }]);
       } catch {
         // The next sample can succeed even if a metric read failed.
       } finally {
@@ -120,17 +186,24 @@ export function createEventStreams(options: Options, timing = streamTiming) {
     const pollTimer = setInterval(() => void poll(), timing.pollMs);
     const hostTimer = setInterval(() => void publishHost(), timing.hostMs);
     const heartbeatTimer = setInterval(() => {
-      broadcast(
-        encodeEvents([{ type: "heartbeat", data: { at: Date.now() } }]),
-      );
+      broadcast([{ type: "heartbeat", data: { at: Date.now() } }]);
     }, timing.heartbeatMs);
 
     return {
       clients,
       add(client: Client) {
-        clients.set(client, initial !== undefined);
-        if (initial) client.send(initial);
-        else void poll();
+        clients.add(client);
+        if (fleet) {
+          client.send(
+            encodeEvents([
+              { type: "fleet", data: fleet },
+              ...Array.from(ships.values(), (data) => ({
+                type: "ship" as const,
+                data,
+              })),
+            ]),
+          );
+        } else void poll();
       },
       stop() {
         shutdown.abort();
@@ -188,7 +261,7 @@ export function createEventStreams(options: Options, timing = streamTiming) {
       );
     },
     stop() {
-      if (active) for (const client of active.clients.keys()) client.close();
+      if (active) for (const client of active.clients) client.close();
     },
   };
 }

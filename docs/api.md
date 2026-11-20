@@ -70,14 +70,17 @@ token is still required.
 
 ## Browser origins
 
-By default the API allows `subspace://*` for macOS Spaces and
-`https://subspace.*` for Windows Spaces. Each `*` matches one nonempty
-label using lowercase ASCII letters, digits, or hyphens. Set `corsOrigins`
-to the exact Space origin to narrow the allowlist, such as
-`["subspace://example-space"]`. Include the port when the serialized origin
-has a port. Matching origins receive CORS headers on responses, including
-event streams. An `OPTIONS` preflight for a matching origin allows `GET`,
-`Authorization`, and `Last-Event-ID` without a token.
+By default the API allows `subspace://*` for macOS Spaces. On Windows,
+add the exact WebView2 Space origin to `corsOrigins`, for example
+`["subspace://*", "https://subspace.fleet-console"]`. Use your Space's ID
+in the Windows hostname. The `https://subspace.*` pattern also matches
+public domains.
+
+Each `*` matches one nonempty label using lowercase ASCII letters, digits,
+or hyphens. Include the port when the serialized origin has a port. Matching
+origins receive CORS headers on responses, including event streams. An
+`OPTIONS` preflight for a matching origin allows `GET`, `Authorization`,
+and `Last-Event-ID` without a token.
 
 ## Routes
 
@@ -97,14 +100,39 @@ five-second sample interval. The gateway caches the OpenCode V2 server version
 for ten minutes. If the probe fails or no OpenCode server is configured, the
 value is null.
 
+`host.disks[].path` labels the filesystem. `/` represents the root
+filesystem, and `data` represents the filesystem holding the data directory
+when it is on a separate device.
+
+Checkout Git status counts changed gitlinks and skips worktree dirt inside
+submodules. Fleet reads disable checkout-configured filters, hooks and
+filesystem monitors.
+
+Pull requests are looked up by head branch, including branches with numeric
+names. A failed refresh retains the last successful result. For a crew
+context, `pullRequestKnown: true` means its branch has a settled lookup.
+With that field present, `pullRequest: null` means no PR was found.
+
 ## Events
 
 Use a streaming browser `fetch` with an `Authorization` header. A connection
-gets one `fleet` event with host and gateway information, then one `ship`
-event per available ship detail. One shared poller reads the fleet every
-three seconds while clients are connected. It publishes changed fleet and
-ship summaries and `activity` transitions. The stream also sends `host`
+gets a `fleet` event with host and gateway information, followed by the
+available `ship` details. One shared poller reads the overview every three
+seconds while clients are connected and publishes changed overviews independently
+of ship details. Each ship detail has its own 20-second deadline, with at most
+one read in flight per ship. Ship events include `detailUpdatedAt`, the
+sample time of that detail. If a refresh fails, `detailStale` is set to
+`true` on the last successful detail, which keeps its original sample time.
+A successful refresh clears `detailStale`. The stream also sends `host`
 every ten seconds and `heartbeat` every fifteen seconds.
+
+The overview and ship details share one crew status read per ship per poll.
+If an older OpenCode plugin reports that it lacks `fleetStatus`, Stargate
+uses ordinary crew status and waits one minute before probing again.
+
+Activity includes newly observed task outcomes, even if the task also
+started between polls. Discovering an existing PR after startup or Git
+recovery does not generate activity.
 
 A frame contains an `event:` line, one `data:` line with JSON, and a blank line.
 

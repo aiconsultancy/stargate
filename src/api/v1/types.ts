@@ -106,6 +106,8 @@ export type V1CrewContext = {
   git: V1Git | null;
   /** Null when unknown or when no PR exists for the branch. */
   pullRequest: V1PullRequest | null;
+  /** A settled lookup exists for this branch, including a known absence. */
+  pullRequestKnown?: true;
 };
 
 export type V1Subagent = {
@@ -193,6 +195,10 @@ export type V1Ship = {
 
 export type V1ShipDetail = V1Ship & {
   crewMembers: V1CrewMember[];
+  /** In a ship event, when the detail was sampled. */
+  detailUpdatedAt?: number;
+  /** In a ship event, true if the last successful detail is being retained. */
+  detailStale?: true;
 };
 
 export type V1CrewDetail = {
@@ -213,7 +219,7 @@ export type V1Host = {
     load: [number, number, number];
   };
   memory: { totalBytes: number; availableBytes: number };
-  /** The filesystems holding `/` and the data directory, deduplicated. */
+  /** The filesystems labelled `/` and `data`, deduplicated by device. */
   disks: { path: string; totalBytes: number; freeBytes: number }[];
   sampledAt: number;
 };
@@ -267,10 +273,17 @@ export type V1Event =
   | { type: "activity"; data: V1ActivityEvent }
   | { type: "heartbeat"; data: { at: number } };
 
+export type V1ShipRead = (
+  signal: AbortSignal,
+) => Promise<V1ShipDetail | undefined>;
+
 /** What the projection provides to the HTTP layer. */
 export interface ApiV1Source {
-  /** Fleet without `host` and `gateway`, which the server adds. */
-  fleet(signal: AbortSignal): Promise<Omit<V1Fleet, "host" | "gateway">>;
+  /** Fleet without host/gateway. The poller can reuse its captured crew reads. */
+  fleet(
+    signal: AbortSignal,
+    captureShipRead?: (id: string, read: V1ShipRead) => void,
+  ): Promise<Omit<V1Fleet, "host" | "gateway">>;
   ship(id: string, signal: AbortSignal): Promise<V1ShipDetail | undefined>;
   crew(
     ship: string,

@@ -165,7 +165,7 @@ requires a restart.
 | ----------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `listen`          | Port required                                                                                          | Private IPv4 literal as `host:port`, private IPv6 as `[address]:port`, or `:port` to use `127.0.0.1`. Ports are 1–65535. |
 | `allowedNetworks` | `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `::1/128`, `fc00::/7` | Nonempty list of CIDRs wholly contained in the default ranges. Bind addresses must also be in these ranges.              |
-| `corsOrigins`     | `["subspace://*", "https://subspace.*"]`                                                               | Exact serialized origins or hostname patterns with a whole-label `*`. An empty list disables CORS.                       |
+| `corsOrigins`     | `["subspace://*"]`                                                                                     | Exact serialized origins or hostname patterns with a whole-label `*`. An empty list disables CORS.                       |
 | `fleetName`       | Hostname                                                                                               | Nonempty display name.                                                                                                   |
 
 ## Backend configuration

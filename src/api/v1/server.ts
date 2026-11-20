@@ -94,10 +94,8 @@ export async function startApiV1Server(options: Options) {
   );
   const host = startHostMetrics(dataDirectory);
   const fleetName = config.fleetName ?? hostname();
-  const readFleet = async (
-    signal: AbortSignal,
-  ): Promise<V1Snapshot["fleet"]> => ({
-    ...(await source.fleet(signal)),
+  const readFleet: ApiV1Source["fleet"] = async (signal, captureShipRead) => ({
+    ...(await source.fleet(signal, captureShipRead)),
     name: fleetName,
   });
   const completeFleet = async (

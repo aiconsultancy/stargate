@@ -86,7 +86,7 @@ export function createPullReader(
 ) {
   const cache = new Map<
     string,
-    { expiresAt: number; value: V1PullRequest | null }
+    { expiresAt: number; value: V1PullRequest | null | undefined }
   >();
   const pending = new Set<string>();
   let auth:
@@ -114,26 +114,33 @@ export function createPullReader(
     if (!auth || auth.expiresAt <= now())
       auth = { expiresAt: now() + ttl, executable: authenticate() };
     const executable = await auth.executable;
-    if (!executable) return null;
+    if (!executable) return undefined;
     const result = await run(
       [
         executable,
         "pr",
-        "view",
+        "list",
         "--repo",
         repository,
+        "--state",
+        "all",
+        "--limit",
+        "1",
         "--json",
         "number,url,title,state,isDraft,statusCheckRollup",
-        "--",
+        "--head",
         branch,
       ],
       { env, timeout },
     );
-    if (result?.code !== 0) return null;
+    if (result?.code !== 0) return undefined;
     try {
-      return mapPullRequest(JSON.parse(result.stdout), repository);
+      const list: unknown = JSON.parse(result.stdout);
+      if (!Array.isArray(list)) return undefined;
+      if (!list.length) return null;
+      return mapPullRequest(list[0], repository) ?? undefined;
     } catch {
-      return null;
+      return undefined;
     }
   }
 
@@ -147,18 +154,21 @@ export function createPullReader(
     ) {
       pending.add(key);
       void refresh(repository, branch)
-        .catch(() => null)
+        .catch(() => undefined)
         .then((value) => {
-          // Keep a stale value during refresh. A later poll can fill a free slot.
+          // A failed refresh leaves the last settled lookup intact.
           cache.delete(key);
           if (cache.size >= 500) {
             const oldest = cache.keys().next();
             if (!oldest.done) cache.delete(oldest.value);
           }
-          cache.set(key, { value, expiresAt: now() + ttl });
+          cache.set(key, {
+            value: value === undefined ? saved?.value : value,
+            expiresAt: now() + ttl,
+          });
           pending.delete(key);
         });
     }
-    return saved?.value ?? null;
+    return saved?.value;
   };
 }
