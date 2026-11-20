@@ -167,7 +167,22 @@ export async function startApiV1Server(options: Options) {
     readHost: host.read,
     snapshotHost: host.snapshot,
   });
-  let detailReads = 0;
+  const httpReads = new Map<Promise<void>, number>();
+  function startHttpRead<T>(
+    signal: AbortSignal,
+    read: (signal: AbortSignal) => Promise<T>,
+  ) {
+    const now = performance.now();
+    // Hold capacity after the response deadline, but abandon stuck reads on
+    // demand so they cannot block the routes forever.
+    for (const [settled, abandonAt] of httpReads)
+      if (abandonAt <= now) httpReads.delete(settled);
+    if (httpReads.size >= maxFleetReads) return undefined;
+    const { result, settled } = readWithDeadline(signal, undefined, read);
+    httpReads.set(settled, now + 3 * httpReadMs);
+    void settled.then(() => httpReads.delete(settled));
+    return result;
+  }
 
   let server: Awaited<ReturnType<typeof startApiServer>>;
   try {
@@ -238,15 +253,17 @@ export async function startApiV1Server(options: Options) {
             const crewDeadline = AbortSignal.timeout(
               fleetReadMs - Math.min(5_000, Math.ceil(fleetReadMs / 3)),
             );
-            const fleet = await readWithDeadline(read, undefined, (reading) =>
-              readFleet(reading, undefined, crewDeadline),
-            ).result;
-            read.throwIfAborted();
-            const result = await readWithDeadline(read, undefined, (reading) =>
-              completeFleet(fleet, reading),
-            ).result.catch((error: unknown) => {
+            let fleet: V1Snapshot["fleet"] | undefined;
+            const overview = startHttpRead(read, async (reading) => {
+              const sample = await readFleet(reading, undefined, crewDeadline);
+              reading.throwIfAborted();
+              fleet = sample;
+              return completeFleet(sample, reading);
+            });
+            if (!overview) return empty(503);
+            const result = await overview.catch((error: unknown) => {
               signal.throwIfAborted();
-              if (read.aborted && error === read.reason)
+              if (fleet && read.aborted && error === read.reason)
                 return fallbackFleet(fleet);
               throw error;
             });
@@ -260,21 +277,13 @@ export async function startApiV1Server(options: Options) {
           if (!id) return empty(404);
           const member = match?.[2] && routeId(match[2]);
           if (match?.[2] && !member) return empty(404);
-          if (detailReads >= maxFleetReads) return empty(503);
-          detailReads++;
-          const readDetail = readWithDeadline(
-            read,
-            undefined,
-            async (reading) =>
-              member
-                ? source.crew(id, member, reading)
-                : source.ship(id, reading),
+          const detail = startHttpRead(read, async (reading) =>
+            member
+              ? source.crew(id, member, reading)
+              : source.ship(id, reading),
           );
-          // Return at the route deadline, but hold capacity until the source settles.
-          void readDetail.settled.then(() => {
-            detailReads--;
-          });
-          const result = await readDetail.result;
+          if (!detail) return empty(503);
+          const result = await detail;
           read.throwIfAborted();
           if (!result) return empty(404);
           return method === "HEAD"

@@ -483,6 +483,53 @@ test("HTTP detail deadlines release the handlers but retain capacity for uncoope
   }
 });
 
+test.each([
+  ["overview", ["/api/v1/fleet"]],
+  [
+    "detail",
+    ["/api/v1/ships/explorer", "/api/v1/ships/explorer/crew/engineer"],
+  ],
+] as const)(
+  "HTTP %s reads hold capacity up to three HTTP deadlines",
+  async (_kind, paths) => {
+    const held = Promise.withResolvers<void>();
+    let blocked = true;
+    const read = async <T>(value: T) => {
+      if (blocked) await held.promise;
+      return value;
+    };
+    const server = await startFixture({
+      source: {
+        ...source,
+        fleet: () => read(overview),
+        ship: () => read(ship),
+        crew: () => read({ ship: ship.id, member }),
+      },
+      timing: { requestMs: 160 },
+      fleetReadMs: 40,
+    });
+    const clock = spyOn(performance, "now").mockReturnValue(0);
+    try {
+      const results = await Promise.all(
+        Array.from({ length: 8 }, (_, index) =>
+          server.get(paths.at(index % paths.length) ?? paths[0]),
+        ),
+      );
+      expect(results.map(({ status }) => status)).toEqual(Array(8).fill(500));
+      blocked = false;
+      // A 160 ms host deadline leaves 144 ms for the HTTP read.
+      clock.mockReturnValue(431);
+      expect((await server.get(paths[0])).status).toBe(503);
+      clock.mockReturnValue(432);
+      expect((await server.get(paths[0])).status).toBe(200);
+    } finally {
+      clock.mockRestore();
+      held.resolve();
+      await server.close();
+    }
+  },
+);
+
 test("bind errors fail startup with Fleet API context", async () => {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-bind-"));
   const reservation = reservePort();
