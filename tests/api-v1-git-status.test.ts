@@ -295,19 +295,56 @@ test.each(["success", "failure"])(
 
 test("rejects the temporary snapshot fallback inside the checkout", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
-  const previous = process.env["TMPDIR"];
   try {
     git(directory, "init", "-b", "main");
     const temporary = join(directory, "tmp");
     await mkdir(temporary);
-    process.env["TMPDIR"] = temporary;
     expect(
-      await createGitReader()(directory, AbortSignal.timeout(3000)),
+      await createGitReader(
+        Date.now,
+        undefined,
+        undefined,
+        () => temporary,
+      )(directory, AbortSignal.timeout(3000)),
     ).toMatchObject({ changedFiles: null, error: "Git state unavailable." });
   } finally {
-    if (previous === undefined) delete process.env["TMPDIR"];
-    else process.env["TMPDIR"] = previous;
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a temporary root reached through a symlink is checked and used canonically", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const outside = await mkdtemp(join(tmpdir(), "stargate-api-git-tmp-"));
+  const links = await mkdtemp(join(tmpdir(), "stargate-api-git-link-"));
+  try {
+    git(directory, "init", "-b", "main");
+    await writeFile(join(directory, "tracked.txt"), "x\n");
+    const link = join(links, "tmp");
+    // Points into the checkout: rejected, even though the link itself is outside.
+    await symlink(join(directory), link);
+    expect(
+      await createGitReader(
+        Date.now,
+        undefined,
+        undefined,
+        () => link,
+      )(directory, AbortSignal.timeout(3000)),
+    ).toMatchObject({ changedFiles: null, error: "Git state unavailable." });
+    // Points outside the checkout: the read works.
+    await rm(link);
+    await symlink(outside, link);
+    expect(
+      await createGitReader(
+        Date.now,
+        undefined,
+        undefined,
+        () => link,
+      )(directory, AbortSignal.timeout(3000)),
+    ).toMatchObject({ changedFiles: 1 });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+    await rm(links, { recursive: true, force: true });
   }
 });
 

@@ -239,17 +239,26 @@ async function copyStatusFile(
 
 type RunGit = (...args: string[]) => Promise<{ code: number; stdout: string }>;
 
-async function createStatusDirectory(checkout: string, dataDirectory?: string) {
+async function createStatusDirectory(
+  checkout: string,
+  dataDirectory?: string,
+  temporaryDirectory: () => string = tmpdir,
+) {
   const root = await realpath(checkout);
+  // The private snapshot would appear as untracked files inside the worktree.
+  // Returns the canonical directory, so the snapshot is created under exactly
+  // the path that passed the check, not one a symlink could redirect later.
   const outsideCheckout = async (directory: string) => {
-    const child = relative(root, await realpath(directory));
-    // The private snapshot would appear as untracked files inside the worktree.
-    return child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child);
+    const canonical = await realpath(directory);
+    const child = relative(root, canonical);
+    return child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)
+      ? canonical
+      : undefined;
   };
   if (dataDirectory) {
     try {
-      if (await outsideCheckout(dataDirectory))
-        return await mkdtemp(join(dataDirectory, statusDirectoryPrefix));
+      const parent = await outsideCheckout(dataDirectory);
+      if (parent) return await mkdtemp(join(parent, statusDirectoryPrefix));
     } catch (error) {
       if (
         !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
@@ -259,10 +268,10 @@ async function createStatusDirectory(checkout: string, dataDirectory?: string) {
         throw error;
     }
   }
-  const temporary = tmpdir();
-  if (!(await outsideCheckout(temporary)))
+  const parent = await outsideCheckout(temporaryDirectory());
+  if (!parent)
     throw new Error("Git status snapshot would be inside the checkout");
-  return mkdtemp(join(temporary, statusDirectoryPrefix));
+  return mkdtemp(join(parent, statusDirectoryPrefix));
 }
 
 async function removeStatusDirectory(path: string) {
@@ -329,6 +338,7 @@ async function prepareStatus(
   command: typeof readCommand,
   ownDirectory: (path: string) => void,
   dataDirectory?: string,
+  temporaryDirectory?: () => string,
 ) {
   const [paths, settings, excludes] = await Promise.all([
     run(
@@ -390,7 +400,11 @@ async function prepareStatus(
 
   // Status only sees this repository's config, HEAD, index and object store.
   // Never copy executable settings, hooks, info/attributes or a commondir.
-  const gitDir = await createStatusDirectory(directory, dataDirectory);
+  const gitDir = await createStatusDirectory(
+    directory,
+    dataDirectory,
+    temporaryDirectory,
+  );
   ownDirectory(gitDir);
   signal.throwIfAborted();
   const configuredExcludes =
@@ -512,6 +526,7 @@ async function inspect(
   command: typeof readCommand,
   ownDirectory: (path: string) => void,
   dataDirectory?: string,
+  temporaryDirectory?: () => string,
 ): Promise<V1Git | null> {
   const state = emptyState(now());
   let deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
@@ -604,6 +619,7 @@ async function inspect(
       command,
       ownDirectory,
       dataDirectory,
+      temporaryDirectory,
     );
     deadline.throwIfAborted();
     // Snapshot I/O and index inspection have a separate budget from status.
@@ -668,13 +684,14 @@ export function createGitReader(
   now: () => number = Date.now,
   command = readCommand,
   dataDirectory?: string,
+  temporaryDirectory: () => string = tmpdir,
 ) {
   const permits = Semaphore.makeUnsafe(4);
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
   void runAbortable(
     permits.withPermit(
       abortable(async () => {
-        for (const root of new Set([dataDirectory, tmpdir()]))
+        for (const root of new Set([dataDirectory, temporaryDirectory()]))
           if (root) await sweepStatusDirectories(root);
       }),
     ),
@@ -707,6 +724,7 @@ export function createGitReader(
                     snapshot = path;
                   },
                   dataDirectory,
+                  temporaryDirectory,
                 );
                 for (const [path, entry] of cache)
                   if (entry.expiresAt <= now()) cache.delete(path);
