@@ -1104,13 +1104,19 @@ test("a replacement backend can publish detail while its predecessor still holds
     { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
   );
   try {
-    const reader = streams.open(AbortSignal.timeout(500))?.getReader();
+    const signal = AbortSignal.timeout(500);
+    const reader = streams.open(signal)?.getReader();
     if (!reader) throw new Error("Cannot open event stream");
     await nextFrame(reader, "fleet");
     const original = await started.promise;
     backend = "replacement";
-    await nextFrame(reader, "fleet");
-    expect(await nextFrame(reader, "ship")).toContain('"name":"Replacement"');
+    expect((await reader.read()).done).toBe(true);
+    const reconnected = streams.open(signal)?.getReader();
+    if (!reconnected) throw new Error("Cannot reopen event stream");
+    await nextFrame(reconnected, "fleet");
+    expect(await nextFrame(reconnected, "ship")).toContain(
+      '"name":"Replacement"',
+    );
     expect(original.aborted).toBe(true);
   } finally {
     held.resolve(ship);
@@ -1118,8 +1124,8 @@ test("a replacement backend can publish detail while its predecessor still holds
   }
 });
 
-test("host and heartbeat frames continue while an identity change stalls the overview", async () => {
-  const held = Promise.withResolvers<typeof overview>();
+test("an identity change closes clients even when the next overview stalls", async () => {
+  const held = Promise.withResolvers<Omit<V1Fleet, "host" | "gateway">>();
   const started = Promise.withResolvers<void>();
   let backend = "original";
   const streams = createEventStreams(
@@ -1137,16 +1143,26 @@ test("host and heartbeat frames continue while an identity change stalls the ove
       readHost: async () => host,
       snapshotHost: () => host,
     },
-    { pollMs: 10, hostMs: 30, heartbeatMs: 35, readMs: 1000 },
+    { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 100 },
   );
   try {
-    const reader = streams.open(AbortSignal.timeout(350))?.getReader();
+    const reader = streams.open(new AbortController().signal)?.getReader();
     if (!reader) throw new Error("Cannot open event stream");
     await nextFrame(reader, "ship");
     backend = "replacement";
+    expect(
+      await Promise.race([
+        reader.read().then(({ done }) => done),
+        wait(150, false),
+      ]),
+    ).toBe(true);
+    const reconnected = streams.open(AbortSignal.timeout(350))?.getReader();
+    if (!reconnected) throw new Error("Cannot reopen event stream");
     await started.promise;
-    expect(await nextFrame(reader, "host")).not.toContain("event: fleet");
-    expect(await nextFrame(reader, "heartbeat")).not.toContain("event: fleet");
+    held.resolve({ ...overview, name: "After reload" });
+    expect(await nextFrame(reconnected, "fleet")).toContain(
+      '"name":"After reload"',
+    );
   } finally {
     held.resolve(overview);
     streams.stop();
@@ -1185,11 +1201,14 @@ test("a reload discards an in-flight overview even if the original roster return
     await nextFrame(reader, "ship");
     await started.promise;
     roster = removed;
-    expect(streams.open(signal)).toBeDefined();
+    const reconnected = streams.open(signal)?.getReader();
+    if (!reconnected) throw new Error("Cannot reopen event stream");
     roster = original;
     expect(streams.open(signal)).toBeDefined();
     held.resolve(overview);
-    expect(await nextFrame(reader, "fleet")).toContain('"name":"After reload"');
+    expect(await nextFrame(reconnected, "fleet")).toContain(
+      '"name":"After reload"',
+    );
   } finally {
     held.resolve(overview);
     streams.stop();

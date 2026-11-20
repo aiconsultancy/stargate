@@ -140,6 +140,7 @@ export function createEventStreams(
         cachedShips.delete(id);
       }
       cachedOverview = undefined;
+      if (fleet) for (const client of clients) client.close();
       fleet = undefined;
       ships.clear();
       identities = current;
@@ -280,6 +281,7 @@ export function createEventStreams(
       publishing = true;
       try {
         const generation = syncIdentities();
+        if (shutdown.signal.aborted) return;
         const sample = await readOverview(shutdown.signal, async (signal) => {
           const reads = new Map<string, V1ShipRead>();
           const overview = await options.fleet(signal, (id, read) =>
@@ -351,9 +353,9 @@ export function createEventStreams(
 
     return {
       clients,
+      syncIdentities,
       add(client: Client) {
         clients.add(client);
-        syncIdentities();
         if (fleet) {
           client.send(
             encodeEvents([
@@ -378,6 +380,7 @@ export function createEventStreams(
   return {
     open(signal: AbortSignal) {
       expireOverview();
+      active?.syncIdentities();
       if (signal.aborted || (active?.clients.size ?? 0) >= maxClients)
         return undefined;
       active ??= startPolling();
