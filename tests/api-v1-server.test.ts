@@ -393,10 +393,11 @@ test("bind errors fail startup with Fleet API context", async () => {
 async function nextFrame(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   type: string,
+  marker = `event: ${type}\n`,
 ) {
   const decoder = new TextDecoder();
   let text = "";
-  while (!text.includes(`event: ${type}\n`) || !text.endsWith("\n\n")) {
+  while (!text.includes(marker) || !text.endsWith("\n\n")) {
     const chunk = await reader.read();
     if (chunk.done)
       throw new Error("Event stream closed before the expected frame");
@@ -506,7 +507,7 @@ test("a slow ship does not delay the overview or other ship details, and retaine
   let fleetName: string = overview.name;
   let surveyed = 0;
   const held = Promise.withResolvers<AbortSignal>();
-  const recover = Promise.withResolvers<void>();
+  const recover = Promise.withResolvers<V1ShipDetail>();
   const timing = { pollMs: 25, hostMs: 1000, heartbeatMs: 1000, readMs: 160 };
   const streams = createEventStreams(
     {
@@ -519,9 +520,8 @@ test("a slow ship does not delay the overview or other ship details, and retaine
         if (id === ship.id) return { ...ship, name: fleetName };
         if (++surveyed === 2) {
           held.resolve(signal);
-          return new Promise(() => {});
+          return recover.promise;
         }
-        if (surveyed > 2) await recover.promise;
         return slow;
       },
       diff: diffEvents,
@@ -553,11 +553,15 @@ test("a slow ship does not delay the overview or other ship details, and retaine
     expect(await nextFrame(reader, "fleet")).toContain(
       '"name":"Another fleet update"',
     );
-    expect(await nextFrame(reader, "ship")).toContain(
-      '"id":"explorer","name":"Another fleet update"',
-    );
+    expect(
+      await nextFrame(
+        reader,
+        "ship",
+        '"id":"explorer","name":"Another fleet update"',
+      ),
+    ).toContain('"id":"explorer","name":"Another fleet update"');
     expect(signal.aborted).toBe(false);
-    const stale = await nextFrame(reader, "ship");
+    const stale = await nextFrame(reader, "ship", '"detailStale":true');
     expect(stale).toContain('"id":"survey"');
     expect(stale).toContain('"detailStale":true');
     expect(signal.aborted).toBe(true);
@@ -570,13 +574,33 @@ test("a slow ship does not delay the overview or other ship details, and retaine
     if (!late) throw new Error("Cannot join event stream");
     expect(await nextFrame(late, "ship")).toContain('"detailStale":true');
     await late.cancel();
-    recover.resolve();
-    const fresh = await nextFrame(reader, "ship");
+    await Bun.sleep(timing.pollMs * 3);
+    expect(surveyed).toBe(2);
+    recover.resolve({ ...slow, name: "Expired result" });
+    const fresh = await nextFrame(reader, "ship", '"id":"survey"');
     expect(fresh).toContain('"id":"survey"');
     expect(fresh).not.toContain('"detailStale":true');
+    expect(fresh).not.toContain("Expired result");
   } finally {
-    recover.resolve();
+    recover.resolve(slow);
     clearTimeout(timeout);
+    streams.stop();
+  }
+});
+
+test("unchanged ship details publish each successful sample time", async () => {
+  const streams = createEventStreams(
+    { ...source, diff: diffEvents, completeFleet, readHost: async () => host },
+    { pollMs: 20, hostMs: 1000, heartbeatMs: 1000 },
+  );
+  try {
+    const reader = streams.open(AbortSignal.timeout(500))?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    const timestamp = (frame: string) =>
+      Number(/"detailUpdatedAt":(\d+)/.exec(frame)?.[1]);
+    const first = timestamp(await nextFrame(reader, "ship"));
+    expect(timestamp(await nextFrame(reader, "ship"))).toBeGreaterThan(first);
+  } finally {
     streams.stop();
   }
 });

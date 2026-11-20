@@ -21,6 +21,7 @@ import {
   dashboardCrewSummary,
 } from "./dashboard-projection";
 import type { IrcRegistration } from "./irc/ship";
+import { readWithDeadline } from "./read-deadline";
 import { backendFingerprint, type Identity } from "./routing";
 import {
   HISTORY_PAGE,
@@ -113,6 +114,7 @@ const RECENT = 20;
 const ROOT_CACHE_MS = 10_000;
 /** Subagents of subagents are rare; a deeper chain is refused, not followed. */
 const MAX_DEPTH = 8;
+const crewUnavailable = "Crew status unavailable.";
 type CrewRead = {
   status: CrewStatus | null;
   error?: string;
@@ -133,10 +135,15 @@ export function dashboardSource(
   >,
   cronStore: Pick<CronStore, "report" | "recentRuns">,
   now: () => number = Date.now,
+  { fleetCrewReadMs = 1_000 } = {},
 ) {
   const crewRoots = new WeakMap<
     DashboardShip,
     { at: number; sessions: HistorySession[] }
+  >();
+  const fleetCrew = new WeakMap<
+    DashboardShip,
+    { latest?: CrewRead; pending?: Promise<CrewRead> }
   >();
 
   const find = (id: string) => ships.find((ship) => ship.bot.id === id);
@@ -214,6 +221,7 @@ export function dashboardSource(
     try {
       if (fleetInput && ship.backend.fleetCrewStatus) {
         const result = await ship.backend.fleetCrewStatus(fleetInput, signal);
+        signal.throwIfAborted();
         if (result) return result;
       }
       return {
@@ -221,8 +229,48 @@ export function dashboardSource(
       };
     } catch {
       signal.throwIfAborted();
-      return { status: null, error: "Crew status unavailable." };
+      return { status: null, error: crewUnavailable };
     }
+  }
+
+  async function sampleCrew(
+    key: DashboardShip,
+    signal: AbortSignal,
+    read: (reading: AbortSignal) => Promise<CrewRead>,
+  ): Promise<CrewRead> {
+    signal.throwIfAborted();
+    let slot = fleetCrew.get(key);
+    if (!slot) {
+      slot = {};
+      fleetCrew.set(key, slot);
+    }
+    const unavailable = (latest?: CrewRead): CrewRead => ({
+      ...latest,
+      status: latest?.status ?? null,
+      error: crewUnavailable,
+    });
+    const pending = slot.pending;
+    if (pending !== undefined)
+      return readWithDeadline(signal, fleetCrewReadMs, () => pending).result;
+
+    const attempt = readWithDeadline(signal, fleetCrewReadMs, read);
+    const entry = slot;
+    entry.pending = attempt.result.then(
+      (sample) => {
+        if (sample.error) return unavailable(entry.latest);
+        entry.latest = sample;
+        return sample;
+      },
+      () => unavailable(entry.latest),
+    );
+    void entry.pending
+      .then(() => attempt.settled)
+      .then(() => {
+        delete entry.pending;
+      });
+    const sample = await entry.pending;
+    signal.throwIfAborted();
+    return sample;
   }
 
   /** A failed read is not cached, so the next request asks the backend again. */
@@ -337,17 +385,22 @@ export function dashboardSource(
       const key = group?.view ?? ship;
       const existing = reads.get(key);
       if (existing !== undefined) return existing;
-      const read: Promise<CrewRead> = (async (): Promise<CrewRead> => {
+      const members = group?.members ?? [ship];
+      const readCrew = async (reading: AbortSignal): Promise<CrewRead> => {
         let last: CrewRead = { status: null };
         // One successful read per pinned captain. Retry an exact alias only
         // after a failure; queue and transcript ownership are never shared.
-        for (const member of group?.members ?? [ship]) {
-          const result = await crew(member, signal, selected ? {} : undefined);
+        for (const member of members) {
+          reading.throwIfAborted();
+          const result = await crew(member, reading, selected ? {} : undefined);
           if (result.status) return result;
           if (result.error) last = result;
         }
         return last;
-      })();
+      };
+      const read = selected
+        ? sampleCrew(members[0] ?? ship, signal, readCrew)
+        : readCrew(signal);
       reads.set(key, read);
       return read;
     }

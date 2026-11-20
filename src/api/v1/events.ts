@@ -1,3 +1,4 @@
+import { readWithDeadline } from "../../read-deadline";
 import type {
   ApiV1Source,
   V1Event,
@@ -40,36 +41,12 @@ function encodeEvents(events: V1Event[]) {
   );
 }
 
-async function readWithDeadline<T>(
-  parent: AbortSignal,
-  timeout: number,
-  read: (signal: AbortSignal) => Promise<T>,
-): Promise<T> {
-  parent.throwIfAborted();
-  const signal = AbortSignal.any([parent, AbortSignal.timeout(timeout)]);
-  const aborted = Promise.withResolvers<never>();
-  const abort = () => aborted.reject(signal.reason);
-  signal.addEventListener("abort", abort, { once: true });
-  try {
-    const result = await Promise.race([
-      aborted.promise,
-      Promise.resolve().then(() => {
-        signal.throwIfAborted();
-        return read(signal);
-      }),
-    ]);
-    signal.throwIfAborted();
-    return result;
-  } finally {
-    signal.removeEventListener("abort", abort);
-  }
-}
-
 export function createEventStreams(
   options: Options,
   timing: typeof streamTiming & { readMs?: number } = streamTiming,
 ) {
   const readMs = timing.readMs ?? 20_000;
+  const pendingShips = new Set<string>();
   let active: ReturnType<typeof startPolling> | undefined;
 
   function startPolling() {
@@ -91,11 +68,7 @@ export function createEventStreams(
       const previous = fleet;
       fleet = next;
       const ids = new Set(next.ships.map(({ id }) => id));
-      for (const [id, attempt] of pending) {
-        if (ids.has(id)) continue;
-        pending.delete(id);
-        attempt.abort();
-      }
+      for (const [id, attempt] of pending) if (!ids.has(id)) attempt.abort();
       for (const id of ships.keys()) if (!ids.has(id)) ships.delete(id);
       broadcast(
         previous
@@ -109,15 +82,15 @@ export function createEventStreams(
     }
 
     async function refreshShip(id: string, read: V1ShipRead) {
-      if (pending.has(id) || shutdown.signal.aborted) return;
+      if (pendingShips.has(id) || shutdown.signal.aborted) return;
       const attempt = new AbortController();
       pending.set(id, attempt);
+      pendingShips.add(id);
       const parent = AbortSignal.any([shutdown.signal, attempt.signal]);
       const readAt = Date.now();
+      const { result, settled } = readWithDeadline(parent, readMs, read);
       try {
-        const detail = await readWithDeadline(parent, readMs, read).catch(
-          () => undefined,
-        );
+        const detail = await result.catch(() => undefined);
         if (parent.aborted || !fleet) return;
         const prior = ships.get(id);
         const next = detail
@@ -136,7 +109,9 @@ export function createEventStreams(
       } catch {
         // A later poll can publish this ship if its projection fails.
       } finally {
-        if (pending.get(id) === attempt) pending.delete(id);
+        await settled;
+        pending.delete(id);
+        pendingShips.delete(id);
       }
     }
 
@@ -145,7 +120,7 @@ export function createEventStreams(
       polling = true;
       try {
         const reads = new Map<string, V1ShipRead>();
-        const next = await readWithDeadline(
+        const { result } = readWithDeadline(
           shutdown.signal,
           readMs,
           async (signal) => {
@@ -156,6 +131,7 @@ export function createEventStreams(
             return options.completeFleet(overview);
           },
         );
+        const next = await result;
         if (shutdown.signal.aborted) return;
         publishFleet(next);
         for (const { id } of next.ships)

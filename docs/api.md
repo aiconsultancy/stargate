@@ -105,13 +105,19 @@ filesystem, and `data` represents the filesystem holding the data directory
 when it is on a separate device.
 
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
-submodules. Fleet reads disable checkout-configured filters, hooks and
-filesystem monitors.
+submodules. Status reads run in a private Git directory with a copy of the
+index, a pinned HEAD, and access to the checkout's objects. Git versions with
+`GIT_ATTR_SOURCE` support read attributes from the empty tree, so files that
+depend on attributes for content conversion may count as changed.
 
 Pull requests are looked up by head branch, including branches with numeric
-names. A failed refresh retains the last successful result. For a crew
-context, `pullRequestKnown: true` means its branch has a settled lookup.
-With that field present, `pullRequest: null` means no PR was found.
+names. The head repository's owner and name must match the branch's GitHub
+push repository, reported as `git.pushRepository` when resolvable. The
+lookup targets the GitHub repository at `origin`, or the push repository
+when `origin` has no GitHub URL. A failed or incomplete refresh retains the
+last successful result. For a crew context, `pullRequestKnown: true` means its
+branch has a settled lookup. With that field present, `pullRequest: null`
+means no matching PR was found.
 
 ## Events
 
@@ -119,16 +125,21 @@ Use a streaming browser `fetch` with an `Authorization` header. A connection
 gets a `fleet` event with host and gateway information, followed by the
 available `ship` details. One shared poller reads the overview every three
 seconds while clients are connected and publishes changed overviews independently
-of ship details. Each ship detail has its own 20-second deadline, with at most
-one read in flight per ship. Ship events include `detailUpdatedAt`, the
-sample time of that detail. If a refresh fails, `detailStale` is set to
-`true` on the last successful detail, which keeps its original sample time.
-A successful refresh clears `detailStale`. The stream also sends `host`
-every ten seconds and `heartbeat` every fifteen seconds.
+of ship details. Each ship detail has its own 20-second deadline. A timed-out
+read keeps its slot until it settles, with at most one read in flight per
+ship. Each successful sample publishes a ship event with its
+`detailUpdatedAt`, including when the rest of the detail is unchanged. If a
+refresh fails, `detailStale` is set to `true` on the last successful detail,
+which keeps its original sample time. A successful refresh clears
+`detailStale`. The stream also sends `host` every ten seconds and `heartbeat`
+every fifteen seconds.
 
 The overview and ship details share one crew status read per ship per poll.
-If an older OpenCode plugin reports that it lacks `fleetStatus`, Stargate
-uses ordinary crew status and waits one minute before probing again.
+Each crew read has a one-second deadline. If it fails, the overview marks
+the ship unavailable and uses its last successful crew counts if available.
+An OpenCode plugin's explicit missing-method response or three consecutive
+non-cancellation failures pause `fleetStatus` probes for one minute.
+Stargate uses ordinary crew status during the pause.
 
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git

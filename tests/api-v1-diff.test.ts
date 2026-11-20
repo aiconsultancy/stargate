@@ -367,3 +367,15 @@ test("availability flips emit an event without a member", () => {
     data: { kind: "availability", text: "Test Ship is available." },
   });
 });
+
+test("a successful sample time publishes ship detail without activity", () => {
+  function sample(detailUpdatedAt: number) {
+    const { fleet, ships } = snapshot([context()]);
+    return { fleet, ships: { ship: { ...ships.ship, detailUpdatedAt } } };
+  }
+  const before = sample(at - 1);
+  const after = sample(at);
+  expect(diffEvents(before, after, at)).toEqual([
+    { type: "ship", data: after.ships.ship },
+  ]);
+});

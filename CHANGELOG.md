@@ -10,6 +10,12 @@
 
 ### Changes
 
+- Isolate Fleet API Git status from checkout configuration and verify PR
+  ownership against each branch's push repository.
+- Bound Fleet API crew reads independently, retain stale ship details on
+  crew failures, and keep timed-out reads in their slots until they settle.
+- Publish the sample time for unchanged Fleet API ship details and back off
+  after repeated OpenCode fleet status failures.
 - Harden Fleet API Git reads against checkout-configured commands.
 - Report Fleet API task outcomes that complete between event polls.
 - Look up pull requests by head branch, keep cached results on refresh

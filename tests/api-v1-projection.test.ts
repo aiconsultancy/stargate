@@ -66,7 +66,7 @@ function session(
   return { id, harness: "opencode", kind: "subagent", ...extra };
 }
 
-function fixture() {
+function fixture(options?: { fleetCrewReadMs?: number }) {
   let at = 4_000_000;
   let config: ApiV1Config = Schema.decodeUnknownSync(configSchema)({
     bots: [bot("captain")],
@@ -118,7 +118,7 @@ function fixture() {
       },
     ],
   });
-  const statuses = new Map<string, CrewStatus | Error>();
+  const statuses = new Map<string, CrewStatus | Error | Promise<CrewStatus>>();
   const queue = new Map<string, V1QueueCounts>();
   const calls = {
     status: [] as string[],
@@ -148,9 +148,12 @@ function fixture() {
     session("unrelated", { parentID: "root-other", updatedAt: at }),
   ];
 
-  function status(id: string, { member }: CrewStatusInput): CrewStatus {
+  async function status(
+    id: string,
+    { member }: CrewStatusInput,
+  ): Promise<CrewStatus> {
     calls.status.push(member ? `${id}/${member}` : id);
-    const found = statuses.get(id);
+    const found = await statuses.get(id);
     if (found instanceof Error) throw found;
     if (!found) return { members: [], total: 0, truncated: false };
     if (!member) return found;
@@ -179,7 +182,7 @@ function fixture() {
       ...(id === "captain"
         ? {
             async fleetCrewStatus(input: CrewStatusInput) {
-              const scoped = status(id, input);
+              const scoped = await status(id, input);
               return {
                 status: scoped,
                 metadata: {
@@ -250,6 +253,7 @@ function fixture() {
     },
     { report: () => [], recentRuns: () => [] },
     now,
+    options,
   );
   const source = createApiV1Source({
     config: () => config,
@@ -286,6 +290,56 @@ function fixture() {
     set: (id: string, members: CrewStatus["members"], truncated = false) =>
       statuses.set(id, { members, total: members.length, truncated }),
   };
+}
+
+const eventHost = {
+  hostname: "example",
+  platform: "linux",
+  arch: "arm64",
+  uptimeSec: 1,
+  cpu: { cores: 1, usage: null, load: [0, 0, 0] as [number, number, number] },
+  memory: { totalBytes: 100, availableBytes: 50 },
+  disks: [],
+  sampledAt: 1,
+};
+
+function fleetEvents(
+  source: ReturnType<typeof fixture>["source"],
+  timing?: Parameters<typeof createEventStreams>[1],
+) {
+  return createEventStreams(
+    {
+      ...source,
+      diff: diffEvents,
+      readHost: async () => eventHost,
+      completeFleet: async (overview) => ({
+        ...overview,
+        host: eventHost,
+        gateway: {
+          version: "1.0.0",
+          bunVersion: "1.0.0",
+          opencodeVersion: null,
+          startedAt: 1,
+          features: [],
+        },
+      }),
+    },
+    timing,
+  );
+}
+
+async function nextEvent(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  marker: string,
+) {
+  const decoder = new TextDecoder();
+  let frames = "";
+  while (!frames.includes(marker)) {
+    const next = await reader.read();
+    if (next.done) throw new Error(`Missing frame containing ${marker}`);
+    frames += decoder.decode(next.value, { stream: true });
+  }
+  return frames;
 }
 
 describe("Fleet API projection", () => {
@@ -378,49 +432,86 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("retains the last crew detail when a crew read fails but history still works", async () => {
+    const f = fixture();
+    f.set("captain", [
+      context("pilot", { current: task("running", "running") }),
+    ]);
+    const streams = fleetEvents(f.source, {
+      pollMs: 30,
+      hostMs: 1000,
+      heartbeatMs: 1000,
+    });
+    try {
+      const reader = streams.open(AbortSignal.timeout(700))?.getReader();
+      if (!reader) throw new Error("Cannot open event stream");
+      const initial = await nextEvent(
+        reader,
+        'event: ship\ndata: {"id":"captain"',
+      );
+      const at = /"detailUpdatedAt":(\d+)/.exec(initial)?.[1];
+      expect(at).toBeDefined();
+      f.statuses.set("captain", new Error("Crew offline"));
+      const unavailable = await nextEvent(reader, '"available":false');
+      expect(unavailable).toContain("event: fleet");
+      expect(unavailable).toContain('"kind":"availability"');
+      const stale = await nextEvent(reader, '"detailStale":true');
+      expect(stale).toContain('"id":"running"');
+      expect(stale).toContain(`"detailUpdatedAt":${at}`);
+    } finally {
+      streams.stop();
+    }
+  });
+
+  test("a stalled crew backend leaves healthy overview and detail updates streaming", async () => {
+    const f = fixture({ fleetCrewReadMs: 40 });
+    f.set("other", [context("remote")]);
+    f.set("captain", [context("pilot")]);
+    const streams = fleetEvents(f.source, {
+      pollMs: 15,
+      hostMs: 1000,
+      heartbeatMs: 1000,
+      readMs: 250,
+    });
+    const held = Promise.withResolvers<CrewStatus>();
+    try {
+      const reader = streams.open(AbortSignal.timeout(850))?.getReader();
+      if (!reader) throw new Error("Cannot open event stream");
+      await nextEvent(reader, 'event: ship\ndata: {"id":"other"');
+      f.statuses.set("other", held.promise);
+      f.set("captain", [
+        context("pilot", { current: task("healthy-task", "running") }),
+      ]);
+      const unavailable = await nextEvent(reader, '"available":false');
+      expect(unavailable).toContain("event: fleet");
+      expect(unavailable).toContain('"crew":{"people":1,"busy":0,"queued":0}');
+      const stale = await nextEvent(reader, '"detailStale":true');
+      expect(stale).toContain('"id":"remote"');
+      if (!(unavailable + stale).includes("healthy-task"))
+        expect(await nextEvent(reader, "healthy-task")).toContain(
+          "event: ship",
+        );
+      await Bun.sleep(70);
+      expect(f.calls.status.filter((id) => id === "other")).toHaveLength(2);
+      f.set("other", [context("recovered")]);
+      held.resolve({ members: [], total: 0, truncated: false });
+      expect(await nextEvent(reader, '"id":"recovered"')).toContain(
+        "event: ship",
+      );
+    } finally {
+      held.resolve({ members: [], total: 0, truncated: false });
+      streams.stop();
+    }
+  });
+
   test("reuses the crew read for overview and detail in each event poll", async () => {
     const f = fixture();
     f.set("captain", [context("pilot")]);
-    const host = {
-      hostname: "example",
-      platform: "linux",
-      arch: "arm64",
-      uptimeSec: 1,
-      cpu: {
-        cores: 1,
-        usage: null,
-        load: [0, 0, 0] as [number, number, number],
-      },
-      memory: { totalBytes: 100, availableBytes: 50 },
-      disks: [],
-      sampledAt: 1,
-    };
-    const streams = createEventStreams({
-      ...f.source,
-      diff: diffEvents,
-      readHost: async () => host,
-      completeFleet: async (overview) => ({
-        ...overview,
-        host,
-        gateway: {
-          version: "1.0.0",
-          bunVersion: "1.0.0",
-          opencodeVersion: null,
-          startedAt: 1,
-          features: [],
-        },
-      }),
-    });
+    const streams = fleetEvents(f.source);
     try {
       const reader = streams.open(signal)?.getReader();
       if (!reader) throw new Error("Cannot open event stream");
-      const decoder = new TextDecoder();
-      let frames = "";
-      while (!frames.includes('event: ship\ndata: {"id":"captain"')) {
-        const next = await reader.read();
-        if (next.done) throw new Error("Missing captain frame");
-        frames += decoder.decode(next.value, { stream: true });
-      }
+      await nextEvent(reader, 'event: ship\ndata: {"id":"captain"');
       expect(f.calls.status.filter((id) => id === "captain")).toEqual([
         "captain",
       ]);
