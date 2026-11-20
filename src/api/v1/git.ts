@@ -669,17 +669,19 @@ export function createGitReader(
   command = readCommand,
   dataDirectory?: string,
   temporaryDirectory: () => string = tmpdir,
+  // Cache expiry and read timing use a monotonic clock, so a wall-clock change
+  // cannot stretch or shrink cache lifetimes. Tests that inject `now` get it
+  // here too, so one fake clock drives both.
+  monotonic: () => number = now === Date.now ? () => performance.now() : now,
 ) {
   const permits = Semaphore.makeUnsafe(4);
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
   let sweptAt = Number.NEGATIVE_INFINITY;
   function cacheResult(directory: string, value: V1Git | null, ms = ttl) {
-    const at = now();
-    // Sweep at most once a second on the monotonic clock, so a burst of
-    // results stays linear and a wall-clock change cannot stop sweeps.
-    const tick = performance.now();
-    if (tick - sweptAt >= 1_000) {
-      sweptAt = tick;
+    const at = monotonic();
+    // Sweep at most once a second, so a burst of results stays linear.
+    if (at - sweptAt >= 1_000) {
+      sweptAt = at;
       for (const [path, entry] of cache)
         if (entry.expiresAt <= at) cache.delete(path);
     }
@@ -699,12 +701,15 @@ export function createGitReader(
     signal.throwIfAborted();
     if (!directory || !isAbsolute(directory)) return null;
     const cached = cache.get(directory);
-    if (cached && cached.expiresAt > now()) return cached.value;
-    // When this read got a permit, on the monotonic clock. A timeout after
-    // holding it for a full read deadline is this checkout's own and is cached
-    // for the usual time. Otherwise the read mostly waited for a slot, which
-    // says little about the checkout: cache that answer only briefly, so polls
-    // under saturation stay fast without hiding the checkout for long.
+    if (cached && cached.expiresAt > monotonic()) return cached.value;
+    // A timeout is this checkout's own when the read got its permit with at
+    // least one read deadline of its budget left; that answer is cached for
+    // the usual time. Otherwise the read mostly waited for a slot, which says
+    // little about the checkout: cache that answer only briefly, so polls under
+    // saturation stay fast without hiding the checkout for long. Measured from
+    // the budget, not from when the timeout handler runs, so a late timer
+    // cannot change the answer.
+    const budgetEnds = monotonic() + 2 * timeout;
     let startedAt: number | undefined;
     try {
       return await readWithDeadline(signal, 2 * timeout, (deadline) => {
@@ -712,9 +717,9 @@ export function createGitReader(
         void runAbortable(
           permits.withPermit(
             abortable(async (reading) => {
-              startedAt = performance.now();
+              startedAt = monotonic();
               const saved = cache.get(directory);
-              if (saved && saved.expiresAt > now()) {
+              if (saved && saved.expiresAt > monotonic()) {
                 reply.resolve(saved.value);
                 return;
               }
@@ -751,10 +756,9 @@ export function createGitReader(
       if (!(error instanceof DOMException && error.name === "TimeoutError"))
         throw error;
       const saved = cache.get(directory);
-      if (saved && saved.expiresAt > now()) return saved.value;
+      if (saved && saved.expiresAt > monotonic()) return saved.value;
       const timedOut = { ...emptyState(now()), error: "Git read timed out." };
-      const own =
-        startedAt !== undefined && performance.now() - startedAt >= timeout;
+      const own = startedAt !== undefined && budgetEnds - startedAt >= timeout;
       return cacheResult(directory, timedOut, own ? ttl : timeout);
     }
   };

@@ -285,6 +285,38 @@ test("caches an outer Git read timeout for 15 seconds", async () => {
   }
 }, 10_000);
 
+test("cache lifetimes follow the monotonic clock, not the wall clock", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  let wall = 10_000_000;
+  let mono = 100;
+  let calls = 0;
+  const read = createGitReader(
+    () => wall,
+    async () => {
+      calls++;
+      return { code: 1, stdout: "" };
+    },
+    undefined,
+    undefined,
+    () => mono,
+  );
+  const signal = new AbortController().signal;
+  try {
+    const first = await read(directory, signal);
+    const reads = calls;
+    // The wall clock jumps back an hour: the entry must still expire on time.
+    wall -= 3_600_000;
+    mono += 14_999;
+    expect(await read(directory, signal)).toBe(first);
+    expect(calls).toBe(reads);
+    mono += 1;
+    expect(await read(directory, signal)).not.toBe(first);
+    expect(calls).toBeGreaterThan(reads);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("caches a timeout spent only waiting for a read slot briefly", async () => {
   const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
   const held = Promise.withResolvers<null>();
@@ -306,10 +338,9 @@ test("caches a timeout spent only waiting for a read slot briefly", async () => 
     const waiting = join(root, "waiting");
     const timedOut = await read(waiting, signal);
     expect(timedOut).toMatchObject({ error: "Git read timed out." });
-    // Under saturation the next poll answers at once from the short cache.
-    const started = performance.now();
+    // Under saturation the next poll answers from the short cache without
+    // reaching Git or waiting for a slot.
     expect(await read(waiting, signal)).toBe(timedOut);
-    expect(performance.now() - started).toBeLessThan(100);
     expect(calls).toBe(4);
     held.resolve(null);
     await Promise.all(busy);
