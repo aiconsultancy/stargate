@@ -1140,17 +1140,20 @@ test("a replacement backend can publish detail while its predecessor still holds
   }
 });
 
-test("an identity change closes clients even when the next overview stalls", async () => {
+test("an identity change closes clients and cancels a pending overview", async () => {
   const held = Promise.withResolvers<Omit<V1Fleet, "host" | "gateway">>();
-  const started = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<AbortSignal>();
   let backend = "original";
+  let reads = 0;
   const streams = createEventStreams(
     {
       ...source,
       shipIdentities: () => new Map([[ship.id, backend]]),
-      fleet: async () => {
-        if (backend === "original") return overview;
-        started.resolve();
+      fleet: async (signal) => {
+        if (++reads === 1) return overview;
+        if (backend !== "original")
+          return { ...overview, name: "After reload" };
+        started.resolve(signal);
         return held.promise;
       },
       diff: diffEvents,
@@ -1159,12 +1162,13 @@ test("an identity change closes clients even when the next overview stalls", asy
       readHost: async () => host,
       snapshotHost: () => host,
     },
-    { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 100 },
+    { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
   );
   try {
     const reader = streams.open(new AbortController().signal)?.getReader();
     if (!reader) throw new Error("Cannot open event stream");
     await nextFrame(reader, "ship");
+    const reading = await started.promise;
     backend = "replacement";
     expect(
       await Promise.race([
@@ -1172,10 +1176,10 @@ test("an identity change closes clients even when the next overview stalls", asy
         wait(150, false),
       ]),
     ).toBe(true);
+    expect(reading.aborted).toBe(true);
+    held.resolve(overview);
     const reconnected = streams.open(AbortSignal.timeout(350))?.getReader();
     if (!reconnected) throw new Error("Cannot reopen event stream");
-    await started.promise;
-    held.resolve({ ...overview, name: "After reload" });
     expect(await nextFrame(reconnected, "fleet")).toContain(
       '"name":"After reload"',
     );

@@ -77,6 +77,7 @@ export function createEventStreams(
   const cachedShips = new Map<string, V1ShipDetail>();
   let identities: ReadonlyMap<string, string> | undefined;
   let rosterGeneration = 0;
+  let rosterRead = new AbortController();
   let cachedOverview:
     | { overview: V1Snapshot["fleet"]; expiresAt: number }
     | undefined;
@@ -139,6 +140,8 @@ export function createEventStreams(
         pending.get(id)?.abort();
         cachedShips.delete(id);
       }
+      rosterRead.abort();
+      rosterRead = new AbortController();
       cachedOverview = undefined;
       if (fleet) for (const client of clients) client.close();
       fleet = undefined;
@@ -277,18 +280,20 @@ export function createEventStreams(
 
     async function poll() {
       expireOverview();
+      const generation = syncIdentities();
       if (publishing || shutdown.signal.aborted) return;
       publishing = true;
       try {
-        const generation = syncIdentities();
-        if (shutdown.signal.aborted) return;
-        const sample = await readOverview(shutdown.signal, async (signal) => {
-          const reads = new Map<string, V1ShipRead>();
-          const overview = await options.fleet(signal, (id, read) =>
-            reads.set(id, read),
-          );
-          return { generation, overview, reads };
-        }).catch(() => undefined);
+        const sample = await readOverview(
+          AbortSignal.any([shutdown.signal, rosterRead.signal]),
+          async (signal) => {
+            const reads = new Map<string, V1ShipRead>();
+            const overview = await options.fleet(signal, (id, read) =>
+              reads.set(id, read),
+            );
+            return { generation, overview, reads };
+          },
+        ).catch(() => undefined);
         if (
           shutdown.signal.aborted ||
           syncIdentities() !== generation ||
