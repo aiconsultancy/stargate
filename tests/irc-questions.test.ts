@@ -714,7 +714,9 @@ test("crew question publication anchors survive a new IRC connection", async () 
 }, 12_000);
 
 test("short hex-like prose remains ordinary while punctuated full tokens stay reserved", async () => {
-  const f = await fixture(false, false);
+  // Only the addressed recipient runs. Broad human wake would also start
+  // captain, making the count of three a transient snapshot of four prompts.
+  const f = await fixture(false, false, { wake: false });
   for (const [index, word] of ["2025...", "decade…", "faded…"].entries())
     f.send(`other: answer ${word}`, `prose-${index}`);
   await until(
@@ -731,5 +733,14 @@ test("short hex-like prose remains ordinary while punctuated full tokens stay re
     await f.received(at);
   }
   expect(f.prompts).toHaveLength(count);
+  const db = new Database(f.path, { readonly: true });
+  try {
+    // PONG proves ingress finished; also catch a leaked control still queued.
+    expect(db.query("SELECT COUNT(*) AS total FROM jobs").get()).toEqual({
+      total: 3,
+    });
+  } finally {
+    db.close();
+  }
   expect(f.replies).toEqual([]);
 });

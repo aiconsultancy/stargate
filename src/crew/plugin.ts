@@ -38,6 +38,7 @@ import { CrewNotifications } from "./notifications";
 import { CrewPost } from "./post";
 import { effectProjectToolInput, projectToolInput } from "./project-options";
 import { CrewProjects } from "./projects";
+import { CrewQuestionHandoff, CrewQuestionRpc } from "./question-handoff";
 import { CrewQuestions, crewQuestionInputSchema } from "./questions";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
@@ -109,6 +110,7 @@ const plugin = Plugin.define({
       return value;
     };
     const waiting = new CrewWaiting(engine);
+    const handoff = new CrewQuestionHandoff();
     const questions = new Map<CrewEngine, CrewQuestions>();
     const questionsFor = (selected: CrewEngine) => {
       let bridge = questions.get(selected);
@@ -133,6 +135,28 @@ const plugin = Plugin.define({
             )
           )
             throw new CrewError("Native crew clarification identity changed.");
+          if (selected.options.team.questionGateway) {
+            const member = selected.options.team.crew.find(
+              (m) => m.id === task.crewID && !m.backend,
+            );
+            if (
+              !member ||
+              !worker.agent ||
+              selected.options.captainSessionID !== task.originCaptainID
+            )
+              throw new CrewError(
+                "Crew question requires the owning pinned captain.",
+              );
+            return handoff.backend(
+              task,
+              {
+                directory: worker.location.directory,
+                agent: worker.agent,
+                namespace: selected.options.namespace,
+              },
+              () => !!questionsFor(selected).active(task),
+            );
+          }
           const client = await connectHistoryAPI(
             selected.options.team,
             worker,
@@ -216,6 +240,12 @@ const plugin = Plugin.define({
     };
     try {
       for (const selected of projects.contexts.values()) {
+        if (
+          selected.options.team.questionGateway &&
+          resolve(ctx.location.directory) !==
+            resolve(selected.options.captainDirectory)
+        )
+          continue;
         const bridge = questionsFor(selected);
         await resources.own(
           async () => {
@@ -291,6 +321,24 @@ const plugin = Plugin.define({
         close: (input, context) =>
           report(context.signal, async () => maintenance.close(input)),
       });
+      if (
+        engine.options.team.questionGateway &&
+        engine.options.captainSessionID &&
+        resolve(ctx.location.directory) ===
+          resolve(engine.options.captainDirectory)
+      )
+        await register(CrewQuestionRpc, {
+          take: (input, context) =>
+            report(context.signal, async () => handoff.take(input.captain)),
+          confirm: (input, context) =>
+            report(context.signal, async () =>
+              handoff.confirm(input.captain, input.id),
+            ),
+          finish: (input, context) =>
+            report(context.signal, async () =>
+              handoff.finish(input.captain, input.id, input.result),
+            ),
+        });
       await register(CrewIrc, {
         bind: (input, context) =>
           report(context.signal, () =>

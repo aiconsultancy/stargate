@@ -85,6 +85,11 @@ releasing the source. IRC uses its own
 [follow-up steering](operations.md#follow-up-steering) for refusal, uncertain
 delivery and content limits.
 
+`bots[].slack.inboundReactions` also defaults to `false` and requires a restart.
+It admits the fixed reaction list and removal events only on this bot's
+messages. The app owner must add the reaction read scope and subscriptions.
+See [inbound Slack reactions](operations.md#inbound-slack-reactions).
+
 Slack registrations can set optional `health` paths and freshness limits for
 the read-only `@captain /health` command. See [health configuration and
 coverage](meta-commands.md#health-configuration-and-coverage). Missing telemetry

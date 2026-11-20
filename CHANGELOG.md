@@ -4,12 +4,15 @@
 
 ### Feature flags
 
+- New flag: `bots[].slack.inboundReactions`, default **off**. Deliver listed
+  reactions and their removal on this bot's Slack messages to its session.
 - New opt-ins: IRC `questionOperator` enables private handling of background questions on a pinned captain with `features.questions`. IRC `features.liveProgress` enables event-based request notices and status. Both default off.
 
 - New opt-in: `api.listen: "unix"` selects a private mode-0600 Fleet socket
   instead of TCP. Omitted `api` still defaults to off. No `enabled` alias.
 - Default changes: none.
 - Enabled by default: none.
+- New opt-ins: IRC `features.crewQuestionHandoff` and crew `team.questionGateway` route native crew clarifications through the owning gateway. Both default off.
 
 ### Changes
 
@@ -47,6 +50,10 @@
   timestamp changes. Preserve the observation time when a crew sample is reused.
 - Publish Fleet events when gateway metadata changes, including when the OpenCode
   version first becomes available.
+- Route admitted people's thumbs up, thumbs down, tick, cross and eyes
+  reactions as conversation input, without interpreting their meaning.
+  Slack app owners must grant `reactions:read` and `users:read`, and subscribe to
+  `reaction_added` and `reaction_removed` before enabling the flag.
 - Serve Fleet through one bounded HTTP host, preserving private TCP access,
   operator authentication, CORS and streamed events. Add the exclusive private
   Unix mode and internal exact-route contract. Notification routes are not yet

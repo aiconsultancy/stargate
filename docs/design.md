@@ -38,6 +38,12 @@ gateway queue and native synthetic-input mechanism as crew steering. Only the
 exact thread owning the active input is eligible. Durable admission receipts
 separate accepted steering, definite refusal and uncertain native writes;
 another thread stays queued. No second scheduler selects follow-ups.
+Opt-in [inbound Slack reactions](operations.md#inbound-slack-reactions) reuse
+that admission path. Slack intake verifies a human actor and the bot-authored
+target, preferring stored posted-message timestamps over an exact API lookup.
+Reaction jobs retain the target timestamp separately from their deduplication
+ID, so source lines identify the reaction without treating it as a new message
+or issuing read receipts against it.
 `attachment-delivery.ts` publishes the files of a stored reply. `store.ts` owns
 the queue, delivery cursor, and session mappings. `runtime.ts` owns startup,
 the exclusive process lock, cancellation, and resource cleanup.

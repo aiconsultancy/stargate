@@ -149,6 +149,11 @@ function ircFeatures(config: IrcConfig): V1Feature[] {
   const mode = access.channelRequests ?? "standard";
   const keys = Object.keys(ircLabels) as (keyof typeof ircLabels)[];
   return [
+    flag(
+      "irc.crewQuestionHandoff",
+      "Gateway-owned crew questions",
+      features.crewQuestionHandoff === true,
+    ),
     ...keys.map((key) =>
       flag(
         `irc.${key}`,
@@ -308,6 +313,11 @@ export async function registrationFeatures(
         "slack.steerThreadFollowUps",
         "Slack follow-up steering",
         config.slack.steerThreadFollowUps,
+      ),
+      flag(
+        "slack.inboundReactions",
+        "Slack inbound reactions",
+        config.slack.inboundReactions,
       ),
       flag(
         "slack.readReceipts",

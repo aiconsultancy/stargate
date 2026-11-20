@@ -116,8 +116,6 @@ export interface SlackApp extends SlackDelivery, CronDelivery {
   identity(signal?: AbortSignal): Promise<Identity>;
   readonly connectionState?: ConnectionState;
   watch?(): Promise<void>;
-  /** Slack `users.info`; required for peer captain admission. */
-  userInfo?(user: string, signal: AbortSignal): Promise<unknown>;
   start(
     accept: (body: unknown) => boolean | Promise<boolean>,
     log: Logger,

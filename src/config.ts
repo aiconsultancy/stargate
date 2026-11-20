@@ -374,6 +374,7 @@ export const botSchema = settingsStruct({
   ),
   slack: settingsStruct({
     steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
+    inboundReactions: Schema.Boolean.pipe(settingsDefault(false)),
     appId: Schema.String.check(settingsPattern(/^A[A-Z0-9]+$/)),
     appTokenEnv: envName,
     botTokenEnv: envName,
@@ -578,6 +579,9 @@ const ircFeaturesSchema = settingsStruct({
   turnStatus: Schema.Boolean.pipe(settingsDefault(true)),
   /** +draft/react for reaction replies, and Stop by reaction. */
   reactions: Schema.Boolean.pipe(settingsDefault(true)),
+  /** Native crew questions use the pinned owner gateway. */
+  crewQuestionHandoff: Schema.optional(Schema.Boolean),
+
   /** CHATHISTORY catch-up of missed messages (persisted cursor). */
   catchUp: Schema.Boolean.pipe(settingsDefault(true)),
   /** draft/persistence: ask the server to keep the account always-on. */
@@ -944,6 +948,16 @@ export const ircSchema = ircConfiguredSchema.check(
         message:
           "Fleet control needs an explicit policy and pinned OpenCode root",
       });
+    if (
+      irc.features.crewQuestionHandoff &&
+      (irc.backend.type !== "opencode" || !irc.backend.sessionID)
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "Crew question handoff requires a pinned OpenCode registration",
+      });
+
     if (
       irc.access.wakeChannels?.some(
         (channel) => !irc.channels.includes(channel),
