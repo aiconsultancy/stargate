@@ -91,7 +91,7 @@ function fileError(error: unknown) {
   return error instanceof Error && "code" in error ? error.code : undefined;
 }
 
-async function openPattern(source: string, roots: string[]) {
+async function openStatusFile(source: string, roots: string[]) {
   // Resolve links first, then prevent the open from following a replacement
   // symlink in any component of the canonical path.
   const path = await realpath(source);
@@ -399,13 +399,20 @@ async function prepareStatus(
     resolve(directory, excludesPath);
   const copiedExcludes = "info/configured-excludes";
   const budget = { remaining: metadataLimit };
+  const roots = await Promise.all(
+    [directory, checkoutGit, commonGit].map((path) => realpath(path)),
+  );
   const snapshotIndex = (
     source: string,
     target: string,
     kind: "primary" | "shared",
   ) =>
     copyStatusFile(
-      () => open(source, metadataFlags),
+      async () => {
+        const file = await openStatusFile(source, roots);
+        if (!file) throw new Error("Git metadata unavailable");
+        return file;
+      },
       join(gitDir, target),
       signal,
       indexLimit,
@@ -420,12 +427,9 @@ async function prepareStatus(
     if (shared)
       await snapshotIndex(join(dirname(index), shared), shared, "shared");
   }
-  const roots = await Promise.all(
-    [directory, checkoutGit, commonGit].map((path) => realpath(path)),
-  );
   const snapshotPattern = (source: string, target: string) =>
     copyStatusFile(
-      () => openPattern(source, roots),
+      () => openStatusFile(source, roots),
       join(gitDir, target),
       signal,
       patternsLimit,

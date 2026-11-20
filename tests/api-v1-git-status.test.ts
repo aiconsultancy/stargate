@@ -84,6 +84,39 @@ test("reads a linked worktree split index without updating the checkout indexes"
   }
 });
 
+test("rejects a primary index path outside the checkout and its Git directories", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  try {
+    const checkout = join(root, "checkout");
+    const external = join(root, "external");
+    await mkdir(checkout);
+    await mkdir(external);
+    git(checkout, "init", "-b", "main");
+    await writeFile(join(checkout, "tracked"), "fixture\n");
+    git(checkout, "add", "tracked");
+    const index = git(
+      checkout,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "index",
+    );
+    const externalIndex = join(external, "index");
+    await fs.copyFile(index, externalIndex);
+    const read = createGitReader(Date.now, async (args, options) => {
+      const result = await readCommand(args, options);
+      if (!result || !args.includes("--absolute-git-dir")) return result;
+      return { ...result, stdout: result.stdout.replace(index, externalIndex) };
+    });
+    expect(await read(checkout, AbortSignal.timeout(3000))).toMatchObject({
+      changedFiles: null,
+      error: "Git state unavailable.",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test.each(["primary", "shared"])(
   "bounds an oversized %s index before invoking Git on either index",
   async (kind) => {
