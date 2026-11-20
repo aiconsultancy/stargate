@@ -106,13 +106,17 @@ when it is on a separate device.
 
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
 submodules. Status reads run in a private Git directory with a copy of the
-index, a pinned HEAD, and access to the checkout's objects. The snapshot
-includes repository-configured `core.excludesFile` patterns and preserves
-the precedence of `info/exclude`. Pattern files have a 1 MiB limit, each
-index file has a 128 MiB limit, and the snapshot has a 192 MiB aggregate
-limit. Oversized metadata produces a Git read error. Git versions with
-`GIT_ATTR_SOURCE` support read attributes from the empty tree, so files
-that depend on attributes for content conversion may count as changed.
+index and access to the checkout's objects. The displayed abbreviated SHA,
+status and ahead/behind counts use the same resolved HEAD. The snapshot
+copies both the primary and any shared index before passing them to Git.
+Repository ignore files, including `core.excludesFile`, are used only when
+they resolve inside the checkout or its Git directories. Unreadable ignore
+files are skipped, and `info/exclude` retains its usual precedence. Pattern
+files have a 1 MiB limit, each index file has a 128 MiB limit, and the
+snapshot has a 192 MiB aggregate limit. Oversized metadata produces a Git
+read error. Git versions with `GIT_ATTR_SOURCE` support read attributes from
+the empty tree, so files that depend on attributes for content conversion may
+count as changed.
 
 Pull requests are looked up by head owner and branch, including branches
 with numeric names. The head repository's owner and name must match the
@@ -130,27 +134,35 @@ Use a streaming browser `fetch` with an `Authorization` header. A connection
 gets a `fleet` event with host and gateway information, followed by the
 initial `ship` details. One shared poller reads the overview every three
 seconds while clients are connected and publishes changed overviews independently
-of ship details. Overview and ship reads have 20-second deadlines and
-keep their slots until they settle. Changed details emit a full `ship`
-event with `detailUpdatedAt`. Timestamp-only refreshes emit
+of ship details. Overview reads have a 25-second deadline. Host and gateway
+enrichment and individual ship details each have a 20-second deadline.
+Reads keep their slots until they settle. After a deadline, the poller can
+publish the last overview or host sample while the original read is still
+pending. If the first overview stalls, host and heartbeat events can arrive
+before the initial fleet frame. If the first host sample stalls, the
+overview uses host metrics without disk usage. Changed details emit a full
+`ship` event with `detailUpdatedAt`. Timestamp-only refreshes emit
 `ship-sampled` with `id` and `detailUpdatedAt`. Clients can use this event
 to update the timestamp on the cached detail. If a refresh fails,
 `detailStale` is set to `true` on the last successful detail, which keeps
-its original sample time. A crew failure before the first successful
-detail emits an unavailable `ship` with an `error` field. A successful
-refresh clears `detailStale`. Availability activity follows the overview's
+its original sample time, including across reconnects. A detail failure
+before the first successful detail emits an unavailable `ship` with an
+`error` field. A successful refresh clears `detailStale`. Availability
+activity follows the overview's
 availability transitions. The stream also sends `host` every ten seconds
 and `heartbeat` every fifteen seconds.
 
-The overview and ship details share one crew read per ship. Each caller waits
-up to one second, and a disconnected caller cancels its own wait. The shared
-read can take up to 20 seconds. If a caller's wait expires during a refresh,
-it can use a successful sample from the previous five seconds. After a
-failure or when no fresh sample is available, the overview marks the ship
-unavailable and retains its last successful crew counts if available.
-OpenCode `fleetStatus` probes have a 400 ms budget so ordinary crew status
-can run on probe failure. An explicit missing-method response or three
-consecutive failures, including probe timeouts, pause probes for one minute.
+The overview and ship details share one crew read per ship. When availability
+is unknown, the caller waits for that result for up to 20 seconds. During a
+refresh, a caller can use a recent sample after one second. A successful
+sample up to 23 seconds old at the start of a refresh remains usable until
+the shared read completes. A disconnected caller cancels its own wait.
+After a shared read fails or reaches its deadline, the overview marks the
+ship unavailable and retains its last successful crew counts if available.
+OpenCode `fleetStatus` probes start with a 400 ms budget that doubles after
+a timeout, up to 6.4 seconds, leaving time for ordinary crew status.
+An explicit missing-method response or three consecutive failures pause
+probes for one minute. Timeouts count toward that pause at the maximum budget.
 
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git

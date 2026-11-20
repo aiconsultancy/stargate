@@ -10,15 +10,18 @@
 
 ### Changes
 
-- Isolate Fleet API Git status from checkout configuration, bound metadata
-  copies, preserve repository excludes, and copy large indexes in larger blocks.
+- Isolate Fleet API Git status from checkout configuration and bound primary
+  and shared indexes before Git loads them. Use one HEAD revision for the SHA,
+  status, and ahead/behind counts. Preserve readable ignore patterns within
+  the checkout and its Git directories.
 - Filter PR candidates by head owner and branch, verify the push repository,
   and fetch checks for the matched PR.
-- Give shared Fleet API crew reads their own deadline so slow successes can
-  be published. Time out OpenCode fleet probes early and back off after
-  repeated failures.
-- Keep timed-out overview and detail reads in their slots, publish initial
-  crew errors, and emit one availability event per transition.
+- Keep recent crew samples usable during slow refreshes and wait for the
+  shared crew read when no recent sample is available. Adapt the OpenCode
+  fleet probe deadline for slower captains and back off after repeated failures.
+- Keep timed-out overview, enrichment, and detail reads in their slots while
+  continuing to publish cached or stale event data across reconnects. Publish
+  initial crew errors and emit one availability event per transition.
 - Publish lightweight `ship-sampled` events when only the ship detail
   timestamp changes.
 - Harden Fleet API Git reads against checkout-configured commands.
