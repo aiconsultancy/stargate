@@ -4,15 +4,18 @@
 
 ### Feature flags
 
-- New flag: `bots[].slack.inboundReactions`, default **off**. Deliver listed
-  reactions and their removal on this bot's Slack messages to its session.
-- New opt-ins: IRC `questionOperator` enables private handling of background questions on a pinned captain with `features.questions`. IRC `features.liveProgress` enables event-based request notices and status. Both default off.
-
-- New opt-in: `api.listen: "unix"` selects a private mode-0600 Fleet socket
-  instead of TCP. Omitted `api` still defaults to off. No `enabled` alias.
+- New flags: `bots[].slack.inboundReactions` delivers listed reactions, and
+  their removal, on this bot's Slack messages to its session. IRC
+  `questionOperator` enables private handling of background questions on a
+  pinned captain with `features.questions`. IRC `features.liveProgress`
+  enables event-based request notices and status. IRC
+  `features.crewQuestionHandoff` and crew `team.questionGateway` route native
+  crew clarifications through the owning gateway. `api.listen: "unix"`
+  selects a private mode-0600 Fleet socket instead of TCP; omitted `api`
+  still defaults to off, with no `enabled` alias. All default off.
 - Default changes: none.
+- New opt-ins: Teams `livePresence` enables native typing and informative updates. IRC `features.fleetTyping` enables typing alongside fleet thread notices. Both default off.
 - Enabled by default: none.
-- New opt-ins: IRC `features.crewQuestionHandoff` and crew `team.questionGateway` route native crew clarifications through the owning gateway. Both default off.
 
 ### Changes
 

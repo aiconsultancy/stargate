@@ -206,3 +206,13 @@ human permission decision for this input, and an earlier human's permission
 token cannot authorise it. Source evidence and rank remain separate from
 human approval. Unknown or interrupted work is reported as uncertain without
 repeating the assignment.
+
+## Typing and progress
+
+Set `livePresence: true` on a Teams registration to show typing and short
+status updates for a recent human request. The update is anchored to that
+message. OpenCode reasoning, tool and reply events select fixed labels such as
+“Thinking”, “Using a tool” and “Writing a reply”. The first text reply for that request closes
+the stream. Image-only replies use normal attachment delivery. Feedback stops
+when the turn ends or after ten minutes. Where informative updates are unavailable, Teams receives a typing
+activity while the turn runs. This option defaults to off.

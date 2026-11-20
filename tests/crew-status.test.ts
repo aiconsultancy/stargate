@@ -11,13 +11,19 @@ import {
   type CrewOptions,
   type CrewSessions,
 } from "../src/crew/engine";
+import { MemberActivityStore } from "../src/crew/member-activity";
 import { teamSchema } from "../src/crew/team";
 import { crewStatusSchema } from "../src/crew-status";
 import { CrewUI, crewStatusView } from "../src/crew-ui";
 import type { CronView } from "../src/cron-ui";
 import { bot, identity } from "./fixtures";
+import {
+  copyCrewDatabase,
+  historyTaskID,
+  statusHistoryFixture,
+} from "./fixtures/database-reuse";
 
-async function fixture() {
+async function fixture(history = false) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-member-status-"));
   const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "adama" },
@@ -58,6 +64,8 @@ async function fixture() {
     synthetic: forbidden,
     compact: forbidden,
   };
+  if (history)
+    await copyCrewDatabase(directory, options.namespace, statusHistoryFixture);
   const engine = await CrewEngine.open(
     options,
     sessions,
@@ -242,30 +250,49 @@ test("large rosters are explicitly truncated while direct member queries remain 
 });
 
 test("durable status bounds recent metadata, retains outcomes and never returns raw results/notices", async () => {
-  const f = await fixture();
+  const f = await fixture(true);
   try {
     const peer = f.engine.state.reservePeer("chief");
-    const tasks = [];
-    for (let i = 0; i < 24; i++) {
-      const task = f.engine.state.reserveTask(
-        peer,
-        "captain",
-        `Engineering ${i}`,
+    const tasks = Array.from({ length: 24 }, (_, i) => {
+      const task = f.engine.state.task(historyTaskID(i));
+      if (!task) throw new Error("Missing saved task");
+      return task;
+    });
+    // Historical task/results/notices are saved. Exercise real metadata writes,
+    // redaction and trimming on one owned setup connection, not the engine's.
+    const setup = new Database(f.engine.state.path, { strict: true });
+    try {
+      const activity = new MemberActivityStore(setup);
+      const phase = setup.query(
+        "UPDATE tasks SET status=?,released=? WHERE id=?",
       );
-      if (!task) throw new Error("Missing task");
-      tasks.push(task);
-      f.engine.state.running(task.id);
-      f.engine.state.activity.progress(
-        task.id,
-        `Visible check ${i}; Bearer secretauth; password=hunter2`,
-      );
-      f.engine.state.notice(task.id, "raw tool output and private reasoning");
-      f.engine.state.complete(
-        task.id,
-        peer.sessionID,
-        "RAW PRIVATE FINAL RESULT",
-      );
-      f.engine.state.release(task.id);
+      setup
+        .transaction(() => {
+          for (let i = 0; i < 24; i++) {
+            const task = tasks[i];
+            if (!task) throw new Error("Missing saved task");
+            phase.run("dispatching", 0, task.id);
+            activity.assignment(
+              { ...task, status: "dispatching", released: 0 },
+              `Engineering ${i}`,
+            );
+            phase.run("running", 0, task.id);
+            activity.phase(
+              { ...task, status: "running", released: 0 },
+              "running",
+            );
+            activity.progress(
+              task.id,
+              `Visible check ${i}; Bearer secretauth; password=hunter2`,
+            );
+            phase.run("completed", 0, task.id);
+            activity.phase({ ...task, released: 0 }, "completed");
+            phase.run("completed", 1, task.id);
+          }
+        })
+        .immediate();
+    } finally {
+      setup.close();
     }
     const status = f.engine.status({ member: "chief" });
     expect(status.members[0]).toMatchObject({

@@ -714,3 +714,118 @@ describe("Opt-in Teams native permission decisions", () => {
     }
   });
 });
+
+test("live Teams presence anchors an informative stage and closes it with the original reply", async () => {
+  const f = registrationFixture({ presence: true });
+  try {
+    const job = await f.running();
+    expect(f.registration.transport.turnStatus?.(job)).toBe("notice");
+    const abort = new AbortController();
+    const working = f.registration.delivery.working?.(
+      job.channel,
+      job.thread,
+      abort.signal,
+      () => true,
+      "notice",
+      () => ({ stage: "reasoning", observedAt: Date.now() }),
+    );
+    await Bun.sleep(10);
+    abort.abort();
+    await working;
+    expect(f.sent.map((x) => x.activity)).toEqual([
+      {
+        type: "typing",
+        text: "Thinking",
+        replyToId: job.thread,
+        entities: [
+          { type: "streamInfo", streamType: "informative", streamSequence: 1 },
+        ],
+      },
+      { type: "typing", replyToId: job.thread },
+    ]);
+    await f.registration.delivery.post(
+      job.channel,
+      job.thread,
+      "Fleet follow-up",
+      undefined,
+      { job: job.id + 1, part: 0 },
+    );
+    expect(f.sent.at(-1)?.activity.entities).toBeUndefined();
+    await f.registration.delivery.post(
+      job.channel,
+      job.thread,
+      "Final",
+      undefined,
+      { job: job.id, part: 0 },
+    );
+    expect(f.sent.at(-1)?.activity).toEqual({
+      type: "message",
+      text: "Final",
+      replyToId: job.thread,
+      entities: [
+        { type: "streamInfo", streamType: "final", streamId: "reply-1" },
+      ],
+    });
+    expect(
+      f.registration.transport.turnStatus?.({
+        ...job,
+        received: Date.now() - 150_000,
+      }),
+    ).toBe("quiet");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a Teams connector that declines informative updates still gets typing and the ordinary reply", async () => {
+  const f = registrationFixture({ presence: true });
+  try {
+    const job = await f.running();
+    const connector = {
+      sendToConversation: async (
+        _service: string,
+        _channel: string,
+        activity: import("../src/teams/connector").OutgoingActivity,
+      ) => {
+        if (activity.entities) throw new Error("Informative streams disabled");
+        return { id: activity.type };
+      },
+    };
+    const spy = spyOn(connector, "sendToConversation");
+    const presence = new (await import("../src/teams/presence")).TeamsPresence(
+      5,
+    );
+    const abort = new AbortController();
+    const send = (
+      activity: import("../src/teams/connector").OutgoingActivity,
+    ) => connector.sendToConversation(SERVICE_URL, job.channel, activity);
+    const work = presence.working(
+      job.channel,
+      job.thread,
+      abort.signal,
+      () => true,
+      () => undefined,
+      send,
+    );
+    await Bun.sleep(14);
+    abort.abort();
+    await work;
+    expect(spy.mock.calls.filter((args) => args[2].entities)).toHaveLength(1);
+    expect(
+      spy.mock.calls.filter(
+        (args) => args[2].type === "typing" && !args[2].entities,
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      await presence.final(
+        job.channel,
+        job.thread,
+        { type: "message", text: "Done" },
+        AbortSignal.timeout(1000),
+        send,
+      ),
+    ).toBeUndefined();
+  } finally {
+    await f.close();
+  }
+});
