@@ -338,6 +338,46 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("backs off after repeated fleet-status failures with a different wire format", async () => {
+    const methods: string[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        const method = new URL(request.url).pathname.split("/").at(-1) ?? "";
+        methods.push(method);
+        if (method === "fleetStatus")
+          return new Response("Not found", { status: 404 });
+        return Response.json({
+          output: { members: [], total: 0, truncated: false },
+        });
+      },
+    });
+    const config = Schema.decodeUnknownSync(backendSchema)({
+      type: "opencode",
+      url: server.url.href,
+      directory: "/",
+    });
+    if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+    const backend = new OpenCodeBackend(config);
+    try {
+      for (let i = 0; i < 4; i++)
+        expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(await backend.crewStatus({}, signal)).toMatchObject({
+        members: [],
+      });
+      expect(methods).toEqual([
+        "fleetStatus",
+        "fleetStatus",
+        "fleetStatus",
+        "status",
+      ]);
+    } finally {
+      await backend.close();
+      await server.stop(true);
+    }
+  });
+
   test("reuses the crew read for overview and detail in each event poll", async () => {
     const f = fixture();
     f.set("captain", [context("pilot")]);

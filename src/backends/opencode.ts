@@ -161,6 +161,7 @@ function generationFailureKind(error: {
 
 export class OpenCodeBackend implements AgentBackend {
   private fleetStatusRetryAt = 0;
+  private fleetStatusFailures = 0;
 
   // Native messages/form IDs are immutable. Recheck their live tool/input state,
   // but do not traverse the entire session twice every second for the same form.
@@ -849,22 +850,27 @@ export class OpenCodeBackend implements AgentBackend {
     try {
       signal.throwIfAborted();
       if (performance.now() < this.fleetStatusRetryAt) return undefined;
-      return fleetCrewStatusSchema.parse(
+      const result = fleetCrewStatusSchema.parse(
         await this.client.rpc(CrewReporting).fleetStatus(input, {
           location: { directory: this.config.directory },
           signal,
         }),
       );
+      signal.throwIfAborted();
+      this.fleetStatusFailures = 0;
+      return result;
     } catch (error) {
       signal.throwIfAborted();
       // Older plugins still serve ordinary status. Probe again after an upgrade.
-      if (
+      const unsupported =
         error &&
         typeof error === "object" &&
         "type" in error &&
-        error.type === "rpc.method_not_found"
-      )
+        error.type === "rpc.method_not_found";
+      if (++this.fleetStatusFailures >= 3 || unsupported) {
         this.fleetStatusRetryAt = performance.now() + 60_000;
+        this.fleetStatusFailures = 0;
+      }
       return undefined;
     }
   }
