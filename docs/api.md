@@ -121,32 +121,153 @@ value is null.
 `host.disks[].path` labels the filesystem. `/` represents the root
 filesystem, and `data` represents the filesystem holding the data directory
 when it is on a separate device.
+`GET /api/v1/fleet` gives the overview and enrichment a shared deadline that
+ends one second before the HTTP request deadline (19 seconds by default). If
+enrichment times out after the overview is ready, the response uses the latest
+host and gateway metrics. Before the first host sample, the
+fallback omits disk usage.
 
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
-submodules. Fleet reads disable checkout-configured filters, hooks and
-filesystem monitors.
+submodules. Status runs in a private Git directory with snapshots of the
+primary and shared indexes and access to the checkout's objects. The SHA and
+upstream come from the captured branch when attached. Stargate rechecks the
+branch and commit after comparing ahead and behind counts and rejects the
+snapshot if either changed.
 
-Pull requests are looked up by head branch, including branches with numeric
-names. A failed refresh retains the last successful result. For a crew
-context, `pullRequestKnown: true` means its branch has a settled lookup.
-With that field present, `pullRequest: null` means no PR was found.
+Git status requires the safe metadata opens supported on Linux and macOS.
+Other platforms report `Git state unavailable.` The reader checks the size of
+each index before snapshotting it. On Linux, it tries a copy-on-write clone
+of the open index and streams a bounded copy if cloning is unavailable.
+On macOS, it streams a bounded copy.
+The primary and shared indexes each have a 128 MiB limit, and all snapshot
+metadata has a 192 MiB aggregate limit. Snapshot preparation, including
+split-index inspection in a separate process, has a two-second budget before
+the two-second Git status and comparison budget starts. A read, including
+time waiting for a slot, has a four-second ceiling. A checkout's own timeout
+is cached for 15 seconds. Timeouts spent mostly waiting for a read slot are
+cached for one read deadline (two seconds). Cleanup runs in the background
+within the same concurrency limit. Snapshots use a private
+`stargate-git-status` folder in the data directory when the data directory is
+outside the worktree, writable and owned by the service user. Every directory
+on its path must be owned by root or the service user, and any that other
+users can write to must have the sticky bit. Startup removes snapshots there
+that are older than 24 hours. Otherwise each process uses its own private
+folder in the system temporary directory, which must pass the same path checks
+but may be owned by root. That folder is removed when the gateway stops; one
+left by a crash is not swept and is cleared with the temporary directory. If
+neither directory passes, Git status is reported unavailable.
+
+Copied ignore files, including `core.excludesFile`, must resolve inside
+the checkout or the Git directories Git reports for it. Those directories come
+from the checkout itself, so this limits which files are copied rather than
+forming a hard boundary: a checkout pointed at another repository on the host
+can affect its own changed-file count, which can reveal to Fleet viewers
+whether that repository's ignore rules match files in the checkout.
+The 1 MiB limit applies to each copied pattern file.
+Unreadable ignore files are skipped, and `info/exclude` retains its usual
+precedence. Git reads worktree `.gitignore` files directly. Status reads
+disable filters for safety. Git versions that support `GIT_ATTR_SOURCE`
+read attributes from the empty tree and ignore worktree `.gitattributes`.
+The private Git directory also has no replacement refs, so a checkout that
+relies on `git replace` can show different status counts.
+When Git rehashes a racily clean file because its timestamp is too close to
+the index timestamp, `text` or `eol` attributes or Git LFS can occasionally
+cause an unchanged file to count as changed.
+
+To enable pull request lookups, set `api.pullRequestRepositories` in
+`stargate.json` and restart Stargate. Each key is the exact absolute,
+normalized path of a local crew checkout as configured in the crew project
+registry. Each value is the GitHub `owner/repository` whose PR metadata
+you want to share with Fleet API viewers.
+
+```json
+{
+  "api": {
+    "listen": ":8484",
+    "pullRequestRepositories": {
+      "/srv/crew/example-worktree": "example/project"
+    }
+  }
+}
+```
+
+Stargate looks up a branch only in its bound repository and requires the PR
+head to belong to that same repository. Checkout remotes supply display
+metadata in `git.repository`. The optional legacy fields
+`git.pushRepository` and `git.pushRepositoryAmbiguous` are deprecated and
+omitted. With no binding or no readable branch and commit, `pullRequest` is
+null and `pullRequestKnown` is absent. A context with `pullRequestKnown: true`
+and `pullRequest: null` has a settled lookup with no matching PR. A failed
+or incomplete refresh retains the last successful lookup result.
 
 ## Events
 
 Use a streaming browser `fetch` with an `Authorization` header. A connection
 gets a `fleet` event with host and gateway information, followed by the
-available `ship` details. One shared poller reads the overview every three
-seconds while clients are connected and publishes changed overviews independently
-of ship details. Each ship detail has its own 20-second deadline, with at most
-one read in flight per ship. Ship events include `detailUpdatedAt`, the
-sample time of that detail. If a refresh fails, `detailStale` is set to
-`true` on the last successful detail, which keeps its original sample time.
-A successful refresh clears `detailStale`. The stream also sends `host`
-every ten seconds and `heartbeat` every fifteen seconds.
+initial `ship` details. One shared poller reads the overview every three
+seconds while clients are connected and publishes a `fleet` event when the
+overview or gateway metadata changes, independently of ship details.
+In the event stream, overview reads have a 25-second deadline,
+and host and gateway enrichment and individual ship details each have a
+20-second deadline. Over HTTP, every read ends one second before the request
+deadline, so a fallback or an error can still be sent. Within that, `GET
+/api/v1/fleet` stops waiting for crew reads 5 seconds before its own deadline
+(14 seconds by default) and reports any captain that hasn't answered as
+unavailable. The fleet overview, ship detail, and crew detail routes share
+eight HTTP read slots. These routes answer 503 when all eight slots are occupied.
+When an overview read fails or times out, the poller can republish the last
+successful overview with `overviewStale: true` and its original `generatedAt`.
+That fallback expires 75 seconds after the successful read and is discarded
+when the configured ship roster or a ship's backend identity changes. The
+poller also discards in-flight overviews from before the change. On expiry,
+the server closes the streams so clients can reconnect for a fresh
+snapshot. Once a stream has received a `fleet` frame, a change to the ship
+roster or to a ship's backend identity also closes it, and the client
+reconnects for a fresh snapshot. Host and
+heartbeat events continue while the poller waits for a stalled overview.
+At three times a read's deadline, another attempt can start. Each overview,
+enrichment, host metrics, crew sample, ship detail and OpenCode `fleetStatus`
+probe slot allows one outstanding abandoned read alongside the current
+attempt. If the first
+overview stalls, host and heartbeat events can arrive before the initial
+fleet frame. The host timer waits up to one second for a fresh sample and
+uses the latest snapshot if the read is still pending. The snapshot omits
+disk usage until the first successful host sample. Changed details emit a
+full `ship` event with `detailUpdatedAt`. Reused crew data retains its
+observation time, even when other detail changes. Timestamp-only refreshes emit
+`ship-sampled` with `id` and `detailUpdatedAt`. Clients can use this event
+to update the timestamp on the cached detail. If a refresh fails,
+`detailStale` is set to `true` on the last successful detail, which keeps
+its original sample time, including across reconnects. When the captain is
+unavailable, retained detail reports `available: false` and includes the
+current error if supplied. A detail failure
+before the first successful detail emits an unavailable `ship` with an
+`error` field. A successful refresh clears `detailStale`. An overview
+availability transition supersedes in-flight detail reads for that ship.
+When a ship becomes available and has no successful detail cached, the
+poller waits for a new detail read as the superseded read drains. Removal or a
+change of backend identity discards cached detail for that ship. A replacement
+backend has its own detail read slot. Availability activity follows the
+overview. The stream sends `host` every ten seconds and `heartbeat` every
+fifteen seconds.
 
-The overview and ship details share one crew status read per ship per poll.
-If an older OpenCode plugin reports that it lacks `fleetStatus`, Stargate
-uses ordinary crew status and waits one minute before probing again.
+The overview and ship details share one crew read per ship. When availability
+is unknown, the caller waits for that result for up to 20 seconds. During a
+refresh, a caller can use a recent sample after one second. A sample up to
+23 seconds old at the start of a refresh remains usable until the shared read
+completes. A failed sample can also be served with its `error` field set.
+A disconnected caller cancels its own wait.
+Fleet API shutdown cancels shared crew reads. A committed configuration
+reload invalidates cached crew samples and cancels reads for retired backends.
+Unchanged backends keep their in-flight reads, including reads shared with
+HTTP requests.
+After a shared read fails or reaches its deadline, the overview marks the
+ship unavailable and retains its last successful crew counts if available.
+OpenCode `fleetStatus` probes start with a 400 ms budget that doubles after
+a timeout, up to 6.4 seconds, leaving time for ordinary crew status.
+Concurrent callers with the same filter share one probe.
+An explicit missing-method response or three consecutive failures pause
+probes for one minute. Timeouts count toward that pause at the maximum budget.
 
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git

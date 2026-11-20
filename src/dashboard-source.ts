@@ -21,6 +21,7 @@ import {
   dashboardCrewSummary,
 } from "./dashboard-projection";
 import type { IrcRegistration } from "./irc/ship";
+import { createReadSlot, readWithDeadline } from "./read-deadline";
 import { backendFingerprint, type Identity } from "./routing";
 import {
   HISTORY_PAGE,
@@ -113,10 +114,13 @@ const RECENT = 20;
 const ROOT_CACHE_MS = 10_000;
 /** Subagents of subagents are rare; a deeper chain is refused, not followed. */
 const MAX_DEPTH = 8;
+const crewUnavailable = "Crew status unavailable.";
+const crewPollIntervalMs = 3_000;
 type CrewRead = {
   status: CrewStatus | null;
   error?: string;
   metadata?: FleetCrewStatus["metadata"];
+  observedAt?: number;
 };
 
 /**
@@ -133,11 +137,42 @@ export function dashboardSource(
   >,
   cronStore: Pick<CronStore, "report" | "recentRuns">,
   now: () => number = Date.now,
+  {
+    fleetCrewReadMs = 1_000,
+    fleetCrewDeadlineMs = 20_000,
+    fleetSignal = new AbortController().signal,
+  }: {
+    fleetCrewReadMs?: number;
+    fleetCrewDeadlineMs?: number;
+    fleetSignal?: AbortSignal;
+  } = {},
 ) {
   const crewRoots = new WeakMap<
     DashboardShip,
     { at: number; sessions: HistorySession[] }
   >();
+  const fleetCrew = new WeakMap<
+    AgentBackend,
+    {
+      read: ReturnType<typeof createReadSlot<CrewRead>>;
+      // Bumped by invalidation; an attempt started before it stores nothing.
+      generation: number;
+      latest?: CrewRead;
+      last?: { sample: CrewRead; at: number };
+      pending?: {
+        attempt: Promise<CrewRead>;
+        result: Promise<CrewRead>;
+        fallback: CrewRead | undefined;
+      };
+    }
+  >();
+  const retirements = new WeakMap<AgentBackend, AbortController>();
+
+  function retirement(backend: AgentBackend) {
+    const controller = retirements.get(backend) ?? new AbortController();
+    retirements.set(backend, controller);
+    return controller;
+  }
 
   const find = (id: string) => ships.find((ship) => ship.bot.id === id);
   const name = (ship: DashboardShip) => ship.bot.displayName ?? ship.bot.id;
@@ -214,6 +249,7 @@ export function dashboardSource(
     try {
       if (fleetInput && ship.backend.fleetCrewStatus) {
         const result = await ship.backend.fleetCrewStatus(fleetInput, signal);
+        signal.throwIfAborted();
         if (result) return result;
       }
       return {
@@ -221,7 +257,86 @@ export function dashboardSource(
       };
     } catch {
       signal.throwIfAborted();
-      return { status: null, error: "Crew status unavailable." };
+      return { status: null, error: crewUnavailable };
+    }
+  }
+
+  async function sampleCrew(
+    members: readonly DashboardShip[],
+    signal: AbortSignal,
+    read: (reading: AbortSignal) => Promise<CrewRead>,
+    crewDeadline?: AbortSignal,
+  ): Promise<CrewRead> {
+    signal.throwIfAborted();
+    fleetSignal.throwIfAborted();
+    const backend = members[0]?.backend;
+    if (!backend) return { status: null };
+    const slot = fleetCrew.get(backend) ?? {
+      read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
+      generation: 0,
+    };
+    fleetCrew.set(backend, slot);
+    const unavailable = (): CrewRead => ({
+      ...slot.latest,
+      status: slot.latest?.status ?? null,
+      error: crewUnavailable,
+    });
+    const current = slot.read.pending;
+    if (!current || slot.pending?.attempt !== current.result) {
+      // The fleet owns the shared attempt. A caller only owns its wait.
+      const attempt = slot.read.start(fleetSignal, read).result;
+      const generation = slot.generation;
+      const last = slot.last;
+      // A recent sample stays usable throughout this refresh. A cold caller
+      // needs the shared result to establish availability.
+      const fallback =
+        last &&
+        performance.now() - last.at < fleetCrewDeadlineMs + crewPollIntervalMs
+          ? last.sample
+          : undefined;
+      const result = attempt
+        .then(
+          (sample) =>
+            sample.error ? unavailable() : { ...sample, observedAt: now() },
+          unavailable,
+        )
+        .then((sample) => {
+          if (fleetSignal.aborted) return unavailable();
+          // A reload invalidated the cache while this attempt ran: answer its
+          // callers, but do not keep a sample from before the reload.
+          if (generation !== slot.generation) return sample;
+          if (!sample.error) slot.latest = sample;
+          slot.last = { sample, at: performance.now() };
+          return sample;
+        });
+      slot.pending = { attempt, result, fallback };
+    }
+    const pending = slot.pending;
+    const hasFallback = pending.fallback !== undefined;
+    const wait = AbortSignal.any([
+      signal,
+      fleetSignal,
+      ...(crewDeadline ? [crewDeadline] : []),
+    ]);
+    try {
+      return await readWithDeadline(
+        wait,
+        hasFallback ? fleetCrewReadMs : undefined,
+        () => pending.result,
+      ).result.catch((error: unknown) => {
+        wait.throwIfAborted();
+        if (!hasFallback) throw error;
+        if (pending.fallback) return slot.last?.sample ?? pending.fallback;
+        return readWithDeadline(wait, undefined, () => pending.result).result;
+      });
+    } catch (error) {
+      signal.throwIfAborted();
+      fleetSignal.throwIfAborted();
+      if (crewDeadline?.aborted && error === crewDeadline.reason)
+        return pending.fallback
+          ? (slot.last?.sample ?? pending.fallback)
+          : unavailable();
+      throw error;
     }
   }
 
@@ -326,6 +441,7 @@ export function dashboardSource(
   async function readFleet(
     signal: AbortSignal,
     selected?: ReadonlySet<string>,
+    crewDeadline?: AbortSignal,
   ) {
     const groups = captains();
     const reads = new Map<
@@ -337,17 +453,36 @@ export function dashboardSource(
       const key = group?.view ?? ship;
       const existing = reads.get(key);
       if (existing !== undefined) return existing;
-      const read: Promise<CrewRead> = (async (): Promise<CrewRead> => {
+      const members = group?.members ?? [ship];
+      const readCrew = async (reading: AbortSignal): Promise<CrewRead> => {
         let last: CrewRead = { status: null };
         // One successful read per pinned captain. Retry an exact alias only
         // after a failure; queue and transcript ownership are never shared.
-        for (const member of group?.members ?? [ship]) {
-          const result = await crew(member, signal, selected ? {} : undefined);
+        for (const member of members) {
+          reading.throwIfAborted();
+          const retired = selected
+            ? retirement(member.backend).signal
+            : undefined;
+          // Retirement skips this backend. The shared slot still tracks a
+          // backend that keeps reading after the fleet deadline.
+          const result = retired
+            ? await readWithDeadline(retired, undefined, (active) => {
+                reading.throwIfAborted();
+                return crew(member, AbortSignal.any([reading, active]), {});
+              }).result.catch((error: unknown) => {
+                reading.throwIfAborted();
+                if (!retired.aborted) throw error;
+                return { status: null, error: crewUnavailable };
+              })
+            : await crew(member, reading);
           if (result.status) return result;
           if (result.error) last = result;
         }
         return last;
-      })();
+      };
+      const read = selected
+        ? sampleCrew(members, signal, readCrew, crewDeadline)
+        : readCrew(signal);
       reads.set(key, read);
       return read;
     }
@@ -355,6 +490,7 @@ export function dashboardSource(
       ships
         .filter((ship) => !selected || selected.has(ship.bot.id))
         .map(async (ship) => {
+          const { backend } = ship;
           const read = await sharedCrew(ship);
           const named = agent(ship);
           const captainView = groups.get(ship)?.view;
@@ -379,7 +515,9 @@ export function dashboardSource(
             ...(selected
               ? {
                   readDetail: (reading: AbortSignal) =>
-                    readShip(ship.bot.id, reading, {}, read),
+                    find(ship.bot.id)?.backend === backend
+                      ? readShip(ship.bot.id, reading, {}, read)
+                      : Promise.resolve(undefined),
                 }
               : {}),
           };
@@ -393,14 +531,22 @@ export function dashboardSource(
     signal: AbortSignal,
     fleetInput?: CrewStatusInput,
     sample?: CrewRead,
-  ): Promise<{ view: ShipView; metadata?: CrewRead["metadata"] } | undefined> {
+  ): Promise<
+    | {
+        view: ShipView;
+        metadata?: CrewRead["metadata"];
+        crewObservedAt?: number;
+      }
+    | undefined
+  > {
     const ship = find(id);
     if (!ship) return undefined;
     const { bot } = ship;
-    const [{ status, error, metadata }, sessions] = await Promise.all([
-      sample ?? crew(ship, signal, fleetInput),
-      roots(ship, signal),
-    ]);
+    const [{ status, error, metadata, observedAt }, sessions] =
+      await Promise.all([
+        sample ?? crew(ship, signal, fleetInput),
+        roots(ship, signal),
+      ]);
     const named = agent(ship);
     const model =
       bot.backend.type === "opencode"
@@ -479,7 +625,11 @@ export function dashboardSource(
       },
       ...sessions,
     };
-    return { view, metadata };
+    return {
+      view,
+      metadata,
+      ...(observedAt !== undefined ? { crewObservedAt: observedAt } : {}),
+    };
   }
 
   return {
@@ -496,8 +646,26 @@ export function dashboardSource(
     },
 
     /** Internal reads. The dashboard HTTP routes use fleet and ship above. */
-    fleetWithCrew: (signal: AbortSignal, selected: ReadonlySet<string>) =>
-      readFleet(signal, selected),
+    fleetBackend: (id: string) => find(id)?.backend,
+    invalidateFleetCrew() {
+      for (const { backend } of ships) {
+        const slot = fleetCrew.get(backend);
+        if (!slot) continue;
+        slot.generation++;
+        delete slot.latest;
+        delete slot.last;
+        if (slot.pending) slot.pending.fallback = undefined;
+      }
+    },
+    retireFleetBackend(backend: AgentBackend) {
+      if (!ships.some((ship) => ship.backend === backend))
+        retirement(backend).abort();
+    },
+    fleetWithCrew: (
+      signal: AbortSignal,
+      selected: ReadonlySet<string>,
+      crewDeadline?: AbortSignal,
+    ) => readFleet(signal, selected, crewDeadline),
     shipWithCrew: (
       id: string,
       signal: AbortSignal,
@@ -536,9 +704,13 @@ export function dashboardSource(
       return history.entries(input, signal);
     },
   } satisfies DashboardSource & {
+    fleetBackend: (id: string) => AgentBackend | undefined;
+    invalidateFleetCrew: () => void;
+    retireFleetBackend: (backend: AgentBackend) => void;
     fleetWithCrew: (
       signal: AbortSignal,
       selected: ReadonlySet<string>,
+      crewDeadline?: AbortSignal,
     ) => ReturnType<typeof readFleet>;
     shipWithCrew: (
       id: string,
@@ -550,5 +722,5 @@ export function dashboardSource(
 
 export type DashboardFleetSource = Pick<
   ReturnType<typeof dashboardSource>,
-  "fleetWithCrew" | "shipWithCrew" | "children"
+  "fleetBackend" | "fleetWithCrew" | "shipWithCrew" | "children"
 >;

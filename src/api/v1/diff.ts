@@ -5,6 +5,7 @@ import type {
   V1CrewContext,
   V1Event,
   V1Fleet,
+  V1Ship,
   V1ShipDetail,
   V1Snapshot,
   V1Task,
@@ -15,12 +16,22 @@ export type V1EventSnapshot = V1Snapshot & { fleet: V1Fleet };
 
 function fleetSummary({
   apiVersion,
+  overviewStale,
   name,
   admiral,
   ships,
   longestIdle,
-}: V1Snapshot["fleet"]) {
-  return { apiVersion, name, admiral, ships, longestIdle };
+  gateway,
+}: V1Fleet) {
+  return {
+    apiVersion,
+    overviewStale,
+    name,
+    admiral,
+    ships,
+    longestIdle,
+    gateway,
+  };
 }
 
 function shipDetail({
@@ -43,6 +54,21 @@ function shipDetail({
 const clean = (text: string, limit: number) =>
   redactCredentials(text, limit).replace(/\s+/g, " ").trim();
 const sentence = (text: string) => `${text.slice(0, 199)}.`;
+
+function availability(ship: V1Ship, at: number): V1Event {
+  return {
+    type: "activity",
+    data: {
+      ship: ship.id,
+      member: null,
+      kind: "availability",
+      text: sentence(
+        `${clean(ship.name, 100) || ship.id} is ${ship.available ? "available" : "unavailable"}`,
+      ),
+      at,
+    },
+  };
+}
 function quoted(prefix: string, text: string, suffix = "") {
   return `${prefix}“${clean(text, 197 - prefix.length - suffix.length) || "Task"}”${suffix}.`;
 }
@@ -149,20 +175,35 @@ function contextEvents(
 }
 
 export function diffEvents(
-  prev: V1Snapshot | undefined,
+  prev: V1EventSnapshot | undefined,
   next: V1EventSnapshot,
   now: number,
 ): V1Event[] {
   if (!prev) return [];
   const events: V1Event[] = [];
-  if (!isDeepStrictEqual(fleetSummary(prev.fleet), fleetSummary(next.fleet)))
+  if (!isDeepStrictEqual(fleetSummary(prev.fleet), fleetSummary(next.fleet))) {
     events.push({ type: "fleet", data: next.fleet });
+    const prior = new Map(prev.fleet.ships.map((ship) => [ship.id, ship]));
+    for (const ship of next.fleet.ships) {
+      const previous = prior.get(ship.id);
+      if (previous && previous.available !== ship.available)
+        events.push(availability(ship, now));
+    }
+  }
   for (const id of Object.keys(next.ships).sort()) {
     const ship = next.ships[id];
     if (!ship) continue;
     const previous = Object.hasOwn(prev.ships, id) ? prev.ships[id] : undefined;
     if (!previous || !isDeepStrictEqual(shipDetail(previous), shipDetail(ship)))
       events.push({ type: "ship", data: ship });
+    else if (
+      ship.detailUpdatedAt !== undefined &&
+      ship.detailUpdatedAt !== previous.detailUpdatedAt
+    )
+      events.push({
+        type: "ship-sampled",
+        data: { id, detailUpdatedAt: ship.detailUpdatedAt },
+      });
     if (!previous) continue;
     const activity = (
       member: string | null,
@@ -174,14 +215,6 @@ export function diffEvents(
         type: "activity",
         data: { ship: id, member, kind, text, at: now, ...extra },
       });
-    if (previous.available !== ship.available)
-      activity(
-        null,
-        "availability",
-        sentence(
-          `${clean(ship.name, 100) || id} is ${ship.available ? "available" : "unavailable"}`,
-        ),
-      );
     const oldMembers = new Map(
       previous.crewMembers.map((member) => [member.id, member]),
     );

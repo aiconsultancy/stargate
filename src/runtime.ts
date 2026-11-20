@@ -986,10 +986,15 @@ export function serve(
         );
         log.info("Dashboard listening");
       }
+      let fleetDashboard: ReturnType<typeof dashboardSource> | undefined;
       if (config.api) {
         // Like the dashboard: a bind failure is an ordinary startup failure.
         const api = config.api;
         const viewers = new AbortController();
+        const dashboard = dashboardSource(ships, store, cronStore, Date.now, {
+          fleetSignal: viewers.signal,
+        });
+        fleetDashboard = dashboard;
         yield* Effect.acquireRelease(
           Effect.promise(async () =>
             startApiV1Server({
@@ -1005,8 +1010,11 @@ export function serve(
                     at,
                   );
                 },
-                dashboard: dashboardSource(ships, store, cronStore),
+                // This instance carries the viewers' signal, so shutdown and
+                // reload can cancel the shared crew reads.
+                dashboard,
                 config: () => reload?.current.config ?? config,
+                dataDirectory: config.dataDirectory,
               }),
               diff: diffEvents,
               gateway: {
@@ -1169,7 +1177,20 @@ export function serve(
               if (!ships.includes(entry.dashboard)) ships.push(entry.dashboard);
               binding.entries.set(registration.key, entry);
             }
+            // Retire all removed Fleet backends before a crew refresh can
+            // sample an alias that is waiting for asynchronous cleanup.
+            for (const { binding, plan } of plans) {
+              for (const registration of plan.removed) {
+                const entry = binding.entries.get(registration.key);
+                if (entry) {
+                  const index = ships.indexOf(entry.dashboard);
+                  if (index >= 0) ships.splice(index, 1);
+                  fleetDashboard?.retireFleetBackend(entry.resource.backend);
+                }
+              }
+            }
             committed = true;
+            fleetDashboard?.invalidateFleetCrew();
             for (const { entry, start } of staged) {
               addedResources.push(entry);
               Effect.runSync(Deferred.succeed(start, undefined));
@@ -1180,10 +1201,6 @@ export function serve(
               for (const registration of plan.removed) {
                 const entry = binding.entries.get(registration.key);
                 binding.entries.delete(registration.key);
-                if (entry) {
-                  const index = ships.indexOf(entry.dashboard);
-                  if (index >= 0) ships.splice(index, 1);
-                }
                 await Effect.runPromise(
                   FiberMap.remove(fibers, registration.key),
                 ).catch(() => log.warn("Retired worker cleanup failed"));

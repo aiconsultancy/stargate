@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { AgentBackend } from "../src/backend";
 import type { CrewStatus } from "../src/crew-status";
 import { CronStore } from "../src/cron-store";
@@ -103,6 +103,7 @@ function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
   return {
     store,
     cronStore,
+    ship,
     key,
     known,
     calls,
@@ -152,6 +153,53 @@ function member(id: string, busy: boolean) {
 }
 
 describe("dashboard source", () => {
+  test.each([true, false])(
+    "retiring an unused alias leaves the primary crew read running (healthy: %s)",
+    async (healthy) => {
+      const { ship, store, cronStore } = fixture({ pinned: "ses_captain" });
+      const started = Promise.withResolvers<AbortSignal>();
+      const finish = Promise.withResolvers<CrewStatus>();
+      ship.backend.crewStatus = async (_input, reading) => {
+        started.resolve(reading);
+        return finish.promise;
+      };
+      const aliasStatus = mock(async () => ({
+        members: [],
+        total: 0,
+        truncated: false,
+      }));
+      const alias = {
+        ...ship,
+        bot: { ...ship.bot, id: "unused" },
+        key: "unused",
+        transport: {
+          kind: "teams",
+          tenantId: "example",
+          botClientId: "alias",
+        },
+        backend: { ...ship.backend, crewStatus: aliasStatus },
+      } satisfies DashboardShip;
+      const ships = [ship, alias];
+      const source = dashboardSource(ships, store, cronStore);
+      const read = source.fleetWithCrew(signal, new Set([ship.bot.id]));
+      const reading = await started.promise;
+      ships.pop();
+      source.retireFleetBackend(alias.backend);
+      if (healthy)
+        finish.resolve({
+          members: [member("pilot", false)],
+          total: 1,
+          truncated: false,
+        });
+      else finish.reject(new Error("Primary unavailable"));
+      const [result] = (await read).ships;
+      expect(reading.aborted).toBe(false);
+      expect(aliasStatus).not.toHaveBeenCalled();
+      if (healthy) expect(result?.summary.crew?.total).toBe(1);
+      else expect(result?.error).toBe("Crew status unavailable.");
+    },
+  );
+
   test("truncated crew summaries use exact aggregates or explicitly report a partial busy count", async () => {
     const f = fixture();
     const members = Array.from({ length: 20 }, (_, index) =>
