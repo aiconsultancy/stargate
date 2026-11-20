@@ -676,6 +676,9 @@ export function createGitReader(
   // Cache expiry and read timing use a monotonic clock, so a wall-clock change
   // cannot stretch or shrink cache lifetimes. `now` only stamps `checkedAt`.
   monotonic: () => number = () => performance.now(),
+  // The whole read's budget, waiting for a slot included. A timeout counts as
+  // the checkout's own when it got a slot with at least half of it left.
+  readMs: number = 2 * timeout,
 ) {
   const permits = Semaphore.makeUnsafe(4);
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
@@ -712,10 +715,10 @@ export function createGitReader(
     // saturation stay fast without hiding the checkout for long. Measured from
     // the budget, not from when the timeout handler runs, so a late timer
     // cannot change the answer.
-    const budgetEnds = monotonic() + 2 * timeout;
+    const budgetEnds = monotonic() + readMs;
     let startedAt: number | undefined;
     try {
-      return await readWithDeadline(signal, 2 * timeout, (deadline) => {
+      return await readWithDeadline(signal, readMs, (deadline) => {
         const reply = Promise.withResolvers<V1Git | null>();
         void runAbortable(
           permits.withPermit(
@@ -761,8 +764,9 @@ export function createGitReader(
       const saved = cache.get(directory);
       if (saved && saved.expiresAt > monotonic()) return saved.value;
       const timedOut = { ...emptyState(now()), error: "Git read timed out." };
-      const own = startedAt !== undefined && budgetEnds - startedAt >= timeout;
-      return cacheResult(directory, timedOut, own ? ttl : timeout);
+      const own =
+        startedAt !== undefined && budgetEnds - startedAt >= readMs / 2;
+      return cacheResult(directory, timedOut, own ? ttl : readMs / 2);
     }
   };
 }

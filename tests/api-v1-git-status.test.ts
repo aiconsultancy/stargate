@@ -297,6 +297,8 @@ test("caches an outer Git read timeout for 15 seconds", async () => {
     undefined,
     undefined,
     () => now,
+    // A short read budget keeps the test fast; half of it decides ownership.
+    400,
   );
   const signal = new AbortController().signal;
   try {
@@ -394,6 +396,7 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
     undefined,
     undefined,
     () => mono,
+    400,
   );
   const signal = new AbortController().signal;
   try {
@@ -403,10 +406,10 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
       read(join(root, `busy-${n}`), signal),
     );
     const target = join(root, "late");
-    // Its four-second budget ends at 4100; it gets a slot at 3000, with less
-    // than one two-second read deadline left.
+    // Its 400 ms budget ends at 500; it gets a slot at 350, with less than
+    // half of it left.
     const pending = read(target, signal);
-    mono = 3_000;
+    mono = 350;
     busy[0]?.resolve(null);
     await busyReads[0];
     const timedOut = await pending;
@@ -415,7 +418,7 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
     for (const hold of busy) hold.resolve(null);
     late.resolve(null);
     await Promise.all(busyReads);
-    mono += 1_999;
+    mono += 199;
     expect(await read(target, signal)).toBe(timedOut);
     // The short lifetime, not the 15-second one, has now passed.
     mono += 1;
@@ -444,6 +447,7 @@ test("caches a timeout spent only waiting for a read slot briefly", async () => 
     undefined,
     undefined,
     () => now,
+    400,
   );
   const signal = new AbortController().signal;
   try {
@@ -459,8 +463,8 @@ test("caches a timeout spent only waiting for a read slot briefly", async () => 
     expect(calls).toBe(4);
     held.resolve(null);
     await Promise.all(busy);
-    // After one read deadline the queue-only timeout is gone: this read runs.
-    now += 2_000;
+    // After half the read budget the queue-only timeout is gone: this read runs.
+    now += 200;
     expect(await read(waiting, signal)).toMatchObject({
       error: "Git state unavailable.",
     });
