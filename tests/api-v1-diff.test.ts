@@ -202,9 +202,6 @@ test("dispatch, phase and outcome refer to the matching task in the matching pro
     },
   ]);
   expect(
-    activity(old, context({ lastOutcome: task("unrelated", "cancelled") })),
-  ).toEqual([]);
-  expect(
     activity(
       old,
       context({
@@ -225,7 +222,7 @@ test("dispatch, phase and outcome refer to the matching task in the matching pro
   ]);
 });
 
-test("outcome requires a new matching record and includes its terminal status", () => {
+test("an already observed task emits another outcome only when its terminal status changes", () => {
   const uncertain = task("old", "uncertain");
   const previous = context({
     current: uncertain,
@@ -237,6 +234,48 @@ test("outcome requires a new matching record and includes its terminal status", 
   expect(activity(previous, context({ lastOutcome: abandoned }))).toMatchObject(
     [{ kind: "outcome", status: "abandoned" }],
   );
+});
+
+test("reports tasks completed between polls without replaying recent outcomes", () => {
+  const older = task("older", "completed", { finishedAt: 1 });
+  const completed = task("completed", "completed", { finishedAt: 2 });
+  const cancelled = task("cancelled", "cancelled", { finishedAt: 3 });
+  const before = context({
+    lastOutcome: older,
+    recent: [older],
+    recentCount: 1,
+  });
+  const after = context({
+    lastOutcome: cancelled,
+    recent: [cancelled, completed, older],
+    recentCount: 3,
+  });
+  expect(diffEvents(undefined, snapshot([after]), at)).toEqual([]);
+  expect(activity(before, after)).toMatchObject([
+    { kind: "outcome", status: "completed" },
+    { kind: "outcome", status: "cancelled" },
+  ]);
+  expect(activity(after, after)).toEqual([]);
+  expect(activity(after, before)).toEqual([]);
+});
+
+test("PR discovery after startup or a Git timeout does not emit activity", () => {
+  const before = context();
+  if (!before.git) throw new Error("Missing Git fixture");
+  const after = context({
+    pullRequest: {
+      number: 42,
+      url: "https://github.com/example/project/pull/42",
+      title: "Layout",
+      state: "open",
+      checks: "running",
+    },
+  });
+  const timedOut = context({
+    git: { ...before.git, branch: null, error: "Git read timed out." },
+  });
+  expect(activity(before, after)).toEqual([]);
+  expect(activity(timedOut, after)).toEqual([]);
 });
 
 test("queue increases produce one bounded sentence with the added task when visible", () => {
@@ -281,7 +320,9 @@ test("git emits when branch changes, HEAD detaches or a PR appears", () => {
     checks: "running" as const,
   };
   const withPR = { ...changed, pullRequest };
-  expect(activity(changed, withPR)).toMatchObject([
+  expect(
+    activity({ ...changed, pullRequestKnown: true }, withPR),
+  ).toMatchObject([
     {
       kind: "git",
       branch: "feature/layout",

@@ -165,9 +165,10 @@ test("maps PR state and check rollups and restricts URL and title output", () =>
   expect(parse({ statusCheckRollup: "unexpected" })).toBeNull();
 });
 
-test("PR refreshes return immediately, deduplicate lookups and use two slots", async () => {
+test("PR refreshes deduplicate work, keep the last result on failure and clear it on confirmed absence", async () => {
   let now = 1_000;
   let authChecks = 0;
+  let authCode = 0;
   type Response = { code: number; stdout: string };
   const views = new Map<
     string,
@@ -179,7 +180,7 @@ test("PR refreshes return immediately, deduplicate lookups and use two slots", a
       expect(options.timeout).toBe(4_000);
       if (command[1] === "auth") {
         authChecks++;
-        return { code: 0, stdout: "" };
+        return { code: authCode, stdout: "" };
       }
       const branch = command.at(-1);
       if (!branch) throw new Error("Missing branch");
@@ -189,33 +190,90 @@ test("PR refreshes return immediately, deduplicate lookups and use two slots", a
     },
   });
   const read = (branch: string) => pull("example/project", branch);
-  expect(read("first")).toBeNull();
-  expect(read("first")).toBeNull();
-  expect(read("second")).toBeNull();
-  expect(read("third")).toBeNull();
+  expect(read("first")).toBeUndefined();
+  expect(read("first")).toBeUndefined();
+  expect(read("second")).toBeUndefined();
+  expect(read("third")).toBeUndefined();
   await Bun.sleep(0);
   expect(authChecks).toBe(1);
   expect([...views.keys()]).toEqual(["first", "second"]);
   views.get("first")?.resolve({
     code: 0,
-    stdout: JSON.stringify({
-      number: 1,
-      url: "https://github.com/example/project/pull/1",
-      title: "Example",
-      state: "OPEN",
-      isDraft: false,
-      statusCheckRollup: [],
-    }),
+    stdout: JSON.stringify([
+      {
+        number: 1,
+        url: "https://github.com/example/project/pull/1",
+        title: "Example",
+        state: "OPEN",
+        isDraft: false,
+        statusCheckRollup: [],
+      },
+    ]),
   });
   views.get("second")?.resolve({ code: 1, stdout: "" });
   await Bun.sleep(0);
   expect(read("first")?.number).toBe(1);
-  expect(read("second")).toBeNull();
+  expect(read("second")).toBeUndefined();
   now += 60_000;
   expect(read("first")?.number).toBe(1);
   await Bun.sleep(0);
   expect(authChecks).toBe(2);
   views.get("first")?.resolve({ code: 1, stdout: "" });
   await Bun.sleep(0);
+  expect(read("first")?.number).toBe(1);
+  now += 60_000;
+  authCode = 1;
+  expect(read("first")?.number).toBe(1);
+  await Bun.sleep(0);
+  expect(read("first")?.number).toBe(1);
+  now += 60_000;
+  authCode = 0;
+  expect(read("first")?.number).toBe(1);
+  await Bun.sleep(0);
+  views.get("first")?.resolve({ code: 0, stdout: "[]" });
+  await Bun.sleep(0);
   expect(read("first")).toBeNull();
 });
+
+test.each(["123", "#123"])(
+  "looks up a literal head branch named %s",
+  async (branch) => {
+    const pr = {
+      number: 42,
+      url: "https://github.com/example/project/pull/42",
+      title: "Example",
+      state: "OPEN",
+      isDraft: false,
+      statusCheckRollup: [],
+    };
+    const pull = createPullReader(Date.now, {
+      which: () => "/fixture/gh",
+      run: async (command) => {
+        if (command[1] === "auth") return { code: 0, stdout: "" };
+        if (command[2] === "view")
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              ...pr,
+              number: 123,
+              url: "https://github.com/example/project/pull/123",
+            }),
+          };
+        const head = command.indexOf("--head");
+        const state = command.indexOf("--state");
+        if (
+          command[2] !== "list" ||
+          head < 0 ||
+          command[head + 1] !== branch ||
+          state < 0 ||
+          command[state + 1] !== "all"
+        )
+          return { code: 1, stdout: "" };
+        return { code: 0, stdout: JSON.stringify([pr]) };
+      },
+    });
+    pull("example/project", branch);
+    await Bun.sleep(0);
+    expect(pull("example/project", branch)?.number).toBe(42);
+  },
+);

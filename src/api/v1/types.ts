@@ -106,6 +106,8 @@ export type V1CrewContext = {
   git: V1Git | null;
   /** Null when unknown or when no PR exists for the branch. */
   pullRequest: V1PullRequest | null;
+  /** A settled lookup exists for this branch, including a known absence. */
+  pullRequestKnown?: true;
 };
 
 export type V1Subagent = {

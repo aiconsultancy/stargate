@@ -101,6 +101,11 @@ Checkout Git status counts changed gitlinks and skips worktree dirt inside
 submodules. Fleet reads disable checkout-configured filters, hooks and
 filesystem monitors.
 
+Pull requests are looked up by head branch, including branches with numeric
+names. A failed refresh retains the last successful result. For a crew
+context, `pullRequestKnown: true` means its branch has a settled lookup.
+With that field present, `pullRequest: null` means no PR was found.
+
 ## Events
 
 Use a streaming browser `fetch` with an `Authorization` header. A connection
@@ -109,6 +114,9 @@ event per available ship detail. One shared poller reads the fleet every
 three seconds while clients are connected. It publishes changed fleet and
 ship summaries and `activity` transitions. The stream also sends `host`
 every ten seconds and `heartbeat` every fifteen seconds.
+Activity includes newly observed task outcomes, even if the task also
+started between polls. Discovering an existing PR after startup or Git
+recovery does not generate activity.
 
 A frame contains an `event:` line, one `data:` line with JSON, and a blank line.
 

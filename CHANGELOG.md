@@ -11,6 +11,9 @@
 ### Changes
 
 - Harden Fleet API Git reads against checkout-configured commands.
+- Report Fleet API task outcomes that complete between event polls.
+- Look up pull requests by head branch, keep cached results on refresh
+  failure, and suppress PR activity when the previous lookup was unknown.
 - A git checkout of a release now reports its `vX.Y.Z` tag at HEAD as the
   Fleet API's `gateway.version` when it has no `.stargate-release.json`.
   Fetch the tag, not only the commit. Other source checkouts still report the
