@@ -1,8 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { z } from "zod";
+import { Schema } from "effect";
 import type { AttachmentTransport } from "../attachment-delivery";
 import type { DeliveryUnit, IrcTurnStatus, SlackDelivery } from "../gateway";
 import type { ReactionName } from "../reactions";
+import { settingsStruct } from "../settings-schema";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";
 import { cleanText, utf8Bytes } from "./protocol";
@@ -48,17 +49,21 @@ export type IrcProgress = {
   done(unit: DeliveryUnit, done: number): void;
 };
 
-const planSchema = z.strictObject({
-  batched: z.boolean(),
-  units: z.array(
-    z.strictObject({
-      lines: z
-        .array(z.strictObject({ text: z.string(), concat: z.boolean() }))
-        .min(1),
-    }),
+const planSchema = settingsStruct({
+  batched: Schema.Boolean,
+  units: Schema.mutable(
+    Schema.Array(
+      settingsStruct({
+        lines: Schema.mutable(
+          Schema.Array(
+            settingsStruct({ text: Schema.String, concat: Schema.Boolean }),
+          ),
+        ).check(Schema.isMinLength(1)),
+      }),
+    ),
   ),
 });
-type Plan = z.infer<typeof planSchema>;
+type Plan = typeof planSchema.Type;
 type Part = Plan["units"][number]["lines"][number];
 
 /** draft/multiline bytes as Stargate counts them (see packBatches). */
@@ -384,7 +389,7 @@ export class IrcDelivery implements SlackDelivery {
     let done = 0;
     if (tracked && this.progress) {
       const stored = this.progress.plan(tracked, JSON.stringify(plan));
-      plan = planSchema.parse(JSON.parse(stored.plan));
+      plan = Schema.decodeUnknownSync(planSchema)(JSON.parse(stored.plan));
       done = stored.done;
     }
     const limits = this.client.multiline;

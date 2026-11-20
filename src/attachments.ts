@@ -9,7 +9,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { z } from "zod";
+import { Result, Schema } from "effect";
+import { settingsPattern, settingsStruct } from "./settings-schema";
 
 /** Bound memory use at each media trust boundary, before admission or upload. */
 export const maxAttachmentBytes = 10 * 1024 * 1024;
@@ -67,15 +68,24 @@ export function checkAttachments(files: readonly Attachment[]) {
 export type PublishedFile = { path: string; caption: string };
 
 /** Durable, JSON-safe metadata; reading the bytes revalidates every field. */
-export const preparedAttachmentSchema = z.strictObject({
-  path: z.string().min(2).max(maxDestination),
-  caption: z.string().max(maxCaption),
-  name: z.string().min(1).max(maxName),
-  mime: z.string().regex(mimePattern),
-  size: z.number().int().positive().max(maxAttachmentBytes),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+export const preparedAttachmentSchema = settingsStruct({
+  path: Schema.String.check(
+    Schema.isMinCodePoints(2),
+    Schema.isMaxCodePoints(maxDestination),
+  ),
+  caption: Schema.String.check(Schema.isMaxCodePoints(maxCaption)),
+  name: Schema.String.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(maxName),
+  ),
+  mime: Schema.String.check(settingsPattern(mimePattern)),
+  size: Schema.Int.check(
+    Schema.isGreaterThan(0),
+    Schema.isLessThanOrEqualTo(maxAttachmentBytes),
+  ),
+  sha256: Schema.String.check(settingsPattern(/^[0-9a-f]{64}$/)),
 });
-export type PreparedAttachment = z.infer<typeof preparedAttachmentSchema>;
+export type PreparedAttachment = typeof preparedAttachmentSchema.Type;
 
 /** Generic by design: messages never contain the requested path or its name. */
 /**
@@ -547,9 +557,9 @@ export async function readPreparedAttachment(
   signal?: AbortSignal,
   root?: string,
 ): Promise<Attachment> {
-  const parsed = preparedAttachmentSchema.safeParse(input);
-  if (!parsed.success) throw new AttachmentUnavailable("invalid");
-  const prepared = parsed.data;
+  const parsed = Schema.decodeUnknownResult(preparedAttachmentSchema)(input);
+  if (Result.isFailure(parsed)) throw new AttachmentUnavailable("invalid");
+  const prepared = parsed.success;
   const path = checkedPath(prepared.path, root);
   try {
     const { handle, size } = await openRegular(path, signal);

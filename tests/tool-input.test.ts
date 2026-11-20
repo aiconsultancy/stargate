@@ -2,11 +2,15 @@ import { expect, test } from "bun:test";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
+import { postInputSchema } from "../src/captain-post";
 import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
 import { crewInputSchema } from "../src/crew/engine";
 import { historyInputBranches, historyInputSchema } from "../src/crew/history";
 import { journalInputSchema } from "../src/crew/journal";
-import { messageOpenCodeInput } from "../src/crew/message-tool-input";
+import {
+  messageOpenCodeInput,
+  messagePortableSchema,
+} from "../src/crew/message-tool-input";
 import { mailInputBranches, mailInputSchema } from "../src/crew/messaging";
 import { modelInputSchema, modelToolInputSchema } from "../src/crew/models";
 import { projectToolInput } from "../src/crew/project-options";
@@ -20,6 +24,101 @@ const schemas = {
   stargate_cron: cronOperationSchema,
   stargate_notifications: notificationInputSchema,
 };
+
+test("native post SDK input keeps defaults, raw text and its input advertisement", async () => {
+  const input = messagePortableSchema(postInputSchema);
+  const standard = input["~standard"];
+  expect(Schema.isSchema(input)).toBe(true);
+  expect(
+    await standard.validate({ channel: "C123", text: "  hello 😀  " }),
+  ).toEqual({
+    value: {
+      channel: "C123",
+      text: "  hello 😀  ",
+      files: [],
+      reply_broadcast: false,
+    },
+  });
+  const advertisement: Record<string, unknown> = standard.jsonSchema.input({
+    target: "draft-2020-12",
+  });
+  expect(advertisement).toEqual({
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    properties: {
+      channel: { type: "string", pattern: "^[CGD][A-Z0-9]{2,40}$" },
+      thread_ts: { type: "string", pattern: "^\\d{1,12}\\.\\d{1,12}$" },
+      text: { type: "string" },
+      files: {
+        default: [],
+        maxItems: 10,
+        type: "array",
+        items: { type: "string", minLength: 2, maxLength: 4096 },
+      },
+      reply_broadcast: { default: false, type: "boolean" },
+      key: { type: "string", minLength: 1, maxLength: 255 },
+    },
+    required: ["channel", "text"],
+    additionalProperties: false,
+  });
+  expect(Object.keys(advertisement["properties"] ?? {})).toEqual([
+    "channel",
+    "thread_ts",
+    "text",
+    "files",
+    "reply_broadcast",
+    "key",
+  ]);
+  const invalid = await standard.validate({
+    channel: "C123",
+    text: "note",
+    reply_broadcast: true,
+  });
+  expect(invalid).toHaveProperty("issues");
+  if (!invalid.issues) throw new Error("Broadcast without thread accepted");
+  expect(invalid.issues).toContainEqual(
+    expect.objectContaining({
+      path: ["reply_broadcast"],
+      message: "reply_broadcast requires thread_ts",
+    }),
+  );
+  expect(
+    await standard.validate({ channel: "C123", text: "note", extra: true }),
+  ).toHaveProperty("issues");
+});
+
+test("post compound constraints retain broadcast diagnostics but structural failures abort them", async () => {
+  const standard = messagePortableSchema(postInputSchema)["~standard"];
+  for (const text of ["", 123]) {
+    const input = { channel: "C123", text, reply_broadcast: true };
+    const direct = Schema.decodeUnknownResult(postInputSchema, {
+      errors: "all",
+    })(input);
+    if (Result.isSuccess(direct)) throw new Error("Invalid post accepted");
+    const sdk = await standard.validate(input);
+    if (!sdk.issues) throw new Error("Invalid SDK post accepted");
+    for (const issues of [
+      SchemaIssue.makeFormatterStandardSchemaV1()(direct.failure.issue).issues,
+      sdk.issues,
+    ]) {
+      expect(issues).toContainEqual(
+        expect.objectContaining({ path: ["text"] }),
+      );
+      if (text === "") {
+        expect(issues).toContainEqual(
+          expect.objectContaining({
+            path: ["reply_broadcast"],
+            message: "reply_broadcast requires thread_ts",
+          }),
+        );
+      } else {
+        expect(
+          issues.some((issue) => issue.path?.includes("reply_broadcast")),
+        ).toBe(false);
+      }
+    }
+  }
+});
 
 test("Effect envelope advertises encoded fields and validates without injecting branch values", () => {
   const original = Schema.Union([
