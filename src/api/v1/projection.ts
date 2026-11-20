@@ -464,9 +464,11 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
                     )?.directory
                   : undefined;
               const state = await git(path, signal);
+              const pushRepository = state?.pushRepository;
+              const repository = state?.repository ?? pushRepository;
               const pr =
-                state?.repository && state.branch && !state.error
-                  ? pullRequest(state.repository, state.branch)
+                repository && pushRepository && state?.branch && !state.error
+                  ? pullRequest(repository, state.branch, pushRepository)
                   : undefined;
               return {
                 ...context,

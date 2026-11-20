@@ -74,6 +74,8 @@ export type V1Git = {
   changedFiles: number | null;
   /** `owner/name` parsed from the `origin` remote, when it is a GitHub URL. */
   repository: string | null;
+  /** GitHub repository of the branch's push remote, when resolvable. */
+  pushRepository?: string | null;
   checkedAt: number;
   /** A safe reason when the read failed; other fields are then null. */
   error?: string;

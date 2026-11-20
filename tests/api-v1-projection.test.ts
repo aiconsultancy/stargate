@@ -266,6 +266,7 @@ function fixture() {
         behind: 0,
         changedFiles: 0,
         repository: "example/project",
+        pushRepository: "example/project",
         checkedAt: at,
       };
     },

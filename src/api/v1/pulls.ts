@@ -5,6 +5,7 @@ import type { V1PullRequest } from "./types";
 
 const ttl = 60_000;
 const timeout = 4_000;
+const candidateLimit = 50;
 const checks = Schema.Struct({
   status: Schema.optional(Schema.String),
   state: Schema.optional(Schema.String),
@@ -18,6 +19,12 @@ const decode = Schema.decodeUnknownSync(
     state: Schema.Literals(["OPEN", "MERGED", "CLOSED"]),
     isDraft: Schema.Boolean,
     statusCheckRollup: Schema.NullOr(Schema.Array(checks)),
+  }),
+);
+const decodeHead = Schema.decodeUnknownOption(
+  Schema.Struct({
+    headRepository: Schema.NullOr(Schema.Struct({ name: Schema.String })),
+    headRepositoryOwner: Schema.NullOr(Schema.Struct({ login: Schema.String })),
   }),
 );
 const failures = new Set([
@@ -110,7 +117,11 @@ export function createPullReader(
     return result?.code === 0 ? executable : null;
   }
 
-  async function refresh(repository: string, branch: string) {
+  async function refresh(
+    repository: string,
+    branch: string,
+    headRepository: string,
+  ) {
     if (!auth || auth.expiresAt <= now())
       auth = { expiresAt: now() + ttl, executable: authenticate() };
     const executable = await auth.executable;
@@ -125,9 +136,9 @@ export function createPullReader(
         "--state",
         "all",
         "--limit",
-        "1",
+        String(candidateLimit),
         "--json",
-        "number,url,title,state,isDraft,statusCheckRollup",
+        "number,url,title,state,isDraft,statusCheckRollup,headRepository,headRepositoryOwner",
         "--head",
         branch,
       ],
@@ -137,15 +148,30 @@ export function createPullReader(
     try {
       const list: unknown = JSON.parse(result.stdout);
       if (!Array.isArray(list)) return undefined;
-      if (!list.length) return null;
-      return mapPullRequest(list[0], repository) ?? undefined;
+      let incomplete = list.length >= candidateLimit;
+      for (const entry of list) {
+        const head = decodeHead(entry);
+        if (head._tag === "None") {
+          incomplete = true;
+          continue;
+        }
+        const { headRepository: repo, headRepositoryOwner: owner } = head.value;
+        if (!repo || !owner) continue;
+        if (`${owner.login}/${repo.name}`.toLowerCase() !== headRepository)
+          continue;
+        const pr = mapPullRequest(entry, repository);
+        if (pr) return pr;
+        incomplete = true;
+      }
+      return incomplete ? undefined : null;
     } catch {
       return undefined;
     }
   }
 
-  return (repository: string, branch: string) => {
-    const key = JSON.stringify([repository.toLowerCase(), branch]);
+  return (repository: string, branch: string, headRepository = repository) => {
+    const head = headRepository.toLowerCase();
+    const key = JSON.stringify([repository.toLowerCase(), branch, head]);
     const saved = cache.get(key);
     if (
       (!saved || saved.expiresAt <= now()) &&
@@ -153,7 +179,7 @@ export function createPullReader(
       pending.size < 2
     ) {
       pending.add(key);
-      void refresh(repository, branch)
+      void refresh(repository, branch, head)
         .catch(() => undefined)
         .then((value) => {
           // A failed refresh leaves the last settled lookup intact.

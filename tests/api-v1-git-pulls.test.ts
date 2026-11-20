@@ -165,6 +165,88 @@ test("maps PR state and check rollups and restricts URL and title output", () =>
   expect(parse({ statusCheckRollup: "unexpected" })).toBeNull();
 });
 
+test("uses the branch push remote instead of the fetch URL for the head repository", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+  const git = (...args: string[]) => {
+    const result = Bun.spawnSync(["git", ...args], { cwd: directory });
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+  };
+  try {
+    git("init", "-b", "main");
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "Initial",
+    );
+    git("remote", "add", "origin", "https://github.com/example/project.git");
+    git("remote", "add", "fork", "https://github.com/example/project.git");
+    git(
+      "remote",
+      "set-url",
+      "--push",
+      "fork",
+      "git@github.com:contributor/renamed.git",
+    );
+    git("config", "remote.pushDefault", "origin");
+    git("config", "branch.main.pushRemote", "fork");
+    expect(
+      await createGitReader()(directory, new AbortController().signal),
+    ).toMatchObject({
+      repository: "example/project",
+      pushRepository: "contributor/renamed",
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("finds the matching PR beyond same-named branches from other forks", async () => {
+  const candidate = (number: number, owner: string, name: string) => ({
+    number,
+    url: `https://github.com/example/project/pull/${number}`,
+    title: "Example",
+    state: "OPEN",
+    isDraft: false,
+    statusCheckRollup: [],
+    headRepositoryOwner: { login: owner },
+    headRepository: { name },
+  });
+  const pull = createPullReader(Date.now, {
+    which: () => "/fixture/gh",
+    run: async (args) => {
+      if (args[1] === "auth") return { code: 0, stdout: "" };
+      const rows = [
+        candidate(42, "other", "renamed"),
+        candidate(41, "contributor", "different"),
+        candidate(40, "Contributor", "Renamed"),
+      ];
+      if (args.at(-1) === "without-a-match") rows.pop();
+      return {
+        code: 0,
+        stdout: JSON.stringify(
+          rows.slice(0, Number(args[args.indexOf("--limit") + 1])),
+        ),
+      };
+    },
+  });
+  pull("example/project", "patch-1", "contributor/renamed");
+  pull("example/project", "without-a-match", "contributor/renamed");
+  await Bun.sleep(0);
+  expect(
+    pull("example/project", "patch-1", "contributor/renamed")?.number,
+  ).toBe(40);
+  expect(
+    pull("example/project", "without-a-match", "contributor/renamed"),
+  ).toBeNull();
+});
+
 test("PR refreshes deduplicate work, keep the last result on failure and clear it on confirmed absence", async () => {
   let now = 1_000;
   let authChecks = 0;
@@ -207,6 +289,8 @@ test("PR refreshes deduplicate work, keep the last result on failure and clear i
         state: "OPEN",
         isDraft: false,
         statusCheckRollup: [],
+        headRepositoryOwner: { login: "example" },
+        headRepository: { name: "project" },
       },
     ]),
   });
@@ -245,6 +329,8 @@ test.each(["123", "#123"])(
       state: "OPEN",
       isDraft: false,
       statusCheckRollup: [],
+      headRepositoryOwner: { login: "example" },
+      headRepository: { name: "project" },
     };
     const pull = createPullReader(Date.now, {
       which: () => "/fixture/gh",

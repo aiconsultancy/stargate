@@ -282,7 +282,7 @@ async function inspect(
     if (root.code !== 0 || root.stdout !== "true\n\n")
       throw new Error("Checkout root unavailable");
     const [branch, head, fullHead, upstream] = await Promise.all([
-      run("symbolic-ref", "--short", "-q", "HEAD"),
+      run("symbolic-ref", "-q", "HEAD"),
       run("rev-parse", "--short", "--verify", "HEAD"),
       run("rev-parse", "--verify", "HEAD"),
       run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"),
@@ -305,7 +305,26 @@ async function inspect(
       changed.code === 0 ? countChangedPaths(changed.stdout) : null;
     if (changedFiles === null || branch.code > 1)
       throw new Error("Git state unavailable");
-    const remote = await run("remote", "get-url", "origin");
+    const branchRef = branch.code === 0 ? branch.stdout.trim() : "";
+    const branchName = branchRef.startsWith("refs/heads/")
+      ? safeRef(branchRef.slice("refs/heads/".length))
+      : null;
+    const [remote, push] = await Promise.all([
+      run("remote", "get-url", "origin"),
+      branchName && oid
+        ? run(
+            "for-each-ref",
+            "--count=1",
+            "--format=%(push:remotename)",
+            "--",
+            branchRef,
+          )
+        : undefined,
+    ]);
+    const pushRemote = push?.code === 0 ? push.stdout.trim() : "";
+    const pushUrl = pushRemote
+      ? await run("remote", "get-url", "--push", "--", pushRemote)
+      : undefined;
     let counts: ReturnType<typeof parseAheadBehind> = null;
     if (baseRef && head.code === 0) {
       const result = await run(
@@ -321,7 +340,7 @@ async function inspect(
     }
     return {
       ...state,
-      branch: branch.code === 0 ? safeRef(branch.stdout.trim()) : null,
+      branch: branchName,
       head:
         head.code === 0 && /^[a-f0-9]{4,64}$/.test(head.stdout.trim())
           ? head.stdout.trim()
@@ -331,6 +350,8 @@ async function inspect(
       changedFiles,
       repository:
         remote.code === 0 ? githubRepository(remote.stdout.trim()) : null,
+      pushRepository:
+        pushUrl?.code === 0 ? githubRepository(pushUrl.stdout.trim()) : null,
       checkedAt: now(),
     };
   } catch {
