@@ -19,8 +19,8 @@
   Recheck HEAD after the ahead/behind comparison. Clean up Git snapshots in
   the background and sweep stale directories on startup. Report Git state
   unavailable if the temporary snapshot fallback is inside the checkout.
-  Cache checkout timeouts for 15 seconds, including timeouts while waiting
-  for a read slot.
+  Cache a checkout's own timeout for 15 seconds and a timeout spent mostly
+  waiting for a read slot for one read deadline (two seconds).
 - Look up Fleet pull requests only for checkouts bound to a GitHub repository
   in `api.pullRequestRepositories`. Require the PR head to belong to the
   bound repository. Unbound checkouts leave PR state unknown.
