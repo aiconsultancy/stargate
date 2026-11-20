@@ -21,8 +21,17 @@ function fleetSummary({
   admiral,
   ships,
   longestIdle,
-}: V1Snapshot["fleet"]) {
-  return { apiVersion, overviewStale, name, admiral, ships, longestIdle };
+  gateway,
+}: V1Fleet) {
+  return {
+    apiVersion,
+    overviewStale,
+    name,
+    admiral,
+    ships,
+    longestIdle,
+    gateway,
+  };
 }
 
 function shipDetail({
@@ -166,7 +175,7 @@ function contextEvents(
 }
 
 export function diffEvents(
-  prev: V1Snapshot | undefined,
+  prev: V1EventSnapshot | undefined,
   next: V1EventSnapshot,
   now: number,
 ): V1Event[] {

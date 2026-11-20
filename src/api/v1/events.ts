@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { createReadSlot, readWithDeadline } from "../../read-deadline";
+import type { V1EventSnapshot } from "./diff";
 import type {
   ApiV1Source,
   V1Event,
@@ -12,8 +13,8 @@ import type {
 } from "./types";
 
 export type ApiV1Diff = (
-  previous: V1Snapshot | undefined,
-  next: V1Snapshot & { fleet: V1Fleet },
+  previous: V1EventSnapshot | undefined,
+  next: V1EventSnapshot,
   now: number,
 ) => V1Event[];
 

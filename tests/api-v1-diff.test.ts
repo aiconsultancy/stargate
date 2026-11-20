@@ -134,6 +134,20 @@ test("initial snapshot emits nothing and volatile sampling timestamps are ignore
   expect(diffEvents(before, after, at)).toEqual([]);
 });
 
+test("a gateway-only change emits a fleet event", () => {
+  const before = snapshot();
+  const after = {
+    ...before,
+    fleet: {
+      ...before.fleet,
+      gateway: { ...before.fleet.gateway, opencodeVersion: "2.3.2" },
+    },
+  };
+  expect(diffEvents(before, after, at)).toEqual([
+    { type: "fleet", data: after.fleet },
+  ]);
+});
+
 test("fleet summary changes emit a full fleet and ship detail changes emit only their ship", () => {
   const before = snapshot();
   const after = snapshot([context({ observed: true })]);

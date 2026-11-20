@@ -188,8 +188,9 @@ or incomplete refresh retains the last successful lookup result.
 Use a streaming browser `fetch` with an `Authorization` header. A connection
 gets a `fleet` event with host and gateway information, followed by the
 initial `ship` details. One shared poller reads the overview every three
-seconds while clients are connected and publishes changed overviews independently
-of ship details. In the event stream, overview reads have a 25-second deadline,
+seconds while clients are connected and publishes a `fleet` event when the
+overview or gateway metadata changes, independently of ship details.
+In the event stream, overview reads have a 25-second deadline,
 and host and gateway enrichment and individual ship details each have a
 20-second deadline. Over HTTP, every read ends one second before the request
 deadline, so a fallback or an error can still be sent.

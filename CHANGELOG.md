@@ -39,6 +39,8 @@
   data continue to wait for the shared read after reload clears their fallback.
 - Publish lightweight `ship-sampled` events when only the ship detail
   timestamp changes. Preserve the observation time when a crew sample is reused.
+- Publish Fleet events when gateway metadata changes, including when the OpenCode
+  version first becomes available.
 - Serve Fleet through one bounded HTTP host, preserving private TCP access,
   operator authentication, CORS and streamed events. Add the exclusive private
   Unix mode and internal exact-route contract. Notification routes are not yet
