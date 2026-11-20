@@ -65,6 +65,7 @@ import {
   type BackendFailureKind,
   connectionFailure,
   PendingBackendQuestion,
+  PromptNotSubmitted,
   statusKind,
 } from "../request-failure";
 import type { TurnProgress, TurnStage } from "../turn-progress";
@@ -178,11 +179,11 @@ export class OpenCodeBackend implements AgentBackend {
     string,
     { fingerprint: string; inputID: string }
   >();
-  private async nativeQuestion(
+  private async runningQuestion(
     sessionID: string,
     formID: string,
     signal: AbortSignal,
-  ): Promise<PendingQuestion | undefined> {
+  ) {
     if (this.sessionID !== undefined && sessionID !== this.sessionID) return;
     const form = await this.client.session.form
       .get({ sessionID, formID }, { signal })
@@ -226,6 +227,17 @@ export class OpenCodeBackend implements AgentBackend {
       tool.time.completed !== undefined
     )
       return;
+    return { form, toolMessageID: message.id, toolCallID: tool.id };
+  }
+
+  private async nativeQuestion(
+    sessionID: string,
+    formID: string,
+    signal: AbortSignal,
+  ): Promise<PendingQuestion | undefined> {
+    const running = await this.runningQuestion(sessionID, formID, signal);
+    if (!running) return;
+    const { form, toolMessageID, toolCallID } = running;
     const fingerprint = questionFingerprint({
       id: form.id,
       sessionID,
@@ -233,7 +245,12 @@ export class OpenCodeBackend implements AgentBackend {
       metadata: form.metadata,
       fields: form.fields,
     });
-    const cacheKey = JSON.stringify([sessionID, form.id, message.id, tool.id]);
+    const cacheKey = JSON.stringify([
+      sessionID,
+      form.id,
+      toolMessageID,
+      toolCallID,
+    ]);
     const cached = this.questionAncestry.get(cacheKey);
     let inputID =
       cached?.fingerprint === fingerprint ? cached.inputID : undefined;
@@ -251,10 +268,10 @@ export class OpenCodeBackend implements AgentBackend {
       )
         return;
     } else {
-      inputID = await this.questionInput(sessionID, message.id, signal);
+      inputID = await this.questionInput(sessionID, toolMessageID, signal);
       if (
         inputID &&
-        (await this.followsInput(sessionID, inputID, signal, message.id))
+        (await this.followsInput(sessionID, inputID, signal, toolMessageID))
       ) {
         if (this.questionAncestry.size >= 128) {
           const oldest = this.questionAncestry.keys().next().value;
@@ -268,8 +285,8 @@ export class OpenCodeBackend implements AgentBackend {
       id: form.id,
       sessionID,
       inputID,
-      toolMessageID: message.id,
-      toolCallID: tool.id,
+      toolMessageID,
+      toolCallID,
       fingerprint,
       title: form.title,
       fields: form.fields,
@@ -280,8 +297,8 @@ export class OpenCodeBackend implements AgentBackend {
           id: form.id,
           sessionID,
           inputID,
-          toolMessageID: message.id,
-          toolCallID: tool.id,
+          toolMessageID,
+          toolCallID,
           fingerprint,
           unsupported: true,
         };
@@ -1193,22 +1210,22 @@ export class OpenCodeBackend implements AgentBackend {
       { sessionID },
       { signal },
     );
-    if (!forms.length) return false;
+    const candidates = forms.filter(
+      (form) =>
+        form.sessionID === sessionID &&
+        Option.isSome(decodeQuestionOrigin(form.metadata)),
+    );
+    if (!candidates.length) return false;
     const active = await this.client.session.active({ signal });
     if (!active[sessionID]) return false;
-    for (const form of forms.slice(0, 16)) {
-      if (form.sessionID !== sessionID) continue;
-      const detail = await this.client.session.form.get(
-        { sessionID, formID: form.id },
-        { signal },
-      );
-      if (
-        detail.sessionID === sessionID &&
-        detail.id === form.id &&
-        detail.state.status === "pending" &&
-        Option.isSome(decodeQuestionOrigin(detail.metadata))
-      )
-        return true;
+    for (const form of candidates.slice(0, 16)) {
+      const running = await this.runningQuestion(
+        sessionID,
+        form.id,
+        signal,
+      ).catch(() => undefined);
+      signal.throwIfAborted();
+      if (running) return true;
     }
     return false;
   }
@@ -1234,7 +1251,10 @@ export class OpenCodeBackend implements AgentBackend {
       const waiting = await this.waitingForAnswer(sessionId, check).catch(
         () => false,
       );
-      signal.throwIfAborted();
+      if (signal.aborted)
+        throw new PromptNotSubmitted("OpenCode admission check cancelled", {
+          cause: signal.reason,
+        });
       if (waiting) throw new PendingBackendQuestion();
     }
     this.inputs.delete(sessionId);
@@ -1289,134 +1309,141 @@ export class OpenCodeBackend implements AgentBackend {
     };
     // Consume promptly: slow Slack writes must not block the shared event source.
     const watch = onText || onProgress;
+    const eventSignal = AbortSignal.any([signal, stop.signal]);
+    const consumeEvents = async () => {
+      for await (const event of this.client.event.subscribe({
+        types: [
+          ...previewEvents,
+          ...(onProgress
+            ? ([
+                "session.inbox.enqueued",
+                "session.inbox.delivered",
+                "session.step.started",
+                "session.reasoning.started",
+                "session.tool.called",
+                "session.text.started",
+              ] as const)
+            : []),
+        ],
+        signal: eventSignal,
+      })) {
+        if (event.type === "server.connected") {
+          connected.resolve();
+          continue;
+        }
+        const current = currentPhase();
+        if (
+          (current.type !== "submitting" && current.type !== "submitted") ||
+          event.data.sessionID !== sessionId
+        )
+          continue;
+        if (
+          event.type === "session.inbox.enqueued" ||
+          event.type === "session.inbox.delivered"
+        ) {
+          if (event.data.inboxID === current.input)
+            report(
+              {
+                stage:
+                  event.type === "session.inbox.enqueued"
+                    ? "queued"
+                    : "delivered",
+                observedAt: Date.now(),
+              },
+              ++eventOrder,
+            );
+          continue;
+        }
+        const { assistantMessageID } = event.data;
+        const status = ownership.get(assistantMessageID);
+        if (status === "excluded") continue;
+        if (
+          onProgress &&
+          event.type !== "session.text.delta" &&
+          event.type !== "session.text.ended"
+        ) {
+          pendingProgress.set(assistantMessageID, {
+            progress: {
+              stage: assistantProgress[event.type],
+              observedAt: Date.now(),
+            },
+            order: ++eventOrder,
+          });
+        }
+        if (
+          onText &&
+          current.type === "submitted" &&
+          (event.type === "session.text.delta" ||
+            event.type === "session.text.ended")
+        ) {
+          let parts = messages.get(assistantMessageID);
+          if (!parts) {
+            parts = new Map();
+            messages.set(assistantMessageID, parts);
+          }
+          const { ordinal } = event.data;
+          parts.set(
+            ordinal,
+            event.type === "session.text.delta"
+              ? (parts.get(ordinal) ?? "") + event.data.delta
+              : event.data.text,
+          );
+        } else if (!onProgress) continue;
+        if (status === "owned") {
+          reportOwned(assistantMessageID);
+          publish();
+        } else if (status === undefined) {
+          ownership.set(assistantMessageID, "checking");
+          // Events identify the session and assistant, not its input.
+          // Only transcript placement proves this is not a queued prior turn.
+          const readSignal = AbortSignal.any([signal, stop.signal]);
+          const readOwner = () =>
+            this.inputOwnership(
+              sessionId,
+              current.input,
+              readSignal,
+              assistantMessageID,
+            ).catch(() => undefined);
+          const check = readOwner()
+            .then(async (owned) => {
+              // Retry one early/unreadable observation. Previous turns
+              // cannot trigger a new history walk on each streamed delta.
+              if (owned !== undefined || !onProgress) return owned;
+              await delay(ownershipRetryMs, undefined, {
+                signal: readSignal,
+              });
+              return readOwner();
+            })
+            .then((owned) => {
+              ownership.set(assistantMessageID, owned ? "owned" : "excluded");
+              if (owned) {
+                if (currentPhase().type !== "settled")
+                  reportOwned(assistantMessageID);
+                publish();
+              } else {
+                pendingProgress.delete(assistantMessageID);
+                messages.delete(assistantMessageID);
+              }
+            })
+            .catch(() => {})
+            .finally(() => checks.delete(check));
+          checks.add(check);
+        }
+      }
+    };
     const events = watch
       ? (async () => {
-          for await (const event of this.client.event.subscribe({
-            types: [
-              ...previewEvents,
-              ...(onProgress
-                ? ([
-                    "session.inbox.enqueued",
-                    "session.inbox.delivered",
-                    "session.step.started",
-                    "session.reasoning.started",
-                    "session.tool.called",
-                    "session.text.started",
-                  ] as const)
-                : []),
-            ],
-            signal: AbortSignal.any([signal, stop.signal]),
-          })) {
-            if (event.type === "server.connected") {
-              connected.resolve();
-              continue;
-            }
-            const current = currentPhase();
-            if (
-              (current.type !== "submitting" && current.type !== "submitted") ||
-              event.data.sessionID !== sessionId
-            )
-              continue;
-            if (
-              event.type === "session.inbox.enqueued" ||
-              event.type === "session.inbox.delivered"
-            ) {
-              if (event.data.inboxID === current.input)
-                report(
-                  {
-                    stage:
-                      event.type === "session.inbox.enqueued"
-                        ? "queued"
-                        : "delivered",
-                    observedAt: Date.now(),
-                  },
-                  ++eventOrder,
-                );
-              continue;
-            }
-            const { assistantMessageID } = event.data;
-            const status = ownership.get(assistantMessageID);
-            if (status === "excluded") continue;
-            if (
-              onProgress &&
-              event.type !== "session.text.delta" &&
-              event.type !== "session.text.ended"
-            ) {
-              pendingProgress.set(assistantMessageID, {
-                progress: {
-                  stage: assistantProgress[event.type],
-                  observedAt: Date.now(),
-                },
-                order: ++eventOrder,
-              });
-            }
-            if (
-              onText &&
-              current.type === "submitted" &&
-              (event.type === "session.text.delta" ||
-                event.type === "session.text.ended")
-            ) {
-              let parts = messages.get(assistantMessageID);
-              if (!parts) {
-                parts = new Map();
-                messages.set(assistantMessageID, parts);
-              }
-              const { ordinal } = event.data;
-              parts.set(
-                ordinal,
-                event.type === "session.text.delta"
-                  ? (parts.get(ordinal) ?? "") + event.data.delta
-                  : event.data.text,
-              );
-            } else if (!onProgress) continue;
-            if (status === "owned") {
-              reportOwned(assistantMessageID);
-              publish();
-            } else if (status === undefined) {
-              ownership.set(assistantMessageID, "checking");
-              // Events identify the session and assistant, not its input.
-              // Only transcript placement proves this is not a queued prior turn.
-              const readSignal = AbortSignal.any([signal, stop.signal]);
-              const readOwner = () =>
-                this.inputOwnership(
-                  sessionId,
-                  current.input,
-                  readSignal,
-                  assistantMessageID,
-                ).catch(() => undefined);
-              const check = readOwner()
-                .then(async (owned) => {
-                  // Retry one early/unreadable observation. Previous turns
-                  // cannot trigger a new history walk on each streamed delta.
-                  if (owned !== undefined || !onProgress) return owned;
-                  await delay(ownershipRetryMs, undefined, {
-                    signal: readSignal,
-                  });
-                  return readOwner();
-                })
-                .then((owned) => {
-                  ownership.set(
-                    assistantMessageID,
-                    owned ? "owned" : "excluded",
-                  );
-                  if (owned) {
-                    if (currentPhase().type !== "settled")
-                      reportOwned(assistantMessageID);
-                    publish();
-                  } else {
-                    pendingProgress.delete(assistantMessageID);
-                    messages.delete(assistantMessageID);
-                  }
-                })
-                .catch(() => {})
-                .finally(() => checks.delete(check));
-              checks.add(check);
-            }
+          let retryMs = 250;
+          while (!eventSignal.aborted) {
+            // The SDK closes subscribers when its underlying stream ends.
+            // Reattach progress observation, never replay the native prompt.
+            await consumeEvents().catch(() => {});
+            connected.resolve();
+            if (!onProgress || eventSignal.aborted) return;
+            await delay(retryMs, undefined, { signal: eventSignal });
+            retryMs = Math.min(retryMs * 2, 10_000);
           }
-        })().catch(() => {
-          // Live-only events are best effort; history remains authoritative.
-          connected.resolve();
-        })
+        })().catch(() => {})
       : Promise.resolve();
     try {
       if (watch) {

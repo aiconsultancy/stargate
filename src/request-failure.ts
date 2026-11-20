@@ -2,7 +2,8 @@ import { cancellationNotice } from "./cancellation";
 import { slackContent } from "./slack-format";
 
 export class AttachmentInputUnavailable extends Error {}
-export class PendingBackendQuestion extends Error {}
+export class PromptNotSubmitted extends Error {}
+export class PendingBackendQuestion extends PromptNotSubmitted {}
 
 /**
  * What a backend saw when the model provider or the agent process failed.

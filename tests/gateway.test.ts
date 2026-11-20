@@ -1,7 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
 import pino from "pino";
-import type { AgentBackend } from "../src/backend";
+import {
+  type AgentBackend,
+  latestInput,
+  TranscriptUnavailable,
+} from "../src/backend";
 import { Gateway, type SlackDelivery } from "../src/gateway";
+import { PromptNotSubmitted } from "../src/request-failure";
 import { handleSlackRequest } from "../src/slack";
 import { Store } from "../src/store";
 import { ThreadContextUnavailable } from "../src/thread-context";
@@ -82,6 +87,38 @@ test("persists once and resumes the same session on thread replies", async () =>
     { session: "session-1", text: "continue" },
   ]);
   expect(f.titles).toEqual(["helper (slack C123)"]);
+});
+
+test("timeout before native submission cannot read a previous turn as the new reply", async () => {
+  const config = bot();
+  config.turnTimeoutMs = 100;
+  const f = fixture(config);
+  let staleAnchorReads = 0;
+  Object.assign(f.backend, {
+    sessionID: "session-1",
+    async prompt(_session: string, _text: string, signal: AbortSignal) {
+      if (!signal.aborted)
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      throw new PromptNotSubmitted();
+    },
+    async transcript(_session: string, cursor: string | undefined) {
+      if (cursor === latestInput) {
+        staleAnchorReads++;
+        return {
+          cursor: "prior-reply",
+          entries: [{ id: "prior-reply", text: "Earlier turn", created: 1 }],
+        };
+      }
+      throw new TranscriptUnavailable("cursor");
+    },
+  } satisfies Partial<AgentBackend>);
+  expect(f.gateway.accept(event())).toBe(true);
+  await f.gateway.process(f.next(), AbortSignal.timeout(3000));
+  expect(staleAnchorReads).toBe(0);
+  expect(f.delivered).toHaveLength(1);
+  expect(f.delivered[0]).toContain("reached the request time limit");
 });
 
 test("resumes an existing Slack thread only after seeing this bot's earlier reply", async () => {

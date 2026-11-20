@@ -15,7 +15,10 @@ import { latestInput } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
 import { PiDurableBackend, piPartialText } from "../src/backends/pi-durable";
 import { backendSchema } from "../src/config";
-import { PendingBackendQuestion } from "../src/request-failure";
+import {
+  PendingBackendQuestion,
+  PromptNotSubmitted,
+} from "../src/request-failure";
 import type { TurnProgress, TurnStage } from "../src/turn-progress";
 
 test("OpenCode V2 creates, queues, waits and reads paginated replies", async () => {
@@ -386,13 +389,20 @@ function openCodeStreamFixture(
     batched?: boolean;
   },
   headersEnv: Record<string, string> = {},
-  pendingQuestion?: { active: boolean },
+  pendingQuestion?: {
+    active: boolean;
+    running?: boolean;
+    unrelated?: number;
+    waitForList?: Promise<void>;
+  },
 ) {
   const waiting = Promise.withResolvers<void>();
   const finish = Promise.withResolvers<void>();
   const disconnected = Promise.withResolvers<void>();
   const interrupted = Promise.withResolvers<void>();
   const checked = Promise.withResolvers<void>();
+  const formListing = Promise.withResolvers<void>();
+  const reconnected = Promise.withResolvers<void>();
   let placed = !queued;
   let interrupts = 0;
   let cancelled = false;
@@ -402,6 +412,7 @@ function openCodeStreamFixture(
   let historyReads = 0;
   let inputId = "";
   let admissions = 0;
+  let eventConnections = 0;
   const form = {
     id: "form_earlier",
     sessionID: "session-current",
@@ -431,13 +442,43 @@ function openCodeStreamFixture(
     hostname: "127.0.0.1",
     async fetch(request) {
       const path = new URL(request.url).pathname;
-      if (path.endsWith("/form"))
-        return Response.json({ data: pendingQuestion ? [form] : [] });
+      if (path.endsWith("/form")) {
+        formListing.resolve();
+        await pendingQuestion?.waitForList;
+        const unrelated = Array.from(
+          { length: pendingQuestion?.unrelated ?? 0 },
+          (_, i) => ({ ...form, id: `form_${i}`, metadata: {} }),
+        );
+        return Response.json({
+          data: pendingQuestion ? [...unrelated, form] : [],
+        });
+      }
       if (path.endsWith("/form/form_earlier"))
         return Response.json({ data: form });
       if (path === "/api/session/active")
         return Response.json({
           data: pendingQuestion?.active ? { "session-current": true } : {},
+        });
+      if (
+        path.endsWith("/message/old-answer") &&
+        pendingQuestion &&
+        pendingQuestion.running !== false
+      )
+        return Response.json({
+          data: {
+            id: "old-answer",
+            type: "assistant",
+            time: { created: 1 },
+            content: [
+              {
+                type: "tool",
+                id: "call_earlier",
+                name: "question",
+                time: { created: 1 },
+                state: { status: "running" },
+              },
+            ],
+          },
         });
       if (path === "/api/event") {
         return new Response(
@@ -445,6 +486,7 @@ function openCodeStreamFixture(
             start(controller) {
               stream = controller;
               emit("server.connected", {});
+              if (++eventConnections > 1) reconnected.resolve();
             },
             cancel() {
               stream = undefined;
@@ -553,6 +595,8 @@ function openCodeStreamFixture(
     waiting: waiting.promise,
     disconnected: disconnected.promise,
     interrupted: interrupted.promise,
+    formListing: formListing.promise,
+    reconnected: reconnected.promise,
     finish: () => finish.resolve(),
     historyReads: () => historyReads,
     input: () => inputId,
@@ -565,8 +609,10 @@ function openCodeStreamFixture(
     cancelled: () => cancelled,
     withdrawals: () => withdrawals,
     emit,
-    disconnect() {
-      stream?.close();
+    disconnect(kind: "eof" | "error" = "eof") {
+      if (kind === "error")
+        stream?.error(new Error("Fixture event stream lost"));
+      else stream?.close();
       stream = undefined;
     },
     async close() {
@@ -800,13 +846,13 @@ const humanIrcSource = {
   },
 } as const;
 
-test("OpenCode refuses a new IRC prompt behind an active question even without status notices", async () => {
+test("OpenCode finds a running IRC question after unrelated forms without status notices", async () => {
   const fixture = openCodeStreamFixture(
     false,
     false,
     undefined,
     {},
-    { active: true },
+    { active: true, unrelated: 16 },
   );
   try {
     await expect(
@@ -824,6 +870,76 @@ test("OpenCode refuses a new IRC prompt behind an active question even without s
     expect(fixture.interrupts()).toBe(0);
     expect(fixture.withdrawals()).toEqual([]);
   } finally {
+    await fixture.close();
+  }
+});
+
+test("OpenCode submits a new request if pending form metadata has no running question tool", async () => {
+  const fixture = openCodeStreamFixture(
+    false,
+    false,
+    undefined,
+    {},
+    {
+      active: true,
+      running: false,
+    },
+  );
+  const controller = new AbortController();
+  const result = fixture.backend.prompt(
+    "session-current",
+    "New IRC request",
+    controller.signal,
+    () => {},
+    undefined,
+    undefined,
+    humanIrcSource,
+  );
+  try {
+    await fixture.waiting;
+    fixture.finish();
+    expect(await result).toBe("Canonical final answer.");
+    expect(fixture.admissions()).toBe(1);
+  } finally {
+    controller.abort();
+    await result.catch(() => {});
+    await fixture.close();
+  }
+});
+
+test("OpenCode marks cancellation during an IRC form check as pre-submission", async () => {
+  const list = Promise.withResolvers<void>();
+  const fixture = openCodeStreamFixture(
+    false,
+    false,
+    undefined,
+    {},
+    {
+      active: true,
+      waitForList: list.promise,
+    },
+  );
+  const controller = new AbortController();
+  const result = fixture.backend.prompt(
+    "session-current",
+    "New IRC request",
+    controller.signal,
+    undefined,
+    undefined,
+    undefined,
+    humanIrcSource,
+  );
+  try {
+    await fixture.formListing;
+    controller.abort();
+    await expect(result).rejects.toBeInstanceOf(PromptNotSubmitted);
+    expect(fixture.admissions()).toBe(0);
+    expect(fixture.interrupts()).toBe(0);
+    expect(fixture.withdrawals()).toEqual([]);
+  } finally {
+    controller.abort();
+    list.resolve();
+    await result.catch(() => {});
     await fixture.close();
   }
 });
@@ -948,6 +1064,53 @@ test("OpenCode event disconnect retains authoritative final history", async () =
     await fixture.close();
   }
 });
+
+test.each(["eof", "error"] as const)(
+  "OpenCode resumes progress after event stream %s without resubmitting",
+  async (kind) => {
+    const fixture = openCodeStreamFixture();
+    const controller = new AbortController();
+    const queued = Promise.withResolvers<void>();
+    const reasoning = Promise.withResolvers<void>();
+    const result = fixture.backend.prompt(
+      "session-current",
+      "New IRC request",
+      controller.signal,
+      undefined,
+      undefined,
+      undefined,
+      humanIrcSource,
+      ({ stage }) => {
+        if (stage === "queued") queued.resolve();
+        if (stage === "reasoning") reasoning.resolve();
+      },
+    );
+    try {
+      await fixture.waiting;
+      fixture.emit("session.inbox.enqueued", {
+        sessionID: "session-current",
+        inboxID: fixture.input(),
+      });
+      await queued.promise;
+      fixture.disconnect(kind);
+      await fixture.reconnected;
+      fixture.emit("session.reasoning.started", {
+        sessionID: "session-current",
+        assistantMessageID: "answer-current",
+        ordinal: 0,
+      });
+      await reasoning.promise;
+      fixture.finish();
+      expect(await result).toBe("Canonical final answer.");
+      expect(fixture.admissions()).toBe(1);
+      expect(fixture.withdrawals()).toEqual([]);
+    } finally {
+      controller.abort();
+      await result.catch(() => {});
+      await fixture.close();
+    }
+  },
+);
 
 test.each([false, true])(
   "OpenCode queued preview placement race=%s",

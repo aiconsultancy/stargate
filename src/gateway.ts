@@ -61,6 +61,7 @@ import {
   BackendFailure,
   failureText,
   PendingBackendQuestion,
+  PromptNotSubmitted,
   providerFailure,
   type RequestFailure,
 } from "./request-failure";
@@ -1979,7 +1980,7 @@ export class Gateway {
           if (cancellation.signal.aborted || maintenanceFailure.signal.aborted)
             activity?.cancel();
           else if (!shutdown.aborted) activity?.finish();
-          if (error instanceof PendingBackendQuestion) admitted = false;
+          if (error instanceof PromptNotSubmitted) admitted = false;
           silent = false;
           failure = cancellation.signal.aborted
             ? "cancelled"
