@@ -2,7 +2,7 @@ import { isAbsolute, resolve } from "node:path";
 import { Effect, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
 import { legacySetting } from "../../settings-legacy";
-import { isGitHubRepositoryName } from "./git";
+import { isGitHubRepositoryName } from "./github-repository";
 import { isOriginPattern, isPrivateNetwork, parseApiListen } from "./network";
 
 const checkoutPath = Schema.String.check(
