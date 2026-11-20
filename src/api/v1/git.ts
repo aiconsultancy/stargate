@@ -247,10 +247,9 @@ async function createStatusDirectory(
   const root = await realpath(checkout);
   // The private snapshot would appear as untracked files inside the worktree.
   // Returns the canonical directory, so the snapshot is created under the path
-  // that passed the check rather than a symlink to it. Someone who can write to
-  // an ancestor of that directory could still swap it between the check and
-  // mkdtemp; the data and per-user temporary directories are the gateway user's
-  // own, so that needs the same user's access already.
+  // that passed the check rather than a symlink to it. This assumes no other
+  // user can write to that directory or any of its ancestors: such a user could
+  // swap a path component between the check and mkdtemp.
   const outsideCheckout = async (directory: string) => {
     const canonical = await realpath(directory);
     const child = relative(root, canonical);
