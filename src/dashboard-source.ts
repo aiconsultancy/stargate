@@ -169,7 +169,7 @@ export function dashboardSource(
   function retirement(backend: AgentBackend) {
     const controller = retirements.get(backend) ?? new AbortController();
     retirements.set(backend, controller);
-    return controller.signal;
+    return controller;
   }
 
   const find = (id: string) => ships.find((ship) => ship.bot.id === id);
@@ -278,16 +278,10 @@ export function dashboardSource(
       status: slot.latest?.status ?? null,
       error: crewUnavailable,
     });
-    const lifetime = AbortSignal.any([
-      fleetSignal,
-      ...members.map((member) => retirement(member.backend)),
-    ]);
-    if (lifetime.aborted) return unavailable();
     const current = slot.read.pending;
     if (!current || slot.pending?.attempt !== current.result) {
-      // The shared attempt may fall back to an alias, so each member owns its lifetime.
-      // A caller only owns its wait.
-      const attempt = slot.read.start(lifetime, read).result;
+      // The fleet owns the shared attempt. A caller only owns its wait.
+      const attempt = slot.read.start(fleetSignal, read).result;
       const last = slot.last;
       // A recent sample stays usable throughout this refresh. A cold caller
       // needs the shared result to establish availability.
@@ -305,7 +299,7 @@ export function dashboardSource(
           unavailable,
         )
         .then((sample) => {
-          if (lifetime.aborted) return unavailable();
+          if (fleetSignal.aborted) return unavailable();
           if (!sample.error) slot.latest = sample;
           slot.last = { sample, at: performance.now() };
           return sample;
@@ -461,7 +455,21 @@ export function dashboardSource(
         // after a failure; queue and transcript ownership are never shared.
         for (const member of members) {
           reading.throwIfAborted();
-          const result = await crew(member, reading, selected ? {} : undefined);
+          const retired = selected
+            ? retirement(member.backend).signal
+            : undefined;
+          // Retirement skips this backend. The shared slot still tracks a
+          // backend that keeps reading after the fleet deadline.
+          const result = retired
+            ? await readWithDeadline(retired, undefined, (active) => {
+                reading.throwIfAborted();
+                return crew(member, AbortSignal.any([reading, active]), {});
+              }).result.catch((error: unknown) => {
+                reading.throwIfAborted();
+                if (!retired.aborted) throw error;
+                return { status: null, error: crewUnavailable };
+              })
+            : await crew(member, reading);
           if (result.status) return result;
           if (result.error) last = result;
         }
@@ -645,7 +653,7 @@ export function dashboardSource(
     },
     retireFleetBackend(backend: AgentBackend) {
       if (!ships.some((ship) => ship.backend === backend))
-        retirements.get(backend)?.abort();
+        retirement(backend).abort();
     },
     fleetWithCrew: (
       signal: AbortSignal,
