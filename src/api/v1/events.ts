@@ -76,7 +76,7 @@ export function createEventStreams(
   const lifetime = new AbortController();
   const readMs = timing.readMs ?? 20_000;
   const overviewReadMs = timing.readMs ?? fleetOverviewReadMs;
-  const readOverview = holdRead<{
+  const overviewReads = createReadSlot<{
     generation: number;
     overview: V1Snapshot["fleet"];
     reads: Map<string, V1ShipRead>;
@@ -110,7 +110,7 @@ export function createEventStreams(
     let summaries = new Map<string, V1Ship>();
     let fleet: V1Fleet | undefined;
     let latestHost: V1Host | undefined;
-    let publishing = false;
+    let publishing: number | undefined;
     let enriching = false;
     let readingHost = false;
 
@@ -154,6 +154,7 @@ export function createEventStreams(
         cachedShips.delete(id);
       }
       rosterRead.abort();
+      overviewReads.abandon();
       rosterRead = new AbortController();
       cachedOverview = undefined;
       if (fleet) for (const client of clients) client.close();
@@ -307,7 +308,7 @@ export function createEventStreams(
       if (shutdown.signal.aborted) return;
       try {
         const generation = syncIdentities();
-        if (!publishing && !shutdown.signal.aborted)
+        if (publishing !== generation && !shutdown.signal.aborted)
           await refreshOverview(generation);
       } catch {
         // Keep the last overview and retry while clients are present.
@@ -315,18 +316,21 @@ export function createEventStreams(
     }
 
     async function refreshOverview(generation: number) {
-      publishing = true;
+      publishing = generation;
       try {
-        const sample = await readOverview(
-          AbortSignal.any([lifetime.signal, rosterRead.signal]),
-          async (signal) => {
-            const reads = new Map<string, V1ShipRead>();
-            const overview = await options.fleet(signal, (id, read) =>
-              reads.set(id, read),
-            );
-            return { generation, overview, reads };
-          },
-        ).catch(() => undefined);
+        const attempt =
+          overviewReads.pending ??
+          overviewReads.start(
+            AbortSignal.any([lifetime.signal, rosterRead.signal]),
+            async (signal) => {
+              const reads = new Map<string, V1ShipRead>();
+              const overview = await options.fleet(signal, (id, read) =>
+                reads.set(id, read),
+              );
+              return { generation, overview, reads };
+            },
+          );
+        const sample = await attempt.result.catch(() => undefined);
         if (
           shutdown.signal.aborted ||
           syncIdentities() !== generation ||
@@ -360,7 +364,7 @@ export function createEventStreams(
         }
         refreshMetrics(overview, generation);
       } finally {
-        publishing = false;
+        if (publishing === generation) publishing = undefined;
       }
     }
 

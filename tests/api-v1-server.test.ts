@@ -1140,7 +1140,7 @@ test("a replacement backend can publish detail while its predecessor still holds
   }
 });
 
-test("an identity change closes clients and cancels a pending overview", async () => {
+test("an identity change replaces an overview that ignores cancellation", async () => {
   const held = Promise.withResolvers<Omit<V1Fleet, "host" | "gateway">>();
   const started = Promise.withResolvers<AbortSignal>();
   let backend = "original";
@@ -1177,8 +1177,7 @@ test("an identity change closes clients and cancels a pending overview", async (
       ]),
     ).toBe(true);
     expect(reading.aborted).toBe(true);
-    held.resolve(overview);
-    const reconnected = streams.open(AbortSignal.timeout(350))?.getReader();
+    const reconnected = streams.open(AbortSignal.timeout(150))?.getReader();
     if (!reconnected) throw new Error("Cannot reopen event stream");
     expect(await nextFrame(reconnected, "fleet")).toContain(
       '"name":"After reload"',

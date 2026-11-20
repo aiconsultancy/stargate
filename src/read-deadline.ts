@@ -37,15 +37,23 @@ export function createReadSlot<T>(timeout: number, onIdle?: () => void) {
   };
   let pending: Attempt | undefined;
   let abandoned: Attempt | undefined;
+  function abandonPending() {
+    if (!pending || abandoned) return;
+    abandoned = pending;
+    pending = undefined;
+    abandoned.onAbandon?.();
+  }
   return {
     get pending() {
       // Check on demand so stopped pollers do not leave recovery timers behind.
-      if (pending && !abandoned && performance.now() >= pending.abandonAt) {
-        abandoned = pending;
-        pending = undefined;
-        abandoned.onAbandon?.();
-      }
+      if (pending && performance.now() >= pending.abandonAt) abandonPending();
       return pending;
+    },
+    abandon() {
+      if (!pending) return;
+      // If the abandoned position is full, retry as soon as it drains.
+      pending.abandonAt = Number.NEGATIVE_INFINITY;
+      abandonPending();
     },
     start(
       parent: AbortSignal,
