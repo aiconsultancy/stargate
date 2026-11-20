@@ -508,36 +508,61 @@ describe("Fleet API projection", () => {
     expect(f.calls.status.filter((id) => id === "captain")).toHaveLength(1);
   });
 
-  test("shutdown and reload cancel the shared crew sample", async () => {
+  test("shutdown cancels the shared crew sample", async () => {
     const shutdown = new AbortController();
-    let reload = new AbortController();
-    const f = fixture({
-      fleetSignal: () => AbortSignal.any([shutdown.signal, reload.signal]),
-    });
-    for (const stop of [() => reload.abort(), () => shutdown.abort()]) {
-      const held = Promise.withResolvers<CrewStatus>();
-      f.statuses.set("captain", held.promise);
-      const read = f.source.fleet(signal);
-      void read.catch(() => {});
+    const f = fixture({ fleetSignal: shutdown.signal });
+    const held = Promise.withResolvers<CrewStatus>();
+    f.statuses.set("captain", held.promise);
+    const read = f.source.fleet(signal);
+    void read.catch(() => {});
+    try {
       await Bun.sleep(0);
       const backendRead = f.crewSignals.get("captain");
       expect(backendRead?.aborted).toBe(false);
-      stop();
-      try {
-        const outcome = await Promise.race([
-          read.then(
-            () => "completed",
-            (error: Error) => error.name,
-          ),
-          Bun.sleep(100).then(() => "pending"),
-        ]);
-        expect(outcome).toBe("AbortError");
-        expect(backendRead?.aborted).toBe(true);
-      } finally {
-        held.resolve({ members: [], total: 0, truncated: false });
-        await read.catch(() => {});
+      shutdown.abort();
+      await expect(read).rejects.toMatchObject({ name: "AbortError" });
+      expect(backendRead?.aborted).toBe(true);
+    } finally {
+      held.resolve({ members: [], total: 0, truncated: false });
+      await read.catch(() => {});
+    }
+  });
+
+  test("reload invalidates cached crew samples without opening more backend slots", async () => {
+    const f = fixture({ fleetCrewReadMs: 5 });
+    await f.source.fleet(signal);
+    const held = Promise.withResolvers<CrewStatus>();
+    f.statuses.set("captain", held.promise);
+    const first = f.source.fleet(signal);
+    const reads = [first];
+    void first.catch(() => {});
+    try {
+      await Bun.sleep(0);
+      for (let i = 0; i < 3; i++) {
+        f.dashboard.invalidateFleetCrew();
+        const read = f.source.fleet(signal);
+        void read.catch(() => {});
+        reads.push(read);
+        await Bun.sleep(0);
       }
-      reload = new AbortController();
+      expect(f.calls.status.filter((id) => id === "captain")).toHaveLength(2);
+      const last = reads[reads.length - 1] ?? first;
+      expect(
+        await Promise.race([
+          last.then(() => "cached"),
+          Bun.sleep(25).then(() => "pending"),
+        ]),
+      ).toBe("pending");
+      held.resolve({ members: [context("pilot")], total: 1, truncated: false });
+      expect(
+        (await last).ships.find(({ id }) => id === "captain"),
+      ).toMatchObject({
+        available: true,
+        crew: { people: 1 },
+      });
+    } finally {
+      held.resolve({ members: [], total: 0, truncated: false });
+      await Promise.allSettled(reads);
     }
   });
 

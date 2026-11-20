@@ -7,9 +7,11 @@ import { Writable } from "node:stream";
 import { Effect, Schema } from "effect";
 import pino from "pino";
 import { z } from "zod";
+import { apiToken } from "../src/api/v1/token";
 import type { AgentBackend } from "../src/backend";
 import { type Config, configSchema, ircSchema } from "../src/config";
 import { ConfigReload, readReloadCandidate } from "../src/config-reload";
+import type { CrewStatus } from "../src/crew-status";
 import { IrcShip, ircKey } from "../src/irc/ship";
 import { botKey } from "../src/routing";
 import {
@@ -35,15 +37,23 @@ async function running(
     turn?: Turn;
     failBackend?: string;
     dashboard?: boolean;
+    crewStatus?: (id: string, signal: AbortSignal) => Promise<CrewStatus>;
+    pinned?: readonly string[];
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-runtime-reload-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.json");
+  const reservation = options.crewStatus
+    ? Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() })
+    : undefined;
+  const listen = reservation && `127.0.0.1:${reservation.port}`;
+  await reservation?.stop(true);
   const config = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: join(directory, "data"),
     bots: [bot()],
     dashboard: options.dashboard,
+    ...(listen ? { api: { listen } } : {}),
     irc: options.irc ?? [],
   });
   const environment = {
@@ -121,7 +131,12 @@ async function running(
       if (id === options.failBackend)
         throw new Error("fixture backend refused");
       built.push(id);
+      const crewStatus = options.crewStatus;
       return {
+        ...(options.pinned?.includes(id) ? { sessionID: "fixture-pin" } : {}),
+        ...(crewStatus
+          ? { crewStatus: (_input, signal) => crewStatus(id, signal) }
+          : {}),
         async createSession() {
           return `session-${id}`;
         },
@@ -173,8 +188,46 @@ async function running(
     writeEnvironment,
     accept,
     directory,
+    async fleet() {
+      const token = await apiToken(config.dataDirectory);
+      return fetch(`http://${listen}/api/v1/fleet`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(5000),
+      });
+    },
   };
 }
+
+test("a live access reload leaves an in-flight Fleet HTTP request healthy", async () => {
+  const entered = Promise.withResolvers<AbortSignal>();
+  const held = Promise.withResolvers<CrewStatus>();
+  const f = await running({
+    crewStatus: async (_input, signal) => {
+      entered.resolve(signal);
+      return held.promise;
+    },
+  });
+  const response = f.fleet();
+  void response.catch(() => {});
+  try {
+    const reading = await entered.promise;
+    await f.write({
+      ...f.config,
+      bots: [{ ...bot(), access: { ...bot().access, deniedUsers: ["U123"] } }],
+    });
+    expect((await f.reload.request()).status).toBe("applied");
+    held.resolve({ members: [], total: 0, truncated: false });
+    const fleet = await response;
+    expect(fleet.status).toBe(200);
+    expect(await fleet.json()).toMatchObject({
+      ships: [{ id: "helper", available: true }],
+    });
+    expect(reading.aborted).toBe(false);
+  } finally {
+    held.resolve({ members: [], total: 0, truncated: false });
+    await response.catch(() => {});
+  }
+});
 
 test("SIGHUP binding requests reload and removes its listener", async () => {
   const signals = new EventEmitter();
@@ -525,4 +578,52 @@ test("dashboard follows IRC access reload and committed crew addition/removal wi
   expect(await fleet()).toEqual(["fleet", "helper"]);
   expect((await get("/api/ships/fleet-chief")).status).toBe(404);
   expect(f.closed).toEqual(["fleet-chief"]);
+});
+
+test("removing an IRC backend cancels only its Fleet crew read", async () => {
+  const server = new FakeIrcServer({
+    accounts: { galactica: "captain-pass", "galactica-chief": "chief-pass" },
+  }).start();
+  cleanup.push(() => server.stop());
+  const registration = Schema.decodeUnknownSync(ircSchema)({
+    ...irc(server.port),
+    crew: [chief],
+  });
+  const retired = Promise.withResolvers<AbortSignal>();
+  const unchanged = Promise.withResolvers<AbortSignal>();
+  const held = Promise.withResolvers<CrewStatus>();
+  const status = { members: [], total: 0, truncated: false };
+  const f = await running({
+    irc: [registration],
+    environment: { IRC_MAIN: "captain-pass", IRC_CHIEF: "chief-pass" },
+    pinned: ["helper", "fleet-chief"],
+    crewStatus: async (id, reading) => {
+      if (id === "fleet-chief") retired.resolve(reading);
+      if (id === "fleet") unchanged.resolve(reading);
+      return held.promise;
+    },
+  });
+  const response = f.fleet();
+  void response.catch(() => {});
+  try {
+    const [removed, kept] = await Promise.all([
+      retired.promise,
+      unchanged.promise,
+    ]);
+    await f.write({ ...f.config, irc: [{ ...registration, crew: [] }] });
+    expect((await f.reload.request()).status).toBe("applied");
+    expect(removed.aborted).toBe(true);
+    expect(kept.aborted).toBe(false);
+    held.resolve(status);
+    expect((await response).status).toBe(200);
+    expect(await (await f.fleet()).json()).toMatchObject({
+      ships: [
+        { id: "fleet", available: true },
+        { id: "helper", available: true },
+      ],
+    });
+  } finally {
+    held.resolve(status);
+    await response.catch(() => {});
+  }
 });

@@ -986,21 +986,22 @@ export function serve(
         );
         log.info("Dashboard listening");
       }
-      let fleetReads = new AbortController();
+      let fleetDashboard: ReturnType<typeof dashboardSource> | undefined;
       if (config.api) {
         // Like the dashboard: a bind failure is an ordinary startup failure.
         const api = config.api;
         const viewers = new AbortController();
+        const dashboard = dashboardSource(ships, store, cronStore, Date.now, {
+          fleetSignal: viewers.signal,
+        });
+        fleetDashboard = dashboard;
         yield* Effect.acquireRelease(
           Effect.promise(async () =>
             startApiV1Server({
               config: api,
               dataDirectory: config.dataDirectory,
               source: createApiV1Source({
-                dashboard: dashboardSource(ships, store, cronStore, Date.now, {
-                  fleetSignal: () =>
-                    AbortSignal.any([viewers.signal, fleetReads.signal]),
-                }),
+                dashboard,
                 config: () => reload?.current.config ?? config,
                 dataDirectory: config.dataDirectory,
               }),
@@ -1166,8 +1167,7 @@ export function serve(
               binding.entries.set(registration.key, entry);
             }
             committed = true;
-            fleetReads.abort();
-            fleetReads = new AbortController();
+            fleetDashboard?.invalidateFleetCrew();
             for (const { entry, start } of staged) {
               addedResources.push(entry);
               Effect.runSync(Deferred.succeed(start, undefined));
@@ -1181,6 +1181,7 @@ export function serve(
                 if (entry) {
                   const index = ships.indexOf(entry.dashboard);
                   if (index >= 0) ships.splice(index, 1);
+                  fleetDashboard?.retireFleetBackend(entry.resource.backend);
                 }
                 await Effect.runPromise(
                   FiberMap.remove(fibers, registration.key),

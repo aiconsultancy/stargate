@@ -140,24 +140,22 @@ export function dashboardSource(
   {
     fleetCrewReadMs = 1_000,
     fleetCrewDeadlineMs = 20_000,
-    fleetSignal,
+    fleetSignal = new AbortController().signal,
   }: {
     fleetCrewReadMs?: number;
     fleetCrewDeadlineMs?: number;
-    fleetSignal?: () => AbortSignal;
+    fleetSignal?: AbortSignal;
   } = {},
 ) {
-  const defaultFleetSignal = new AbortController().signal;
   const crewRoots = new WeakMap<
     DashboardShip,
     { at: number; sessions: HistorySession[] }
   >();
   const fleetCrew = new WeakMap<
-    DashboardShip,
+    AgentBackend,
     {
       read: ReturnType<typeof createReadSlot<CrewRead>>;
-      lifetime: AbortSignal;
-      backend: AgentBackend;
+      retirement: AbortController;
       latest?: CrewRead;
       last?: { sample: CrewRead; at: number };
       pending?: {
@@ -256,31 +254,27 @@ export function dashboardSource(
   }
 
   async function sampleCrew(
-    key: DashboardShip,
+    backend: AgentBackend,
     signal: AbortSignal,
     read: (reading: AbortSignal) => Promise<CrewRead>,
   ): Promise<CrewRead> {
     signal.throwIfAborted();
-    const lifetime = fleetSignal?.() ?? defaultFleetSignal;
-    lifetime.throwIfAborted();
-    const cached = fleetCrew.get(key);
-    const slot =
-      cached && !cached.lifetime.aborted && cached.backend === key.backend
-        ? cached
-        : {
-            read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
-            lifetime,
-            backend: key.backend,
-          };
-    fleetCrew.set(key, slot);
+    fleetSignal.throwIfAborted();
+    const slot = fleetCrew.get(backend) ?? {
+      read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
+      retirement: new AbortController(),
+    };
+    fleetCrew.set(backend, slot);
     const unavailable = (): CrewRead => ({
       ...slot.latest,
       status: slot.latest?.status ?? null,
       error: crewUnavailable,
     });
+    if (slot.retirement.signal.aborted) return unavailable();
     const current = slot.read.pending;
     if (!current || slot.pending?.attempt !== current.result) {
       // The backend read belongs to the shared slot. A caller only owns its wait.
+      const lifetime = AbortSignal.any([fleetSignal, slot.retirement.signal]);
       const attempt = slot.read.start(lifetime, read).result;
       const last = slot.last;
       // A recent sample stays usable throughout this refresh. A cold caller
@@ -307,16 +301,17 @@ export function dashboardSource(
       slot.pending = { attempt, result, fallback };
     }
     const pending = slot.pending;
-    const wait = AbortSignal.any([signal, lifetime]);
+    const fallback = pending.fallback;
+    const wait = AbortSignal.any([signal, fleetSignal]);
     try {
       return await readWithDeadline(
         wait,
-        pending.fallback ? fleetCrewReadMs : undefined,
+        fallback ? fleetCrewReadMs : undefined,
         () => pending.result,
       ).result;
     } catch (error) {
       wait.throwIfAborted();
-      if (pending.fallback) return slot.last?.sample ?? pending.fallback;
+      if (fallback) return slot.last?.sample ?? fallback;
       throw error;
     }
   }
@@ -447,7 +442,7 @@ export function dashboardSource(
         return last;
       };
       const read = selected
-        ? sampleCrew(members[0] ?? ship, signal, readCrew)
+        ? sampleCrew((members[0] ?? ship).backend, signal, readCrew)
         : readCrew(signal);
       reads.set(key, read);
       return read;
@@ -612,6 +607,20 @@ export function dashboardSource(
     },
 
     /** Internal reads. The dashboard HTTP routes use fleet and ship above. */
+    fleetBackend: (id: string) => find(id)?.backend,
+    invalidateFleetCrew() {
+      for (const { backend } of ships) {
+        const slot = fleetCrew.get(backend);
+        if (!slot) continue;
+        delete slot.latest;
+        delete slot.last;
+        if (slot.pending) slot.pending.fallback = undefined;
+      }
+    },
+    retireFleetBackend(backend: AgentBackend) {
+      if (!ships.some((ship) => ship.backend === backend))
+        fleetCrew.get(backend)?.retirement.abort();
+    },
     fleetWithCrew: (signal: AbortSignal, selected: ReadonlySet<string>) =>
       readFleet(signal, selected),
     shipWithCrew: (
@@ -652,6 +661,9 @@ export function dashboardSource(
       return history.entries(input, signal);
     },
   } satisfies DashboardSource & {
+    fleetBackend: (id: string) => AgentBackend | undefined;
+    invalidateFleetCrew: () => void;
+    retireFleetBackend: (backend: AgentBackend) => void;
     fleetWithCrew: (
       signal: AbortSignal,
       selected: ReadonlySet<string>,
@@ -666,5 +678,5 @@ export function dashboardSource(
 
 export type DashboardFleetSource = Pick<
   ReturnType<typeof dashboardSource>,
-  "fleetWithCrew" | "shipWithCrew" | "children"
+  "fleetBackend" | "fleetWithCrew" | "shipWithCrew" | "children"
 >;
