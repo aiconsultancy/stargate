@@ -1,9 +1,14 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Schema } from "effect";
 import { diffEvents } from "../src/api/v1/diff";
 import { createEventStreams } from "../src/api/v1/events";
 import type { ApiV1Config } from "../src/api/v1/features";
 import { createApiV1Source } from "../src/api/v1/projection";
+import { startApiV1Server } from "../src/api/v1/server";
+import { apiToken } from "../src/api/v1/token";
 import type { V1Git, V1QueueCounts, V1Task } from "../src/api/v1/types";
 import type { AgentBackend } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode";
@@ -361,6 +366,59 @@ async function nextEvent(
 }
 
 describe("Fleet API projection", () => {
+  test("HTTP fleet returns healthy ships before the host deadline when a cold captain stalls", async () => {
+    const shutdown = new AbortController();
+    const f = fixture({ fleetSignal: shutdown.signal });
+    const held = Promise.withResolvers<CrewStatus>();
+    f.statuses.set("captain", held.promise);
+    f.set("other", [context("pilot")]);
+    const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-"));
+    const reservation = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response(null),
+    });
+    const listen = `127.0.0.1:${reservation.port}`;
+    await reservation.stop(true);
+    let server: Awaited<ReturnType<typeof startApiV1Server>> | undefined;
+    try {
+      server = await startApiV1Server({
+        config: { listen },
+        dataDirectory,
+        source: f.source,
+        diff: diffEvents,
+        gateway: {
+          version: "1.0.0",
+          startedAt: 1,
+          opencodeVersion: async () => null,
+        },
+        signal: shutdown.signal,
+        timing: { requestMs: 300 },
+      });
+      const response = await fetch(new URL("/api/v1/fleet", server.url), {
+        headers: { Authorization: `Bearer ${await apiToken(dataDirectory)}` },
+        signal: AbortSignal.timeout(1000),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ships: [
+          {
+            id: "captain",
+            available: false,
+            error: "Crew status unavailable.",
+          },
+          { id: "other", available: true, crew: { people: 1 } },
+        ],
+      });
+      expect(f.crewSignals.get("captain")?.aborted).toBe(false);
+    } finally {
+      shutdown.abort();
+      held.resolve({ members: [], total: 0, truncated: false });
+      await server?.stop();
+      await rm(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test("OpenCode adapts to a fleet probe slower than its initial budget", async () => {
     const server = Bun.serve({
       hostname: "127.0.0.1",

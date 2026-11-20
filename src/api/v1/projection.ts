@@ -558,13 +558,14 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       }
       return identities;
     },
-    async fleet(signal, captureShipRead) {
+    async fleet(signal, captureShipRead, crewDeadline) {
       signal.throwIfAborted();
       const config = deps.config();
       const configured = registrations(config);
       const fleet = await dashboard.fleetWithCrew(
         signal,
         new Set(configured.keys()),
+        crewDeadline,
       );
       signal.throwIfAborted();
       let admiral: V1Captain | null = null;

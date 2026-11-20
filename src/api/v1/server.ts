@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { readWithDeadline } from "../../read-deadline";
 import type { ApiRoute } from "../route";
-import { apiRequestMs, startApiServer } from "../server";
+import { apiRequestMs, maxFleetReads, startApiServer } from "../server";
 import type { ApiV1Config } from "./config";
 import {
   type ApiV1Diff,
@@ -106,6 +106,10 @@ export async function startApiV1Server(options: Options) {
     1,
     hostRequestMs - Math.min(1_000, Math.ceil(hostRequestMs / 10)),
   );
+  const fleetReadMs = Math.min(
+    options.fleetReadMs ?? fleetOverviewReadMs,
+    httpReadMs,
+  );
   const lifetime = new AbortController();
   const lookupVersion = cacheOpenCodeVersion(
     options.gateway.opencodeVersion,
@@ -113,8 +117,12 @@ export async function startApiV1Server(options: Options) {
   );
   const host = startHostMetrics(dataDirectory);
   const fleetName = config.fleetName ?? hostname();
-  const readFleet: ApiV1Source["fleet"] = async (signal, captureShipRead) => ({
-    ...(await source.fleet(signal, captureShipRead)),
+  const readFleet: ApiV1Source["fleet"] = async (
+    signal,
+    captureShipRead,
+    crewDeadline,
+  ) => ({
+    ...(await source.fleet(signal, captureShipRead, crewDeadline)),
     name: fleetName,
   });
   let lastOpenCodeVersion: string | null = null;
@@ -159,6 +167,7 @@ export async function startApiV1Server(options: Options) {
     readHost: host.read,
     snapshotHost: host.snapshot,
   });
+  let detailReads = 0;
 
   let server: Awaited<ReturnType<typeof startApiServer>>;
   try {
@@ -220,18 +229,18 @@ export async function startApiV1Server(options: Options) {
           const read = AbortSignal.any([
             signal,
             AbortSignal.timeout(
-              pathname === "/api/v1/fleet"
-                ? Math.min(
-                    options.fleetReadMs ?? fleetOverviewReadMs,
-                    httpReadMs,
-                  )
-                : httpReadMs,
+              pathname === "/api/v1/fleet" ? fleetReadMs : httpReadMs,
             ),
           ]);
           if (pathname === "/api/v1/fleet") {
             if (method === "HEAD") return empty(200);
-            const fleet = await readWithDeadline(read, undefined, readFleet)
-              .result;
+            // Leave room for checkout projection and a response after crew waits.
+            const crewDeadline = AbortSignal.timeout(
+              fleetReadMs - Math.min(5_000, Math.ceil(fleetReadMs / 3)),
+            );
+            const fleet = await readWithDeadline(read, undefined, (reading) =>
+              readFleet(reading, undefined, crewDeadline),
+            ).result;
             read.throwIfAborted();
             const result = await readWithDeadline(read, undefined, (reading) =>
               completeFleet(fleet, reading),
@@ -251,9 +260,21 @@ export async function startApiV1Server(options: Options) {
           if (!id) return empty(404);
           const member = match?.[2] && routeId(match[2]);
           if (match?.[2] && !member) return empty(404);
-          const result = member
-            ? await source.crew(id, member, read)
-            : await source.ship(id, read);
+          if (detailReads >= maxFleetReads) return empty(503);
+          detailReads++;
+          const readDetail = readWithDeadline(
+            read,
+            undefined,
+            async (reading) =>
+              member
+                ? source.crew(id, member, reading)
+                : source.ship(id, reading),
+          );
+          // Return at the route deadline, but hold capacity until the source settles.
+          void readDetail.settled.then(() => {
+            detailReads--;
+          });
+          const result = await readDetail.result;
           read.throwIfAborted();
           if (!result) return empty(404);
           return method === "HEAD"

@@ -155,7 +155,6 @@ export function dashboardSource(
     AgentBackend,
     {
       read: ReturnType<typeof createReadSlot<CrewRead>>;
-      retirement: AbortController;
       latest?: CrewRead;
       last?: { sample: CrewRead; at: number };
       pending?: {
@@ -165,6 +164,13 @@ export function dashboardSource(
       };
     }
   >();
+  const retirements = new WeakMap<AgentBackend, AbortController>();
+
+  function retirement(backend: AgentBackend) {
+    const controller = retirements.get(backend) ?? new AbortController();
+    retirements.set(backend, controller);
+    return controller.signal;
+  }
 
   const find = (id: string) => ships.find((ship) => ship.bot.id === id);
   const name = (ship: DashboardShip) => ship.bot.displayName ?? ship.bot.id;
@@ -254,15 +260,17 @@ export function dashboardSource(
   }
 
   async function sampleCrew(
-    backend: AgentBackend,
+    members: readonly DashboardShip[],
     signal: AbortSignal,
     read: (reading: AbortSignal) => Promise<CrewRead>,
+    crewDeadline?: AbortSignal,
   ): Promise<CrewRead> {
     signal.throwIfAborted();
     fleetSignal.throwIfAborted();
+    const backend = members[0]?.backend;
+    if (!backend) return { status: null };
     const slot = fleetCrew.get(backend) ?? {
       read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
-      retirement: new AbortController(),
     };
     fleetCrew.set(backend, slot);
     const unavailable = (): CrewRead => ({
@@ -270,11 +278,15 @@ export function dashboardSource(
       status: slot.latest?.status ?? null,
       error: crewUnavailable,
     });
-    if (slot.retirement.signal.aborted) return unavailable();
+    const lifetime = AbortSignal.any([
+      fleetSignal,
+      ...members.map((member) => retirement(member.backend)),
+    ]);
+    if (lifetime.aborted) return unavailable();
     const current = slot.read.pending;
     if (!current || slot.pending?.attempt !== current.result) {
-      // The backend read belongs to the shared slot. A caller only owns its wait.
-      const lifetime = AbortSignal.any([fleetSignal, slot.retirement.signal]);
+      // The shared attempt may fall back to an alias, so each member owns its lifetime.
+      // A caller only owns its wait.
       const attempt = slot.read.start(lifetime, read).result;
       const last = slot.last;
       // A recent sample stays usable throughout this refresh. A cold caller
@@ -293,7 +305,7 @@ export function dashboardSource(
           unavailable,
         )
         .then((sample) => {
-          if (lifetime.aborted) return sample;
+          if (lifetime.aborted) return unavailable();
           if (!sample.error) slot.latest = sample;
           slot.last = { sample, at: performance.now() };
           return sample;
@@ -302,18 +314,30 @@ export function dashboardSource(
     }
     const pending = slot.pending;
     const hasFallback = pending.fallback !== undefined;
-    const wait = AbortSignal.any([signal, fleetSignal]);
+    const wait = AbortSignal.any([
+      signal,
+      fleetSignal,
+      ...(crewDeadline ? [crewDeadline] : []),
+    ]);
     try {
       return await readWithDeadline(
         wait,
         hasFallback ? fleetCrewReadMs : undefined,
         () => pending.result,
-      ).result;
+      ).result.catch((error: unknown) => {
+        wait.throwIfAborted();
+        if (!hasFallback) throw error;
+        if (pending.fallback) return slot.last?.sample ?? pending.fallback;
+        return readWithDeadline(wait, undefined, () => pending.result).result;
+      });
     } catch (error) {
-      wait.throwIfAborted();
-      if (!hasFallback) throw error;
-      if (pending.fallback) return slot.last?.sample ?? pending.fallback;
-      return readWithDeadline(wait, undefined, () => pending.result).result;
+      signal.throwIfAborted();
+      fleetSignal.throwIfAborted();
+      if (crewDeadline?.aborted && error === crewDeadline.reason)
+        return pending.fallback
+          ? (slot.last?.sample ?? pending.fallback)
+          : unavailable();
+      throw error;
     }
   }
 
@@ -418,6 +442,7 @@ export function dashboardSource(
   async function readFleet(
     signal: AbortSignal,
     selected?: ReadonlySet<string>,
+    crewDeadline?: AbortSignal,
   ) {
     const groups = captains();
     const reads = new Map<
@@ -443,7 +468,7 @@ export function dashboardSource(
         return last;
       };
       const read = selected
-        ? sampleCrew((members[0] ?? ship).backend, signal, readCrew)
+        ? sampleCrew(members, signal, readCrew, crewDeadline)
         : readCrew(signal);
       reads.set(key, read);
       return read;
@@ -620,10 +645,13 @@ export function dashboardSource(
     },
     retireFleetBackend(backend: AgentBackend) {
       if (!ships.some((ship) => ship.backend === backend))
-        fleetCrew.get(backend)?.retirement.abort();
+        retirements.get(backend)?.abort();
     },
-    fleetWithCrew: (signal: AbortSignal, selected: ReadonlySet<string>) =>
-      readFleet(signal, selected),
+    fleetWithCrew: (
+      signal: AbortSignal,
+      selected: ReadonlySet<string>,
+      crewDeadline?: AbortSignal,
+    ) => readFleet(signal, selected, crewDeadline),
     shipWithCrew: (
       id: string,
       signal: AbortSignal,
@@ -668,6 +696,7 @@ export function dashboardSource(
     fleetWithCrew: (
       signal: AbortSignal,
       selected: ReadonlySet<string>,
+      crewDeadline?: AbortSignal,
     ) => ReturnType<typeof readFleet>;
     shipWithCrew: (
       id: string,

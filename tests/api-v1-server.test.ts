@@ -444,6 +444,45 @@ test("disconnected HTTP clients cancel source reads", async () => {
   }
 });
 
+test("HTTP detail deadlines release the handlers but retain capacity for uncooperative reads", async () => {
+  const held = Promise.withResolvers<void>();
+  const readingShip = mock(async () => {
+    await held.promise;
+    return ship;
+  });
+  const readingCrew = mock(async () => {
+    await held.promise;
+    return { ship: ship.id, member };
+  });
+  const server = await startFixture({
+    source: { ...source, ship: readingShip, crew: readingCrew },
+    timing: { requestMs: 160 },
+  });
+  const shipPath = "/api/v1/ships/explorer";
+  const crewPath = `${shipPath}/crew/engineer`;
+  const get = (path: string) =>
+    server.get(path, { signal: AbortSignal.timeout(1000) });
+  try {
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        get(index % 2 ? crewPath : shipPath),
+      ),
+    );
+    expect(results.map(({ status }) => status)).toEqual(Array(8).fill(500));
+    expect((await get(shipPath)).status).toBe(503);
+    expect((await get(crewPath)).status).toBe(503);
+    expect(readingShip).toHaveBeenCalledTimes(4);
+    expect(readingCrew).toHaveBeenCalledTimes(4);
+    held.resolve();
+    await nextTurn();
+    expect((await get(shipPath)).status).toBe(200);
+    expect((await get(crewPath)).status).toBe(200);
+  } finally {
+    held.resolve();
+    await server.close();
+  }
+});
+
 test("bind errors fail startup with Fleet API context", async () => {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-bind-"));
   const reservation = reservePort();

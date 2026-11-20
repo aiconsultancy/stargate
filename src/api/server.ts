@@ -21,7 +21,7 @@ type Options = {
 const maxConnections = 64;
 const maxHeaders = 16 * 1024;
 const maxNotificationWork = 8;
-const maxFleetReads = 8;
+export const maxFleetReads = 8;
 const maxFleetStreams = 8;
 
 function failure(status: number, code: string) {

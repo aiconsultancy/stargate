@@ -300,6 +300,7 @@ export interface ApiV1Source {
   fleet(
     signal: AbortSignal,
     captureShipRead?: (id: string, read: V1ShipRead) => void,
+    crewDeadline?: AbortSignal,
   ): Promise<Omit<V1Fleet, "host" | "gateway">>;
   /** Internal identity of the current top-level captains, independent of read availability. */
   shipIdentities?(): ReadonlyMap<string, string>;
