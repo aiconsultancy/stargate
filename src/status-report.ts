@@ -234,6 +234,7 @@ const failures = new Set<string>([
   "interrupted",
   "reaction",
   "history",
+  "pending-question",
 ]);
 
 export function summarizeLog(

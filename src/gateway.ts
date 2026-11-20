@@ -60,6 +60,8 @@ import {
   AttachmentInputUnavailable,
   BackendFailure,
   failureText,
+  PendingBackendQuestion,
+  PromptNotSubmitted,
   providerFailure,
   type RequestFailure,
 } from "./request-failure";
@@ -100,6 +102,7 @@ import {
   TranscriptionUnavailable,
   transcribeMedia,
 } from "./transcription";
+import { type TurnProgress, turnProgressText } from "./turn-progress";
 import type { UpdateReceipt } from "./update-notice";
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
 
@@ -215,7 +218,7 @@ export interface SlackDelivery {
   ): Promise<void>;
   /**
    * Show that a turn is running until `signal` aborts. When requested, send
-   * an acknowledgement and an open-request notice. Best effort only.
+   * an acknowledgement and backend status notices. Best effort only.
    */
   working?(
     channel: string,
@@ -223,6 +226,7 @@ export interface SlackDelivery {
     signal: AbortSignal,
     allowed?: () => boolean,
     turnStatus?: IrcTurnStatus,
+    readProgress?: () => TurnProgress | undefined,
   ): Promise<void>;
 }
 
@@ -276,6 +280,7 @@ export interface GatewayTransport {
 /** The failure a thrown error names when no signal ended the turn. */
 function errorFailure(error: unknown): RequestFailure {
   if (error instanceof BackendFailure) return error.failure;
+  if (error instanceof PendingBackendQuestion) return "pending-question";
   if (error instanceof ThreadContextUnavailable) return "context";
   if (error instanceof AttachmentInputUnavailable) return "attachments";
   if (error instanceof TranscriptionUnavailable) return "transcription";
@@ -1631,6 +1636,12 @@ export class Gateway {
       ]);
       // Ends before delivery, so a typing indicator never outlasts the turn.
       const typing = new AbortController();
+      const turnStatus = transport.turnStatus?.(job);
+      const observeProgress =
+        !job.deferDelivery &&
+        turnStatus === "notice" &&
+        config.backend.type === "opencode";
+      let progress: TurnProgress | undefined;
       const working = job.deferDelivery
         ? undefined
         : this.slack
@@ -1639,7 +1650,8 @@ export class Gateway {
               job.thread,
               AbortSignal.any([typing.signal, signal]),
               () => allowed(job),
-              transport.turnStatus?.(job),
+              turnStatus,
+              observeProgress ? () => progress : undefined,
             )
             .catch(() => {});
       const live = job.deferDelivery
@@ -1904,6 +1916,11 @@ export class Gateway {
               : undefined,
             inputFiles,
             sourceContext,
+            observeProgress
+              ? (update) => {
+                  progress = update;
+                }
+              : undefined,
           );
           // A concurrent native receipt must settle before final link capture.
           await this.followUpTask;
@@ -1963,6 +1980,7 @@ export class Gateway {
           if (cancellation.signal.aborted || maintenanceFailure.signal.aborted)
             activity?.cancel();
           else if (!shutdown.aborted) activity?.finish();
+          if (error instanceof PromptNotSubmitted) admitted = false;
           silent = false;
           failure = cancellation.signal.aborted
             ? "cancelled"
@@ -1978,12 +1996,22 @@ export class Gateway {
               job: job.id,
               backend: config.backend.type,
               failure: detail?.kind ?? failure,
+              ...(failure === "timeout" && progress
+                ? {
+                    lastStage: progress.stage,
+                    lastStageAgeMs: Date.now() - progress.observedAt,
+                  }
+                : {}),
               ...(detail?.status ? { status: detail.status } : {}),
               ...(detail ? { ran: detail.ran } : {}),
             },
             "Agent request failed or timed out",
           );
-          output = [statusText(failure)];
+          output = [
+            failure === "timeout" && observeProgress
+              ? `${statusText(failure)} ${turnProgressText(progress)}`
+              : statusText(failure),
+          ];
           transcript = undefined;
           // A request refused before admission submitted no input and owns no
           // text: reading history for it could assign another source's reply

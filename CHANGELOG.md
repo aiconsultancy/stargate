@@ -29,6 +29,8 @@
   Fleet API's `gateway.version` when it has no `.stargate-release.json`.
   Fetch the tag, not only the commit. Other source checkouts still report the
   package version.
+- Report OpenCode turn progress in IRC and flag earlier pending questions
+  before submitting a new request.
 
 ## 0.40.1
 
