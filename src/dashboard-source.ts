@@ -291,9 +291,7 @@ export function dashboardSource(
       // needs the shared result to establish availability.
       const fallback =
         last &&
-        (last.sample.error ||
-          performance.now() - last.at <
-            fleetCrewDeadlineMs + crewPollIntervalMs)
+        performance.now() - last.at < fleetCrewDeadlineMs + crewPollIntervalMs
           ? last.sample
           : undefined;
       const result = attempt

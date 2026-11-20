@@ -655,6 +655,37 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("an expired crew failure waits for the shared refresh", async () => {
+    const f = fixture({ fleetCrewReadMs: 5 });
+    f.statuses.set("captain", new Error("Fixture unavailable"));
+    const captain = (fleet: Awaited<ReturnType<typeof f.source.fleet>>) =>
+      fleet.ships.find(({ id }) => id === "captain");
+    expect(captain(await f.source.fleet(signal))?.available).toBe(false);
+    const held = Promise.withResolvers<CrewStatus>();
+    f.statuses.set("captain", held.promise);
+    const clock = spyOn(performance, "now").mockReturnValue(
+      performance.now() + 24_000,
+    );
+    const refresh = f.source.fleet(signal);
+    try {
+      expect(
+        await Promise.race([
+          refresh.then(() => "stale"),
+          Bun.sleep(30).then(() => "pending"),
+        ]),
+      ).toBe("pending");
+      held.resolve({ members: [context("pilot")], total: 1, truncated: false });
+      expect(captain(await refresh)).toMatchObject({
+        available: true,
+        crew: { people: 1 },
+      });
+    } finally {
+      clock.mockRestore();
+      held.resolve({ members: [], total: 0, truncated: false });
+      await refresh;
+    }
+  });
+
   test("disconnecting the caller that started a crew sample leaves the shared read running", async () => {
     const f = fixture({ fleetCrewReadMs: 300 });
     const held = Promise.withResolvers<CrewStatus>();
