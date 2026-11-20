@@ -135,6 +135,13 @@ export function createEventStreams(
             )
           : [{ type: "fleet", data: next }],
       );
+      for (const { id, available } of next.ships)
+        if (
+          !available &&
+          prior.get(id)?.available !== false &&
+          cachedShips.has(id)
+        )
+          publishShip(id, Date.now());
     }
 
     function publishShip(id: string, readAt: number, result?: V1ShipDetail) {

@@ -26,7 +26,8 @@
   read per slot. Serve cached metrics when fleet HTTP enrichment times out and
   publish fresh host samples when ready within one second, falling back to
   the latest sample during slower refreshes. Retained ship details
-  report captain unavailability and preserve the last successful crew data.
+  report captain unavailability immediately and preserve the last successful
+  crew data and sample time.
   Availability transitions supersede older detail reads. Recovering ships
   wait for fresh detail when no successful sample is cached. Replacement
   backends get independent detail read slots. Retained overviews are marked

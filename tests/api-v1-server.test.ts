@@ -680,6 +680,59 @@ test("an availability transition supersedes an older healthy detail read", async
   }
 });
 
+test("a joining client gets stale retained detail as soon as the captain is unavailable", async () => {
+  const held = Promise.withResolvers<V1ShipDetail>();
+  const started = Promise.withResolvers<void>();
+  const offline = { ...summary, available: false, error: "Crew unavailable." };
+  const detailUpdatedAt = 123;
+  let available = true;
+  const streams = createEventStreams(
+    {
+      ...source,
+      fleet: async () => ({
+        ...overview,
+        ships: [available ? summary : offline],
+      }),
+      ship: async () => {
+        if (available) return { ...ship, detailUpdatedAt };
+        started.resolve();
+        return held.promise;
+      },
+      diff: diffEvents,
+      completeFleet,
+      fallbackFleet,
+      readHost: async () => host,
+      snapshotHost: () => host,
+    },
+    { pollMs: 20, hostMs: 1000, heartbeatMs: 1000, readMs: 1000 },
+  );
+  const signal = AbortSignal.timeout(1500);
+  try {
+    const reader = streams.open(signal)?.getReader();
+    if (!reader) throw new Error("Cannot open event stream");
+    await nextFrame(reader, "ship");
+    available = false;
+    expect(await nextFrame(reader, "fleet")).toContain('"available":false');
+    await started.promise;
+    const late = streams.open(signal)?.getReader();
+    if (!late) throw new Error("Cannot join event stream");
+    const snapshot = await nextFrame(late, "ship");
+    const [fleetFrame, shipFrame] = snapshot.split("\n\n");
+    expect(fleetFrame).toContain('"available":false');
+    const detail = JSON.parse(shipFrame?.split("\n")[1]?.slice(6) ?? "");
+    expect(detail).toMatchObject({
+      available: false,
+      error: offline.error,
+      detailStale: true,
+      detailUpdatedAt,
+      crewMembers: ship.crewMembers,
+    });
+  } finally {
+    held.resolve({ ...offline, crewMembers: [] });
+    streams.stop();
+  }
+});
+
 test("availability recovery waits for fresh detail while an older read drains", async () => {
   const held = Promise.withResolvers<V1ShipDetail>();
   const started = Promise.withResolvers<void>();
