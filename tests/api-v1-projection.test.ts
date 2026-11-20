@@ -512,6 +512,52 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("concurrent OpenCode fleet callers share checkout metadata", async () => {
+    const held = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const status = { members: [], total: 0, truncated: false };
+    const metadata = { projectDirectory: "/fixture", contexts: [] };
+    const filtered = { projectDirectory: "/filtered", contexts: [] };
+    const fetchProbe = mock(async () => {
+      if (fetchProbe.mock.calls.length === 1) {
+        started.resolve();
+        await held.promise;
+        return Response.json({ output: { status, metadata } });
+      }
+      return Response.json({ output: { status, metadata: filtered } });
+    });
+    const config = Schema.decodeUnknownSync(backendSchema)({
+      type: "opencode",
+      url: "http://127.0.0.1:1",
+      directory: "/",
+    });
+    if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+    const backend = new OpenCodeBackend(
+      config,
+      OpenCode.make({
+        baseUrl: config.url,
+        fetch: Object.assign(fetchProbe, { preconnect: fetch.preconnect }),
+      }),
+    );
+    try {
+      const caller = new AbortController();
+      const first = backend.fleetCrewStatus({}, caller.signal);
+      await started.promise;
+      const second = backend.fleetCrewStatus({}, signal);
+      const different = backend.fleetCrewStatus({ member: "pilot" }, signal);
+      caller.abort();
+      await expect(first).rejects.toMatchObject({ name: "AbortError" });
+      expect(fetchProbe).toHaveBeenCalledTimes(1);
+      held.resolve();
+      expect(await second).toEqual({ status, metadata });
+      expect(await different).toEqual({ status, metadata: filtered });
+      expect(fetchProbe).toHaveBeenCalledTimes(2);
+    } finally {
+      held.resolve();
+      await backend.close();
+    }
+  });
+
   test("OpenCode waits for a timed-out fleet probe to settle before probing again", async () => {
     const held = Promise.withResolvers<void>();
     const started = Promise.withResolvers<void>();
