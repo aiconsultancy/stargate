@@ -31,10 +31,16 @@ make stargate ARGS='--help'
 make config-check ARGS='--config stargate.example.json --schema-only'
 ```
 
-`make check` runs TypeScript, Oxlint, and Bun tests. Run the smallest relevant
-test while changing behavior, then the full check before completing code work.
-Run `make hooks-install` once per clone. `make hooks` runs the same prek gate as
-CI, including workflow and file hygiene checks. Use `make format` for safe fixes;
+`make check` runs TypeScript, Oxlint, and the full Bun test suite on demand.
+Run the smallest relevant test while changing behavior. Commits run strict
+typecheck, lint, and affected tests. Untrusted paths defer to hosted checks by
+default; selection errors still run the full suite. Set
+`STARGATE_UNTRUSTED_TESTS=full` to opt in to full tests for untrusted paths.
+Hosted **Quality checks** explicitly runs the full check before merge.
+Run `make hooks-install` once per clone. `make hooks` runs the pre-commit gate,
+including workflow and file hygiene checks, but does not replace the full CI
+gate. With no staged changes, affected tests report an explicit no-op.
+Use `make format` for safe fixes;
 do not suppress or weaken type-safety rules to pass the gate. Index-signature
 properties require bracket access; Oxlint's conflicting `useLiteralKeys` rule is
 intentionally disabled. Dependency declaration checks remain excluded because
@@ -149,7 +155,14 @@ blocks the merge. The gate is a full test pass before a release; see
 `docs/releases.md`.
 Do not stack PRs or keep long-lived branches;
 split a large feature into several PRs that each leave `main` working.
-The pre-push hook enforces the rebase-before-push policy: every branch
+Pre-commit tests union HEAD and index import graphs, including deletions,
+renames, and imported helpers/data. A reader table covers architecture policy,
+hook data and documentation. Untrusted paths print a notice and defer to hosted
+**Quality checks** by default. A commit changing only `package.json`, the
+lockfile, tool config or workflows runs typecheck and lint locally, but no
+tests. Hosted **Quality checks** runs the full suite for those changes.
+Computation errors still run the full suite in either untrusted-path mode.
+The pre-push hook only enforces the rebase-before-push policy: every branch
 push must contain the freshly fetched `origin/main`, so a PR's head is
 always current before review. If `main` moves, `git fetch origin && git
 rebase origin/main`, then re-run checks; re-review only when the PR's own

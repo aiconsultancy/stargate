@@ -13,6 +13,7 @@ import {
   isCallExpression,
   isExportDeclaration,
   isExternalModuleReference,
+  isIdentifier,
   isImportDeclaration,
   isImportEqualsDeclaration,
   isImportTypeNode,
@@ -331,7 +332,12 @@ async function sourceFiles(directory: string): Promise<string[]> {
   return files.sort();
 }
 
-async function resolveLocal(root: string, from: string, specifier: string) {
+async function resolveLocal(
+  root: string,
+  from: string,
+  specifier: string,
+  deleted: ReadonlySet<string> = new Set(),
+) {
   const named = resolve(dirname(from), specifier);
   if (!inside(root, named))
     throw new Error(`${from}: ${specifier} outside repository`);
@@ -350,6 +356,19 @@ async function resolveLocal(root: string, from: string, specifier: string) {
   try {
     target = Bun.resolveSync(specifier, dirname(from));
   } catch {
+    // A staged deletion can leave old importers broken. Keep that terminal
+    // edge so selection runs those tests; do not hide unrelated resolution errors.
+    const stem = portable(relative(root, named));
+    const extensions = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".json"];
+    const candidates = [
+      stem,
+      ...extensions.flatMap((extension) => [
+        stem + extension,
+        `${stem}/index${extension}`,
+      ]),
+      ...(stem.endsWith(".js") ? [stem.slice(0, -3) + ".ts"] : []),
+    ].filter((path) => deleted.has(path));
+    if (candidates.length === 1 && candidates[0]) return candidates[0];
     throw new Error(`${from}: unresolved local import ${specifier}`);
   }
   if (!inside(root, target))
@@ -359,10 +378,16 @@ async function resolveLocal(root: string, from: string, specifier: string) {
   return portable(relative(root, target));
 }
 
-async function resolveSource(root: string, from: string, specifier: string) {
+async function resolveSource(
+  root: string,
+  from: string,
+  specifier: string,
+  deleted: ReadonlySet<string>,
+) {
   if (isAbsolute(specifier) || specifier.startsWith("file:"))
     throw new Error(`${from}: absolute source import: ${specifier}`);
-  if (specifier.startsWith(".")) return resolveLocal(root, from, specifier);
+  if (specifier.startsWith("."))
+    return resolveLocal(root, from, specifier, deleted);
   // Bun also resolves tsconfig paths and package.json imports. Bare package and
   // builtin imports are external; a local alias must not hide a source edge.
   let target: string;
@@ -393,7 +418,8 @@ function importsOf(node: Node): string[] {
       literal(child.argument.literal);
     else if (
       isCallExpression(child) &&
-      child.expression.kind === SyntaxKind.ImportKeyword
+      (child.expression.kind === SyntaxKind.ImportKeyword ||
+        (isIdentifier(child.expression) && child.expression.text === "require"))
     )
       literal(child.arguments[0]);
     else if (
@@ -408,9 +434,15 @@ function importsOf(node: Node): string[] {
 }
 
 /** Parse only. Never import, transpile, or execute a production module. */
-export async function buildGraph(directory: string): Promise<SourceGraph> {
+export async function buildGraph(
+  directory: string,
+  directories: string[] = ["src"],
+  deleted: ReadonlySet<string> = new Set(),
+): Promise<SourceGraph> {
   const root = await realpath(directory);
-  const files = await sourceFiles(join(root, "src"));
+  const files = (
+    await Promise.all(directories.map((name) => sourceFiles(join(root, name))))
+  ).flat();
   const graph = new Map<string, Set<string>>(
     files.map((file) => [portable(relative(root, file)), new Set<string>()]),
   );
@@ -442,8 +474,16 @@ export async function buildGraph(directory: string): Promise<SourceGraph> {
         const edges = graph.get(portable(relative(root, file)));
         if (!edges) throw new Error(`Source not in graph: ${file}`);
         for (const specifier of importsOf(source)) {
-          const target = await resolveSource(root, file, specifier);
+          const target = await resolveSource(root, file, specifier, deleted);
           if (!target) continue;
+          // Affected-test graphs retain imported data and known deleted targets.
+          // The default architecture graph remains source-only.
+          if (
+            directories.includes("tests") &&
+            (!sourceExtension.test(target) || deleted.has(target)) &&
+            !graph.has(target)
+          )
+            graph.set(target, new Set());
           if (graph.has(target)) edges.add(target);
           else if (sourceExtension.test(target))
             throw new Error(`${file}: source outside src graph: ${specifier}`);
