@@ -9,8 +9,42 @@
  * does.
  */
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+
+if (process.argv.includes("--version")) {
+  writeFileSync(
+    join(process.cwd(), "fixture-probe.pending"),
+    JSON.stringify({
+      pid: process.pid,
+      argv: process.argv.slice(2),
+      env: process.env,
+    }),
+  );
+  renameSync(
+    join(process.cwd(), "fixture-probe.pending"),
+    join(process.cwd(), "fixture-probe.json"),
+  );
+  const version = readFileSync(join(process.cwd(), "fixture-version"), "utf8");
+  if (version === "hang") {
+    process.on("SIGTERM", () => {});
+    setInterval(() => {}, 1000);
+    await new Promise(() => {});
+  }
+  if (version === "fail") {
+    console.error("private-version-error");
+    process.exit(1);
+  }
+  console.log(version);
+  process.exit(0);
+}
 
 const home = process.env["CLAUDE_CONFIG_DIR"] ?? "";
 const flag = (name: string) => {
@@ -233,7 +267,7 @@ process.stdin.on("data", (chunk: string) => {
         response: {
           subtype: "success",
           request_id: frame.request_id,
-          response: {},
+          response: { mcp_servers_applied: true },
         },
       });
     else if (frame.type === "user") {
