@@ -16,6 +16,7 @@ import {
   dispatchInputSchema,
   FleetError,
   type FleetRequest,
+  offerAnswerInputSchema,
   reviewInputBranches,
   reviewInputSchema,
   statusInputSchema,
@@ -146,6 +147,19 @@ export async function installFleetTools(ctx: ToolHost) {
       execute: (input, context) =>
         guard(context, "fleet_dispatch", input.target, {
           operation: "dispatch",
+          input,
+          caller: caller(context),
+        }),
+    });
+    editor.add({
+      name: "fleet_answer_offer",
+      description:
+        "Answer a Ready-for-agents offer that your fleet's rear admiral addressed to you in chat: accept or decline, with the exact offerID from that offer message. The gateway sends the answer from your own IRC account as a reply to the offer. Accepting asks the rear admiral to assign the issue to you; the rear admiral confirms in the channel. No answer before the deadline counts as a decline. An optional short reason is shown to people only. Not human approval.",
+      input: fleetToolInput(offerAnswerInputSchema),
+      options: { codemode: false, permission: "fleet_answer_offer" },
+      execute: (input, context) =>
+        guard(context, "fleet_answer_offer", input.offerID, {
+          operation: "answer",
           input,
           caller: caller(context),
         }),

@@ -51,6 +51,8 @@ import {
   ircDashboardShip,
   teamsDashboardShip,
 } from "./dashboard-source";
+import { sendDispatchAnswer } from "./dispatch/irc";
+import { startAgentDispatch } from "./dispatch/start";
 import { abortable } from "./effect";
 import { FleetControl } from "./fleet/control";
 import { fleetRequestAction } from "./fleet/permissions";
@@ -157,6 +159,8 @@ export type RuntimeDependencies = {
   connectionTiming?: { outageMs: number; pollMs: number };
   /** Host maintenance drain. Absent in tests, so nothing touches host state. */
   drain?: { directory?: string };
+  /** Tests only: agent dispatch's Subspace API transport and environment. */
+  agentDispatch?: { fetch?: typeof fetch; env?: NodeJS.ProcessEnv };
   /** Isolated notification fixtures only; not operator configuration. */
   notification?: {
     environment?: NodeJS.ProcessEnv;
@@ -994,6 +998,15 @@ export function serve(
                     signal,
                   );
                 },
+                answer: (offer, answer, reason, signal) =>
+                  sendDispatchAnswer(
+                    primary.client,
+                    offer,
+                    answer,
+                    reason,
+                    () => open,
+                    signal,
+                  ),
                 status: () => ({
                   account: irc.account,
                   connected: ship.registrations.map((registration) => ({
@@ -1010,6 +1023,7 @@ export function serve(
           ship.sourceRecorder = (source) => {
             control.recordSource(source);
           };
+          ship.offerRecorder = (offer) => control.recordOffer(offer);
           for (const team of relatedTeams)
             team.sourceRecorder = (source) => {
               control.recordSource(source);
@@ -1059,6 +1073,30 @@ export function serve(
           }),
         );
         log.info({ irc: irc.id }, "IRC connecting");
+      }
+      // Off unless enabled: then nothing is opened, listened to or contacted.
+      const agentDispatch = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          startAgentDispatch({
+            config: config.agentDispatch,
+            irc: config.irc ?? [],
+            ship: (id) => ircBindings.get(id)?.ship,
+            dataDirectory: config.dataDirectory,
+            allowed: () => open,
+            log,
+            ...dependencies.agentDispatch,
+          }),
+        ),
+        (started) => Effect.sync(() => started?.close()),
+      );
+      if (agentDispatch) {
+        workers.push({
+          key: agentDispatch.key,
+          work: supervise(agentDispatch.log, "gateway", (signal) =>
+            agentDispatch.run(signal),
+          ),
+        });
+        agentDispatch.log.info("Agent dispatch enabled");
       }
       for (const team of teamsRegistrations) {
         yield* Effect.promise(() => team.start(() => open));

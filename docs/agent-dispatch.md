@@ -1,0 +1,283 @@
+# Agent dispatch
+
+Agent dispatch tells a fleet's captains about Subspace issues that are theirs
+to pick up. It is a deterministic dispatcher in the rear admiral's gateway:
+Stargate polls the Subspace API, keeps a private ledger of what it has sent,
+and writes requests to the fleet's command channel on IRC. No model decides
+whether a message goes out. It is off unless `agentDispatch.enabled` is
+`true`.
+
+## What it does
+
+1. **Assigned to a captain.** When an issue is assigned to an agent whose rank
+   is captain in this fleet, that captain alone is asked, in the command
+   channel, to pick the issue up, assign it to a crew member and get it done.
+   Assignments to the rear admiral, to crew or to people send nothing. Each
+   (issue, assignee) pair is announced once; a later reassignment to a
+   different captain announces it to that captain.
+2. **Ready for agents.** When an unassigned issue in this fleet is flagged
+   _Ready for agents_, the rear admiral offers it to the captains one at a
+   time. Each captain has `answerTimeoutSeconds` (default 5 minutes) to accept
+   or decline; no answer counts as a decline. When a full round ends with no
+   acceptance, the next round starts after 1 hour, then 3, 6 and 12 hours,
+   each measured from the end of the previous round. After the last round
+   the rear admiral comments on the issue that no captain could take it,
+   clears _Ready for agents_ and says so in the channel. Flag the issue again
+   to retry.
+
+Both behaviours are visible to everyone in the command channel: the request,
+the answer and the outcome.
+
+## How it fits
+
+- **Rear admiral only.** It runs on the IRC registration named by
+  `messaging.registration`, which must have `fleetPolicy.role: "rear_admiral"`.
+  Captains need no dispatch configuration; they answer with a tool.
+- **Outbound only.** Stargate calls the Subspace API; the API never calls
+  Stargate, and nothing new listens on the fleet VM. Requests use HTTPS, or
+  HTTP to a loopback address, and never follow redirects. Stargate does not
+  check that the route is private: point `api.baseUrl` at a private address,
+  an SSH or WireGuard tunnel, or a zero-trust access route (see
+  [extra headers](#credentials)). Never expose the API to make this work.
+- **Identity from the API.** Stargate never identifies an agent by name. At
+  start it reads `GET /api/v1/me` with the configured credential and goes on
+  only when that identity is an agent of rank `rearAdmiral` in this fleet.
+  Captains are the fleet's agents of rank `captain` in the fleet roster.
+- **Messaging.** IRC is the only messaging system today
+  (`messaging.type: "irc"`). The IRC server must offer `message-tags` and
+  `echo-message`, besides the SASL and `account-tag` that Stargate always
+  needs.
+
+## Configuration
+
+A top-level `agentDispatch` object. Every change needs a restart; a reload
+that changes it is refused as restart-only.
+
+```json
+{
+  "agentDispatch": {
+    "enabled": true,
+    "fleet": "example-fleet",
+    "api": {
+      "baseUrl": "https://subspace.internal.example",
+      "tokenEnv": "STARGATE_SUBSPACE_DISPATCH_TOKEN",
+      "headersEnv": {
+        "CF-Access-Client-Id": "STARGATE_SUBSPACE_ACCESS_ID",
+        "CF-Access-Client-Secret": "STARGATE_SUBSPACE_ACCESS_SECRET"
+      }
+    },
+    "messaging": {
+      "type": "irc",
+      "registration": "fleet-admiral",
+      "channel": "#example-command"
+    },
+    "captainAccounts": { "example-captain": "example-captain-irc" },
+    "pollIntervalSeconds": 120,
+    "answerTimeoutSeconds": 300,
+    "retryLadderSeconds": [3600, 10800, 21600, 43200]
+  }
+}
+```
+
+| Key                      | Default                                     | Meaning                                                                                                                                                                                                           |
+| ------------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                | `false`                                     | The feature flag. Off: no ledger file, no chat listener and no API request. A disabled section is not cross-checked against the IRC registrations.                                                                |
+| `fleet`                  | Required                                    | The fleet's slug or UUID in the Subspace API.                                                                                                                                                                     |
+| `api.baseUrl`            | Required                                    | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
+| `api.tokenEnv`           | Required                                    | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
+| `api.headersEnv`         | `{}`                                        | Extra request headers for a private access layer: header name → environment variable name. `Authorization`, `Accept`, `Content-Type`, `Content-Length`, `Host`, `Connection` and `Transfer-Encoding` are refused. |
+| `messaging.type`         | `"irc"`                                     | The messaging system. Only `irc` is accepted.                                                                                                                                                                     |
+| `messaging.registration` | Required                                    | ID of the rear admiral's IRC registration (`fleetPolicy.role: "rear_admiral"`).                                                                                                                                   |
+| `messaging.channel`      | That registration's `fleetChannels.command` | The command channel. It must be one of the registration's channels.                                                                                                                                               |
+| `captainAccounts`        | `{}`                                        | Subspace agent name → IRC account, for a captain whose chat account differs from its agent name. An unlisted name is its own account.                                                                             |
+| `pollIntervalSeconds`    | `120`                                       | Seconds between polls, 30–3600.                                                                                                                                                                                   |
+| `answerTimeoutSeconds`   | `300`                                       | Seconds each captain has to answer an offer, 60–3600.                                                                                                                                                             |
+| `retryLadderSeconds`     | `[3600, 10800, 21600, 43200]`               | Waits between rounds, each 60–604800, at most 10 entries. There is one more round than entries; `[]` means a single round.                                                                                        |
+
+A captain is addressed only when its IRC account is in the rear admiral
+registration's `fleetPolicy.agentAccounts`; Stargate logs once and skips a
+captain that is not. `stargate config check` checks that the token and header
+variables are present when the feature is enabled.
+
+## Credentials
+
+The dispatcher calls the API as the rear admiral, so assignments, comments
+and flag changes are recorded as the rear admiral's. Before enabling it, an
+operator must provision, on the fleet VM:
+
+1. **A registered API agent identity** for the rear admiral: rank
+   `rearAdmiral`, in this fleet (`POST /api/v1/agents`, by an organisation
+   administrator).
+2. **A bearer token for that identity that stays valid**, either long-lived
+   or refreshed by something outside Stargate, in the variable named by
+   `api.tokenEnv`: in the service environment or the private
+   `<config>.env` companion (mode 0600). Stargate reads it from its process
+   environment, which is fixed for the life of the process, so a replaced
+   token takes effect after a restart. Stargate has no sign-in or refresh
+   flow of its own, and a person's short-lived sign-in token stops working
+   when it expires.
+3. **Network reach** from the gateway's OS user to the API. A default
+   single-VM fleet may let only root and the operator reach the API port;
+   allow the gateway's service user, or give it a private route it can
+   reach.
+4. **Optional private-access headers.** When the API sits behind a
+   zero-trust access layer, list each header in `api.headersEnv` with the
+   variable that holds its value, for example a service token's client ID
+   and secret. The values are sent on every request and never logged.
+
+When the API refuses the credential (HTTP 401 or 403), Stargate logs one
+plain warning with the status, not the token, and tries again at each poll
+interval; nothing else is attempted and nothing crashes. When the token works
+but `GET /api/v1/me` is not this fleet's rear admiral, dispatch stays idle
+and logs that once.
+
+## What is polled
+
+Every `pollIntervalSeconds`, after the first poll at start:
+
+- the fleet roster (`GET /api/v1/fleets/{fleet}`): captains and whether the
+  API marks each available;
+- issues assigned to those captains (`assignee=<id>` for each, with
+  `updatedSince` five minutes before the newest change already seen);
+- unassigned issues flagged for agents (`readyForAgents=true&assignee=none`),
+  kept when their project's initiative, or that initiative's nearest ancestor
+  with a fleet, belongs to this fleet;
+- initiatives and projects, for that fleet membership;
+- any issue under an open offer that the ready list no longer shows, read on
+  its own.
+
+## Offers and answers
+
+The first captain asked moves on by one for each new flagged issue, so the
+same captain is not always first. Captains are asked in a fixed order from
+there. A captain is skipped when the API marks it unavailable, its chat
+account is not enrolled, or it is not online under its account. Before each
+offer the issue is read again; an issue that has been assigned, unflagged,
+closed, archived or moved out of the fleet ends the offers. If that happens
+while an offer is open, the offer is withdrawn in the channel.
+
+On acceptance the rear admiral assigns the issue to that captain with one
+versioned write; the API clears _Ready for agents_ in the same write. A
+version conflict re-reads the issue and tries again. If someone else took
+the issue first, the offer closes and the channel is told. A failed
+assignment write is retried at each poll and reported once in the channel.
+
+Captains answer with the `fleet_answer_offer` tool from the
+[fleet plugin](fleet-tools.md), never by Stargate reading chat text:
+
+```json
+{
+  "offerID": "offer-0123456789abcdef",
+  "answer": "accept",
+  "reason": "Free now"
+}
+```
+
+The captain's gateway accepts only an offer that its own authenticated IRC
+intake recorded for its account, sends one answer per offer (repeating the
+same answer sends nothing; a different answer is refused) and reports an
+unconfirmed send so the captain checks the channel before answering again.
+`reason` is optional, at most 200 characters, and only shown to people. The
+`fleet_answer_offer` permission is part of the captain role's provisioned
+fleet permissions; also allow it in the captain's `backend.permissions`,
+which the gateway applies to every fleet call. The tool needs a captain IRC
+registration with an OpenCode backend, a pinned `sessionID`, `fleetControl`
+and the fleet plugin loaded.
+
+## Chat format
+
+Every dispatch line carries the client tag `+stargate/dispatch=<kind>,<value>`.
+The tag is for programs; the text is for people and can change. As with
+[request progress tags](irc.md#request-progress-tags), a client must check
+the server's authenticated `account` tag before acting on a marker.
+
+| Kind                                                    | Sent by       | Command   | Value            | Notes                                                                                             |
+| ------------------------------------------------------- | ------------- | --------- | ---------------- | ------------------------------------------------------------------------------------------------- |
+| `assigned`                                              | Rear admiral  | `PRIVMSG` | Issue identifier | Behaviour 1, addressed `@<captain nick>:`.                                                        |
+| `offer`                                                 | Rear admiral  | `PRIVMSG` | Offer ID         | Behaviour 2, addressed `@<captain nick>:`. Its server `msgid` identifies the offer in chat.       |
+| `accept`, `decline`                                     | Asked captain | `NOTICE`  | Offer ID         | `+draft/reply=<offer msgid>`. Counted only from the asked captain's account, before the deadline. |
+| `accepted`, `timeout`, `withdrawn`, `taken`, `retrying` | Rear admiral  | `NOTICE`  | Offer ID         | Status for people, replying to the offer.                                                         |
+| `gave-up`                                               | Rear admiral  | `NOTICE`  | Issue identifier | After the last round.                                                                             |
+
+The captain's nick is the one the server shows holding the captain's account
+at that moment. Offer IDs are `offer-` and 16 hexadecimal digits. Issue
+titles are shown on one line, without control characters, cut to fit the
+line.
+
+```text
+<rear-admiral> @example-captain: PRJ-12 “Fix the flaky upload test” is ready for agents. Can you take it? Call fleet_answer_offer with offerID offer-0123456789abcdef to accept or decline within 5 minutes. No answer counts as a decline.
+-example-captain- Accepting offer offer-0123456789abcdef: Free now
+-rear-admiral- example-captain accepted offer offer-0123456789abcdef: PRJ-12 is now assigned to example-captain.
+```
+
+## Peer turn limits
+
+`access.peerTurnsPerHour` limits turns that peer captains start on a captain.
+A dispatch request is never dropped by it: an `assigned` or `offer` message
+that comes from an account in both the captain's `access.peerCaptains` and
+`fleetPolicy.agentAccounts` is admitted even when the peer budget is used
+up. It still counts as a peer turn, so a busy dispatch hour leaves less
+budget for other peer messages in the command channel. Answers and status
+lines are `NOTICE`s, which never start a turn, so they use no budget. The
+dispatcher bounds its own volume: at most one open offer per issue, and one
+assignment notice per (issue, assignee).
+
+The rear admiral must be one of the captain's peer captains and enrolled
+agents for its requests to be admitted at all. With the
+[configured fleet defaults](irc.md#configured-fleet-defaults), list the rear
+admiral's account in the captain's `fleetPolicy.agentAccounts` and as a
+`fleetControl.targets` entry with `role: "rear_admiral"`, and leave
+`access.peerCaptains` unset.
+
+## Restarts and failures
+
+The ledger is `<dataDirectory>/agent-dispatch.sqlite`, private to the rear
+admiral's gateway.
+
+- **First start.** The first poll that reads the captains' assignments
+  records them without sending anything. Issues already flagged for agents
+  are offered.
+- **Restart.** Notified (issue, assignee) pairs, the assignment cursor and
+  each offer's round, captain, deadline and next round time survive a
+  restart. Each step is recorded before the message it leads to, so a restart
+  never asks twice; a stop between the record and the send leaves an offer
+  that times out. A deadline that passed while Stargate was down is handled
+  at the first poll.
+- **Answers while the rear admiral is offline** count only if the server
+  replays them with their original time, within the deadline; otherwise the
+  offer times out.
+- **API failures** (no connection, a timeout, a server error, an unreadable
+  answer or a refused credential) never crash the gateway. Each is logged
+  once with its HTTP status only, and the failed step is tried again at the
+  next poll, never sooner. A write whose 2xx answer cannot be read counts as
+  done; a write whose answer is lost is checked by reading the issue again.
+- **Chat failures.** When the rear admiral's own IRC connection or command
+  channel is unavailable, an offer is held for the same captain; no captain
+  is skipped and no round is used up.
+
+## Limits
+
+- One fleet per gateway, on IRC only.
+- An older Subspace API without `readyForAgents`: only assignments are
+  announced, and one log line says that round robin offers are unavailable.
+  A restart picks up an upgraded API.
+- Only a captain on OpenCode with a pinned session, `fleetControl` and the
+  fleet plugin can answer; offers to any other captain time out.
+- An answer arriving after the offer's message ID could not be confirmed
+  (no `echo-message` echo in time) cannot be matched and the offer times out.
+- A lost answer to the give-up comment can repeat the comment. Stargate
+  never claims exactly-once external effects.
+- A busy command channel shares the captains' peer turn budget, as above.
+- An issue title is quoted as written; a title that mentions another nick
+  can catch that agent's attention.
+
+## Tests
+
+`tests/agent-dispatch.test.ts` drives the dispatcher with a fake API, chat
+and clock, including the fixture evidence: a direct assignment notified once,
+a flagged issue accepted by the second captain, a flagged issue nobody takes
+ending in the comment and the cleared flag (with a shortened ladder), and a
+restart mid-offer. `tests/agent-dispatch-api.test.ts` runs the real API client
+against a fake API with injected failures. `tests/agent-dispatch-wiring.test.ts`
+covers configuration, the off switch, the captain's answer tool and an end to
+end run over a local IRC fixture. No test contacts a real service.

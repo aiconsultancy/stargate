@@ -350,6 +350,33 @@ export type DispatchInput = typeof dispatchInputSchema.Type;
 export const statusInputSchema = settingsStruct({
   requestID: Schema.optional(identifier),
 });
+/** Answer to a rear admiral's Ready-for-agents offer (agent dispatch). */
+export const offerAnswerInputSchema = settingsStruct({
+  offerID: Schema.String.check(settingsPattern(/^offer-[a-f0-9]{16}$/)),
+  answer: Schema.Literals(["accept", "decline"]),
+  /** Optional short note for people; Stargate never reads it. */
+  reason: Schema.optional(
+    Schema.String.check(
+      Schema.isMinCodePoints(1),
+      Schema.isMaxCodePoints(200),
+      Schema.makeFilter(
+        (text) => ![...text].some((character) => /\p{Cc}/u.test(character)),
+      ),
+    ),
+  ),
+});
+export type OfferAnswerInput = typeof offerAnswerInputSchema.Type;
+/** An offer this captain received, from the gateway's authenticated intake. */
+export type DispatchOffer = {
+  offerID: string;
+  /** This captain's account, which the offer addressed. */
+  account: string;
+  /** Rear admiral account that sent the offer. */
+  sender: string;
+  channel: string;
+  messageID: string;
+  receivedAt: string;
+};
 export const reviewInputBranches = [
   settingsStruct({
     op: Schema.Literal("start"),
@@ -383,6 +410,11 @@ export const requestSchema = settingsDiscriminatedUnion("operation", [
     operation: Schema.Literal("review"),
     caller: callerSchema,
     input: reviewInputSchema,
+  }),
+  settingsStruct({
+    operation: Schema.Literal("answer"),
+    caller: callerSchema,
+    input: offerAnswerInputSchema,
   }),
 ]);
 export type FleetRequest = typeof requestSchema.Type;

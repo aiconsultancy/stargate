@@ -16,6 +16,7 @@ import {
 } from "./permissions";
 import {
   type DispatchInput,
+  type DispatchOffer,
   type FleetCaller,
   type FleetCompletion,
   type FleetControlConfig,
@@ -27,6 +28,7 @@ import {
   type FleetTarget,
   fleetAssignmentText,
   fleetControlSchema,
+  type OfferAnswerInput,
   requestSchema,
   reviewRepositorySchema,
   type VerifiedSource,
@@ -49,6 +51,13 @@ export type FleetControlOptions = {
     request: FleetRequest,
   ): Promise<void> | Promise<FleetOrigin>;
   send(target: FleetTarget, text: string, signal: AbortSignal): Promise<void>;
+  /** Agent dispatch: send this captain's answer as a reply to the offer. */
+  answer?(
+    offer: DispatchOffer,
+    answer: OfferAnswerInput["answer"],
+    reason: string | undefined,
+    signal: AbortSignal,
+  ): Promise<void>;
   status?(): Promise<unknown> | unknown;
   /** Resolve the immutable authenticated ingress job and native input locally. */
   origin?(source: VerifiedSource): FleetOrigin | undefined;
@@ -108,6 +117,53 @@ export class FleetControl {
   /** Only authenticated gateway intake calls this; it is never an IPC operation. */
   recordSource(source: FleetSource) {
     return this.ledger.record(this.options.sessionID, source);
+  }
+
+  /** Authenticated IRC intake only: an offer addressed to this captain. */
+  recordOffer(offer: Omit<DispatchOffer, "account">) {
+    this.ledger.recordOffer({ ...offer, account: this.options.account });
+  }
+
+  /**
+   * The answer tool. Only an offer this gateway's intake recorded for its
+   * own account can be answered, once; repeating the same answer resends
+   * nothing. The rear admiral decides what the answer means.
+   */
+  private async answerOffer(input: OfferAnswerInput, signal: AbortSignal) {
+    const recorded = this.ledger.dispatchOffer(
+      this.options.account,
+      input.offerID,
+    );
+    if (!recorded || recorded.received < Date.now() - 24 * 3_600_000)
+      throw new FleetError(
+        "No current offer with this ID was addressed to this captain.",
+      );
+    const result = {
+      offerID: input.offerID,
+      answer: input.answer,
+      state: "sent" as const,
+      note: "The rear admiral confirms in the channel. Accepting asks it to assign the issue to you; it is not human approval.",
+      humanApproval: false as const,
+    };
+    if (recorded.answer === input.answer) return { ...result, repeated: true };
+    if (recorded.answer !== null)
+      throw new FleetError("This offer already has a different answer.");
+    if (!this.options.answer)
+      throw new FleetError("Offer answers are unavailable on this gateway.");
+    try {
+      await this.options.answer(
+        recorded.offer,
+        input.answer,
+        input.reason,
+        signal,
+      );
+    } catch {
+      throw new FleetError(
+        "Answer delivery is unconfirmed; check the channel before answering again.",
+      );
+    }
+    this.ledger.answerOffer(this.options.account, input.offerID, input.answer);
+    return result;
   }
 
   get resultsEnabled() {
@@ -407,19 +463,21 @@ export class FleetControl {
                   )
                 : value.operation === "dispatch"
                   ? await this.dispatch(value.input, value.caller, signal)
-                  : value.input.requestID
-                    ? (this.ledger.dispatch(
-                        value.caller.sessionID,
-                        value.input.requestID,
-                      ) ?? { state: "not_found", humanApproval: false })
-                    : {
-                        account: this.options.account,
-                        targets: this.options.config.targets,
-                        humanApproval: false,
-                        ...(this.options.status
-                          ? { transport: await this.options.status() }
-                          : {}),
-                      };
+                  : value.operation === "answer"
+                    ? await this.answerOffer(value.input, signal)
+                    : value.input.requestID
+                      ? (this.ledger.dispatch(
+                          value.caller.sessionID,
+                          value.input.requestID,
+                        ) ?? { state: "not_found", humanApproval: false })
+                      : {
+                          account: this.options.account,
+                          targets: this.options.config.targets,
+                          humanApproval: false,
+                          ...(this.options.status
+                            ? { transport: await this.options.status() }
+                            : {}),
+                        };
           sendJson(response, 200, { result });
         } catch (error) {
           sendJson(response, 400, {

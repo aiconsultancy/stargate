@@ -501,6 +501,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
         config.irc,
         config.notify,
         config.dataDirectory,
+        config.agentDispatch,
       );
       await checkCodexConfiguration(config, configPath);
     }

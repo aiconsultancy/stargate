@@ -10,7 +10,9 @@ import {
   secret,
 } from "../config";
 import { type OutboxPage, outboxMaxAgeMs } from "../crew/irc-rpc";
-import type { FleetSource } from "../fleet/protocol";
+import { ircDispatchOffer, isDispatchRequest } from "../dispatch/irc";
+import { dispatchTag } from "../dispatch/protocol";
+import type { DispatchOffer, FleetSource } from "../fleet/protocol";
 import { fleetAuthority, fleetInstructions } from "../fleet-policy";
 import { fleetSourceReference } from "../fleet-source";
 import type { GatewayConfig, GatewayTransport } from "../gateway";
@@ -556,6 +558,12 @@ type Built = { registration: IrcRegistration; lifetime: Lifetime };
  */
 export class IrcShip {
   sourceRecorder: ((source: FleetSource) => void) | undefined;
+  /** Captain side of agent dispatch: an admitted offer for the answer tool. */
+  offerRecorder: ((offer: Omit<DispatchOffer, "account">) => void) | undefined;
+  /** Rear admiral side of agent dispatch: every tagged chat message, unchecked. */
+  dispatchListener:
+    | ((message: IrcMessage, fold: (value: string) => string) => void)
+    | undefined;
   assignmentPrompt: ((dispatchID: string) => string | undefined) | undefined;
   assignmentRecorder:
     | ((
@@ -1227,6 +1235,17 @@ export class IrcShip {
     const time = message.tags.get("time");
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
     if (replay && (!time || Date.parse(time) < oldest)) return;
+    // The dispatcher checks account, offer and reply itself; this only routes.
+    if (
+      member.role === "captain" &&
+      this.dispatchListener &&
+      message.tags.has(dispatchTag)
+    )
+      try {
+        this.dispatchListener(message, client.fold);
+      } catch {
+        this.log.warn("Agent dispatch answer handler failed");
+      }
     if (
       this.config.dmPolicy === "redirect" &&
       !client.isChannel(message.params[0] ?? "")
@@ -1304,7 +1323,15 @@ export class IrcShip {
       this.advance(member, client, message);
       return;
     }
+    // A rear admiral's dispatch notice or offer from an enrolled fleet agent is
+    // never dropped by the peer limit: the dispatcher bounds its own rate.
+    const dispatchRequest =
+      admission.sender === "captain" &&
+      !!this.config.fleetPolicy &&
+      fleetAuthority(this.config.fleetPolicy, admission.user) === "agent" &&
+      isDispatchRequest(message);
     if (
+      !dispatchRequest &&
       !withinLimits(
         admission,
         this.config,
@@ -1361,6 +1388,23 @@ export class IrcShip {
     ) {
       this.advance(member, client, message);
       return;
+    }
+    const offer =
+      dispatchRequest && member.role === "captain"
+        ? ircDispatchOffer(message)
+        : undefined;
+    if (offer && this.offerRecorder) {
+      try {
+        const target = message.params[0] ?? "";
+        this.offerRecorder({
+          ...offer,
+          sender: message.tags.get("account") ?? admission.user,
+          channel: client.channel(target) ?? target,
+          receivedAt: new Date(admission.received).toISOString(),
+        });
+      } catch {
+        this.log.warn("Agent dispatch offer was not recorded");
+      }
     }
     if (this.sourceRecorder && this.config.fleetPolicy) {
       try {

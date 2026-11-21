@@ -384,6 +384,7 @@ test("actual fleet tool registrations stay native with explicit review opt-in an
         ...(reviews ? ["fleet_review"] : []),
         "fleet_verify_instruction",
         "fleet_dispatch",
+        "fleet_answer_offer",
         "fleet_status",
       ]);
       for (const tool of tools) expect(Schema.isSchema(tool.input)).toBe(true);

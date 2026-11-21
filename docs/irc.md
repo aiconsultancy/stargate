@@ -874,6 +874,15 @@ existing thread routing, and `+typing` remains scoped to the channel or DM.
 See the [loopback IRC transcript](../tests/fixtures/irc-progress.irc) for two
 requests in the same thread, an ordinary notice and the final replies.
 
+### Agent dispatch tags
+
+With [agent dispatch](agent-dispatch.md) enabled, the rear admiral's gateway
+writes `+stargate/dispatch=<kind>,<value>` requests to captains in the fleet
+command channel, and captains answer with a `NOTICE` that replies to the
+offer. A request from an account that is both a peer captain and an enrolled
+fleet agent is never dropped by `access.peerTurnsPerHour`, but still counts
+towards it. See that page for the markers, the answer tool and the limits.
+
 ## Native clarification questions
 
 OpenCode clarification forms can be answered from the original IRC conversation.

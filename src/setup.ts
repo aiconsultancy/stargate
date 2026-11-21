@@ -15,6 +15,7 @@ import { Writable } from "node:stream";
 import { parseEnv } from "node:util";
 import { Result, Schema } from "effect";
 import {
+  type AgentDispatchConfig,
   type BotConfig,
   botSchema,
   configSchema,
@@ -126,6 +127,7 @@ export async function checkCredentials(
   irc: readonly IrcConfig[] = [],
   notify?: NotifyConfig,
   dataDirectory = ".stargate",
+  agentDispatch?: AgentDispatchConfig,
 ): Promise<NodeJS.ProcessEnv> {
   let companion: NodeJS.ProcessEnv = {};
   try {
@@ -162,6 +164,15 @@ export async function checkCredentials(
     if (ca && !(await lstat(ca).catch(() => undefined))?.isFile())
       throw new Error("IRC caFile is not a readable file.");
   }
+  if (agentDispatch?.enabled)
+    for (const name of [
+      agentDispatch.api.tokenEnv,
+      ...Object.values(agentDispatch.api.headersEnv),
+    ])
+      if (!env[name]?.trim())
+        throw new Error(
+          "Missing agent dispatch API environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
+        );
   for (const bot of bots) {
     if (
       !/^xapp-[A-Za-z0-9-]+$/.test(env[bot.slack.appTokenEnv] ?? "") ||

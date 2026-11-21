@@ -103,6 +103,11 @@ export function fleetInstructions(
           "Read fleet_status for configured fleet targets, then use fleet_dispatch with a retained source reference and stable request ID for authorised cross-fleet contact. A transport unknown requires inspection, never a new-ID resend.",
         ]
       : []),
+    ...(policy.role === "captain"
+      ? [
+          "When the rear admiral offers you a Ready-for-agents issue, answer with fleet_answer_offer and the offer's exact offerID: accept only if your ship can take it now, otherwise decline. A chat reply is not an answer. After an accepted offer is assigned to you, pick the issue up, assign it to a crew member and get it done.",
+        ]
+      : []),
     policy.role === "rear_admiral"
       ? "Coordinate captains, read code and use only the configured tools and capabilities. Recommend PR scope based on repository rules, reviewability, complexity and business risk. Weigh the benefit of isolating risk or easing review against another CI, review and merge cycle. Human-only approval and deployment gates still apply."
       : "Follow the assigned repository's delivery and review rules.",
@@ -131,6 +136,8 @@ export function fleetPermissions(
     for (const action of ["read", "glob", "grep", "external_directory"])
       actions.add(action);
   if (policy.capabilities.includes("subspace")) actions.add("subspace_*");
+  // Agent dispatch offers are addressed to captains, who answer them.
+  if (policy.role === "captain") actions.add("fleet_answer_offer");
   if (policy.capabilities.includes("dispatch"))
     for (const action of ["fleet_dispatch", "stargate_mail", "stargate_dm"])
       actions.add(action);

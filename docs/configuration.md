@@ -150,8 +150,8 @@ Queued turns use the configuration current when they start.
 All unlisted keys are restart-only. This includes transport additions/removals,
 Slack/IRC credentials, existing credential values, backends, server/bind settings,
 joined channels/JOIN/PART, existing crew-member fields, concurrency/timeouts,
-feature switches, cron/waiting/activity, dashboard, Fleet API, maintenance and
-state paths.
+feature switches, cron/waiting/activity, dashboard, Fleet API, agent
+dispatch, maintenance and state paths.
 An invalid or mixed live/restart change is never partially applied. Environment
 variables keep precedence over the companion; values supplied by the service
 manager remain fixed for the process lifetime. Reload never mutates the process
@@ -188,6 +188,18 @@ There is no `enabled` alias, simultaneous second API listener or notification
 route in this version. For downgrade, restore the prior TCP `listen` or omit
 `api` when no Fleet API is needed; keep private state. See [API limits and Unix
 access](api.md#private-unix-mode).
+
+## Agent dispatch
+
+The optional top-level `agentDispatch` object lets the rear admiral's IRC
+gateway poll the Subspace API and offer issues to the fleet's captains. It
+is off by default (`enabled: false`) and every key requires a restart. Keys:
+`enabled`, `fleet`, `api.baseUrl`, `api.tokenEnv`, `api.headersEnv`,
+`messaging.type`, `messaging.registration`, `messaging.channel`,
+`captainAccounts`, `pollIntervalSeconds` (default 120),
+`answerTimeoutSeconds` (default 300) and `retryLadderSeconds` (default
+`[3600, 10800, 21600, 43200]`). See [agent dispatch](agent-dispatch.md) for
+each key, the credential it needs and how captains answer.
 
 ## Backend configuration
 
