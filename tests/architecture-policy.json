@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "20cd5f87baab551958ee965cf69dced6bc49266f",
+  "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "aliases": {
     "src/nightly/archive.ts": [
@@ -704,8 +704,15 @@
     },
     "meta-commands": {
       "layer": "slices",
-      "files": ["src/config-panel.ts", "src/meta-commands.ts"],
-      "public": ["src/meta-commands.ts"],
+      "files": [
+        "src/config-panel.ts",
+        "src/meta-commands.ts",
+        "src/meta-commands/meta-command-syntax.ts"
+      ],
+      "public": [
+        "src/meta-commands.ts",
+        "src/meta-commands/meta-command-syntax.ts"
+      ],
       "neighbours": [
         "config",
         "gateway",

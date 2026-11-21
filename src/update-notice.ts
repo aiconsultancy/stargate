@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { Predicate, Schema } from "effect";
 import { z } from "zod";
 import { redactCredentials } from "./credentials";
-import { metaCommandSyntax } from "./meta-commands";
+import { metaCommandSyntax } from "./meta-commands/meta-command-syntax";
 import { compareVersions, parseVersion } from "./nightly/versions";
 
 const digest = (value: unknown) =>
