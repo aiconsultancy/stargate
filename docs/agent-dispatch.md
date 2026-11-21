@@ -181,6 +181,16 @@ version conflict re-reads the issue and tries again. If someone else took
 the issue first, the offer closes and the channel is told. A failed
 assignment write is retried at each poll and reported once in the channel.
 
+The user ID stored with the offer is not trusted on its own. Before each
+assignment attempt, the first and every retry, the rear admiral checks the
+fleet roster, read again when it is older than one poll interval, as for
+fleet membership: the user must still be an agent of rank `captain` in this
+fleet, and its chat account must still be the account that answered. The
+API's availability flag is not checked here. When either check fails, the
+offer is closed as declined, the channel is told why (a `withdrawn` line)
+and the next captain in the round is asked. A roster that cannot be read
+holds the write until a later poll.
+
 Captains answer with the `fleet_answer_offer` tool from the
 [fleet plugin](fleet-tools.md), never by Stargate reading chat text:
 
@@ -205,15 +215,17 @@ and the fleet plugin loaded.
 
 ## Chat format
 
-Every dispatch line carries the client tag `+stargate/dispatch=<kind>,<value>`.
+Every dispatch line but the issue title line carries the client tag
+`+stargate/dispatch=<kind>,<value>`.
 The tag is for programs; the text is for people and can change. As with
 [request progress tags](irc.md#request-progress-tags), a client must check
 the server's authenticated `account` tag before acting on a marker.
 
 | Kind                                                    | Sent by       | Command   | Value            | Notes                                                                                             |
 | ------------------------------------------------------- | ------------- | --------- | ---------------- | ------------------------------------------------------------------------------------------------- |
-| `assigned`                                              | Rear admiral  | `PRIVMSG` | Issue identifier | Behaviour 1, addressed `@<captain nick>:`.                                                        |
-| `offer`                                                 | Rear admiral  | `PRIVMSG` | Offer ID, issue  | Behaviour 2, addressed `@<captain nick>:`. Its server `msgid` identifies the offer in chat.       |
+| `assigned`                                              | Rear admiral  | `PRIVMSG` | Issue identifier | Behaviour 1, addressed `@<captain nick>:`. Fixed text from the marker, never the title.           |
+| `offer`                                                 | Rear admiral  | `PRIVMSG` | Offer ID, issue  | Behaviour 2, as above. Its server `msgid` identifies the offer in chat.                           |
+| None                                                    | Rear admiral  | `NOTICE`  | None             | The issue title for people, after each request; for an offer, `+draft/reply=<offer msgid>`.       |
 | `accept`, `decline`                                     | Asked captain | `NOTICE`  | Offer ID         | `+draft/reply=<offer msgid>`. Counted only from the asked captain's account, before the deadline. |
 | `accepted`, `timeout`, `withdrawn`, `taken`, `retrying` | Rear admiral  | `NOTICE`  | Offer ID         | Status for people, replying to the offer.                                                         |
 | `gave-up`                                               | Rear admiral  | `NOTICE`  | Issue identifier | After the last round.                                                                             |
@@ -221,19 +233,25 @@ the server's authenticated `account` tag before acting on a marker.
 The `offer` value is `<offer ID>,<issue identifier>`, for example
 `offer,offer-0123456789abcdef,PRJ-12`; every other value is one field.
 The captain's nick is the one the server shows holding the captain's account
-at that moment. Offer IDs are `offer-` and 16 hexadecimal digits. Issue
-titles are shown on one line, without control characters, cut to fit the
-line.
+at that moment. Offer IDs are `offer-` and 16 hexadecimal digits. A refused
+acceptance (see [offers and answers](#offers-and-answers)) is a `withdrawn`
+line that names the reason.
 
-An issue title is user-editable, so it never becomes the captain agent's
-instruction. For a request from its rear admiral, the captain's gateway
-replaces the chat text of the agent's turn with fixed text built from the
-marker: the issue identifier, the offer ID and the request, with a note that
-issue content is untrusted data and that the agent should read the issue
-itself. People in the channel still see the title.
+An issue title is user-editable, so it never becomes a captain agent's
+instruction. The request `PRIVMSG`, the only line that can start a captain's
+turn, carries only fixed text built from the marker's fields: the address,
+the issue identifier, the offer ID, the request and how to answer. The title
+follows for people as a separate `NOTICE`, which never starts a turn, on one
+line, without control characters, cut to fit the line. It is best effort: a
+title line that cannot be sent is logged and neither fails nor repeats the
+request. Answers reply to the `PRIVMSG`, never to the title line. As defence
+in depth, for a request from its rear admiral the captain's gateway also
+rebuilds the agent's turn from the marker, with a note that issue content is
+untrusted data and that the agent should read the issue itself.
 
 ```text
-<rear-admiral> @example-captain: PRJ-12 “Fix the flaky upload test” is ready for agents. Can you take it? Call fleet_answer_offer with offerID offer-0123456789abcdef to accept or decline within 5 minutes. No answer counts as a decline.
+<rear-admiral> @example-captain: PRJ-12 is ready for agents. Can you take it? Call fleet_answer_offer with offerID offer-0123456789abcdef to accept or decline within 5 minutes. No answer counts as a decline.
+-rear-admiral- Title of PRJ-12: “Fix the flaky upload test”
 -example-captain- Accepting offer offer-0123456789abcdef: Free now
 -rear-admiral- example-captain accepted offer offer-0123456789abcdef: PRJ-12 is now assigned to example-captain.
 ```
@@ -281,8 +299,9 @@ admiral's gateway.
   already flagged for agents are offered meanwhile.
 - **Restart.** Notified (issue, assignee) pairs, the assignment cursor, the
   place in an unfinished assignment list and each offer's round, captain,
-  deadline and next round time survive a restart. The API identity and
-  fleet membership do not: both are read again before the next write. Each step is recorded before the message it leads to, so a restart
+  deadline and next round time survive a restart. The API identity, the
+  fleet roster and fleet membership do not: each is read again before the
+  next write. Each step is recorded before the message it leads to, so a restart
   never asks twice; a stop between the record and the send leaves an offer
   that times out. A deadline that passed while Stargate was down is handled
   at the first poll.
@@ -315,10 +334,11 @@ admiral's gateway.
 - A lost answer to the give-up comment can repeat the comment. Stargate
   never claims exactly-once external effects.
 - A busy command channel shares the captains' peer turn budget, as above.
-- An issue title is quoted as written in chat; a title that mentions
-  another nick can catch that agent's attention. A captain whose
-  `fleetControl` does not name its rear admiral treats dispatch requests as
-  ordinary peer messages, title included, and cannot answer offers.
+- An issue title is quoted as written in its `NOTICE`; a title that
+  mentions a nick can catch a person's attention, but never starts an agent
+  turn. A captain whose `fleetControl` does not name its rear admiral treats
+  dispatch requests as ordinary peer messages (the fixed text, no title) and
+  cannot answer offers.
 
 ## Tests
 
