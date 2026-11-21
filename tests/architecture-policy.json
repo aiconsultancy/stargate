@@ -1,0 +1,1176 @@
+{
+  "sourceCommit": "20cd5f87baab551958ee965cf69dced6bc49266f",
+  "rules": "docs/design.md#source-layout-and-boundary-rules",
+  "aliases": {
+    "src/nightly/archive.ts": [
+      "src/nightly/archive.ts",
+      "src/maintenance/nightly/archive.ts"
+    ],
+    "src/nightly/catalog.ts": [
+      "src/nightly/catalog.ts",
+      "src/maintenance/nightly/catalog.ts"
+    ],
+    "src/nightly/cleanup-config.ts": [
+      "src/nightly/cleanup-config.ts",
+      "src/maintenance/nightly/cleanup-config.ts"
+    ],
+    "src/nightly/cleanup-protection.ts": [
+      "src/nightly/cleanup-protection.ts",
+      "src/maintenance/nightly/cleanup-protection.ts"
+    ],
+    "src/nightly/cleanup.ts": [
+      "src/nightly/cleanup.ts",
+      "src/maintenance/nightly/cleanup.ts"
+    ],
+    "src/nightly/cli.ts": [
+      "src/nightly/cli.ts",
+      "src/maintenance/nightly/cli.ts"
+    ],
+    "src/nightly/config.ts": [
+      "src/nightly/config.ts",
+      "src/maintenance/nightly/config.ts"
+    ],
+    "src/nightly/cooloff.ts": [
+      "src/nightly/cooloff.ts",
+      "src/maintenance/nightly/cooloff.ts"
+    ],
+    "src/nightly/crews.ts": [
+      "src/nightly/crews.ts",
+      "src/maintenance/nightly/crews.ts"
+    ],
+    "src/nightly/drain.ts": [
+      "src/nightly/drain.ts",
+      "src/maintenance/nightly/drain.ts"
+    ],
+    "src/nightly/droid-agent.ts": [
+      "src/nightly/droid-agent.ts",
+      "src/maintenance/nightly/droid-agent.ts"
+    ],
+    "src/nightly/droid-facts.ts": [
+      "src/nightly/droid-facts.ts",
+      "src/maintenance/nightly/droid-facts.ts"
+    ],
+    "src/nightly/droid.ts": [
+      "src/nightly/droid.ts",
+      "src/maintenance/nightly/droid.ts"
+    ],
+    "src/nightly/exec.ts": [
+      "src/nightly/exec.ts",
+      "src/maintenance/nightly/exec.ts"
+    ],
+    "src/nightly/files.ts": [
+      "src/nightly/files.ts",
+      "src/maintenance/nightly/files.ts"
+    ],
+    "src/nightly/host.ts": [
+      "src/nightly/host.ts",
+      "src/maintenance/nightly/host.ts"
+    ],
+    "src/nightly/idle.ts": [
+      "src/nightly/idle.ts",
+      "src/maintenance/nightly/idle.ts"
+    ],
+    "src/nightly/instructions.ts": [
+      "src/nightly/instructions.ts",
+      "src/maintenance/nightly/instructions.ts"
+    ],
+    "src/nightly/journal.ts": [
+      "src/nightly/journal.ts",
+      "src/maintenance/nightly/journal.ts"
+    ],
+    "src/nightly/model-step.ts": [
+      "src/nightly/model-step.ts",
+      "src/maintenance/nightly/model-step.ts"
+    ],
+    "src/nightly/models.ts": [
+      "src/nightly/models.ts",
+      "src/maintenance/nightly/models.ts"
+    ],
+    "src/nightly/opencode.ts": [
+      "src/nightly/opencode.ts",
+      "src/maintenance/nightly/opencode.ts"
+    ],
+    "src/nightly/outbox.ts": [
+      "src/nightly/outbox.ts",
+      "src/maintenance/nightly/outbox.ts"
+    ],
+    "src/nightly/paths.ts": [
+      "src/nightly/paths.ts",
+      "src/maintenance/nightly/paths.ts"
+    ],
+    "src/nightly/plugin-digest.ts": [
+      "src/nightly/plugin-digest.ts",
+      "src/maintenance/nightly/plugin-digest.ts"
+    ],
+    "src/nightly/ready.ts": [
+      "src/nightly/ready.ts",
+      "src/maintenance/nightly/ready.ts"
+    ],
+    "src/nightly/release.ts": [
+      "src/nightly/release.ts",
+      "src/maintenance/nightly/release.ts"
+    ],
+    "src/nightly/report.ts": [
+      "src/nightly/report.ts",
+      "src/maintenance/nightly/report.ts"
+    ],
+    "src/nightly/run.ts": [
+      "src/nightly/run.ts",
+      "src/maintenance/nightly/run.ts"
+    ],
+    "src/nightly/state.ts": [
+      "src/nightly/state.ts",
+      "src/maintenance/nightly/state.ts"
+    ],
+    "src/nightly/timer.ts": [
+      "src/nightly/timer.ts",
+      "src/maintenance/nightly/timer.ts"
+    ],
+    "src/nightly/update.ts": [
+      "src/nightly/update.ts",
+      "src/maintenance/nightly/update.ts"
+    ],
+    "src/nightly/versions.ts": [
+      "src/nightly/versions.ts",
+      "src/maintenance/nightly/versions.ts"
+    ],
+    "src/nightly/window.ts": [
+      "src/nightly/window.ts",
+      "src/maintenance/nightly/window.ts"
+    ],
+    "src/activity-delivery.ts": [
+      "src/activity-delivery.ts",
+      "src/activity/activity-delivery.ts"
+    ],
+    "src/activity-slack.ts": [
+      "src/activity-slack.ts",
+      "src/activity/activity-slack.ts"
+    ],
+    "src/activity.ts": ["src/activity.ts", "src/activity/activity.ts"],
+    "src/agent-profile-switch.ts": [
+      "src/agent-profile-switch.ts",
+      "src/ops/agent-profile-switch.ts"
+    ],
+    "src/api/route.ts": ["src/api/route.ts", "src/dashboard/api/route.ts"],
+    "src/api/server.ts": ["src/api/server.ts", "src/dashboard/api/server.ts"],
+    "src/api/v1/command.ts": [
+      "src/api/v1/command.ts",
+      "src/dashboard/api/v1/command.ts"
+    ],
+    "src/api/v1/config.ts": [
+      "src/api/v1/config.ts",
+      "src/dashboard/api/v1/config.ts"
+    ],
+    "src/api/v1/diff.ts": [
+      "src/api/v1/diff.ts",
+      "src/dashboard/api/v1/diff.ts"
+    ],
+    "src/api/v1/events.ts": [
+      "src/api/v1/events.ts",
+      "src/dashboard/api/v1/events.ts"
+    ],
+    "src/api/v1/features.ts": [
+      "src/api/v1/features.ts",
+      "src/dashboard/api/v1/features.ts"
+    ],
+    "src/api/v1/gateway.ts": [
+      "src/api/v1/gateway.ts",
+      "src/dashboard/api/v1/gateway.ts"
+    ],
+    "src/api/v1/git-index.ts": [
+      "src/api/v1/git-index.ts",
+      "src/dashboard/api/v1/git-index.ts"
+    ],
+    "src/api/v1/git.ts": ["src/api/v1/git.ts", "src/dashboard/api/v1/git.ts"],
+    "src/api/v1/github-repository.ts": [
+      "src/api/v1/github-repository.ts",
+      "src/dashboard/api/v1/github-repository.ts"
+    ],
+    "src/api/v1/host.ts": [
+      "src/api/v1/host.ts",
+      "src/dashboard/api/v1/host.ts"
+    ],
+    "src/api/v1/network.ts": [
+      "src/api/v1/network.ts",
+      "src/dashboard/api/v1/network.ts"
+    ],
+    "src/api/v1/projection.ts": [
+      "src/api/v1/projection.ts",
+      "src/dashboard/api/v1/projection.ts"
+    ],
+    "src/api/v1/pulls.ts": [
+      "src/api/v1/pulls.ts",
+      "src/dashboard/api/v1/pulls.ts"
+    ],
+    "src/api/v1/server.ts": [
+      "src/api/v1/server.ts",
+      "src/dashboard/api/v1/server.ts"
+    ],
+    "src/api/v1/token.ts": [
+      "src/api/v1/token.ts",
+      "src/dashboard/api/v1/token.ts"
+    ],
+    "src/api/v1/types.ts": [
+      "src/api/v1/types.ts",
+      "src/dashboard/api/v1/types.ts"
+    ],
+    "src/attachment-delivery.ts": [
+      "src/attachment-delivery.ts",
+      "src/attachments/attachment-delivery.ts"
+    ],
+    "src/attachments.ts": [
+      "src/attachments.ts",
+      "src/attachments/attachments.ts"
+    ],
+    "src/backend.ts": ["src/backend.ts", "src/backends/backend.ts"],
+    "src/backends/opencode-history.ts": [
+      "src/backends/opencode-history.ts",
+      "src/backends/opencode/opencode-history.ts"
+    ],
+    "src/backends/opencode.ts": [
+      "src/backends/opencode.ts",
+      "src/backends/opencode/opencode.ts"
+    ],
+    "src/backends/pi-attachments.ts": [
+      "src/backends/pi-attachments.ts",
+      "src/backends/pi/pi-attachments.ts"
+    ],
+    "src/backends/pi-durable.ts": [
+      "src/backends/pi-durable.ts",
+      "src/backends/pi/pi-durable.ts"
+    ],
+    "src/backends/pi-history.ts": [
+      "src/backends/pi-history.ts",
+      "src/backends/pi/pi-history.ts"
+    ],
+    "src/background-questions.ts": [
+      "src/background-questions.ts",
+      "src/questions/background-questions.ts"
+    ],
+    "src/bot-web.ts": ["src/bot-web.ts", "src/slack/bot-web.ts"],
+    "src/cancellation.ts": [
+      "src/cancellation.ts",
+      "src/gateway/cancellation.ts"
+    ],
+    "src/captain-post-config.ts": [
+      "src/captain-post-config.ts",
+      "src/captain-post/captain-post-config.ts"
+    ],
+    "src/captain-post.ts": [
+      "src/captain-post.ts",
+      "src/captain-post/captain-post.ts"
+    ],
+    "src/cli.ts": ["src/cli.ts", "src/app/cli.ts"],
+    "src/config-panel.ts": [
+      "src/config-panel.ts",
+      "src/meta-commands/config-panel.ts"
+    ],
+    "src/config-reload.ts": [
+      "src/config-reload.ts",
+      "src/app/config-reload.ts"
+    ],
+    "src/credentials.ts": ["src/credentials.ts", "src/lib/credentials.ts"],
+    "src/crew-status.ts": ["src/crew-status.ts", "src/shared/crew-status.ts"],
+    "src/crew-ui.ts": ["src/crew-ui.ts", "src/slack/crew-ui.ts"],
+    "src/cron-advanced.ts": [
+      "src/cron-advanced.ts",
+      "src/cron/cron-advanced.ts"
+    ],
+    "src/cron-control.ts": ["src/cron-control.ts", "src/cron/cron-control.ts"],
+    "src/cron-decision.ts": [
+      "src/cron-decision.ts",
+      "src/cron/cron-decision.ts"
+    ],
+    "src/cron-input.ts": ["src/cron-input.ts", "src/cron/cron-input.ts"],
+    "src/cron-store.ts": ["src/cron-store.ts", "src/cron/cron-store.ts"],
+    "src/cron-ui.ts": ["src/cron-ui.ts", "src/cron/cron-ui.ts"],
+    "src/cron.ts": ["src/cron.ts", "src/cron/cron.ts"],
+    "src/cronjob-config.ts": [
+      "src/cronjob-config.ts",
+      "src/cron/cronjob-config.ts"
+    ],
+    "src/cronjob-files.ts": [
+      "src/cronjob-files.ts",
+      "src/cron/cronjob-files.ts"
+    ],
+    "src/cronjob-manager.ts": [
+      "src/cronjob-manager.ts",
+      "src/cron/cronjob-manager.ts"
+    ],
+    "src/dashboard-branding.ts": [
+      "src/dashboard-branding.ts",
+      "src/dashboard/dashboard-branding.ts"
+    ],
+    "src/dashboard-model.ts": [
+      "src/dashboard-model.ts",
+      "src/dashboard/dashboard-model.ts"
+    ],
+    "src/dashboard-projection.ts": [
+      "src/dashboard-projection.ts",
+      "src/dashboard/dashboard-projection.ts"
+    ],
+    "src/dashboard-source.ts": [
+      "src/dashboard-source.ts",
+      "src/dashboard/dashboard-source.ts"
+    ],
+    "src/dashboard.ts": ["src/dashboard.ts", "src/dashboard/dashboard.ts"],
+    "src/effect.ts": ["src/effect.ts", "src/lib/effect.ts"],
+    "src/fleet-irc.ts": ["src/fleet-irc.ts", "src/fleet/fleet-irc.ts"],
+    "src/fleet-policy.ts": ["src/fleet-policy.ts", "src/fleet/fleet-policy.ts"],
+    "src/fleet-source.ts": ["src/fleet-source.ts", "src/fleet/fleet-source.ts"],
+    "src/gateway.ts": ["src/gateway.ts", "src/gateway/gateway.ts"],
+    "src/health-config.ts": [
+      "src/health-config.ts",
+      "src/health/health-config.ts"
+    ],
+    "src/health-host.ts": ["src/health-host.ts", "src/health/health-host.ts"],
+    "src/health.ts": ["src/health.ts", "src/health/health.ts"],
+    "src/input-boundary.ts": [
+      "src/input-boundary.ts",
+      "src/backends/opencode/input-boundary.ts"
+    ],
+    "src/input-origin.ts": [
+      "src/input-origin.ts",
+      "src/backends/opencode/input-origin.ts"
+    ],
+    "src/interactions.ts": ["src/interactions.ts", "src/slack/interactions.ts"],
+    "src/loopback.ts": ["src/loopback.ts", "src/lib/loopback.ts"],
+    "src/maintenance-delivery.ts": [
+      "src/maintenance-delivery.ts",
+      "src/maintenance/maintenance-delivery.ts"
+    ],
+    "src/maintenance-drain.ts": [
+      "src/maintenance-drain.ts",
+      "src/maintenance/maintenance-drain.ts"
+    ],
+    "src/maintenance.ts": [
+      "src/maintenance.ts",
+      "src/maintenance/maintenance.ts"
+    ],
+    "src/markdown-chunks.ts": [
+      "src/markdown-chunks.ts",
+      "src/slack/markdown-chunks.ts"
+    ],
+    "src/mentions.ts": ["src/mentions.ts", "src/shared/mentions.ts"],
+    "src/meta-commands.ts": [
+      "src/meta-commands.ts",
+      "src/meta-commands/meta-commands.ts"
+    ],
+    "src/notification-control.ts": [
+      "src/notification-control.ts",
+      "src/notifications/preferences/notification-control.ts"
+    ],
+    "src/notification-store.ts": [
+      "src/notification-store.ts",
+      "src/notifications/preferences/notification-store.ts"
+    ],
+    "src/notifications.ts": [
+      "src/notifications.ts",
+      "src/notifications/preferences/notifications.ts"
+    ],
+    "src/notify/binding.ts": [
+      "src/notify/binding.ts",
+      "src/notifications/ingest/binding.ts"
+    ],
+    "src/notify/config.ts": [
+      "src/notify/config.ts",
+      "src/notifications/ingest/config.ts"
+    ],
+    "src/notify/http.ts": [
+      "src/notify/http.ts",
+      "src/notifications/ingest/http.ts"
+    ],
+    "src/notify/model.ts": [
+      "src/notify/model.ts",
+      "src/notifications/ingest/model.ts"
+    ],
+    "src/notify/notifications.ts": [
+      "src/notify/notifications.ts",
+      "src/notifications/ingest/notifications.ts"
+    ],
+    "src/notify/signature.ts": [
+      "src/notify/signature.ts",
+      "src/notifications/ingest/signature.ts"
+    ],
+    "src/notify/sink.ts": [
+      "src/notify/sink.ts",
+      "src/notifications/ingest/sink.ts"
+    ],
+    "src/notify/slack.ts": [
+      "src/notify/slack.ts",
+      "src/notifications/ingest/slack.ts"
+    ],
+    "src/notify/store.ts": [
+      "src/notify/store.ts",
+      "src/notifications/ingest/store.ts"
+    ],
+    "src/notify/subscriptions.ts": [
+      "src/notify/subscriptions.ts",
+      "src/notifications/ingest/subscriptions.ts"
+    ],
+    "src/pairing.ts": ["src/pairing.ts", "src/slack/pairing.ts"],
+    "src/peers.ts": ["src/peers.ts", "src/gateway/peers.ts"],
+    "src/pi-model.ts": ["src/pi-model.ts", "src/backends/pi/pi-model.ts"],
+    "src/profile.ts": ["src/profile.ts", "src/app/profile.ts"],
+    "src/provision.ts": ["src/provision.ts", "src/app/provision.ts"],
+    "src/question-settings.ts": [
+      "src/question-settings.ts",
+      "src/questions/question-settings.ts"
+    ],
+    "src/questions.ts": ["src/questions.ts", "src/questions/questions.ts"],
+    "src/quota-watch.ts": ["src/quota-watch.ts", "src/quota/quota-watch.ts"],
+    "src/quota.ts": ["src/quota.ts", "src/quota/quota.ts"],
+    "src/reactions.ts": ["src/reactions.ts", "src/shared/reactions.ts"],
+    "src/read-deadline.ts": [
+      "src/read-deadline.ts",
+      "src/lib/read-deadline.ts"
+    ],
+    "src/request-failure.ts": [
+      "src/request-failure.ts",
+      "src/shared/request-failure.ts"
+    ],
+    "src/routing.ts": ["src/routing.ts", "src/gateway/routing.ts"],
+    "src/runtime.ts": ["src/runtime.ts", "src/app/runtime.ts"],
+    "src/service.ts": ["src/service.ts", "src/app/service.ts"],
+    "src/session-history.ts": [
+      "src/session-history.ts",
+      "src/shared/session-history.ts"
+    ],
+    "src/setup.ts": ["src/setup.ts", "src/app/setup.ts"],
+    "src/slack-connection.ts": [
+      "src/slack-connection.ts",
+      "src/slack/slack-connection.ts"
+    ],
+    "src/slack-files.ts": ["src/slack-files.ts", "src/slack/slack-files.ts"],
+    "src/slack-format.ts": [
+      "src/slack-format.ts",
+      "src/shared/slack-format.ts"
+    ],
+    "src/slack-questions.ts": [
+      "src/slack-questions.ts",
+      "src/questions/slack-questions.ts"
+    ],
+    "src/slack.ts": ["src/slack.ts", "src/slack/slack.ts"],
+    "src/status-report.ts": [
+      "src/status-report.ts",
+      "src/app/status-report.ts"
+    ],
+    "src/store.ts": ["src/store.ts", "src/gateway/store.ts"],
+    "src/streaming.ts": ["src/streaming.ts", "src/gateway/streaming.ts"],
+    "src/teams/http-util.ts": [
+      "src/teams/http-util.ts",
+      "src/lib/http-util.ts"
+    ],
+    "src/teams/unix-socket.ts": [
+      "src/teams/unix-socket.ts",
+      "src/lib/unix-socket.ts"
+    ],
+    "src/thread-context.ts": [
+      "src/thread-context.ts",
+      "src/gateway/thread-context.ts"
+    ],
+    "src/transcript.ts": ["src/transcript.ts", "src/ops/transcript.ts"],
+    "src/transcription.ts": [
+      "src/transcription.ts",
+      "src/transcription/transcription.ts"
+    ],
+    "src/turn-progress.ts": [
+      "src/turn-progress.ts",
+      "src/shared/turn-progress.ts"
+    ],
+    "src/update-notice.ts": [
+      "src/update-notice.ts",
+      "src/maintenance/update-notice.ts"
+    ],
+    "src/waiting.ts": ["src/waiting.ts", "src/gateway/waiting.ts"]
+  },
+  "slices": {
+    "lib": {
+      "layer": "lib",
+      "files": [
+        "src/credentials.ts",
+        "src/effect.ts",
+        "src/loopback.ts",
+        "src/read-deadline.ts",
+        "src/teams/http-util.ts",
+        "src/teams/unix-socket.ts"
+      ],
+      "public": [
+        "src/credentials.ts",
+        "src/effect.ts",
+        "src/loopback.ts",
+        "src/read-deadline.ts",
+        "src/teams/http-util.ts",
+        "src/teams/unix-socket.ts"
+      ],
+      "neighbours": []
+    },
+    "shared": {
+      "layer": "contracts",
+      "files": [
+        "src/crew-status.ts",
+        "src/mentions.ts",
+        "src/reactions.ts",
+        "src/request-failure.ts",
+        "src/session-history.ts",
+        "src/slack-format.ts",
+        "src/turn-progress.ts"
+      ],
+      "public": [
+        "src/crew-status.ts",
+        "src/mentions.ts",
+        "src/reactions.ts",
+        "src/request-failure.ts",
+        "src/session-history.ts",
+        "src/slack-format.ts",
+        "src/turn-progress.ts"
+      ],
+      "neighbours": ["config", "gateway", "slack"]
+    },
+    "config": {
+      "layer": "config",
+      "files": [
+        "src/config.ts",
+        "src/settings-errors.ts",
+        "src/settings-legacy.ts",
+        "src/settings-schema.ts"
+      ],
+      "public": [
+        "src/config.ts",
+        "src/settings-errors.ts",
+        "src/settings-legacy.ts",
+        "src/settings-schema.ts"
+      ],
+      "neighbours": [
+        "activity",
+        "backends",
+        "captain-post",
+        "cron",
+        "dashboard",
+        "fleet",
+        "gateway",
+        "health",
+        "irc",
+        "lib",
+        "maintenance",
+        "notifications/ingest",
+        "quota",
+        "shared",
+        "transcription"
+      ]
+    },
+    "app": {
+      "layer": "app",
+      "files": [
+        "src/cli.ts",
+        "src/config-reload.ts",
+        "src/main.ts",
+        "src/profile.ts",
+        "src/provision.ts",
+        "src/runtime.ts",
+        "src/service.ts",
+        "src/setup.ts",
+        "src/status-report.ts"
+      ],
+      "public": ["src/main.ts", "src/runtime.ts"],
+      "neighbours": [
+        "backends",
+        "config",
+        "crew",
+        "cron",
+        "dashboard",
+        "fleet",
+        "gateway",
+        "health",
+        "irc",
+        "lib",
+        "maintenance",
+        "notifications/ingest",
+        "notifications/preferences",
+        "quota",
+        "shared",
+        "slack",
+        "teams",
+        "transcription"
+      ]
+    },
+    "ops": {
+      "layer": "app",
+      "files": ["src/agent-profile-switch.ts", "src/transcript.ts"],
+      "public": ["src/agent-profile-switch.ts", "src/transcript.ts"],
+      "neighbours": ["app", "backends", "config", "gateway", "shared", "slack"]
+    },
+    "gateway": {
+      "layer": "gateway",
+      "files": [
+        "src/cancellation.ts",
+        "src/gateway.ts",
+        "src/peers.ts",
+        "src/routing.ts",
+        "src/store.ts",
+        "src/streaming.ts",
+        "src/thread-context.ts",
+        "src/waiting.ts"
+      ],
+      "public": [
+        "src/gateway.ts",
+        "src/peers.ts",
+        "src/routing.ts",
+        "src/store.ts"
+      ],
+      "retained": {
+        "src/store.ts": "store",
+        "src/gateway.ts": "service"
+      },
+      "neighbours": [
+        "activity",
+        "attachments",
+        "backends",
+        "config",
+        "fleet",
+        "irc",
+        "lib",
+        "maintenance",
+        "meta-commands",
+        "notifications/preferences",
+        "questions",
+        "shared",
+        "slack",
+        "transcription"
+      ]
+    },
+    "slack": {
+      "layer": "transports",
+      "files": [
+        "src/bot-web.ts",
+        "src/crew-ui.ts",
+        "src/interactions.ts",
+        "src/markdown-chunks.ts",
+        "src/pairing.ts",
+        "src/slack-connection.ts",
+        "src/slack-files.ts",
+        "src/slack.ts"
+      ],
+      "public": ["src/bot-web.ts", "src/markdown-chunks.ts", "src/slack.ts"],
+      "neighbours": [
+        "activity",
+        "attachments",
+        "backends",
+        "config",
+        "cron",
+        "gateway",
+        "lib",
+        "notifications/ingest",
+        "quota",
+        "shared"
+      ]
+    },
+    "questions": {
+      "layer": "slices",
+      "files": [
+        "src/background-questions.ts",
+        "src/question-settings.ts",
+        "src/questions.ts",
+        "src/slack-questions.ts"
+      ],
+      "public": [
+        "src/question-settings.ts",
+        "src/questions.ts",
+        "src/slack-questions.ts"
+      ],
+      "contracts": ["src/question-settings.ts"],
+      "neighbours": ["backends", "config", "gateway", "lib", "shared", "slack"],
+      "retained": {
+        "src/background-questions.ts": "service"
+      }
+    },
+    "activity": {
+      "layer": "slices",
+      "files": [
+        "src/activity-delivery.ts",
+        "src/activity-slack.ts",
+        "src/activity.ts"
+      ],
+      "public": ["src/activity-delivery.ts", "src/activity.ts"],
+      "contracts": ["src/activity.ts"],
+      "neighbours": ["backends", "config", "gateway", "shared", "slack"]
+    },
+    "attachments": {
+      "layer": "slices",
+      "files": ["src/attachment-delivery.ts", "src/attachments.ts"],
+      "public": ["src/attachment-delivery.ts", "src/attachments.ts"],
+      "contracts": ["src/attachments.ts"],
+      "neighbours": ["config", "gateway", "lib"]
+    },
+    "meta-commands": {
+      "layer": "slices",
+      "files": ["src/config-panel.ts", "src/meta-commands.ts"],
+      "public": ["src/meta-commands.ts"],
+      "neighbours": [
+        "config",
+        "gateway",
+        "notifications/preferences",
+        "questions",
+        "shared",
+        "slack"
+      ]
+    },
+    "captain-post": {
+      "layer": "slices",
+      "files": ["src/captain-post-config.ts", "src/captain-post.ts"],
+      "public": ["src/captain-post-config.ts", "src/captain-post.ts"],
+      "contracts": ["src/captain-post-config.ts"],
+      "neighbours": ["attachments", "config", "gateway", "shared", "slack"]
+    },
+    "cron": {
+      "layer": "slices",
+      "files": [
+        "src/cron-advanced.ts",
+        "src/cron-control.ts",
+        "src/cron-decision.ts",
+        "src/cron-input.ts",
+        "src/cron-store.ts",
+        "src/cron-ui.ts",
+        "src/cron.ts",
+        "src/cronjob-config.ts",
+        "src/cronjob-files.ts",
+        "src/cronjob-manager.ts"
+      ],
+      "public": [
+        "src/cron-advanced.ts",
+        "src/cron.ts",
+        "src/cronjob-config.ts",
+        "src/cronjob-manager.ts"
+      ],
+      "contracts": ["src/cron-advanced.ts", "src/cronjob-config.ts"],
+      "retained": {
+        "src/cron-store.ts": "store"
+      },
+      "neighbours": ["backends", "config", "gateway", "lib", "quota", "slack"]
+    },
+    "notifications/preferences": {
+      "layer": "slices",
+      "files": [
+        "src/notification-control.ts",
+        "src/notification-store.ts",
+        "src/notifications.ts"
+      ],
+      "public": ["src/notification-control.ts", "src/notifications.ts"],
+      "contracts": ["src/notifications.ts"],
+      "retained": {
+        "src/notification-store.ts": "store"
+      },
+      "neighbours": ["config", "gateway", "slack"]
+    },
+    "notifications/ingest": {
+      "layer": "slices",
+      "files": [
+        "src/notify/binding.ts",
+        "src/notify/config.ts",
+        "src/notify/http.ts",
+        "src/notify/model.ts",
+        "src/notify/notifications.ts",
+        "src/notify/signature.ts",
+        "src/notify/sink.ts",
+        "src/notify/slack.ts",
+        "src/notify/store.ts",
+        "src/notify/subscriptions.ts"
+      ],
+      "public": [
+        "src/notify/config.ts",
+        "src/notify/http.ts",
+        "src/notify/model.ts",
+        "src/notify/notifications.ts",
+        "src/notify/sink.ts"
+      ],
+      "contracts": [
+        "src/notify/config.ts",
+        "src/notify/model.ts",
+        "src/notify/sink.ts"
+      ],
+      "retained": {
+        "src/notify/store.ts": "store"
+      },
+      "neighbours": ["config", "dashboard", "gateway", "lib", "shared", "slack"]
+    },
+    "maintenance": {
+      "layer": "slices",
+      "files": [
+        "src/maintenance-delivery.ts",
+        "src/maintenance-drain.ts",
+        "src/maintenance.ts",
+        "src/nightly/archive.ts",
+        "src/nightly/catalog.ts",
+        "src/nightly/cleanup-config.ts",
+        "src/nightly/cleanup-protection.ts",
+        "src/nightly/cleanup.ts",
+        "src/nightly/cli.ts",
+        "src/nightly/config.ts",
+        "src/nightly/cooloff.ts",
+        "src/nightly/crews.ts",
+        "src/nightly/drain.ts",
+        "src/nightly/droid-agent.ts",
+        "src/nightly/droid-facts.ts",
+        "src/nightly/droid.ts",
+        "src/nightly/exec.ts",
+        "src/nightly/files.ts",
+        "src/nightly/host.ts",
+        "src/nightly/idle.ts",
+        "src/nightly/instructions.ts",
+        "src/nightly/journal.ts",
+        "src/nightly/model-step.ts",
+        "src/nightly/models.ts",
+        "src/nightly/opencode.ts",
+        "src/nightly/outbox.ts",
+        "src/nightly/paths.ts",
+        "src/nightly/plugin-digest.ts",
+        "src/nightly/ready.ts",
+        "src/nightly/release.ts",
+        "src/nightly/report.ts",
+        "src/nightly/run.ts",
+        "src/nightly/state.ts",
+        "src/nightly/timer.ts",
+        "src/nightly/update.ts",
+        "src/nightly/versions.ts",
+        "src/nightly/window.ts",
+        "src/update-notice.ts"
+      ],
+      "public": [
+        "src/maintenance-delivery.ts",
+        "src/maintenance-drain.ts",
+        "src/maintenance.ts",
+        "src/nightly/files.ts",
+        "src/nightly/update.ts",
+        "src/nightly/versions.ts",
+        "src/update-notice.ts"
+      ],
+      "retained": {
+        "src/nightly/state.ts": "store",
+        "src/nightly/ready.ts": "service"
+      },
+      "neighbours": [
+        "app",
+        "backends",
+        "config",
+        "crew",
+        "cron",
+        "gateway",
+        "lib",
+        "meta-commands"
+      ]
+    },
+    "quota": {
+      "layer": "slices",
+      "files": ["src/quota-watch.ts", "src/quota.ts"],
+      "public": ["src/quota-watch.ts", "src/quota.ts"],
+      "neighbours": ["config", "lib", "maintenance"]
+    },
+    "fleet": {
+      "layer": "slices",
+      "files": [
+        "src/dispatch/api.ts",
+        "src/dispatch/dispatcher.ts",
+        "src/dispatch/irc.ts",
+        "src/dispatch/ledger.ts",
+        "src/dispatch/protocol.ts",
+        "src/dispatch/routes.ts",
+        "src/dispatch/start.ts",
+        "src/fleet-irc.ts",
+        "src/fleet-policy.ts",
+        "src/fleet-source.ts",
+        "src/fleet/client.ts",
+        "src/fleet/control.ts",
+        "src/fleet/ledger.ts",
+        "src/fleet/permissions.ts",
+        "src/fleet/plugin.ts",
+        "src/fleet/protocol.ts",
+        "src/fleet/results.ts",
+        "src/fleet/reviews.ts"
+      ],
+      "public": [
+        "src/dispatch/protocol.ts",
+        "src/dispatch/start.ts",
+        "src/fleet-irc.ts",
+        "src/fleet-policy.ts",
+        "src/fleet-source.ts",
+        "src/fleet/plugin.ts",
+        "src/fleet/protocol.ts"
+      ],
+      "contracts": [
+        "src/dispatch/protocol.ts",
+        "src/fleet-policy.ts",
+        "src/fleet/protocol.ts"
+      ],
+      "neighbours": [
+        "backends",
+        "config",
+        "gateway",
+        "irc",
+        "lib",
+        "shared",
+        "slack"
+      ],
+      "retained": {
+        "src/fleet/results.ts": "service",
+        "src/dispatch/irc.ts": "service"
+      }
+    },
+    "dashboard": {
+      "layer": "slices",
+      "files": [
+        "src/api/route.ts",
+        "src/api/server.ts",
+        "src/api/v1/command.ts",
+        "src/api/v1/config.ts",
+        "src/api/v1/diff.ts",
+        "src/api/v1/events.ts",
+        "src/api/v1/features.ts",
+        "src/api/v1/gateway.ts",
+        "src/api/v1/git-index.ts",
+        "src/api/v1/git.ts",
+        "src/api/v1/github-repository.ts",
+        "src/api/v1/host.ts",
+        "src/api/v1/network.ts",
+        "src/api/v1/projection.ts",
+        "src/api/v1/pulls.ts",
+        "src/api/v1/server.ts",
+        "src/api/v1/token.ts",
+        "src/api/v1/types.ts",
+        "src/dashboard-branding.ts",
+        "src/dashboard-model.ts",
+        "src/dashboard-projection.ts",
+        "src/dashboard-source.ts",
+        "src/dashboard.ts"
+      ],
+      "public": [
+        "src/dashboard-model.ts",
+        "src/dashboard-source.ts",
+        "src/dashboard.ts"
+      ],
+      "contracts": ["src/dashboard-model.ts"],
+      "neighbours": [
+        "backends",
+        "config",
+        "crew",
+        "cron",
+        "gateway",
+        "irc",
+        "lib",
+        "maintenance",
+        "questions",
+        "shared"
+      ]
+    },
+    "transcription": {
+      "layer": "slices",
+      "files": ["src/transcribers/azure-openai.ts", "src/transcription.ts"],
+      "public": ["src/transcription.ts"],
+      "neighbours": ["attachments", "config", "lib", "shared"]
+    },
+    "health": {
+      "layer": "slices",
+      "files": ["src/health-config.ts", "src/health-host.ts", "src/health.ts"],
+      "public": ["src/health-config.ts", "src/health.ts"],
+      "contracts": ["src/health-config.ts"],
+      "neighbours": [
+        "app",
+        "backends",
+        "config",
+        "cron",
+        "maintenance",
+        "quota",
+        "shared"
+      ]
+    },
+    "backends": {
+      "layer": "slices",
+      "files": [
+        "src/backend-values.ts",
+        "src/backend.ts",
+        "src/backends/claude.ts",
+        "src/backends/cli-agent.ts",
+        "src/backends/codex-paths.ts",
+        "src/backends/codex.ts",
+        "src/backends/opencode-history.ts",
+        "src/backends/opencode.ts",
+        "src/backends/pi-attachments.ts",
+        "src/backends/pi-durable.ts",
+        "src/backends/pi-history.ts",
+        "src/input-boundary.ts",
+        "src/input-origin.ts",
+        "src/pi-model.ts"
+      ],
+      "public": ["src/backend-values.ts", "src/backend.ts"],
+      "contracts": ["src/backend-values.ts", "src/backend.ts"],
+      "neighbours": [
+        "activity",
+        "attachments",
+        "config",
+        "crew",
+        "cron",
+        "fleet",
+        "irc",
+        "lib",
+        "maintenance",
+        "questions",
+        "quota",
+        "shared"
+      ],
+      "retained": {
+        "src/backends/opencode.ts": "service",
+        "src/backends/pi-durable.ts": "service"
+      }
+    },
+    "crew": {
+      "layer": "slices",
+      "files": [
+        "src/crew/api.ts",
+        "src/crew/compaction.ts",
+        "src/crew/crew-tool-input.ts",
+        "src/crew/cron-execution.ts",
+        "src/crew/cron.ts",
+        "src/crew/engine.ts",
+        "src/crew/fleet-status.ts",
+        "src/crew/history-rpc.ts",
+        "src/crew/history.ts",
+        "src/crew/identity.ts",
+        "src/crew/instruction-context.ts",
+        "src/crew/instructions.ts",
+        "src/crew/irc-rpc.ts",
+        "src/crew/irc.ts",
+        "src/crew/journal.ts",
+        "src/crew/maintenance.ts",
+        "src/crew/member-activity.ts",
+        "src/crew/mesij.ts",
+        "src/crew/message-protocol.ts",
+        "src/crew/message-tool-input.ts",
+        "src/crew/messaging.ts",
+        "src/crew/models.ts",
+        "src/crew/native-wait.ts",
+        "src/crew/notifications.ts",
+        "src/crew/origin.ts",
+        "src/crew/pending.ts",
+        "src/crew/pi-extension.ts",
+        "src/crew/pi-worker.ts",
+        "src/crew/plugin.ts",
+        "src/crew/policy.ts",
+        "src/crew/post.ts",
+        "src/crew/project-options.ts",
+        "src/crew/projects.ts",
+        "src/crew/question-handoff.ts",
+        "src/crew/questions.ts",
+        "src/crew/reconciliation.ts",
+        "src/crew/recovery-rpc.ts",
+        "src/crew/report-rpc.ts",
+        "src/crew/reporting.ts",
+        "src/crew/result.ts",
+        "src/crew/shell-context.ts",
+        "src/crew/state.ts",
+        "src/crew/team.ts",
+        "src/crew/tool-input.ts",
+        "src/crew/waiting.ts",
+        "src/crew/workspace.ts"
+      ],
+      "public": [
+        "src/crew/engine.ts",
+        "src/crew/fleet-status.ts",
+        "src/crew/identity.ts",
+        "src/crew/message-protocol.ts",
+        "src/crew/plugin.ts",
+        "src/crew/report-rpc.ts",
+        "src/crew/team.ts"
+      ],
+      "contracts": [
+        "src/crew/fleet-status.ts",
+        "src/crew/identity.ts",
+        "src/crew/message-protocol.ts",
+        "src/crew/report-rpc.ts",
+        "src/crew/team.ts"
+      ],
+      "retained": {
+        "src/crew/state.ts": "store",
+        "src/crew/engine.ts": "service"
+      },
+      "neighbours": [
+        "activity",
+        "attachments",
+        "backends",
+        "captain-post",
+        "config",
+        "cron",
+        "gateway",
+        "lib",
+        "maintenance",
+        "notifications/preferences",
+        "questions",
+        "quota",
+        "shared"
+      ]
+    },
+    "irc": {
+      "layer": "transports",
+      "files": [
+        "src/irc/audit.ts",
+        "src/irc/burst.ts",
+        "src/irc/client-pem.ts",
+        "src/irc/client.ts",
+        "src/irc/crew-link.ts",
+        "src/irc/crew-question-gateway.ts",
+        "src/irc/delivery.ts",
+        "src/irc/filehost.ts",
+        "src/irc/protocol.ts",
+        "src/irc/routing.ts",
+        "src/irc/ship.ts",
+        "src/irc/status.ts",
+        "src/irc/text.ts"
+      ],
+      "public": [
+        "src/irc/client.ts",
+        "src/irc/protocol.ts",
+        "src/irc/routing.ts",
+        "src/irc/ship.ts",
+        "src/irc/text.ts"
+      ],
+      "contracts": ["src/irc/protocol.ts"],
+      "neighbours": [
+        "attachments",
+        "backends",
+        "config",
+        "crew",
+        "fleet",
+        "gateway",
+        "lib",
+        "questions",
+        "shared"
+      ]
+    },
+    "teams": {
+      "layer": "transports",
+      "files": [
+        "src/teams/botframework-auth.ts",
+        "src/teams/connector.ts",
+        "src/teams/http.ts",
+        "src/teams/images.ts",
+        "src/teams/log.ts",
+        "src/teams/presence.ts",
+        "src/teams/registration.ts",
+        "src/teams/service-url.ts",
+        "src/teams/teams.ts"
+      ],
+      "public": [
+        "src/teams/http.ts",
+        "src/teams/registration.ts",
+        "src/teams/teams.ts"
+      ],
+      "neighbours": [
+        "attachments",
+        "backends",
+        "config",
+        "fleet",
+        "gateway",
+        "lib",
+        "shared"
+      ]
+    }
+  }
+}
