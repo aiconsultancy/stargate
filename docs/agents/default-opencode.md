@@ -364,6 +364,37 @@ directory, session, tasks and results. It rejects removal or rebinding. Clear
 the flag after rollout. Back up private state first and update at an idle
 boundary; the profile initializer still refuses conflicting overlays.
 
+### Expansion rollout steps and its failure signature
+
+Without the flag, a changed roster fails inside OpenCode plugin setup, which
+OpenCode swallows silently: nothing is logged, and the captain's turns lose
+every `stargate_*` tool. A captain answering "stargate_crew is not available
+in this turn" after a roster edit has hit this guard; restore the original
+options or complete the flagged rollout. The state database pins the roster
+fingerprint, and the flag only accepts pure additions: same namespace,
+project directory and captain, and every existing member unchanged.
+
+A complete OpenCode-member rollout:
+
+1. Add the roster entry with an explicit `agent` id
+   (`<namespace>-crew-<id>`); ids are kebab-cased names. Add the worktree
+   path to the options `worktrees` map, which must exactly match the crew
+   ids. Keep the team source document in sync.
+2. Create the member worktree from the project checkout and copy a coding
+   member's profile: set the member's model in the profile's `model`,
+   `default_agent` and `agents` entry, and write the agent markdown from
+   the crew template with the member's identity, role and worktree. A Pi
+   member needs no profile.
+3. Sync `team`, `worktrees` and the flag into **every** plugin options copy
+   (the captain's and each OpenCode member's own profile embed the same
+   options). Options load only at server start: restart the OpenCode server
+   at an idle boundary; in-flight sessions are interrupted.
+4. Verify with the captain: `stargate_crew` op `roster` must list the new
+   members and the tool must work again. Provision the new sessions through
+   the captain's in-session `stargate_crew`; direct shell `opencode api`
+   RPC calls fail the captain-location check by design. Finish with a
+   bounded read-only onboarding task per new member.
+
 `tools` defaults to `none`. `coding` grants trusted read/write/edit/bash in the
 host OS account; a worktree is **not a sandbox**, and there is no Slack tool
 approval UI. Approval instructions are cooperative, not enforced isolation.
