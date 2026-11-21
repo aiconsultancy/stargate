@@ -2,6 +2,8 @@
 
 ## Boundaries
 
+This section describes the current runtime.
+
 ```text
 One process
   ├─ Bot A: Socket Mode + Web API → routing/access → durable queue
@@ -64,6 +66,12 @@ SQLite stores and the adapter contract stay Promise-based TypeScript with
 `AbortSignal`; `effect.ts` bridges them. See the
 [architecture review](architecture-review.md).
 
+The IRC transport does not depend on Slack. Attachment delivery retains each
+file's stored phase so retries resume. The dashboard source owns session scope;
+backends answer metadata and transcript queries. Nightly maintenance runs external
+commands through `CommandRunner`; its tests do not call providers. See
+[maintenance](maintenance.md). Keep Effect pinned to the OpenCode SDK version.
+
 Workers start only after every bot has connected; a connection failure at
 startup leaves queued requests queued. Shutdown closes Slack intake for every
 bot first. Requests that arrive after that point get no ACK, so Slack
@@ -71,6 +79,78 @@ redelivers them. All workers then stop together: each turn sees its signal
 abort and records an `interrupted` outcome. Backends, stores and the instance
 lock close last. A failure after startup stops every bot and exits with code
 1, so the service manager restarts Stargate.
+
+## Source layout and boundary rules
+
+The [restructure tracker](https://linear.app/nettworks/issue/NET-1766/tracker-stargate-source-restructure-into-bounded-vertical-slices)
+is the authority for the stages and ownership decisions. This section describes
+the target, not the current runtime layout above.
+
+### Target layout — FUTURE, NOT CURRENT
+
+Entries below are relative to the future source root. Names without `.ts` are
+module stems, not declarations of public files. These paths are not current-path
+references or a complete file inventory.
+
+| Target directory                                              | Ownership or module stems                                                                                                                                           |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/`                                                        | Composition and startup                                                                                                                                             |
+| `ops/`                                                        | Operator interfaces and operations                                                                                                                                  |
+| `lib/`                                                        | Domain-free helpers and types                                                                                                                                       |
+| `shared/`                                                     | Shared domain helpers and types                                                                                                                                     |
+| `config/`                                                     | Configuration                                                                                                                                                       |
+| `gateway/`                                                    | Turn engine only: gateway, ports, routing, store core, streaming, request-failure, turn-progress, cancellation, thread-context, reactions, mentions, peers, waiting |
+| `slack/`                                                      | Transport only: connection, format, files, interactions, bot-web, pairing, crew-ui                                                                                  |
+| `irc/`, `teams/`                                              | Transport implementations                                                                                                                                           |
+| `questions/`                                                  | questions, background-questions, question-settings, slack-questions                                                                                                 |
+| `activity/`                                                   | activity, activity-delivery, activity-slack                                                                                                                         |
+| `attachments/`                                                | attachments, attachment-delivery                                                                                                                                    |
+| `meta-commands/`                                              | meta-commands, config-panel                                                                                                                                         |
+| `captain-post/`                                               | captain-post, captain-post-config                                                                                                                                   |
+| `cron/`                                                       | cron, cron-advanced, cron-control, cron-decision, cron-input, cron-store, cron-ui, cronjob-config, cronjob-files, cronjob-manager                                   |
+| `notifications/preferences/`, `notifications/ingest/`         | Notification preferences and ingestion                                                                                                                              |
+| `maintenance/`                                                | maintenance modules, update-notice, nightly/                                                                                                                        |
+| `quota/`, `fleet/`, `dashboard/`, `transcription/`, `health/` | Their named domains                                                                                                                                                 |
+| `backends/`                                                   | Contract, factory, opencode/, pi/, claude, codex                                                                                                                    |
+| `crew/`                                                       | Fixed plugin.ts, protocol/, engine, pi, messaging, reporting                                                                                                        |
+
+The current paths `src/main.ts`, `src/config.ts`, `src/crew/plugin.ts` and
+`src/fleet/plugin.ts` are fixed and must never move. Tests stay flat in `tests/`.
+`gateway.ts` has a permanent 1000-line exception. The O1 decision in
+[architecture review](architecture-review.md) is unchanged.
+
+### Dependency policy
+
+Each slice has a small public surface: its config schema, model or wire types,
+and one entry point. Other files are private. Slice-to-slice imports use only
+named public files and explicitly listed directed neighbour pairs; directory
+membership alone grants no permission. Slice owners declare the public files
+and neighbour pairs. The table above is a target slice map, not a manifest of
+those declarations. Do not infer public filenames or permissions from it.
+
+The dependency order is `lib` → slice contracts → `config` → slices → gateway
+engine → transports → `app`: a dependent imports a lower layer, not the reverse.
+`lib` and `shared` never import a slice. A slice never imports gateway, transport
+or app. Backend adapters remain independent of Slack. No file import cycles are
+allowed.
+
+Count consuming slices for the rule of three, not files, calls or tests. A helper
+or type stays in its owner slice by default. A second slice imports an owner's
+public file or copies a small amount of code. At the third consuming slice, move
+a domain-free helper or type to `lib`, or a domain helper or type to `shared`.
+A store or service always stays with its owner.
+
+### Migration guards
+
+Stage 0 architecture guards ratchet current violations: exception entries may
+be removed but not expanded. Follow the tracker stages in order. Do not move
+source files until all Stage 0 and Stage 1 guards are in place. A pure move PR
+changes only file locations and import lines; behavior, configuration, SQLite
+and wire formats stay unchanged.
+
+A move in the crew plugin closure changes its digest and requires a full
+OpenCode restart for the release. An unchanged digest permits a gateway-only
+restart. This plan does not deploy a release.
 
 ## Maintenance restart drain
 
