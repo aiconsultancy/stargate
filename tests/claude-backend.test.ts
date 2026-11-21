@@ -14,7 +14,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { BUILTIN_TOOL_NAMES } from "@anthropic-ai/claude-agent-sdk";
 import { Result, Schema } from "effect";
 import { z } from "zod";
-import { createBackend } from "../src/backend";
+import { createBackend } from "../src/backends/factory";
 import {
   ClaudeBackend,
   type ClaudeRuntime,

@@ -12,20 +12,18 @@ import { SessionMessage } from "@opencode/schema";
 import { Option, Result, Schema } from "effect";
 import { type ActivityWatch, activitySnapshotSchema } from "../activity";
 import { type Attachment, checkAttachments } from "../attachments";
-import type {
-  AgentBackend,
-  PromptSourceContext,
-  SteerInput,
-  SteerResult,
-  TextSink,
-  Transcript,
-  TranscriptEntry,
-} from "../backend";
 import {
+  type AgentBackend,
   latestInput,
+  type PromptSourceContext,
   sourceLine,
+  type SteerInput,
+  type SteerResult,
+  type TextSink,
+  type Transcript,
+  type TranscriptEntry,
   TranscriptUnavailable,
-} from "../backend-values";
+} from "../backend";
 import { type BackendConfig, secret } from "../config";
 import { redactCredentials } from "../credentials";
 import {

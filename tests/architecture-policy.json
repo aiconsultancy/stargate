@@ -996,12 +996,12 @@
     "backends": {
       "layer": "slices",
       "files": [
-        "src/backend-values.ts",
         "src/backend.ts",
         "src/backends/claude.ts",
         "src/backends/cli-agent.ts",
         "src/backends/codex-paths.ts",
         "src/backends/codex.ts",
+        "src/backends/factory.ts",
         "src/backends/opencode-history.ts",
         "src/backends/opencode.ts",
         "src/backends/pi-attachments.ts",
@@ -1011,8 +1011,8 @@
         "src/input-origin.ts",
         "src/pi-model.ts"
       ],
-      "public": ["src/backend-values.ts", "src/backend.ts"],
-      "contracts": ["src/backend-values.ts", "src/backend.ts"],
+      "public": ["src/backend.ts", "src/backends/factory.ts"],
+      "contracts": ["src/backend.ts"],
       "neighbours": [
         "activity",
         "attachments",
