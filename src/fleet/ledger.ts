@@ -11,6 +11,7 @@ import {
 import { dirname, resolve } from "node:path";
 import { Schema } from "effect";
 import {
+  type DispatchOffer,
   type DispatchResult,
   type FleetCompletion,
   type FleetControlConfig,
@@ -133,6 +134,11 @@ export class FleetLedger {
         CREATE TABLE IF NOT EXISTS fleet_review_poll_cursors (
           ownerSessionID TEXT PRIMARY KEY, lastID TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS fleet_dispatch_offers (
+          account TEXT NOT NULL, offerID TEXT NOT NULL, value TEXT NOT NULL,
+          answer TEXT, received INTEGER NOT NULL,
+          PRIMARY KEY(account, offerID)
+        );
       `);
     } finally {
       process.umask(mask);
@@ -141,6 +147,51 @@ export class FleetLedger {
 
   close() {
     this.db.close();
+  }
+
+  /**
+   * An agent dispatch offer this captain's authenticated intake admitted.
+   * The first record wins; a later copy (catch-up) never changes it.
+   */
+  recordOffer(offer: DispatchOffer, now = Date.now()) {
+    this.db
+      .query("DELETE FROM fleet_dispatch_offers WHERE received < ?")
+      .run(now - 7 * 24 * 3_600_000);
+    this.db
+      .query(
+        "INSERT OR IGNORE INTO fleet_dispatch_offers(account, offerID, value, received) VALUES(?,?,?,?)",
+      )
+      .run(offer.account, offer.offerID, JSON.stringify(offer), now);
+  }
+
+  dispatchOffer(
+    account: string,
+    offerID: string,
+  ):
+    | { offer: DispatchOffer; answer: string | null; received: number }
+    | undefined {
+    const row = this.db
+      .query<
+        { value: string; answer: string | null; received: number },
+        [string, string]
+      >(
+        "SELECT value, answer, received FROM fleet_dispatch_offers WHERE account=? AND offerID=?",
+      )
+      .get(account, offerID);
+    if (!row) return;
+    return {
+      offer: JSON.parse(row.value) as DispatchOffer,
+      answer: row.answer,
+      received: row.received,
+    };
+  }
+
+  answerOffer(account: string, offerID: string, answer: string) {
+    this.db
+      .query(
+        "UPDATE fleet_dispatch_offers SET answer=? WHERE account=? AND offerID=? AND answer IS NULL",
+      )
+      .run(answer, account, offerID);
   }
 
   record(ownerSessionID: string, input: FleetSource): VerifiedSource {

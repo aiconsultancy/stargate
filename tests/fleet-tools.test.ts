@@ -563,6 +563,7 @@ test("OpenCode tools assert native permission and bind native caller, never mode
     expect(tools.map((tool) => tool.name)).toEqual([
       "fleet_verify_instruction",
       "fleet_dispatch",
+      "fleet_answer_offer",
       "fleet_status",
     ]);
     const verify = tools.find(

@@ -26,6 +26,19 @@
     },
     "subscriptions": [{ "topic": "release.*", "to": ["release-log"] }]
   },
+  "agentDispatch": {
+    "enabled": false,
+    "fleet": "example-fleet",
+    "api": {
+      "baseUrl": "https://subspace.internal.example",
+      "tokenEnv": "STARGATE_SUBSPACE_DISPATCH_TOKEN",
+      "headersEnv": {}
+    },
+    "messaging": { "type": "irc", "registration": "fleet-admiral" },
+    "pollIntervalSeconds": 120,
+    "answerTimeoutSeconds": 300,
+    "retryLadderSeconds": [3600, 10800, 21600, 43200]
+  },
   "bots": [
     {
       "id": "code-helper",

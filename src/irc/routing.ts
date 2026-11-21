@@ -529,6 +529,28 @@ export function routeIrcMessage(
   };
 }
 
+/**
+ * Whether a channel message may reach this connection's agent dispatch
+ * answer intake: the sender and channel rules every ordinary message must
+ * pass (`ircAllowed`, read from the live configuration), from an
+ * authenticated account other than this connection's own, in a channel this
+ * connection is in now. The dispatcher still checks the asked account, the
+ * offer, the reply and the deadline itself.
+ */
+export function ircDispatchAnswerAllowed(
+  message: IrcMessage,
+  context: Pick<IrcRouteContext, "config" | "member" | "fold" | "joined">,
+) {
+  const caseFold = context.fold;
+  const account = message.tags.get("account");
+  if (!account || account === "*") return false;
+  const user = caseFold(account);
+  if (user === caseFold(context.member.account)) return false;
+  const target = message.params[0] ?? "";
+  if (!isIrcChannel(target) || !context.joined?.(target)) return false;
+  return ircAllowed(context.config, context.member, user, target, caseFold);
+}
+
 /** Emoji compare without variation selector or skin tone. */
 export function reactionKey(value: string) {
   return value.replace(/[\u{FE0F}\u{1F3FB}-\u{1F3FF}]/gu, "");

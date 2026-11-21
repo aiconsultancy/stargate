@@ -10,7 +10,13 @@ import {
   secret,
 } from "../config";
 import { type OutboxPage, outboxMaxAgeMs } from "../crew/irc-rpc";
-import type { FleetSource } from "../fleet/protocol";
+import {
+  dispatchRequestTurn,
+  ircDispatchOffer,
+  isRearAdmiral,
+} from "../dispatch/irc";
+import { dispatchTag } from "../dispatch/protocol";
+import type { DispatchOffer, FleetSource } from "../fleet/protocol";
 import { fleetAuthority, fleetInstructions } from "../fleet-policy";
 import { fleetSourceReference } from "../fleet-source";
 import type { GatewayConfig, GatewayTransport } from "../gateway";
@@ -42,6 +48,7 @@ import {
   agentTurn,
   type IrcMember,
   ircAllowed,
+  ircDispatchAnswerAllowed,
   ircNote,
   ircResultJobAllowed,
   requiresVisitorTag,
@@ -556,6 +563,16 @@ type Built = { registration: IrcRegistration; lifetime: Lifetime };
  */
 export class IrcShip {
   sourceRecorder: ((source: FleetSource) => void) | undefined;
+  /** Captain side of agent dispatch: an admitted offer for the answer tool. */
+  offerRecorder: ((offer: Omit<DispatchOffer, "account">) => void) | undefined;
+  /**
+   * Rear admiral side of agent dispatch: each tagged chat message whose
+   * sender and channel pass the registration's access rules; its marker,
+   * account and reply are still unchecked.
+   */
+  dispatchListener:
+    | ((message: IrcMessage, fold: (value: string) => string) => void)
+    | undefined;
   assignmentPrompt: ((dispatchID: string) => string | undefined) | undefined;
   assignmentRecorder:
     | ((
@@ -1227,6 +1244,24 @@ export class IrcShip {
     const time = message.tags.get("time");
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
     if (replay && (!time || Date.parse(time) < oldest)) return;
+    // Only after the sender and channel rules every message passes; the
+    // dispatcher then checks account, offer, reply and deadline itself.
+    if (
+      member.role === "captain" &&
+      this.dispatchListener &&
+      message.tags.has(dispatchTag) &&
+      ircDispatchAnswerAllowed(message, {
+        config: this.config,
+        member,
+        fold: client.fold,
+        joined: (channel) => client.inChannel(channel),
+      })
+    )
+      try {
+        this.dispatchListener(message, client.fold);
+      } catch {
+        this.log.warn("Agent dispatch answer handler failed");
+      }
     if (
       this.config.dmPolicy === "redirect" &&
       !client.isChannel(message.params[0] ?? "")
@@ -1304,7 +1339,19 @@ export class IrcShip {
       this.advance(member, client, message);
       return;
     }
+    // Only this fleet's rear admiral's dispatch notice or offer is never
+    // dropped by the peer limit (the dispatcher bounds its own rate), and its
+    // turn is fixed text from the marker, without the issue's title. The same
+    // marker from any other agent is an ordinary peer message.
+    const dispatchTurn =
+      admission.sender === "captain" &&
+      member.role === "captain" &&
+      isRearAdmiral(this.config, admission.user, client.fold)
+        ? dispatchRequestTurn(message, admission.text)
+        : undefined;
+    const dispatchRequest = dispatchTurn !== undefined;
     if (
+      !dispatchRequest &&
       !withinLimits(
         admission,
         this.config,
@@ -1362,6 +1409,27 @@ export class IrcShip {
       this.advance(member, client, message);
       return;
     }
+    // An offer counts only in the command channel, when the captain knows it.
+    const commandChannel = this.config.fleetChannels?.command;
+    const offer =
+      dispatchRequest &&
+      (commandChannel === undefined ||
+        admission.channel === client.fold(commandChannel))
+        ? ircDispatchOffer(message)
+        : undefined;
+    if (offer && this.offerRecorder) {
+      try {
+        const target = message.params[0] ?? "";
+        this.offerRecorder({
+          ...offer,
+          sender: message.tags.get("account") ?? admission.user,
+          channel: client.channel(target) ?? target,
+          receivedAt: new Date(admission.received).toISOString(),
+        });
+      } catch {
+        this.log.warn("Agent dispatch offer was not recorded");
+      }
+    }
     if (this.sourceRecorder && this.config.fleetPolicy) {
       try {
         const messageID = admission.eventId.slice(admission.channel.length + 1);
@@ -1392,11 +1460,10 @@ export class IrcShip {
         return;
       }
     }
+    const text = dispatchTurn ?? admission.text;
     const input = {
       ...admission,
-      ...(privateReview
-        ? { text: `${admission.text}\n\n${privateReview}` }
-        : {}),
+      text: privateReview ? `${text}\n\n${privateReview}` : text,
       ...this.stagger(member, client, admission),
       ...(dispatchID
         ? { fleet: { kind: "assignment" as const, dispatchID } }

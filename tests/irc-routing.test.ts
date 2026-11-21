@@ -16,6 +16,7 @@ import {
   type IrcMember,
   ircAllowed,
   ircCrewInstructions,
+  ircDispatchAnswerAllowed,
   ircInstructions,
   ircNote,
   ircResultJobAllowed,
@@ -1436,4 +1437,42 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
       config: legacy,
     })?.text,
   ).toBe("vance: this is addressed to galactica");
+});
+
+test("irc dispatch answers pass the same account and channel rules as messages, in a joined channel", () => {
+  const rules = shipConfig({
+    channels: ["#galactica", "#closed"],
+    access: { deniedAccounts: ["mallory"], deniedChannels: ["#closed"] },
+  });
+  const member = { ...captain, channels: ["#galactica", "#closed"] };
+  const joined = new Set(["#galactica", "#closed"]);
+  const allowed = (
+    target: string,
+    tags: Record<string, string>,
+    config = rules,
+  ) =>
+    ircDispatchAnswerAllowed(message(target, "Accepting.", tags, "NOTICE"), {
+      config,
+      member,
+      fold: (value) => fold(value),
+      joined: (channel) => joined.has(channel),
+    });
+  expect(allowed("#galactica", { account: "jack" })).toBe(true);
+  expect(allowed("#galactica", { account: "MALLORY" })).toBe(false);
+  expect(allowed("#closed", { account: "jack" })).toBe(false);
+  expect(allowed("#elsewhere", { account: "jack" })).toBe(false);
+  expect(allowed("galactica", { account: "jack" })).toBe(false);
+  expect(allowed("#galactica", {})).toBe(false);
+  expect(allowed("#galactica", { account: "*" })).toBe(false);
+  expect(allowed("#galactica", { account: "Galactica" })).toBe(false);
+  // The live configuration decides: an allowlist without the sender refuses.
+  expect(
+    allowed(
+      "#galactica",
+      { account: "jack" },
+      shipConfig({ access: { allowedAccounts: ["kara"] } }),
+    ),
+  ).toBe(false);
+  joined.delete("#galactica");
+  expect(allowed("#galactica", { account: "jack" })).toBe(false);
 });
