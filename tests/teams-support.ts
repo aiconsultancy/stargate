@@ -90,7 +90,13 @@ export class TeamsBackend implements AgentBackend {
 }
 
 export function registrationFixture(
-  options: { approvals?: boolean; fleet?: boolean; presence?: boolean } = {},
+  options: {
+    approvals?: boolean;
+    fleet?: boolean;
+    presence?: boolean;
+    agent?: string;
+    displayName?: string;
+  } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "sg-teams-"));
   const storePath = join(directory, "queue.sqlite");
@@ -102,7 +108,13 @@ export function registrationFixture(
     tenantId: TENANT_ID,
     socketPath: join(directory, "bridge.sock"),
     access: { users: [HUMAN, OTHER_HUMAN], channels: ["allowed-channel"] },
-    backend: { type: "opencode", url: "http://127.0.0.1:4096", directory },
+    backend: {
+      type: "opencode",
+      url: "http://127.0.0.1:4096",
+      directory,
+      ...(options.agent ? { agent: options.agent } : {}),
+    },
+    ...(options.displayName ? { displayName: options.displayName } : {}),
     ...(options.approvals ? { approvalUsers: [HUMAN, OTHER_HUMAN] } : {}),
     ...(options.fleet
       ? {

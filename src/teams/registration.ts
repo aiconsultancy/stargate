@@ -18,6 +18,7 @@ import {
   settingsUUID,
 } from "../settings-schema";
 import type { Store } from "../store";
+import { botDisplayName, resolveWaiting } from "../waiting";
 import {
   BotFrameworkKeyStore,
   checkActivityBinding,
@@ -242,6 +243,12 @@ export class TeamsRegistration {
                 allowed() &&
                 this.allowed(ref.user, channel) &&
                 this.reference(channel)?.service === ref.service;
+              // The same settings and captain override as Slack, read once
+              // per turn; an active turn keeps its initial values.
+              const waiting = {
+                ...(await resolveWaiting(config)),
+                name: botDisplayName(config),
+              };
               await presence.working(
                 channel,
                 thread,
@@ -258,6 +265,7 @@ export class TeamsRegistration {
                     { signal, retryServerErrors: false },
                   );
                 },
+                waiting,
               );
             },
           }
