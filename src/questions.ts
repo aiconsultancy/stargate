@@ -1,7 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Schema } from "effect";
-import type { AgentBackend } from "./backend";
-import { type OperatorRoute, operatorControl } from "./background-questions";
+import {
+  type BackgroundCases,
+  type OperatorRoute,
+  operatorControl,
+} from "./background-questions";
 import { containsCredential } from "./credentials";
 import {
   settingsCheck,
@@ -10,7 +13,7 @@ import {
   settingsRecord,
   settingsStruct,
 } from "./settings-schema";
-import type { Incoming, Job, Store } from "./store";
+import type { Incoming, Job } from "./gateway/store-types";
 
 const option = settingsStruct({
   value: Schema.String.check(
@@ -359,6 +362,99 @@ export type QuestionPort = {
   publish(job: Job, text: string, allowed: () => boolean): Promise<void>;
 };
 
+/**
+ * Narrow store surface the question engine reads. `Store` satisfies it
+ * structurally; members mirror `store.ts`. Keeps `questions.ts` free of a
+ * store import edge.
+ */
+type QuestionStore = {
+  readonly backgroundCases: BackgroundCases;
+  session(conversation: string): string | undefined;
+  jobByInput(botKey: string, input: string): Job | null;
+  ownsQuestionSource(job: Job): boolean;
+  recordedQuestionSource(job: Job): boolean;
+  offerQuestion(offer: QuestionOffer): QuestionOffer | undefined;
+  questionByToken(botKey: string, token: string): QuestionOffer | undefined;
+  questionOffers(
+    botKey: string,
+    includeRunningOutcomes?: boolean,
+  ): QuestionOffer[];
+  activeQuestionSessions(botKey: string, pinned?: string): string[];
+  renewQuestion(
+    token: string,
+    replacement: string,
+    now: number,
+  ): QuestionOffer | undefined;
+  attemptQuestion(token: string, now: number): boolean;
+  claimExpiredQuestion(token: string, now: number): boolean;
+  claimQuestionStop(offer: QuestionOffer): boolean;
+  questionOutcome(
+    token: string,
+    outcome: NonNullable<QuestionOffer["outcome"]>,
+  ): void;
+  questionOutcomeNotified(token: string): void;
+  retireQuestion(token: string): void;
+  closeQuestion(token: string): void;
+  questionNotified(token: string): void;
+  questionRecovering(token: string): void;
+  questionSourceCancelled(offer: QuestionOffer): boolean;
+  failQuestionRecovery(offer: QuestionOffer): void;
+  finishQuestionRecovery(offer: QuestionOffer): void;
+  startQuestionPublication(
+    botKey: string,
+    token: string,
+    timeoutMs?: number,
+  ): QuestionOffer | undefined;
+};
+
+/**
+ * Narrow backend surface the question engine reads. `AgentBackend`
+ * satisfies it structurally; members mirror `backend.ts`. Keeps
+ * `questions.ts` free of a backend import edge.
+ */
+type QuestionBackend = {
+  readonly sessionID?: string | undefined;
+  pinnedBackgroundQuestions?(signal: AbortSignal): Promise<NativeQuestion[]>;
+  pendingQuestions?(
+    sessionID: string,
+    signal: AbortSignal,
+  ): Promise<PendingQuestion[]>;
+  questionState?(
+    sessionID: string,
+    formID: string,
+    signal: AbortSignal,
+  ): Promise<"pending" | "resolved" | "missing-session" | "unknown">;
+  questionBelongsToInput?(
+    sessionID: string,
+    formID: string,
+    inputID: string,
+    fingerprint: string,
+    signal: AbortSignal,
+  ): Promise<boolean>;
+  backgroundOutcome?(
+    session: string,
+    form: string,
+    fingerprint: string,
+    signal: AbortSignal,
+  ): Promise<"answered" | "cancelled" | undefined>;
+  replyQuestion?(
+    question: NativeQuestion,
+    answer: QuestionAnswer | null,
+    signal: AbortSignal,
+    allowed?: () => boolean,
+  ): Promise<void>;
+  questionInputSettled?(
+    sessionID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ): Promise<boolean>;
+  interruptInput?(
+    sessionId: string,
+    inputId: string,
+    signal: AbortSignal,
+  ): Promise<void>;
+};
+
 /** Gateway-owned durable forms. Neither the model nor the dashboard can answer. */
 export class Questions {
   private offset = 0;
@@ -376,8 +472,8 @@ export class Questions {
   private readonly missing = new Map<string, number>();
   constructor(
     private readonly key: string,
-    private readonly store: Store,
-    private readonly backend: AgentBackend,
+    private readonly store: QuestionStore,
+    private readonly backend: QuestionBackend,
     private readonly port: () => QuestionPort | undefined,
     private readonly allowed: (job: Job) => boolean,
     private readonly settled: (session: string) => void,

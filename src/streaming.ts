@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
-import type { SlackDelivery } from "./gateway";
+import type { SlackDelivery } from "./gateway/ports";
 import { chunks } from "./routing";
 import { type ReplyChunk, replyText } from "./slack-format";
 import type { Job, Store } from "./store";

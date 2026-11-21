@@ -6,7 +6,7 @@ import type {
   IrcTurnStatus,
   RequestOutcome,
   SlackDelivery,
-} from "../gateway";
+} from "../gateway/ports";
 import type { ReactionName } from "../reactions";
 import { settingsStruct } from "../settings-schema";
 import {

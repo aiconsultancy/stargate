@@ -10,7 +10,7 @@ import type { FleetSource } from "../fleet/protocol";
 import { fleetResultSource } from "../fleet/results";
 import { fleetAuthority, fleetInstructions } from "../fleet-policy";
 import { fleetSourceReference } from "../fleet-source";
-import type { GatewayTransport, SlackDelivery } from "../gateway";
+import type { GatewayTransport, SlackDelivery } from "../gateway/ports";
 import { backendFingerprint } from "../routing";
 import {
   settingsDefault,

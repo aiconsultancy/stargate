@@ -5,10 +5,9 @@ import type { PreparedAttachment, PublishedFile } from "./attachments";
 import { BackgroundCases } from "./background-questions";
 import { cancellationNotice } from "./cancellation";
 import {
-  type FleetJob,
   fleetJobSchema,
-  type NativeMaker,
   nativeMakerSchema,
+  type NativeMaker,
 } from "./fleet/protocol";
 import {
   type IrcBurstMessage,
@@ -18,80 +17,18 @@ import {
   ircBurstText,
 } from "./irc/burst";
 import { validMsgid } from "./irc/protocol";
-import {
-  type NotificationContext,
-  notificationContextSchema,
-} from "./notifications";
+import { notificationContextSchema } from "./notifications";
 import type { NativeQuestion, QuestionOffer } from "./questions";
-import { type InboundReaction, inboundReactionSchema } from "./reactions";
+import { inboundReactionSchema } from "./reactions";
 import { failureText, type RequestFailure } from "./request-failure";
 import { settingsPattern, settingsStruct } from "./settings-schema";
 import type { ReplyChunk } from "./slack-format";
+import { type Incoming, type Job, type JobStatus } from "./gateway/store-types";
 import type { TurnProgress } from "./turn-progress";
 import { UpdateNotices } from "./update-notice";
 
-export type Incoming = {
-  eventId: string;
-  botKey: string;
-  conversation: string;
-  channel: string;
-  thread: string;
-  /** IRC thread root; null/absent means an ordinary main-channel request. */
-  replyParent?: string | null;
-  user: string;
-  text: string;
-  files?: readonly string[];
-  deferDelivery?: boolean;
-  /**
-   * `captain`: a verified peer captain bot. `crew`: this ship's own captain
-   * or crew account on IRC. Absent for people.
-   */
-  sender?: "captain" | "crew" | null;
-  /** Transport time of the message in ms, for rolling turn limits (IRC). */
-  received?: number | null;
-  /**
-   * `spoken`: held until its speech names the bot; it neither starts nor
-   * continues a conversation yet. `admitted`: its speech named the bot.
-   */
-  gate?: "spoken" | "admitted" | null;
-  /** The configured name that admitted a message without a mention. */
-  textMention?: string | null;
-  /** Earliest start in ms (IRC all-call turns); absent starts at once. */
-  notBefore?: number | null;
-  /** Only trusted gateway intake/result recovery supplies this correlation. */
-  fleet?: FleetJob;
-  /** Trusted Slack ingress classification; absent on legacy/scheduled/native jobs. */
-  notification?: NotificationContext;
-  /** Present only for a verified Slack reaction, not a Slack message. */
-  slackReaction?: InboundReaction;
-};
-
-/**
- * Job lifecycle. Each method below is one transition and its SQL guard is
- * the check: a transition from any other status writes nothing.
- *
- * - queued → running: `running` (not after an accepted Stop).
- * - queued → responding: an accepted Stop (`cancel`, `cancelTurn`).
- * - running → responding: `respond` (throws `JobTransitionRefused` from
- *   another status), or `recover` after a restart.
- * - responding → done or failed: `finish`, after delivery or its last retry.
- * - failed → responding: `appendTranscript` requeues a `transcript:*` row.
- * - queued → failed: `finish`, when access was removed before the turn.
- *
- * While responding, `sent` moves the delivery cursor forward and `retry`
- * delays the next attempt. `finish`, `sent` and `retry` return false when
- * the status refused them.
- *
- * A row with `deferDelivery` has no delivery: it goes to `done` at once.
- */
-export const jobStatuses = [
-  "queued",
-  "running",
-  "responding",
-  "done",
-  "failed",
-] as const;
-export type JobStatus = (typeof jobStatuses)[number];
+export { jobStatuses } from "./gateway/store-types";
+export type { Incoming, Job, JobStatus };
 
 const sqlList = (statuses: readonly JobStatus[]) =>
   statuses.map((status) => `'${status}'`).join(",");
@@ -111,17 +48,6 @@ const stopJob = `UPDATE jobs SET cancel_requested=1,
   response=CASE WHEN status='queued' THEN ? ELSE response END,
   failure=CASE WHEN status='queued' THEN 'cancelled' ELSE failure END,
   status=CASE WHEN status='queued' THEN 'responding' ELSE status END`;
-
-export type Job = Incoming & {
-  id: number;
-  status: JobStatus;
-  response: string | null;
-  sent: number;
-  attempts: number;
-  failure?: RequestFailure | null;
-  input?: string | null;
-  makers?: NativeMaker[];
-};
 
 const followUpSchema = Schema.Struct({
   botKey: Schema.String,

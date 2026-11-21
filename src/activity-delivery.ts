@@ -6,7 +6,7 @@ import type {
   CrewActivitySettings,
 } from "./activity";
 import type { AgentBackend } from "./backend";
-import type { SlackDelivery } from "./gateway";
+import type { SlackDelivery } from "./gateway/ports";
 import type { Job, Store } from "./store";
 
 export type ActivityHandle = { finish(): void; cancel(): void };

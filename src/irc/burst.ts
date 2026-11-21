@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { settingsStartsWith, settingsStruct } from "../settings-schema";
-import type { Incoming } from "../store";
+import type { Incoming } from "../gateway/store-types";
 import { validMsgid } from "./protocol";
 
 /** Bounds apply to accepted live messages, never to already running work. */

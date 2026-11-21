@@ -1,13 +1,8 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Effect, FiberMap, Schedule } from "effect";
 import type { Logger } from "pino";
-import type { ActivityView } from "./activity";
 import { ActivityDelivery, type ActivityHandle } from "./activity-delivery";
-import {
-  type AttachmentTransport,
-  agentFilesLocal,
-  deliverAttachments,
-} from "./attachment-delivery";
+import { agentFilesLocal, deliverAttachments } from "./attachment-delivery";
 import {
   type Attachment,
   checkAttachments,
@@ -29,6 +24,12 @@ import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "./config";
 import { abortable, runAbortable } from "./effect";
 import { fleetResultSource } from "./fleet/results";
+import type {
+  GatewayAccessContext,
+  GatewayTransport,
+  RequestOutcome,
+  SlackDelivery,
+} from "./gateway/ports";
 import { maintenanceText, TurnBudget } from "./maintenance";
 import { startMaintenanceDelivery } from "./maintenance-delivery";
 import {
@@ -57,7 +58,7 @@ import {
   Questions,
   type questionControl,
 } from "./questions";
-import { parseReactionReply, type ReactionName } from "./reactions";
+import { parseReactionReply } from "./reactions";
 import {
   AttachmentInputUnavailable,
   BackendFailure,
@@ -78,8 +79,8 @@ import {
   routeReaction,
   transcriptChunks,
 } from "./routing";
-import type { ReactionTargetRequest, SocketRequest } from "./slack";
-import { type ReplyChunk, replyText, type SlackContent } from "./slack-format";
+import type { SocketRequest } from "./slack";
+import { type ReplyChunk, replyText } from "./slack-format";
 import { SlackQuestionControls } from "./slack-questions";
 import {
   type CaptainCursor,
@@ -91,12 +92,7 @@ import {
   TranscriptConflict,
 } from "./store";
 import { LiveReply } from "./streaming";
-import {
-  type ThreadContext,
-  type ThreadContextRequest,
-  ThreadContextUnavailable,
-  withThreadContext,
-} from "./thread-context";
+import { ThreadContextUnavailable, withThreadContext } from "./thread-context";
 import {
   isMedia,
   spokenMention,
@@ -108,6 +104,9 @@ import {
 import { type TurnProgress, turnProgressText } from "./turn-progress";
 import type { UpdateReceipt } from "./update-notice";
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
+
+// Tests import the delivery port from the gateway entry; gateway-ports owns it.
+export type { SlackDelivery } from "./gateway/ports";
 
 // Catch-up retries read history only; they never prompt the agent.
 const retryCeilingMs = 5 * 60 * 1000;
@@ -155,96 +154,6 @@ export function transcriptAttachments(entries: readonly TranscriptEntry[]) {
   ];
 }
 
-/** One stored reply chunk of one job. */
-export type DeliveryUnit = {
-  job: number;
-  part: number;
-  allowed?: () => boolean;
-};
-
-export type IrcTurnStatus = "notice" | "live" | "quiet";
-export type RequestOutcome = "completed" | "failed";
-
-export interface SlackDelivery {
-  /** Undefined (or absent) while the transport cannot move files. */
-  readonly files?: AttachmentTransport | undefined;
-  /** Replace a preview when ts is set; false means it was removed. */
-  failure?(
-    channel: string,
-    thread: string,
-    cause: RequestFailure,
-    ts?: string,
-  ): Promise<string | false> | Promise<void>;
-  activity?(
-    channel: string,
-    thread: string,
-    view: ActivityView,
-    ts?: string,
-    signal?: AbortSignal,
-  ): Promise<string>;
-  threadContext?(input: ThreadContextRequest): Promise<ThreadContext>;
-  /** Slack user directory, used when an event has no reliable bot marker. */
-  userInfo?(user: string, signal: AbortSignal): Promise<unknown>;
-  reactionThread?(input: ReactionTargetRequest): Promise<string | undefined>;
-  readReceipt?(channel: string, ts: string, active: boolean): Promise<void>;
-  ephemeral?(
-    channel: string,
-    user: string,
-    thread: string,
-    text: string,
-  ): Promise<void>;
-  post(
-    channel: string,
-    thread: string,
-    text: string,
-    stopJob?: number,
-    /** Final delivery of stored chunk `part`: lets a transport keep progress. */
-    unit?: DeliveryUnit | { allowed: () => boolean },
-    /** Already classified content of `text`; the transport must not reparse. */
-    content?: SlackContent,
-  ): Promise<string> | Promise<void>;
-  /** false means the user removed the preview; post a replacement. */
-  update?(
-    channel: string,
-    ts: string,
-    text: string,
-    stopJob?: number,
-    content?: SlackContent,
-  ): Promise<boolean> | Promise<void>;
-  remove?(channel: string, ts: string): Promise<void>;
-  /**
-   * Pure: classify one whole reply once, then split it. Absent transports
-   * deliver plain `chunks`/`transcriptChunks` strings.
-   */
-  prepareReply?(text: string, unbounded?: boolean): ReplyChunk[];
-  react?(
-    channel: string,
-    ts: string,
-    name: ReactionName,
-    allowed?: () => boolean,
-  ): Promise<void>;
-  /**
-   * Show that a turn is running until `signal` aborts. When requested, send
-   * an acknowledgement and backend status notices. Best effort only.
-   */
-  working?(
-    channel: string,
-    thread: string,
-    signal: AbortSignal,
-    allowed?: () => boolean,
-    turnStatus?: IrcTurnStatus,
-    readProgress?: () => TurnProgress | undefined,
-    request?: string,
-  ): Promise<void>;
-  requestSettled?(
-    channel: string,
-    request: string,
-    outcome: RequestOutcome,
-    signal: AbortSignal,
-    allowed: () => boolean,
-  ): Promise<void>;
-}
-
 /**
  * Registration settings the transport-neutral worker reads. A Slack
  * `BotConfig` carries `slack` and enables Slack-only intake and controls.
@@ -263,37 +172,7 @@ export type GatewayConfig =
       | "transcription"
     > & { steerThreadFollowUps?: boolean });
 
-/** Immutable access context; scheduled/catch-up scopes may have no job. */
-export type GatewayAccessContext = Readonly<
-  Pick<Incoming, "user" | "channel" | "sender" | "fleet"> &
-    Partial<Pick<Incoming, "text" | "eventId">>
->;
-
 type SlackAdmission = (write: () => boolean) => boolean | Promise<boolean>;
-
-/** Transport rules the gateway applies to every job of one registration. */
-export interface GatewayTransport {
-  /** Clarification channel; never a native permission-approval surface. */
-  questions?: QuestionPort;
-  /** Session title and source label. */
-  readonly name: "slack" | "irc" | "teams";
-  /** Queue, session and outbox namespace of this registration. */
-  readonly key: string;
-  /** Current access rules, rechecked before work and before delivery. */
-  allowed(user: string, channel: string, job?: GatewayAccessContext): boolean;
-  /** Model-visible source of a chat message; undefined for other jobs. */
-  source(input: Incoming): PromptSourceContext["source"] | undefined;
-  /** Prompt prefix naming the sender when no source line is sent. */
-  note(job: Job): string | undefined;
-  instructions?(job: Job): string;
-  turnStatus?(job: Job): IrcTurnStatus | undefined;
-  progressRequest?(job: Job): string | undefined;
-  /**
-   * Best effort, before each turn of an unpinned session (IRC crew: bind
-   * the session to its crew member). Never fails or blocks the turn.
-   */
-  sessionReady?(sessionID: string, signal: AbortSignal): Promise<void>;
-}
 
 /** The failure a thrown error names when no signal ended the turn. */
 function errorFailure(error: unknown): RequestFailure {
