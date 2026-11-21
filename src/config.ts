@@ -1112,6 +1112,110 @@ export const ircSchema = ircConfiguredSchema.check(
   }),
 );
 
+const dispatchSeconds = (minimum: number, maximum: number) =>
+  Schema.Finite.check(Schema.isInt())
+    .check(Schema.isGreaterThanOrEqualTo(minimum))
+    .check(Schema.isLessThanOrEqualTo(maximum));
+/** Headers that the dispatch client owns or that no proxy needs from config. */
+const reservedDispatchHeaders = new Set([
+  "accept",
+  "authorization",
+  "connection",
+  "content-length",
+  "content-type",
+  "host",
+  "transfer-encoding",
+]);
+export const agentDispatchDefaults = {
+  pollIntervalSeconds: 120,
+  answerTimeoutSeconds: 300,
+  retryLadderSeconds: [3600, 10_800, 21_600, 43_200],
+} as const;
+
+/**
+ * Deterministic agent dispatch on the rear admiral's gateway (see
+ * docs/agent-dispatch.md). Stargate polls the Subspace API over outbound
+ * HTTPS only; nothing here listens for connections. Off unless `enabled`.
+ */
+export const agentDispatchSchema = settingsStruct({
+  enabled: Schema.Boolean.pipe(settingsDefault(false)),
+  /** Fleet slug or UUID in the Subspace API. */
+  fleet: Schema.String.check(
+    settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/),
+  ),
+  api: settingsStruct({
+    /** API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback. */
+    baseUrl: secureLocalOrHttpsURL,
+    /** Variable holding the rear admiral agent's bearer token. */
+    tokenEnv: envName,
+    /** Extra headers for private access (for example a zero-trust service token). */
+    headersEnv: settingsRecord(
+      Schema.String.check(
+        settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/),
+      ).check(
+        settingsRefine(
+          (name) => !reservedDispatchHeaders.has(name.toLowerCase()),
+          {
+            message:
+              "This header is set by Stargate; use tokenEnv for the bearer token",
+          },
+        ),
+      ),
+      envName,
+    ).pipe(settingsDefault({})),
+  }),
+  messaging: settingsStruct({
+    /** IRC is the only messaging system today. */
+    type: Schema.Literal("irc").pipe(settingsDefault("irc")),
+    /** The rear admiral's IRC registration ID. */
+    registration: Schema.String.check(
+      settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+    ),
+    /** Defaults to the registration's fleetChannels.command. */
+    channel: Schema.optional(ircChannel),
+  }),
+  /** Subspace agent name to chat account; an unlisted name is its own account. */
+  captainAccounts: settingsRecord(
+    Schema.String.check(settingsPattern(/^[A-Za-z0-9-]{1,64}$/)),
+    ircAccount,
+  ).pipe(settingsDefault({})),
+  pollIntervalSeconds: dispatchSeconds(30, 3600).pipe(
+    settingsDefault(agentDispatchDefaults.pollIntervalSeconds),
+  ),
+  answerTimeoutSeconds: dispatchSeconds(60, 3600).pipe(
+    settingsDefault(agentDispatchDefaults.answerTimeoutSeconds),
+  ),
+  /** Waits between rounds; there is one more round than entries. */
+  retryLadderSeconds: Schema.mutable(Schema.Array(dispatchSeconds(60, 604_800)))
+    .check(Schema.isMaxLength(10))
+    .pipe(settingsDefault([...agentDispatchDefaults.retryLadderSeconds])),
+});
+export type AgentDispatchConfig = typeof agentDispatchSchema.Type;
+
+/** The rear admiral registration and channel that dispatch uses, or why not. */
+export function agentDispatchTarget(
+  dispatch: AgentDispatchConfig,
+  irc: readonly IrcConfig[],
+): { registration: IrcConfig; channel: string } | string {
+  const registration = irc.find(
+    (entry) => entry.id === dispatch.messaging.registration,
+  );
+  if (!registration)
+    return "Agent dispatch messaging.registration must name an IRC registration";
+  if (registration.fleetPolicy?.role !== "rear_admiral")
+    return "Agent dispatch runs only on a rear admiral's IRC registration (fleetPolicy.role rear_admiral)";
+  const channel =
+    dispatch.messaging.channel ?? registration.fleetChannels?.command;
+  if (!channel)
+    return "Set agent dispatch messaging.channel or the registration's fleetChannels.command";
+  const joined = effectiveIrcConfig(registration).channels.find(
+    (name) => fold(name) === fold(channel),
+  );
+  if (!joined)
+    return "The agent dispatch channel must be one of the rear admiral registration's channels";
+  return { registration, channel: joined };
+}
+
 /** Bot Framework transport: exact sender IDs, no credential values in config. */
 export const teamsSchema = settingsStruct({
   livePresence: Schema.optional(Schema.Boolean),
@@ -1247,6 +1351,8 @@ const configFields = settingsStruct({
   maintenance: Schema.optional(maintenanceSchema),
   /** Read subscription quota and announce changes to crew availability. */
   quotaWatch: Schema.optional(quotaWatchSchema),
+  /** Rear admiral agent dispatch from Subspace issues; off by default. */
+  agentDispatch: Schema.optional(agentDispatchSchema),
 });
 const configCheck = (liveNotificationPolicy = false) =>
   settingsCheck<typeof configFields.Type>(
@@ -1261,9 +1367,20 @@ const configCheck = (liveNotificationPolicy = false) =>
         dashboardSocket,
         notify,
         api,
+        agentDispatch,
       },
       context,
     ) => {
+      // A disabled section is inert: it names nothing that must exist yet.
+      if (agentDispatch?.enabled) {
+        const target = agentDispatchTarget(agentDispatch, irc);
+        if (typeof target === "string")
+          context.addIssue({
+            code: "custom",
+            path: ["agentDispatch", "messaging"],
+            message: target,
+          });
+      }
       if (notify) {
         const message = notifyConfigError(
           notify,

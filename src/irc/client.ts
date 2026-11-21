@@ -263,7 +263,9 @@ export class IrcClient {
     text: string;
     root: string | undefined;
     label: string | undefined;
-    request: string;
+    request: string | undefined;
+    /** Receives the server msgid of this send's own authenticated echo. */
+    onEcho?: (msgid: string) => void;
   }>(1024);
   private echoID = 0;
   private readonly lastSeen = new Map<string, string>();
@@ -509,6 +511,41 @@ export class IrcClient {
     return this.send("PRIVMSG", [target, text], tags, guard, priority, request);
   }
 
+  /**
+   * One PRIVMSG that resolves with the server message ID of its own echo,
+   * authenticated with this connection's account. Undefined without
+   * echo-message, or when no echo arrives within the confirmation window.
+   */
+  async publish(
+    target: string,
+    text: string,
+    tags: Record<string, string> = {},
+    guard?: () => boolean,
+  ): Promise<string | undefined> {
+    const echoed = Promise.withResolvers<string | undefined>();
+    const echo = this.hasCap("echo-message");
+    await this.send(
+      "PRIVMSG",
+      [target, text],
+      tags,
+      guard,
+      "normal",
+      undefined,
+      true,
+      (msgid) => echoed.resolve(msgid),
+    );
+    if (!echo) return;
+    const timer = setTimeout(
+      () => echoed.resolve(undefined),
+      this.timing.confirmMs,
+    );
+    try {
+      return await echoed.promise;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   tagmsg(target: string, tags: Record<string, string>, guard?: () => boolean) {
     if (!this.caps.has("message-tags"))
       return Promise.reject(new Error("IRC message tags unavailable"));
@@ -687,6 +724,7 @@ export class IrcClient {
     priority: SendPriority = "normal",
     request?: string,
     audit = true,
+    onEcho?: (msgid: string) => void,
   ): Promise<void> {
     let echo: string | undefined;
     const result = this.transmit(
@@ -698,6 +736,7 @@ export class IrcClient {
             tags,
             label,
             request,
+            onEcho,
           );
         return [
           formatMessage(command, params, {
@@ -729,15 +768,18 @@ export class IrcClient {
     tags: Record<string, string>,
     label: string | undefined,
     request: string | undefined,
+    onEcho?: (msgid: string) => void,
   ) {
-    if (!validMsgid(request) || !this.hasCap("echo-message")) return;
+    if ((!validMsgid(request) && !onEcho) || !this.hasCap("echo-message"))
+      return;
     const id = String(++this.echoID);
     this.echoes.set(id, {
       target: this.fold(target),
       text,
       root: tags["+draft/reply"],
       label,
-      request,
+      request: validMsgid(request) ? request : undefined,
+      ...(onEcho ? { onEcho } : {}),
     });
     return id;
   }
@@ -1430,7 +1472,7 @@ export class IrcClient {
       if (echo) this.echoes.delete(echo[0]);
       this.own.set(msgid, {
         ...(validMsgid(root) ? { root } : {}),
-        ...(echo ? { request: echo[1].request } : {}),
+        ...(echo?.[1].request ? { request: echo[1].request } : {}),
       });
       if (
         echo &&
@@ -1438,13 +1480,16 @@ export class IrcClient {
         account &&
         this.fold(account) === this.fold(this.options.account)
       ) {
+        const { request, onEcho } = echo[1];
         try {
-          this.events.published?.({
-            target,
-            msgid,
-            request: echo[1].request,
-            ...(validMsgid(root) ? { root } : {}),
-          });
+          if (request !== undefined)
+            this.events.published?.({
+              target,
+              msgid,
+              request,
+              ...(validMsgid(root) ? { root } : {}),
+            });
+          onEcho?.(msgid);
         } catch {
           this.options.log.warn("IRC published-message handler failed");
         }

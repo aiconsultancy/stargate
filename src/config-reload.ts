@@ -30,6 +30,7 @@ export async function readReloadCandidate(
     config.irc,
     config.notify,
     config.dataDirectory,
+    config.agentDispatch,
   );
   return {
     config: {

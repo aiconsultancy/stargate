@@ -89,6 +89,9 @@ permissions control what the agent can do on the host.
   [nightly maintenance](docs/maintenance.md) each have separate setup.
 - The [Fleet API](docs/api.md) serves read-only fleet status and events to
   Subspace over a private network.
+- Optional [agent dispatch](docs/agent-dispatch.md) lets a fleet's rear
+  admiral poll Subspace issues and ask its captains, on IRC, to take them.
+  It is off by default.
 - Optional [notification ingestion](docs/notification-ingestion.md) accepts
   authenticated facts on the private Unix API and displays literal Slack text
   without agent work. Every input defaults to off.

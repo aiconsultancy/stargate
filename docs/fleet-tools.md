@@ -1,8 +1,8 @@
 # Opt-in fleet tools
 
 The OpenCode V2 fleet plugin provides `fleet_dispatch`,
-`fleet_verify_instruction` and `fleet_status`. Nothing enables these tools or
-opens a control listener by default. They do not replace native permissions,
+`fleet_verify_instruction`, `fleet_status` and `fleet_answer_offer`. Nothing
+enables these tools or opens a control listener by default. They do not replace native permissions,
 repository instructions or human approval and deployment gates.
 
 Optional [native PR review evidence](fleet-reviews.md) adds `fleet_review` only
@@ -22,7 +22,7 @@ The gateway independently applies a private copy of its trusted
 wins, and no match means deny. Fleet IPC supports exact patterns, `*`, and a
 literal prefix followed by `*`. Potentially relevant unsupported patterns and
 `ask` rules are rejected when fleet control is configured. A native approval
-does not expand the gateway policy; use explicit allow/deny for these three
+does not expand the gateway policy; use explicit allow/deny for these
 fleet actions. Teams approval remains available for other native OpenCode tools.
 
 The engine owns its native database. Matching the active native tool's agent,
@@ -86,7 +86,7 @@ Load the plugin **directory**, which has its own package manifest, in OpenCode:
 }
 ```
 
-Allow the three native actions only for the intended profile. The default
+Allow the native actions only for the intended profile. The default
 permissions remain deny. A profile may permit verification/status while denying
 dispatch. Installing the plugin does not grant Subspace API, filesystem, shell
 or deployment permission.
@@ -102,6 +102,20 @@ trusted gateway service group, for example `2770`. The database, WAL and SHM are
 group and must not read or write this directory. Keep installed code and gateway
 credentials outside engine write access. These OS permissions are part of the
 trust boundary; plugin permissions alone are not a sandbox.
+
+## Answering an agent dispatch offer
+
+`fleet_answer_offer({"offerID":"offer-…","answer":"accept"})` answers a
+_Ready for agents_ offer that the fleet's rear admiral addressed to this
+captain in the command channel (see [agent dispatch](agent-dispatch.md)).
+`answer` is `accept` or `decline`; an optional `reason` of up to 200
+characters is shown to people only. The gateway accepts only an offer that
+its authenticated IRC intake recorded for its own account in the last 24
+hours. It sends the answer from its own IRC account as a `NOTICE` replying to
+the offer, sends one answer per offer and returns `humanApproval: false`.
+Accepting asks the rear admiral to assign the issue; it is not approval.
+Allow `fleet_answer_offer` in the captain's gateway and native permissions;
+the captain role's provisioned fleet permissions include it.
 
 ## Original instructions and authority
 

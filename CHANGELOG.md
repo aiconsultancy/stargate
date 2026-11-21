@@ -4,6 +4,10 @@
 
 ### Feature flags
 
+- New flag: `agentDispatch.enabled` defaults off. When on, the rear admiral's
+  IRC gateway polls the Subspace API, tells a captain about an issue assigned
+  to it and offers issues flagged _Ready for agents_ to the fleet's captains
+  in turn. Off starts no dispatcher, opens no ledger and makes no API request.
 - New flag: `bots[].cronjobs.advanced` defaults off. It enables quota-event
   triggers, per-job model evaluation, one-off jobs and optional crew arbitration.
   Existing clock schedules retain their current behaviour when it is off.
@@ -31,6 +35,16 @@
 
 ### Changes
 
+- Add optional agent dispatch for a fleet's rear admiral
+  ([docs](docs/agent-dispatch.md)). It polls the Subspace API outbound only
+  (default every 120 seconds) with the rear admiral's bearer token from
+  `agentDispatch.api.tokenEnv` and optional private-access headers from
+  `api.headersEnv`. Captains answer offers with the new `fleet_answer_offer`
+  fleet tool, sent as an IRC reply carrying `+stargate/dispatch`, counted only
+  from the asked captain's account. Offers time out after 300 seconds; rounds
+  repeat after 1, 3, 6 and 12 hours, then the rear admiral comments and clears
+  the flag. A durable ledger survives restarts. Dispatch requests are never
+  dropped by the IRC peer turn limit but count towards it.
 - Add durable quota-reset and quota-threshold cron events without model polling.
   Retain immutable model/arbiter choices, suppress ignored output and remove
   one-off jobs only after a successful run. Refuse configuration/namespace drift

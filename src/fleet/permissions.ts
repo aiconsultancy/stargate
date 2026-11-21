@@ -8,13 +8,15 @@ export type FleetPermissionRule = {
 type FleetAction =
   | "fleet_verify_instruction"
   | "fleet_dispatch"
-  | "fleet_status";
+  | "fleet_status"
+  | "fleet_answer_offer";
 type ReviewAction = "fleet_review";
 const actions: readonly (FleetAction | ReviewAction)[] = [
   "fleet_verify_instruction",
   "fleet_dispatch",
   "fleet_status",
   "fleet_review",
+  "fleet_answer_offer",
 ];
 
 // Deliberately smaller than a general native glob language. Punctuation that
@@ -87,6 +89,8 @@ export function fleetRequestAction(request: FleetRequest): {
         action: "fleet_status",
         resource: request.input.requestID ?? "fleet",
       };
+    case "answer":
+      return { action: "fleet_answer_offer", resource: request.input.offerID };
   }
 }
 
