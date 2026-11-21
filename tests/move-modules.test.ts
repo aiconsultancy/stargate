@@ -160,6 +160,64 @@ test("batch moves preserve index shorthand, extension spelling and moved depende
   await moveModules(root, moves, { check: true });
 });
 
+test.each([
+  ["src/item/use.ts", "../item"],
+  ["src/item/nested/use.ts", "../../item"],
+] as const)(
+  "keeps the sibling file named when its importer moves to %s",
+  async (destination, specifier) => {
+    const root = await fixture({
+      "src/item.ts": "export const value = 1;\n",
+      "src/use.ts": 'import { value } from "./item";\n',
+    });
+    const moves = [["src/use.ts", destination]] as const;
+    await moveModules(root, moves);
+    expect(await text(root, destination)).toBe(
+      `import { value } from "${specifier}";\n`,
+    );
+    await moveModules(root, moves, { check: true });
+  },
+);
+
+test("updates a root importer when its dependency moves into the same-named folder", async () => {
+  const root = await fixture({
+    "src/item.ts": 'export { value } from "./use";\n',
+    "src/use.ts": "export const value = 1;\n",
+  });
+  const moves = [["src/use.ts", "src/item/use.ts"]] as const;
+  await moveModules(root, moves);
+  expect(await text(root, "src/item.ts")).toBe(
+    'export { value } from "./item/use";\n',
+  );
+  await moveModules(root, moves, { check: true });
+});
+
+test("names the index file when a directly imported file moves to index.ts", async () => {
+  const root = await fixture({
+    "src/item.ts": "export const value = 1;\n",
+    "src/use.ts": 'import { value } from "./item";\n',
+  });
+  const moves = [["src/item.ts", "src/item/index.ts"]] as const;
+  await moveModules(root, moves);
+  expect(await text(root, "src/use.ts")).toBe(
+    'import { value } from "./item/index";\n',
+  );
+  await moveModules(root, moves, { check: true });
+});
+
+test("preserves directory shorthand when an index module moves to index.ts", async () => {
+  const root = await fixture({
+    "src/old/index.ts": "export const value = 1;\n",
+    "src/use.ts": 'import { value } from "./old";\n',
+  });
+  const moves = [["src/old/index.ts", "src/item/index.ts"]] as const;
+  await moveModules(root, moves);
+  expect(await text(root, "src/use.ts")).toBe(
+    'import { value } from "./item";\n',
+  );
+  await moveModules(root, moves, { check: true });
+});
+
 test("rewrites exact documentation paths once, not lookalikes or other files", async () => {
   const original = [
     "`src/item.ts` [module](src/item.ts) src/item.ts:14 src/item.ts.",
