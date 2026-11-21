@@ -8,10 +8,17 @@ changes wait until a person approves a release.
 
 ## Merge policy
 
-Use short-lived branches and ready PRs. After review is clear, enable
-`gh pr merge --auto --squash`. Main protection requires **Quality checks**
-with strict up-to-date checks. If main moves, update the branch and re-run
-checks. GitHub deletes the remote branch after merge.
+Use short-lived branches and ready PRs. When a PR is ready, enable
+`gh pr merge --auto --squash`. Main protection requires only **Quality
+checks** on the PR's exact head, with no approving review. The branch does
+not need to be up to date with `main`: a PR without conflicts merges as it is,
+so update it only to resolve conflicts. A requested Go or No go from another
+captain is advice, not a merge gate. GitHub deletes the remote branch after
+merge.
+
+The gate is before a release: the release workflow publishes only the current
+`main` commit, and only after **Quality checks**, including the full test suite
+and the self-update environment test, have passed on that commit.
 
 ## Prepare release notes
 
