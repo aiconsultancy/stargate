@@ -45,34 +45,9 @@ Pass non-secret CLI options through `ARGS`, or `mise run TASK -- OPTIONS`.
 
 ## Code boundaries
 
-- `src/config.ts`: strict boundary validation and environment references.
-- `src/cli.ts`, `src/setup.ts`, `src/service.ts`: CLI, wizard, user service.
-- `src/slack.ts`: one Socket Mode/Web API connection per bot registration.
-- `src/irc/`: IRCv3 transport: client (CAP/SASL/TLS/reconnect), admission
-  and turn limits, plain-text line delivery, captain/crew ship wiring.
-  See `docs/irc.md`; it must not depend on Slack.
-- `src/routing.ts`: event validation, access rules, conversation identity.
-- `src/gateway.ts`: per-thread ordering, backend execution, reply delivery.
-- `src/attachment-delivery.ts`: publication of reply files through an upload
-  or link transport; each file's stored phase makes a retry resume.
-- `src/store.ts`: SQLite queue, session mappings, delivery progress.
-- `src/backend.ts`, `src/backends/`: backend contract and implementations.
-- `src/runtime.ts`: process ownership, startup, cancellation, cleanup.
-- `src/dashboard.ts`, `src/dashboard-source.ts`, `src/session-history.ts`:
-  read-only operator dashboard on a private Unix socket. The source owns
-  session scope; backends only answer metadata and transcript pages.
-- `src/nightly/`: nightly maintenance (window, idle gate, release, host and
-  model updates, reports). A release with an unchanged crew plugin digest
-  restarts the gateway only (`plugin-digest.ts`). Every external command goes through the injectable
-  `CommandRunner`; tests never call real providers. See `docs/maintenance.md`.
-- `src/effect.ts`: Effect/Promise interop. Effect owns lifetimes and
-  concurrency in runtime, gateway workers and plugin setup; keep pure logic,
-  stores and the adapter contract Promise-based. Keep `effect` pinned to the
-  OpenCode SDK's version. See `docs/architecture-review.md`.
-
-Keep backend adapters independent of Slack. Preserve isolation by bot, app,
-workspace, backend settings, channel, and thread. Changing backend settings
-selects a new session namespace; never reuse another backend's session ID.
+Follow the current runtime boundaries and future slice rules in
+[the architecture design](docs/design.md#source-layout-and-boundary-rules).
+Keep backend adapters independent of Slack and preserve session isolation.
 
 ## Engineering
 
