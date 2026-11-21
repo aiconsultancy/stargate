@@ -410,7 +410,7 @@ try {
   await engine.exited;
   broker?.kill();
   await broker?.exited;
-  model.stop(true);
+  void model.stop(true);
   state.close();
   await rm(home, { recursive: true, force: true });
 }

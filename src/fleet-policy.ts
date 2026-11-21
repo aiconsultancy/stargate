@@ -161,11 +161,15 @@ export function fleetPermissions(
       actions.add(action);
   return [
     { action: "*", resource: "*", effect: "deny" },
-    ...[...actions].map(
-      (action): FleetRule => ({ action, resource: "*", effect: "allow" }),
-    ),
-    ...["*.env", "*.env.*", "*.key", "*.pem"].map(
-      (resource): FleetRule => ({ action: "read", resource, effect: "deny" }),
-    ),
+    ...[...actions].map((action): FleetRule => ({
+      action,
+      resource: "*",
+      effect: "allow",
+    })),
+    ...["*.env", "*.env.*", "*.key", "*.pem"].map((resource): FleetRule => ({
+      action: "read",
+      resource,
+      effect: "deny",
+    })),
   ];
 }

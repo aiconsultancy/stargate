@@ -61,6 +61,7 @@ Their prompt bodies use one pair of valid HTML comments:
 
 ```markdown
 <!-- STARGATE:START -->
+
 Stargate-generated role and ship instructions.
 <!-- STARGATE:END -->
 ```

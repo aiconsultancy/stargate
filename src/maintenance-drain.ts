@@ -286,13 +286,11 @@ const participantPath = (directory: string, dataDirectory: string) =>
   );
 
 export type ParticipantHandle = {
-  update(
-    patch: {
-      [K in keyof Omit<DrainParticipant, "pid" | "dataDirectory">]?:
-        | DrainParticipant[K]
-        | undefined;
-    },
-  ): Promise<void>;
+  update(patch: {
+    [K in keyof Omit<DrainParticipant, "pid" | "dataDirectory">]?:
+      | DrainParticipant[K]
+      | undefined;
+  }): Promise<void>;
   close(): Promise<void>;
 };
 

@@ -120,16 +120,14 @@ export class IrcSessions {
         "SELECT sequence,id,fromRole,fromID,toRole,toID,text,created FROM irc_dm_outbox WHERE sequence>? AND created>=? ORDER BY sequence LIMIT ?",
       )
       .all(input.after, oldest, input.limit)
-      .map(
-        (row): OutboxItem => ({
-          sequence: row.sequence,
-          id: row.id,
-          from: { role: role(row.fromRole), id: row.fromID },
-          to: { role: role(row.toRole), id: row.toID },
-          text: row.text,
-          created: row.created,
-        }),
-      );
+      .map((row): OutboxItem => ({
+        sequence: row.sequence,
+        id: row.id,
+        from: { role: role(row.fromRole), id: row.fromID },
+        to: { role: role(row.toRole), id: row.toID },
+        text: row.text,
+        created: row.created,
+      }));
     return { items, latest };
   }
 

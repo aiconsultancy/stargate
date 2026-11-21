@@ -162,8 +162,8 @@ export class SlackConnection implements SlackDelivery {
         clientOptions: options,
         autoReconnectEnabled: false,
       });
-      socket.on("slack_event", async (request: SocketRequest) => {
-        await this.handle?.(request);
+      socket.on("slack_event", (request: SocketRequest) => {
+        void this.handle?.(request);
       });
       return socket;
     }, log);

@@ -55,112 +55,116 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk: string) => {
   prompt += chunk;
 });
-process.stdin.on("end", async () => {
-  deaf = prompt.includes("deaf");
-  log({ pid: process.pid, argv: args, env: process.env, cwd: process.cwd() });
-  log({ prompt, images: images.map((path) => existsSync(path)) });
-  const sessions = join(home, "sessions");
-  mkdirSync(sessions, { recursive: true });
-  if (resumed && !existsSync(join(sessions, resumed))) {
-    process.stderr.write("raw stderr detail: no such thread\n");
-    process.exit(1);
-  }
-  const thread = prompt.includes("rethread")
-    ? crypto.randomUUID()
-    : (resumed ?? crypto.randomUUID());
-  writeFileSync(join(sessions, thread), prompt);
-  write({ type: "thread.started", thread_id: thread });
-  write({ type: "turn.started" });
-  if (prompt.includes("stubborn")) await stubborn(prompt.includes("detached"));
-  if (prompt.includes("swap")) {
-    const link = process.env["STARGATE_TEST_LINK"] ?? "";
-    rmSync(link);
-    symlinkSync(process.env["STARGATE_TEST_TARGET"] ?? "", link);
-    spawnSync("git", ["--version"], { stdio: "ignore" });
-  }
-  if (prompt.includes("hold")) {
-    // Absolute interpreter: the CLI's PATH depends on the host.
-    const holder = spawn(
-      process.execPath,
-      ["-e", "setInterval(() => {}, 1000)"],
-      {
-        stdio: ["ignore", "inherit", "inherit"],
-        env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
-      },
-    );
-    log({ grandchild: holder.pid });
-  }
-  if (prompt.includes("hang")) {
-    const child = spawn(
-      process.execPath,
-      ["-e", "setInterval(() => {}, 1000)"],
-      { stdio: "ignore" },
-    );
-    log({ grandchild: child.pid });
-    setInterval(() => {}, 1000);
-    return;
-  }
-  if (prompt.includes("crash")) {
-    process.stderr.write("raw stderr detail: upstream said no\n");
-    process.exit(3);
-  }
-  // "fail", or "fail=<provider message>;". "tool" runs a command first;
-  // "fatal" reports through the stream's `error` event instead.
-  if (prompt.includes("fail")) {
-    const message = /fail=([^;]*);/.exec(prompt)?.[1] ?? "raw upstream detail";
-    if (prompt.includes("tool"))
+process.stdin.on("end", () => {
+  void (async () => {
+    deaf = prompt.includes("deaf");
+    log({ pid: process.pid, argv: args, env: process.env, cwd: process.cwd() });
+    log({ prompt, images: images.map((path) => existsSync(path)) });
+    const sessions = join(home, "sessions");
+    mkdirSync(sessions, { recursive: true });
+    if (resumed && !existsSync(join(sessions, resumed))) {
+      process.stderr.write("raw stderr detail: no such thread\n");
+      process.exit(1);
+    }
+    const thread = prompt.includes("rethread")
+      ? crypto.randomUUID()
+      : (resumed ?? crypto.randomUUID());
+    writeFileSync(join(sessions, thread), prompt);
+    write({ type: "thread.started", thread_id: thread });
+    write({ type: "turn.started" });
+    if (prompt.includes("stubborn"))
+      await stubborn(prompt.includes("detached"));
+    if (prompt.includes("swap")) {
+      const link = process.env["STARGATE_TEST_LINK"] ?? "";
+      rmSync(link);
+      symlinkSync(process.env["STARGATE_TEST_TARGET"] ?? "", link);
+      spawnSync("git", ["--version"], { stdio: "ignore" });
+    }
+    if (prompt.includes("hold")) {
+      // Absolute interpreter: the CLI's PATH depends on the host.
+      const holder = spawn(
+        process.execPath,
+        ["-e", "setInterval(() => {}, 1000)"],
+        {
+          stdio: ["ignore", "inherit", "inherit"],
+          env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+        },
+      );
+      log({ grandchild: holder.pid });
+    }
+    if (prompt.includes("hang")) {
+      const child = spawn(
+        process.execPath,
+        ["-e", "setInterval(() => {}, 1000)"],
+        { stdio: "ignore" },
+      );
+      log({ grandchild: child.pid });
+      setInterval(() => {}, 1000);
+      return;
+    }
+    if (prompt.includes("crash")) {
+      process.stderr.write("raw stderr detail: upstream said no\n");
+      process.exit(3);
+    }
+    // "fail", or "fail=<provider message>;". "tool" runs a command first;
+    // "fatal" reports through the stream's `error` event instead.
+    if (prompt.includes("fail")) {
+      const message =
+        /fail=([^;]*);/.exec(prompt)?.[1] ?? "raw upstream detail";
+      if (prompt.includes("tool"))
+        write({
+          type: "item.completed",
+          item: {
+            id: "item_c",
+            type: "command_execution",
+            command: "deploy",
+            aggregated_output: "",
+          },
+        });
       write({
         type: "item.completed",
-        item: {
-          id: "item_c",
-          type: "command_execution",
-          command: "deploy",
-          aggregated_output: "",
-        },
+        item: { id: "item_e", type: "error", message },
       });
+      write(
+        prompt.includes("fatal")
+          ? { type: "error", message }
+          : { type: "turn.failed", error: { message } },
+      );
+      process.stderr.write("raw stderr detail\n");
+      process.exit(1);
+    }
+    const item = (body: object) =>
+      write({
+        type: "item.completed",
+        item: { id: crypto.randomUUID(), ...body },
+      });
+    item({ type: "reasoning", text: "private reasoning" });
+    item({
+      type: "command_execution",
+      command: "cat /secret",
+      aggregated_output: "SECRETOUTPUT",
+      exit_code: 0,
+      status: "completed",
+    });
+    write({
+      type: "item.started",
+      item: { id: "msg_1", type: "agent_message", text: "" },
+    });
     write({
       type: "item.completed",
-      item: { id: "item_e", type: "error", message },
+      item: { id: "msg_1", type: "agent_message", text: "Hello world" },
     });
-    write(
-      prompt.includes("fatal")
-        ? { type: "error", message }
-        : { type: "turn.failed", error: { message } },
-    );
-    process.stderr.write("raw stderr detail\n");
-    process.exit(1);
-  }
-  const item = (body: object) =>
+    item({ type: "error", message: "raw nonfatal detail" });
+    item({ type: "agent_message", text: "Done." });
     write({
-      type: "item.completed",
-      item: { id: crypto.randomUUID(), ...body },
+      type: "turn.completed",
+      usage: {
+        input_tokens: 1,
+        cached_input_tokens: 0,
+        output_tokens: 1,
+        reasoning_output_tokens: 0,
+      },
     });
-  item({ type: "reasoning", text: "private reasoning" });
-  item({
-    type: "command_execution",
-    command: "cat /secret",
-    aggregated_output: "SECRETOUTPUT",
-    exit_code: 0,
-    status: "completed",
-  });
-  write({
-    type: "item.started",
-    item: { id: "msg_1", type: "agent_message", text: "" },
-  });
-  write({
-    type: "item.completed",
-    item: { id: "msg_1", type: "agent_message", text: "Hello world" },
-  });
-  item({ type: "error", message: "raw nonfatal detail" });
-  item({ type: "agent_message", text: "Done." });
-  write({
-    type: "turn.completed",
-    usage: {
-      input_tokens: 1,
-      cached_input_tokens: 0,
-      output_tokens: 1,
-      reasoning_output_tokens: 0,
-    },
-  });
-  if (prompt.includes("linger")) setInterval(() => {}, 1000);
+    if (prompt.includes("linger")) setInterval(() => {}, 1000);
+  })();
 });

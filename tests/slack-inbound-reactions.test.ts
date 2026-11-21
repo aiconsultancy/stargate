@@ -70,12 +70,10 @@ function fixture(
     },
     async close() {},
   };
-  const userInfo = mock(
-    async (user: string): Promise<unknown> => ({
-      ok: true,
-      user: { id: user, team_id: "T123", is_bot: false, deleted: false },
-    }),
-  );
+  const userInfo = mock(async (user: string): Promise<unknown> => ({
+    ok: true,
+    user: { id: user, team_id: "T123", is_bot: false, deleted: false },
+  }));
   const post = mock(async (_channel: string, _thread: string, _text: string) =>
     prompts.length === 1 ? "2.000" : "4.000",
   );

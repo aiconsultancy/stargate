@@ -398,7 +398,7 @@ for (const outcome of ["success", "failure", "cancel", "close"] as const) {
         outcome === "success" ? "completed" : "uncertain",
       );
       const saved = f.state.activity.task(f.state.task(f.task.id) ?? f.task);
-      f.emit("Late observer callback");
+      void f.emit("Late observer callback");
       for (const callback of callbacks) callback();
       f.clock.advance(10000);
       expect(f.state.activity.task(f.state.task(f.task.id) ?? f.task)).toEqual(

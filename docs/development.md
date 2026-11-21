@@ -12,14 +12,19 @@ mise run check
 mise run hooks
 ```
 
-`check` runs strict TypeScript, Biome lint/format checks, and Bun tests. TypeScript
+`check` runs strict TypeScript, Oxlint lint checks, and Bun tests. TypeScript
 also rejects unchecked index access, implicit returns/overrides, unused code,
 fallthrough, unreachable code, unused labels, and unchecked side-effect imports.
-Biome treats warnings as failures and checks promise handling, unsafe returns,
-exhaustive switches, explicit `any`, non-null assertions, and `@ts-ignore`.
+Oxlint treats warnings as failures and runs type-aware (backed by tsrs),
+checking promise handling, exhaustive switches, explicit `any`, non-null
+assertions, and `@ts-ignore`, across `src`, `tests`, `scripts` and `perf`.
+The deeper exceed-parity type-aware rules (unsafe returns, unbound methods,
+misused spreads and more) stay in the advisory `mise run oxlint` layer until
+triaged.
 
-`format` applies Biome's safe fixes. `hooks-install` installs prek's pre-commit
-hook for this clone. `hooks` runs the same repository-wide gate as CI, plus
+`format` runs Oxfmt over the repository. `hooks-install` installs prek's
+pre-commit and pre-push hooks for this clone. `hooks` runs the same
+repository-wide gate as CI, plus
 workflow validation, merge/case conflicts, broken symlinks, large files, private
 keys, trailing whitespace, final newlines, and TOML/YAML syntax. File hygiene
 hooks can edit files; review and stage their changes before retrying a commit.
@@ -34,10 +39,19 @@ GitHub Actions runs this gate for pull requests and pushes to `main`, using
 pinned tools and frozen dependency installation. No Slack or provider credentials
 are required.
 
+The pre-push hook refuses to push a branch that is behind the freshly
+fetched `origin/main`: rebase first (`git fetch origin && git rebase
+origin/main`), re-run checks, then push. Pushes to `main` itself, branch
+deletions and non-branch refs are not checked. When the fetch itself fails,
+the push is refused rather than verified against a stale ref; bypass only
+when you are certain `main` is unchanged (`git push --no-verify`). After
+pulling this hook in, re-run `mise run hooks-install` once to install the
+new hook type in your clone.
+
 TypeScript checks first-party source, tests and performance benchmarks.
 `skipLibCheck` remains enabled
 because the installed SDK declarations have upstream type errors. It does not
-skip checks of SDK use in this code. Biome's `useLiteralKeys` style rule is off
+skip checks of SDK use in this code. Oxlint's `useLiteralKeys` style rule is off
 because it conflicts with `noPropertyAccessFromIndexSignature`; record keys use
 bracket access. Do not replace it with casts, suppression comments, or weaker
 type-safety rules.
@@ -48,7 +62,10 @@ Effect **4.1.0** stays pinned to the OpenCode SDK's version. The official
 revision. Read `node_modules/effect/AGENTS.md` before changing Effect code.
 The migration skill is available for future upgrades; this project already uses
 Effect 4. Skill examples that install `latest` do not override the SDK pin.
-Biome leaves these two upstream skill files unformatted to preserve their hashes.
+Oxfmt leaves these upstream skill files unformatted to preserve their hashes.
+The quality gate is the root `.oxlintrc.json`; the vendored anti-slop rules
+and code-size thresholds live in the advisory `tools/oxlint/oxlint.config.ts`
+run by `mise run oxlint`.
 
 ## Dependency updates
 

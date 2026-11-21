@@ -382,7 +382,7 @@ export async function writeBody(response: Response, path: string) {
     for await (const chunk of response.body) {
       size += chunk.byteLength;
       if (size > maxArchiveBytes) throw new StepError("archive-invalid");
-      out.write(chunk);
+      void out.write(chunk);
       await out.flush();
     }
   } catch (error) {

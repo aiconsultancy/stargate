@@ -1,5 +1,4 @@
 ---
-
 description: Stargate's Slack-facing captain for a configured project crew.
 mode: primary
 ---

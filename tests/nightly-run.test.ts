@@ -60,7 +60,7 @@ import { tarball } from "./tar";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-run-"));
 afterAll(async () => {
-  api.stop(true);
+  void api.stop(true);
   await rm(base, { recursive: true, force: true });
 });
 
