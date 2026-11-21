@@ -424,18 +424,30 @@ test("the default cache clock ignores an injected wall clock", async () => {
 
 test("a read that gets its slot late caches its timeout only briefly", async () => {
   const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
-  const busy = [0, 1, 2, 3].map(() => Promise.withResolvers<null>());
+  const busy = [0, 1, 2, 3].map((n) => ({
+    directory: join(root, `busy-${n}`),
+    result: Promise.withResolvers<null>(),
+    started: Promise.withResolvers<void>(),
+  }));
+  const heldByCwd = new Map(busy.map((hold) => [hold.directory, hold]));
+  const target = join(root, "late");
   const late = Promise.withResolvers<null>();
   const started = Promise.withResolvers<void>();
   const deadline = new AbortController();
   let mono = 100;
   let calls = 0;
+  let targetStarted = false;
   const read = createGitReader(
     Date.now,
-    async () => {
-      const call = ++calls;
-      if (call <= 4) return busy[call - 1]?.promise ?? null;
-      if (call === 5) {
+    async (_args, options) => {
+      calls++;
+      const hold = options.cwd ? heldByCwd.get(options.cwd) : undefined;
+      if (hold) {
+        hold.started.resolve();
+        return hold.result.promise;
+      }
+      if (options.cwd === target && !targetStarted) {
+        targetStarted = true;
         started.resolve();
         return late.promise;
       }
@@ -447,28 +459,26 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
     400,
   );
   const signal = new AbortController().signal;
+  const timeout = spyOn(AbortSignal, "timeout").mockReturnValue(signal);
   try {
-    for (const name of ["busy-0", "busy-1", "busy-2", "busy-3", "late"])
-      await mkdir(join(root, name));
-    const timeout = spyOn(AbortSignal, "timeout").mockReturnValue(signal);
-    const busyReads = [0, 1, 2, 3].map((n) =>
-      read(join(root, `busy-${n}`), signal),
-    );
-    const target = join(root, "late");
+    for (const directory of [...heldByCwd.keys(), target])
+      await mkdir(directory);
+    const busyReads = busy.map((hold) => read(hold.directory, signal));
+    await Promise.all(busy.map((hold) => hold.started.promise));
     // Its 400 ms budget ends at 500; it gets a slot at 350, with less than
     // half of it left.
     timeout.mockReturnValue(deadline.signal);
     const pending = read(target, signal);
     timeout.mockRestore();
     mono = 350;
-    busy[0]?.resolve(null);
+    busy[0]?.result.resolve(null);
     await busyReads[0];
     await started.promise;
     deadline.abort(new DOMException("Read timed out", "TimeoutError"));
     const timedOut = await pending;
     expect(timedOut).toMatchObject({ error: "Git read timed out." });
     expect(calls).toBe(5);
-    for (const hold of busy) hold.resolve(null);
+    for (const hold of busy) hold.result.resolve(null);
     late.resolve(null);
     await Promise.all(busyReads);
     mono += 199;
@@ -479,7 +489,8 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
       error: "Git state unavailable.",
     });
   } finally {
-    for (const hold of busy) hold.resolve(null);
+    timeout.mockRestore();
+    for (const hold of busy) hold.result.resolve(null);
     late.resolve(null);
     await rm(root, { recursive: true, force: true });
   }
