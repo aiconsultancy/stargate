@@ -5,6 +5,17 @@ Keep accepted inputs, decoded values, public configuration, stored records and
 tool wire formats unchanged. Keep Bun SQLite and the Promise adapter contract.
 This migration does not upgrade Effect or the SDKs.
 
+## Touched-file ratchet
+
+Any change that modifies a file importing `zod` must replace that file's
+Zod schemas with Effect Schema in the same change; otherwise the touch must
+be reverted. CI enforces this on every pull request through
+`scripts/hooks/touched-zod.sh`, which compares the PR against its base and
+fails while any touched file under `src`, `scripts` or `perf` still imports
+`zod`. Untouched Zod files keep working until their migration batch. The
+legacy-oracle tests are exempt: they compare against captured Zod behaviour
+by design and stay until the migration removes the oracle.
+
 ## PR budget and batch boundaries
 
 The revised target is **18 migration PRs in total**. Twelve migration PRs are
