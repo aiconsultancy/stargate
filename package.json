@@ -7,23 +7,21 @@
     "type": "git",
     "url": "git+https://github.com/aiconsultancy/stargate.git"
   },
+  "bin": {
+    "stargate": "./src/main.ts"
+  },
   "type": "module",
   "exports": {
     ".": "./src/crew/plugin.ts"
   },
-  "bin": {
-    "stargate": "./src/main.ts"
-  },
-  "engines": {
-    "bun": ">=1.4.4"
-  },
-  "packageManager": "bun@1.4.4",
   "scripts": {
     "start": "bun run src/main.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check --error-on-warnings .",
-    "format": "biome check --write --error-on-warnings .",
+    "typecheck": "tsrs --noEmit",
+    "typecheck:tsc": "tsc --noEmit",
+    "lint": "oxlint --type-aware --deny-warnings src tests scripts perf && oxfmt --check",
+    "oxlint": "oxlint --type-aware -c tools/oxlint/oxlint.config.ts --disable-nested-config src tests scripts perf",
+    "format": "oxfmt --write",
     "check": "bun run typecheck && bun run lint && bun test"
   },
   "dependencies": {
@@ -44,9 +42,16 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.8",
     "@hona/strobe": "0.44.0",
+    "@oxlint/plugins": "1.93.0",
     "@types/bun": "^1.4.4",
+    "oxfmt": "0.79.0",
+    "oxlint": "1.93.0",
+    "tsrs": "7.1.0-beta.tsrs4",
     "typescript": "^7.0.2"
-  }
+  },
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "packageManager": "bun@1.4.4"
 }

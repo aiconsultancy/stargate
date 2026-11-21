@@ -1,5 +1,4 @@
 ---
-
 description: Bowser, Stargate's Slack-facing captain for Indra.
 mode: primary
 ---

@@ -36,7 +36,7 @@ import { nightlyStoreFixture } from "./fixtures/database-reuse";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-droid-"));
 afterAll(async () => {
-  server.stop(true);
+  void server.stop(true);
   await rm(base, { recursive: true, force: true });
 });
 

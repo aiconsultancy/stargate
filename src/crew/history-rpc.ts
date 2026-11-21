@@ -146,18 +146,16 @@ export class CrewHistoryRPC {
       );
       const selected = rows.slice(0, input.limit);
       return {
-        sessions: selected.map(
-          (row): HistorySession => ({
-            id: `${piHistoryPrefix}${owned.sessionID}~${row.conversationID}`,
-            harness: "pi-durable",
-            kind: "conversation",
-            parentID: input.parentID,
-            title: row.title,
-            ...(input.updatedSince !== undefined && row.updatedAt !== null
-              ? { updatedAt: row.updatedAt }
-              : {}),
-          }),
-        ),
+        sessions: selected.map((row): HistorySession => ({
+          id: `${piHistoryPrefix}${owned.sessionID}~${row.conversationID}`,
+          harness: "pi-durable",
+          kind: "conversation",
+          parentID: input.parentID,
+          title: row.title,
+          ...(input.updatedSince !== undefined && row.updatedAt !== null
+            ? { updatedAt: row.updatedAt }
+            : {}),
+        })),
         ...(input.updatedSince === undefined && rows.length > input.limit
           ? {
               cursor: Buffer.from(

@@ -1,4 +1,29 @@
 [install]
+# Save exact versions: every dependency resolves to a pinned version,
+# matching the repository's manual exact-pin policy.
+exact = true
 # Supply-chain cool-off: install only package versions published at least one
 # day ago. Matches the Dependabot cooldown.
 minimumReleaseAge = 86400
+# Operator-approved immediate-update exceptions (November 2026): the Rust
+# TypeScript checker (tsrs) and its platform binaries, the Bun runtime (npm
+# package form; the pinned mise tool has no age gate), and Effect (kept
+# version-aligned with the OpenCode SDK per AGENTS.md; this only removes the
+# delay, not the pin policy). Everything else keeps the 24-hour rule. The
+# platform packages are named explicitly: bun 1.4.4 does not expand the
+# "@tsrs/*" glob here, and install-time resolution of these optional
+# platform binaries is exactly where the age gate would bite.
+minimumReleaseAgeExcludes = [
+  "tsrs",
+  "@tsrs/darwin-arm64",
+  "@tsrs/darwin-x64",
+  "@tsrs/linux-arm64-gnu",
+  "@tsrs/linux-arm64-musl",
+  "@tsrs/linux-x64-gnu",
+  "@tsrs/linux-x64-musl",
+  "@tsrs/win32-arm64",
+  "@tsrs/win32-x64",
+  "bun",
+  "effect",
+  "@effect/*",
+]

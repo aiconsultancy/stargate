@@ -9,7 +9,7 @@ For dependency updates:
 - Keep the three direct `@earendil-works` packages pinned to the same version.
 - Keep OpenCode client/plugin usage consistent with the installed V2 versions.
 - Keep GitHub Actions pinned to full commit SHAs with release-version comments.
-- Check that frozen Bun installation, strict TypeScript, Biome, workflow lint,
+- Check that frozen Bun installation, strict TypeScript, Oxlint, workflow lint,
   and tests still pass. Do not recommend bypassing or weakening these checks.
 - Do not approve source changes disguised as dependency updates.
 

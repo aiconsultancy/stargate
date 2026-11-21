@@ -68,7 +68,7 @@ const server = Bun.serve({
 });
 port = server.port ?? 0;
 afterAll(async () => {
-  server.stop(true);
+  void server.stop(true);
   await rm(root, { recursive: true, force: true });
 });
 

@@ -223,10 +223,10 @@ cron snapshots, DM cursors, crew tasks, journal and exact native metadata edits.
      "gateway": "data/pogo.sqlite",
      "cron": "data/cron.sqlite",
      "crew": [],
-     "paths": [{"from": "/srv/pogo", "to": "/srv/stargate"}],
+     "paths": [{ "from": "/srv/pogo", "to": "/srv/stargate" }],
      "botKeys": [],
      "mesij": [],
-     "moves": [{"from": "data/pogo.sqlite", "to": "data/stargate.sqlite"}],
+     "moves": [{ "from": "data/pogo.sqlite", "to": "data/stargate.sqlite" }],
      "jsonFiles": [],
      "cells": []
    }
@@ -261,6 +261,7 @@ cron snapshots, DM cursors, crew tasks, journal and exact native metadata edits.
    over prompts/history. OpenCode changes must use V2 APIs as described above.
    JSON columns need complete old/new serialized values.
    Check unchanged native IDs and payload text before accepting these edits.
+
 5. Run from the verified new source tree:
 
    ```sh
@@ -275,6 +276,7 @@ cron snapshots, DM cursors, crew tasks, journal and exact native metadata edits.
    bundle becomes eligible for activation only after all edits and moves pass
    and `.stargate-cutover-complete.json` exists. The operator activates all
    converted roots during the same outage; the program never promotes them.
+
 6. Compare row counts, native IDs, session mappings, unfinished job statuses,
    `sent`, retries, attachment phases, crew uncertain/running tasks, journal,
    mail and DM cursors, cron run snapshots and future deadlines. Validate the
@@ -322,6 +324,7 @@ updater to accept the new format. Do not rename or retag historical releases.
    [manual-install runbook](maintenance.md#runbook-install-a-release-by-hand).
    Do not hand-create a directory under `releases/`, edit `current`, invent
    metadata, or label the old Pogo tree as a Stargate release.
+
 4. Update OpenCode/Pi plugin paths, permissions, instructions and tool bindings
    to the new tree. Restart the native server only after its metadata/store
    conversion is validated. Remove the old `bun link` command registration and

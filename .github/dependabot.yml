@@ -10,6 +10,15 @@ updates:
     open-pull-requests-limit: 5
     cooldown:
       default-days: 1
+      # Operator-approved immediate updates (November 2026): the Rust
+      # TypeScript checker, the Bun runtime package, and Effect. The Effect
+      # version-alignment group policy above is unchanged.
+      exclude:
+        - tsrs
+        - "@tsrs/*"
+        - bun
+        - effect
+        - "@effect/*"
     commit-message:
       prefix: chore
       include: scope

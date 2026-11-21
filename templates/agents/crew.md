@@ -1,5 +1,4 @@
 ---
-
 description: Stargate's durable configured project worker.
 mode: primary
 ---

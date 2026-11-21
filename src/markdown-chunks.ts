@@ -46,7 +46,7 @@ export function markdownChunks(points: string[]): string[] {
     return state;
   };
   const result: string[] = [];
-  for (let start = 0; start < points.length; ) {
+  for (let start = 0; start < points.length;) {
     const before = stateAt(start);
     const prefix = before ? `${before.opening}\n` : "";
     const capacity = 2800 - Array.from(prefix).length;

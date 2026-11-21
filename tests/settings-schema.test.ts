@@ -263,7 +263,9 @@ for (const [name, codec] of Object.entries(codecs))
         .update(settingsCanonical(outcomes))
         .digest("hex"),
     }).toEqual(settingsGolden[name as keyof typeof settingsGolden]);
-  });
+    // The legacy oracle sweep is CPU-bound and can exceed the default 5s
+    // under a full-suite load; it is a deliberate golden comparison.
+  }, 60_000);
 
 test("settings preserve Unicode bounds, URL cleanup and explicit undefined keys", () => {
   const name = "𐐀".repeat(40);

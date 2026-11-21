@@ -22,6 +22,7 @@ IRC-only installation.
    from the Stargate manifest, skip opening a new creation page. If the link
    does not prefill, run `bun run src/main.ts manifest --name project-helper --json`
    and paste the output into Slack's [manifest form][manifest].
+
 3. In Slack's app settings, copy the **App ID** (`A…`) from **Basic
    Information**. Under **App-Level Tokens**, generate an `xapp-…` token with
    `connections:write`. Install the app from **OAuth & Permissions** and copy
@@ -676,6 +677,7 @@ or runtime databases. Link to this guide rather than copying a live transcript.
 ## Official references
 
 [manifest]: https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests/#creating-apps-using-manifests
+
 - [Slack Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode/)
 - [Slack agent setup](https://docs.slack.dev/agent-setup/prompt.md)
 - [Hosted Slack CLI skill](https://docs.slack.dev/.well-known/skills/slack-cli/SKILL.md)

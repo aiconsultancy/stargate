@@ -241,9 +241,11 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
           .catch(() => {
             fail();
           })
-          .finally(async () => {
+          .finally(() => {
             deadline.abort();
-            await timeout;
+          })
+          .then(() => timeout)
+          .then(() => {
             active.delete(claim.id);
           });
         active.set(claim.id, { controller, promise });
