@@ -28,9 +28,16 @@
 - Enabled by default: IRC live progress, fleet typing, native questions for
   supported registrations, and paired crew question handoff. Background
   question alerts still require a configured `questionOperator`.
+- Teams waiting phrases: none. They use the existing Teams `livePresence`
+  flag and `waiting` settings; no flag is added and no default changes.
 
 ### Changes
 
+- Show the shared waiting phrases with the bot's display name in Teams live
+  presence instead of the generic “Thinking” and “Working” labels. They follow
+  `waiting.delayMs`, `waiting.intervalMs` and a captain's waiting override,
+  rotate only on the existing presence refresh, and stop with the turn.
+  Specific stage labels are unchanged.
 - Add durable quota-reset and quota-threshold cron events without model polling.
   Retain immutable model/arbiter choices, suppress ignored output and remove
   one-off jobs only after a successful run. Refuse configuration/namespace drift

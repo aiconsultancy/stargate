@@ -213,6 +213,17 @@ Set `livePresence: true` on a Teams registration to show typing and short
 status updates for a recent human request. The update is anchored to that
 message. OpenCode reasoning, tool and reply events select fixed labels such as
 “Thinking”, “Using a tool” and “Writing a reply”. The first text reply for that request closes
-the stream. Image-only replies use normal attachment delivery. Feedback stops
+the stream.
+
+The generic “Thinking” and “Working” labels give way to the shared
+[waiting phrases](waiting.md), such as “Adama is pondering…”, after the
+registration's `waiting.delayMs`. The name comes from the registration's
+`displayName`, then its OpenCode agent ID, then its `id`. The phrase changes
+at most once per `waiting.intervalMs`, on the next presence refresh (about
+every three seconds), and is sent only when it changes. Every other label,
+including “Using a tool”, “Writing a reply”, “Queued”, the waiting labels
+and “Connection interrupted”, stays as it is. `waiting.delayMs: null` keeps
+the generic labels. A captain's waiting override applies as it does in Slack,
+and is read when the turn starts. Image-only replies use normal attachment delivery. Feedback stops
 when the turn ends or after ten minutes. Where informative updates are unavailable, Teams receives a typing
 activity while the turn runs. This option defaults to off.
