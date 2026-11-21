@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import type { BotConfig } from "./config";
-import type { SlackDelivery } from "./gateway";
+import type { SlackDelivery } from "./gateway/ports";
 import {
   type NativeQuestion,
   nativeQuestionSchema,

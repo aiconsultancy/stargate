@@ -15,7 +15,7 @@ import {
   readConfigSnapshot,
   sameConfigSnapshot,
 } from "./config-panel";
-import type { SlackDelivery } from "./gateway";
+import type { SlackDelivery } from "./gateway/ports";
 import type { NotificationPage } from "./notification-store";
 import { notificationKey } from "./notifications";
 import {

@@ -605,6 +605,8 @@
       "files": [
         "src/cancellation.ts",
         "src/gateway.ts",
+        "src/gateway/ports.ts",
+        "src/gateway/store-types.ts",
         "src/peers.ts",
         "src/routing.ts",
         "src/store.ts",
@@ -614,6 +616,8 @@
       ],
       "public": [
         "src/gateway.ts",
+        "src/gateway/ports.ts",
+        "src/gateway/store-types.ts",
         "src/peers.ts",
         "src/routing.ts",
         "src/store.ts"

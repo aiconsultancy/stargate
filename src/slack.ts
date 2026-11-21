@@ -7,7 +7,7 @@ import { activityContent } from "./activity-slack";
 import { stopBlock } from "./cancellation";
 import type { CrewUIApi } from "./crew-ui";
 import type { CronUIApi } from "./cron-ui";
-import type { SlackDelivery } from "./gateway";
+import type { ReactionTargetRequest, SlackDelivery } from "./gateway/ports";
 import type { DisplayPayload } from "./notify/model";
 import type { SinkOutcome } from "./notify/sink";
 import { notificationContent, notificationOutcome } from "./notify/slack";
@@ -39,14 +39,6 @@ export type SocketRequest = {
   type: string;
   body: unknown;
   ack: (payload?: Record<string, unknown>) => Promise<void>;
-};
-
-export type ReactionTargetRequest = {
-  channel: string;
-  ts: string;
-  appId: string;
-  identity: Identity;
-  signal: AbortSignal;
 };
 
 const reactionTargetSchema = Schema.Struct({
