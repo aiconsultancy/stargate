@@ -25,6 +25,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history: the touched-Zod ratchet diffs the PR against its
+          # base and needs the merge base that a shallow checkout lacks.
+          fetch-depth: 0
       - name: Verify dependency commit provenance
         if: github.event.pull_request.user.login == 'dependabot[bot]'
         shell: bash
@@ -52,6 +55,14 @@ jobs:
           printf 'TMPDIR=%s\nXDG_CACHE_HOME=%s/cache\n' "$test_tmp" "$test_tmp" >> "$GITHUB_ENV"
       - name: Run pre-commit and quality checks
         run: mise run hooks
+      # Touched-Zod ratchet: a change that modifies a file importing zod
+      # must migrate that file's schemas to Effect Schema in the same
+      # change. Only pull requests have a comparison base.
+      - name: Reject Zod in files touched by the PR
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin +${{ github.event.pull_request.base.sha }}:refs/remotes/base/pr-base
+          mise exec -- scripts/hooks/touched-zod.sh "${{ github.event.pull_request.base.sha }}"
       # Self-updates test a release with a minimal environment and a hidden
       # TMPDIR; a test that only passes with the developer's environment
       # would block every update.

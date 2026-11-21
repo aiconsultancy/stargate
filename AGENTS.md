@@ -80,7 +80,10 @@ selects a new session namespace; never reuse another backend's session ID.
   Migrate existing Zod schemas in component batches, preserving validation and
   wire formats. Keep coupled schemas, direct consumers and parity tests together.
   Follow the PR budget and batch order in `docs/effect-schema-migration.md`.
-  Keep remaining Zod consumers until their migration phase.
+  Keep remaining Zod consumers until their migration phase. Touched-Zod
+  ratchet: a change that modifies a file importing `zod` must migrate that
+  file's schemas to Effect Schema in the same change; CI rejects the PR
+  otherwise.
 - Prefer the installed Effect capability over another dependency when required
   behavior and security properties are equivalent. Do not remove SDK-required
   dependencies or change public behavior merely to reduce dependency count.
