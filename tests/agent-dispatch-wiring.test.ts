@@ -382,11 +382,20 @@ test("runtime end to end: an offer in the command channel, an answer reply from 
   expect(marker).toMatchObject({ kind: "offer", issue: "PRJ-1" });
   const offerID = marker?.kind === "offer" ? marker.offerID : undefined;
   expect(offerID).toMatch(/^offer-[a-f0-9]{16}$/);
-  const ledger = new DispatchLedger(
-    join(admiral.dataDirectory, "agent-dispatch.sqlite"),
-  );
-  const messageID = ledger.tracked("i1")?.offer?.messageID;
-  ledger.close();
+  // The dispatcher records the offer's message ID from its own echo, which
+  // can arrive after the fake server has seen the offer.
+  const offerMessageID = () => {
+    const ledger = new DispatchLedger(
+      join(admiral.dataDirectory, "agent-dispatch.sqlite"),
+    );
+    try {
+      return ledger.tracked("i1")?.offer?.messageID;
+    } finally {
+      ledger.close();
+    }
+  };
+  await until(() => offerMessageID() !== undefined, 5000, "offer message ID");
+  const messageID = offerMessageID();
   expect(messageID).toBeDefined();
   const reply = {
     "+draft/reply": messageID ?? "",

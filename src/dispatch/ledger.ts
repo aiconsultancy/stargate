@@ -73,7 +73,9 @@ const walkSchema = Schema.Struct({
 export type AssignmentWalk = typeof walkSchema.Type;
 export type DispatchOfferRecord = typeof offerSchema.Type;
 export type TrackedIssue = {
-  -readonly [K in keyof typeof trackedSchema.Type]: (typeof trackedSchema.Type)[K];
+  -readonly [
+    K in keyof typeof trackedSchema.Type
+  ]: (typeof trackedSchema.Type)[K];
 };
 
 /**
