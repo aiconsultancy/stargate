@@ -51,7 +51,8 @@ function fitBytes(text: string, bytes: number) {
 /**
  * IRC side of agent dispatch on the rear admiral's own connection: requests
  * to captains are PRIVMSGs in the command channel addressed by verified
- * nick, so people see them; status lines are NOTICEs, which wake no agent.
+ * nick, so people see them, with fixed text from the marker alone. The
+ * issue title and status lines are NOTICEs, which wake no agent.
  */
 export class IrcDispatchMessenger implements DispatchMessenger {
   private warnedTags = false;
@@ -106,6 +107,7 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     };
   }
 
+  /** Cut to the line budget; titles shorten first, on code point boundaries. */
   private fit(
     command: "PRIVMSG" | "NOTICE",
     tags: Record<string, string>,
@@ -120,10 +122,38 @@ export class IrcDispatchMessenger implements DispatchMessenger {
   }
 
   /**
+   * The issue title for people, as a NOTICE after the request: a NOTICE
+   * never starts a turn, so the user-editable title never reaches a
+   * captain's agent. Best effort: the request is already sent, so a failure
+   * here is logged (without the title) and neither fails nor repeats it.
+   */
+  private async title(issue: IssueLabel, replyTo: string | undefined) {
+    try {
+      const tags =
+        replyTo && validMsgid(replyTo) && this.client.hasCap("message-tags")
+          ? { "+draft/reply": replyTo }
+          : {};
+      const text = this.fit("NOTICE", tags, (max) =>
+        dispatchText.title(issue, max),
+      );
+      await this.client.send(
+        "NOTICE",
+        [this.channel, text],
+        tags,
+        this.allowed,
+      );
+    } catch {
+      this.log.warn(
+        { issue: issue.identifier },
+        "Agent dispatch issue title notice was not delivered",
+      );
+    }
+  }
+
+  /**
    * A request's marker names its issue, and the captain's turn is built from
    * that marker alone. An identifier the marker cannot carry is refused
-   * before anything is sent: an untagged request would hand the captain's
-   * agent the issue title as an ordinary peer message.
+   * before anything is sent: a request is never sent untagged.
    */
   private carried(issue: IssueLabel) {
     if (!isMarkerIssue(issue.identifier))
@@ -135,9 +165,9 @@ export class IrcDispatchMessenger implements DispatchMessenger {
   async assigned(captain: CaptainRef, issue: IssueLabel, signal: AbortSignal) {
     this.carried(issue);
     await this.ready(signal);
-    // Without message-tags the notice would go out untagged, handing the
-    // captain's agent the issue title as an ordinary peer message. Holding
-    // the notice (by throwing) retries it once the server supports tags.
+    // Without message-tags the notice would go out untagged, so the
+    // captain's gateway could not tell it from an ordinary peer message.
+    // Holding it (by throwing) retries it once the server supports tags.
     if (!this.client.hasCap("message-tags")) {
       if (!this.warnedTags)
         this.log.warn(
@@ -149,10 +179,12 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     const nick = await this.nick(captain);
     if (!nick) return false;
     const tags = this.tags({ kind: "assigned", issue: issue.identifier });
-    const text = this.fit("PRIVMSG", tags, (max) =>
-      dispatchText.assigned(nick, issue, max),
+    const text = fitBytes(
+      dispatchText.assigned(nick, issue.identifier),
+      this.client.budget("PRIVMSG", this.channel, tags),
     );
     await this.client.privmsg(this.channel, text, tags, this.allowed);
+    await this.title(issue, undefined);
     return true;
   }
 
@@ -183,21 +215,23 @@ export class IrcDispatchMessenger implements DispatchMessenger {
       offerID: offer.id,
       issue: offer.issue.identifier,
     });
-    const text = this.fit("PRIVMSG", tags, (max) =>
+    const text = fitBytes(
       dispatchText.offer(
         nick,
         offer.id,
-        offer.issue,
+        offer.issue.identifier,
         offer.timeoutSeconds,
-        max,
       ),
+      this.client.budget("PRIVMSG", this.channel, tags),
     );
+    // Answers reply to this PRIVMSG: the title NOTICE never carries the ID.
     const messageID = await this.client.publish(
       this.channel,
       text,
       tags,
       this.allowed,
     );
+    await this.title(offer.issue, messageID);
     return { messageID };
   }
 

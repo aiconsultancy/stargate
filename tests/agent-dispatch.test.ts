@@ -734,6 +734,106 @@ test("membership older than one poll interval is read again before the acceptanc
   });
 });
 
+for (const [variant, change, reason] of [
+  [
+    "removed from the fleet",
+    (f: Fixture) => {
+      f.api.agents = f.api.agents.filter((a) => a.userId !== CAPTAIN_A);
+    },
+    "is no longer a captain in this fleet",
+  ],
+  [
+    "demoted",
+    (f: Fixture) => {
+      f.api.agent(CAPTAIN_A).rank = "crew";
+    },
+    "is no longer a captain in this fleet",
+  ],
+  [
+    "mapped to another chat account",
+    (f: Fixture) => {
+      f.api.agent(CAPTAIN_A).name = "captain-z";
+    },
+    "its captain agent no longer maps to that chat account",
+  ],
+] as const)
+  test(`a captain ${variant} between acceptance and a retried write is not assigned; the round continues`, async () => {
+    const f = await fixture();
+    f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+    await f.dispatcher.step(signal);
+    f.api.failAssign = 1;
+    await answer(f, "accept").catch(() => {});
+    expect(f.chat.statuses()).toEqual(["retrying"]);
+    change(f);
+    f.clock.advance(2 * MINUTE);
+    await f.dispatcher.step(signal);
+    expect(f.api.edits).toEqual([]);
+    expect(f.api.issues.get("i1")?.assigneeId).toBeNull();
+    expect(f.chat.transcript()).toEqual([
+      "offer PRJ-1 -> example-captain-a",
+      "retrying PRJ-1",
+      "withdrawn PRJ-1",
+      "offer PRJ-1 -> example-captain-b",
+    ]);
+    const first = f.chat.offers()[0];
+    const refused = f.chat.lines.find(
+      (line) => line.kind === "status" && line.event.kind === "withdrawn",
+    );
+    expect(refused?.kind === "status" ? refused.event : undefined).toEqual({
+      kind: "withdrawn",
+      offerID: first?.offerID,
+      issue: "PRJ-1",
+      text: `Withdrew offer ${first?.offerID} for PRJ-1: example-captain-a accepted, but ${reason}. Asking the next captain.`,
+      replyTo: first?.messageID,
+    });
+    // The round goes on from the ledger, which kept its place.
+    expect(f.ledger.tracked("i1")).toMatchObject({
+      state: "asking",
+      round: 1,
+      position: 1,
+      offer: { captain: CAPTAIN_B, account: "example-captain-b" },
+    });
+    expect(f.ledger.tracked("i1")?.outcome).toBeUndefined();
+    // A late repeat of the refused acceptance counts for nothing.
+    await f.dispatcher.answer(
+      {
+        account: "example-captain-a",
+        offerID: first?.offerID ?? "",
+        answer: "accept",
+        replyTo: first?.messageID,
+        at: f.clock.now(),
+      },
+      signal,
+    );
+    expect(f.api.edits).toEqual([]);
+    await answer(f, "accept");
+    expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_B);
+    expect(f.chat.statuses()).toEqual(["retrying", "withdrawn", "accepted"]);
+  });
+
+test("a roster older than one poll interval is read again before the acceptance write", async () => {
+  const f = await fixture();
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  // No poll for longer than the interval; the answer is still in time.
+  f.clock.advance(3 * MINUTE);
+  f.api.agents = f.api.agents.filter((a) => a.userId !== CAPTAIN_A);
+  f.api.calls.length = 0;
+  await answer(f, "accept");
+  expect(f.api.calls).toContain("fleet example-fleet");
+  expect(f.api.edits).toEqual([]);
+  expect(f.chat.transcript()).toEqual([
+    "offer PRJ-1 -> example-captain-a",
+    "withdrawn PRJ-1",
+    "offer PRJ-1 -> example-captain-b",
+  ]);
+  // A roster read within the interval is used as it is.
+  f.api.calls.length = 0;
+  await answer(f, "accept");
+  expect(f.api.calls).not.toContain("fleet example-fleet");
+  expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_B);
+});
+
 test("a first start too long for one poll records existing assignments over several polls, without blocking offers", async () => {
   const f = await fixture();
   f.api.listingLimit = 2;

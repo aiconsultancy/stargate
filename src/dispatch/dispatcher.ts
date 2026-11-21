@@ -13,6 +13,7 @@ import {
   dispatchText,
   type IssueLabel,
   newOfferID,
+  type RefusedReason,
   type WithdrawReason,
 } from "./protocol";
 
@@ -45,7 +46,9 @@ export class UndeliverableIssue extends Error {
  * The chat side, independent of the transport. IRC is the only
  * implementation today; another transport supplies the same three calls.
  * Either request throws `UndeliverableIssue` for an issue it can never
- * carry; any other failure is this side's own outage and is retried.
+ * carry; any other failure is this side's own outage and is retried. The
+ * issue title is user-editable: a request never puts it in a message that
+ * can start a captain's turn, only in a separate line for people.
  */
 export interface DispatchMessenger {
   /** Behaviour 1 notice. False when the captain cannot be reached now. */
@@ -122,7 +125,8 @@ function pause(ms: number, signal: AbortSignal) {
 }
 
 type Captain = CaptainRef & { available: boolean; reachable: boolean };
-type Roster = { captains: Map<string, Captain> };
+/** The fleet's captains, by user ID, and when the roster was read (ms). */
+type Roster = { captains: Map<string, Captain>; at: number };
 type Membership = {
   fleetId: string;
   projects: ReadonlySet<string>;
@@ -320,8 +324,10 @@ export class AgentDispatcher {
 
   private async poll(signal: AbortSignal) {
     let roster: FleetRoster;
+    let readAt: number;
     try {
       roster = await this.options.api.fleet(this.settings.fleet, signal);
+      readAt = this.now();
       this.cleared("fleet");
       this.cleared("credential");
     } catch (error) {
@@ -334,26 +340,7 @@ export class AgentDispatcher {
       return;
     }
     if (!(await this.checkIdentity(roster, signal))) return;
-    const captains = new Map<string, Captain>();
-    for (const agent of roster.agents) {
-      if (agent.rank !== "captain") continue;
-      const account = this.settings.captainAccount(agent.name);
-      const reachable = this.settings.enrolled(account);
-      if (!reachable)
-        this.warnOnce(
-          `enrolled:${agent.userId}`,
-          "Agent dispatch skips a captain whose chat account is not an enrolled fleet agent",
-          { captain: agent.name },
-        );
-      captains.set(agent.userId, {
-        userId: agent.userId,
-        name: agent.name,
-        account,
-        available: agent.available,
-        reachable,
-      });
-    }
-    this.roster = { captains };
+    this.roster = this.captainsOf(roster, readAt);
     try {
       await this.pollAssigned(signal);
       this.cleared("assigned");
@@ -377,6 +364,53 @@ export class AgentDispatcher {
       );
     }
     this.options.ledger.prune(this.now());
+  }
+
+  /** Captains are the roster's agents of rank captain, with their chat accounts. */
+  private captainsOf(roster: FleetRoster, at: number): Roster {
+    const captains = new Map<string, Captain>();
+    for (const agent of roster.agents) {
+      if (agent.rank !== "captain") continue;
+      const account = this.settings.captainAccount(agent.name);
+      const reachable = this.settings.enrolled(account);
+      if (!reachable)
+        this.warnOnce(
+          `enrolled:${agent.userId}`,
+          "Agent dispatch skips a captain whose chat account is not an enrolled fleet agent",
+          { captain: agent.name },
+        );
+      captains.set(agent.userId, {
+        userId: agent.userId,
+        name: agent.name,
+        account,
+        available: agent.available,
+        reachable,
+      });
+    }
+    return { captains, at };
+  }
+
+  /**
+   * The fleet roster, read within the last poll interval: read again when
+   * older or not yet read, as for fleet membership. A failed read, or a
+   * roster of another fleet than the confirmed identity's, throws, so the
+   * write that needed it waits.
+   */
+  private async freshRoster(signal: AbortSignal) {
+    const cached = this.roster;
+    const age = cached ? this.now() - cached.at : undefined;
+    if (
+      cached &&
+      age !== undefined &&
+      age >= 0 &&
+      age < this.settings.pollIntervalMs
+    )
+      return cached;
+    const roster = await this.options.api.fleet(this.settings.fleet, signal);
+    if (this.verifiedFleet === undefined || roster.id !== this.verifiedFleet)
+      throw new Error("Agent dispatch roster is not the confirmed fleet's");
+    this.roster = this.captainsOf(roster, this.now());
+    return this.roster;
   }
 
   /**
@@ -779,7 +813,8 @@ export class AgentDispatcher {
   }
 
   private async timers(signal: AbortSignal) {
-    // Nothing moves until a poll has read the roster in this process.
+    // Nothing moves until this process has read the roster: at a poll, or
+    // before an acceptance write as a confirmed identity.
     if (!this.roster) return;
     for (const tracked of this.options.ledger.active()) {
       signal.throwIfAborted();
@@ -1121,8 +1156,10 @@ export class AgentDispatcher {
 
   /**
    * Versioned assignment to the accepting captain, retried after a race.
-   * Only as a confirmed identity, and only while the issue still qualifies
-   * against current fleet membership.
+   * Only as a confirmed identity, only while the issue still qualifies
+   * against current fleet membership, and only while the offer's user is
+   * still a captain of this fleet whose chat account is the one that
+   * answered, by a roster no older than one poll interval.
    */
   private async assignAccepted(tracked: TrackedIssue, signal: AbortSignal) {
     const offer = tracked.offer;
@@ -1137,6 +1174,7 @@ export class AgentDispatcher {
     }
     this.cleared("unconfirmed-write");
     const { api, ledger } = this.options;
+    let refused: RefusedReason | undefined;
     try {
       for (let attempt = 0; attempt < maxEditAttempts; attempt++) {
         const current = await api.issue(tracked.issue, signal);
@@ -1182,6 +1220,15 @@ export class AgentDispatcher {
           return;
         }
         if (!current) return;
+        // The offer's stored user ID is not proof: the captain may have left
+        // the fleet, been demoted or been renamed to another chat account.
+        const captain = (await this.freshRoster(signal)).captains.get(
+          offer.captain,
+        );
+        if (!captain || !this.same(captain.account, offer.account)) {
+          refused = captain ? "account" : "captain";
+          break;
+        }
         const result = await api.assign(
           tracked.issue,
           current.version,
@@ -1237,5 +1284,44 @@ export class AgentDispatcher {
       }
       throw error;
     }
+    if (refused) await this.refuseAcceptance(tracked, refused, signal);
+  }
+
+  /**
+   * An acceptance that must not be written: close the offer as declined,
+   * say why, and ask the next captain in this round.
+   */
+  private async refuseAcceptance(
+    tracked: TrackedIssue,
+    reason: RefusedReason,
+    signal: AbortSignal,
+  ) {
+    const offer = tracked.offer;
+    if (!offer) return;
+    const declined: TrackedIssue = {
+      ...tracked,
+      state: "asking",
+      closedOffer: offer.id,
+      resume: undefined,
+      outcome: undefined,
+      updatedAt: this.now(),
+    };
+    // Recorded first: a restart or a failed next offer moves on from here.
+    this.options.ledger.save(declined);
+    this.options.log.info(
+      { issue: tracked.identifier, captain: offer.account, reason },
+      "Agent dispatch refused an acceptance: the user is no longer this fleet's captain under the answering account",
+    );
+    await this.announce(
+      {
+        kind: "withdrawn",
+        offerID: offer.id,
+        issue: tracked.identifier,
+        text: dispatchText.refused(offer.account, offer.id, tracked, reason),
+        replyTo: offer.messageID,
+      },
+      signal,
+    );
+    await this.askNext(declined, declined.position + 1, signal);
   }
 }

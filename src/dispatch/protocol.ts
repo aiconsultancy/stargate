@@ -103,25 +103,35 @@ function minutes(seconds: number) {
 
 export type IssueLabel = { identifier: string; title: string };
 
-function issueLabel(issue: IssueLabel, maxTitle = 120) {
-  return `${issue.identifier} “${chatTitle(issue.title, maxTitle)}”`;
-}
-
 const assignedAsk =
   "is assigned to you. Please pick it up, assign it to a crew member and get it done.";
 
-/** Text for people. Programs read the marker, never this text. */
+/** Why an acceptance was refused at the assignment write. */
+export type RefusedReason = "captain" | "account";
+
+const refusedText: Record<RefusedReason, string> = {
+  captain: "is no longer a captain in this fleet",
+  account: "its captain agent no longer maps to that chat account",
+};
+
+/**
+ * Text for people. Programs read the marker, never this text. The two
+ * requests that wake a captain carry only fixed text built from the marker's
+ * fields: the issue title, which anyone who can edit the issue controls,
+ * goes in a separate `title` NOTICE, which never starts a turn.
+ */
 export const dispatchText = {
-  assigned: (nick: string, issue: IssueLabel, maxTitle?: number) =>
-    `@${nick}: ${issueLabel(issue, maxTitle)} ${assignedAsk}`,
+  assigned: (nick: string, issue: string) =>
+    `@${nick}: ${issue} ${assignedAsk}`,
   offer: (
     nick: string,
     offerID: string,
-    issue: IssueLabel,
+    issue: string,
     timeoutSeconds: number,
-    maxTitle?: number,
   ) =>
-    `@${nick}: ${issueLabel(issue, maxTitle)} is ready for agents. Can you take it? Call ${answerToolName} with offerID ${offerID} to accept or decline within ${minutes(timeoutSeconds)}. No answer counts as a decline.`,
+    `@${nick}: ${issue} is ready for agents. Can you take it? Call ${answerToolName} with offerID ${offerID} to accept or decline within ${minutes(timeoutSeconds)}. No answer counts as a decline.`,
+  title: (issue: IssueLabel, maxTitle?: number) =>
+    `Title of ${issue.identifier}: “${chatTitle(issue.title, maxTitle)}”`,
   accepted: (account: string, offerID: string, issue: IssueLabel) =>
     `${account} accepted offer ${offerID}: ${issue.identifier} is now assigned to ${account}.`,
   timeout: (
@@ -137,6 +147,13 @@ export const dispatchText = {
     `Withdrew offer ${offerID} for ${issue.identifier}: ${withdrawText[reason]}.`,
   gaveUp: (issue: IssueLabel, rounds: number) =>
     `No captain could take ${issue.identifier} after ${rounds === 1 ? "1 round" : `${rounds} rounds`}. Ready for agents is cleared; flag the issue again to retry.`,
+  refused: (
+    account: string,
+    offerID: string,
+    issue: IssueLabel,
+    reason: RefusedReason,
+  ) =>
+    `Withdrew offer ${offerID} for ${issue.identifier}: ${account} accepted, but ${refusedText[reason]}. Asking the next captain.`,
   retrying: (account: string, offerID: string, issue: IssueLabel) =>
     `${account} accepted offer ${offerID}, but ${issue.identifier} could not be assigned yet. Stargate will retry.`,
   answer: (answer: DispatchAnswer, offerID: string, reason?: string) =>
