@@ -25,6 +25,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history: the touched-Zod ratchet diffs the PR against its
+          # base and needs the merge base that a shallow checkout lacks.
+          fetch-depth: 0
       - name: Verify dependency commit provenance
         if: github.event.pull_request.user.login == 'dependabot[bot]'
         shell: bash

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -34,7 +34,6 @@ async function scenario() {
   git(root, "init", "-b", "main");
   git(root, "config", "user.email", "hook-test@example.invalid");
   git(root, "config", "user.name", "Hook Test");
-  const { mkdir } = await import("node:fs/promises");
   await mkdir(join(root, "src"), { recursive: true });
   await writeFile(
     join(root, "src/zod-file.ts"),
@@ -102,16 +101,17 @@ describe("touched-zod hook", () => {
     }
   });
 
-  test("tests are exempt; an unresolvable base fails closed", async () => {
+  test("test fixtures are exempt; an unresolvable base fails closed", async () => {
     const root = await scenario();
     try {
       const base = git(root, "rev-parse", "HEAD");
+      await mkdir(join(root, "tests"), { recursive: true });
       await writeFile(
-        join(root, "tests-zod.ts"),
+        join(root, "tests/legacy-oracle.ts"),
         'import { z } from "zod";\nexport const s = z.string();\n',
       );
       git(root, "add", "-A");
-      git(root, "commit", "-m", "zod outside src, scripts, perf");
+      git(root, "commit", "-m", "zod inside tests");
       expect(runHook(root, base).status).toBe(0);
       expect(
         runHook(root, "0000000000000000000000000000000000000000").status,
@@ -122,11 +122,50 @@ describe("touched-zod hook", () => {
     }
   });
 
+  test("subpath and dynamic Zod imports are caught", async () => {
+    const root = await scenario();
+    try {
+      const base = git(root, "rev-parse", "HEAD");
+      await writeFile(
+        join(root, "src/zod-file.ts"),
+        'export const m = await import("zod/v4");\n',
+      );
+      git(root, "add", "-A");
+      git(root, "commit", "-m", "subpath import");
+      const { status, output } = runHook(root, base);
+      expect(status).toBe(1);
+      expect(output).toContain("src/zod-file.ts");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a base with no shared history fails closed", async () => {
+    const root = await scenario();
+    try {
+      const base = git(root, "rev-parse", "HEAD");
+      // An orphan branch gives the repository two roots: the base still
+      // resolves, but no merge base exists, like CI's shallow checkout.
+      git(root, "checkout", "--orphan", "detached-head");
+      git(root, "rm", "-rq", "--cached", ".");
+      await writeFile(
+        join(root, "other.ts"),
+        'import { Schema } from "effect";\nexport const s = Schema.String;\n',
+      );
+      git(root, "add", "other.ts");
+      git(root, "commit", "-qm", "unrelated history");
+      const { status, output } = runHook(root, base);
+      expect(status).toBe(1);
+      expect(output).toContain("cannot compare with");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("non-TypeScript files mentioning the specifier are exempt", async () => {
     const root = await scenario();
     try {
       const base = git(root, "rev-parse", "HEAD");
-      const { mkdir } = await import("node:fs/promises");
       await mkdir(join(root, "scripts/hooks"), { recursive: true });
       await writeFile(
         join(root, "scripts/hooks/enforcer.sh"),

@@ -22,7 +22,10 @@ if ! git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
   exit 1
 fi
 
-CHANGED=$(git diff --name-only --diff-filter=ACMRT "$BASE"...HEAD -- 'src' 'scripts' 'perf')
+CHANGED=$(git diff --name-only --diff-filter=ACMRT "$BASE"...HEAD -- 'src' 'scripts' 'perf') || {
+  echo "touched-zod: cannot compare with $BASE; refusing to verify." >&2
+  exit 1
+}
 
 VIOLATIONS=
 for file in $CHANGED; do
@@ -33,7 +36,8 @@ for file in $CHANGED; do
     *.ts) ;;
     *) continue ;;
   esac
-  if grep -q 'from "zod"' "$file"; then
+  # Direct imports, subpath imports (zod/v4, zod/mini) and dynamic imports.
+  if grep -Eq '(from |import\()"zod(/[^"]*)?"' "$file"; then
     VIOLATIONS="$VIOLATIONS
   $file"
   fi
