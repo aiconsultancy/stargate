@@ -51,13 +51,12 @@ always_run = true
 
 [[repos.hooks]]
 id = "stargate-check"
-name = "Strict TypeScript, Oxlint, and tests"
-# Fixtures create other repositories; do not inherit this commit's Git state.
-entry = """
-unset $(git rev-parse --local-env-vars)
-exec mise run check
-"""
-shell = "sh"
+name = "Strict TypeScript, Oxlint, and affected tests"
+# Resolve staged dependencies before clearing Git's local environment for tests.
+# Untrusted paths defer to hosted Quality checks by default; select known tests.
+# STARGATE_UNTRUSTED_TESTS=full opts in to a local full run for untrusted paths.
+# Selection errors always run all tests. CI also runs check explicitly.
+entry = "mise run check-affected"
 language = "system"
 pass_filenames = false
 always_run = true
