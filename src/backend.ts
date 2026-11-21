@@ -1,9 +1,5 @@
-import { pathToFileURL } from "node:url";
 import type { ActivityWatch } from "./activity";
 import type { Attachment } from "./attachments";
-import { OpenCodeBackend } from "./backends/opencode";
-import { PiDurableBackend } from "./backends/pi-durable";
-import type { BackendConfig } from "./config";
 import type { FleetCrewStatus } from "./crew/fleet-status";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
@@ -13,6 +9,7 @@ import type {
   FleetReviewEvidence,
   NativeMaker,
 } from "./fleet/protocol";
+import { validMsgid } from "./irc/protocol";
 import type { MaintenanceWatch } from "./maintenance";
 import type { MaintenanceDrain } from "./maintenance-drain";
 import type {
@@ -26,11 +23,28 @@ import type { SessionHistory } from "./session-history";
 import type { TurnProgress } from "./turn-progress";
 import type { UpdateReceipt, UpdateSnapshot } from "./update-notice";
 
-export {
-  latestInput,
-  sourceLine,
-  TranscriptUnavailable,
-} from "./backend-values";
+/** Compact source identity; IRC optionally adds `;r=<encoded thread root>`. */
+export function sourceLine({ source }: PromptSourceContext) {
+  const value = encodeURIComponent;
+  return `s=${source.transport ?? "slack"};c=${value(source.channel)};t=${value(source.thread)};m=${value(source.message)};u=${value(source.user)}${source.sender ? `;k=${source.sender}` : ""}${source.authority ? `;a=${source.authority}` : ""}${source.reference ? `;e=${value(source.reference)}` : ""}${source.transport === "irc" && validMsgid(source.replyParent) ? `;r=${value(source.replyParent)}` : ""}${source.reaction ? `;reaction=${value(source.reaction.name)};action=${source.reaction.action}` : ""}`;
+}
+
+/**
+ * Permanent transcript failures: the mapped session or the stored cursor no
+ * longer exists. Transient read errors stay ordinary errors.
+ */
+export class TranscriptUnavailable extends Error {
+  constructor(readonly reason: "session" | "cursor") {
+    super(
+      reason === "session"
+        ? "Mapped session no longer exists"
+        : "Transcript cursor is not in session history",
+    );
+  }
+}
+
+/** `after` value for messages after this adapter's latest prompt input. */
+export const latestInput = "\u0000latest-input";
 
 /** Model-visible source identity only; never repeat chat history here. */
 export type PromptSourceContext = {
@@ -290,52 +304,3 @@ export type BackendContext = {
   crew?: PiCrewBinding;
   workingAgreement?: { path: string; owns(conversationID: string): boolean };
 };
-
-export async function createBackend(
-  config: BackendConfig,
-  context: BackendContext,
-): Promise<AgentBackend> {
-  switch (config.type) {
-    case "opencode":
-      return new OpenCodeBackend(config);
-    case "pi-durable":
-      return PiDurableBackend.open(config, context);
-    case "claude": {
-      // Loaded on demand: the SDK bundle is large and most bots do not use it.
-      const { ClaudeBackend } = await import("./backends/claude");
-      return ClaudeBackend.open(config, context);
-    }
-    case "codex": {
-      const { CodexBackend } = await import("./backends/codex");
-      return CodexBackend.open(config, context);
-    }
-    case "module": {
-      const plugin: unknown = await import(pathToFileURL(config.module).href);
-      if (
-        typeof plugin !== "object" ||
-        !plugin ||
-        !("createBackend" in plugin) ||
-        typeof plugin.createBackend !== "function"
-      ) {
-        throw new Error(
-          "Backend module must export createBackend(options, context)",
-        );
-      }
-      const backend: unknown = await plugin.createBackend(
-        config.options,
-        context,
-      );
-      if (
-        typeof backend !== "object" ||
-        !backend ||
-        !["createSession", "prompt", "close"].every(
-          (key) =>
-            key in backend && typeof Reflect.get(backend, key) === "function",
-        )
-      ) {
-        throw new Error("Backend module returned an invalid AgentBackend");
-      }
-      return backend as AgentBackend;
-    }
-  }
-}

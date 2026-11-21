@@ -20,11 +20,8 @@ import { diffEvents } from "./api/v1/diff";
 import { gatewayVersion } from "./api/v1/gateway";
 import { createApiV1Source } from "./api/v1/projection";
 import { startApiV1Server } from "./api/v1/server";
-import {
-  type AgentBackend,
-  type BackendContext,
-  createBackend,
-} from "./backend";
+import type { AgentBackend, BackendContext } from "./backend";
+import { createBackend } from "./backends/factory";
 import { OpenCodeBackend } from "./backends/opencode";
 import {
   type BackendConfig,

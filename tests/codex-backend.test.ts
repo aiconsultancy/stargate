@@ -19,7 +19,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Codex } from "@openai/codex-sdk";
 import { Result, Schema } from "effect";
 import { z } from "zod";
-import { createBackend } from "../src/backend";
+import { createBackend } from "../src/backends/factory";
 import { inheritedEnvironment } from "../src/backends/cli-agent";
 import {
   CodexBackend,
