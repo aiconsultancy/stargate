@@ -58,12 +58,17 @@ Keep backend adapters independent of Slack and preserve session isolation.
   Keep remaining Zod consumers until their migration phase. Touched-Zod
   ratchet: a substantive change to a file importing `zod` must migrate that
   file's schemas to Effect Schema in the same change, or revert the touch.
-  NET1766 permits only mechanically verified import/path moves. The guard
+  NET1766 permits mechanically verified import/path moves. The guard
   requires an existing base file or Git-detected rename, with byte-identical
   source except static relative import/reexport paths that resolve to the
   same base file through the actual rename map. New files/copies and extra
   Zod imports, sources or bindings are not exempt. Formatting, comments,
-  logic edits and constant/helper extraction are not exempt. See the exact
+  logic edits and constant/helper extraction need a declared NET issue entry
+  in `scripts/hooks/touched-zod-changes.json`: an existing file, byte-identical
+  Zod declarations, and at most 20 added plus removed lines. No file may gain
+  a Zod import. The head list is required; only entries new or changed against
+  the merge base apply to this PR. Unchanged entries grant nothing. This scoped
+  restructure policy does not prove behavior. See the exact
   supported path-resolution limits in `docs/effect-schema-migration.md`.
 - Prefer the installed Effect capability over another dependency when required
   behavior and security properties are equivalent. Do not remove SDK-required

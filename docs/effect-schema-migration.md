@@ -61,12 +61,50 @@ environment switch or alternate CI mode that bypasses them.
   targets. Parse or Git comparison errors also fail closed. No supplied
   base still means no comparison, as before.
 
-This proof covers import-only and move-only source edits, not arbitrary
+This mechanical proof covers import-only and move-only source edits, not arbitrary
 behavior-preserving refactors. Constant extraction, importing a new helper,
-changing a helper call, and other root/helper logic edits still require
+changing a helper call, and other root/helper logic edits outside the declared
+restructure policy below still require
 migration or reversion of the Zod-file touch. This check does not prove general
 runtime equivalence of a module move. Normal tests and review still cover
 path-sensitive runtime behavior and changes inside imported modules.
+
+### Declared scoped restructure changes
+
+The owner permits small scoped restructure edits in existing Zod files.
+Each PR can declare `path`, a `NET-` issue identifier and a one-line `reason`
+in `scripts/hooks/touched-zod-changes.json`. The guard reads the committed PR
+head, requires that list as a regular file, validates it and rejects duplicate
+or invalid entries. Only an entry new or changed from the merge base applies;
+an unchanged entry grants nothing to a later PR. An absent base list means an
+empty list; malformed base data fails closed. The mechanism ships an empty
+list. Each restructure PR must add or update its own entry. JSON formatting
+changes alone do not renew an entry. Declared files must exist as regular files at base and head, without
+copy or rename substitution. Their Zod declarations must be byte-identical.
+No file may gain a Zod import. A declared edit has a fixed budget of 20 added
+plus removed lines, so a ten-line replacement uses the full budget. This
+covers the small root/syntax edits without granting a large rewrite. Unknown
+loaders and failed Git, parse or declaration checks fail closed. Undeclared
+files retain ordinary and mechanical policy. For the NET1769 root extraction
+and NET1771 syntax import retarget, the respective PRs can add these entries:
+
+```json
+[
+  {
+    "path": "src/nightly/ready.ts",
+    "issue": "NET-1769",
+    "reason": "Centralize the installation root."
+  },
+  {
+    "path": "src/update-notice.ts",
+    "issue": "NET-1771",
+    "reason": "Retarget the extracted syntax leaf."
+  }
+]
+```
+
+This is a quality check, not proof of behavior or verification of live issue
+approval. Review and focused tests must establish scope and preserved behavior.
 
 ## PR budget and batch boundaries
 
