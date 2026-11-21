@@ -156,6 +156,16 @@ access. Neither `allowedTools: []` nor the working directory confines those
 programs. Only the explicitly configured servers are loaded from bot
 configuration.
 
+Stargate sends MCP configuration over stdin with the SDK's
+`mcpServersDelivery: "initialize"`. Before each turn it checks the executable's
+`--version` against the installed SDK's `claudeCodeVersion`. An equal or newer
+CLI uses stdin. A known older CLI uses explicit `"argv"` delivery and emits
+`STARGATE_CLAUDE_MCP_ARGV_FALLBACK`; MCP environment values and headers can then
+be visible to other local users. Update that CLI to remove this exposure.
+Missing, unrecognised or prerelease versions, failed probes and probes that
+exceed five seconds stop the turn before the SDK starts. Probe diagnostics
+are discarded, and the probe receives no provider token.
+
 ## Settings, memory and prompts
 
 `settingSources` is empty by default: Claude Code reads no

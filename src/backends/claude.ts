@@ -1,8 +1,9 @@
 import {
   type ChildProcessByStdio,
+  execFile,
   spawn as spawnChild,
 } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   access,
   chmod,
@@ -12,10 +13,13 @@ import {
   readFile,
   rm,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   type Options,
   query,
@@ -33,6 +37,7 @@ import {
   type TextSink,
 } from "../backend";
 import { type BackendConfig, secret } from "../config";
+import { compareVersions, parseVersion } from "../nightly/versions";
 import {
   AttachmentInputUnavailable,
   BackendFailure,
@@ -55,6 +60,44 @@ type UserContent = Exclude<SDKUserMessage["message"]["content"], string>;
 
 /** Fixed, safe failure text produced by this adapter. */
 class ClaudeTurnError extends Error {}
+
+const exec = promisify(execFile);
+const versionFailure = "Cannot verify Claude Code version for MCP delivery";
+const sdkMetadata = Schema.Struct({ claudeCodeVersion: Schema.String });
+
+/** Resolve from the SDK, never PATH, using its native platform preference. */
+function claudeCLI() {
+  const entry = import.meta.resolve("@anthropic-ai/claude-agent-sdk");
+  const require = createRequire(entry);
+  const root = dirname(fileURLToPath(entry));
+  const { claudeCodeVersion } = Schema.decodeUnknownSync(sdkMetadata)(
+    JSON.parse(readFileSync(join(root, "package.json"), "utf8")),
+  );
+  if (!parseVersion(claudeCodeVersion))
+    throw new ClaudeTurnError(versionFailure);
+  const native = () => {
+    const report = process.report?.getReport() as
+      | { header?: { glibcVersionRuntime?: string } }
+      | undefined;
+    const platform = `${process.platform}-${process.arch}`;
+    const candidates =
+      process.platform === "linux"
+        ? report && report.header?.glibcVersionRuntime === undefined
+          ? [`${platform}-musl`, platform]
+          : [platform, `${platform}-musl`]
+        : [platform];
+    for (const target of candidates) {
+      try {
+        const path = require.resolve(
+          `@anthropic-ai/claude-agent-sdk-${target}/claude${process.platform === "win32" ? ".exe" : ""}`,
+        );
+        if (existsSync(path)) return path;
+      } catch {}
+    }
+    throw new ClaudeTurnError(versionFailure);
+  };
+  return { version: claudeCodeVersion, native };
+}
 
 // A CLI that ends without a result proves nothing about its tools: frames
 // can be lost with the process. Never report that nothing ran.
@@ -530,10 +573,14 @@ const decodeRecord = Schema.decodeUnknownSync(recordSchema, {
 });
 
 /**
- * Test seams: a fake CLI path (production uses the SDK's native binary) and
- * the SIGTERM-to-SIGKILL grace period.
+ * Test seams: a fake CLI path (production uses the SDK's native binary),
+ * the version-probe deadline and the SIGTERM-to-SIGKILL grace period.
  */
-export type ClaudeRuntime = { executable?: string; graceMs?: number };
+export type ClaudeRuntime = {
+  executable?: string;
+  graceMs?: number;
+  versionTimeoutMs?: number;
+};
 
 export class ClaudeBackend implements AgentBackend {
   readonly supportsAttachments = true;
@@ -651,6 +698,39 @@ export class ClaudeBackend implements AgentBackend {
     try {
       // Never resume a session that an earlier process is still running.
       await this.stopOrphan(id, AbortSignal.timeout(5000));
+      let executable: string;
+      let mcpServersDelivery: "initialize" | "argv" = "initialize";
+      try {
+        const bundled = claudeCLI();
+        executable = this.runtime.executable ?? bundled.native();
+        const { stdout } = await exec(executable, ["--version"], {
+          cwd: this.config.directory,
+          env: {
+            ...inherited(process.env),
+            ...claudeRouting(this.config),
+            CLAUDE_CONFIG_DIR: this.home,
+          },
+          signal: run.controller.signal,
+          timeout: this.runtime.versionTimeoutMs ?? 5000,
+          killSignal: "SIGKILL",
+          maxBuffer: 4096,
+        });
+        const version = /^(\S+)(?: \(Claude Code\))?$/.exec(stdout.trim())?.[1];
+        if (!version || !parseVersion(version))
+          throw new ClaudeTurnError(versionFailure);
+        if (compareVersions(version, bundled.version) < 0) {
+          mcpServersDelivery = "argv";
+          if (Object.keys(this.config.mcpServers ?? {}).length)
+            process.emitWarning(
+              "Claude Code is older than the SDK bundled CLI; using MCP argv delivery. MCP environment and headers may be visible to other local users. Update Claude Code to use initialize delivery.",
+              { code: "STARGATE_CLAUDE_MCP_ARGV_FALLBACK" },
+            );
+        }
+      } catch {
+        // Probe output and command errors can contain secrets; discard both.
+        throw new ClaudeTurnError(versionFailure);
+      }
+      run.controller.signal.throwIfAborted();
       // A private temporary directory per turn, removed after the CLI exits.
       temporary = await mkdtemp(join(tmpdir(), "stargate-claude-"));
       env["TMPDIR"] = temporary;
@@ -696,6 +776,7 @@ export class ClaudeBackend implements AgentBackend {
             { ...server, alwaysLoad: true },
           ]),
         ),
+        mcpServersDelivery,
         strictMcpConfig: true,
         // Slack text is data: no @file expansion or slash-command dispatch.
         verbatimPrompts: true,
@@ -713,9 +794,7 @@ export class ClaudeBackend implements AgentBackend {
         ...(resume
           ? { resume: id }
           : { sessionId: id, ...(title ? { title } : {}) }),
-        ...(this.runtime.executable
-          ? { pathToClaudeCodeExecutable: this.runtime.executable }
-          : {}),
+        pathToClaudeCodeExecutable: executable,
         spawnClaudeCodeProcess: (spawn) => this.spawn(run, spawn),
       };
       const turn = new ClaudeTurn();
