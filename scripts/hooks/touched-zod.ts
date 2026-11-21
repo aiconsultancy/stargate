@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { posix } from "node:path";
+import { Schema } from "effect";
 import {
   getTokenPosOfNode,
   isCallExpression,
@@ -26,6 +27,72 @@ function git(...args: string[]): string {
 
 function scoped(path: string): boolean {
   return /^(src|scripts|perf)\/.*\.ts$/.test(path);
+}
+
+const declarationsPath = "scripts/hooks/touched-zod-changes.json";
+// Count additions plus removals: a ten-line replacement consumes all 20.
+const changedLineLimit = 20;
+const declarationSchema = Schema.Array(
+  Schema.Struct({
+    path: Schema.String.check(
+      Schema.isPattern(/^(src|scripts|perf)\/[A-Za-z0-9_./-]+\.ts(?![\s\S])/),
+      Schema.isMaxLength(256),
+    ),
+    issue: Schema.String.check(Schema.isPattern(/^NET-[1-9][0-9]*(?![\s\S])/)),
+    reason: Schema.String.check(
+      Schema.isPattern(/^[^\r\n\s][^\r\n\u2028\u2029]*(?![\s\S])/),
+      Schema.isMaxLength(200),
+    ),
+  }),
+);
+
+function declarations(
+  ancestor: string,
+  baseFiles: Map<string, string>,
+  headFiles: Map<string, string>,
+) {
+  const paths = new Set<string>();
+  if (headFiles.get(declarationsPath) !== "100644")
+    throw new Error("head declared-change list must exist as a regular file");
+  try {
+    function read(revision: string) {
+      const entries = Schema.decodeUnknownSync(declarationSchema, {
+        onExcessProperty: "error",
+      })(JSON.parse(git("show", `${revision}:${declarationsPath}`)));
+      const seen = new Set<string>();
+      for (const entry of entries) {
+        if (posix.normalize(entry.path) !== entry.path || seen.has(entry.path))
+          throw new Error("invalid declared path");
+        seen.add(entry.path);
+      }
+      return entries;
+    }
+    const entries = read("HEAD");
+    if (
+      baseFiles.has(declarationsPath) &&
+      baseFiles.get(declarationsPath) !== "100644"
+    )
+      throw new Error("base declared-change list must be a regular file");
+    const previous = new Map(
+      (baseFiles.has(declarationsPath) ? read(ancestor) : []).map((entry) => [
+        entry.path,
+        entry,
+      ]),
+    );
+    for (const entry of entries) {
+      if (
+        !["100644", "100755"].includes(baseFiles.get(entry.path) ?? "") ||
+        !["100644", "100755"].includes(headFiles.get(entry.path) ?? "")
+      )
+        throw new Error("invalid declared path");
+      const old = previous.get(entry.path);
+      if (!old || old.issue !== entry.issue || old.reason !== entry.reason)
+        paths.add(entry.path);
+    }
+  } catch {
+    throw new Error("invalid declared-change list; refusing to verify");
+  }
+  return paths;
 }
 
 function tree(revision: string): Map<string, string> {
@@ -72,16 +139,21 @@ type ModuleSpan = { start: number; end: number; value: string };
 
 function inspect(source: SourceFile) {
   const modules: ModuleSpan[] = [];
+  const zodDeclarations: string[] = [];
   let zod = false;
   let unknownLoader = false;
   let relativeLoader = false;
-  function module(node: Node | undefined, movable: boolean) {
+  function module(node: Node | undefined, movable: boolean, owner: Node) {
     if (!node || !isStringLiteralLikeNode(node)) {
       unknownLoader = true;
       return;
     }
     const value = node.text;
     zod ||= value === "zod" || value.startsWith("zod/");
+    if (value === "zod" || value.startsWith("zod/"))
+      zodDeclarations.push(
+        source.text.slice(getTokenPosOfNode(owner, source), owner.end),
+      );
     if (movable) {
       modules.push({
         start: getTokenPosOfNode(node, source),
@@ -93,27 +165,68 @@ function inspect(source: SourceFile) {
     }
   }
   function visit(node: Node) {
-    if (isImportDeclaration(node)) module(node.moduleSpecifier, true);
+    if (isImportDeclaration(node)) module(node.moduleSpecifier, true, node);
     else if (isExportDeclaration(node) && node.moduleSpecifier)
-      module(node.moduleSpecifier, true);
+      module(node.moduleSpecifier, true, node);
     else if (
       isImportEqualsDeclaration(node) &&
       isExternalModuleReference(node.moduleReference)
     ) {
-      module(node.moduleReference.expression, false);
+      module(node.moduleReference.expression, false, node);
     } else if (isImportTypeNode(node) && isLiteralTypeNode(node.argument)) {
-      module(node.argument.literal, false);
+      module(node.argument.literal, false, node);
     } else if (
       isCallExpression(node) &&
       (node.expression.kind === SyntaxKind.ImportKeyword ||
         (isIdentifier(node.expression) && node.expression.text === "require"))
     ) {
-      module(node.arguments[0], false);
+      module(node.arguments[0], false, node);
     }
     node.forEachChild(visit);
   }
   visit(source);
-  return { modules, zod, unknownLoader, relativeLoader };
+  return { modules, zod, zodDeclarations, unknownLoader, relativeLoader };
+}
+
+function declaredChange(
+  before: SourceFile,
+  after: SourceFile,
+  oldPath: string,
+  path: string,
+  ancestor: string,
+  declared: Set<string>,
+) {
+  if (oldPath !== path || !declared.has(path)) return false;
+  const old = inspect(before);
+  const next = inspect(after);
+  if (
+    !old.zod ||
+    old.unknownLoader ||
+    next.unknownLoader ||
+    JSON.stringify(old.zodDeclarations) !== JSON.stringify(next.zodDeclarations)
+  )
+    return false;
+  const parts = git(
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-renames",
+    "--numstat",
+    ancestor,
+    "HEAD",
+    "--",
+    path,
+  )
+    .trimEnd()
+    .split("\t");
+  const [added, removed, file] = parts;
+  return (
+    parts.length === 3 &&
+    file === path &&
+    /^\d+$/.test(added ?? "") &&
+    /^\d+$/.test(removed ?? "") &&
+    Number(added) + Number(removed) <= changedLineLimit
+  );
 }
 
 function mechanical(
@@ -220,6 +333,7 @@ async function check(base: string): Promise<void> {
         oldPath: status === "M" || status.startsWith("R") ? oldPath : undefined,
       });
   }
+  const declared = declarations(ancestor, baseFiles, headFiles);
   if (!touched.length) return;
   const sources: Record<string, string> = {};
   function addSource(rev: string, path: string) {
@@ -279,7 +393,7 @@ async function check(base: string): Promise<void> {
           next.zod &&
           (!before ||
             !pair.oldPath ||
-            !mechanical(
+            (!mechanical(
               before,
               after,
               pair.oldPath,
@@ -287,7 +401,15 @@ async function check(base: string): Promise<void> {
               baseFiles,
               headFiles,
               renames,
-            ))
+            ) &&
+              !declaredChange(
+                before,
+                after,
+                pair.oldPath,
+                pair.path,
+                ancestor,
+                declared,
+              )))
         )
           violations.push(pair.path);
       }
@@ -295,7 +417,7 @@ async function check(base: string): Promise<void> {
         throw new Error(
           `this change touches files that still import zod:\n  ${violations.join("\n  ")}\n` +
             "Each touched file must migrate its Zod schemas to Effect Schema, or the touch must be reverted.\n" +
-            "Only verified import/path moves are exempt. See docs/effect-schema-migration.md.",
+            "Only verified import/path moves or declared bounded restructure changes are exempt. See docs/effect-schema-migration.md.",
         );
     } finally {
       await snapshot.dispose();

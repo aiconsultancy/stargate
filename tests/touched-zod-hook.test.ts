@@ -35,6 +35,8 @@ async function scenario() {
   git(root, "init", "-b", "main");
   git(root, "config", "user.email", "hook-test@example.invalid");
   git(root, "config", "user.name", "Hook Test");
+  await mkdir(join(root, "scripts/hooks"), { recursive: true });
+  await writeFile(join(root, "scripts/hooks/touched-zod-changes.json"), "[]\n");
   await mkdir(join(root, "src"), { recursive: true });
   await writeFile(
     join(root, "src/zod-file.ts"),
