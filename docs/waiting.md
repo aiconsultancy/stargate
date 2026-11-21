@@ -10,6 +10,7 @@ Each bot can set its waiting response delay and phrase interval:
 ```
 
 These fields go inside a bot registration, next to `id` and `backend`.
+Teams registrations accept the same `displayName` and `waiting` fields.
 The default delay is 5 seconds. The default phrase interval is 10 seconds.
 `delayMs: null` disables waiting responses. `delayMs: 0` starts immediately;
 zero does not mean disabled. Delays must be whole milliseconds from 0 to
@@ -19,6 +20,15 @@ Waiting phrases use `displayName`, then the configured OpenCode agent ID,
 then the bot registration ID. No captain name is built into the phrases.
 The phrase collection contains 100 short status messages. They do not report
 tool output or claim that a particular check has completed.
+
+## Where phrases appear
+
+- Slack shows them in the reply placeholder until text arrives.
+- IRC sets them as the nick's `status` metadata while a turn runs. See
+  [IRC](irc.md).
+- Teams, with `livePresence: true`, shows them in place of the generic
+  “Thinking” and “Working” progress labels. Specific labels are unchanged.
+  See [Teams](teams.md#typing-and-progress).
 
 ## Change delay through a captain
 
