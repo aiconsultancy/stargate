@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { spawn } from "node:child_process";
 import {
   mkdir,
@@ -17,6 +17,7 @@ import { z } from "zod";
 import { createBackend } from "../src/backend";
 import {
   ClaudeBackend,
+  type ClaudeRuntime,
   ClaudeTurn,
   claudeEnvironment,
   claudeInputContent,
@@ -88,10 +89,15 @@ const logEntry = z.union([
   z.object({ grandchild: z.number() }),
 ]);
 
-async function open(extra: Record<string, unknown> = {}) {
+async function open(
+  extra: Record<string, unknown> = {},
+  version = "2.1.327 (Claude Code)",
+  runtime: Pick<ClaudeRuntime, "versionTimeoutMs"> = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "stargate-claude-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const executable = join(root, "claude");
+  await writeFile(join(root, "fixture-version"), version);
   await writeFile(
     executable,
     `#!/bin/sh\nexec "${process.execPath}" "${fixture}" "$@"\n`,
@@ -102,7 +108,7 @@ async function open(extra: Record<string, unknown> = {}) {
   const backend = await ClaudeBackend.open(
     config(extra, root),
     { dataDirectory },
-    { executable, graceMs: 200 },
+    { executable, graceMs: 200, ...runtime },
   );
   cleanup.push(() => backend.close());
   const log = async () =>
@@ -380,6 +386,161 @@ test("Claude tools default to none; allowed names map to the SDK", async () => {
   expect(some?.argv.some((arg) => arg.includes("disallowedTools"))).toBe(false);
   expect(some?.argv).toContain("--setting-sources=project");
   expect(some?.argv).toContain("--permission-mode=dontAsk");
+});
+
+test.each(["2.1.327 (Claude Code)", "2.1.328 (Claude Code)"])(
+  "Claude %s sends MCP secrets through initialize, not generated argv",
+  async (version) => {
+    const {
+      backend: unused,
+      root,
+      dataDirectory,
+      executable,
+      runs,
+      log,
+    } = await open({}, version);
+    await unused.close();
+    // Trusted internal input exercises SDK fields that public config forbids.
+    const stdio = {
+      type: "stdio" as const,
+      command: "/fixture/mcp",
+      args: [],
+      env: { MCP_KEY: "mcp-env-canary" },
+    };
+    const http = {
+      type: "http" as const,
+      url: "https://mcp.example/",
+      headers: { Authorization: "mcp-header-canary" },
+    };
+    const backend = await ClaudeBackend.open(
+      { ...config({}, root), mcpServers: { stdio, http } },
+      { dataDirectory },
+      { executable, graceMs: 200 },
+    );
+    cleanup.push(() => backend.close());
+    expect(await backend.prompt(await session(backend), "hi", signal())).toBe(
+      "Hello world\n\nDone.",
+    );
+    const [run] = await runs();
+    expect(run?.argv).toContain("--await-initialize");
+    expect(run?.argv.join(" ")).not.toMatch(
+      /--mcp-config|mcp-env-canary|mcp-header-canary|MCP_KEY|Authorization/,
+    );
+    const initialize = (await log()).find(
+      (entry) => "input" in entry && entry.input.type === "control_request",
+    );
+    expect(
+      initialize && "input" in initialize
+        ? initialize.input["request"]
+        : undefined,
+    ).toMatchObject({
+      subtype: "initialize",
+      mcpServers: {
+        stdio: { ...stdio, alwaysLoad: true },
+        http: { ...http, alwaysLoad: true },
+      },
+    });
+  },
+);
+
+test("older Claude explicitly falls back to argv with a safe warning", async () => {
+  const warning = spyOn(process, "emitWarning").mockImplementation(() => {});
+  try {
+    const { backend, runs, log } = await open(
+      { mcpServers: { docs: { type: "http", url: "https://mcp.example/" } } },
+      "2.1.326 (Claude Code)",
+    );
+    expect(await backend.prompt(await session(backend), "hi", signal())).toBe(
+      "Hello world\n\nDone.",
+    );
+    const [run] = await runs();
+    expect(run?.argv).toContain("--mcp-config");
+    expect(run?.argv).not.toContain("--await-initialize");
+    const initialize = (await log()).find(
+      (entry) => "input" in entry && entry.input.type === "control_request",
+    );
+    expect(
+      initialize && "input" in initialize
+        ? initialize.input["request"]
+        : undefined,
+    ).not.toHaveProperty("mcpServers");
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning.mock.calls[0]).toEqual([
+      "Claude Code is older than the SDK bundled CLI; using MCP argv delivery. MCP environment and headers may be visible to other local users. Update Claude Code to use initialize delivery.",
+      { code: "STARGATE_CLAUDE_MCP_ARGV_FALLBACK" },
+    ]);
+  } finally {
+    warning.mockRestore();
+  }
+});
+
+test.each([
+  ["empty", ""],
+  ["unrecognised", "private-version-error"],
+  ["prerelease", "2.1.327-beta (Claude Code)"],
+  ["nonzero exit", "fail"],
+  ["oversized", "x".repeat(8192)],
+])(
+  "Claude version probe fails closed on %s without starting a turn",
+  async (_label, version) => {
+    const { backend, runs } = await open({}, version);
+    await expect(
+      backend.prompt(await session(backend), "hi", signal()),
+    ).rejects.toMatchObject({
+      message: "Cannot verify Claude Code version for MCP delivery",
+    });
+    expect(await runs().catch(() => [])).toEqual([]);
+  },
+);
+
+test("a missing Claude executable fails closed before starting a turn", async () => {
+  const { backend, executable, runs } = await open();
+  await rm(executable);
+  await expect(
+    backend.prompt(await session(backend), "hi", signal()),
+  ).rejects.toThrow("Cannot verify Claude Code version for MCP delivery");
+  expect(await runs().catch(() => [])).toEqual([]);
+});
+
+test("Claude version probe timeout kills the process, even if SIGTERM is ignored", async () => {
+  const { backend, root, runs } = await open({}, "hang", {
+    versionTimeoutMs: 1500,
+  });
+  const turn = backend.prompt(await session(backend), "hi", signal());
+  await expect(turn).rejects.toThrow(
+    "Cannot verify Claude Code version for MCP delivery",
+  );
+  const probe = JSON.parse(
+    await readFile(join(root, "fixture-probe.json"), "utf8"),
+  );
+  expect(alive(probe.pid)).toBe(false);
+  expect(probe.argv).toEqual(["--version"]);
+  expect(probe.env["ANTHROPIC_AUTH_TOKEN"]).toBeUndefined();
+  expect(probe.env[apiKeyEnv]).toBeUndefined();
+  expect(probe.env["CLAUDE_CONFIG_DIR"]).toBe(join(root, "data", "claude"));
+  expect(await runs().catch(() => [])).toEqual([]);
+});
+
+test("cancelling a Claude version probe stops it before any SDK turn starts", async () => {
+  const { backend, root, runs } = await open({}, "hang", {
+    versionTimeoutMs: 2000,
+  });
+  const controller = new AbortController();
+  const turn = backend.prompt(await session(backend), "hi", controller.signal);
+  const path = join(root, "fixture-probe.json");
+  await until(
+    () =>
+      readFile(path).then(
+        () => true,
+        () => false,
+      ),
+    1000,
+  );
+  const probe = JSON.parse(await readFile(path, "utf8"));
+  controller.abort();
+  await expect(turn).rejects.toThrow();
+  await until(() => !alive(probe.pid), 1000);
+  expect(await runs().catch(() => [])).toEqual([]);
 });
 
 test("cancelling a Claude turn stops the CLI and its tool processes", async () => {

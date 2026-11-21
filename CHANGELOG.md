@@ -25,6 +25,9 @@
 
 ### Changes
 
+- Deliver Claude MCP configuration over stdin after checking the CLI version.
+  Known older CLIs use explicit argv delivery with a safe exposure warning;
+  unknown versions and failed probes stop the turn before the SDK starts.
 - Tag IRC fleet request progress notices with a fixed stage and the triggering
   message ID. Publish terminal stages from confirmed gateway outcomes.
 - Reserve addressed IRC `status` in registrations with enrolled humans for
