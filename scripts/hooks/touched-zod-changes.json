@@ -1,1 +1,7 @@
-[]
+[
+  {
+    "path": "src/update-notice.ts",
+    "issue": "NET-1771",
+    "reason": "Retarget the extracted syntax leaf."
+  }
+]
