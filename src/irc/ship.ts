@@ -10,7 +10,11 @@ import {
   secret,
 } from "../config";
 import { type OutboxPage, outboxMaxAgeMs } from "../crew/irc-rpc";
-import { ircDispatchOffer, isDispatchRequest } from "../dispatch/irc";
+import {
+  dispatchRequestTurn,
+  ircDispatchOffer,
+  isRearAdmiral,
+} from "../dispatch/irc";
 import { dispatchTag } from "../dispatch/protocol";
 import type { DispatchOffer, FleetSource } from "../fleet/protocol";
 import { fleetAuthority, fleetInstructions } from "../fleet-policy";
@@ -1323,13 +1327,17 @@ export class IrcShip {
       this.advance(member, client, message);
       return;
     }
-    // A rear admiral's dispatch notice or offer from an enrolled fleet agent is
-    // never dropped by the peer limit: the dispatcher bounds its own rate.
-    const dispatchRequest =
+    // Only this fleet's rear admiral's dispatch notice or offer is never
+    // dropped by the peer limit (the dispatcher bounds its own rate), and its
+    // turn is fixed text from the marker, without the issue's title. The same
+    // marker from any other agent is an ordinary peer message.
+    const dispatchTurn =
       admission.sender === "captain" &&
-      !!this.config.fleetPolicy &&
-      fleetAuthority(this.config.fleetPolicy, admission.user) === "agent" &&
-      isDispatchRequest(message);
+      member.role === "captain" &&
+      isRearAdmiral(this.config, admission.user, client.fold)
+        ? dispatchRequestTurn(message, admission.text)
+        : undefined;
+    const dispatchRequest = dispatchTurn !== undefined;
     if (
       !dispatchRequest &&
       !withinLimits(
@@ -1389,8 +1397,12 @@ export class IrcShip {
       this.advance(member, client, message);
       return;
     }
+    // An offer counts only in the command channel, when the captain knows it.
+    const commandChannel = this.config.fleetChannels?.command;
     const offer =
-      dispatchRequest && member.role === "captain"
+      dispatchRequest &&
+      (commandChannel === undefined ||
+        admission.channel === client.fold(commandChannel))
         ? ircDispatchOffer(message)
         : undefined;
     if (offer && this.offerRecorder) {
@@ -1436,11 +1448,10 @@ export class IrcShip {
         return;
       }
     }
+    const text = dispatchTurn ?? admission.text;
     const input = {
       ...admission,
-      ...(privateReview
-        ? { text: `${admission.text}\n\n${privateReview}` }
-        : {}),
+      text: privateReview ? `${text}\n\n${privateReview}` : text,
       ...this.stagger(member, client, admission),
       ...(dispatchID
         ? { fleet: { kind: "assignment" as const, dispatchID } }

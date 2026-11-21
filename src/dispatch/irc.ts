@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
+import type { IrcConfig } from "../config";
 import { type IrcClient, IrcUnavailable } from "../irc/client";
 import { fold, type IrcMessage, validMsgid } from "../irc/protocol";
 import type {
@@ -13,8 +14,10 @@ import {
   type DispatchMarker,
   dispatchTag,
   dispatchText,
+  dispatchTurnText,
   formatDispatchMarker,
   type IssueLabel,
+  isMarkerIssue,
   parseDispatchMarker,
 } from "./protocol";
 
@@ -146,9 +149,16 @@ export class IrcDispatchMessenger implements DispatchMessenger {
       this.warnedTags = true;
       throw new Error("IRC message-tags or echo-message unavailable");
     }
+    // The marker names the issue: the captain's turn is built from it alone.
+    if (!isMarkerIssue(offer.issue.identifier))
+      throw new Error("Issue identifier cannot be carried in an offer marker");
     const nick = await this.nick(captain);
     if (!nick) return;
-    const tags = this.tags({ kind: "offer", offerID: offer.id });
+    const tags = this.tags({
+      kind: "offer",
+      offerID: offer.id,
+      issue: offer.issue.identifier,
+    });
     const text = this.fit("PRIVMSG", tags, (max) =>
       dispatchText.offer(
         nick,
@@ -214,11 +224,56 @@ export function ircDispatchAnswer(
   };
 }
 
-/** A rear admiral request that a captain must not lose to the peer turn limit. */
+/** A message carrying a request marker; who sent it is checked separately. */
 export function isDispatchRequest(message: IrcMessage) {
   if (message.command !== "PRIVMSG") return false;
   const marker = parseDispatchMarker(message.tags.get(dispatchTag));
   return marker?.kind === "offer" || marker?.kind === "assigned";
+}
+
+/**
+ * Whether `account` (the server's `account` tag) is this captain's rear
+ * admiral: an enrolled fleet agent (`fleetPolicy.agentAccounts`) that is
+ * also a `fleetControl.targets` entry with `role: "rear_admiral"`. Only
+ * that account's requests pass the peer turn limit or record an offer;
+ * a marker from any other agent is an ordinary peer message.
+ */
+export function isRearAdmiral(
+  config: Pick<IrcConfig, "fleetPolicy" | "fleetControl">,
+  account: string,
+  caseFold: (value: string) => string,
+) {
+  const policy = config.fleetPolicy;
+  if (policy?.role !== "captain") return false;
+  const key = caseFold(account);
+  return (
+    policy.agentAccounts.some((agent) => caseFold(agent) === key) &&
+    !!config.fleetControl?.targets.some(
+      (target) =>
+        target.role === "rear_admiral" && caseFold(target.account) === key,
+    )
+  );
+}
+
+/**
+ * The agent turn for a rear admiral request, or undefined when the message
+ * carries no request marker. Only the leading address of the admitted text
+ * is kept, so intake rechecks see the same recipient; the rest is fixed text
+ * from the marker. The issue title, which anyone who can edit the issue
+ * controls, never reaches the turn. Call only for a verified rear admiral.
+ */
+export function dispatchRequestTurn(
+  message: IrcMessage,
+  admittedText: string,
+): string | undefined {
+  if (message.command !== "PRIVMSG") return;
+  const marker = parseDispatchMarker(message.tags.get(dispatchTag));
+  const address = /^@[^\s:,]+[:,] ?/.exec(admittedText)?.[0] ?? "";
+  if (marker?.kind === "assigned")
+    return `${address}${dispatchTurnText(marker.issue)}`;
+  if (marker?.kind === "offer")
+    return `${address}${dispatchTurnText(marker.issue, marker.offerID)}`;
+  return;
 }
 
 /** An offer addressed to this captain, as recorded for the answer tool. */

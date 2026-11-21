@@ -75,19 +75,21 @@ test("the client sends the bearer and zero-trust headers, reads the wire shapes 
   const assigned = await api.assignedIssues(
     [CAPTAIN_A, CAPTAIN_B],
     since,
+    undefined,
     signal,
   );
+  expect(assigned.next).toBeUndefined();
   expect(
-    assigned.map((issue) => [
+    assigned.items.map((issue) => [
       issue.identifier,
       issue.assignee?.kind,
       issue.assignee?.rank,
       issue.readyForAgents,
     ]),
   ).toEqual([["PRJ-1", "agent", "captain", false]]);
-  expect((await api.readyIssues(signal)).map((issue) => issue.id)).toEqual([
-    "i2",
-  ]);
+  expect(
+    (await api.readyIssues(undefined, signal)).items.map((issue) => issue.id),
+  ).toEqual(["i2"]);
   expect(await api.issue("missing", signal)).toBeUndefined();
   expect(await api.assign("i2", 1, CAPTAIN_B, signal)).toEqual({
     conflict: false,
@@ -130,6 +132,60 @@ test("the client sends the bearer and zero-trust headers, reads the wire shapes 
     );
     expect(request.redirect).toBe("error");
   }
+});
+
+test("an issue listing longer than one call's page budget returns a cursor to go on, never an error", async () => {
+  const f = await fixture({ http: true });
+  const api = client(f);
+  f.http.pageSize = 2;
+  for (let n = 0; n < 120; n++)
+    f.api.add({ id: `i${n}`, identifier: `PRJ-${n}`, assigneeId: CAPTAIN_A });
+  // 50 pages of 2 per call; the API's cursor continues the listing.
+  const first = await api.assignedIssues(
+    [CAPTAIN_A],
+    undefined,
+    undefined,
+    signal,
+  );
+  expect(first.items).toHaveLength(100);
+  expect(first.next).toBe("100");
+  const rest = await api.assignedIssues(
+    [CAPTAIN_A],
+    undefined,
+    first.next,
+    signal,
+  );
+  expect(rest.items).toHaveLength(20);
+  expect(rest.next).toBeUndefined();
+  expect(
+    new Set([...first.items, ...rest.items].map((issue) => issue.id)).size,
+  ).toBe(120);
+  // Membership needs whole listings, which read past the issue budget.
+  for (let n = 0; n < 120; n++) f.api.fleetProjectIDs.add(`project-${n}`);
+  expect((await api.fleetProjects(FLEET, signal)).size).toBe(121);
+});
+
+test("a first start longer than one poll's page budget initialises over several polls and sends nothing", async () => {
+  const f = await fixture({ http: true });
+  f.http.pageSize = 1;
+  for (let n = 0; n < 60; n++)
+    f.api.add({ id: `i${n}`, identifier: `PRJ-${n}`, assigneeId: CAPTAIN_A });
+  await f.dispatcher.step(signal);
+  expect(f.ledger.initialised).toBe(false);
+  f.clock.advance(2 * MINUTE);
+  await f.dispatcher.step(signal);
+  expect(f.ledger.initialised).toBe(true);
+  for (let n = 0; n < 60; n++)
+    expect(f.ledger.notified(`i${n}`, CAPTAIN_A)).toBe(true);
+  expect(f.chat.lines).toEqual([]);
+  f.clock.advance(2 * MINUTE);
+  f.api.add({ id: "new", identifier: "PRJ-NEW", assigneeId: CAPTAIN_B });
+  await f.dispatcher.step(signal);
+  f.clock.advance(2 * MINUTE);
+  await f.dispatcher.step(signal);
+  expect(f.chat.transcript()).toEqual([
+    "assigned PRJ-NEW -> example-captain-b",
+  ]);
 });
 
 test("a missing token or header variable fails before any request is made", async () => {
@@ -199,8 +255,10 @@ test("an older API's issues decode with readyForAgents unknown, in lists and sin
   f.api.legacy = true;
   f.api.add({ id: "i1", identifier: "PRJ-1", assigneeId: CAPTAIN_A });
   f.api.add({ id: "i2", identifier: "PRJ-2" });
-  const [assigned] = await api.assignedIssues([CAPTAIN_A], undefined, signal);
-  const [listed] = await api.readyIssues(signal);
+  const [assigned] = (
+    await api.assignedIssues([CAPTAIN_A], undefined, undefined, signal)
+  ).items;
+  const [listed] = (await api.readyIssues(undefined, signal)).items;
   const single = await api.issue("i2", signal);
   for (const issue of [assigned, listed, single]) {
     expect(issue).toBeDefined();

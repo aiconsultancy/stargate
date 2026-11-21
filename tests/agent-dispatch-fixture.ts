@@ -8,6 +8,7 @@ import {
   type DispatchIssue,
   type EditResult,
   type FleetRoster,
+  type ListingPart,
   SubspaceApi,
 } from "../src/dispatch/api";
 import {
@@ -135,7 +136,29 @@ export class FakeApi implements DispatchApi {
   /** Runs before each roster read; it may wait on, or fail, the request. */
   beforeFleet: ((signal: AbortSignal) => Promise<void>) | undefined;
   failAssign = 0;
+  /** Projects of this fleet, as initiatives and projects resolve them. */
+  fleetProjectIDs = new Set([PROJECT]);
+  /** Membership reads that fail before the next one succeeds. */
+  failProjects = 0;
+  /** Issues per listing call; a longer listing returns a cursor to go on. */
+  listingLimit: number | undefined;
   constructor(readonly clock: Clock) {}
+
+  /** A part of a listing from an index cursor, as `listingLimit` allows. */
+  private part(
+    issues: StoredIssue[],
+    cursor: string | undefined,
+  ): ListingPart<DispatchIssue> {
+    const start = cursor === undefined ? 0 : Number(cursor);
+    const end =
+      this.listingLimit === undefined
+        ? issues.length
+        : start + this.listingLimit;
+    return {
+      items: issues.slice(start, end).map((issue) => this.view(issue)),
+      next: end < issues.length ? String(end) : undefined,
+    };
+  }
 
   add(issue: Partial<StoredIssue> & { id: string; identifier: string }) {
     this.issues.set(issue.id, {
@@ -241,7 +264,11 @@ export class FakeApi implements DispatchApi {
   }
   async fleetProjects(fleetId: string) {
     this.calls.push("projects");
-    return new Set(fleetId === FLEET ? [PROJECT] : []);
+    if (this.failProjects > 0) {
+      this.failProjects--;
+      throw new Error("API unavailable");
+    }
+    return new Set(fleetId === FLEET ? this.fleetProjectIDs : []);
   }
   assignedRaw(assignees: readonly string[], since: string | undefined) {
     return [...this.issues.values()].filter(
@@ -255,9 +282,12 @@ export class FakeApi implements DispatchApi {
   async assignedIssues(
     assignees: readonly string[],
     since: string | undefined,
+    cursor: string | undefined,
   ) {
-    this.calls.push(`assigned since=${since ?? "-"}`);
-    return this.assignedRaw(assignees, since).map((issue) => this.view(issue));
+    this.calls.push(
+      `assigned since=${since ?? "-"}${cursor === undefined ? "" : ` from=${cursor}`}`,
+    );
+    return this.part(this.assignedRaw(assignees, since), cursor);
   }
   readyRaw() {
     return [...this.issues.values()].filter(
@@ -267,9 +297,9 @@ export class FakeApi implements DispatchApi {
         (this.legacy || issue.readyForAgents),
     );
   }
-  async readyIssues() {
-    this.calls.push("ready");
-    return this.readyRaw().map((issue) => this.view(issue));
+  async readyIssues(cursor: string | undefined) {
+    this.calls.push(cursor === undefined ? "ready" : `ready from=${cursor}`);
+    return this.part(this.readyRaw(), cursor);
   }
   async issue(reference: string) {
     this.calls.push(`issue ${reference}`);
@@ -416,6 +446,8 @@ export class FakeSubspaceHttp {
   credentialStatus: 401 | 403 | undefined;
   /** An API that predates the filter answers 400 to `readyForAgents`. */
   rejectReadyFilter = false;
+  /** Items per page of every listing; one page when unset. */
+  pageSize: number | undefined;
   constructor(readonly api: FakeApi) {}
 
   readonly fetch = (async (
@@ -496,7 +528,15 @@ export class FakeSubspaceHttp {
         status,
         headers: { "content-type": "application/json" },
       });
-    const page = (items: unknown[]) => json({ items, nextCursor: null });
+    const page = (items: unknown[]) => {
+      const start = Number(url.searchParams.get("cursor") ?? "0");
+      const end =
+        this.pageSize === undefined ? items.length : start + this.pageSize;
+      return json({
+        items: items.slice(start, end),
+        nextCursor: end < items.length ? String(end) : null,
+      });
+    };
     switch (route) {
       case "me":
         return json({
@@ -515,7 +555,10 @@ export class FakeSubspaceHttp {
         return page([{ id: INITIATIVE, parentId: null, fleetId: FLEET }]);
       case "projects":
         return page([
-          { id: PROJECT, initiativeId: INITIATIVE },
+          ...[...api.fleetProjectIDs].map((id) => ({
+            id,
+            initiativeId: INITIATIVE,
+          })),
           { id: OUTSIDE, initiativeId: null },
         ]);
       case "assigned":

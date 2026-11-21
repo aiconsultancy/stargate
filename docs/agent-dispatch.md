@@ -32,7 +32,9 @@ the answer and the outcome.
 
 - **Rear admiral only.** It runs on the IRC registration named by
   `messaging.registration`, which must have `fleetPolicy.role: "rear_admiral"`.
-  Captains need no dispatch configuration; they answer with a tool.
+  Captains need no `agentDispatch` section; they answer with a tool, and
+  recognise their rear admiral from their existing fleet configuration (see
+  [peer turn limits](#peer-turn-limits)).
 - **Outbound only.** Stargate calls the Subspace API; the API never calls
   Stargate, and nothing new listens on the fleet VM. Requests use HTTPS, or
   HTTP to a loopback address, and never follow redirects. Stargate does not
@@ -41,7 +43,12 @@ the answer and the outcome.
   [extra headers](#credentials)). Never expose the API to make this work.
 - **Identity from the API.** Stargate never identifies an agent by name. At
   start it reads `GET /api/v1/me` with the configured credential and goes on
-  only when that identity is an agent of rank `rearAdmiral` in this fleet.
+  only when that identity is an agent of rank `rearAdmiral` whose `fleetId`
+  is this fleet's ID from the roster; an agent without a fleet is refused.
+  Nothing is written to the API until the running process has confirmed
+  this. An answer that arrives first, as after a restart, is recorded and
+  confirms the identity before its assignment; when that fails, the
+  assignment waits in the ledger for a poll that confirms it.
   Captains are the fleet's agents of rank `captain` in the fleet roster.
 - **Messaging.** IRC is the only messaging system today
   (`messaging.type: "irc"`). The IRC server must offer `message-tags` and
@@ -106,8 +113,8 @@ and flag changes are recorded as the rear admiral's. Before enabling it, an
 operator must provision, on the fleet VM:
 
 1. **A registered API agent identity** for the rear admiral: rank
-   `rearAdmiral`, in this fleet (`POST /api/v1/agents`, by an organisation
-   administrator).
+   `rearAdmiral`, linked to this fleet so that `GET /api/v1/me` returns its
+   `fleetId` (`POST /api/v1/agents`, by an organisation administrator).
 2. **A bearer token for that identity that stays valid**, either long-lived
    or refreshed by something outside Stargate, in the variable named by
    `api.tokenEnv`: in the service environment or the private
@@ -142,9 +149,17 @@ Every `pollIntervalSeconds`, after the first poll at start:
 - unassigned issues flagged for agents (`readyForAgents=true&assignee=none`),
   kept when their project's initiative, or that initiative's nearest ancestor
   with a fleet, belongs to this fleet;
-- initiatives and projects, for that fleet membership;
+- initiatives and projects, for that fleet membership, read again whenever
+  the last read is older than one poll interval;
 - any issue under an open offer that the ready list no longer shows, read on
   its own.
+
+Each poll reads at most 50 pages (of 100 issues) of an issue list. A longer
+list goes on from the API's cursor at the next poll, so no list is too long
+to make progress. The ledger keeps the place in the assignment list, so a
+restart goes on from it; the ready list starts again after a restart.
+Initiatives and projects are read whole, up to 500 pages each; a longer
+list leaves fleet membership unknown, which holds offers (see below).
 
 ## Offers and answers
 
@@ -154,7 +169,11 @@ there. A captain is skipped when the API marks it unavailable, its chat
 account is not enrolled, or it is not online under its account. Before each
 offer the issue is read again; an issue that has been assigned, unflagged,
 closed, archived or moved out of the fleet ends the offers. If that happens
-while an offer is open, the offer is withdrawn in the channel.
+while an offer is open, the offer is withdrawn in the channel. Fleet
+membership must be known and no older than one poll interval before an
+offer is sent and before the acceptance write; it is read again when it is
+not. When it cannot be read, the step waits for a later poll: unknown
+membership never lets an issue through.
 
 On acceptance the rear admiral assigns the issue to that captain with one
 versioned write; the API clears _Ready for agents_ in the same write. A
@@ -194,15 +213,24 @@ the server's authenticated `account` tag before acting on a marker.
 | Kind                                                    | Sent by       | Command   | Value            | Notes                                                                                             |
 | ------------------------------------------------------- | ------------- | --------- | ---------------- | ------------------------------------------------------------------------------------------------- |
 | `assigned`                                              | Rear admiral  | `PRIVMSG` | Issue identifier | Behaviour 1, addressed `@<captain nick>:`.                                                        |
-| `offer`                                                 | Rear admiral  | `PRIVMSG` | Offer ID         | Behaviour 2, addressed `@<captain nick>:`. Its server `msgid` identifies the offer in chat.       |
+| `offer`                                                 | Rear admiral  | `PRIVMSG` | Offer ID, issue  | Behaviour 2, addressed `@<captain nick>:`. Its server `msgid` identifies the offer in chat.       |
 | `accept`, `decline`                                     | Asked captain | `NOTICE`  | Offer ID         | `+draft/reply=<offer msgid>`. Counted only from the asked captain's account, before the deadline. |
 | `accepted`, `timeout`, `withdrawn`, `taken`, `retrying` | Rear admiral  | `NOTICE`  | Offer ID         | Status for people, replying to the offer.                                                         |
 | `gave-up`                                               | Rear admiral  | `NOTICE`  | Issue identifier | After the last round.                                                                             |
 
+The `offer` value is `<offer ID>,<issue identifier>`, for example
+`offer,offer-0123456789abcdef,PRJ-12`; every other value is one field.
 The captain's nick is the one the server shows holding the captain's account
 at that moment. Offer IDs are `offer-` and 16 hexadecimal digits. Issue
 titles are shown on one line, without control characters, cut to fit the
 line.
+
+An issue title is user-editable, so it never becomes the captain agent's
+instruction. For a request from its rear admiral, the captain's gateway
+replaces the chat text of the agent's turn with fixed text built from the
+marker: the issue identifier, the offer ID and the request, with a note that
+issue content is untrusted data and that the agent should read the issue
+itself. People in the channel still see the title.
 
 ```text
 <rear-admiral> @example-captain: PRJ-12 “Fix the flaky upload test” is ready for agents. Can you take it? Call fleet_answer_offer with offerID offer-0123456789abcdef to accept or decline within 5 minutes. No answer counts as a decline.
@@ -213,17 +241,27 @@ line.
 ## Peer turn limits
 
 `access.peerTurnsPerHour` limits turns that peer captains start on a captain.
-A dispatch request is never dropped by it: an `assigned` or `offer` message
-that comes from an account in both the captain's `access.peerCaptains` and
-`fleetPolicy.agentAccounts` is admitted even when the peer budget is used
-up. It still counts as a peer turn, so a busy dispatch hour leaves less
-budget for other peer messages in the command channel. Answers and status
-lines are `NOTICE`s, which never start a turn, so they use no budget. The
-dispatcher bounds its own volume: at most one open offer per issue, and one
-assignment notice per (issue, assignee).
+The rear admiral's dispatch request is never dropped by it: an `assigned` or
+`offer` message whose server-authenticated account is the captain's rear
+admiral is admitted even when the peer budget is used up. It still counts as
+a peer turn, so a busy dispatch hour leaves less budget for other peer
+messages in the command channel. Answers and status lines are `NOTICE`s,
+which never start a turn, so they use no budget. The dispatcher bounds its
+own volume: at most one open offer per issue, and one assignment notice per
+(issue, assignee).
 
-The rear admiral must be one of the captain's peer captains and enrolled
-agents for its requests to be admitted at all. With the
+A captain recognises its rear admiral from its existing fleet configuration:
+an account in `fleetPolicy.agentAccounts` that is also a
+`fleetControl.targets` entry with `role: "rear_admiral"`. Only that account's
+requests pass the peer limit, get the turn described under
+[chat format](#chat-format) and, for an offer, are recorded for the answer
+tool. When the captain has `fleetChannels`, an offer is recorded only in its
+`fleetChannels.command` channel. The same markers from any other account,
+an enrolled peer captain included, are ordinary peer messages: they count
+against the limit, record no offer and reach the agent as written.
+
+The rear admiral must also be one of the captain's peer captains for its
+requests to be admitted at all. With the
 [configured fleet defaults](irc.md#configured-fleet-defaults), list the rear
 admiral's account in the captain's `fleetPolicy.agentAccounts` and as a
 `fleetControl.targets` entry with `role: "rear_admiral"`, and leave
@@ -234,12 +272,14 @@ admiral's account in the captain's `fleetPolicy.agentAccounts` and as a
 The ledger is `<dataDirectory>/agent-dispatch.sqlite`, private to the rear
 admiral's gateway.
 
-- **First start.** The first poll that reads the captains' assignments
-  records them without sending anything. Issues already flagged for agents
-  are offered.
-- **Restart.** Notified (issue, assignee) pairs, the assignment cursor and
-  each offer's round, captain, deadline and next round time survive a
-  restart. Each step is recorded before the message it leads to, so a restart
+- **First start.** The first read of the captains' assignments records them
+  without sending anything. A list longer than one poll reads is recorded
+  over several polls, and assignment notices start when it ends. Issues
+  already flagged for agents are offered meanwhile.
+- **Restart.** Notified (issue, assignee) pairs, the assignment cursor, the
+  place in an unfinished assignment list and each offer's round, captain,
+  deadline and next round time survive a restart. The API identity and
+  fleet membership do not: both are read again before the next write. Each step is recorded before the message it leads to, so a restart
   never asks twice; a stop between the record and the send leaves an offer
   that times out. A deadline that passed while Stargate was down is handled
   at the first poll.
@@ -268,8 +308,10 @@ admiral's gateway.
 - A lost answer to the give-up comment can repeat the comment. Stargate
   never claims exactly-once external effects.
 - A busy command channel shares the captains' peer turn budget, as above.
-- An issue title is quoted as written; a title that mentions another nick
-  can catch that agent's attention.
+- An issue title is quoted as written in chat; a title that mentions
+  another nick can catch that agent's attention. A captain whose
+  `fleetControl` does not name its rear admiral treats dispatch requests as
+  ordinary peer messages, title included, and cannot answer offers.
 
 ## Tests
 
@@ -279,5 +321,6 @@ a flagged issue accepted by the second captain, a flagged issue nobody takes
 ending in the comment and the cleared flag (with a shortened ladder), and a
 restart mid-offer. `tests/agent-dispatch-api.test.ts` runs the real API client
 against a fake API with injected failures. `tests/agent-dispatch-wiring.test.ts`
-covers configuration, the off switch, the captain's answer tool and an end to
-end run over a local IRC fixture. No test contacts a real service.
+covers configuration, the off switch, the captain's recognition of its rear
+admiral, the captain's answer tool and an end to end run over a local IRC
+fixture. No test contacts a real service.

@@ -106,7 +106,8 @@ trust boundary; plugin permissions alone are not a sandbox.
 ## Answering an agent dispatch offer
 
 `fleet_answer_offer({"offerID":"offer-…","answer":"accept"})` answers a
-_Ready for agents_ offer that the fleet's rear admiral addressed to this
+_Ready for agents_ offer that the fleet's rear admiral (the
+`fleetControl.targets` entry with `role: "rear_admiral"`) addressed to this
 captain in the command channel (see [agent dispatch](agent-dispatch.md)).
 `answer` is `accept` or `decline`; an optional `reason` of up to 200
 characters is shown to people only. The gateway accepts only an offer that

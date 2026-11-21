@@ -1,10 +1,14 @@
 import { afterEach, expect, test } from "bun:test";
+import type { AgentDispatcher } from "../src/dispatch/dispatcher";
+import { DispatchLedger } from "../src/dispatch/ledger";
 import {
   answer,
   CAPTAIN_A,
   CAPTAIN_B,
   CAPTAIN_C,
   CREW_A,
+  type Fixture,
+  FLEET,
   fixture,
   HOUR,
   HUMAN,
@@ -548,4 +552,167 @@ test("an older API: an open offer is withdrawn once the issue read lacks readyFo
   f.clock.advance(2 * MINUTE);
   await f.dispatcher.step(signal);
   expect(f.chat.lines).toHaveLength(2);
+});
+
+/** The asked captain accepts the last offer, through `dispatcher`. */
+function accept(f: Fixture, dispatcher: AgentDispatcher) {
+  const offer = f.chat.lastOffer();
+  return dispatcher.answer(
+    {
+      account: offer.account,
+      offerID: offer.offerID,
+      answer: "accept",
+      replyTo: offer.messageID,
+      at: f.clock.now(),
+    },
+    signal,
+  );
+}
+
+test("an identity without a fleet, or of another fleet, is not this fleet's rear admiral", async () => {
+  const f = await fixture();
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  for (const fleetId of [null, OTHER_FLEET]) {
+    f.api.identity = { ...f.api.identity, fleetId };
+    await f.dispatcher.step(signal);
+  }
+  expect(f.chat.lines).toEqual([]);
+  expect(
+    f.api.calls.filter(
+      (call) => call.startsWith("assigned") || call === "ready",
+    ),
+  ).toEqual([]);
+  f.api.identity = { ...f.api.identity, fleetId: FLEET };
+  await f.dispatcher.step(signal);
+  expect(f.chat.transcript()).toEqual(["offer PRJ-1 -> example-captain-a"]);
+});
+
+test("an answer after a restart writes nothing until this process confirms its API identity", async () => {
+  const f = await fixture();
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  f.ledger.close();
+  // The restarted process holds another fleet's rear admiral credential.
+  f.api.identity = { ...f.api.identity, fleetId: OTHER_FLEET };
+  const ledger = new DispatchLedger(f.path);
+  const restarted = f.open(ledger);
+  f.api.calls.length = 0;
+  await accept(f, restarted);
+  // The identity is checked first; the issue is not even read.
+  expect(f.api.calls).toEqual(["fleet example-fleet", "me"]);
+  expect(f.api.edits).toEqual([]);
+  // The acceptance is kept for a confirmed identity, not lost.
+  expect(ledger.tracked("i1")).toMatchObject({ state: "accepting" });
+  f.clock.advance(2 * MINUTE);
+  await restarted.step(signal);
+  expect(f.api.edits).toEqual([]);
+  f.api.identity = { ...f.api.identity, fleetId: FLEET };
+  f.clock.advance(2 * MINUTE);
+  await restarted.step(signal);
+  expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_A);
+  expect(f.api.edits).toHaveLength(1);
+  expect(f.chat.statuses()).toEqual(["accepted"]);
+  ledger.close();
+});
+
+test("an answer before the first poll confirms the identity, then assigns", async () => {
+  const f = await fixture();
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  f.ledger.close();
+  const ledger = new DispatchLedger(f.path);
+  const restarted = f.open(ledger);
+  f.api.calls.length = 0;
+  await accept(f, restarted);
+  expect(f.api.calls.slice(0, 2)).toEqual(["fleet example-fleet", "me"]);
+  expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_A);
+  ledger.close();
+});
+
+test("unknown fleet membership defers an offer, and after a restart is read before the acceptance write", async () => {
+  const f = await fixture();
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  // Membership cannot be read: nothing is offered rather than permitted.
+  f.api.failProjects = 1;
+  await f.dispatcher.step(signal);
+  expect(f.chat.lines).toEqual([]);
+  f.clock.advance(2 * MINUTE);
+  await f.dispatcher.step(signal);
+  expect(f.chat.transcript()).toEqual(["offer PRJ-1 -> example-captain-a"]);
+  f.ledger.close();
+  // The issue's project left the fleet while the gateway restarted.
+  f.api.fleetProjectIDs = new Set();
+  const ledger = new DispatchLedger(f.path);
+  const restarted = f.open(ledger);
+  await accept(f, restarted);
+  expect(f.api.edits).toEqual([]);
+  expect(ledger.tracked("i1")).toMatchObject({
+    state: "done",
+    outcome: "withdrawn:moved",
+  });
+  expect(f.chat.statuses()).toEqual(["withdrawn"]);
+  ledger.close();
+});
+
+test("membership older than one poll interval is read again before the acceptance write; a failed read defers it", async () => {
+  const f = await fixture();
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  // No poll for longer than the interval; the answer is still in time.
+  f.clock.advance(3 * MINUTE);
+  f.api.failProjects = 1;
+  await answer(f, "accept").catch(() => {});
+  expect(f.api.edits).toEqual([]);
+  expect(f.ledger.tracked("i1")?.state).toBe("accepting");
+  // The project leaves the fleet before membership can be read again.
+  f.api.fleetProjectIDs = new Set();
+  f.clock.advance(2 * MINUTE);
+  await f.dispatcher.step(signal);
+  expect(f.api.edits).toEqual([]);
+  expect(f.ledger.tracked("i1")).toMatchObject({
+    state: "done",
+    outcome: "withdrawn:moved",
+  });
+});
+
+test("a first start too long for one poll records existing assignments over several polls, without blocking offers", async () => {
+  const f = await fixture();
+  f.api.listingLimit = 2;
+  for (let n = 1; n <= 5; n++)
+    f.api.add({ id: `i${n}`, identifier: `PRJ-${n}`, assigneeId: CAPTAIN_A });
+  f.api.add({ id: "r1", identifier: "PRJ-R", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  expect(f.ledger.initialised).toBe(false);
+  expect(f.ledger.assignmentWalk).toMatchObject({ cursor: "2" });
+  // The rest of the poll is not blocked by the unfinished listing.
+  expect(f.chat.transcript()).toEqual(["offer PRJ-R -> example-captain-a"]);
+  // A restart goes on from the saved cursor.
+  f.ledger.close();
+  const ledger = new DispatchLedger(f.path);
+  const restarted = f.open(ledger);
+  for (let poll = 0; poll < 2; poll++) {
+    f.clock.advance(2 * MINUTE);
+    await restarted.step(signal);
+  }
+  expect(ledger.initialised).toBe(true);
+  expect(ledger.assignmentWalk).toBeUndefined();
+  expect(f.api.calls.filter((call) => call.startsWith("assigned"))).toEqual([
+    "assigned since=-",
+    "assigned since=- from=2",
+    "assigned since=- from=4",
+  ]);
+  for (let n = 1; n <= 5; n++)
+    expect(ledger.notified(`i${n}`, CAPTAIN_A)).toBe(true);
+  expect(f.chat.transcript()).toEqual(["offer PRJ-R -> example-captain-a"]);
+  // A later listing longer than one poll still reaches a new assignment.
+  f.clock.advance(2 * MINUTE);
+  f.api.add({ id: "i6", identifier: "PRJ-6", assigneeId: CAPTAIN_B });
+  for (let poll = 0; poll < 4; poll++) {
+    await restarted.step(signal);
+    f.clock.advance(2 * MINUTE);
+  }
+  expect(
+    f.chat.transcript().filter((line) => line.startsWith("assigned")),
+  ).toEqual(["assigned PRJ-6 -> example-captain-b"]);
+  ledger.close();
 });

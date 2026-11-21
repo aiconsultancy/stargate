@@ -879,9 +879,13 @@ requests in the same thread, an ordinary notice and the final replies.
 With [agent dispatch](agent-dispatch.md) enabled, the rear admiral's gateway
 writes `+stargate/dispatch=<kind>,<value>` requests to captains in the fleet
 command channel, and captains answer with a `NOTICE` that replies to the
-offer. A request from an account that is both a peer captain and an enrolled
-fleet agent is never dropped by `access.peerTurnsPerHour`, but still counts
-towards it. See that page for the markers, the answer tool and the limits.
+offer. Only a request from the captain's rear admiral, an enrolled fleet
+agent that is a `fleetControl.targets` entry with `role: "rear_admiral"`, is
+never dropped by `access.peerTurnsPerHour` (it still counts towards it). Its
+agent turn is fixed text built from the marker, without the issue title, and
+an offer is recorded only in `fleetChannels.command` when that is set. The
+same marker from any other account is an ordinary peer message. See that
+page for the markers, the answer tool and the limits.
 
 ## Native clarification questions
 

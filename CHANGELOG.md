@@ -43,8 +43,10 @@
   fleet tool, sent as an IRC reply carrying `+stargate/dispatch`, counted only
   from the asked captain's account. Offers time out after 300 seconds; rounds
   repeat after 1, 3, 6 and 12 hours, then the rear admiral comments and clears
-  the flag. A durable ledger survives restarts. Dispatch requests are never
-  dropped by the IRC peer turn limit but count towards it.
+  the flag. A durable ledger survives restarts. Only the rear admiral's
+  dispatch requests, recognised from the captain's `fleetControl.targets`
+  entry with `role: "rear_admiral"`, are never dropped by the IRC peer turn
+  limit; they still count towards it.
 - Add durable quota-reset and quota-threshold cron events without model polling.
   Retain immutable model/arbiter choices, suppress ignored output and remove
   one-off jobs only after a successful run. Refuse configuration/namespace drift

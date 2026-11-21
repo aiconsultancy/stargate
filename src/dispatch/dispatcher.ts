@@ -6,7 +6,7 @@ import {
   type DispatchIssue,
   type FleetRoster,
 } from "./api";
-import type { DispatchLedger, TrackedIssue } from "./ledger";
+import type { AssignmentWalk, DispatchLedger, TrackedIssue } from "./ledger";
 import {
   type DispatchAnswer,
   type DispatchOutcome,
@@ -108,7 +108,12 @@ function pause(ms: number, signal: AbortSignal) {
 }
 
 type Captain = CaptainRef & { available: boolean; reachable: boolean };
-type Roster = { fleetId: string; captains: Map<string, Captain> };
+type Roster = { captains: Map<string, Captain> };
+type Membership = {
+  fleetId: string;
+  projects: ReadonlySet<string>;
+  at: number;
+};
 
 const closedStates = new Set(["completed", "canceled", "duplicate"]);
 /** Re-read assignments a little before the cursor: dedupe makes it safe. */
@@ -130,9 +135,16 @@ export class AgentDispatcher {
   private readonly now: () => number;
   private queue: Promise<unknown> = Promise.resolve();
   private roster: Roster | undefined;
-  private projects: Set<string> | undefined;
+  /** Fleet project membership and when it was read; see `fleetProjects`. */
+  private membership: Membership | undefined;
   private readySupported: boolean | undefined;
-  private identityChecked = false;
+  /** Where the next poll goes on with a ready list longer than one poll reads. */
+  private readyCursor: string | undefined;
+  /**
+   * The fleet's API ID once this process has confirmed that its credential
+   * is that fleet's rear admiral. Nothing is written to the API before.
+   */
+  private verifiedFleet: string | undefined;
   private readonly warned = new Set<string>();
   /** Issue → earliest retry after a failed step, so a failing API is not hammered. */
   private readonly retryAt = new Map<string, number>();
@@ -327,7 +339,7 @@ export class AgentDispatcher {
         reachable,
       });
     }
-    this.roster = { fleetId: roster.id, captains };
+    this.roster = { captains };
     try {
       await this.pollAssigned(signal);
       this.cleared("assigned");
@@ -353,15 +365,19 @@ export class AgentDispatcher {
     this.options.ledger.prune(this.now());
   }
 
-  /** Assignments and comments must be the rear admiral's own. */
+  /**
+   * Assignments and comments must be the rear admiral's own, in this fleet:
+   * the identity's fleet ID must be the roster's, never absent.
+   */
   private async checkIdentity(roster: FleetRoster, signal: AbortSignal) {
-    if (this.identityChecked) return true;
+    if (this.verifiedFleet !== undefined)
+      return this.verifiedFleet === roster.id;
     try {
       const me = await this.options.api.me(signal);
       if (
         me.kind !== "agent" ||
         me.agentRank !== "rearAdmiral" ||
-        (me.fleetId !== null && me.fleetId !== roster.id)
+        me.fleetId !== roster.id
       ) {
         this.warnOnce(
           "identity",
@@ -369,7 +385,7 @@ export class AgentDispatcher {
         );
         return false;
       }
-      this.identityChecked = true;
+      this.verifiedFleet = roster.id;
       this.cleared("identity");
       return true;
     } catch (error) {
@@ -381,6 +397,51 @@ export class AgentDispatcher {
       );
       return false;
     }
+  }
+
+  /**
+   * Whether this process has confirmed its API identity, confirming it now
+   * when no poll has yet. Every API write waits for this: a ledger left by
+   * an earlier process says nothing about the credential this one holds.
+   */
+  private async identityConfirmed(signal: AbortSignal) {
+    if (this.verifiedFleet !== undefined) return true;
+    let roster: FleetRoster;
+    try {
+      roster = await this.options.api.fleet(this.settings.fleet, signal);
+    } catch (error) {
+      signal.throwIfAborted();
+      this.apiFailed(
+        "fleet",
+        "Agent dispatch cannot read the fleet roster",
+        error,
+      );
+      return false;
+    }
+    return this.checkIdentity(roster, signal);
+  }
+
+  /**
+   * The fleet's projects, read within the last poll interval: read again
+   * when unknown (as after a restart) or older. A failed read throws, so the
+   * offer or write that needed it waits; unknown membership never permits.
+   */
+  private async fleetProjects(signal: AbortSignal) {
+    const fleetId = this.verifiedFleet;
+    if (fleetId === undefined)
+      throw new Error("Agent dispatch identity is not confirmed");
+    const cached = this.membership;
+    const age = cached ? this.now() - cached.at : undefined;
+    if (
+      cached?.fleetId === fleetId &&
+      age !== undefined &&
+      age >= 0 &&
+      age < this.settings.pollIntervalMs
+    )
+      return cached.projects;
+    const projects = await this.options.api.fleetProjects(fleetId, signal);
+    this.membership = { fleetId, projects, at: this.now() };
+    return projects;
   }
 
   private noteReadyField(issues: readonly DispatchIssue[]) {
@@ -398,6 +459,12 @@ export class AgentDispatcher {
     );
   }
 
+  /**
+   * Behaviour 1. A listing longer than one poll's page budget is read over
+   * several polls from a cursor kept in the ledger, so its size never blocks
+   * a poll: the first start's full read records existing assignments a part
+   * at a time and initialises the ledger when it ends.
+   */
   private async pollAssigned(signal: AbortSignal) {
     const roster = this.roster;
     if (!roster) return;
@@ -407,15 +474,43 @@ export class AgentDispatcher {
     // First start ends with the first read of captains' assignments: a fleet
     // that gains its first captain later still records before it notifies.
     if (!ids.length) return;
+    const saved = ledger.assignmentWalk;
+    // The API cursor is bound to the filter: a changed roster starts again.
+    const resumed =
+      saved &&
+      saved.assignees.length === ids.length &&
+      saved.assignees.every((id, index) => id === ids[index])
+        ? saved
+        : undefined;
     const cursor = ledger.cursor;
-    const since =
-      first || cursor === undefined || !Number.isFinite(Date.parse(cursor))
-        ? undefined
-        : new Date(Date.parse(cursor) - cursorOverlapMs).toISOString();
-    const issues = await this.options.api.assignedIssues(ids, since, signal);
+    const walk: Omit<AssignmentWalk, "cursor"> = resumed ?? {
+      assignees: ids,
+      since:
+        first || cursor === undefined || !Number.isFinite(Date.parse(cursor))
+          ? undefined
+          : new Date(Date.parse(cursor) - cursorOverlapMs).toISOString(),
+      startedAt: this.now(),
+      newest: first ? undefined : cursor,
+      hold: undefined,
+    };
+    let part: Awaited<ReturnType<DispatchApi["assignedIssues"]>>;
+    try {
+      part = await this.options.api.assignedIssues(
+        ids,
+        walk.since,
+        resumed?.cursor,
+        signal,
+      );
+    } catch (error) {
+      // A cursor the API no longer accepts starts the listing again.
+      if (resumed && errorStatus(error) === 400)
+        ledger.assignmentWalk = undefined;
+      throw error;
+    }
+    const issues = part.items;
     this.noteReadyField(issues);
-    let newest = cursor;
-    let hold: string | undefined;
+    let newest = walk.newest;
+    let hold = walk.hold;
     const ordered = [...issues].sort(
       (a, b) =>
         Date.parse(a.updatedAt) - Date.parse(b.updatedAt) ||
@@ -492,23 +587,45 @@ export class AgentDispatcher {
         );
       }
     }
-    ledger.cursor =
-      hold !== undefined &&
-      (newest === undefined || Date.parse(hold) < Date.parse(newest))
-        ? hold
+    if (part.next !== undefined) {
+      if (!resumed)
+        this.options.log.info(
+          "Agent dispatch reads a long assignment list over several polls",
+        );
+      ledger.assignmentWalk = { ...walk, cursor: part.next, newest, hold };
+      return;
+    }
+    // Never past the listing's start: an issue changed while a long listing
+    // was read, on a page already passed, is read again by the next one.
+    const started = new Date(walk.startedAt).toISOString();
+    const reached =
+      newest === undefined || Date.parse(newest) > walk.startedAt
+        ? started
         : newest;
+    ledger.cursor =
+      hold !== undefined && Date.parse(hold) < Date.parse(reached)
+        ? hold
+        : reached;
+    ledger.assignmentWalk = undefined;
     if (first) ledger.markInitialised();
   }
 
-  private unqualified(
+  /**
+   * Why an issue no longer qualifies for offers, or undefined. Fleet
+   * membership must be known and current (see `fleetProjects`); when it
+   * cannot be read this throws, so the caller waits instead of permitting.
+   */
+  private async unqualified(
     issue: DispatchIssue | undefined,
-  ): WithdrawReason | undefined {
+    signal: AbortSignal,
+  ): Promise<WithdrawReason | undefined> {
     if (!issue) return "missing";
     if (issue.assignee) return "assigned";
     if (issue.archived) return "archived";
     if (closedStates.has(issue.stateType)) return "closed";
     if (issue.readyForAgents !== true) return "unflagged";
-    if (this.projects && !this.projects.has(issue.projectId)) return "moved";
+    const projects = await this.fleetProjects(signal);
+    if (!projects.has(issue.projectId)) return "moved";
     return;
   }
 
@@ -517,23 +634,32 @@ export class AgentDispatcher {
     if (!roster) return;
     let issues: DispatchIssue[] = [];
     if (this.readySupported !== false) {
+      const from = this.readyCursor;
       try {
-        issues = await this.options.api.readyIssues(signal);
+        const part = await this.options.api.readyIssues(from, signal);
+        issues = part.items;
+        // A longer list goes on at the next poll, then starts again.
+        this.readyCursor = part.next;
         this.noteReadyField(issues);
       } catch (error) {
         if (errorStatus(error) !== 400) throw error;
+        // A refused cursor starts the list again; only a refused first
+        // page means an API without the filter.
+        if (from !== undefined) {
+          this.readyCursor = undefined;
+          throw error;
+        }
         this.markReadyUnsupported();
       }
     }
     const { ledger } = this.options;
     const readyIDs = new Set<string>();
     if (this.readyForAgentsAvailable) {
-      this.projects = await this.options.api.fleetProjects(
-        roster.fleetId,
-        signal,
-      );
+      // Current membership, read before any issue is tracked: a failure
+      // fails this part of the poll rather than tracking on stale data.
+      await this.fleetProjects(signal);
       for (const issue of issues) {
-        if (this.unqualified(issue)) continue;
+        if (await this.unqualified(issue, signal)) continue;
         readyIDs.add(issue.id);
         const tracked = ledger.tracked(issue.id);
         if (tracked && tracked.state !== "done") {
@@ -577,7 +703,7 @@ export class AgentDispatcher {
         signal.throwIfAborted();
         continue;
       }
-      const reason = this.unqualified(current);
+      const reason = await this.unqualified(current, signal);
       if (reason) await this.finish(tracked, reason, current?.version, signal);
     }
   }
@@ -693,10 +819,13 @@ export class AgentDispatcher {
     else if (tracked.state === "clearing") await this.giveUp(tracked, signal);
   }
 
-  /** Re-read the issue before any new offer; stop when it no longer qualifies. */
+  /**
+   * Re-read the issue and current fleet membership before any new offer;
+   * stop when it no longer qualifies. A failed read throws: the offer waits.
+   */
   private async stillReady(tracked: TrackedIssue, signal: AbortSignal) {
     const current = await this.options.api.issue(tracked.issue, signal);
-    const reason = this.unqualified(current);
+    const reason = await this.unqualified(current, signal);
     if (reason) {
       await this.finish(tracked, reason, current?.version, signal);
       return false;
@@ -834,10 +963,12 @@ export class AgentDispatcher {
 
   private async giveUp(tracked: TrackedIssue, signal: AbortSignal) {
     const { api, ledger } = this.options;
+    // Never write as an identity this process has not confirmed.
+    if (!(await this.identityConfirmed(signal))) return;
     let state = tracked;
     for (let attempt = 0; attempt < maxEditAttempts; attempt++) {
       const current = await api.issue(state.issue, signal);
-      const reason = this.unqualified(current);
+      const reason = await this.unqualified(current, signal);
       // After the comment, a cleared flag is most likely our own write whose
       // answer was lost: finish the give-up and still say so in chat.
       if (reason === "unflagged" && state.commented && current) {
@@ -920,6 +1051,9 @@ export class AgentDispatcher {
       await this.askNext(declined, declined.position + 1, signal);
       return;
     }
+    // The acceptance is recorded first: when this process has not yet
+    // confirmed its API identity (after a restart, say) and cannot now, the
+    // write waits in the ledger for a poll that confirms it.
     const accepting: TrackedIssue = {
       ...tracked,
       state: "accepting",
@@ -929,10 +1063,23 @@ export class AgentDispatcher {
     await this.assignAccepted(accepting, signal);
   }
 
-  /** Versioned assignment to the accepting captain, retried after a race. */
+  /**
+   * Versioned assignment to the accepting captain, retried after a race.
+   * Only as a confirmed identity, and only while the issue still qualifies
+   * against current fleet membership.
+   */
   private async assignAccepted(tracked: TrackedIssue, signal: AbortSignal) {
     const offer = tracked.offer;
     if (!offer) return;
+    if (!(await this.identityConfirmed(signal))) {
+      this.warnOnce(
+        "unconfirmed-write",
+        "Agent dispatch holds an accepted offer until its API identity is confirmed",
+        { issue: tracked.identifier },
+      );
+      return;
+    }
+    this.cleared("unconfirmed-write");
     const { api, ledger } = this.options;
     try {
       for (let attempt = 0; attempt < maxEditAttempts; attempt++) {
@@ -968,7 +1115,7 @@ export class AgentDispatcher {
           );
           return;
         }
-        const reason = this.unqualified(current);
+        const reason = await this.unqualified(current, signal);
         if (reason) {
           await this.finish(
             { ...tracked, state: "asking" },

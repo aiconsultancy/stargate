@@ -38,6 +38,13 @@ export type DispatchIdentity = {
   fleetId: string | null;
 };
 
+/**
+ * One poll's stretch of an issue listing: at most a page budget, so no
+ * listing is too long to make progress. `next` continues it at a later poll
+ * (the API's cursor, bound to the same filter); undefined at the end.
+ */
+export type ListingPart<T> = { items: T[]; next: string | undefined };
+
 /** A versioned edit either applied (with the new version when returned) or lost a race. */
 export type EditResult =
   | { conflict: false; version: number | undefined }
@@ -49,12 +56,17 @@ export interface DispatchApi {
   fleet(reference: string, signal: AbortSignal): Promise<FleetRoster>;
   /** Projects whose initiative, or nearest ancestor with a fleet, is this fleet's. */
   fleetProjects(fleetId: string, signal: AbortSignal): Promise<Set<string>>;
+  /** Issues assigned to these agents, from `cursor` (the start when undefined). */
   assignedIssues(
     assignees: readonly string[],
     updatedSince: string | undefined,
+    cursor: string | undefined,
     signal: AbortSignal,
-  ): Promise<DispatchIssue[]>;
-  readyIssues(signal: AbortSignal): Promise<DispatchIssue[]>;
+  ): Promise<ListingPart<DispatchIssue>>;
+  readyIssues(
+    cursor: string | undefined,
+    signal: AbortSignal,
+  ): Promise<ListingPart<DispatchIssue>>;
   /** Undefined when the issue is gone or no longer readable. */
   issue(
     reference: string,
@@ -182,8 +194,17 @@ function json(status: number, text: string): unknown {
   }
 }
 
-/** Bound every walk: a misbehaving cursor never loops forever. */
-const maxPages = 50;
+/**
+ * Pages of an issue listing read in one call; a longer listing continues at
+ * the next poll from the returned cursor, so its size never blocks a poll.
+ */
+const issuePageBudget = 50;
+/**
+ * Initiatives and projects are needed whole for fleet membership. Bound the
+ * walk anyway, so a misbehaving cursor never loops forever; a longer listing
+ * leaves membership unknown, which defers offers rather than permitting them.
+ */
+const maxReferencePages = 500;
 const maxBodyBytes = 8 * 1024 * 1024;
 
 export type SubspaceApiOptions = {
@@ -292,26 +313,56 @@ export class SubspaceApi implements DispatchApi {
     return json(status, text);
   }
 
-  private async pages(
+  /** Up to `budget` pages from `from`; `next` is where the listing goes on. */
+  private async walk(
     route: (cursor?: string) => string,
+    from: string | undefined,
+    budget: number,
     signal: AbortSignal,
-  ): Promise<unknown[]> {
+  ): Promise<ListingPart<unknown>> {
     const items: unknown[] = [];
-    let cursor: string | undefined;
-    for (let page = 0; page < maxPages; page++) {
+    let cursor = from;
+    for (let page = 0; page < budget; page++) {
       const result = decode(
         pageSchema,
         await this.get(route(cursor), signal),
         "page",
       );
       items.push(...result.items);
-      if (!result.nextCursor) return items;
+      if (!result.nextCursor) return { items, next: undefined };
+      if (result.nextCursor === cursor)
+        throw new DispatchApiError(undefined, "API listing cursor repeated");
       cursor = result.nextCursor;
     }
-    throw new DispatchApiError(
+    return { items, next: cursor };
+  }
+
+  /** A whole listing, or an error when it exceeds the reference bound. */
+  private async pages(
+    route: (cursor?: string) => string,
+    signal: AbortSignal,
+  ): Promise<unknown[]> {
+    const { items, next } = await this.walk(
+      route,
       undefined,
-      "API listing exceeded its page bound",
+      maxReferencePages,
+      signal,
     );
+    if (next !== undefined)
+      throw new DispatchApiError(
+        undefined,
+        "API listing exceeded its page bound",
+      );
+    return items;
+  }
+
+  private async issueListing(
+    route: (cursor?: string) => string,
+    from: string | undefined,
+    signal: AbortSignal,
+  ): Promise<ListingPart<DispatchIssue>> {
+    const part = await this.walk(route, from, issuePageBudget, signal);
+    return { items: part.items.map(toDispatchIssue), next: part.next };
   }
 
   async me(signal: AbortSignal): Promise<DispatchIdentity> {
@@ -376,22 +427,19 @@ export class SubspaceApi implements DispatchApi {
   async assignedIssues(
     assignees: readonly string[],
     updatedSince: string | undefined,
+    cursor: string | undefined,
     signal: AbortSignal,
   ) {
-    if (!assignees.length) return [];
-    return (
-      await this.pages(
-        (cursor) =>
-          dispatchRoutes.assignedIssues(assignees, updatedSince, cursor),
-        signal,
-      )
-    ).map(toDispatchIssue);
+    if (!assignees.length) return { items: [], next: undefined };
+    return this.issueListing(
+      (page) => dispatchRoutes.assignedIssues(assignees, updatedSince, page),
+      cursor,
+      signal,
+    );
   }
 
-  async readyIssues(signal: AbortSignal) {
-    return (await this.pages(dispatchRoutes.readyIssues, signal)).map(
-      toDispatchIssue,
-    );
+  readyIssues(cursor: string | undefined, signal: AbortSignal) {
+    return this.issueListing(dispatchRoutes.readyIssues, cursor, signal);
   }
 
   async issue(reference: string, signal: AbortSignal) {

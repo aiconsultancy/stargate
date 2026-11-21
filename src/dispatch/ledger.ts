@@ -50,6 +50,27 @@ const trackedSchema = Schema.Struct({
   updatedAt: Schema.Finite,
 });
 
+/**
+ * An assignment listing longer than one poll's page budget, read over
+ * several polls. The API cursor is bound to the same filter, so the
+ * assignees and `since` are kept with it.
+ */
+const walkSchema = Schema.Struct({
+  /** Captain user IDs the listing filters on, sorted. */
+  assignees: Schema.Array(Schema.String),
+  /** The listing's `updatedSince`; absent for the first start's full read. */
+  since: Schema.optional(Schema.String),
+  /** API cursor of the next page to read. */
+  cursor: Schema.String,
+  /** When the listing began (ms). */
+  startedAt: Schema.Finite,
+  /** Newest server `updatedAt` seen so far, the earlier cursor included. */
+  newest: Schema.optional(Schema.String),
+  /** Oldest `updatedAt` of a notice that is still to be sent. */
+  hold: Schema.optional(Schema.String),
+});
+
+export type AssignmentWalk = typeof walkSchema.Type;
 export type DispatchOfferRecord = typeof offerSchema.Type;
 export type TrackedIssue = {
   -readonly [K in keyof typeof trackedSchema.Type]: (typeof trackedSchema.Type)[K];
@@ -124,6 +145,28 @@ export class DispatchLedger {
 
   set cursor(value: string | undefined) {
     if (value !== undefined) this.setMeta("cursor", value);
+  }
+
+  /** An unfinished assignment listing; an unreadable value starts it again. */
+  get assignmentWalk(): AssignmentWalk | undefined {
+    const value = this.meta("assignmentWalk");
+    if (value === undefined) return undefined;
+    const parsed = Schema.decodeUnknownResult(
+      Schema.fromJsonString(walkSchema),
+    )(value);
+    return Result.isSuccess(parsed) ? parsed.success : undefined;
+  }
+
+  set assignmentWalk(value: AssignmentWalk | undefined) {
+    if (value === undefined)
+      this.db
+        .query("DELETE FROM dispatch_meta WHERE key=?")
+        .run("assignmentWalk");
+    else
+      this.setMeta(
+        "assignmentWalk",
+        JSON.stringify(Schema.encodeUnknownSync(walkSchema)(value)),
+      );
   }
 
   /** One-time log flags, so a restart does not repeat a warning every poll. */
