@@ -48,6 +48,7 @@ import {
   agentTurn,
   type IrcMember,
   ircAllowed,
+  ircDispatchAnswerAllowed,
   ircNote,
   ircResultJobAllowed,
   requiresVisitorTag,
@@ -564,7 +565,11 @@ export class IrcShip {
   sourceRecorder: ((source: FleetSource) => void) | undefined;
   /** Captain side of agent dispatch: an admitted offer for the answer tool. */
   offerRecorder: ((offer: Omit<DispatchOffer, "account">) => void) | undefined;
-  /** Rear admiral side of agent dispatch: every tagged chat message, unchecked. */
+  /**
+   * Rear admiral side of agent dispatch: each tagged chat message whose
+   * sender and channel pass the registration's access rules; its marker,
+   * account and reply are still unchecked.
+   */
   dispatchListener:
     | ((message: IrcMessage, fold: (value: string) => string) => void)
     | undefined;
@@ -1239,11 +1244,18 @@ export class IrcShip {
     const time = message.tags.get("time");
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
     if (replay && (!time || Date.parse(time) < oldest)) return;
-    // The dispatcher checks account, offer and reply itself; this only routes.
+    // Only after the sender and channel rules every message passes; the
+    // dispatcher then checks account, offer, reply and deadline itself.
     if (
       member.role === "captain" &&
       this.dispatchListener &&
-      message.tags.has(dispatchTag)
+      message.tags.has(dispatchTag) &&
+      ircDispatchAnswerAllowed(message, {
+        config: this.config,
+        member,
+        fold: client.fold,
+        joined: (channel) => client.inChannel(channel),
+      })
     )
       try {
         this.dispatchListener(message, client.fold);

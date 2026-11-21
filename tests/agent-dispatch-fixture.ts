@@ -17,6 +17,7 @@ import {
   type CaptainRef,
   type DispatchEvent,
   type DispatchMessenger,
+  UndeliverableIssue,
 } from "../src/dispatch/dispatcher";
 import { DispatchLedger } from "../src/dispatch/ledger";
 import type { IssueLabel } from "../src/dispatch/protocol";
@@ -358,8 +359,17 @@ export class FakeChat implements DispatchMessenger {
   offline = new Set<string>();
   /** Our own chat connection is down: every send throws. */
   down = false;
+  /** Identifiers this transport can never carry, and each refused request. */
+  undeliverable = new Set<string>();
+  refused: string[] = [];
   private sequence = 0;
+  private carried(kind: "assigned" | "offer", issue: IssueLabel) {
+    if (!this.undeliverable.has(issue.identifier)) return;
+    this.refused.push(`${kind} ${issue.identifier}`);
+    throw new UndeliverableIssue("identifier cannot be carried");
+  }
   async assigned(captain: CaptainRef, issue: IssueLabel) {
+    this.carried("assigned", issue);
     if (this.down) throw new Error("IRC unavailable");
     if (this.offline.has(captain.account)) return false;
     this.lines.push({
@@ -370,6 +380,7 @@ export class FakeChat implements DispatchMessenger {
     return true;
   }
   async offer(captain: CaptainRef, offer: { id: string; issue: IssueLabel }) {
+    this.carried("offer", offer.issue);
     if (this.down) throw new Error("IRC unavailable");
     if (this.offline.has(captain.account)) return undefined;
     const messageID = `msg-${++this.sequence}`;

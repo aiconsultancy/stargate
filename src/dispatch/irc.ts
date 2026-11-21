@@ -3,11 +3,12 @@ import type { Logger } from "pino";
 import type { IrcConfig } from "../config";
 import { type IrcClient, IrcUnavailable } from "../irc/client";
 import { fold, type IrcMessage, validMsgid } from "../irc/protocol";
-import type {
-  CaptainRef,
-  DispatchAnswerInput,
-  DispatchEvent,
-  DispatchMessenger,
+import {
+  type CaptainRef,
+  type DispatchAnswerInput,
+  type DispatchEvent,
+  type DispatchMessenger,
+  UndeliverableIssue,
 } from "./dispatcher";
 import {
   type DispatchAnswer,
@@ -118,8 +119,33 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     return fitBytes(build(12), budget);
   }
 
+  /**
+   * A request's marker names its issue, and the captain's turn is built from
+   * that marker alone. An identifier the marker cannot carry is refused
+   * before anything is sent: an untagged request would hand the captain's
+   * agent the issue title as an ordinary peer message.
+   */
+  private carried(issue: IssueLabel) {
+    if (!isMarkerIssue(issue.identifier))
+      throw new UndeliverableIssue(
+        "Issue identifier cannot be carried in a dispatch marker",
+      );
+  }
+
   async assigned(captain: CaptainRef, issue: IssueLabel, signal: AbortSignal) {
+    this.carried(issue);
     await this.ready(signal);
+    // Without message-tags the notice would go out untagged, handing the
+    // captain's agent the issue title as an ordinary peer message. Holding
+    // the notice (by throwing) retries it once the server supports tags.
+    if (!this.client.hasCap("message-tags")) {
+      if (!this.warnedTags)
+        this.log.warn(
+          "Agent dispatch requests need IRC message-tags and echo-message; requests are held",
+        );
+      this.warnedTags = true;
+      throw new Error("IRC message-tags unavailable");
+    }
     const nick = await this.nick(captain);
     if (!nick) return false;
     const tags = this.tags({ kind: "assigned", issue: issue.identifier });
@@ -135,6 +161,7 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     offer: { id: string; issue: IssueLabel; timeoutSeconds: number },
     signal: AbortSignal,
   ) {
+    this.carried(offer.issue);
     await this.ready(signal);
     // Without both, no answer could ever be matched to this offer. Holding
     // the offer (by throwing) keeps captains and rounds for a working server.
@@ -149,9 +176,6 @@ export class IrcDispatchMessenger implements DispatchMessenger {
       this.warnedTags = true;
       throw new Error("IRC message-tags or echo-message unavailable");
     }
-    // The marker names the issue: the captain's turn is built from it alone.
-    if (!isMarkerIssue(offer.issue.identifier))
-      throw new Error("Issue identifier cannot be carried in an offer marker");
     const nick = await this.nick(captain);
     if (!nick) return;
     const tags = this.tags({

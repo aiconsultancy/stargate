@@ -7,6 +7,7 @@ import {
   CAPTAIN_B,
   CAPTAIN_C,
   CREW_A,
+  capturedLog,
   type Fixture,
   FLEET,
   fixture,
@@ -498,6 +499,64 @@ test("an outage of the rear admiral's own chat connection holds the offer withou
   expect(f.ledger.tracked("i1")?.round).toBe(1);
   await answer(f, "accept");
   expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_A);
+});
+
+test("an assignment notice the chat can never carry is skipped once, without holding the cursor", async () => {
+  const { log, lines } = capturedLog();
+  const f = await fixture({ log });
+  await f.dispatcher.step(signal);
+  f.chat.undeliverable.add("PRJ 1");
+  f.api.add({ id: "i1", identifier: "PRJ 1", assigneeId: CAPTAIN_A });
+  f.clock.advance(MINUTE);
+  f.api.add({ id: "i2", identifier: "PRJ-2", assigneeId: CAPTAIN_B });
+  f.clock.advance(MINUTE);
+  await f.dispatcher.step(signal);
+  expect(f.chat.transcript()).toEqual(["assigned PRJ-2 -> example-captain-b"]);
+  expect(f.ledger.notified("i1", CAPTAIN_A)).toBe(true);
+  // The cursor moves past the refused notice instead of holding at it.
+  expect(f.ledger.cursor).toBe(f.api.issues.get("i2")?.updatedAt);
+  for (let poll = 0; poll < 3; poll++) {
+    f.clock.advance(2 * MINUTE);
+    await f.dispatcher.step(signal);
+  }
+  expect(f.chat.refused).toEqual(["assigned PRJ 1"]);
+  expect(
+    lines.filter((line) => line.includes("skipped an assignment notice")),
+  ).toHaveLength(1);
+});
+
+test("a ready issue the chat can never carry is skipped once, and other issues are still offered", async () => {
+  const { log, lines } = capturedLog();
+  const f = await fixture({ log });
+  f.chat.undeliverable.add("PRJ 1");
+  f.api.add({ id: "i1", identifier: "PRJ 1", readyForAgents: true });
+  f.api.add({ id: "i2", identifier: "PRJ-2", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  expect(f.chat.offers().map((offer) => offer.issue)).toEqual(["PRJ-2"]);
+  expect(f.ledger.tracked("i1")).toMatchObject({
+    state: "done",
+    outcome: "undeliverable",
+    doneVersion: 1,
+  });
+  // Never retried as if our chat connection were down.
+  for (let poll = 0; poll < 3; poll++) {
+    f.clock.advance(2 * MINUTE);
+    await f.dispatcher.step(signal);
+  }
+  expect(f.chat.refused).toEqual(["offer PRJ 1"]);
+  expect(
+    lines.filter((line) => line.includes("skipped a ready issue")),
+  ).toHaveLength(1);
+  // The other issue went on: its offer timed out and the next captain was asked.
+  expect(f.chat.offers().map((offer) => offer.issue)).toEqual([
+    "PRJ-2",
+    "PRJ-2",
+  ]);
+  // A changed issue is considered again.
+  f.api.change("i1", { identifier: "PRJ-1" });
+  f.clock.advance(2 * MINUTE);
+  await f.dispatcher.step(signal);
+  expect(f.chat.offers().some((offer) => offer.issue === "PRJ-1")).toBe(true);
 });
 
 test("a decline whose next offer could not be sent moves on before the old deadline", async () => {

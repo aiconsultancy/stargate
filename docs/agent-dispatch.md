@@ -246,7 +246,10 @@ The rear admiral's dispatch request is never dropped by it: an `assigned` or
 admiral is admitted even when the peer budget is used up. It still counts as
 a peer turn, so a busy dispatch hour leaves less budget for other peer
 messages in the command channel. Answers and status lines are `NOTICE`s,
-which never start a turn, so they use no budget. The dispatcher bounds its
+which never start a turn, so they use no budget. The rear admiral counts an
+answer only when its sender and channel pass the rear admiral registration's
+own IRC access rules (`deniedAccounts`, `deniedChannels`, `allowedAccounts`,
+fleet policy) in a channel it has joined. The dispatcher bounds its
 own volume: at most one open offer per issue, and one assignment notice per
 (issue, assignee).
 
@@ -294,6 +297,10 @@ admiral's gateway.
 - **Chat failures.** When the rear admiral's own IRC connection or command
   channel is unavailable, an offer is held for the same captain; no captain
   is skipped and no round is used up.
+- **Identifiers a marker cannot carry.** An issue whose identifier does not
+  fit the [marker](#chat-format) is never sent untagged. Its assignment
+  notice is skipped, and a ready issue is not offered until the issue
+  changes; each is logged once, and other issues are not held.
 
 ## Limits
 

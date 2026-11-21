@@ -30,8 +30,22 @@ export type DispatchEvent = {
 };
 
 /**
+ * Thrown by a messenger for an issue it can never carry, such as an
+ * identifier its markers cannot hold. Nothing was sent, and retrying cannot
+ * help: the dispatcher skips that notice or offer instead of holding it.
+ */
+export class UndeliverableIssue extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UndeliverableIssue";
+  }
+}
+
+/**
  * The chat side, independent of the transport. IRC is the only
  * implementation today; another transport supplies the same three calls.
+ * Either request throws `UndeliverableIssue` for an issue it can never
+ * carry; any other failure is this side's own outage and is retried.
  */
 export interface DispatchMessenger {
   /** Behaviour 1 notice. False when the captain cannot be reached now. */
@@ -552,8 +566,23 @@ export class AgentDispatcher {
       if (captain.reachable)
         try {
           sent = await this.options.messenger.assigned(captain, issue, signal);
-        } catch {
+        } catch (error) {
           signal.throwIfAborted();
+          // Never sendable: skip this notice rather than hold the cursor.
+          if (error instanceof UndeliverableIssue) {
+            ledger.recordNotified(
+              issue.id,
+              captain.userId,
+              issue.identifier,
+              now,
+              false,
+            );
+            this.options.log.warn(
+              { issue: issue.id, captain: captain.name },
+              "Agent dispatch skipped an assignment notice whose issue identifier cannot be sent in chat",
+            );
+            continue;
+          }
         }
       if (sent) {
         ledger.recordNotified(
@@ -822,21 +851,23 @@ export class AgentDispatcher {
   /**
    * Re-read the issue and current fleet membership before any new offer;
    * stop when it no longer qualifies. A failed read throws: the offer waits.
+   * The issue as read when it still qualifies; undefined once finished.
    */
   private async stillReady(tracked: TrackedIssue, signal: AbortSignal) {
     const current = await this.options.api.issue(tracked.issue, signal);
     const reason = await this.unqualified(current, signal);
-    if (reason) {
-      await this.finish(tracked, reason, current?.version, signal);
-      return false;
+    if (reason || !current) {
+      await this.finish(tracked, reason ?? "missing", current?.version, signal);
+      return;
     }
-    return true;
+    return current;
   }
 
   private async startRound(tracked: TrackedIssue, signal: AbortSignal) {
     const roster = this.roster;
     if (!roster) return;
-    if (!(await this.stillReady(tracked, signal))) return;
+    const current = await this.stillReady(tracked, signal);
+    if (!current) return;
     const ids = [...roster.captains.keys()].sort();
     const shift = ids.length ? tracked.start % ids.length : 0;
     const order = [...ids.slice(shift), ...ids.slice(0, shift)];
@@ -850,20 +881,27 @@ export class AgentDispatcher {
       updatedAt: this.now(),
     };
     this.options.ledger.save(next);
-    await this.askNext(next, 0, signal, false);
+    await this.askNext(next, 0, signal, current.version);
   }
 
-  /** Ask the next available captain from `position`, or end the round. */
+  /**
+   * Ask the next available captain from `position`, or end the round.
+   * `checked` is the issue's version when the caller has just re-read it.
+   */
   private async askNext(
     tracked: TrackedIssue,
     position: number,
     signal: AbortSignal,
-    recheck = true,
+    checked?: number,
   ) {
     const roster = this.roster;
     if (!roster) return;
-    if (recheck && position < tracked.order.length)
-      if (!(await this.stillReady(tracked, signal))) return;
+    let version = checked;
+    if (version === undefined && position < tracked.order.length) {
+      const current = await this.stillReady(tracked, signal);
+      if (!current) return;
+      version = current.version;
+    }
     for (let index = position; index < tracked.order.length; index++) {
       const captain = roster.captains.get(tracked.order[index] ?? "");
       if (!captain?.available || !captain.reachable) continue;
@@ -899,6 +937,24 @@ export class AgentDispatcher {
         );
       } catch (error) {
         signal.throwIfAborted();
+        // No captain could ever be sent this issue: stop tracking it until
+        // someone changes it, without holding the poll or other issues.
+        if (error instanceof UndeliverableIssue) {
+          this.options.ledger.save({
+            ...tracked,
+            state: "done",
+            offer: undefined,
+            resume: undefined,
+            outcome: "undeliverable",
+            ...(version === undefined ? {} : { doneVersion: version }),
+            updatedAt: now,
+          });
+          this.options.log.warn(
+            { issue: tracked.issue },
+            "Agent dispatch skipped a ready issue whose identifier cannot be sent in chat; it is offered again only after the issue changes",
+          );
+          return;
+        }
         // Our own chat connection failed, not the captain: close this
         // undelivered offer and ask the same captain again later, so an
         // outage never uses up a round or skips anyone.
