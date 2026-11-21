@@ -20,7 +20,7 @@ import type {
   PendingQuestion,
   QuestionAnswer,
 } from "./questions";
-import type { QuotaSnapshot } from "./quota";
+import type { QuotaObservation, QuotaSnapshot } from "./quota";
 import type { InboundReaction } from "./reactions";
 import type { SessionHistory } from "./session-history";
 import type { TurnProgress } from "./turn-progress";
@@ -266,6 +266,7 @@ export interface AgentBackend {
   ): Promise<FleetCrewStatus | undefined>;
   /** Sanitized subscription limits; never runs a model or creates a session. */
   quota?(signal: AbortSignal): Promise<QuotaSnapshot>;
+  cronQuota?(signal: AbortSignal): Promise<QuotaObservation>;
   /** Validates one configured live cron route without changing the captain. */
   cronModel?(
     input: Pick<CronAdvanced, "model" | "arbiter">,

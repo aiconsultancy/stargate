@@ -525,6 +525,26 @@ test("cron adapter uses location-scoped RPC and never calls native sessions", as
         expect(body).toEqual({ input: {} });
         return Response.json({ output: { model: "go-proxy/cheap#low" } });
       }
+      if (url.pathname.endsWith("/cronQuota")) {
+        expect(body).toEqual({ input: {} });
+        return Response.json({
+          output: {
+            status: "ok",
+            observedAt: 1,
+            cached: false,
+            accounts: [
+              {
+                provider: "codex",
+                account: "codex-1",
+                identity: `sha256:${"a".repeat(64)}`,
+                status: "ok",
+                observedAt: 1,
+                windows: [],
+              },
+            ],
+          },
+        });
+      }
       expect(body).toEqual({ input: { id: "run-rpc", prompt: "status" } });
       return Response.json({
         output: invalid
@@ -549,6 +569,9 @@ test("cron adapter uses location-scoped RPC and never calls native sessions", as
     expect(await backend.cronModel({}, signal())).toEqual({
       model: "go-proxy/cheap#low",
     });
+    expect((await backend.cronQuota(signal())).accounts[0]?.identity).toBe(
+      `sha256:${"a".repeat(64)}`,
+    );
     const result = await backend.cronEvaluate(
       { id: "run-rpc", prompt: "status" },
       signal(),
@@ -560,6 +583,7 @@ test("cron adapter uses location-scoped RPC and never calls native sessions", as
     ).rejects.toThrow("do not replay");
     expect(requests).toEqual([
       "/api/rpc/stargate.crew.reporting/cronModel",
+      "/api/rpc/stargate.crew.reporting/cronQuota",
       "/api/rpc/stargate.crew.reporting/cronEvaluate",
       "/api/rpc/stargate.crew.reporting/cronEvaluate",
     ]);

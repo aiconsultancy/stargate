@@ -8,7 +8,11 @@ import {
   cronModelInputSchema,
 } from "../cron-decision";
 import { maintenanceDrainSchema } from "../maintenance-drain";
-import { quotaInputSchema, quotaSnapshotSchema } from "../quota";
+import {
+  quotaInputSchema,
+  quotaObservationSchema,
+  quotaSnapshotSchema,
+} from "../quota";
 import {
   exactStruct,
   historyChildrenInputSchema,
@@ -131,6 +135,7 @@ export const CrewReporting = Rpc.define({
       ),
     },
     quota: { input: quotaInputSchema, output: quotaSnapshotSchema },
+    cronQuota: { input: quotaInputSchema, output: quotaObservationSchema },
     cronModel: {
       input: portable(cronModelInputSchema),
       output: portable(settingsStruct({ model: cronModelSchema })),

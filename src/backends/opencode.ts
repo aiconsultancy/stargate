@@ -64,7 +64,7 @@ import {
   type QuestionAnswer,
   questionFingerprint,
 } from "../questions";
-import { quotaSnapshotSchema } from "../quota";
+import { quotaObservationSchema, quotaSnapshotSchema } from "../quota";
 import { createReadSlot, readWithDeadline } from "../read-deadline";
 import {
   BackendFailure,
@@ -1119,6 +1119,26 @@ export class OpenCodeBackend implements AgentBackend {
     } catch {
       throw new Error(
         "Quota unavailable; check the captain location and quota configuration.",
+      );
+    }
+  }
+
+  async cronQuota(signal: AbortSignal) {
+    try {
+      signal.throwIfAborted();
+      const result = quotaObservationSchema.parse(
+        await this.client
+          .rpc(CrewReporting)
+          .cronQuota(
+            {},
+            { location: { directory: this.config.directory }, signal },
+          ),
+      );
+      signal.throwIfAborted();
+      return result;
+    } catch {
+      throw new Error(
+        "Cron quota unavailable; inspect the bound captain configuration.",
       );
     }
   }

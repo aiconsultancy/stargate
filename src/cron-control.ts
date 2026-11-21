@@ -9,7 +9,7 @@ import { CronStore } from "./cron-store";
 import { cronChannel, cronUser } from "./cronjob-config";
 import { cronjobNameSchema } from "./cronjob-files";
 import { CronjobManager, cronRuntimeBinding } from "./cronjob-manager";
-import type { Identity } from "./routing";
+import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
 import { legacySetting } from "./settings-legacy";
 
 const destination = {
@@ -160,6 +160,45 @@ export async function runCronOperation(
             .map((job) => ({ ...job, model: job.model ?? "captain" })),
           definitionErrors: errors,
         };
+      if (input.op === "list") {
+        if (
+          (input.channel !== undefined &&
+            !isAllowedChannel(bot, input.channel)) ||
+          (input.user !== undefined &&
+            (input.user === identity.user || !isAllowedUser(bot, input.user)))
+        )
+          throw new CronControlError("Cronjob user or channel is not allowed.");
+        const filter = {
+          botKey: manager.key,
+          channel: input.channel,
+          user: input.user,
+        };
+        return {
+          jobs: store
+            .listDestinations(filter, input.page)
+            .map((job) => ({ ...job, model: job.model ?? "captain" })),
+          filter: { channel: input.channel ?? null, user: input.user ?? null },
+          page: input.page,
+          definitionErrors: errors,
+        };
+      }
+      if (input.op === "remove") {
+        const job = store.findDestination(manager.key, input.id);
+        if (
+          !job ||
+          (input.channel !== undefined && input.channel !== job.channel) ||
+          (input.user !== undefined && input.user !== job.user)
+        )
+          return { removed: false };
+        // Removing an existing task grants no new access or execution. Retain
+        // bot ownership even when its former destination is no longer allowed.
+        return {
+          removed: store.remove(
+            { botKey: job.botKey, channel: job.channel, user: job.user },
+            input.id,
+          ),
+        };
+      }
       const scope = {
         botKey: manager.key,
         user: input.user ?? bot.cronjobs.user,
@@ -167,16 +206,6 @@ export async function runCronOperation(
       };
       if (!manager.allowed(scope))
         throw new CronControlError("Cronjob user or channel is not allowed.");
-      if (input.op === "list")
-        return {
-          jobs: store
-            .list(scope, input.page)
-            .map((job) => ({ ...job, model: job.model ?? "captain" })),
-          page: input.page,
-          definitionErrors: errors,
-        };
-      if (input.op === "remove")
-        return { removed: store.remove(scope, input.id) };
       if (input.op === "run") {
         const run = store.runNow(scope, input.name, now, input.requestId);
         return run

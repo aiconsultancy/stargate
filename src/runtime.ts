@@ -657,9 +657,9 @@ export function serve(
         );
         const cronServices: CronServices = {
           quota: (signal) => {
-            if (!backend.quota)
+            if (!backend.cronQuota)
               throw new Error("Cron quota reader unavailable.");
-            return backend.quota(signal);
+            return backend.cronQuota(signal);
           },
           model: (input, signal) => {
             if (!backend.cronModel)

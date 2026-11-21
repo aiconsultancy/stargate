@@ -8,6 +8,7 @@ import { CronStore } from "../src/cron-store";
 import type { QuotaSnapshot } from "../src/quota";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
+const hour = 3_600_000;
 const scope = { botKey: "bot", channel: "C123", user: "U123" };
 const stores: CronStore[] = [];
 const directories: string[] = [];
@@ -89,7 +90,7 @@ test("reset bootstraps silently, advances on manual reset, and survives reopenin
   store.upsertFile(scope, reset, "/jobs/reset.md", false, now);
   expect(store.claimDue(scope.botKey, now + 1)).toEqual([]);
   expect(store.claimQuota(scope.botKey, observation(), now)).toEqual([]);
-  const changed = observation(0, now + 120_000, now + 1);
+  const changed = observation(0, now + 60_000 + hour, now + 1);
   const runs = store.claimQuota(scope.botKey, changed, now + 1);
   expect(runs).toHaveLength(1);
   expect(runs[0]).toMatchObject({
@@ -103,7 +104,8 @@ test("reset bootstraps silently, advances on manual reset, and survives reopenin
       window: "5h",
       scope: "subscription",
       usedPercent: 0,
-      resetAt: now + 120_000,
+      previousResetAt: now + 60_000,
+      resetAt: now + 60_000 + hour,
       observedAt: now + 1,
     },
   });
@@ -121,7 +123,7 @@ test("reset bootstraps silently, advances on manual reset, and survives reopenin
   expect(
     store.claimQuota(
       scope.botKey,
-      observation(0, now + 120_000, now + 3),
+      observation(0, now + 60_000 + hour, now + 3),
       now + 3,
     ),
   ).toEqual([]);
@@ -133,6 +135,11 @@ test("threshold fires initially high and only once per account reset cycle", () 
   store.add(scope, threshold, now);
   const first = store.claimQuota(scope.botKey, observation(80), now);
   expect(first).toHaveLength(1);
+  expect(first[0]?.quotaEvent).toMatchObject({
+    previousResetAt: null,
+    resetAt: now + 60_000,
+  });
+  expect(open(path).pending(scope.botKey)).toEqual(first);
   if (!first[0]) throw new Error("Expected threshold run");
   store.finish(first[0].id, "done", now);
   const restarted = open(path);
@@ -160,7 +167,7 @@ test("threshold fires initially high and only once per account reset cycle", () 
   expect(
     restarted.claimQuota(
       scope.botKey,
-      observation(85, now + 120_000, now + 4),
+      observation(80, now + 60_000 + hour, now + 4),
       now + 4,
     ),
   ).toHaveLength(1);
@@ -209,7 +216,7 @@ test("threshold crossing consumes paused, unavailable and busy events without ba
   expect(
     store.claimQuota(
       scope.botKey,
-      observation(90, now + 120_000, now + 3),
+      observation(85, now + 60_000 + hour, now + 3),
       now + 3,
     ),
   ).toHaveLength(3);
@@ -282,10 +289,196 @@ test("invalid, stale, inactive and out-of-order observations cannot change basel
   expect(
     store.claimQuota(
       scope.botKey,
-      observation(10, now + 700_000, now + 3),
+      observation(5, now + 500_000 + hour, now + 3),
       now + 3,
     ),
   ).toHaveLength(1);
+});
+
+test("subsecond jitter and backward drift do not reset or rearm thresholds after reopening", () => {
+  const path = databasePath();
+  const store = open(path);
+  store.add(scope, reset, now);
+  store.add(scope, threshold, now);
+  const rawResetAt = now + 5 * hour;
+  const bootstrap = store.claimQuota(
+    scope.botKey,
+    observation(90, rawResetAt),
+    now,
+  );
+  expect(bootstrap).toHaveLength(1);
+  if (!bootstrap[0]) throw new Error("Expected threshold run");
+  expect(bootstrap[0].quotaEvent?.type).toBe("quota-threshold");
+  store.finish(bootstrap[0].id, "done", now);
+  for (const [offset, used, at] of [
+    [499, 90, now + 1],
+    [998, 0, now + 2],
+    [-200, 90, now + 3],
+  ] as const)
+    expect(
+      open(path).claimQuota(
+        scope.botKey,
+        observation(used, rawResetAt + offset, at),
+        at,
+      ),
+    ).toEqual([]);
+  // A non-stale backwards timestamp becomes the next raw baseline.
+  const next = open(path).claimQuota(
+    scope.botKey,
+    observation(85, rawResetAt - 200 + hour, now + 4),
+    now + 4,
+  );
+  expect(next).toHaveLength(2);
+  for (const run of next) {
+    expect(run.quotaEvent).toMatchObject({
+      previousResetAt: rawResetAt - 200,
+      resetAt: rawResetAt - 200 + hour,
+    });
+    store.finish(run.id, "done", now + 4);
+  }
+  expect(
+    store.claimQuota(
+      scope.botKey,
+      observation(90, rawResetAt - 200, now + 5),
+      now + 5,
+    ),
+  ).toEqual([]);
+  // A later qualified reset must get fresh receipts if raw deadlines repeat.
+  expect(
+    open(path).claimQuota(
+      scope.botKey,
+      observation(85, rawResetAt - 200 + hour, now + 6),
+      now + 6,
+    ),
+  ).toHaveLength(2);
+});
+
+test("existing quota state backfills the receipt cycle without replaying thresholds", () => {
+  const path = databasePath();
+  const rawResetAt = now + 5 * hour;
+  const db = new Database(path);
+  try {
+    db.exec(`CREATE TABLE cron_quota_state (
+      botKey TEXT NOT NULL, provider TEXT NOT NULL, account TEXT NOT NULL,
+      window TEXT NOT NULL, scope TEXT NOT NULL, resetAt INTEGER NOT NULL,
+      usedPercent REAL NOT NULL, observedAt INTEGER NOT NULL,
+      PRIMARY KEY(botKey,provider,account,window,scope)
+    )`);
+    db.query("INSERT INTO cron_quota_state VALUES (?,?,?,?,?,?,?,?)").run(
+      scope.botKey,
+      "claude",
+      "claude-1",
+      "5h",
+      "subscription",
+      rawResetAt,
+      90,
+      now,
+    );
+    const store = open(path);
+    const schedule = store.add(scope, threshold, now);
+    db.query("INSERT INTO cron_quota_receipts VALUES (?,?,?,?,?,?,?)").run(
+      schedule.id,
+      "claude",
+      "claude-1",
+      "5h",
+      "subscription",
+      rawResetAt,
+      "quota-threshold",
+    );
+    expect(
+      store.claimQuota(
+        scope.botKey,
+        observation(90, rawResetAt + 499, now + 1),
+        now + 1,
+      ),
+    ).toEqual([]);
+    expect(
+      open(path).claimQuota(
+        scope.botKey,
+        observation(90, rawResetAt + 2 * hour, now + 2),
+        now + 2,
+      ),
+    ).toEqual([]);
+    expect(
+      store.claimQuota(
+        scope.botKey,
+        observation(85, rawResetAt + 3 * hour, now + 3),
+        now + 3,
+      ),
+    ).toHaveLength(1);
+  } finally {
+    db.close();
+  }
+});
+
+test("multi-hour reset drift without a sufficient usage drop stays in the same cycle", () => {
+  const store = open();
+  store.add(scope, reset, now);
+  store.add(scope, threshold, now);
+  const rawResetAt = now + 5 * hour;
+  expect(
+    store.claimQuota(scope.botKey, observation(0, rawResetAt), now),
+  ).toEqual([]);
+  for (const [used, hours, at] of [
+    [2, 7, now + 1],
+    [0, 9, now + 2],
+    [90, 11, now + 3],
+  ] as const) {
+    const runs = store.claimQuota(
+      scope.botKey,
+      observation(used, now + hours * hour, at),
+      at,
+    );
+    if (used < 80) expect(runs).toEqual([]);
+    else {
+      expect(runs).toHaveLength(1);
+      if (!runs[0]) throw new Error("Expected threshold run");
+      expect(runs[0].quotaEvent).toMatchObject({
+        type: "quota-threshold",
+        previousResetAt: now + 9 * hour,
+        resetAt: now + 11 * hour,
+      });
+      store.finish(runs[0].id, "done", at);
+    }
+  }
+  expect(
+    store.claimQuota(
+      scope.botKey,
+      observation(90, now + 13 * hour, now + 4),
+      now + 4,
+    ),
+  ).toEqual([]);
+});
+
+test("weekly reset after the previous deadline fires once without a usage drop", () => {
+  const path = databasePath();
+  const store = open(path);
+  store.add(
+    scope,
+    job({ type: "quota-reset", provider: "claude", window: "weekly" }),
+    now,
+  );
+  const previousResetAt = now + 60_000;
+  const weekly = observation(1, previousResetAt);
+  limit(weekly).window = "weekly";
+  expect(store.claimQuota(scope.botKey, weekly, now)).toEqual([]);
+  const at = previousResetAt;
+  const nextResetAt = previousResetAt + 7 * 24 * hour;
+  const next = observation(2, nextResetAt, at);
+  limit(next).window = "weekly";
+  const runs = open(path).claimQuota(scope.botKey, next, at);
+  expect(runs).toHaveLength(1);
+  if (!runs[0]) throw new Error("Expected weekly reset run");
+  expect(runs[0].quotaEvent).toMatchObject({
+    previousResetAt,
+    resetAt: nextResetAt,
+    usedPercent: 2,
+  });
+  store.finish(runs[0].id, "done", at);
+  expect(open(path).claimQuota(scope.botKey, next, at + 1)).toEqual([]);
+  const drift = observation(2, nextResetAt + 2 * hour, at + 2);
+  limit(drift).window = "weekly";
+  expect(open(path).claimQuota(scope.botKey, drift, at + 2)).toEqual([]);
 });
 
 test("provider, account, window, scope and bot observations stay isolated", () => {

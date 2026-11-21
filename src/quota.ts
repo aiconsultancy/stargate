@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -70,23 +71,34 @@ const windowSchema = z.strictObject({
   resetAt: timestamp.nullable(),
   active: z.boolean().nullable(),
 });
+const accountSchema = z.strictObject({
+  provider: providerSchema,
+  account: z.string().regex(/^(claude|codex)-[1-9][0-9]?$/),
+  status: z.enum(["ok", "unavailable"]),
+  observedAt: timestamp.nullable(),
+  windows: z.array(windowSchema).max(16),
+});
 export const quotaSnapshotSchema = z.strictObject({
   status: z.enum(["not-configured", "ok", "partial", "unavailable"]),
   observedAt: timestamp,
   cached: z.boolean(),
+  accounts: z.array(accountSchema).max(10),
+});
+export type QuotaSnapshot = z.infer<typeof quotaSnapshotSchema>;
+/** Private cron transport only. Never return identities through quota tools. */
+export const quotaObservationSchema = quotaSnapshotSchema.extend({
   accounts: z
     .array(
-      z.strictObject({
-        provider: providerSchema,
-        account: z.string().regex(/^(claude|codex)-[1-9][0-9]?$/),
-        status: z.enum(["ok", "unavailable"]),
-        observedAt: timestamp.nullable(),
-        windows: z.array(windowSchema).max(16),
+      accountSchema.extend({
+        identity: z
+          .string()
+          .regex(/^sha256:[a-f0-9]{64}$/)
+          .optional(),
       }),
     )
     .max(10),
 });
-export type QuotaSnapshot = z.infer<typeof quotaSnapshotSchema>;
+export type QuotaObservation = z.infer<typeof quotaObservationSchema>;
 type Window = z.infer<typeof windowSchema>;
 const recordSchema = z.record(z.string(), z.unknown());
 const claudeWindow = z.object({
@@ -228,7 +240,7 @@ const ttl = 60_000;
 /** One opt-in reader per host binding. No URL/auth/reset controls reach callers. */
 export class QuotaReader {
   private readonly config: typeof quotaConfigSchema.Type | undefined;
-  private cache?: QuotaSnapshot;
+  private cache?: QuotaObservation;
   constructor(
     config?: typeof quotaConfigSchema.Encoded,
     private readonly now = Date.now,
@@ -241,6 +253,14 @@ export class QuotaReader {
   }
 
   async read(caller: AbortSignal): Promise<QuotaSnapshot> {
+    const snapshot = await this.readForCron(caller);
+    return {
+      ...snapshot,
+      accounts: snapshot.accounts.map(({ identity: _, ...account }) => account),
+    };
+  }
+
+  async readForCron(caller: AbortSignal): Promise<QuotaObservation> {
     caller.throwIfAborted();
     const now = this.now();
     if (!this.config)
@@ -257,7 +277,7 @@ export class QuotaReader {
     )
       return structuredClone({ ...this.cache, cached: true });
     const signal = AbortSignal.any([caller, AbortSignal.timeout(8000)]);
-    let snapshot: QuotaSnapshot = {
+    let snapshot: QuotaObservation = {
       status: "unavailable",
       observedAt: now,
       cached: false,
@@ -308,12 +328,21 @@ export class QuotaReader {
       // Sequential, bounded reads avoid bursting subscription status endpoints.
       for (const file of active) {
         const provider = providerSchema.parse(file.provider ?? file.type);
-        const account: QuotaSnapshot["accounts"][number] = {
+        const account: QuotaObservation["accounts"][number] = {
           provider,
           account: `${provider}-${++counts[provider]}`,
           status: "unavailable",
           observedAt: null,
           windows: [],
+          // The proxy's auth_index hashes stable auth-file identity, not list
+          // position. Hash again with the provider to keep this key private.
+          ...(file.auth_index === undefined
+            ? {}
+            : {
+                identity: `sha256:${createHash("sha256")
+                  .update(JSON.stringify([provider, String(file.auth_index)]))
+                  .digest("hex")}`,
+              }),
         };
         snapshot.accounts.push(account);
         try {
@@ -380,7 +409,7 @@ export class QuotaReader {
           : available
             ? "partial"
             : "unavailable";
-      snapshot = quotaSnapshotSchema.parse(snapshot);
+      snapshot = quotaObservationSchema.parse(snapshot);
     } catch {
       // No raw request, credential metadata, exception or account text escapes.
       caller.throwIfAborted();

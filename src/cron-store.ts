@@ -18,7 +18,7 @@ import {
   cronQuotaEventSchema,
 } from "./cron-advanced";
 import { type CronInput, validateCronInput } from "./cron-input";
-import { type QuotaSnapshot, quotaSnapshotSchema } from "./quota";
+import { type QuotaObservation, quotaObservationSchema } from "./quota";
 import { legacySetting } from "./settings-legacy";
 
 export type { CronEvaluation } from "./cron-advanced";
@@ -129,6 +129,10 @@ const scopeSchema = z.strictObject({
   botKey: botKeySchema,
   channel: z.string().regex(/^[CDG][A-Z0-9]+$/),
   user: z.string().regex(/^[UW][A-Z0-9]+$/),
+});
+const destinationScopeSchema = scopeSchema.partial({
+  channel: true,
+  user: true,
 });
 const sourceSchema = z
   .string()
@@ -301,6 +305,7 @@ export class CronStore {
         CREATE TABLE IF NOT EXISTS cron_quota_state (
           botKey TEXT NOT NULL, provider TEXT NOT NULL, account TEXT NOT NULL,
           window TEXT NOT NULL, scope TEXT NOT NULL, resetAt INTEGER NOT NULL,
+          cycleAt INTEGER NOT NULL,
           usedPercent REAL NOT NULL, observedAt INTEGER NOT NULL,
           PRIMARY KEY(botKey,provider,account,window,scope)
         );
@@ -323,6 +328,10 @@ export class CronStore {
           PRIMARY KEY(botKey,channel,user,date)
         );
       `);
+        column("cron_quota_state", "cycleAt", "INTEGER");
+        this.db.exec(
+          "UPDATE cron_quota_state SET cycleAt=resetAt WHERE cycleAt IS NULL",
+        );
       })
       .immediate();
   }
@@ -623,10 +632,14 @@ export class CronStore {
   }
 
   /** Consume fresh quota observations and matching events before admitting work. */
-  claimQuota(botKey: string, snapshot: QuotaSnapshot, now: number): CronRun[] {
+  claimQuota(
+    botKey: string,
+    snapshot: QuotaObservation,
+    now: number,
+  ): CronRun[] {
     checkBotKey(botKey);
     checkTime(now);
-    const parsed = quotaSnapshotSchema.safeParse(snapshot);
+    const parsed = quotaObservationSchema.safeParse(snapshot);
     if (!parsed.success || !["ok", "partial"].includes(parsed.data.status))
       return [];
     const fresh = (observedAt: number) =>
@@ -636,6 +649,9 @@ export class CronStore {
       .transaction(() => {
         const claimed: CronRun[] = [];
         for (const account of parsed.data.accounts) {
+          // Alias fallback supports legacy observations. Runtime readers supply
+          // a stable private identity, so display order never changes receipts.
+          const accountKey = account.identity ?? account.account;
           const observedAt = account.observedAt;
           if (
             account.status !== "ok" ||
@@ -655,29 +671,42 @@ export class CronStore {
             const key = [
               botKey,
               account.provider,
-              account.account,
+              accountKey,
               window.window,
               window.scope,
             ] as const;
             const previous = this.db
               .query<
-                { resetAt: number; usedPercent: number; observedAt: number },
+                {
+                  resetAt: number;
+                  cycleAt: number;
+                  usedPercent: number;
+                  observedAt: number;
+                },
                 [string, string, string, string, string]
               >(
-                "SELECT resetAt,usedPercent,observedAt FROM cron_quota_state WHERE botKey=? AND provider=? AND account=? AND window=? AND scope=?",
+                "SELECT resetAt,cycleAt,usedPercent,observedAt FROM cron_quota_state WHERE botKey=? AND provider=? AND account=? AND window=? AND scope=?",
               )
               .get(...key);
-            if (
-              previous &&
-              (observedAt <= previous.observedAt || resetAt < previous.resetAt)
-            )
-              continue;
+            if (previous && observedAt <= previous.observedAt) continue;
+            const reset =
+              previous !== null &&
+              resetAt - previous.resetAt >= 3_600_000 &&
+              (previous.usedPercent - usedPercent >= 5 ||
+                previous.resetAt <= now);
+            // Raw deadlines can drift in either direction. Only a qualified
+            // reset starts a new receipt cycle, even if raw timestamps repeat.
+            const cycleAt = previous
+              ? reset
+                ? Math.max(resetAt, previous.cycleAt + 1)
+                : previous.cycleAt
+              : resetAt;
             this.db
               .query(`INSERT INTO cron_quota_state
-            (botKey,provider,account,window,scope,resetAt,usedPercent,observedAt) VALUES (?,?,?,?,?,?,?,?)
+            (botKey,provider,account,window,scope,resetAt,cycleAt,usedPercent,observedAt) VALUES (?,?,?,?,?,?,?,?,?)
             ON CONFLICT(botKey,provider,account,window,scope) DO UPDATE SET
-              resetAt=excluded.resetAt,usedPercent=excluded.usedPercent,observedAt=excluded.observedAt`)
-              .run(...key, resetAt, usedPercent, observedAt);
+              resetAt=excluded.resetAt,cycleAt=excluded.cycleAt,usedPercent=excluded.usedPercent,observedAt=excluded.observedAt`)
+              .run(...key, resetAt, cycleAt, usedPercent, observedAt);
             const matching = `s.botKey=? AND s.removedAt IS NULL
               AND json_extract(s.options,'$.trigger.provider')=?
               AND (json_extract(s.options,'$.trigger.window') IS NULL
@@ -691,7 +720,7 @@ export class CronStore {
               account.provider,
               window.window,
               window.scope,
-              previous !== null && previous.resetAt < resetAt ? 1 : 0,
+              reset ? 1 : 0,
               usedPercent,
             ] as const;
             const schedules = this.db
@@ -723,10 +752,10 @@ export class CronStore {
               .all(
                 ...matchArgs,
                 account.provider,
-                account.account,
+                accountKey,
                 window.window,
                 window.scope,
-                resetAt,
+                cycleAt,
                 100 - claimed.length,
               )
               .map(readSchedule);
@@ -745,6 +774,7 @@ export class CronStore {
                   window: window.window,
                   scope: window.scope,
                   usedPercent,
+                  previousResetAt: previous?.resetAt ?? null,
                   resetAt,
                   observedAt,
                 },
@@ -754,6 +784,7 @@ export class CronStore {
             // Consume all matches, including paused, unavailable, busy and
             // overflow jobs. The 100-run poll cap must not create a backlog.
             // Removed jobs cannot return, so they need no further receipts.
+            // Receipt resetAt stores cycleAt; run payloads retain raw deadlines.
             this.db
               .query(`INSERT OR IGNORE INTO cron_quota_receipts
               (scheduleId,provider,account,window,scope,resetAt,type)
@@ -761,10 +792,10 @@ export class CronStore {
               FROM cron_schedules s WHERE ${matching}`)
               .run(
                 account.provider,
-                account.account,
+                accountKey,
                 window.window,
                 window.scope,
-                resetAt,
+                cycleAt,
                 ...matchArgs,
               );
           }
@@ -786,6 +817,51 @@ export class CronStore {
       )
       .all(scope.botKey, scope.channel, scope.user, page * 10)
       .map(readSchedule);
+  }
+
+  listDestinations(
+    scope: {
+      botKey: string;
+      channel?: string | undefined;
+      user?: string | undefined;
+    },
+    page = 0,
+  ): CronSchedule[] {
+    if (!destinationScopeSchema.safeParse(scope).success)
+      throw new Error("Invalid cron ownership scope.");
+    if (!Number.isSafeInteger(page) || page < 0 || page > 1_000_000)
+      throw new Error("Invalid cron page.");
+    const channel = scope.channel ?? null;
+    const user = scope.user ?? null;
+    return this.db
+      .query<
+        ScheduleRow,
+        [
+          string,
+          string | null,
+          string | null,
+          string | null,
+          string | null,
+          number,
+        ]
+      >(
+        `SELECT * FROM cron_schedules
+        WHERE botKey=? AND (? IS NULL OR channel=?) AND (? IS NULL OR user=?)
+          AND removedAt IS NULL ORDER BY createdAt,id LIMIT 10 OFFSET ?`,
+      )
+      .all(scope.botKey, channel, channel, user, user, page * 10)
+      .map(readSchedule);
+  }
+
+  findDestination(botKey: string, id: string): CronSchedule | undefined {
+    checkBotKey(botKey);
+    if (!z.uuid().safeParse(id).success) return undefined;
+    const row = this.db
+      .query<ScheduleRow, [string, string]>(
+        "SELECT * FROM cron_schedules WHERE botKey=? AND id=? AND removedAt IS NULL",
+      )
+      .get(botKey, id);
+    return row ? readSchedule(row) : undefined;
   }
 
   remove(scope: CronScope, id: string): boolean {

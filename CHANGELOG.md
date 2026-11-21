@@ -7,6 +7,9 @@
 - New flag: `bots[].cronjobs.advanced` defaults off. It enables quota-event
   triggers, per-job model evaluation, one-off jobs and optional crew arbitration.
   Existing clock schedules retain their current behaviour when it is off.
+  Cron list and remove now cover every destination for the bound bot, including
+  DMs, unless explicit destination filters are supplied. Configuration drift
+  returns an error instead of a misleading empty inventory.
 - New flags: Teams `livePresence` defaults off. IRC `features.fleetTyping`
   defaults on. Fleet `api.pullRequestRepositories` enables pull request lookup
   only for bound checkouts and defaults to no bindings.

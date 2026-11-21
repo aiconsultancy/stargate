@@ -24,6 +24,10 @@ Do not change global configuration or install another scheduler.
 `op=report` does not change settings. Do not claim an existing report mode
 changed unless the definition was changed through a supported operation.
 List accepts a page; follow pages when the returned job list is full.
+List and remove cover every destination for the bound bot, including DMs.
+Optional channel/user filters are exact; inspect the returned list filter.
+Add and run still default to the configured destination. A five-field calendar
+date repeats each year: use `once=true` when only its first success should run.
 
 Use the declared tool fields; do not invent fields or bypass validation with
 shell commands. Retain an explicit run requestId when retrying the same request;
@@ -48,8 +52,10 @@ With operator-enabled `cronjobs.advanced`, use `trigger` for a quota event:
 `{"type":"quota-threshold","provider":"codex","usedPercent":98}`.
 Omit `schedule` for an event-only job; keep both for either event or clock.
 Use optional `window` and `scope` to narrow the provider window. The gateway
-checks quota without a model turn. Reset requires a forward reset timestamp;
-a threshold fires once per window/reset cycle, not on every observation.
+checks quota without a model turn. Reset requires `resetAt` to move forward by
+at least one hour and either usage to drop by at least five percentage points
+or the previous reset time to have passed. Other timestamp drift updates the
+observation silently. A threshold fires once per qualified reset cycle.
 
 Set `model` to a verified `provider/model#variant`, `once=true` to remove the
 job after its first success, and `arbiter=twiki` for a configured Pi decision

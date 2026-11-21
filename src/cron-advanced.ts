@@ -42,6 +42,7 @@ export const cronQuotaEventSchema = settingsStruct({
     "code-review",
   ]),
   usedPercent: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  previousResetAt: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   resetAt: Schema.Int.check(Schema.isGreaterThan(0)),
   observedAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
