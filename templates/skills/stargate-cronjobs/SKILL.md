@@ -26,6 +26,7 @@ changed unless the definition was changed through a supported operation.
 List accepts a page; follow pages when the returned job list is full.
 List and remove cover every destination for the bound bot, including DMs.
 Optional channel/user filters are exact; inspect the returned list filter.
+Lists omit prompts unless both filters select a currently allowed destination.
 Add and run still default to the configured destination. A five-field calendar
 date repeats each year: use `once=true` when only its first success should run.
 
@@ -63,7 +64,9 @@ member. Model and arbiter evaluations are tools-off and do not change or
 occupy the captain's or crew member's durable session. Only `act` or
 `escalate` forwards the result for action; `ignore` stays private. Never use
 an arbiter verdict to bypass approval, credentials or an owner decision.
-An interrupted evaluation is held, not replayed.
+Failed, timed-out or interrupted tools-off occurrences fail without replay;
+future occurrences can run. Uncertain captain admission remains held because
+tools may have acted. A successful manual run also consumes `once=true`.
 
 Verify creation with `op=list` and `op=report`: check the exact job's trigger,
 model, once flag and arbiter. A missing flag, unavailable model or scope-drift

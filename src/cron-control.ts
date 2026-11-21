@@ -174,9 +174,18 @@ export async function runCronOperation(
           user: input.user,
         };
         return {
-          jobs: store
-            .listDestinations(filter, input.page)
-            .map((job) => ({ ...job, model: job.model ?? "captain" })),
+          jobs: store.listDestinations(filter, input.page).map((job) => {
+            const { prompt, ...metadata } = job;
+            return {
+              ...metadata,
+              model: job.model ?? "captain",
+              ...(input.channel !== undefined &&
+              input.user !== undefined &&
+              manager.allowed(job)
+                ? { prompt }
+                : {}),
+            };
+          }),
           filter: { channel: input.channel ?? null, user: input.user ?? null },
           page: input.page,
           definitionErrors: errors,

@@ -120,7 +120,7 @@ test("event-only definitions preserve trigger, model, once and arbiter in the ex
   ).toThrow();
 });
 
-test("disabled advanced flag holds accepted advanced work without a model turn or Slack post", async () => {
+test("disabled advanced flag fails accepted advanced occurrences without a model turn or Slack post", async () => {
   const f = await fixture(false);
   f.store.add(f.scope, { ...input, model }, now);
   let calls = 0;
@@ -135,7 +135,7 @@ test("disabled advanced flag holds accepted advanced work without a model turn o
   expect(calls).toBe(0);
   expect(f.posts).toEqual([]);
   expect(f.queued).toEqual([]);
-  expect(f.store.report(f.scope.botKey)[0]?.lastStatus).toBe("blocked");
+  expect(f.store.report(f.scope.botKey)[0]?.lastStatus).toBe("failed");
 });
 
 test("ignore completes a one-off job with no captain admission or Slack announcement", async () => {
@@ -180,7 +180,7 @@ test.each(["act", "escalate"] as const)(
   },
 );
 
-test("an ambiguous evaluation is held across scheduler restarts, never replayed", async () => {
+test("failed tools-off evaluation occurrences are not replayed and future occurrences run", async () => {
   const f = await fixture();
   f.store.add(f.scope, { ...input, model }, now);
   let calls = 0;
@@ -191,9 +191,11 @@ test("an ambiguous evaluation is held across scheduler restarts, never replayed"
     },
   };
   await f.worker(services).tick(now + 60_000, signal);
-  await f.worker(services).tick(now + 120_000, signal);
+  await f.worker(services).tick(now + 60_000, signal);
   expect(calls).toBe(1);
-  expect(f.store.report(f.scope.botKey)[0]?.lastStatus).toBe("blocked");
+  await f.worker(services).tick(now + 120_000, signal);
+  expect(calls).toBe(2);
+  expect(f.store.report(f.scope.botKey)[0]?.lastStatus).toBe("failed");
   expect(f.queued).toEqual([]);
   expect(f.posts).toEqual([]);
 });
@@ -395,6 +397,7 @@ test("list and remove cover DM jobs without crossing bots or ignoring explicit f
     runCronOperation(value, binding, signal, dependencies);
   const listed = await run({ op: "list" });
   expect(listed).toHaveProperty("jobs.length", 2);
+  expect(JSON.stringify(listed)).not.toContain(input.prompt);
   expect(listed).toMatchObject({
     jobs: expect.arrayContaining([
       expect.objectContaining({
@@ -410,12 +413,30 @@ test("list and remove cover DM jobs without crossing bots or ignoring explicit f
     jobs: [{ id: channel.id }],
     filter: { channel: "C123", user: null },
   });
+  expect(
+    await run({ op: "list", channel: "C123", user: "U123" }),
+  ).toMatchObject({ jobs: [{ id: channel.id, prompt: input.prompt }] });
   await expect(run({ op: "list", user: "U999" })).rejects.toThrow(
     "not allowed",
   );
   expect(await run({ op: "remove", id: dm.id, channel: "C123" })).toEqual({
     removed: false,
   });
+  await writeFile(
+    configPath,
+    JSON.stringify({
+      dataDirectory: f.directory,
+      bots: [
+        { ...f.config, access: { ...f.config.access, channels: ["C123"] } },
+      ],
+    }),
+  );
+  const revokedList = await run({ op: "list" });
+  expect(revokedList).toHaveProperty("jobs.length", 2);
+  expect(JSON.stringify(revokedList)).not.toContain(input.prompt);
+  await expect(
+    run({ op: "list", channel: "D123", user: "U123" }),
+  ).rejects.toThrow("not allowed");
   expect(await run({ op: "remove", id: other.id })).toEqual({ removed: false });
   expect(await run({ op: "remove", id: dm.id })).toEqual({ removed: true });
   expect(await run({ op: "list" })).toMatchObject({
@@ -424,7 +445,7 @@ test("list and remove cover DM jobs without crossing bots or ignoring explicit f
   expect(f.store.list({ ...f.scope, botKey: "other-bot" })).toHaveLength(1);
 });
 
-test("advanced-off file sync holds accepted file work rather than failing it", async () => {
+test("advanced-off file sync fails accepted occurrences without forwarding file work", async () => {
   const f = await fixture();
   const path = join(f.config.cronjobs?.directory ?? "", input.name);
   await mkdir(path, { recursive: true });
@@ -454,7 +475,7 @@ test("advanced-off file sync holds accepted file work rather than failing it", a
   });
   await worker.tick(now + 10_000, signal);
   expect(f.store.list(f.scope)[0]?.available).toBe(0);
-  expect(f.store.recentRuns(f.scope.botKey)[0]?.status).toBe("blocked");
+  expect(f.store.recentRuns(f.scope.botKey)[0]?.status).toBe("failed");
   expect(f.queued).toEqual([]);
   expect(f.posts).toEqual([]);
 });
@@ -527,15 +548,15 @@ test("once prevents an annual five-field date from running next year", async () 
   expect(f.store.list(f.scope)).toEqual([]);
 });
 
-test("a timed-out evaluation holds without replay while clock work continues", async () => {
+test("a timed-out tools-off occurrence fails without replay and the next occurrence runs", async () => {
   const f = await fixture();
   f.store.add(f.scope, { ...input, name: "model-one", model }, now);
-  f.store.add(f.scope, { ...input, name: "model-two", model }, now);
   f.store.add(f.scope, { ...input, name: "clock-only" }, now);
   const deadline = new AbortController();
+  let deadlines = 0;
   const timeout = spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
     expect(ms).toBe(60_000);
-    return deadline.signal;
+    return deadlines++ === 0 ? deadline.signal : new AbortController().signal;
   });
   const reading = Promise.withResolvers<{
     model: string;
@@ -547,6 +568,8 @@ test("a timed-out evaluation holds without replay while clock work continues", a
     async evaluate(_run, current) {
       calls++;
       expect(current.aborted).toBe(false);
+      if (calls > 1)
+        return { model, text: "Future occurrence", verdict: "act" };
       queueMicrotask(() =>
         deadline.abort(new DOMException("Deadline", "TimeoutError")),
       );
@@ -560,7 +583,7 @@ test("a timed-out evaluation holds without replay while clock work continues", a
     expect(
       f.store
         .recentRuns(f.scope.botKey)
-        .filter((run) => run.status === "blocked"),
+        .filter((run) => run.status === "failed"),
     ).toHaveLength(1);
     await worker.tick(now + 60_000, signal);
     expect(calls).toBe(1);
@@ -572,6 +595,12 @@ test("a timed-out evaluation holds without replay while clock work continues", a
     await reading.promise;
     expect(f.queued).toHaveLength(1);
     expect(f.posts).toHaveLength(1);
+    await worker.tick(now + 120_000, signal);
+    expect(calls).toBe(2);
+    expect(f.queued.filter((job) => job.name === "model-one")).toHaveLength(1);
+    expect(f.queued.some((job) => job.prompt.includes("Late output"))).toBe(
+      false,
+    );
   } finally {
     reading.resolve({ model, text: "", verdict: "act" });
     timeout.mockRestore();

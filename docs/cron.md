@@ -242,8 +242,8 @@ maintenance tasks.
 `bots[].cronjobs.advanced` is **off by default**. Enable it explicitly on the
 intended registration; it does not enable itself on upgrade. Existing clock
 jobs keep their behaviour when the flag is absent or false. Advanced definitions
-are unavailable while it is off; already accepted advanced work is held without
-replay rather than falling back to a captain turn.
+are unavailable while it is off; accepted advanced occurrences fail without
+falling back to a captain turn or replaying the occurrence.
 
 ```json
 "cronjobs": {
@@ -324,19 +324,30 @@ Approval, credentials, destructive actions and owner decisions force escalation;
 malformed or incomplete verdicts cannot authorise action. `act` still grants no
 new authority. The captain must apply the normal approval rules before acting.
 
-Evaluation claims and output are durable. Interrupted or uncertain evaluation
-is held, never silently replayed. A retained verdict can resume delivery without
-rerunning the models. Each evaluation has a 60-second deadline, including the
-arbiter. A tick starts at most one new evaluation. A timed-out provider that
-ignores cancellation holds that evaluation lane until it settles, but does not
-block later clock jobs, quota polling or reports. No late output is delivered.
+Evaluation claims and output are durable. A tools-off evaluation that fails,
+times out or is interrupted by restart records that occurrence as failed.
+It is never replayed, and late output is not delivered. Future clock occurrences
+and fresh quota events remain eligible. Each evaluation has a 60-second
+deadline, including the arbiter; a tick starts at most one new evaluation.
+A retained verdict can resume delivery without rerunning the models.
+Event-only definitions do not count as clock work in the maintenance idle gate;
+failed tools-off occurrences do not block nightly maintenance either.
 Private per-run Pi stores under the crew's `cron-evaluations` directory are
 retained for operator inspection; this version has no automatic retention
 cleanup. Treat them as private runtime state and include them in the normal
 authorised data-retention procedure. `once: true` removes the schedule through
 a durable tombstone only after its first successful run, including `ignore`.
+Successful manual runs count too: testing a dated one-off early consumes it.
 Failure or uncertainty leaves it retained. Rediscovering the file does not
 revive the removed job; use a new name for an intentional replacement.
+
+After forwarding to the captain, tools can act. Missing queue history or an
+unconfirmed queue admission still holds the occurrence without replay. A held
+run prevents future occurrences of that job and keeps nightly maintenance busy.
+Inspect its retained state, reconcile any captain work, and remove the exact
+job ID to cancel future admission. For a file-backed job, removal leaves a
+tombstone: use a new definition name to create its intentional replacement.
+Removal does not undo actions or stop a captain turn already running.
 
 Definition validation fails closed. If live model validation is temporarily
 unavailable during file sync, the affected job becomes unavailable. An event
@@ -353,6 +364,10 @@ the bot's destinations, with optional exact filters. It cannot remove another
 bot's job. Add and manual run keep their configured-destination defaults.
 For a calendar date that should run only once, set `once: true`: a five-field
 expression alone repeats each year.
+Default and partially filtered lists contain metadata only, not prompt text.
+Prompt text is returned only when both `channel` and `user` are explicitly
+selected and that exact destination is currently allowed. Revoked destinations
+remain visible as metadata so the captain can remove their jobs safely.
 
 The gateway retains the active backend namespace until a restart. Tools read
 the configuration file afresh. A restart-only backend or cron setting change

@@ -255,6 +255,65 @@ describe("idle gate", () => {
     });
   });
 
+  test("an event-only quota watcher is idle until it has an accepted run", async () => {
+    const store = new CronStore(join(data, "cron.sqlite"));
+    const scope = { botKey: "k", channel: "C1", user: "U1" };
+    try {
+      store.add(
+        scope,
+        {
+          name: "quota-watch",
+          expression: "",
+          timezone: "UTC",
+          prompt: "Check quota",
+          trigger: { type: "quota-reset", provider: "codex" },
+        },
+        now,
+      );
+      const running = { ...input("gateway"), gatewayRunning: async () => true };
+      expect(await checkIdle(running)).toEqual({ idle: true });
+      expect(store.runNow(scope, "quota-watch", now)).toBeDefined();
+      expect(await checkIdle(running)).toEqual({
+        idle: false,
+        reason: "busy-cron",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("interrupted tools-off evaluation fails without keeping maintenance busy", async () => {
+    const store = new CronStore(join(data, "cron.sqlite"));
+    const scope = { botKey: "k", channel: "C1", user: "U1" };
+    try {
+      store.add(
+        scope,
+        {
+          name: "quota-watch",
+          expression: "",
+          timezone: "UTC",
+          prompt: "Check quota",
+          model: "openai-proxy/cheap#low",
+          trigger: { type: "quota-reset", provider: "codex" },
+        },
+        now,
+      );
+      const run = store.runNow(scope, "quota-watch", now);
+      if (!run) throw new Error("Fixture run missing");
+      expect(store.claimEvaluation(run.id)).toBe(true);
+      expect(await checkIdle(input("gateway"))).toEqual({
+        idle: false,
+        reason: "busy-cron",
+      });
+      expect(store.recoverEvaluations(scope.botKey)).toBe(1);
+      expect(store.recentRuns(scope.botKey)[0]?.status).toBe("failed");
+      expect(await checkIdle(input("gateway"))).toEqual({ idle: true });
+      expect(store.runNow(scope, "quota-watch", now + 1)).toBeDefined();
+    } finally {
+      store.close();
+    }
+  });
+
   test("overdue schedules count only while the gateway runs", async () => {
     exec(
       join(data, "cron.sqlite"),

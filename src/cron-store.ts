@@ -1098,12 +1098,13 @@ export class CronStore {
     );
   }
 
-  recoverEvaluations(botKey: string): number {
+  recoverEvaluations(botKey: string, now = Date.now()): number {
     checkBotKey(botKey);
+    checkTime(now);
     return this.db
-      .query(`UPDATE cron_runs SET status='blocked' WHERE status='evaluating'
+      .query(`UPDATE cron_runs SET status='failed',finishedAt=? WHERE status='evaluating'
       AND scheduleId IN (SELECT id FROM cron_schedules WHERE botKey=?)`)
-      .run(botKey).changes;
+      .run(now, botKey).changes;
   }
 
   announcing(id: string): boolean {

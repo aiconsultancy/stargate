@@ -255,7 +255,7 @@ describe("file-backed cron controls", () => {
     expect(restarted.enabled(schedule.id)).toBe(false);
   });
 
-  test("interrupted evaluations become blocked per bot and cannot be replayed", () => {
+  test("interrupted tools-off evaluations fail per bot without replay and allow later runs", () => {
     const path = databasePath();
     const store = open(path);
     const other = { ...scope, botKey: "other" };
@@ -268,18 +268,19 @@ describe("file-backed cron controls", () => {
     const restarted = open(path);
     expect(restarted.recoverEvaluations(scope.botKey)).toBe(1);
     expect(restarted.recoverEvaluations(scope.botKey)).toBe(0);
-    expect(restarted.recentRuns(scope.botKey)[0]?.status).toBe("blocked");
+    expect(restarted.recentRuns(scope.botKey)[0]?.status).toBe("failed");
     expect(restarted.recentRuns("other")[0]?.status).toBe("evaluating");
-    const blocked = restarted.recentRuns(scope.botKey)[0];
-    if (!blocked) throw new Error("Expected blocked run");
-    expect(restarted.claimEvaluation(blocked.id)).toBe(false);
+    const failed = restarted.recentRuns(scope.botKey)[0];
+    if (!failed) throw new Error("Expected failed run");
+    expect(restarted.claimEvaluation(failed.id)).toBe(false);
     expect(
-      restarted.saveEvaluation(blocked.id, {
+      restarted.saveEvaluation(failed.id, {
         text: "Late result",
         model: "claude/sonnet",
         verdict: "act",
       }),
     ).toBe(false);
+    expect(restarted.runNow(scope, input.name, now + 60_000)).toBeDefined();
   });
 
   test("evaluation claims recheck availability and manual pause ownership", () => {

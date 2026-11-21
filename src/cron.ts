@@ -77,7 +77,6 @@ export class CronScheduler {
   private syncAfter = 0;
   private definitionErrors: string[] = [];
   private quotaAfter = 0;
-  private evaluationPending = false;
 
   constructor(
     private config: BotConfig,
@@ -133,11 +132,11 @@ export class CronScheduler {
           );
       }
       if (!this.recovered) {
-        const evaluations = this.store.recoverEvaluations(this.key);
+        const evaluations = this.store.recoverEvaluations(this.key, now);
         if (evaluations)
           this.log.warn(
             { bot: this.config.id, count: evaluations },
-            "Cron evaluations interrupted; runs held without replay",
+            "Cron evaluations interrupted; occurrences failed without replay",
           );
         const count = this.store.recoverAnnouncements(this.key);
         if (count)
@@ -191,7 +190,7 @@ export class CronScheduler {
           (run.model !== undefined || run.arbiter !== undefined) &&
           !run.evaluation
         ) {
-          if (evaluated || this.evaluationPending) continue;
+          if (evaluated) continue;
           evaluated = true;
         }
         await this.process(run, now, signal);
@@ -204,7 +203,7 @@ export class CronScheduler {
 
   private async process(run: CronRun, now: number, signal: AbortSignal) {
     if (usesAdvancedCron(run) && !this.config.cronjobs?.advanced) {
-      this.store.block(run.id);
+      this.store.finish(run.id, "failed");
       return;
     }
     if (!this.allowed(run) || !this.store.enabled(run.scheduleId, run.manual)) {
@@ -218,31 +217,27 @@ export class CronScheduler {
       if (!run.evaluation) {
         const evaluate = this.services.evaluate;
         if (!evaluate || !this.store.claimEvaluation(run.id)) {
-          this.store.block(run.id);
+          this.store.finish(run.id, "failed");
           return;
         }
         try {
-          this.evaluationPending = true;
           const reading = readWithDeadline(signal, 60_000, (current) =>
             evaluate(
               { id: run.id, prompt, model: run.model, arbiter: run.arbiter },
               current,
             ),
           );
-          // An abort-ignoring provider cannot start more evaluation work while
-          // draining. Clock jobs, quota reads and reports remain available.
-          void reading.settled.then(() => {
-            this.evaluationPending = false;
-          });
           const evaluation = await reading.result;
           signal.throwIfAborted();
           if (!this.store.saveEvaluation(run.id, evaluation)) return;
           run = { ...run, evaluation };
         } catch {
-          this.store.block(run.id);
+          // Tools-off attempts have no tools to reconcile. Fail this occurrence
+          // without replay; future occurrences remain eligible to run.
+          this.store.finish(run.id, "failed");
           this.log.warn(
             { run: run.id },
-            "Cron evaluation unconfirmed; run held without replay",
+            "Cron evaluation failed; occurrence not replayed",
           );
           return;
         }
