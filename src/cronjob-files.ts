@@ -3,7 +3,8 @@ import { constants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import { dirname, join, parse, resolve, sep } from "node:path";
 import { z } from "zod";
-import { validateCronInput } from "./cron";
+import { cronAdvancedFields } from "./cron-advanced";
+import { validateCronInput } from "./cron-input";
 
 const maxBytes = 64 * 1024;
 const safeId = z
@@ -16,7 +17,8 @@ export const cronjobNameSchema = safeId.refine(
 const frontmatterSchema = z.strictObject({
   name: cronjobNameSchema,
   description: z.string().trim().min(1).max(1000),
-  schedule: z.string(),
+  schedule: z.string().optional(),
+  ...cronAdvancedFields,
   timezone: z.string().default("UTC"),
   skills: z.array(safeId).max(100).default([]),
   enabled: z.boolean().default(true),
@@ -66,15 +68,19 @@ export function parseCronjob(
   const { input } = validateCronInput(
     {
       name,
-      expression: metadata.schedule,
+      expression: metadata.schedule ?? "",
       timezone: metadata.timezone,
       prompt: body,
+      trigger: metadata.trigger,
+      model: metadata.model,
+      once: metadata.once,
+      arbiter: metadata.arbiter,
     },
     now,
   );
   return {
     ...metadata,
-    schedule: input.expression,
+    ...(input.expression ? { schedule: input.expression } : {}),
     timezone: input.timezone,
     prompt: input.prompt,
   };

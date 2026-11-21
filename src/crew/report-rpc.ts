@@ -2,6 +2,11 @@ import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
 import { activitySnapshotSchema } from "../activity";
 import { crewStatusInputSchema, crewStatusSchema } from "../crew-status";
+import { cronEvaluationSchema, cronModelSchema } from "../cron-advanced";
+import {
+  cronEvaluateInputSchema,
+  cronModelInputSchema,
+} from "../cron-decision";
 import { maintenanceDrainSchema } from "../maintenance-drain";
 import { quotaInputSchema, quotaSnapshotSchema } from "../quota";
 import {
@@ -126,6 +131,14 @@ export const CrewReporting = Rpc.define({
       ),
     },
     quota: { input: quotaInputSchema, output: quotaSnapshotSchema },
+    cronModel: {
+      input: portable(cronModelInputSchema),
+      output: portable(settingsStruct({ model: cronModelSchema })),
+    },
+    cronEvaluate: {
+      input: portable(cronEvaluateInputSchema),
+      output: portable(cronEvaluationSchema),
+    },
     status: { input: crewStatusInputSchema, output: crewStatusSchema },
     fleetStatus: {
       input: portable(fleetCrewStatusInputSchema),

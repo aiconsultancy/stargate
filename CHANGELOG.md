@@ -4,6 +4,9 @@
 
 ### Feature flags
 
+- New flag: `bots[].cronjobs.advanced` defaults off. It enables quota-event
+  triggers, per-job model evaluation, one-off jobs and optional crew arbitration.
+  Existing clock schedules retain their current behaviour when it is off.
 - New flags: Teams `livePresence` defaults off. IRC `features.fleetTyping`
   defaults on. Fleet `api.pullRequestRepositories` enables pull request lookup
   only for bound checkouts and defaults to no bindings.
@@ -25,6 +28,10 @@
 
 ### Changes
 
+- Add durable quota-reset and quota-threshold cron events without model polling.
+  Retain immutable model/arbiter choices, suppress ignored output and remove
+  one-off jobs only after a successful run. Refuse configuration/namespace drift
+  in cron controls rather than returning an empty list while old jobs run.
 - Tag IRC fleet request progress notices with a fixed stage and the triggering
   message ID. Publish terminal stages from confirmed gateway outcomes.
 - Reserve addressed IRC `status` in registrations with enrolled humans for

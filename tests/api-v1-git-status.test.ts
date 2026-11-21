@@ -1123,7 +1123,7 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
     return original(path, options);
   });
   try {
-    await mkdir(data);
+    await mkdir(data, { mode: 0o700 });
     const checkouts = await Promise.all(
       Array.from({ length: 8 }, async (_, id) => {
         const path = join(root, String(id));

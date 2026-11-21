@@ -7,6 +7,7 @@ import type { BackendConfig } from "./config";
 import type { FleetCrewStatus } from "./crew/fleet-status";
 import type { PiCrewBinding } from "./crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "./crew-status";
+import type { CronAdvanced, CronEvaluation } from "./cron-advanced";
 import type {
   FleetReviewBinding,
   FleetReviewEvidence,
@@ -265,6 +266,19 @@ export interface AgentBackend {
   ): Promise<FleetCrewStatus | undefined>;
   /** Sanitized subscription limits; never runs a model or creates a session. */
   quota?(signal: AbortSignal): Promise<QuotaSnapshot>;
+  /** Validates one configured live cron route without changing the captain. */
+  cronModel?(
+    input: Pick<CronAdvanced, "model" | "arbiter">,
+    signal: AbortSignal,
+  ): Promise<{ model: string }>;
+  /** Tools-off isolated evaluation; caller claims the run before admission. */
+  cronEvaluate?(
+    input: { id: string; prompt: string } & Pick<
+      CronAdvanced,
+      "model" | "arbiter"
+    >,
+    signal: AbortSignal,
+  ): Promise<CronEvaluation>;
   /** Read-only transcripts for operator views; never prompts or mutates. */
   readonly history?: SessionHistory;
   close(): Promise<void>;

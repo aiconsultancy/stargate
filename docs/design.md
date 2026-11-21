@@ -609,6 +609,13 @@ commands. The modal lists only jobs owned by the caller in the current channel.
 Creation and removal recheck the bot, workspace, user, and channel boundaries.
 
 Schedules and run claims live in a separate private `cron.sqlite` database.
+Opt-in advanced jobs retain per-window quota observations and event receipts
+in that database and claim events without invoking a model. Explicit job-model
+evaluation uses the crew plugin's stateless tools-off generation; optional Pi
+arbitration uses a separate tools-off store rather than a crew task slot. Only
+an act/escalate verdict reaches the captain or job delivery. Claims precede
+generation, so uncertain evaluations are held rather than replayed. Runtime
+scope bindings fence controls against restart-only configuration drift.
 Each run posts a new thread root, then enters the existing durable gateway
 queue. The creator's current access rules still apply. Scheduled thread replies
 use the same conversation routing as human-started threads. Agent failures and

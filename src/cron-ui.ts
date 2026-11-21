@@ -5,7 +5,7 @@ import type { BotConfig } from "./config";
 import { validateCronInput } from "./cron";
 import type { CronStore } from "./cron-store";
 import { cronjobNameSchema } from "./cronjob-files";
-import { CronjobManager } from "./cronjob-manager";
+import { CronjobManager, type CronModelResolver } from "./cronjob-manager";
 import {
   botKey,
   type Identity,
@@ -204,9 +204,12 @@ export class CronUI {
   private async sync() {
     if (this.config.cronjobs)
       await this.bounded(
-        new CronjobManager(this.config, this.identity, this.store).sync(
-          Date.now(),
-        ),
+        new CronjobManager(
+          this.config,
+          this.identity,
+          this.store,
+          this.resolveModel,
+        ).sync(Date.now(), AbortSignal.timeout(1500)),
       );
   }
   constructor(
@@ -215,6 +218,7 @@ export class CronUI {
     private readonly store: CronStore,
     private readonly api: CronUIApi,
     private readonly log: Logger,
+    private readonly resolveModel?: CronModelResolver,
   ) {}
 
   /** Access changes apply before the next operation or delivery. */
@@ -273,7 +277,7 @@ export class CronUI {
         ...(jobs.length
           ? jobs.map((job) => ({
               ...section(
-                `${job.name}\n${job.expression} · ${job.timezone}\n${job.available ? (job.paused ? "Paused" : "Active") : "Missing or invalid definition"} · Report: ${job.report}\nNext: ${new Date(job.nextAt).toISOString()}\n${Array.from(job.prompt).slice(0, 500).join("")}`,
+                `${job.name}\n${job.expression || "Quota event only"} · ${job.timezone}\n${job.available ? (job.paused ? "Paused" : "Active") : "Missing or invalid definition"} · Report: ${job.report}\nModel: ${job.model ?? "captain (default)"}${job.once ? " · Once" : ""}${job.arbiter ? ` · Arbiter: ${job.arbiter}` : ""}\nNext: ${job.expression ? new Date(job.nextAt).toISOString() : "on quota event"}\n${Array.from(job.prompt).slice(0, 500).join("")}`,
               ),
               accessory: {
                 ...button("Remove", "cron_remove"),
@@ -507,7 +511,12 @@ export class CronUI {
           // Synchronous SQLite commit precedes success ACK. Slack retries reuse view.id.
           if (this.config.cronjobs) {
             await this.bounded(
-              new CronjobManager(this.config, this.identity, this.store).add(
+              new CronjobManager(
+                this.config,
+                this.identity,
+                this.store,
+                this.resolveModel,
+              ).add(
                 scopeSchema.parse(scope),
                 validated.input,
                 now,

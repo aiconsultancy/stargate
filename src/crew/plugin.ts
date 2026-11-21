@@ -21,6 +21,7 @@ import { connectHistoryAPI, historyVisible } from "./api";
 import { compactOnServer } from "./compaction";
 import { crewOpenCodeInput } from "./crew-tool-input";
 import { CrewCron } from "./cron";
+import { CrewCronExecution } from "./cron-execution";
 import { CrewEngine } from "./engine";
 import { CrewHistory, historyInputBranches } from "./history";
 import { workingAgreementContext } from "./instructions";
@@ -402,6 +403,24 @@ const plugin = Plugin.define({
           ),
       });
       await register(CrewReporting, {
+        cronModel: (input, context) =>
+          report(context.signal, () =>
+            new CrewCronExecution(engine, {
+              session: ctx.session,
+              agent: ctx.agent,
+              model: ctx.model,
+              generate: ctx.experimental.generate,
+            }).model(input, context.signal),
+          ),
+        cronEvaluate: (input, context) =>
+          report(context.signal, () =>
+            new CrewCronExecution(engine, {
+              session: ctx.session,
+              agent: ctx.agent,
+              model: ctx.model,
+              generate: ctx.experimental.generate,
+            }).evaluate(input, context.signal),
+          ),
         updateTools: (_input, context) =>
           report(context.signal, async () =>
             noticeTools(await ctx.tool.list()),
@@ -502,7 +521,7 @@ const plugin = Plugin.define({
         editor.add({
           name: "stargate_cron",
           description:
-            "Captain-only cronjobs: create (add), list, run, remove and report retained results for the configured bot/workspace. Load stargate-cronjobs first. Definitions live in cronjobs/<name>/CRONJOB.md; reference reusable skills instead of copying prompts and load required skills before execution. Add requires a five-field schedule, explicit timezone and intended Slack destination; use enabled=false when timing is undecided. Add report=immediate posts configured reports; report=daily silently logs results for one 08:30 UTC digest. Deferred report results remain local until their configured report; missing daily reporting leaves results local. op=report reads results, not reporting settings. Run admission or busy status never proves completion. Preserve busy work; retry the same run with its requestId (host tool-call ID by default), never blindly replay uncertain work. No permission expansion, global configuration changes, duplicate OS updaters, blind self-restarts or live dependency updates.",
+            "Captain-only cronjobs: add, list, run, remove and report for the bound bot/workspace. Load stargate-cronjobs first. Definitions live in cronjobs/<name>/CRONJOB.md; reference skills instead of copying prompts. Add requires a five-field schedule or a quota trigger and the intended Slack destination. The default-off cronjobs.advanced flag gates trigger, model, once and arbiter. A model uses provider/model#variant, validated against allowed providers and the active live catalogue; omitted means the captain's actual model. Explicit model or arbiter runs tools-off evaluation, never changes a durable session, and forwards only act/escalate to the captain; ignore stays private. Approval, credentials, destructive actions and owner decisions escalate. Once removes only after success; interrupted evaluations are held, never replayed. Use enabled=false when timing is undecided. Report immediate posts configured results; daily retains them until the configured digest, and ignore is excluded. Report reads metadata, not settings. Admission is not completion. Preserve busy work; retry the same run with requestId (host tool-call ID by default). Scope-drift errors require operator configuration reconciliation, not state deletion or cross-namespace access. No permission expansion, duplicate OS updaters, blind self-restarts or live dependency updates.",
           input: objectToolInput(cronOperationSchema),
           options: { codemode: false, permission: "stargate_crew" },
           execute: (input, context) =>

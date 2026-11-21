@@ -221,6 +221,7 @@ describe("idle gate", () => {
     );
     const statuses: Record<CronRun["status"], boolean> = {
       pending: false,
+      evaluating: false,
       announcing: false,
       announced: false,
       queued: false,

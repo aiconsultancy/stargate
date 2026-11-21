@@ -383,8 +383,28 @@ test("legacy defaults bypass input transforms and shallow-copy only their contai
   expect(() => decode({ text: "  " })).toThrow();
 });
 
-test("installed OpenCode cron tool advertisement retains the exact legacy JSON", () => {
+test("installed OpenCode cron tool advertisement matches its supported fields", () => {
   const advertisement = z.toJSONSchema(objectToolInput(cronOperationSchema));
+  expect(Object.keys(advertisement.properties ?? {})).toEqual([
+    "op",
+    "channel",
+    "user",
+    "page",
+    "name",
+    "description",
+    "schedule",
+    "trigger",
+    "model",
+    "once",
+    "arbiter",
+    "timezone",
+    "prompt",
+    "skills",
+    "enabled",
+    "report",
+    "requestId",
+    "id",
+  ]);
   expect(
     createHash("sha256").update(JSON.stringify(advertisement)).digest("hex"),
   ).toBe(cronAdvertisementHash);

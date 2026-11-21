@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { BotConfig } from "./config";
-import { type CronInput, validateCronInput } from "./cron";
+import { type CronAdvanced, usesAdvancedCron } from "./cron-advanced";
+import { type CronInput, validateCronInput } from "./cron-input";
 import type { CronScope, CronStore } from "./cron-store";
 import {
   type CronjobDefinition,
@@ -14,6 +15,25 @@ import {
   isAllowedChannel,
   isAllowedUser,
 } from "./routing";
+
+export type CronModelResolver = (
+  input: Pick<CronAdvanced, "model" | "arbiter">,
+  signal: AbortSignal,
+) => Promise<{ model: string }>;
+
+export function cronRuntimeBinding(config: BotConfig, identity: Identity) {
+  const key = botKey(config, identity);
+  return {
+    key,
+    registration: JSON.stringify([
+      config.id,
+      config.slack.appId,
+      identity.team,
+      identity.user,
+    ]),
+    signature: JSON.stringify([key, config.cronjobs ?? null]),
+  };
+}
 
 export function cronjobPrompt(definition: CronjobDefinition, path: string) {
   const skills = definition.skills.length
@@ -29,6 +49,7 @@ export class CronjobManager {
     readonly config: BotConfig,
     readonly identity: Identity,
     readonly store: CronStore,
+    private readonly resolveModel?: CronModelResolver,
   ) {
     this.key = botKey(config, identity);
   }
@@ -42,7 +63,18 @@ export class CronjobManager {
     );
   }
 
-  async sync(now: number) {
+  private async validateAdvanced(input: CronAdvanced, signal: AbortSignal) {
+    if (usesAdvancedCron(input) && !this.config.cronjobs?.advanced)
+      throw new Error("Advanced cron jobs are disabled.");
+    if (input.model !== undefined || input.arbiter !== undefined) {
+      if (!this.resolveModel)
+        throw new Error("Cron model validation is unavailable.");
+      return this.resolveModel(input, signal);
+    }
+    return undefined;
+  }
+
+  async sync(now: number, signal = new AbortController().signal) {
     const settings = this.config.cronjobs;
     if (!settings) return [];
     const available: string[] = [];
@@ -63,22 +95,31 @@ export class CronjobManager {
           const { input } = validateCronInput(
             {
               name,
-              expression: definition.schedule,
+              expression: definition.schedule ?? "",
               timezone: definition.timezone,
               prompt: cronjobPrompt(definition, source),
               report: definition.report,
+              trigger: definition.trigger,
+              model: definition.model,
+              once: definition.once,
+              arbiter: definition.arbiter,
             },
             now,
           );
+          await this.validateAdvanced(input, signal);
+          signal.throwIfAborted();
           this.store.upsertFile(scope, input, source, !definition.enabled, now);
           available.push(source);
         } catch {
+          signal.throwIfAborted();
           errors.push(name);
         }
       }
     } catch {
+      signal.throwIfAborted();
       errors.push("cronjobs-directory");
     }
+    signal.throwIfAborted();
     this.store.fileAvailability(this.key, available);
     return errors;
   }
@@ -93,21 +134,28 @@ export class CronjobManager {
       skills?: string[];
       enabled?: boolean;
     } = {},
+    signal = new AbortController().signal,
   ) {
     if (!this.allowed(scope)) throw new Error("Cronjob access denied.");
     const { input } = validateCronInput(raw, now);
+    await this.validateAdvanced(input, signal);
+    signal.throwIfAborted();
     const settings = this.config.cronjobs;
     if (!settings) return this.store.add(scope, input, now, requestId);
     const definition: CronjobDefinition = {
       name: input.name,
       description: details.description ?? input.name,
-      schedule: input.expression,
+      ...(input.expression ? { schedule: input.expression } : {}),
       timezone: input.timezone,
       prompt: input.prompt,
       report: input.report ?? "immediate",
       skills: details.skills ?? [],
       enabled: details.enabled ?? true,
       slack: { channel: scope.channel, user: scope.user },
+      trigger: input.trigger,
+      model: input.model,
+      once: input.once,
+      arbiter: input.arbiter,
     };
     const source = join(settings.directory, definition.name, "CRONJOB.md");
     const compiled = validateCronInput(
