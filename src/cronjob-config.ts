@@ -12,6 +12,7 @@ export const cronChannel = Schema.String.check(
 );
 export const cronUser = Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/));
 export const cronjobsSchema = settingsStruct({
+  advanced: Schema.optional(Schema.Boolean),
   directory: Schema.String.check(Schema.isMaxCodePoints(4096)).check(
     settingsRefine((path) => isAbsolute(path) && !/[\r\n\0]/.test(path), {
       message: "Invalid input",

@@ -1,12 +1,15 @@
+import { lstat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
+import { OpenCodeBackend } from "./backends/opencode";
 import { botToken, botWebClient } from "./bot-web";
 import { type BotConfig, loadConfig } from "./config";
+import { type CronAdvanced, cronAdvancedFields } from "./cron-advanced";
 import { CronStore } from "./cron-store";
 import { cronChannel, cronUser } from "./cronjob-config";
 import { cronjobNameSchema } from "./cronjob-files";
-import { CronjobManager } from "./cronjob-manager";
-import type { Identity } from "./routing";
+import { CronjobManager, cronRuntimeBinding } from "./cronjob-manager";
+import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
 import { legacySetting } from "./settings-legacy";
 
 const destination = {
@@ -24,7 +27,8 @@ export const cronOperationSchema = z.discriminatedUnion("op", [
     ...destination,
     name: cronjobNameSchema,
     description: z.string().trim().min(1).max(1000),
-    schedule: z.string().max(100),
+    schedule: z.string().max(100).optional(),
+    ...cronAdvancedFields,
     timezone: z.string().max(100).default("UTC"),
     prompt: z.string().min(1).max(12000),
     skills: z.array(cronjobNameSchema).max(100).default([]),
@@ -50,6 +54,12 @@ type Dependencies = {
     signal: AbortSignal,
   ): Promise<Identity>;
   now(): number;
+  model?(
+    bot: BotConfig,
+    dataDirectory: string,
+    input: Pick<CronAdvanced, "model" | "arbiter">,
+    signal: AbortSignal,
+  ): Promise<{ model: string }>;
 };
 
 const defaults: Dependencies = {
@@ -95,15 +105,109 @@ export async function runCronOperation(
       signal,
     );
     signal.throwIfAborted();
-    const store = new CronStore(join(config.dataDirectory, "cron.sqlite"));
+    const storePath = join(config.dataDirectory, "cron.sqlite");
+    if (parsed.data.op !== "add") {
+      const existing = await lstat(storePath).catch(() => undefined);
+      if (!existing?.isFile() || existing.isSymbolicLink())
+        throw new CronControlError(
+          "Cron state is unavailable at this configuration's data directory; inspect the gateway configuration before retrying.",
+        );
+    }
+    const store = new CronStore(storePath);
     try {
-      const manager = new CronjobManager(bot, identity, store);
+      const binding = cronRuntimeBinding(bot, identity);
+      try {
+        store.assertRuntimeBinding(
+          binding.registration,
+          binding.signature,
+          binding.key,
+        );
+      } catch {
+        throw new CronControlError(
+          "Cron gateway configuration differs; restart the gateway before managing jobs.",
+        );
+      }
+      const model = async (
+        input: Pick<CronAdvanced, "model" | "arbiter">,
+        current: AbortSignal,
+      ) => {
+        if (dependencies.model)
+          return dependencies.model(bot, config.dataDirectory, input, current);
+        if (bot.backend.type !== "opencode")
+          throw new CronControlError(
+            "This backend cannot validate cron models.",
+          );
+        const backend = new OpenCodeBackend(bot.backend);
+        try {
+          if (!backend.cronModel)
+            throw new CronControlError(
+              "This backend cannot validate cron models.",
+            );
+          return await backend.cronModel(input, current);
+        } finally {
+          await backend.close();
+        }
+      };
+      const manager = new CronjobManager(bot, identity, store, model);
       const now = dependencies.now();
-      const errors = await manager.sync(now);
+      const errors = await manager.sync(now, signal);
       signal.throwIfAborted();
       const input = parsed.data;
       if (input.op === "report")
-        return { jobs: store.report(manager.key), definitionErrors: errors };
+        return {
+          jobs: store
+            .report(manager.key)
+            .map((job) => ({ ...job, model: job.model ?? "captain" })),
+          definitionErrors: errors,
+        };
+      if (input.op === "list") {
+        if (
+          (input.channel !== undefined &&
+            !isAllowedChannel(bot, input.channel)) ||
+          (input.user !== undefined &&
+            (input.user === identity.user || !isAllowedUser(bot, input.user)))
+        )
+          throw new CronControlError("Cronjob user or channel is not allowed.");
+        const filter = {
+          botKey: manager.key,
+          channel: input.channel,
+          user: input.user,
+        };
+        return {
+          jobs: store.listDestinations(filter, input.page).map((job) => {
+            const { prompt, ...metadata } = job;
+            return {
+              ...metadata,
+              model: job.model ?? "captain",
+              ...(input.channel !== undefined &&
+              input.user !== undefined &&
+              manager.allowed(job)
+                ? { prompt }
+                : {}),
+            };
+          }),
+          filter: { channel: input.channel ?? null, user: input.user ?? null },
+          page: input.page,
+          definitionErrors: errors,
+        };
+      }
+      if (input.op === "remove") {
+        const job = store.findDestination(manager.key, input.id);
+        if (
+          !job ||
+          (input.channel !== undefined && input.channel !== job.channel) ||
+          (input.user !== undefined && input.user !== job.user)
+        )
+          return { removed: false };
+        // Removing an existing task grants no new access or execution. Retain
+        // bot ownership even when its former destination is no longer allowed.
+        return {
+          removed: store.remove(
+            { botKey: job.botKey, channel: job.channel, user: job.user },
+            input.id,
+          ),
+        };
+      }
       const scope = {
         botKey: manager.key,
         user: input.user ?? bot.cronjobs.user,
@@ -111,14 +215,6 @@ export async function runCronOperation(
       };
       if (!manager.allowed(scope))
         throw new CronControlError("Cronjob user or channel is not allowed.");
-      if (input.op === "list")
-        return {
-          jobs: store.list(scope, input.page),
-          page: input.page,
-          definitionErrors: errors,
-        };
-      if (input.op === "remove")
-        return { removed: store.remove(scope, input.id) };
       if (input.op === "run") {
         const run = store.runNow(scope, input.name, now, input.requestId);
         return run
@@ -134,17 +230,22 @@ export async function runCronOperation(
         scope,
         {
           name: input.name,
-          expression: input.schedule,
+          expression: input.schedule ?? "",
           timezone: input.timezone,
           prompt: input.prompt,
           report: input.report,
+          trigger: input.trigger,
+          model: input.model,
+          once: input.once,
+          arbiter: input.arbiter,
         },
         now,
         undefined,
         input,
+        signal,
       );
       return {
-        job: schedule,
+        job: { ...schedule, model: schedule.model ?? "captain" },
         effect: input.enabled
           ? "recurring-execution-authorized"
           : "schedule-paused-manual-run-available",

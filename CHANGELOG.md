@@ -4,6 +4,12 @@
 
 ### Feature flags
 
+- New flag: `bots[].cronjobs.advanced` defaults off. It enables quota-event
+  triggers, per-job model evaluation, one-off jobs and optional crew arbitration.
+  Existing clock schedules retain their current behaviour when it is off.
+  Cron list and remove now cover every destination for the bound bot, including
+  DMs, unless explicit destination filters are supplied. Configuration drift
+  returns an error instead of a misleading empty inventory.
 - New flags: Teams `livePresence` defaults off. IRC `features.fleetTyping`
   defaults on. Fleet `api.pullRequestRepositories` enables pull request lookup
   only for bound checkouts and defaults to no bindings.
@@ -25,6 +31,10 @@
 
 ### Changes
 
+- Add durable quota-reset and quota-threshold cron events without model polling.
+  Retain immutable model/arbiter choices, suppress ignored output and remove
+  one-off jobs only after a successful run. Refuse configuration/namespace drift
+  in cron controls rather than returning an empty list while old jobs run.
 - Deliver Claude MCP configuration over stdin after checking the CLI version.
   Known older CLIs use explicit argv delivery with a safe exposure warning;
   unknown versions and failed probes stop the turn before the SDK starts.

@@ -99,7 +99,7 @@ export const settingsGolden = {
   },
 } as const;
 export const cronAdvertisementHash =
-  "2ad84ad2f258f0a0c9128e913c768335dd1907659086621a747e296209d5c5b5";
+  "805102783f02eb7c49a877cb0796e6f5bfca3a3853a9f4b981354958cfe21bba";
 
 // Legacy normalised provisioning plan, including property order used by its hash.
 export const legacyProvisionInput = {

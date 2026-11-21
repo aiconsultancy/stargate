@@ -27,6 +27,7 @@ import {
   TranscriptUnavailable,
 } from "../backend-values";
 import { type BackendConfig, secret } from "../config";
+import { redactCredentials } from "../credentials";
 import {
   type FleetCrewStatus,
   fleetCrewStatusSchema,
@@ -35,6 +36,7 @@ import { isNativeInstructionContext } from "../crew/instruction-context";
 import { crewMessageMetadataKey } from "../crew/message-protocol";
 import { CrewReporting } from "../crew/report-rpc";
 import { type CrewStatusInput, crewStatusSchema } from "../crew-status";
+import { cronEvaluationSchema, cronModelSchema } from "../cron-advanced";
 import type {
   FleetReviewBinding,
   FleetReviewEvidence,
@@ -62,7 +64,7 @@ import {
   type QuestionAnswer,
   questionFingerprint,
 } from "../questions";
-import { quotaSnapshotSchema } from "../quota";
+import { quotaObservationSchema, quotaSnapshotSchema } from "../quota";
 import { createReadSlot, readWithDeadline } from "../read-deadline";
 import {
   BackendFailure,
@@ -1117,6 +1119,65 @@ export class OpenCodeBackend implements AgentBackend {
     } catch {
       throw new Error(
         "Quota unavailable; check the captain location and quota configuration.",
+      );
+    }
+  }
+
+  async cronQuota(signal: AbortSignal) {
+    try {
+      signal.throwIfAborted();
+      const result = quotaObservationSchema.parse(
+        await this.client
+          .rpc(CrewReporting)
+          .cronQuota(
+            {},
+            { location: { directory: this.config.directory }, signal },
+          ),
+      );
+      signal.throwIfAborted();
+      return result;
+    } catch {
+      throw new Error(
+        "Cron quota unavailable; inspect the bound captain configuration.",
+      );
+    }
+  }
+
+  async cronModel(
+    input: Parameters<NonNullable<AgentBackend["cronModel"]>>[0],
+    signal: AbortSignal,
+  ) {
+    try {
+      signal.throwIfAborted();
+      const result = await this.client.rpc(CrewReporting).cronModel(input, {
+        location: { directory: this.config.directory },
+        signal,
+      });
+      signal.throwIfAborted();
+      return { model: Schema.decodeUnknownSync(cronModelSchema)(result.model) };
+    } catch {
+      throw new Error(
+        "Cron model validation unavailable; raw details withheld.",
+      );
+    }
+  }
+
+  async cronEvaluate(
+    input: Parameters<NonNullable<AgentBackend["cronEvaluate"]>>[0],
+    signal: AbortSignal,
+  ) {
+    try {
+      signal.throwIfAborted();
+      const result = await this.client.rpc(CrewReporting).cronEvaluate(input, {
+        location: { directory: this.config.directory },
+        signal,
+      });
+      signal.throwIfAborted();
+      const evaluation = Schema.decodeUnknownSync(cronEvaluationSchema)(result);
+      return { ...evaluation, text: redactCredentials(evaluation.text, 12000) };
+    } catch {
+      throw new Error(
+        "Cron evaluation unavailable or unconfirmed; do not replay. Raw details withheld.",
       );
     }
   }

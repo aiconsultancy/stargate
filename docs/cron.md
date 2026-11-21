@@ -237,6 +237,150 @@ There is no system-wide single report across independently configured bots.
 Use one captain's job directory/report configuration to bundle its overnight
 maintenance tasks.
 
+## Quota events, models and arbitration (opt-in)
+
+`bots[].cronjobs.advanced` is **off by default**. Enable it explicitly on the
+intended registration; it does not enable itself on upgrade. Existing clock
+jobs keep their behaviour when the flag is absent or false. Advanced definitions
+are unavailable while it is off; accepted advanced occurrences fail without
+falling back to a captain turn or replaying the occurrence.
+
+```json
+"cronjobs": {
+  "advanced": true,
+  "directory": "/srv/captain/cronjobs",
+  "channel": "C123",
+  "user": "U123"
+}
+```
+
+The tool, local CLI JSON and `CRONJOB.md` frontmatter accept these extra fields:
+
+```json
+{
+  "op": "add",
+  "name": "quota-recovered",
+  "description": "Check whether routine work can resume after a Codex reset",
+  "trigger": { "type": "quota-reset", "provider": "codex" },
+  "model": "openai-proxy/gpt-6-luna#low",
+  "once": true,
+  "arbiter": "twiki",
+  "prompt": "Use the supplied quota observation to report whether the reset occurred. Return the numeric evidence."
+}
+```
+
+Replace the model with an available route from the active profile. Omit `op`
+for file frontmatter. Omit `schedule` for an event-only job, or keep a normal
+five-field `schedule` to run on either clock or event. The slash Add form still
+creates clock jobs; use the tool or a reviewed definition for the extra fields.
+List and report include model, trigger, once and arbiter metadata. An omitted
+model is shown as `captain`, meaning the captain's actual model at execution,
+not a guessed provider default.
+
+- `quota-reset` fires when a known window's raw `resetAt` moves forward by at
+  least one hour and either usage drops by at least five percentage points or
+  the previous `resetAt` has passed. This recognises weekly and early manual
+  resets while rejecting timestamp jitter and multi-hour drift at unchanged
+  usage. Other observations update the stored raw timestamp and usage silently.
+  The first observation establishes the baseline without a reset event.
+- `quota-threshold` uses the same provider selector and adds `usedPercent`,
+  between 0 and 100. An initial observation already at or above the threshold
+  fires once. It does not fire again for that account/window/reset cycle;
+  utilisation noise does not rearm it. Only a reset meeting the rule above
+  starts a new cycle; raw timestamp drift does not rearm the threshold.
+- Both selectors accept optional `window` (`5h`, `weekly` or `other`) and
+  `scope`. The default scope is `subscription`. Each account and window has
+  separate state; a model-specific scope must be selected explicitly.
+- The gateway reads the existing quota capability at most once a minute,
+  without a model turn. Unavailable, inactive, stale, future-dated or incomplete
+  observations do not imply quota. Reset-passed observations do not fire.
+- Observation, event receipt and run admission commit together in private
+  `cron.sqlite`. Restarts do not fire the same event twice. Events while a job
+  is paused, unavailable or busy are consumed, not saved as a future backlog.
+  Each pass admits at most 100 runs. The accepted task retains the numeric
+  observation that caused it, including `previousResetAt` (null on bootstrap)
+  and the new `resetAt`; no account email or credential is included. This
+  payload accompanies both tools-off evaluation and direct captain execution.
+  Deduplication uses a stable private account key, not the display ordinal;
+  credential reordering does not rearm an event. Public quota tools and job
+  prompts never contain that private key.
+
+An explicit `model` or `arbiter` selects tools-off evaluation before any captain
+turn or Slack announcement. This uses the OpenCode crew plugin's stateless
+generation capability, not a new root or a change to the captain's model.
+Creation and execution both validate the exact provider, model and reasoning
+variant against the team's allowed providers and live model/agent catalogue.
+Unavailable routes fail closed; there is no fallback. Without either field,
+clock and event jobs continue through the existing captain execution path.
+
+`arbiter: twiki` requires that exact configured Pi crew member. Its configured
+model evaluates only the job's output and returns `act`, `ignore` or `escalate`.
+It uses a separate tools-off decision store, not the durable Twiki conversation,
+task slot or tools. The job evaluation also has no tools or previous context.
+It can use its supplied input and event observation, not inspect files or make
+changes. The captain receives the original task and evaluation only for `act`
+or `escalate`. `ignore` stays private and is omitted from daily result excerpts.
+Approval, credentials, destructive actions and owner decisions force escalation;
+malformed or incomplete verdicts cannot authorise action. `act` still grants no
+new authority. The captain must apply the normal approval rules before acting.
+
+Evaluation claims and output are durable. A tools-off evaluation that fails,
+times out or is interrupted by restart records that occurrence as failed.
+It is never replayed, and late output is not delivered. Future clock occurrences
+and fresh quota events remain eligible. Each evaluation has a 60-second
+deadline, including the arbiter; a tick starts at most one new evaluation.
+A retained verdict can resume delivery without rerunning the models.
+Event-only definitions do not count as clock work in the maintenance idle gate;
+failed tools-off occurrences do not block nightly maintenance either.
+Private per-run Pi stores under the crew's `cron-evaluations` directory are
+retained for operator inspection; this version has no automatic retention
+cleanup. Treat them as private runtime state and include them in the normal
+authorised data-retention procedure. `once: true` removes the schedule through
+a durable tombstone only after its first successful run, including `ignore`.
+Successful manual runs count too: testing a dated one-off early consumes it.
+Failure or uncertainty leaves it retained. Rediscovering the file does not
+revive the removed job; use a new name for an intentional replacement.
+
+After forwarding to the captain, tools can act. Missing queue history or an
+unconfirmed queue admission still holds the occurrence without replay. A held
+run prevents future occurrences of that job and keeps nightly maintenance busy.
+Inspect its retained state, reconcile any captain work, and remove the exact
+job ID to cancel future admission. For a file-backed job, removal leaves a
+tombstone: use a new definition name to create its intentional replacement.
+Removal does not undo actions or stop a captain turn already running.
+
+Definition validation fails closed. If live model validation is temporarily
+unavailable during file sync, the affected job becomes unavailable. An event
+observed in that state is consumed, not backlogged, just like an explicitly
+unavailable job. Once validation recovers, later events can run; the earlier
+event is not replayed.
+
+## Empty lists after configuration changes
+
+`list` defaults to every destination for the bound bot, including DMs. Optional
+`channel` and `user` filters are exact and reported in the response; they do not
+default to the configured destination. `remove` finds the exact job ID across
+the bot's destinations, with optional exact filters. It cannot remove another
+bot's job. Add and manual run keep their configured-destination defaults.
+For a calendar date that should run only once, set `once: true`: a five-field
+expression alone repeats each year.
+Default and partially filtered lists contain metadata only, not prompt text.
+Prompt text is returned only when both `channel` and `user` are explicitly
+selected and that exact destination is currently allowed. Revoked destinations
+remain visible as metadata so the captain can remove their jobs safely.
+
+The gateway retains the active backend namespace until a restart. Tools read
+the configuration file afresh. A restart-only backend or cron setting change
+can therefore select a different namespace in the tool while the old gateway
+still runs its jobs. Controls now refuse that mismatch before syncing files,
+instead of returning a misleading empty list or creating duplicate schedules.
+An absent database on a read operation is also an error, not a new empty store.
+
+Compare the intended configuration with the running gateway and perform its
+normal authorised restart. Do not delete cron state, move schedules to another
+namespace or widen access to make the list appear. The scope fence diagnoses
+this mechanism; it does not prove which setting caused a historical incident.
+
 ## System maintenance example
 
 [`system-maintenance`](../cronjobs/system-maintenance/CRONJOB.md) is a

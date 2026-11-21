@@ -41,7 +41,7 @@ import {
 } from "./config-reload";
 import type { CrewUIApi } from "./crew-ui";
 import { CrewUI } from "./crew-ui";
-import { type CronDelivery, CronScheduler } from "./cron";
+import { type CronDelivery, CronScheduler, type CronServices } from "./cron";
 import { CronStore } from "./cron-store";
 import { CronUI, type CronUIApi } from "./cron-ui";
 import { startDashboard } from "./dashboard";
@@ -655,6 +655,23 @@ export function serve(
           ),
           drain,
         );
+        const cronServices: CronServices = {
+          quota: (signal) => {
+            if (!backend.cronQuota)
+              throw new Error("Cron quota reader unavailable.");
+            return backend.cronQuota(signal);
+          },
+          model: (input, signal) => {
+            if (!backend.cronModel)
+              throw new Error("Cron model validation unavailable.");
+            return backend.cronModel(input, signal);
+          },
+          evaluate: (input, signal) => {
+            if (!backend.cronEvaluate)
+              throw new Error("Cron evaluation unavailable.");
+            return backend.cronEvaluate(input, signal);
+          },
+        };
         const cron = new CronScheduler(
           bot,
           identity,
@@ -662,6 +679,7 @@ export function serve(
           gateway,
           slack,
           botLog,
+          cronServices,
         );
         workers.push(
           {
@@ -731,6 +749,7 @@ export function serve(
           cronStore,
           slack.cronUI,
           botLog,
+          cronServices.model,
         );
         const pairing = new PairingUI(
           bot,

@@ -36,6 +36,326 @@ afterEach(() => {
 });
 
 describe("file-backed cron controls", () => {
+  test("runtime bindings reject changed configuration without changing schedules", () => {
+    const path = databasePath();
+    const store = open(path);
+    const registration = JSON.stringify(["captain", "A123", "T123", "U123"]);
+    const key = JSON.stringify([
+      "captain",
+      "A123",
+      "T123",
+      "U123",
+      "fingerprint",
+    ]);
+    const signature = JSON.stringify({
+      key,
+      root: "/jobs",
+      channel: "C123",
+      user: "U123",
+    });
+    const owned = { ...scope, botKey: key };
+    store.add(owned, input, now);
+    const before = store.list(owned);
+    store.bindRuntime(registration, signature);
+    const restarted = open(path);
+    expect(() =>
+      restarted.assertRuntimeBinding(registration, signature, key),
+    ).not.toThrow();
+    expect(() =>
+      restarted.assertRuntimeBinding(registration, "changed", key),
+    ).toThrow("restart the gateway");
+    expect(restarted.list(owned)).toEqual(before);
+    expect(() => restarted.bindRuntime(registration, "x".repeat(8193))).toThrow(
+      "Invalid cron runtime binding",
+    );
+    expect(() => restarted.assertRuntimeBinding("bad", signature, key)).toThrow(
+      "Invalid cron runtime binding",
+    );
+    restarted.bindRuntime(registration, "changed");
+    expect(() =>
+      store.assertRuntimeBinding(registration, "changed", key),
+    ).not.toThrow();
+  });
+
+  test("legacy fingerprint changes fail closed without exposing or rekeying old jobs", () => {
+    const store = open();
+    const tuple = ["captain", "A123", "T123", "U123"];
+    const registration = JSON.stringify(tuple);
+    const old = { ...scope, botKey: JSON.stringify([...tuple, "old"]) };
+    const changed = JSON.stringify([...tuple, "new"]);
+    store.add(old, input, now);
+    const before = store.list(old);
+    expect(() =>
+      store.assertRuntimeBinding(registration, "signature", old.botKey),
+    ).not.toThrow();
+    expect(() =>
+      store.assertRuntimeBinding(registration, "signature", changed),
+    ).toThrow("Cron gateway configuration differs");
+    expect(store.list(old)).toEqual(before);
+    expect(store.list({ ...scope, botKey: changed })).toEqual([]);
+    const unrelated = JSON.stringify(["other", "A123", "T123", "U123"]);
+    expect(() =>
+      store.assertRuntimeBinding(unrelated, "signature", "other"),
+    ).not.toThrow();
+  });
+
+  test("advanced snapshots and metadata survive definition edits and restart", () => {
+    const path = databasePath();
+    const store = open(path);
+    const options = {
+      trigger: {
+        type: "quota-reset" as const,
+        provider: "claude" as const,
+        window: "weekly" as const,
+      },
+      model: "claude/sonnet#high",
+      once: false,
+      arbiter: "chief",
+    };
+    const schedule = store.upsertFile(
+      scope,
+      { ...input, ...options, report: "daily" },
+      source,
+      false,
+      now,
+    );
+    const accepted = store.claimDue(scope.botKey, schedule.nextAt)[0];
+    if (!accepted) throw new Error("Expected advanced clock run");
+    expect(accepted).toMatchObject(options);
+    expect(store.list(scope)[0]).toMatchObject(options);
+    expect(store.report(scope.botKey)[0]).toMatchObject(options);
+    expect(store.recentRuns(scope.botKey)[0]).toMatchObject(options);
+    expect(
+      store.dailyResults(scope.botKey, now, now + 120_000)[0],
+    ).toMatchObject(options);
+    expect(
+      store.add(scope, { ...input, ...options }, now, "advanced-add"),
+    ).toMatchObject(options);
+    expect(store.add(scope, input, now, "advanced-add")).toMatchObject(options);
+    store.upsertFile(scope, input, source, false, now);
+    expect(open(path).pending(scope.botKey)[0]).toEqual(accepted);
+    expect(
+      store.list(scope).find((row) => row.id === schedule.id),
+    ).not.toHaveProperty("model");
+    expect(store.recentRuns(scope.botKey)[0]).not.toHaveProperty("prompt");
+  });
+
+  test("once completion uses the accepted snapshot and never revives after file discovery", () => {
+    const path = databasePath();
+    const store = open(path);
+    const schedule = store.upsertFile(
+      scope,
+      { ...input, once: true, report: "daily" },
+      source,
+      false,
+      now,
+    );
+    const run = store.runNow(scope, schedule.id, now);
+    if (!run) throw new Error("Expected once run");
+    store.upsertFile(scope, input, source, false, now);
+    store.finish(run.id, "done", now + 1);
+    const restarted = open(path);
+    expect(restarted.list(scope)).toEqual([]);
+    expect(restarted.enabled(schedule.id, true)).toBe(false);
+    restarted.upsertFile(
+      scope,
+      { ...input, once: true },
+      source,
+      false,
+      now + 2,
+    );
+    expect(restarted.list(scope)).toEqual([]);
+    expect(() => restarted.runNow(scope, schedule.id, now + 2)).toThrow(
+      "not found",
+    );
+    expect(restarted.dailyResults(scope.botKey, now, now + 3)).toMatchObject([
+      { id: run.id, status: "done", once: true },
+    ]);
+  });
+
+  test("failed, blocked and canceled once runs do not consume a schedule", () => {
+    const store = open();
+    const schedule = store.upsertFile(
+      scope,
+      { ...input, once: true },
+      source,
+      false,
+      now,
+    );
+    const failed = store.runNow(scope, schedule.id, now);
+    if (!failed) throw new Error("Expected failed run");
+    store.finish(failed.id, "failed", now);
+    expect(store.enabled(schedule.id)).toBe(true);
+    store.finish(failed.id, "done", now + 1);
+    expect(store.enabled(schedule.id)).toBe(true);
+    const blocked = store.runNow(scope, schedule.id, now + 1);
+    if (!blocked) throw new Error("Expected blocked run");
+    store.block(blocked.id);
+    expect(store.enabled(schedule.id)).toBe(true);
+    const dbPath = databasePath();
+    const disk = open(dbPath);
+    const canceled = disk.add(scope, { ...input, once: true }, now);
+    const canceledRun = disk.runNow(scope, canceled.id, now);
+    if (!canceledRun) throw new Error("Expected cancelable run");
+    const db = new Database(dbPath);
+    try {
+      db.query("UPDATE cron_runs SET status='canceled' WHERE id=?").run(
+        canceledRun.id,
+      );
+    } finally {
+      db.close();
+    }
+    disk.finish(canceledRun.id, "done", now + 1);
+    expect(disk.enabled(canceled.id)).toBe(true);
+  });
+
+  test("adding once to a definition cannot change an already accepted run", () => {
+    const store = open();
+    const schedule = store.upsertFile(scope, input, source, false, now);
+    const run = store.runNow(scope, schedule.id, now);
+    if (!run) throw new Error("Expected ordinary run");
+    store.upsertFile(scope, { ...input, once: true }, source, false, now);
+    store.finish(run.id, "done", now + 1);
+    expect(store.enabled(schedule.id)).toBe(true);
+  });
+
+  test("evaluation receipts survive restart without duplicate claims or metadata leaks", () => {
+    const path = databasePath();
+    const store = open(path);
+    const schedule = store.add(
+      scope,
+      { ...input, model: "claude/sonnet", report: "daily", once: true },
+      now,
+    );
+    const run = store.runNow(scope, schedule.id, now);
+    if (!run) throw new Error("Expected evaluation run");
+    expect(store.claimEvaluation(run.id)).toBe(true);
+    expect(store.claimEvaluation(run.id)).toBe(false);
+    expect(store.runNow(scope, schedule.id, now)).toBeUndefined();
+    expect(store.pending(scope.botKey)).toEqual([]);
+    const evaluation = {
+      text: "Private evaluator result.",
+      model: "claude/sonnet",
+      verdict: "ignore" as const,
+    };
+    expect(store.saveEvaluation(run.id, evaluation)).toBe(true);
+    const restarted = open(path);
+    expect(restarted.pending(scope.botKey)[0]).toEqual({ ...run, evaluation });
+    expect(restarted.claimEvaluation(run.id)).toBe(false);
+    expect(
+      restarted.saveEvaluation(run.id, { ...evaluation, verdict: "act" }),
+    ).toBe(false);
+    expect(
+      restarted.dailyResults(scope.botKey, now, now + 1)[0]?.evaluation,
+    ).toEqual(evaluation);
+    expect(JSON.stringify(restarted.recentRuns(scope.botKey))).not.toContain(
+      evaluation.text,
+    );
+    restarted.finish(run.id, "done", now + 1);
+    expect(restarted.enabled(schedule.id)).toBe(false);
+  });
+
+  test("interrupted tools-off evaluations fail per bot without replay and allow later runs", () => {
+    const path = databasePath();
+    const store = open(path);
+    const other = { ...scope, botKey: "other" };
+    for (const owner of [scope, other]) {
+      const schedule = store.add(owner, { ...input, arbiter: "chief" }, now);
+      const run = store.runNow(owner, schedule.id, now);
+      if (!run) throw new Error("Expected evaluation run");
+      expect(store.claimEvaluation(run.id)).toBe(true);
+    }
+    const restarted = open(path);
+    expect(restarted.recoverEvaluations(scope.botKey)).toBe(1);
+    expect(restarted.recoverEvaluations(scope.botKey)).toBe(0);
+    expect(restarted.recentRuns(scope.botKey)[0]?.status).toBe("failed");
+    expect(restarted.recentRuns("other")[0]?.status).toBe("evaluating");
+    const failed = restarted.recentRuns(scope.botKey)[0];
+    if (!failed) throw new Error("Expected failed run");
+    expect(restarted.claimEvaluation(failed.id)).toBe(false);
+    expect(
+      restarted.saveEvaluation(failed.id, {
+        text: "Late result",
+        model: "claude/sonnet",
+        verdict: "act",
+      }),
+    ).toBe(false);
+    expect(restarted.runNow(scope, input.name, now + 60_000)).toBeDefined();
+  });
+
+  test("evaluation claims recheck availability and manual pause ownership", () => {
+    const store = open();
+    const schedule = store.upsertFile(
+      scope,
+      { ...input, model: "claude/sonnet" },
+      source,
+      true,
+      now,
+    );
+    const run = store.runNow(scope, schedule.id, now);
+    if (!run) throw new Error("Expected paused manual run");
+    store.fileAvailability(scope.botKey, []);
+    expect(store.claimEvaluation(run.id)).toBe(false);
+    store.fileAvailability(scope.botKey, [source]);
+    expect(store.claimEvaluation(run.id)).toBe(true);
+    expect(() =>
+      store.saveEvaluation(run.id, {
+        text: "x".repeat(12_001),
+        model: "claude/sonnet",
+        verdict: "act",
+      }),
+    ).toThrow("Invalid cron evaluation state");
+    store.block(run.id);
+    expect(store.recentRuns(scope.botKey)[0]?.status).toBe("blocked");
+  });
+
+  test("corrupt options, accepted snapshots and evaluation receipts fail closed", () => {
+    const path = databasePath();
+    const store = open(path);
+    const schedule = store.add(scope, input, now);
+    const run = store.runNow(scope, schedule.id, now);
+    if (!run) throw new Error("Expected run");
+    const db = new Database(path);
+    try {
+      db.query("UPDATE cron_schedules SET options=? WHERE id=?").run(
+        '{"once":1}',
+        schedule.id,
+      );
+      expect(() => store.list(scope)).toThrow("Invalid cron options state");
+      db.query("UPDATE cron_schedules SET options=NULL WHERE id=?").run(
+        schedule.id,
+      );
+      db.query("UPDATE cron_runs SET snapshot=? WHERE id=?").run(
+        JSON.stringify({ ...run, model: "invalid" }),
+        run.id,
+      );
+      expect(() => store.pending(scope.botKey)).toThrow(
+        "Invalid cron run state",
+      );
+      // Restore through the actual stored snapshot fields, not run-only metadata.
+      const {
+        id: _id,
+        scheduleId: _scheduleId,
+        dueAt: _dueAt,
+        manual: _manual,
+        status: _status,
+        thread: _thread,
+        jobId: _jobId,
+        ...snapshot
+      } = run;
+      db.query("UPDATE cron_runs SET snapshot=?,evaluation=? WHERE id=?").run(
+        JSON.stringify(snapshot),
+        '{"text":"private","model":"claude/sonnet","verdict":"invalid"}',
+        run.id,
+      );
+      expect(() => store.pending(scope.botKey)).toThrow(
+        "Invalid cron run state",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("additive upgrade preserves legacy schedules and pending join fallback", () => {
     const path = databasePath();
     const db = new Database(path);

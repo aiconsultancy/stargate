@@ -1,7 +1,7 @@
 ---
 
 name: stargate-cronjobs
-description: Manage Stargate scheduled jobs when a user asks to create a job, list schedules, run a named job now, remove a job, or change immediate versus daily reporting. Use the captain-only stargate_cron tool, not OS cron or replacement services.
+description: Manage Stargate scheduled and quota-event jobs when a user asks to create, list, run or remove a job, choose a job model or arbiter, or change immediate versus daily reporting. Use the captain-only stargate_cron tool, not OS cron or replacement services.
 ---
 
 # Stargate cronjobs
@@ -24,6 +24,11 @@ Do not change global configuration or install another scheduler.
 `op=report` does not change settings. Do not claim an existing report mode
 changed unless the definition was changed through a supported operation.
 List accepts a page; follow pages when the returned job list is full.
+List and remove cover every destination for the bound bot, including DMs.
+Optional channel/user filters are exact; inspect the returned list filter.
+Lists omit prompts unless both filters select a currently allowed destination.
+Add and run still default to the configured destination. A five-field calendar
+date repeats each year: use `once=true` when only its first success should run.
 
 Use the declared tool fields; do not invent fields or bypass validation with
 shell commands. Retain an explicit run requestId when retrying the same request;
@@ -42,6 +47,31 @@ Confirm schedule and timezone before enabling execution. If the time is not
 decided, create with `enabled=false` and a valid provisional schedule, clearly
 marked as provisional. Ask for the missing timing decision; do not silently
 enable it. Do not use a six-field seconds expression.
+
+With operator-enabled `cronjobs.advanced`, use `trigger` for a quota event:
+`{"type":"quota-reset","provider":"codex"}` or
+`{"type":"quota-threshold","provider":"codex","usedPercent":98}`.
+Omit `schedule` for an event-only job; keep both for either event or clock.
+Use optional `window` and `scope` to narrow the provider window. The gateway
+checks quota without a model turn. Reset requires `resetAt` to move forward by
+at least one hour and either usage to drop by at least five percentage points
+or the previous reset time to have passed. Other timestamp drift updates the
+observation silently. A threshold fires once per qualified reset cycle.
+
+Set `model` to a verified `provider/model#variant`, `once=true` to remove the
+job after its first success, and `arbiter=twiki` for a configured Pi decision
+member. Model and arbiter evaluations are tools-off and do not change or
+occupy the captain's or crew member's durable session. Only `act` or
+`escalate` forwards the result for action; `ignore` stays private. Never use
+an arbiter verdict to bypass approval, credentials or an owner decision.
+Failed, timed-out or interrupted tools-off occurrences fail without replay;
+future occurrences can run. Uncertain captain admission remains held because
+tools may have acted. A successful manual run also consumes `once=true`.
+
+Verify creation with `op=list` and `op=report`: check the exact job's trigger,
+model, once flag and arbiter. A missing flag, unavailable model or scope-drift
+error is a configuration gap, not permission to use a different provider or
+delete state. Ask the operator to reconcile the gateway and tool configuration.
 
 Reference reusable skills in `skills`; require the executing agent to load
 every listed skill before work. Do not copy their prompts into the job body.

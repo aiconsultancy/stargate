@@ -91,7 +91,7 @@ export async function checkIdle(input: IdleInput): Promise<IdleResult> {
       undefined,
     );
     const schedules =
-      "SELECT COUNT(*) AS n FROM cron_schedules WHERE removedAt IS NULL AND available=1 AND paused=0";
+      "SELECT COUNT(*) AS n FROM cron_schedules WHERE removedAt IS NULL AND available=1 AND paused=0 AND expression<>''";
     const cron = read(
       join(input.dataDirectory, "cron.sqlite"),
       (db) => ({
