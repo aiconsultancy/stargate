@@ -20,13 +20,11 @@ export function crewPermissions(
   if (access === "direct") {
     return [
       allow("*"),
-      ...["*.env", "*.env.*", "*.key", "*.pem"].map(
-        (resource): Rule => ({
-          action: "read",
-          resource,
-          effect: "deny",
-        }),
-      ),
+      ...["*.env", "*.env.*", "*.key", "*.pem"].map((resource): Rule => ({
+        action: "read",
+        resource,
+        effect: "deny",
+      })),
     ];
   }
   const rules: Rule[] = [

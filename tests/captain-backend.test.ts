@@ -66,7 +66,7 @@ test("update notice admission queues local context via RPC, never native input",
     ).toBe(false);
   } finally {
     await adapter.close();
-    server.stop(true);
+    void server.stop(true);
   }
 });
 
@@ -393,7 +393,7 @@ test("lost pinned lookup response never creates a replacement", async () => {
     port: 0,
     fetch(request, server) {
       methods.push(request.method);
-      server.stop(true);
+      void server.stop(true);
       return new Response();
     },
   });

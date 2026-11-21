@@ -10,8 +10,10 @@ changes wait until a person approves a release.
 
 Use short-lived branches and ready PRs. After review is clear, enable
 `gh pr merge --auto --squash`. Main protection requires **Quality checks**
-with strict up-to-date checks. If main moves, update the branch and re-run
-checks. GitHub deletes the remote branch after merge.
+with strict up-to-date checks; the pre-push hook enforces the same
+rebase-before-push policy. If main moves, `git fetch origin && git rebase
+origin/main`, then re-run checks. GitHub deletes the remote branch after
+merge.
 
 ## Prepare release notes
 

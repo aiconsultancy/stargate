@@ -5,7 +5,7 @@ ARGS ?=
 
 TASKS := deps stargate init crew-init provision cua-install cua start \
 	config-check manifest service check test test-release-env eval \
-	typecheck lint format \
+	typecheck lint oxlint format \
 	hooks-install hooks workflow-check
 
 .PHONY: help $(TASKS)
@@ -27,6 +27,7 @@ help:
 	  '  make check         Run typecheck, lint, and tests' \
 	  '  make eval          Run local conversation reliability evaluations' \
 	  '  make test | typecheck | lint | format' \
+	  '  make oxlint         Run the anti-slop Oxlint rules (not in check yet)' \
 	  '  make test-release-env  Run tests as a self-update does (hidden TMPDIR)' \
 	  '  make hooks-install Install prek pre-commit hooks' \
 	  '  make hooks         Run all pre-commit checks' \

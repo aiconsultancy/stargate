@@ -31,12 +31,12 @@ make stargate ARGS='--help'
 make config-check ARGS='--config stargate.example.json --schema-only'
 ```
 
-`make check` runs TypeScript, Biome, and Bun tests. Run the smallest relevant
+`make check` runs TypeScript, Oxlint, and Bun tests. Run the smallest relevant
 test while changing behavior, then the full check before completing code work.
 Run `make hooks-install` once per clone. `make hooks` runs the same prek gate as
 CI, including workflow and file hygiene checks. Use `make format` for safe fixes;
 do not suppress or weaken type-safety rules to pass the gate. Index-signature
-properties require bracket access; Biome's conflicting `useLiteralKeys` rule is
+properties require bracket access; Oxlint's conflicting `useLiteralKeys` rule is
 intentionally disabled. Dependency declaration checks remain excluded because
 installed SDK declarations have upstream type errors; first-party code and tests
 must pass every configured check.
@@ -158,8 +158,11 @@ protection). Auto-merge and automatic remote-branch deletion are enabled.
 No human merge approval is required.
 Do not stack PRs or keep long-lived branches;
 split a large feature into several PRs that each leave `main` working.
-Merge or rebase the latest `main` before review. If `main` moves, update the
-branch and re-run checks; re-review only when the PR's own diff changed.
+The pre-push hook enforces the rebase-before-push policy: every branch
+push must contain the freshly fetched `origin/main`, so a PR's head is
+always current before review. If `main` moves, `git fetch origin && git
+rebase origin/main`, then re-run checks; re-review only when the PR's own
+diff changed.
 Preserve unrelated user changes. Use Conventional Commits, for example
 `feat: add backend endpoint configuration` or
 `fix: preserve reply progress after delivery failure`. Stage only intended
