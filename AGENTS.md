@@ -152,14 +152,15 @@ unrelated Promise code or upgrade Effect as part of a schema change.
 
 Use trunk-based development. Never commit directly to `main`. Branch from the
 latest `main` and keep branches short-lived. Keep each PR to one small change.
-After review is clear, use `gh pr merge --auto --squash` so the PR merges when
-required checks pass on its exact head with up-to-date `main` (strict branch
-protection). Auto-merge and automatic remote-branch deletion are enabled.
-No human merge approval is required.
+When the PR is ready, use `gh pr merge --auto --squash` so it merges when
+**Quality checks** pass on its exact head. The branch does not need to be up
+to date with `main`: a PR without conflicts merges as it is. Update the branch
+only to resolve conflicts. Auto-merge and automatic remote-branch deletion are
+enabled. No approving review is required. You may ask another captain for a
+Go or No go, but the verdict is advice and never blocks the merge. The gate
+is a full test pass before a release; see `docs/releases.md`.
 Do not stack PRs or keep long-lived branches;
 split a large feature into several PRs that each leave `main` working.
-Merge or rebase the latest `main` before review. If `main` moves, update the
-branch and re-run checks; re-review only when the PR's own diff changed.
 Preserve unrelated user changes. Use Conventional Commits, for example
 `feat: add backend endpoint configuration` or
 `fix: preserve reply progress after delivery failure`. Stage only intended
