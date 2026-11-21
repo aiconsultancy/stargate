@@ -7,13 +7,15 @@ This migration does not upgrade Effect or the SDKs.
 
 ## Touched-file ratchet
 
-Any change that modifies a file importing `zod` must replace that file's
-Zod schemas with Effect Schema in the same change; otherwise the touch must
-be reverted. CI enforces this on every pull request through
-`scripts/hooks/touched-zod.sh`, which compares the PR against its base and
-fails while any touched file under `src`, `scripts` or `perf` still imports
-`zod` (direct, subpath or dynamic). Untouched Zod files keep working until
-their migration batch. The legacy-oracle tests are exempt: they compare
+Any substantive change to a file importing `zod` must replace that file's
+Zod schemas with Effect Schema in the same change; otherwise revert the touch.
+CI enforces this on every pull request through `scripts/hooks/touched-zod.sh`.
+The guard compares committed HEAD with the merge base of the supplied PR base.
+It checks TypeScript files under `src`, `scripts` and `perf`. Direct imports,
+subpath imports, reexports, import types, dynamic imports and `require` calls
+all count, including single-quoted and static template literals.
+Untouched Zod files keep working until their migration batch.
+The legacy-oracle tests are exempt: they compare
 against captured Zod behaviour by design and stay until the migration
 removes the oracle.
 
@@ -22,6 +24,49 @@ outranks the batch boundaries. A fix that touches a Zod file migrates that
 file immediately, even mid-batch inside an otherwise unrelated PR; record
 such a forced migration under the file's home batch so the remaining budget
 stays accurate. Batches remain the plan for _untouched_ files.
+
+### NET1766 mechanical import/path exception
+
+The operator permits existing Zod imports to survive a narrowly verified move.
+This exception does not permit new Zod imports or unrelated source edits.
+The ordinary CI command applies these checks automatically. There is no label,
+environment switch or alternate CI mode that bypasses them.
+
+- The source must be an existing scoped base file or a Git-detected rename
+  from one. Git compares all paths with 50% rename similarity. An added file
+  or copy cannot inherit a legacy file's imports. A move that Git does not
+  identify as a rename fails while it retains Zod.
+- The guard parses committed source with the installed TypeScript API. It
+  compares exact source text, not a token sequence with whitespace removed.
+  Comments, formatting, ASI-sensitive newlines, import declarations, bindings,
+  Zod specifiers and executable code must remain byte-identical.
+- Only static relative import/reexport literal contents can change. Each
+  target must resolve uniquely in both Git trees to the same base file,
+  applying the actual rename map. An in-place consumer can change a path only
+  when its target was renamed. A moved consumer can update paths to unchanged
+  targets. The guard also checks unchanged relative static paths in these
+  files, so moving a consumer cannot silently select a different target.
+- Resolution supports regular `.ts` files through explicit `.ts` paths,
+  extensionless paths and directory `index.ts` paths. Ambiguous file/index
+  candidates, symlinks, aliases, package resolution and JS-to-TS mappings are
+  not proof of identity. Unresolved or unsupported paths fail the exception.
+  Changed literals cannot change quote kind or use escaped path spellings.
+- Dynamic imports, `require`, import-equals and import-type expressions must
+  remain unchanged. A Zod file with a relative expression of one of these
+  forms cannot move through this exception. Nonliteral dynamic imports and
+  `require` arguments prevent a retained-Zod file from qualifying for the
+  exception. They do not cause the ordinary guard to reject clean files
+  without a literal Zod import. The guard detects literal module targets;
+  it does not perform general semantic analysis of computed runtime module
+  targets. Parse or Git comparison errors also fail closed. No supplied
+  base still means no comparison, as before.
+
+This proof covers import-only and move-only source edits, not arbitrary
+behavior-preserving refactors. Constant extraction, importing a new helper,
+changing a helper call, and other root/helper logic edits still require
+migration or reversion of the Zod-file touch. This check does not prove general
+runtime equivalence of a module move. Normal tests and review still cover
+path-sensitive runtime behavior and changes inside imported modules.
 
 ## PR budget and batch boundaries
 
