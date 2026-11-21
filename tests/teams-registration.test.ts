@@ -3,7 +3,11 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { dirname, join } from "node:path";
 import { Result, Schema } from "effect";
 import { teamsSchema } from "../src/config";
+import type { OutgoingActivity as Outgoing } from "../src/teams/connector";
+import { TeamsPresence, type TeamsWaiting } from "../src/teams/presence";
 import { allowedActivity, TeamsRegistration } from "../src/teams/registration";
+import type { TurnProgress as Progress } from "../src/turn-progress";
+import { saveWaitingDelay, waitingPhrase } from "../src/waiting";
 import {
   activity,
   HUMAN,
@@ -828,4 +832,181 @@ test("a Teams connector that declines informative updates still gets typing and 
   } finally {
     await f.close();
   }
+});
+
+describe("Teams waiting phrases", () => {
+  const waiting = (settings: Partial<TeamsWaiting> = {}): TeamsWaiting => ({
+    delayMs: 0,
+    intervalMs: 20,
+    name: "Adama",
+    ...settings,
+  });
+  const informative = (sent: Outgoing[]) =>
+    sent.flatMap((activity) =>
+      activity.entities && activity.text !== undefined ? [activity.text] : [],
+    );
+
+  async function run(
+    progress: () => Progress | undefined,
+    settings: TeamsWaiting | undefined,
+    ms: number,
+  ) {
+    const sent: Outgoing[] = [];
+    const abort = new AbortController();
+    const work = new TeamsPresence(5).working(
+      "conversation",
+      "anchor",
+      abort.signal,
+      () => true,
+      progress,
+      async (activity) => {
+        sent.push(activity);
+        return { id: "stream-1" };
+      },
+      settings,
+    );
+    await Bun.sleep(ms);
+    abort.abort();
+    await work;
+    return sent;
+  }
+
+  test("generic stages show the bot's rotating phrase on the waiting interval", async () => {
+    for (const progress of [
+      (): Progress => ({ stage: "reasoning", observedAt: Date.now() }),
+      (): Progress => ({ stage: "model", observedAt: Date.now() }),
+      () => undefined,
+    ]) {
+      const texts = informative(await run(progress, waiting(), 120));
+      expect(texts[0]).toBe(waitingPhrase("Adama", 0));
+      expect(texts[1]).toBe(waitingPhrase("Adama", 1));
+      // One update per interval at most, and none while the phrase is unchanged.
+      expect(texts.length).toBeLessThanOrEqual(7);
+      expect(texts).toEqual(texts.map((_, i) => waitingPhrase("Adama", i)));
+    }
+  });
+
+  test("specific stage labels are unchanged", async () => {
+    const labels: [Progress, string][] = [
+      [{ stage: "tool", observedAt: 0 }, "Using a tool"],
+      [{ stage: "reply", observedAt: 0 }, "Writing a reply"],
+      [{ stage: "queued", observedAt: 0 }, "Queued"],
+      [{ stage: "submitting", observedAt: 0 }, "Waiting for confirmation"],
+      [{ stage: "retry", observedAt: 0 }, "Waiting to retry"],
+      [{ stage: "waiting", observedAt: 0 }, "Waiting for an answer"],
+      [
+        { stage: "reasoning", observedAt: 0, disconnected: true },
+        "Connection interrupted",
+      ],
+    ];
+    for (const [progress, label] of labels)
+      expect(informative(await run(() => progress, waiting(), 40))).toEqual([
+        label,
+      ]);
+  });
+
+  test("a specific stage pauses the phrase, which resumes afterwards", async () => {
+    let progress: Progress = { stage: "reasoning", observedAt: 0 };
+    const sent: Outgoing[] = [];
+    const abort = new AbortController();
+    const work = new TeamsPresence(5).working(
+      "conversation",
+      "anchor",
+      abort.signal,
+      () => true,
+      () => progress,
+      async (activity) => {
+        sent.push(activity);
+        return { id: "stream-1" };
+      },
+      waiting({ intervalMs: 60_000 }),
+    );
+    await Bun.sleep(40);
+    progress = { stage: "tool", observedAt: 0 };
+    await Bun.sleep(40);
+    progress = { stage: "reasoning", observedAt: 0 };
+    await Bun.sleep(40);
+    abort.abort();
+    await work;
+    expect(informative(sent)).toEqual([
+      waitingPhrase("Adama", 0),
+      "Using a tool",
+      waitingPhrase("Adama", 0),
+    ]);
+  });
+
+  test("the waiting delay keeps the generic label, and off disables phrases", async () => {
+    const reasoning = (): Progress => ({ stage: "reasoning", observedAt: 0 });
+    expect(
+      informative(await run(reasoning, waiting({ delayMs: null }), 40)),
+    ).toEqual(["Thinking"]);
+    expect(informative(await run(() => undefined, undefined, 40))).toEqual([
+      "Working",
+    ]);
+    const delayed = informative(
+      await run(reasoning, waiting({ delayMs: 30, intervalMs: 60_000 }), 120),
+    );
+    expect(delayed).toEqual(["Thinking", waitingPhrase("Adama", 0)]);
+  });
+
+  test("the phrase name is cleaned and bounded, and a blank name keeps the label", async () => {
+    const texts = informative(
+      await run(
+        () => undefined,
+        waiting({ name: `Ad\nama${"x".repeat(200)}` }),
+        10,
+      ),
+    );
+    expect(texts).toEqual([waitingPhrase(`Ad ama${"x".repeat(94)}`, 0)]);
+    expect(
+      informative(await run(() => undefined, waiting({ name: " \n " }), 10)),
+    ).toEqual(["Working"]);
+  });
+
+  test("rotation stops when the turn ends", async () => {
+    const sent = await run(() => undefined, waiting(), 30);
+    const count = sent.length;
+    expect(count).toBeGreaterThan(0);
+    await Bun.sleep(50);
+    expect(sent).toHaveLength(count);
+  });
+
+  test("registration uses the display name and the captain's waiting override", async () => {
+    const f = registrationFixture({
+      presence: true,
+      agent: "captain",
+      displayName: "Adama",
+    });
+    try {
+      const backend = f.config.backend;
+      if (backend.type !== "opencode") throw new Error("OpenCode fixture");
+      // The configured 5 second delay would keep "Thinking" for this turn.
+      await saveWaitingDelay(
+        backend.directory,
+        "captain",
+        0,
+        AbortSignal.timeout(1000),
+      );
+      const job = await f.running();
+      const abort = new AbortController();
+      const working = f.registration.delivery.working?.(
+        job.channel,
+        job.thread,
+        abort.signal,
+        () => true,
+        "notice",
+        () => ({ stage: "reasoning", observedAt: Date.now() }),
+      );
+      await Bun.sleep(40);
+      abort.abort();
+      await working;
+      expect(
+        f.sent.flatMap(({ activity }) =>
+          activity.entities ? [activity.text] : [],
+        ),
+      ).toEqual([waitingPhrase("Adama", 0)]);
+    } finally {
+      await f.close();
+    }
+  });
 });

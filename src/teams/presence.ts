@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { TurnProgress } from "../turn-progress";
+import { type WaitingSettings, waitingPhrase } from "../waiting";
 import { isDefiniteRefusal, type OutgoingActivity } from "./connector";
 
 type Send = (
@@ -7,27 +8,30 @@ type Send = (
   signal: AbortSignal,
 ) => Promise<{ id?: string }>;
 type Slot = { anchor: string; id?: string; expires: number };
-function label(progress?: TurnProgress) {
+/** Resolved waiting settings and the bot's display name for one turn. */
+export type TeamsWaiting = WaitingSettings & { name: string };
+type Label = { text: string; generic: boolean };
+function label(progress?: TurnProgress): Label {
   if (progress && "disconnected" in progress && progress.disconnected === true)
-    return "Connection interrupted";
+    return { text: "Connection interrupted", generic: false };
   const stage: string | undefined = progress?.stage;
   switch (stage) {
     case "reasoning":
-      return "Thinking";
+      return { text: "Thinking", generic: true };
     case "tool":
-      return "Using a tool";
+      return { text: "Using a tool", generic: false };
     case "reply":
-      return "Writing a reply";
+      return { text: "Writing a reply", generic: false };
     case "queued":
-      return "Queued";
+      return { text: "Queued", generic: false };
     case "submitting":
-      return "Waiting for confirmation";
+      return { text: "Waiting for confirmation", generic: false };
     case "retry":
-      return "Waiting to retry";
+      return { text: "Waiting to retry", generic: false };
     case "waiting":
-      return "Waiting for an answer";
+      return { text: "Waiting for an answer", generic: false };
     default:
-      return "Working";
+      return { text: "Working", generic: true };
   }
 }
 
@@ -42,6 +46,7 @@ export class TeamsPresence {
     allowed: () => boolean,
     read: () => TurnProgress | undefined,
     send: Send,
+    waiting?: TeamsWaiting,
   ) {
     if (signal.aborted || !allowed()) return;
     const now = Date.now();
@@ -56,8 +61,40 @@ export class TeamsPresence {
       previous = "",
       informative = !!slot;
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(600_000)]);
+    // As on IRC, strip control characters. Config names are bounded but an
+    // OpenCode agent ID fallback is not, so keep every phrase well inside
+    // Teams' 1,000-character informative limit.
+    const name =
+      waiting &&
+      (Array.from(waiting.name.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " "))
+        .slice(0, 100)
+        .join("")
+        .trim() ||
+        undefined);
+    let phrase = 0;
+    let phraseShownAt: number | undefined;
     while (!deadline.aborted && allowed()) {
-      const text = label(read());
+      const stage = label(read());
+      let text = stage.text;
+      const at = Date.now();
+      // Only the generic stages rotate, and only on this refresh loop, so a
+      // phrase change never adds a request beyond the existing cadence.
+      if (
+        waiting &&
+        name !== undefined &&
+        waiting.delayMs !== null &&
+        stage.generic &&
+        at - now >= waiting.delayMs
+      ) {
+        if (
+          phraseShownAt !== undefined &&
+          at - phraseShownAt >= waiting.intervalMs
+        ) {
+          phrase++;
+          phraseShownAt = undefined;
+        }
+        text = waitingPhrase(name, phrase);
+      }
       if (informative && text !== previous && slot) {
         try {
           const response = await send(
@@ -86,6 +123,7 @@ export class TeamsPresence {
             slot.id = response.id;
           }
           previous = text;
+          if (text !== stage.text) phraseShownAt ??= Date.now();
         } catch {
           informative = false;
         }
@@ -99,7 +137,7 @@ export class TeamsPresence {
           "Waiting for an answer",
           "Waiting to retry",
           "Connection interrupted",
-        ].includes(text)
+        ].includes(stage.text)
       )
         await send({ type: "typing", replyToId: anchor }, deadline).catch(
           () => {},
