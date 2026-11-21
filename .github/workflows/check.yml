@@ -33,12 +33,25 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           count=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.commits')
           gh api --paginate --slurp "repos/$GH_REPO/pulls/$PR_NUMBER/commits?per_page=100" |
-            jq -e --argjson count "$count" --arg head "$HEAD_SHA" '
-              add | length == $count and $count > 0 and .[-1].sha == $head and
-              all(.[]; .author.login == "dependabot[bot]" and .commit.verification.verified == true)
+            jq -e --argjson count "$count" --arg head "$HEAD_SHA" \
+              --arg base "$BASE_SHA" '
+              add as $commits |
+              ($commits |
+                length == $count and $count > 0 and .[-1].sha == $head
+              ) and
+              all($commits[];
+                if .sha == $head and .author.login != "dependabot[bot]" then
+                  (.parents | length) == 2 and
+                  .parents[0].sha == $commits[-2].sha and
+                  .parents[1].sha == $base
+                else
+                  .author.login == "dependabot[bot]" and .commit.verification.verified == true
+                end
+              )
             '
       - name: Install pinned tools
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
