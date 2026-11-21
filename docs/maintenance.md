@@ -467,6 +467,7 @@ It never guesses. To get out:
    content of every file is in `backups/<runID>/N.json` (`old`). Other
    entries show the release link, CLI versions, proxy link, sessions, unit
    or the owed OpenCode restart.
+
 3. Decide for each listed path. To keep the current content, do nothing. To
    return to the state before maintenance, restore it by hand from the
    backup.
@@ -1319,6 +1320,7 @@ how to resume from the journal. For existing profiles, use
    Adoption writes `.stargate-release.json` and creates `current` if absent.
    An adopted release gets its first verified upgrade through the nightly
    run before it can use [manual updates](#update-now).
+
 4. **Point launchers and profiles at stable paths.** Follow the
    [install layout](#install-layout) for the gateway launcher and any
    OpenCode plugin and skill paths. Keep an installation's custom plugin

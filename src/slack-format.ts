@@ -434,7 +434,7 @@ export function replySource(chunks: ReplyChunk[]) {
 function literalChunks(text: string) {
   const points = Array.from(text);
   const chunks: string[] = [];
-  for (let start = 0; start < points.length; ) {
+  for (let start = 0; start < points.length;) {
     let end = Math.min(start + 2800, points.length);
     const opening = points.lastIndexOf("<", end - 1);
     if (opening > start && end - opening < 256) {
@@ -564,7 +564,7 @@ export function prepareSlackReply(
         used += cost;
         continue;
       }
-      for (let offset = 0; offset < chars.length; ) {
+      for (let offset = 0; offset < chars.length;) {
         if (used === 2800) {
           append();
           flush();

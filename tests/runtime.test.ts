@@ -636,13 +636,15 @@ test("shutdown closes every intake and stops every worker together", async () =>
           busy.resolve();
           signal.addEventListener(
             "abort",
-            async () => {
-              // First aborted-work observation: every intake already closed.
-              draining = ["helper", "other"].map((id) => f.intake(id).open());
-              // Work becomes ready for the first bot while this one drains.
-              late = seed(path, helper);
-              await Bun.sleep(400);
-              reject(new Error("stopped"));
+            () => {
+              void (async () => {
+                // First aborted-work observation: every intake already closed.
+                draining = ["helper", "other"].map((id) => f.intake(id).open());
+                // Work becomes ready for the first bot while this one drains.
+                late = seed(path, helper);
+                await Bun.sleep(400);
+                reject(new Error("stopped"));
+              })();
             },
             { once: true },
           );

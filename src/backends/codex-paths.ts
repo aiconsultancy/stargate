@@ -108,7 +108,7 @@ async function walk(
   if (!path.startsWith("/")) throw new Error("Codex paths must be absolute");
   const pending = path.split("/").filter(Boolean);
   let resolved = "/";
-  for (let links = 0; pending.length > 0; ) {
+  for (let links = 0; pending.length > 0;) {
     const name = pending.shift() ?? "";
     if (name === ".") continue;
     if (name === "..") {

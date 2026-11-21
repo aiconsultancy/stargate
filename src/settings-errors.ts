@@ -104,6 +104,9 @@ function customIssues(
           /* A different branch can still be structurally valid. */
         }
       }
+      break;
+    default:
+      break;
   }
 }
 

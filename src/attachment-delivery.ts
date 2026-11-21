@@ -59,8 +59,7 @@ export interface LinkTransport {
 
 /** Input downloads, plus uploads when the transport can publish files. */
 export interface AttachmentTransport
-  extends Partial<UploadTransport>,
-    Partial<LinkTransport> {
+  extends Partial<UploadTransport>, Partial<LinkTransport> {
   download(
     ids: readonly string[],
     channel: string,

@@ -96,6 +96,10 @@ run = "bun run typecheck"
 description = "Check lint and formatting"
 run = "bun run lint"
 
+[tasks.oxlint]
+description = "Run the vendored anti-slop Oxlint rules over src and tests"
+run = "bun run oxlint"
+
 [tasks.format]
 description = "Apply lint and formatting fixes"
 run = "bun run format"

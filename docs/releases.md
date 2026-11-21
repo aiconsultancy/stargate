@@ -10,11 +10,12 @@ changes wait until a person approves a release.
 
 Use short-lived branches and ready PRs. When a PR is ready, enable
 `gh pr merge --auto --squash`. Main protection requires only **Quality
-checks** on the PR's exact head, with no approving review. The branch does
-not need to be up to date with `main`: a PR without conflicts merges as it is,
-so update it only to resolve conflicts. A requested Go or No go from another
-captain is advice, not a merge gate. GitHub deletes the remote branch after
-merge.
+checks** on the PR's exact head, with no approving review. The pre-push
+hook enforces the rebase-before-push policy: every branch push must
+contain the freshly fetched `origin/main`. If `main` moves, `git fetch
+origin && git rebase origin/main`, then re-run checks. A requested Go or
+No go from another captain is advice, not a merge gate. GitHub deletes
+the remote branch after merge.
 
 The gate is before a release: the release workflow publishes only the current
 `main` commit, and only after **Quality checks**, including the full test suite

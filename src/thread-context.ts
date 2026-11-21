@@ -100,8 +100,8 @@ export async function loadThreadContext(
       messages: [],
       truncated: Boolean(
         page.has_more ||
-          page.response_metadata?.next_cursor?.trim() ||
-          page.messages.length > threadContextLimits.pageSize,
+        page.response_metadata?.next_cursor?.trim() ||
+        page.messages.length > threadContextLimits.pageSize,
       ),
     };
     const seen = new Set<string>();

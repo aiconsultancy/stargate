@@ -1,6 +1,6 @@
 minimum_prek_version = "0.5.10"
 default_stages = ["pre-commit"]
-default_install_hook_types = ["pre-commit"]
+default_install_hook_types = ["pre-commit", "pre-push"]
 fail_fast = true
 
 [[repos]]
@@ -9,10 +9,14 @@ hooks = [
   { id = "check-merge-conflict" },
   { id = "check-case-conflict" },
   { id = "check-symlinks" },
-  { id = "check-added-large-files", args = ["--maxkb=1024"] },
+  { id = "check-added-large-files", args = [
+    "--maxkb=1024",
+  ] },
   { id = "detect-private-key" },
   { id = "end-of-file-fixer" },
-  { id = "trailing-whitespace", args = ["--markdown-linebreak-ext=md"] },
+  { id = "trailing-whitespace", args = [
+    "--markdown-linebreak-ext=md",
+  ] },
   { id = "check-toml" },
   { id = "check-yaml" },
 ]
@@ -47,7 +51,7 @@ always_run = true
 
 [[repos.hooks]]
 id = "stargate-check"
-name = "Strict TypeScript, Biome, and tests"
+name = "Strict TypeScript, Oxlint, and tests"
 # Fixtures create other repositories; do not inherit this commit's Git state.
 entry = """
 unset $(git rev-parse --local-env-vars)
@@ -55,5 +59,17 @@ exec mise run check
 """
 shell = "sh"
 language = "system"
+pass_filenames = false
+always_run = true
+
+[[repos.hooks]]
+id = "main-ancestor"
+name = "Require rebase before pushing behind-main branches"
+# The hook fetches origin/main itself and refuses unverified pushes; it
+# never rewrites history. Re-run `make hooks-install` after pulling this
+# change to install the pre-push hook type in your clone.
+entry = "scripts/hooks/pre-push-main.sh"
+language = "system"
+stages = ["pre-push"]
 pass_filenames = false
 always_run = true

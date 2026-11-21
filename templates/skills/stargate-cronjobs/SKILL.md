@@ -1,5 +1,4 @@
 ---
-
 name: stargate-cronjobs
 description: Manage Stargate scheduled and quota-event jobs when a user asks to create, list, run or remove a job, choose a job model or arbiter, or change immediate versus daily reporting. Use the captain-only stargate_cron tool, not OS cron or replacement services.
 ---

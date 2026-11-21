@@ -224,8 +224,8 @@ beforeAll(async () => {
   execFileSync("git", ["clone", "-q", source, checkout]);
 });
 afterAll(async () => {
-  api.stop(true);
-  storage.stop(true);
+  void api.stop(true);
+  void storage.stop(true);
   await rm(directory, { recursive: true, force: true });
 });
 beforeEach(() => {
