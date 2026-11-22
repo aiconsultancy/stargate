@@ -137,7 +137,7 @@ function resolveRelative(
 
 type ModuleSpan = { start: number; end: number; value: string };
 
-function inspect(source: SourceFile) {
+function inspect(source: SourceFile, movableDynamicImports = false) {
   const modules: ModuleSpan[] = [];
   const zodDeclarations: string[] = [];
   let zod = false;
@@ -180,7 +180,12 @@ function inspect(source: SourceFile) {
       (node.expression.kind === SyntaxKind.ImportKeyword ||
         (isIdentifier(node.expression) && node.expression.text === "require"))
     ) {
-      module(node.arguments[0], false, node);
+      module(
+        node.arguments[0],
+        movableDynamicImports &&
+          node.expression.kind === SyntaxKind.ImportKeyword,
+        node,
+      );
     }
     node.forEachChild(visit);
   }
@@ -238,8 +243,8 @@ function mechanical(
   headFiles: Map<string, string>,
   renames: Map<string, string>,
 ): boolean {
-  const old = inspect(before);
-  const next = inspect(after);
+  const old = inspect(before, oldPath !== newPath);
+  const next = inspect(after, oldPath !== newPath);
   if (
     !old.zod ||
     old.unknownLoader ||

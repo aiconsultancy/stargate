@@ -83,6 +83,163 @@ describe("touched-zod hook", () => {
     }
   });
 
+  test.each([false, true])(
+    "a nightly CLI rename preserves its literal dynamic import target, moved=%s",
+    async (moveTarget) => {
+      const root = await scenario();
+      try {
+        await mkdir(join(root, "src/nightly"));
+        await writeFile(
+          join(root, "src/runtime.ts"),
+          "export const run = (value: string) => value;\n",
+        );
+        const before =
+          'import { z } from "zod";\n' +
+          "export const input = z.string();\n" +
+          "export async function command(value: string) {\n" +
+          "  const parsed = input.parse(value);\n" +
+          "  const runtime = await import('../runtime');\n" +
+          "  return runtime.run(parsed);\n}\n";
+        await writeFile(join(root, "src/nightly/cli.ts"), before);
+        git(root, "add", "-A");
+        git(root, "commit", "-m", "nightly CLI base");
+        const base = git(root, "rev-parse", "HEAD");
+        await mkdir(join(root, "src/maintenance/nightly"), { recursive: true });
+        await rename(
+          join(root, "src/nightly/cli.ts"),
+          join(root, "src/maintenance/nightly/cli.ts"),
+        );
+        if (moveTarget) {
+          await mkdir(join(root, "src/app"));
+          await rename(
+            join(root, "src/runtime.ts"),
+            join(root, "src/app/runtime.ts"),
+          );
+        }
+        await writeFile(
+          join(root, "src/maintenance/nightly/cli.ts"),
+          before.replace(
+            "'../runtime'",
+            moveTarget ? "'../../app/runtime'" : "'../../runtime'",
+          ),
+        );
+        git(root, "add", "-A");
+        git(root, "commit", "-m", "move CLI and preserve dynamic target");
+        expect(
+          git(root, "diff", "--name-status", "-M", base, "HEAD"),
+        ).toContain("src/nightly/cli.ts\tsrc/maintenance/nightly/cli.ts");
+        expect(runHook(root, base)).toMatchObject({ status: 0 });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.each([
+    "retarget",
+    "unchanged wrong target",
+    "computed",
+    "logic",
+    "Zod binding",
+    "Zod schema",
+  ])("a renamed dynamic-import consumer rejects %s changes", async (kind) => {
+    const root = await scenario();
+    try {
+      await mkdir(join(root, "src/nightly"));
+      await writeFile(
+        join(root, "src/runtime.ts"),
+        'export const name = "runtime";\n',
+      );
+      await writeFile(
+        join(root, "src/other.ts"),
+        'export const name = "other";\n',
+      );
+      await mkdir(join(root, "src/maintenance"));
+      await writeFile(
+        join(root, "src/maintenance/runtime.ts"),
+        'export const name = "different";\n',
+      );
+      const before =
+        'import { z } from "zod";\nexport const input = z.string();\n' +
+        'export const modulePath = "../runtime";\n' +
+        "export async function command(value: string) {\n" +
+        "  const parsed = input.parse(value);\n" +
+        `  const runtime = await import(${kind === "computed" ? "modulePath" : "'../runtime'"});\n` +
+        "  return { parsed, runtime };\n}\n";
+      await writeFile(join(root, "src/nightly/cli.ts"), before);
+      git(root, "add", "-A");
+      git(root, "commit", "-m", "dynamic consumer base");
+      const base = git(root, "rev-parse", "HEAD");
+      await mkdir(join(root, "src/maintenance/nightly"));
+      await rename(
+        join(root, "src/nightly/cli.ts"),
+        join(root, "src/maintenance/nightly/cli.ts"),
+      );
+      let after = before.replace("'../runtime'", "'../../runtime'");
+      if (kind === "retarget")
+        after = after.replace("'../../runtime'", "'../../other'");
+      if (kind === "unchanged wrong target") after = before;
+      if (kind === "logic")
+        after = after.replace(
+          "input.parse(value)",
+          "input.parse(value.trim())",
+        );
+      if (kind === "Zod binding")
+        after = after.replace("{ z }", "{ z, ZodError }");
+      if (kind === "Zod schema")
+        after = after.replace("z.string()", "z.number()");
+      await writeFile(join(root, "src/maintenance/nightly/cli.ts"), after);
+      git(root, "add", "-A");
+      git(root, "commit", "-m", "unproven dynamic consumer move");
+      expect(git(root, "diff", "--name-status", "-M", base, "HEAD")).toContain(
+        "src/nightly/cli.ts\tsrc/maintenance/nightly/cli.ts",
+      );
+      const result = runHook(root, base);
+      expect(result.status).toBe(1);
+      expect(result.output).toContain("src/maintenance/nightly/cli.ts");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a stationary Zod consumer cannot rewrite a dynamic literal for a renamed target", async () => {
+    const root = await scenario();
+    try {
+      await mkdir(join(root, "src/old"));
+      await writeFile(join(root, "src/target.ts"), "export const value = 1;\n");
+      const before =
+        'import { z } from "zod";\n' +
+        "export const input = z.string();\n" +
+        "export async function load(value: string) {\n" +
+        "  const parsed = input.parse(value);\n" +
+        "  const target = await import('../target');\n" +
+        "  return { parsed, target };\n}\n";
+      await writeFile(join(root, "src/old/consumer.ts"), before);
+      git(root, "add", "-A");
+      git(root, "commit", "-m", "stationary dynamic consumer base");
+      const base = git(root, "rev-parse", "HEAD");
+      await mkdir(join(root, "src/next"));
+      await rename(
+        join(root, "src/target.ts"),
+        join(root, "src/next/target.ts"),
+      );
+      await writeFile(
+        join(root, "src/old/consumer.ts"),
+        before.replace("'../target'", "'../next/target'"),
+      );
+      git(root, "add", "-A");
+      git(root, "commit", "-m", "rename target only");
+      const changes = git(root, "diff", "--name-status", "-M", base, "HEAD");
+      expect(changes).toContain("M\tsrc/old/consumer.ts");
+      expect(changes).toContain("R100\tsrc/target.ts\tsrc/next/target.ts");
+      const result = runHook(root, base);
+      expect(result.status).toBe(1);
+      expect(result.output).toContain("src/old/consumer.ts");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("a retained Zod consumer follows a renamed import and reexport target", async () => {
     const root = await scenario();
     try {
