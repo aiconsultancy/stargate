@@ -66,8 +66,9 @@ Keep backend adapters independent of Slack and preserve session isolation.
   file's schemas to Effect Schema in the same change, or revert the touch.
   NET1766 permits mechanically verified import/path moves. The guard
   requires an existing base file or Git-detected rename, with byte-identical
-  source except static relative import/reexport paths that resolve to the
-  same base file through the actual rename map. New files/copies and extra
+  source except relative static import/reexport and literal dynamic import
+  paths that resolve to the same base file through the actual rename map.
+  New files/copies and extra
   Zod imports, sources or bindings are not exempt. Formatting, comments,
   logic edits and constant/helper extraction need a declared NET issue entry
   in `scripts/hooks/touched-zod-changes.json`: an existing file, byte-identical

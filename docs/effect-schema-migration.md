@@ -40,23 +40,23 @@ environment switch or alternate CI mode that bypasses them.
   compares exact source text, not a token sequence with whitespace removed.
   Comments, formatting, ASI-sensitive newlines, import declarations, bindings,
   Zod specifiers and executable code must remain byte-identical.
-- Only static relative import/reexport literal contents can change. Each
-  target must resolve uniquely in both Git trees to the same base file,
-  applying the actual rename map. An in-place consumer can change a path only
-  when its target was renamed. A moved consumer can update paths to unchanged
-  targets. The guard also checks unchanged relative static paths in these
+- Only relative static import/reexport and dynamic import literal contents
+  can change. Each target must resolve uniquely in both Git trees to the same
+  base file, applying the actual rename map. An in-place consumer can change
+  a path only when its target was renamed. A moved consumer can update paths to unchanged
+  targets. The guard also checks unchanged relative paths in these
   files, so moving a consumer cannot silently select a different target.
 - Resolution supports regular `.ts` files through explicit `.ts` paths,
   extensionless paths and directory `index.ts` paths. Ambiguous file/index
   candidates, symlinks, aliases, package resolution and JS-to-TS mappings are
   not proof of identity. Unresolved or unsupported paths fail the exception.
   Changed literals cannot change quote kind or use escaped path spellings.
-- Dynamic imports, `require`, import-equals and import-type expressions must
-  remain unchanged. A Zod file with a relative expression of one of these
-  forms cannot move through this exception. Nonliteral dynamic imports and
-  `require` arguments prevent a retained-Zod file from qualifying for the
-  exception. They do not cause the ordinary guard to reject clean files
-  without a literal Zod import. The guard detects literal module targets;
+- `require`, import-equals and import-type expressions must remain unchanged.
+  A Zod file with a relative expression of one of these forms cannot move
+  through this exception. Nonliteral dynamic imports and `require` arguments
+  prevent a retained-Zod file from qualifying for the exception. They do not
+  cause the ordinary guard to reject clean files without a literal Zod import.
+  The guard detects literal module targets;
   it does not perform general semantic analysis of computed runtime module
   targets. Parse or Git comparison errors also fail closed. No supplied
   base still means no comparison, as before.

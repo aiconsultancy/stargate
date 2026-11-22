@@ -180,7 +180,11 @@ function inspect(source: SourceFile) {
       (node.expression.kind === SyntaxKind.ImportKeyword ||
         (isIdentifier(node.expression) && node.expression.text === "require"))
     ) {
-      module(node.arguments[0], false, node);
+      module(
+        node.arguments[0],
+        node.expression.kind === SyntaxKind.ImportKeyword,
+        node,
+      );
     }
     node.forEachChild(visit);
   }
