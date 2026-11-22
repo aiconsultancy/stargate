@@ -18,7 +18,8 @@ import type { TransportDelivery } from "../src/gateway/ports";
 import type { RequestFailure } from "../src/shared/request-failure";
 import { conversationKey } from "../src/gateway/routing";
 import { prepareSlackReply } from "../src/shared/slack-format";
-import { type Job, Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Job, type Store } from "../src/gateway/store";
 import { repairTranscript } from "../src/ops/transcript";
 import { bot, event, identity } from "./fixtures";
 
@@ -90,7 +91,7 @@ function fixture(
     session?: string;
   } = {},
 ) {
-  const store = options.store ?? new Store(":memory:");
+  const store = options.store ?? openStore(":memory:");
   if (!options.store) cleanup.push(() => store.close());
   const native = options.native ?? nativeSession();
   const prompts: string[] = [];
@@ -237,7 +238,7 @@ test("continuations after a turn reach the exact thread once, in order", async (
 });
 
 test("settle events never cross bot namespaces that share a native session", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanup.push(() => store.close());
   const a = fixture({ store });
   const b = fixture({ store, config: bot("other") });
@@ -323,7 +324,7 @@ test("restart resumes from the durable cursor without reposting", async () => {
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
   const native = nativeSession();
-  const store = new Store(path);
+  const store = openStore(path);
   const first = fixture({ store, native });
   first.setTurn(async () => {
     native.add("Started the build.");
@@ -334,7 +335,7 @@ test("restart resumes from the durable cursor without reposting", async () => {
   await first.gateway.close();
   store.close();
   native.add("Build finished while Stargate was stopped.");
-  const reopened = new Store(path);
+  const reopened = openStore(path);
   cleanup.push(() => reopened.close());
   const second = fixture({ store: reopened, native });
   await second.settle(); // Event stream (re)connected.
@@ -350,7 +351,7 @@ test("upgrade baselines existing threads without backfill, then follows them", a
   const directory = await mkdtemp(join(tmpdir(), "stargate-transcript-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
-  const legacy = new Store(path);
+  const legacy = openStore(path);
   const f = fixture({ store: legacy });
   f.gateway.accept(event());
   const job = pending(f);
@@ -363,7 +364,7 @@ test("upgrade baselines existing threads without backfill, then follows them", a
   const db = new Database(path);
   db.exec("ALTER TABLE sessions DROP COLUMN cursor");
   db.close();
-  const store = new Store(path);
+  const store = openStore(path);
   cleanup.push(() => store.close());
   const native = nativeSession();
   native.add("Old answer");
@@ -780,7 +781,7 @@ test("a cursor moved by another writer rolls back the reply and defers instead o
   const directory = await mkdtemp(join(tmpdir(), "stargate-transcript-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
-  const store = new Store(path);
+  const store = openStore(path);
   cleanup.push(() => store.close());
   const other = new Database(path);
   cleanup.push(() => other.close());

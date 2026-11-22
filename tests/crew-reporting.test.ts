@@ -19,7 +19,7 @@ import {
 } from "../src/crew/engine";
 import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
 import { defaultTeam, teamSchema } from "../src/crew/team";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 
 const diskIntegrationTimeoutMs = 30_000;
 
@@ -318,7 +318,7 @@ test("journal-only activity needs no reporter, retains late facts and never call
 
 test("saved Stop dry-reads a summarizing capture without admitting a report", async () => {
   const f = await fixture();
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   let delivery: ActivityDelivery | undefined;
   try {
     const capture = await f.start();

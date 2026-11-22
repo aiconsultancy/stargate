@@ -11,7 +11,7 @@ import { IrcClient } from "../src/irc/client";
 import { clientPem } from "../src/irc/client-pem";
 import { IrcShip, ircKey } from "../src/irc/ship";
 import { checkCredentials } from "../src/app/setup";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 
 const openssl =
   spawnSync("openssl", ["version"], { stdio: "ignore" }).status === 0;
@@ -224,7 +224,7 @@ test.skipIf(!openssl)(
       crew: [member("chief", chief.file)],
     });
     await checkCredentials(join(f.dir, "config.json"), [], {}, [config]);
-    const store = new Store(join(f.dir, "ship.sqlite"));
+    const store = openStore(join(f.dir, "ship.sqlite"));
     cleanup.push(() => store.close());
     const ship = await IrcShip.create(config, store, pino({ level: "silent" }));
     cleanup.push(() => ship.close());
@@ -310,7 +310,7 @@ test.skipIf(!openssl)(
           },
         ],
       });
-      const store = new Store(":memory:");
+      const store = openStore(":memory:");
       const ship = await IrcShip.create(
         config,
         store,
@@ -358,7 +358,7 @@ test.skipIf(!openssl)(
       channels: ["#ship"],
       backend,
     });
-    const store = new Store(":memory:");
+    const store = openStore(":memory:");
     cleanup.push(() => store.close());
     const ship = await IrcShip.create(config, store, pino({ level: "silent" }));
     cleanup.push(() => ship.close());

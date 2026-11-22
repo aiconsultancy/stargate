@@ -19,7 +19,7 @@ import {
   resolveQuestionSettings,
   saveQuestionSettings,
 } from "../src/questions/question-settings";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { resolveWaiting, waitingSettingsPath } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 
@@ -225,7 +225,7 @@ async function fixture(options: MetaOptions = {}) {
   if (config.backend.type !== "opencode") throw new Error("Expected OpenCode");
   config.backend.directory = directory;
   config.backend.agent = "adama";
-  let store = new Store(join(directory, "gateway.sqlite"));
+  let store = openStore(join(directory, "gateway.sqlite"));
   cleanups.push(async () => {
     store.close();
     await rm(directory, { recursive: true, force: true });
@@ -363,7 +363,7 @@ async function fixture(options: MetaOptions = {}) {
     },
     reopen() {
       store.close();
-      store = new Store(join(directory, "gateway.sqlite"));
+      store = openStore(join(directory, "gateway.sqlite"));
       meta = new MetaCommands(store.meta, slack, metaOptions);
     },
   };

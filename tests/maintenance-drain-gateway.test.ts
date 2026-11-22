@@ -11,7 +11,7 @@ import type {
   DrainControl,
   DrainHandler,
 } from "../src/maintenance/maintenance-drain";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
@@ -25,7 +25,7 @@ async function until(check: () => boolean) {
 }
 
 function fixture(path: string, held: { value: boolean }) {
-  const store = new Store(path);
+  const store = openStore(path);
   cleanup.push(() => store.close());
   const prompts: string[] = [];
   const handlers: DrainHandler[] = [];

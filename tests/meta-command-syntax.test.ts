@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { metaCommandSyntax } from "../src/meta-commands/meta-command-syntax";
 import { MetaCommands } from "../src/meta-commands/meta-commands";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 test("update syntax matches the command help catalogue in order", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   try {
     let reply = "";
     const commands = new MetaCommands(store.meta, {

@@ -37,7 +37,7 @@ if (import.meta.main) {
   const { mkdtemp, rm, access } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { CrewState } = await import("../../src/crew/state");
-  const { Store } = await import("../../src/gateway/store");
+  const { openStore } = await import("../../src/app/open-store");
   const directory = await mkdtemp(join(tmpdir(), "database-reuse-build-"));
   const assets = [crewSchemaFixture, statusHistoryFixture, nightlyStoreFixture];
   const paths = assets.map((asset) =>
@@ -95,7 +95,7 @@ if (import.meta.main) {
     } finally {
       history.close();
     }
-    const store = new Store(storePath);
+    const store = openStore(storePath);
     try {
       store.saveSession('["k","C123","1.0"]', "ses_captain");
     } finally {

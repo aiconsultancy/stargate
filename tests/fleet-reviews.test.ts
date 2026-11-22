@@ -35,7 +35,7 @@ import {
 } from "../src/fleet/protocol";
 import { reviewContextPrompt } from "../src/fleet/reviews";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, until } from "./irc-fixture";
 
 const close: (() => Promise<unknown> | unknown)[] = [];
@@ -722,7 +722,7 @@ test("authenticated IRC intake injects exact private context before retaining th
   }).start();
   close.push(() => server.stop());
   server.caps.push("draft/multiline=max-bytes=4096,max-lines=100");
-  const store = new Store(join(w.directory, "irc.sqlite"));
+  const store = openStore(join(w.directory, "irc.sqlite"));
   close.push(() => store.close());
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "peer",

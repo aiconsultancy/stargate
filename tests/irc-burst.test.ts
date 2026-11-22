@@ -16,7 +16,8 @@ import { ircBurstLimits } from "../src/irc/burst";
 import { fold, formatMessage, parseMessage } from "../src/irc/protocol";
 import { routeIrcStop } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
-import { type Incoming, Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Incoming, type Store } from "../src/gateway/store";
 import { FakeIrcServer, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -24,7 +25,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 function state() {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanup.push(() => store.close());
   return store;
 }
@@ -304,7 +305,7 @@ test("restart preserves original evidence, deduplication, and per-member native-
   const directory = await realpath(await mkdtemp("/tmp/irc-burst-state-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "queue.sqlite");
-  let store = new Store(path);
+  let store = openStore(path);
   const ledger = new FleetLedger(join(directory, "evidence.sqlite"));
   cleanup.push(() => ledger.close());
   cleanup.push(() => store.close());
@@ -327,7 +328,7 @@ test("restart preserves original evidence, deduplication, and per-member native-
   for (const source of sources)
     expect(fleetOrigin(store, "ses_captain", source)).toBeUndefined();
   store.close();
-  store = new Store(path);
+  store = openStore(path);
   expect(store.ready("captain", 3599, 10)).toEqual([]);
   const job = store.ready("captain", 3600, 10)[0];
   if (!job) throw new Error("Missing durable burst");

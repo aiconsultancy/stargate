@@ -19,7 +19,7 @@ import { Filehost, filehostURL } from "../src/irc/filehost";
 import { fold, parseMessage } from "../src/irc/protocol";
 import { routeIrcMessage } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import type { Transcriber } from "../src/transcription/transcription";
 import { publishedFileDirectory } from "./file-fixture";
 import { FakeFilehost, FakeIrcServer, lineOf, until } from "./irc-fixture";
@@ -80,7 +80,7 @@ async function ship(
   // Published files use configured OpenCode scratch, including hidden TMPDIR.
   const directory = await publishedFileDirectory("stargate-irc-files-");
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = Schema.decodeUnknownSync(ircSchema)({
     ...shipConfig(fake.port, options.server?.(host)),

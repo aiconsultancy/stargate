@@ -6,7 +6,7 @@ import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { crewMessageMetadataKey } from "../src/crew/message-protocol";
 import { Gateway } from "../src/gateway/gateway";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
@@ -303,7 +303,7 @@ for (const delayed of [false, true])
     config.backend = f.config;
     config.slack.steerThreadFollowUps = true;
     config.waiting.delayMs = null;
-    const store = new Store(":memory:");
+    const store = openStore(":memory:");
     cleanup.push(() => store.close());
     const posts: { thread: string; text: string }[] = [];
     // Keep optional maintenance/activity RPCs outside this native input fixture.

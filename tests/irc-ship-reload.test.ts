@@ -7,7 +7,7 @@ import { Schema } from "effect";
 import pino from "pino";
 import { ircSchema } from "../src/config";
 import { type IrcRegistration, IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -87,7 +87,7 @@ async function setup(members: CrewName[], { start = true } = {}) {
   fake.invited.add("galactica:#galactica");
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-reload-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const ship = await IrcShip.create(
     shipConfig(fake.port, members),

@@ -4,12 +4,12 @@ import type { AgentBackend } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { slackContent } from "../src/shared/slack-format";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { LiveReply } from "../src/gateway/streaming";
 import { bot, event, identity } from "./fixtures";
 
 test("text reaches Slack before generation completes, then updates in place", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const visible = Promise.withResolvers<void>();
   const finish = Promise.withResolvers<void>();
   const writes: string[] = [];
@@ -62,7 +62,7 @@ test("text reaches Slack before generation completes, then updates in place", as
 });
 
 function liveFixture(delayMs: number | null = 5000) {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const input = {
     eventId: "1.000",
     botKey: "bot",
@@ -215,7 +215,7 @@ test("completion cancels pending status timers", async () => {
 });
 
 function gatewayFixture() {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const messages = new Map<string, string>();
   let calls = 0;
   const slack: TransportDelivery = {

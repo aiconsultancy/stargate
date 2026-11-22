@@ -6,7 +6,7 @@ import {
   buildQuestionBlocks,
   SlackQuestionControls,
 } from "../src/questions/slack-questions";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 const token = "a".repeat(32);
@@ -41,7 +41,7 @@ function question(): NativeQuestion {
 function fixture(native = question(), expires = Date.now() + 60_000) {
   const config = bot();
   const key = botKey(config, identity);
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanups.push(() => store.close());
   store.enqueue({
     botKey: key,

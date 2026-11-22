@@ -10,7 +10,7 @@ import pino from "pino";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { FakeIrcServer } from "../tests/irc-fixture";
 
 const binary = process.argv[2];
@@ -293,7 +293,7 @@ try {
   });
   const log = pino({ level: "silent" });
   async function startGateway() {
-    const store = new Store(join(home, "stargate.sqlite"));
+    const store = openStore(join(home, "stargate.sqlite"));
     const ship = await IrcShip.create(opts, store, log, {
       env: { IRC_FIXTURE: "fixture" },
       timing: {

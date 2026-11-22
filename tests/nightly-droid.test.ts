@@ -41,7 +41,7 @@ import {
 import { updateState } from "../src/maintenance/nightly/state";
 import { buildDroidUnits } from "../src/maintenance/nightly/timer";
 import { stableJitter } from "../src/maintenance/nightly/window";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-droid-"));
@@ -331,7 +331,7 @@ async function install(
   // One Stargate-owned OpenCode session: the gateway's mapping of a thread.
   const storePath = join(config.dataDirectory, "stargate.sqlite");
   if (seededStore) await copyFile(nightlyStoreFixture, storePath);
-  const store = new Store(storePath);
+  const store = openStore(storePath);
   if (!seededStore) store.saveSession('["k","C123","1.0"]', "ses_captain");
   store.close();
   return { config, path: join(dir, "stargate.json") };

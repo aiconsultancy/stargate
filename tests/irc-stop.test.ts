@@ -10,7 +10,7 @@ import { Gateway } from "../src/gateway/gateway";
 import { fold, parseMessage } from "../src/irc/protocol";
 import { routeIrcStop } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -56,7 +56,7 @@ async function setup(extra: Record<string, unknown> = {}, answer = "Done.") {
   cleanup.push(() => fake.stop());
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-stop-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const ship = await IrcShip.create(
     config(fake.port, extra),

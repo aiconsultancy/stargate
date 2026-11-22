@@ -4,11 +4,11 @@ import type { AgentBackend } from "../src/backends/backend";
 import { CronScheduler } from "../src/cron/index";
 import { CronStore } from "../src/cron/store";
 import { Gateway } from "../src/gateway/gateway";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, identity } from "./fixtures";
 
 test("a due cron prompt runs through the existing gateway and replies in its scheduled thread", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const schedules = new CronStore(":memory:");
   const config = bot();
   const log = pino({ enabled: false });

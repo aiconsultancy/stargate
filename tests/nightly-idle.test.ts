@@ -21,7 +21,8 @@ import {
 } from "../src/maintenance/nightly/idle";
 import type { OpenCodeControl } from "../src/maintenance/nightly/opencode";
 import { bounds } from "../src/maintenance/nightly/run";
-import { jobStatuses, Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { jobStatuses } from "../src/gateway/store";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-idle-"));
 afterAll(() => rm(root, { recursive: true, force: true }));
@@ -62,7 +63,7 @@ beforeEach(async () => {
   opencode.fail = false;
   data = join(root, `case-${count++}`);
   await mkdir(data, { recursive: true });
-  const store = new Store(join(data, "stargate.sqlite"));
+  const store = openStore(join(data, "stargate.sqlite"));
   store.saveSession('["key","C1","1.0"]', "ses_captain");
   store.close();
   new CronStore(join(data, "cron.sqlite")).close();
@@ -130,7 +131,7 @@ describe("idle gate", () => {
     ]);
   });
   test("drain holds queued gateway and cron work without treating it as running", async () => {
-    const store = new Store(join(data, "stargate.sqlite"));
+    const store = openStore(join(data, "stargate.sqlite"));
     store.enqueue({
       eventId: "drain-queued",
       botKey: "key",
@@ -179,7 +180,7 @@ describe("idle gate", () => {
   });
 
   test("gateway jobs block", async () => {
-    const store = new Store(join(data, "stargate.sqlite"));
+    const store = openStore(join(data, "stargate.sqlite"));
     store.enqueue({
       eventId: "E1",
       botKey: "key",
@@ -197,7 +198,7 @@ describe("idle gate", () => {
   });
 
   test("every unfinished job status blocks; finished ones do not", async () => {
-    const store = new Store(join(data, "stargate.sqlite"));
+    const store = openStore(join(data, "stargate.sqlite"));
     store.enqueue({
       eventId: "E1",
       botKey: "key",
@@ -654,7 +655,7 @@ describe("idle gate", () => {
       reason: "busy-cron",
     });
     exec(join(data, "cron.sqlite"), "DELETE FROM cron_schedules");
-    const store = new Store(join(data, "stargate.sqlite"));
+    const store = openStore(join(data, "stargate.sqlite"));
     store.enqueue({
       eventId: "E1",
       botKey: "key",

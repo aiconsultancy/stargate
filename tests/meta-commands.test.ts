@@ -15,7 +15,7 @@ import { NotificationStore } from "../src/notifications/preferences/notification
 import { notificationKey } from "../src/notifications/preferences/notifications";
 import { PeerDirectory } from "../src/gateway/peers";
 import { handleSlackRequest } from "../src/slack/slack";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { resolveWaiting, waitingSettingsPath } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 
@@ -32,7 +32,7 @@ async function fixture(options: MetaOptions = {}) {
   config.backend.directory = directory;
   config.backend.agent = "adama";
   config.backend.sessionID = "ses_existing_captain";
-  const store = new Store(join(directory, "gateway.sqlite"));
+  const store = openStore(join(directory, "gateway.sqlite"));
   cleanups.push(async () => {
     store.close();
     await rm(directory, { recursive: true, force: true });
@@ -621,7 +621,7 @@ test("audit persists exact actor, clock, source and old/new settings, not raw me
     reply: reply(f),
     delivered: 1,
   });
-  const reopened = new Store(join(f.directory, "gateway.sqlite"));
+  const reopened = openStore(join(f.directory, "gateway.sqlite"));
   cleanups.push(async () => reopened.close());
   await f.waiting.run({ seconds: 8 }, f.caller);
   await f.createGateway(reopened).receive(event("<@UBOT> /config waiting 3"));
@@ -670,7 +670,7 @@ test("retained pending claim reports uncertainty after reopen, never reapplies",
     }),
   ).toBe(true);
   await f.waiting.run({ seconds: 8 }, f.caller);
-  const reopened = new Store(join(f.directory, "gateway.sqlite"));
+  const reopened = openStore(join(f.directory, "gateway.sqlite"));
   cleanups.push(async () => reopened.close());
   await f.createGateway(reopened).receive(event("<@UBOT> /config waiting 3"));
   expect((await resolveWaiting(f.config)).delayMs).toBe(8000);

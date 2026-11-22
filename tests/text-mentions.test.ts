@@ -20,7 +20,7 @@ import {
   peerTurnsPerHour,
 } from "../src/gateway/peers";
 import { routeEvent } from "../src/gateway/routing";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
@@ -200,7 +200,7 @@ test("own bot, denied users and unverified bots are never admitted by text", () 
 });
 
 function fixture() {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanup.push(() => store.close());
   const prompts: { text: string; context?: PromptSourceContext }[] = [];
   let answer = "[[stargate:silent]]";

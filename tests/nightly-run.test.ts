@@ -57,7 +57,7 @@ import {
 } from "../src/maintenance/nightly/update";
 import type { ModelRef } from "../src/maintenance/nightly/versions";
 import { botKey } from "../src/gateway/routing";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";
 import { tarball } from "./tar";
 
@@ -405,7 +405,7 @@ async function install(
       join(config.dataDirectory, "stargate.sqlite"),
     );
   } else {
-    const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
+    const store = openStore(join(config.dataDirectory, "stargate.sqlite"));
     store.saveSession('["k","C123","1.0"]', "ses_captain");
     store.close();
   }
@@ -1768,7 +1768,7 @@ describe("nightly maintenance run", () => {
     const { config, path } = await install();
     fixture.onCommand = async (command) => {
       if (!command.startsWith("npm install")) return;
-      const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
+      const store = openStore(join(config.dataDirectory, "stargate.sqlite"));
       store.enqueue({
         eventId: "E1",
         botKey: "k",
@@ -1809,7 +1809,7 @@ describe("nightly maintenance run", () => {
 
   test("hundreds of Slack-thread sessions neither block nor get switched", async () => {
     const { config, path } = await install();
-    const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
+    const store = openStore(join(config.dataDirectory, "stargate.sqlite"));
     for (let i = 0; i < 200; i++) {
       store.saveSession(`["k","C123","t${i}.0"]`, `ses_thread${i}`);
       fixture.sessions.set(`ses_thread${i}`, {
@@ -2048,7 +2048,7 @@ async function runningPlugin(plugin = releaseFiles["src/crew/plugin.ts"]) {
   expect(await writePluginDigest(old)).toMatch(/^v1:/);
 }
 const queueJob = (config: Config) => {
-  const store = new Store(join(config.dataDirectory, "stargate.sqlite"));
+  const store = openStore(join(config.dataDirectory, "stargate.sqlite"));
   store.enqueue({
     eventId: "E-busy",
     botKey: "k",

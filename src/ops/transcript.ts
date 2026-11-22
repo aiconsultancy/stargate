@@ -13,7 +13,8 @@ import {
 } from "../gateway/routing";
 import { loadEnvironment } from "../app/runtime";
 import { type ReplyChunk, replySource } from "../shared/slack-format";
-import { Store } from "../gateway/store";
+import { openStore } from "../app/open-store";
+import { type Store } from "../gateway/store";
 
 export type TranscriptRepair = {
   session: string;
@@ -190,7 +191,7 @@ export async function repairThread(input: {
   } finally {
     await file.close();
   }
-  const store = new Store(path);
+  const store = openStore(path);
   try {
     const keys = store.transcript
       .threadBots(input.channel, input.thread)

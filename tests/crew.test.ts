@@ -43,7 +43,7 @@ import {
 } from "../src/crew/team";
 import { CrewWaiting } from "../src/crew/waiting";
 import { Gateway } from "../src/gateway/gateway";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import {
   buildUpdateSnapshot,
   noticeTools,
@@ -628,7 +628,7 @@ test("bounded wait preserves completion, notices, idle failure and caller abort 
 test("conversation eval: bounded wait lets a SQLite-queued Slack source enter after progress ends the captain turn", async () => {
   const clock = waitClock();
   const f = await fixture(undefined, clock.options);
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const posts: string[] = [];
@@ -996,7 +996,7 @@ test("conversation eval: busy status lets a second source progress without repla
       throw new Error("Busy status must not read a final result");
     },
   );
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const posts: { channel: string; thread: string; text: string }[] = [];
   const sessions: string[] = [];
   const task = (

@@ -5,7 +5,7 @@ import { Schema } from "effect";
 import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import type { AgentBackend, PendingPermission } from "../src/backends/backend";
 import { teamsSchema } from "../src/config";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import {
   BOT_FRAMEWORK_ISSUER,
   BOT_FRAMEWORK_OPENID_URL,
@@ -140,7 +140,7 @@ export function registrationFixture(
       return { id: `reply-${sent.length}` };
     },
   };
-  let store = new Store(storePath);
+  let store = openStore(storePath);
   let registration = new TeamsRegistration(
     config,
     path,
@@ -174,7 +174,7 @@ export function registrationFixture(
     async reopen() {
       await registration.close();
       store.close();
-      store = new Store(storePath);
+      store = openStore(storePath);
       registration = new TeamsRegistration(
         config,
         path,

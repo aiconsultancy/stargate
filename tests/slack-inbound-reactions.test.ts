@@ -14,7 +14,8 @@ import { NotificationStore } from "../src/notifications/preferences/notification
 import type { NotificationReader } from "../src/notifications/preferences/notifications";
 import { botKey } from "../src/gateway/routing";
 import { handleSlackRequest, SlackConnection } from "../src/slack/slack";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 function reaction(name = "eyes", type = "reaction_added", id = "EvAdded") {
@@ -49,7 +50,7 @@ function fixture(
     notifications?: NotificationReader;
   } = {},
 ) {
-  const store = options.store ?? new Store(":memory:");
+  const store = options.store ?? openStore(":memory:");
   if (!options.store) cleanups.push(() => store.close());
   const config = bot();
   if (options.enabled !== undefined)
@@ -109,7 +110,7 @@ test("confirmed final replies route after restart and Socket Mode retries do not
   const dir = mkdtempSync(join(tmpdir(), "stargate-reaction-"));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "gateway.sqlite");
-  const writer = new Store(path);
+  const writer = openStore(path);
   try {
     const f = fixture({ store: writer });
     expect(await f.gateway.receive(event())).toBe(true);
@@ -120,7 +121,7 @@ test("confirmed final replies route after restart and Socket Mode retries do not
   } finally {
     writer.close();
   }
-  const first = new Store(path);
+  const first = openStore(path);
   try {
     const f = fixture({ enabled: true, store: first });
     const ack = mock(async () => {
@@ -141,7 +142,7 @@ test("confirmed final replies route after restart and Socket Mode retries do not
   } finally {
     first.close();
   }
-  const reader = new Store(path);
+  const reader = openStore(path);
   cleanups.push(() => reader.close());
   const f = fixture({ enabled: true, store: reader });
   expect(await f.gateway.receive(reaction("+1"))).toBe(false);
@@ -412,7 +413,7 @@ test("an ordinary steer during a reaction turn retains its own Slack message ide
 test("Slack fallback uses an exact message returned by the API, never claimed item ownership", async () => {
   const config = bot();
   config.slack.inboundReactions = true;
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanups.push(() => store.close());
   const message = {
     type: "message",

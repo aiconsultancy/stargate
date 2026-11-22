@@ -8,7 +8,7 @@ import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { saveQuestionSettings } from "../src/questions/question-settings";
 import type { NativeQuestion } from "../src/questions/questions";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -26,7 +26,7 @@ test.each([false, true])(
     config.backend.directory = directory;
     config.backend.agent = "adama";
     config.backend.sessionID = "ses_captain";
-    const store = new Store(join(directory, "gateway.sqlite"));
+    const store = openStore(join(directory, "gateway.sqlite"));
     cleanup.push(() => store.close());
     let prompts = 0;
     let pending = true;

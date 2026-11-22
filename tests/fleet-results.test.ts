@@ -21,7 +21,8 @@ import { FleetResults, fleetOrigin } from "../src/fleet/results";
 import { sendFleetAssignment } from "../src/fleet/fleet-irc";
 import { Gateway } from "../src/gateway/gateway";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Store } from "../src/gateway/store";
 import {
   authenticateActivityRequest,
   BotFrameworkKeyStore,
@@ -215,8 +216,8 @@ async function world(
     botAccounts: ["vance", "captain"],
   }).start();
   cleanup.push(() => fake.stop());
-  const ownerStore = new Store(join(directory, "owner.sqlite"));
-  const captainStore = new Store(join(directory, "captain.sqlite"));
+  const ownerStore = openStore(join(directory, "owner.sqlite"));
+  const captainStore = openStore(join(directory, "captain.sqlite"));
   cleanup.push(() => {
     ownerStore.close();
     captainStore.close();
@@ -650,7 +651,7 @@ test("fleet results: outbox and queued continuation survive reopen after queue-b
     f.ownerStore.ready(f.teamsGateway.key, Number.MAX_SAFE_INTEGER, 100),
   ).toHaveLength(1);
   await f.owner.close();
-  const store = new Store(join(f.directory, "owner.sqlite"));
+  const store = openStore(join(f.directory, "owner.sqlite"));
   cleanup.push(() => store.close());
   const owner = await FleetControl.open({
     ...f.ownerOptions,

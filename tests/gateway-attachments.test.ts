@@ -12,7 +12,7 @@ import { backendSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { routeEvent } from "../src/gateway/routing";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { publishedFileDirectory } from "./file-fixture";
 import { bot, event, identity } from "./fixtures";
 
@@ -35,7 +35,7 @@ async function fixture(pinned = false) {
   const config = bot();
   config.access.channels = ["*"];
   const database = join(directory, "state.sqlite");
-  const store = new Store(database);
+  const store = openStore(database);
   let closed = false;
   const closeStore = () => {
     if (!closed) {
@@ -278,7 +278,7 @@ test("attachment eval: restart reconciles persisted upload without a second prom
   expect(before?.phase).toBe("completing");
   await f.gateway.close();
   f.closeStore();
-  const reopened = new Store(f.database);
+  const reopened = openStore(f.database);
   cleanup.push(() => reopened.close());
   expect(reopened.attachmentRecords.attachments(1)[0]?.fileID).toBe(
     before?.fileID,

@@ -11,7 +11,7 @@ import { configSchema } from "../src/config";
 import { type IrcRegistration, IrcShip } from "../src/irc/ship";
 import { conversationKey } from "../src/gateway/routing";
 import { type RuntimeDependencies, serve } from "../src/app/runtime";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import {
   flockCommand,
   setDefaultLockCommandForTests,
@@ -232,7 +232,7 @@ for (const transport of ["irc", "teams", "both"] as const)
     if (transport !== "teams") {
       const registration = f.registrations[0];
       if (!registration) throw new Error("Missing real IRC registration");
-      const store = new Store(join(f.directory, "stargate.sqlite"));
+      const store = openStore(join(f.directory, "stargate.sqlite"));
       try {
         const conversation = conversationKey(
           registration.key,

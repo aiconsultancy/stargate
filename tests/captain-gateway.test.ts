@@ -25,7 +25,8 @@ import {
   conversationKey,
   routeEvent,
 } from "../src/gateway/routing";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Store } from "../src/gateway/store";
 import { repairTranscript } from "../src/ops/transcript";
 import { bot, event, identity } from "./fixtures";
 
@@ -34,7 +35,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
-function fixture(store = new Store(":memory:"), ownStore = true) {
+function fixture(store = openStore(":memory:"), ownStore = true) {
   if (ownStore) cleanup.push(() => store.close());
   const config = bot();
   config.access.channels = ["*"];
@@ -435,7 +436,7 @@ test("shell cursor reanchors after restart and reconnect; text and files keep or
   const path = join(directory, "state.sqlite");
   const file = join(directory, "proof.txt");
   await writeFile(file, "background proof");
-  const initial = new Store(path);
+  const initial = openStore(path);
   const f = productionTranscriptFixture(initial, false);
   f.beforeAnswer(() => f.add(shellLaunch("launch_a", "sh_fixtureA")));
   f.gateway.accept(source("D123", "task A", "1.000"));
@@ -459,7 +460,7 @@ test("shell cursor reanchors after restart and reconnect; text and files keep or
   ).toBe(true);
   await f.gateway.close();
   initial.close();
-  const reopened = new Store(path);
+  const reopened = openStore(path);
   cleanup.push(() => reopened.close());
   f.restartParser();
   const uploads: { channel: string; thread: string }[] = [];
@@ -594,7 +595,7 @@ test("conversation eval: crew origin survives restart and ordinary shell complet
   const directory = await mkdtemp(join(tmpdir(), "stargate-origin-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
-  const initial = new Store(path);
+  const initial = openStore(path);
   const f = productionTranscriptFixture(initial, false);
   f.gateway.accept(source("D123", "private task A", "1.000"));
   await f.drain();
@@ -606,7 +607,7 @@ test("conversation eval: crew origin survives restart and ordinary shell complet
   await f.gateway.catchUp(f.signal);
   await f.gateway.close();
   initial.close();
-  const reopened = new Store(path);
+  const reopened = openStore(path);
   cleanup.push(() => reopened.close());
   const gateway = new Gateway(
     f.config,
@@ -1457,7 +1458,7 @@ test("restart preserves source jobs, input ownership and the one delivery cursor
   const directory = await mkdtemp(join(tmpdir(), "stargate-captain-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.sqlite");
-  const first = new Store(path);
+  const first = openStore(path);
   const f = nativeFixture(first, false);
   f.gateway.accept(source("D123", "first", "1.000"));
   await f.drain();
@@ -1466,7 +1467,7 @@ test("restart preserves source jobs, input ownership and the one delivery cursor
   first.close();
   f.add("synthetic");
   f.add("assistant", "Completed during restart");
-  const reopened = new Store(path);
+  const reopened = openStore(path);
   cleanup.push(() => reopened.close());
   const gateway = new Gateway(
     f.config,
