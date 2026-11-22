@@ -12,7 +12,6 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
-import type { Crew } from "./nightly/crews";
 import type { UpdateReceipt } from "./update-notice";
 
 /**
@@ -71,6 +70,19 @@ const crewSchema = Schema.Struct({
   piMembers: Schema.mutable(Schema.Array(Schema.String)),
   captainSessionID: Schema.optional(Schema.String),
 });
+type Crew = {
+  namespace: string;
+  captainDirectory: string;
+  stateDirectory: string;
+  roots: {
+    directory: string;
+    configPath: string;
+    pluginPackage: string;
+  }[];
+  worktreeDirectories?: string[];
+  piMembers: string[];
+  captainSessionID?: string;
+};
 const participantSchema = Schema.Struct({
   pid: positive,
   dataDirectory: Schema.String,

@@ -16,6 +16,16 @@ import {
   registerDrainParticipant,
   writeMaintenanceDrain,
 } from "../src/maintenance/maintenance-drain";
+import type { DrainParticipant } from "../src/maintenance/maintenance-drain";
+import type { Crew } from "../src/maintenance/nightly/crews";
+
+export type DrainCrewParity<
+  T extends ((<U>() => U extends DrainParticipant["crews"][number]
+    ? 1
+    : 2) extends <U>() => U extends Crew ? 1 : 2
+    ? true
+    : false) = true,
+> = T;
 
 const cleanup: string[] = [];
 afterEach(async () => {

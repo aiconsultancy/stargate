@@ -1,5 +1,4 @@
 import { Result, Schema } from "effect";
-import type { BotConfig } from "../../config";
 import {
   type Identity,
   isAllowedChannel,
@@ -9,6 +8,8 @@ import type { NotifyConfig } from "./config";
 import { audienceAllowed, Destination, physicalKey } from "./model";
 import type { DeliveryDestination } from "./sink";
 import { topicMatches } from "./subscriptions";
+
+type BotConfig = Parameters<typeof isAllowedChannel>[0];
 
 /** Offline identity uncertainty must not permit possible peer echo. */
 export function notifyConfigError(
