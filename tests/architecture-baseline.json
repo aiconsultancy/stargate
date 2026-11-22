@@ -18,7 +18,7 @@
     "src/store.ts"
   ],
   "sourceFiles": 254,
-  "sourceEdges": 1096,
+  "sourceEdges": 1090,
   "rootFiles": [
     "src/backend.ts",
     "src/config.ts",
@@ -28,67 +28,46 @@
     "src/settings-legacy.ts",
     "src/settings-schema.ts"
   ],
-  "largestCycle": 9,
+  "largestCycle": 6,
   "cycleComponents": [
     [
       "src/backend.ts",
       "src/backends/pi-durable.ts",
       "src/crew/crew-tool-input.ts",
       "src/crew/engine.ts",
-      "src/crew/history-rpc.ts",
-      "src/crew/instructions.ts",
       "src/crew/pi-extension.ts",
-      "src/crew/pi-worker.ts",
-      "src/crew/reconciliation.ts"
+      "src/crew/pi-worker.ts"
     ],
     [
       "src/config.ts",
       "src/notifications.ts",
       "src/notify/binding.ts",
-      "src/routing.ts",
-      "src/waiting.ts"
+      "src/routing.ts"
     ],
-    [
-      "src/crew/member-activity.ts",
-      "src/crew/messaging.ts",
-      "src/crew/reporting.ts",
-      "src/crew/state.ts"
-    ]
+    ["src/crew/messaging.ts", "src/crew/reporting.ts", "src/crew/state.ts"]
   ],
   "cyclicEdges": [
     "src/backend.ts -> src/crew/pi-extension.ts",
     "src/backends/pi-durable.ts -> src/backend.ts",
-    "src/backends/pi-durable.ts -> src/crew/instructions.ts",
     "src/backends/pi-durable.ts -> src/crew/pi-extension.ts",
     "src/config.ts -> src/notify/binding.ts",
-    "src/config.ts -> src/waiting.ts",
     "src/crew/crew-tool-input.ts -> src/crew/engine.ts",
-    "src/crew/engine.ts -> src/crew/history-rpc.ts",
     "src/crew/engine.ts -> src/crew/pi-extension.ts",
     "src/crew/engine.ts -> src/crew/pi-worker.ts",
-    "src/crew/engine.ts -> src/crew/reconciliation.ts",
-    "src/crew/history-rpc.ts -> src/crew/pi-worker.ts",
-    "src/crew/instructions.ts -> src/crew/engine.ts",
-    "src/crew/member-activity.ts -> src/crew/state.ts",
     "src/crew/messaging.ts -> src/crew/state.ts",
     "src/crew/pi-extension.ts -> src/crew/crew-tool-input.ts",
     "src/crew/pi-extension.ts -> src/crew/engine.ts",
     "src/crew/pi-worker.ts -> src/backend.ts",
     "src/crew/pi-worker.ts -> src/backends/pi-durable.ts",
-    "src/crew/pi-worker.ts -> src/crew/instructions.ts",
     "src/crew/pi-worker.ts -> src/crew/pi-extension.ts",
-    "src/crew/reconciliation.ts -> src/crew/engine.ts",
     "src/crew/reporting.ts -> src/crew/state.ts",
-    "src/crew/state.ts -> src/crew/member-activity.ts",
     "src/crew/state.ts -> src/crew/messaging.ts",
     "src/crew/state.ts -> src/crew/reporting.ts",
-    "src/notifications.ts -> src/config.ts",
     "src/notifications.ts -> src/routing.ts",
     "src/notify/binding.ts -> src/config.ts",
     "src/notify/binding.ts -> src/routing.ts",
     "src/routing.ts -> src/config.ts",
-    "src/routing.ts -> src/notifications.ts",
-    "src/waiting.ts -> src/config.ts"
+    "src/routing.ts -> src/notifications.ts"
   ],
   "crewPlugin": {
     "entry": "src/crew/plugin.ts",
@@ -292,7 +271,6 @@
     "direction:src/nightly/timer.ts -> src/service.ts",
     "direction:src/notification-control.ts -> src/bot-web.ts",
     "direction:src/notification-control.ts -> src/routing.ts",
-    "direction:src/notifications.ts -> src/config.ts",
     "direction:src/notifications.ts -> src/notification-store.ts",
     "direction:src/notifications.ts -> src/routing.ts",
     "direction:src/notify/binding.ts -> src/routing.ts",

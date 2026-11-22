@@ -5,16 +5,23 @@ import {
   type HistoryChildrenInput,
   type HistoryEntriesInput,
   type HistorySession,
+  type SessionHistory,
   historyChildrenInputSchema,
   historyDescribeInputSchema,
   historyEntriesInputSchema,
   piHistoryPrefix,
 } from "../shared/session-history";
-import type { PiCrewWorkers } from "./pi-worker";
 import { CrewError, type CrewState } from "./state";
 import type { CrewMember, Team } from "./team";
 
 const unavailable = "Pi history unavailable or cancelled.";
+interface HistoryReader {
+  readHistory<T>(
+    member: CrewMember,
+    signal: AbortSignal,
+    read: (history: SessionHistory, signal: AbortSignal) => Promise<T>,
+  ): Promise<T>;
+}
 const decodeChildrenCursor = Schema.decodeUnknownSync(
   exactStruct({ parentID: Schema.String, after: Schema.String }),
 );
@@ -30,7 +37,7 @@ export class CrewHistoryRPC {
   constructor(
     private readonly team: Team,
     private readonly state: CrewState,
-    private readonly pi: Pick<PiCrewWorkers, "readHistory">,
+    private readonly pi: HistoryReader,
   ) {}
 
   private async safe<T>(
