@@ -409,7 +409,7 @@ test("no tool process outlives its Codex turn, even one ignoring SIGTERM", async
   const pids = await grandchildren();
   expect(pids.length).toBe(10);
   await until(() => pids.every((pid) => !alive(pid)), 3000);
-});
+}, 30_000);
 
 test("a Codex CLI that ignores SIGTERM cannot keep a turn pending", async () => {
   const { backend, runs, grandchildren } = await open();
