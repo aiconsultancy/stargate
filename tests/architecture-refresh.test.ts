@@ -168,12 +168,14 @@ describe("architecture baseline refresh", () => {
     await json(root, BASELINE, original);
     await formatter(root);
     const before = await readFile(join(root, BASELINE), "utf8");
-    const result = run(root, base, "--write");
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(
-      "unauthorized-large-file:src/feature/leaf.ts",
-    );
-    expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+    for (const flags of [[], ["--prune-stale"]]) {
+      const result = run(root, base, "--write", ...flags);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "unauthorized-large-file:src/feature/leaf.ts",
+      );
+      expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+    }
     await noStagingFiles(root);
   });
 
@@ -258,6 +260,92 @@ describe("architecture baseline refresh", () => {
     expect(next.largeFiles).toEqual(original.largeFiles);
   });
 
+  test("prunes and names only resolved exceptions, then removes nothing on a second write", async () => {
+    const { root, base, original } = await fixture();
+    await files(root, { "src/feature/entry.ts": 'import "./leaf";\n' });
+    await formatter(root);
+    const result = run(root, base, "--write", "--prune-stale");
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      write: true,
+      exceptions: 0,
+      prunedExceptions: [EXCEPTION],
+    });
+    const after = await readFile(join(root, BASELINE), "utf8");
+    const next = JSON.parse(after) as Baseline;
+    expect(next.exceptions).toEqual([]);
+    expect(next.largeFiles).toEqual(original.largeFiles);
+    expect(next.sourceCommit).toBe(original.sourceCommit);
+    expect(next.measurementStatus).toBe(original.measurementStatus);
+    expect(next.futureInventory).toEqual(original.futureInventory);
+    const second = run(root, base, "--write", "--prune-stale");
+    expect(second.status).toBe(0);
+    expect(JSON.parse(second.stdout)).toMatchObject({ prunedExceptions: [] });
+    expect(await readFile(join(root, BASELINE), "utf8")).toBe(after);
+    await noStagingFiles(root);
+  });
+
+  test("preview names planned removals in stdout and receipt without writing", async () => {
+    const { root, base } = await fixture();
+    await files(root, { "src/feature/entry.ts": 'import "./leaf";\n' });
+    const outside = await mkdtemp(join(tmpdir(), "stargate-prune-preview-"));
+    temporary.push(outside);
+    const output = join(outside, "receipt.json");
+    const before = await readFile(join(root, BASELINE), "utf8");
+    const result = run(root, base, "--prune-stale", "--output", output);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      write: false,
+      prunedExceptions: [EXCEPTION],
+    });
+    expect(JSON.parse(await readFile(output, "utf8"))).toMatchObject({
+      write: false,
+      exceptions: [],
+      prunedExceptions: [EXCEPTION],
+      errors: [],
+    });
+    expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+    await noStagingFiles(root);
+  });
+
+  test("a stale exception cannot hide a new violation or permit any write", async () => {
+    const { root, base } = await fixture();
+    await files(root, {
+      "src/feature/entry.ts": 'import "./leaf";\n',
+      "src/feature/leaf.ts": 'import "./entry"; import "../other/private";\n',
+    });
+    await formatter(root);
+    const before = await readFile(join(root, BASELINE), "utf8");
+    const result = run(root, base, "--write", "--prune-stale");
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "new:private:src/feature/leaf.ts -> src/other/private.ts",
+    );
+    expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+    await noStagingFiles(root);
+  });
+
+  for (const scenario of ["unauthorized", "duplicate"] as const) {
+    test(`pruning cannot authorize ${scenario} exceptions`, async () => {
+      const { root, base, original } = await fixture();
+      original.exceptions.push(
+        scenario === "unauthorized" ? "unapproved:permission" : EXCEPTION,
+      );
+      await files(root, { "src/feature/entry.ts": 'import "./leaf";\n' });
+      await json(root, BASELINE, original);
+      const before = await readFile(join(root, BASELINE), "utf8");
+      const result = run(root, base, "--write", "--prune-stale");
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        scenario === "unauthorized"
+          ? "unauthorized-exception:unapproved:permission"
+          : "duplicate-exception",
+      );
+      expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+      await noStagingFiles(root);
+    });
+  }
+
   for (const scenario of [
     "unauthorized",
     "new",
@@ -317,10 +405,12 @@ describe("architecture baseline refresh", () => {
         original.crewPlugin.members = baseline().crewPlugin.members;
       await json(root, BASELINE, original);
       const before = await readFile(join(root, BASELINE), "utf8");
-      const result = run(root, base, "--write");
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain(`${scenario}:`);
-      expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+      for (const flags of [[], ["--prune-stale"]]) {
+        const result = run(root, base, "--write", ...flags);
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain(`${scenario}:`);
+        expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+      }
       await noStagingFiles(root);
     });
   }
@@ -397,6 +487,7 @@ describe("architecture baseline refresh", () => {
       ["--allow-net1772-swaps"],
       ["--allow-net1769-closure"],
       ["--write", "--write"],
+      ["--prune-stale", "--prune-stale"],
       ["--base", base],
       ["--root", root],
       ["--output", join(root, "one"), "--output", join(root, "two")],

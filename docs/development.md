@@ -140,11 +140,14 @@ The tool reuses the architecture test's graph reader. It measures unstaged and
 untracked source files too. It compares roots, cyclic edges, largest cycle and
 crew-plugin closure size with the baseline at `--base`, a full 40-character
 ancestor commit hash. Module and edge totals are informational, not caps.
-Provenance, unknown fields and `largeFiles` remain unchanged. Remove resolved
-working-tree exceptions explicitly before refreshing; new, stale or duplicate
-exceptions fail validation. The tool cannot grant permissions, approve new
-exceptions or raise base caps. It does not replace the architecture guards or
-the separate source-size check.
+Provenance, unknown fields and `largeFiles` remain unchanged. Without pruning,
+stale exceptions remain errors; new or duplicate exceptions always fail.
+The tool cannot grant permissions, approve new exceptions or raise base caps.
+It does not replace the architecture guards or the separate source-size check.
+
+`--prune-stale` previews removals; exit 0 requires all other guards.
+`--write` applies them; `prunedExceptions` names each; reruns list none.
+Only `exceptions` are pruned; normal inventory refresh and guards stay intact.
 
 Use optional `--output PATH` for a JSON receipt outside the checkout, including
 in preview mode. Unknown and repeated options are errors.
