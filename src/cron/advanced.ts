@@ -55,6 +55,18 @@ export const cronModelSchema = Schema.String.check(
 export const cronArbiterSchema = Schema.String.check(
   settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/),
 );
+const modelFields = {
+  model: Schema.optional(cronModelSchema),
+  arbiter: Schema.optional(cronArbiterSchema),
+};
+export const cronModelInputSchema = settingsStruct(modelFields);
+export const cronEvaluateInputSchema = settingsStruct({
+  ...modelFields,
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  // Accepted job text remains 12000; the gateway appends bounded quota evidence.
+  prompt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(14000)),
+});
+
 export const cronAdvancedSchema = settingsStruct({
   trigger: Schema.optional(cronTriggerSchema),
   model: Schema.optional(cronModelSchema),
