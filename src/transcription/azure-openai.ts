@@ -140,7 +140,3 @@ export class AzureOpenAITranscriber implements Transcriber {
     }
   }
 }
-
-export function createTranscriber(config: TranscriptionConfig): Transcriber {
-  return new AzureOpenAITranscriber(config.provider);
-}

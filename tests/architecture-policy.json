@@ -1176,8 +1176,12 @@
     },
     "transcription": {
       "layer": "slices",
-      "files": ["src/transcribers/azure-openai.ts", "src/transcription.ts"],
-      "public": ["src/transcription.ts"],
+      "files": [
+        "src/transcribers/azure-openai.ts",
+        "src/transcription.ts",
+        "src/transcription/startup.ts"
+      ],
+      "public": ["src/transcription.ts", "src/transcription/startup.ts"],
       "neighbours": ["attachments", "config", "lib", "shared"]
     },
     "health": {

@@ -15,8 +15,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 267,
-  "sourceEdges": 1113,
+  "sourceFiles": 268,
+  "sourceEdges": 1115,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -292,7 +292,6 @@
     "private:src/runtime.ts -> src/notify/binding.ts",
     "private:src/runtime.ts -> src/notify/slack.ts",
     "private:src/runtime.ts -> src/pairing.ts",
-    "private:src/runtime.ts -> src/transcribers/azure-openai.ts",
     "private:src/setup.ts -> src/irc/client-pem.ts",
     "private:src/slack.ts -> src/activity-slack.ts",
     "private:src/slack.ts -> src/cancellation.ts",
