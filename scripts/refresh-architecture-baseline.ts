@@ -1,13 +1,17 @@
 import { randomUUID } from "node:crypto";
 import {
   open,
+  mkdir,
+  mkdtemp,
   readFile,
   realpath,
   rename,
+  rm,
   stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import {
   basename,
   dirname,
@@ -50,6 +54,7 @@ const argv = process.argv.slice(2);
 const flags = new Set<string>();
 const values = new Map<string, string>();
 const allowedClosureFiles: string[] = [];
+const exceptionRekeys: { oldKey: string; newKey: string }[] = [];
 for (let index = 0; index < argv.length; index++) {
   const argument = argv[index];
   if (!argument) throw new Error("Missing argument");
@@ -60,6 +65,21 @@ for (let index = 0; index < argv.length; index++) {
     if (allowedClosureFiles.includes(file))
       throw new Error(`duplicate-closure-addition:${file}`);
     allowedClosureFiles.push(file);
+  } else if (argument === "--rekey-exception") {
+    const oldKey = argv[++index],
+      newKey = argv[++index];
+    if (
+      !oldKey ||
+      !newKey ||
+      oldKey.startsWith("--") ||
+      newKey.startsWith("--")
+    )
+      throw new Error("rekey:missing-keys");
+    if (exceptionRekeys.some((entry) => entry.oldKey === oldKey))
+      throw new Error(`rekey:duplicate-old:${oldKey}`);
+    if (exceptionRekeys.some((entry) => entry.newKey === newKey))
+      throw new Error(`rekey:duplicate-new:${newKey}`);
+    exceptionRekeys.push({ oldKey, newKey });
   } else if (argument === "--write" || argument === "--prune-stale") {
     if (flags.has(argument)) throw new Error(`Duplicate option: ${argument}`);
     flags.add(argument);
@@ -74,7 +94,7 @@ const rootArg = values.get("--root");
 const baseArg = values.get("--base");
 if (!rootArg || !baseArg || !/^[a-f0-9]{40}$/.test(baseArg)) {
   throw new Error(
-    "Usage: bun scripts/refresh-architecture-baseline.ts --root PATH --base COMMIT [--output PATH] [--write] [--prune-stale] [--allow-closure-addition FILE ...]\n--prune-stale removes stale exception and large-file entries.",
+    "Usage: bun scripts/refresh-architecture-baseline.ts --root PATH --base COMMIT [--output PATH] [--write] [--prune-stale] [--allow-closure-addition FILE ...] [--rekey-exception OLD_KEY NEW_KEY ...]\n--prune-stale removes stale exception and large-file entries.",
   );
 }
 const root = await realpath(resolve(rootArg));
@@ -96,12 +116,15 @@ if (output) {
     throw new Error("Receipt output must be outside the source clone");
   }
 }
-async function git(...args: string[]): Promise<string> {
+async function gitWithEnvironment(
+  env: NodeJS.ProcessEnv,
+  ...args: string[]
+): Promise<string> {
   const result = Bun.spawn(["git", ...args], {
     cwd: root,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    env: { ...env, GIT_OPTIONAL_LOCKS: "0" },
   });
   const [stdout, stderr, exit] = await Promise.all([
     new Response(result.stdout).text(),
@@ -110,6 +133,38 @@ async function git(...args: string[]): Promise<string> {
   ]);
   if (exit !== 0) throw new Error(`git ${args.join(" ")}: ${stderr}`);
   return stdout;
+}
+const git = (...args: string[]) => gitWithEnvironment(process.env, ...args);
+
+async function rekeyBase() {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-rekey-base-"));
+  try {
+    const tree = join(directory, "tree");
+    await mkdir(tree);
+    const env = { ...process.env, GIT_INDEX_FILE: join(directory, "index") };
+    await gitWithEnvironment(env, "read-tree", base);
+    await gitWithEnvironment(
+      env,
+      "checkout-index",
+      "--all",
+      `--prefix=${tree}/`,
+    );
+    const basePolicy = JSON.parse(
+      await readFile(join(tree, "tests/architecture-policy.json"), "utf8"),
+    ) as ArchitecturePolicy;
+    const source = await buildGraph(tree);
+    const graph = normalizeGraph(source, basePolicy);
+    const violations = [
+      ...boundaryViolations(graph, basePolicy),
+      ...(await documentationViolations(
+        tree,
+        await architectureDocuments(tree),
+      )),
+    ];
+    return { graph, files: new Set(source.keys()), violations };
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 await git("merge-base", "--is-ancestor", base, "HEAD");
 const baselinePath = join(root, "tests/architecture-baseline.json");
@@ -157,15 +212,84 @@ function subset(actual: string[], allowed: string[], label: string) {
   for (const item of actual)
     if (!permissions.has(item)) errors.push(`${label}:${item}`);
 }
-subset(working.exceptions, baseline.exceptions, "unauthorized-exception");
 subset(working.largeFiles, baseline.largeFiles, "unauthorized-large-file");
 subset(inventory.rootFiles, baseline.rootFiles, "root");
 subset(inventory.cyclicEdges, baseline.cyclicEdges, "cycle");
 if (new Set(working.exceptions).size !== working.exceptions.length)
   errors.push("duplicate-exception");
-subset(violations, working.exceptions, "new");
+const approvedExceptions = [...working.exceptions];
+const allowedWorkingExceptions = [...baseline.exceptions];
+if (exceptionRekeys.length) {
+  const previous = await rekeyBase();
+  const paths = sourceIdentities(source.keys(), policy);
+  const parse = (key: string) => {
+    const match =
+      /^(direction|private|neighbour|shared-dependency):(src\/\S+) -> (src\/\S+)$/.exec(
+        key,
+      );
+    return match
+      ? { kind: match[1], source: match[2], target: match[3] }
+      : undefined;
+  };
+  for (const { oldKey, newKey } of exceptionRekeys) {
+    const old = parse(oldKey),
+      next = parse(newKey);
+    let reason: string | undefined;
+    if (
+      !old ||
+      !next ||
+      !old.source ||
+      !old.target ||
+      !next.source ||
+      !next.target
+    )
+      reason = "invalid-key";
+    else if (old.kind !== next.kind) reason = "different-kind";
+    else if (old.target !== next.target) reason = "different-target";
+    else if (
+      !baseline.exceptions.includes(oldKey) ||
+      (!working.exceptions.includes(oldKey) &&
+        !working.exceptions.includes(newKey))
+    )
+      reason = "unknown-old";
+    else if (
+      approvedExceptions.includes(oldKey) &&
+      approvedExceptions.includes(newKey)
+    )
+      reason = "duplicate-new";
+    else if (
+      violations.includes(oldKey) ||
+      graph.get(old.source)?.has(old.target)
+    )
+      reason = "old-key-present";
+    else {
+      const file = [...paths].find(
+        ([, identity]) => identity === next.source,
+      )?.[0];
+      if (!file) reason = "new-source-missing";
+      else if (previous.files.has(file)) reason = "new-source-existed-at-base";
+      else if (!previous.graph.get(old.source)?.has(old.target))
+        reason = "base-edge-missing";
+      else if (!previous.violations.includes(oldKey))
+        reason = "base-exception-missing";
+      else if (!violations.includes(newKey)) reason = "new-key-missing";
+    }
+    if (reason) errors.push(`rekey:${reason}:${oldKey} => ${newKey}`);
+    else {
+      const index = approvedExceptions.indexOf(oldKey);
+      if (index !== -1) approvedExceptions[index] = newKey;
+      allowedWorkingExceptions.push(newKey);
+    }
+  }
+  if (violations.length > previous.violations.length)
+    errors.push(
+      `rekey:exception-total-increase:${previous.violations.length} -> ${violations.length}`,
+    );
+}
+subset(working.exceptions, allowedWorkingExceptions, "unauthorized-exception");
+subset(violations, approvedExceptions, "new");
 if (!flags.has("--prune-stale"))
-  subset(working.exceptions, violations, "stale");
+  subset(approvedExceptions, violations, "stale");
 const sizeFailures = await sizeRegressions(root, policy, working.largeFiles);
 const staleSizePrefix = "stale:large-file:";
 const staleLargeFiles = new Set(
@@ -249,11 +373,11 @@ if (errors.length)
   throw new Error(JSON.stringify({ errors: errors.sort() }, null, 2));
 const measuredExceptions = new Set(violations);
 const prunedExceptions = flags.has("--prune-stale")
-  ? working.exceptions.filter((item) => !measuredExceptions.has(item))
+  ? approvedExceptions.filter((item) => !measuredExceptions.has(item))
   : [];
 const exceptions = flags.has("--prune-stale")
-  ? working.exceptions.filter((item) => measuredExceptions.has(item))
-  : working.exceptions;
+  ? approvedExceptions.filter((item) => measuredExceptions.has(item))
+  : approvedExceptions;
 const prunedLargeFiles = flags.has("--prune-stale")
   ? working.largeFiles.filter((item) => staleLargeFiles.has(item))
   : [];
@@ -331,6 +455,7 @@ const result = {
     : {}),
   violations,
   errors,
+  ...(exceptionRekeys.length ? { exceptionRekeys } : {}),
 };
 if (output)
   await writeFile(resolve(output), JSON.stringify(result, null, 2) + "\n");
@@ -356,5 +481,6 @@ console.log(
         }
       : {}),
     errors,
+    ...(exceptionRekeys.length ? { exceptionRekeys } : {}),
   }),
 );

@@ -315,6 +315,28 @@ The architecture guard remains strict by identity; commit the measured
 baseline with the reviewed extraction. `--prune-stale` remains a separate,
 explicit operation on resolved exception and stale large-file identities.
 
+### Declared exception rekeys
+
+Jack approved P1 on 22 November 2026: a declared exception may change its
+source identity only when kind and target are equal, the old key disappears,
+the importing file is new in that PR, and the exception total does not rise.
+This does not approve new boundary permissions.
+
+Use repeatable `--rekey-exception OLD_KEY NEW_KEY` arguments. Quote each
+complete key, including its spaces and arrow. Preview first, then use `--write`
+only after review. The receipt names every `exceptionRekeys` pair.
+Without this argument, the existing exception guard is unchanged.
+
+The tool also requires an active base exception and its parsed import edge
+in the old source at `--base`. It checks physical file absence using the base
+source tree and applies each tree's existing aliases. Duplicate sources or
+destinations, changed kind/target, an old edge still present, a pre-existing
+new source, missing provenance and a measured exception-count increase fail
+with named `rekey:` errors before any baseline write. These additional
+provenance checks are narrower than the approved rule, not wider.
+Body identity and initialization order remain reviewer evidence. Closure,
+root, cycle, size and other exception guards remain required.
+
 ### Strict baseline freshness
 
 The architecture guard rejects stale-high inventories as well as growth.
