@@ -391,7 +391,8 @@
     ],
     "src/captain-post-config.ts": [
       "src/captain-post-config.ts",
-      "src/captain-post/captain-post-config.ts"
+      "src/captain-post/captain-post-config.ts",
+      "src/captain-post/config.ts"
     ],
     "src/captain-post.ts": [
       "src/captain-post.ts",
