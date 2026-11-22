@@ -164,7 +164,7 @@ that owns their production boundary, rather than a separate test-only PR.
     `notification-store.ts` and `notifications.ts`. Include report/UI consumers.
 16. Maintenance records and readiness. Migrate `maintenance.ts`,
     `maintenance/nightly/state.ts`, `maintenance/nightly/ready.ts`, `maintenance/nightly/journal.ts`,
-    `maintenance/nightly/report.ts` and remaining maintenance configuration/record schemas.
+    `maintenance/nightly/reports/report.ts` and remaining maintenance configuration/record schemas.
 17. Maintenance execution and migration scripts. Migrate the remaining
     `maintenance/nightly/` validators and `scripts/bootstrap-stargate.ts` and
     `scripts/migrate-stargate-state.ts`.

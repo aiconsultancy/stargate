@@ -20,7 +20,12 @@ import { atomicWrite, readOptional } from "./files";
 import { queuedTaskAction } from "./schedule/idle";
 import { Journal } from "./journal";
 import { maintenanceDirectory } from "./paths";
-import { noticeSchemaID, queueNotice, type Report, summary } from "./report";
+import {
+  noticeSchemaID,
+  queueNotice,
+  type Report,
+  summary,
+} from "./reports/report";
 import {
   type Dependencies,
   defaultDependencies,

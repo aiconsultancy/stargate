@@ -21,7 +21,7 @@ import {
   upgradeTeamFile,
 } from "./models";
 import { type OpenCodeControl, openCodeCallMs } from "./opencode";
-import type { ModelChange } from "./report";
+import type { ModelChange } from "./reports/report";
 import { formatRef, type ModelRef, parseModel } from "./versions";
 
 export type Session = {

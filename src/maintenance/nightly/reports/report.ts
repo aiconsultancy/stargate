@@ -1,9 +1,9 @@
 import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { cleanupResultSchema } from "./cleanup-config";
-import { type Reason, reasons } from "./exec";
-import { maintenanceDirectory } from "./paths";
+import { cleanupResultSchema } from "../cleanup-config";
+import { type Reason, reasons } from "../exec";
+import { maintenanceDirectory } from "../paths";
 
 /**
  * Versioned maintenance report. Consumers (for example a reporting droid)

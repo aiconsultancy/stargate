@@ -37,7 +37,7 @@ import {
   type Report,
   writeAlert,
   writeReport,
-} from "../src/maintenance/nightly/report";
+} from "../src/maintenance/nightly/reports/report";
 import { updateState } from "../src/maintenance/nightly/state";
 import { buildDroidUnits } from "../src/maintenance/nightly/schedule/timer";
 import { stableJitter } from "../src/maintenance/nightly/schedule/window";

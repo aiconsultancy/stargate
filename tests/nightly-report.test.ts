@@ -10,7 +10,7 @@ import {
   recoveryBudgetMs,
   undoBounds,
 } from "../src/maintenance/nightly/journal";
-import { MaintenanceOutbox } from "../src/maintenance/nightly/outbox";
+import { MaintenanceOutbox } from "../src/maintenance/nightly/reports/outbox";
 import {
   limits,
   queueNotice,
@@ -18,7 +18,7 @@ import {
   reportSchema,
   summary,
   writeReport,
-} from "../src/maintenance/nightly/report";
+} from "../src/maintenance/nightly/reports/report";
 import {
   buildMaintenanceUnits,
   buildUpdateCommand,

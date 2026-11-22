@@ -1,5 +1,10 @@
 [
   {
+    "path": "src/maintenance/nightly/droid.ts",
+    "issue": "NET-1791",
+    "reason": "Formatter-wrapped import of the reports move at 80 columns; names and schemas unchanged."
+  },
+  {
     "path": "src/maintenance/nightly/cli.ts",
     "issue": "NET-1791",
     "reason": "Formatter-wrapped import of the schedule move at 80 columns; names and schemas unchanged."

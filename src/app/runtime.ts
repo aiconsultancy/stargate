@@ -67,7 +67,7 @@ import { type IrcRegistration, IrcShip, ircKey } from "../irc/ship";
 import { templatesDirectory } from "../lib/installation-paths";
 import { DrainRuntime } from "../maintenance/maintenance-drain";
 import { discoverCrews } from "../maintenance/nightly/crews";
-import { MaintenanceOutbox } from "../maintenance/nightly/outbox";
+import { MaintenanceOutbox } from "../maintenance/nightly/reports/outbox";
 import type { Ready } from "../maintenance/nightly/ready";
 import {
   packageDirectory,
