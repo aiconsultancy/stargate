@@ -1,4 +1,4 @@
-import { markdownChunks } from "../markdown-chunks";
+import { markdownChunks } from "../slack/markdown-chunks";
 
 /** Native Markdown cannot represent Slack mentions. Use structured text only
  * when controls occur; Slack never interprets text elements as notifications. */
