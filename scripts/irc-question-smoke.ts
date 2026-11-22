@@ -110,7 +110,7 @@ const engine = Bun.spawn(
     cwd: home,
     env: {
       HOME: home,
-      PATH: process.env.PATH,
+      PATH: process.env["PATH"],
       XDG_CONFIG_HOME: join(home, "config"),
       XDG_DATA_HOME: join(home, "data"),
       XDG_CACHE_HOME: join(home, "cache"),
