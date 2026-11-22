@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CronStore } from "../src/cron-store";
+import { CronStore } from "../src/cron/store";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
 const scope = { botKey: "bot", channel: "C123", user: "U123" };

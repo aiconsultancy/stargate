@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { validateCronInput } from "../src/cron";
+import { validateCronInput } from "../src/cron/index";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
 const input = {

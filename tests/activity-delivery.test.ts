@@ -5,11 +5,11 @@ import type {
   ActivityView,
   ActivityWatch,
   CrewActivitySettings,
-} from "../src/activity";
-import { ActivityDelivery } from "../src/activity-delivery";
+} from "../src/activity/activity";
+import { ActivityDelivery } from "../src/activity/activity-delivery";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import { Store } from "../src/store";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const signal = () => new AbortController().signal;

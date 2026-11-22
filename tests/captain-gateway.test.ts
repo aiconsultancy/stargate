@@ -6,7 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { Schema } from "effect";
 import pino from "pino";
-import { opencodeScratchDirectory } from "../src/attachments";
+import { opencodeScratchDirectory } from "../src/attachments/attachments";
 import {
   type AgentBackend,
   latestInput,
@@ -14,18 +14,18 @@ import {
   type Transcript,
   TranscriptUnavailable,
 } from "../src/backend";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import { failureText } from "../src/request-failure";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { failureText } from "../src/shared/request-failure";
 import {
   backendFingerprint,
   botKey,
   conversationKey,
   routeEvent,
-} from "../src/routing";
-import { Store } from "../src/store";
-import { repairTranscript } from "../src/transcript";
+} from "../src/gateway/routing";
+import { Store } from "../src/gateway/store";
+import { repairTranscript } from "../src/ops/transcript";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

@@ -15,7 +15,7 @@ import {
   questionSettingsPath,
   resolveQuestionSettings,
   saveQuestionSettings,
-} from "../src/question-settings";
+} from "../src/questions/question-settings";
 import { bot } from "./fixtures";
 
 test("question authority rejects symbolic, oversized and non-private files", async () => {

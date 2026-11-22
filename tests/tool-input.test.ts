@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
-import { postInputSchema } from "../src/captain-post";
+import { postInputSchema } from "../src/captain-post/captain-post";
 import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
 import { crewInputSchema } from "../src/crew/engine";
 import { historyInputBranches, historyInputSchema } from "../src/crew/history";
@@ -17,8 +17,8 @@ import { projectToolInput } from "../src/crew/project-options";
 import * as toolInputs from "../src/crew/tool-input";
 import { objectToolInput } from "../src/crew/tool-input";
 import { cronOperationSchema } from "../src/cron-control";
-import { notificationInputSchema } from "../src/notification-store";
-import { quotaInputSchema } from "../src/quota";
+import { notificationInputSchema } from "../src/notifications/preferences/notification-store";
+import { quotaInputSchema } from "../src/quota/quota";
 
 const schemas = {
   stargate_cron: cronOperationSchema,

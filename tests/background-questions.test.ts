@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentBackend } from "../src/backend";
-import { type NativeQuestion, Questions } from "../src/questions";
-import { Store } from "../src/store";
+import { type NativeQuestion, Questions } from "../src/questions/questions";
+import { Store } from "../src/gateway/store";
 
 const q: NativeQuestion = {
   id: "form_1",

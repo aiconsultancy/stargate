@@ -12,7 +12,7 @@ import type {
 import { installFleetTools } from "../src/fleet/plugin";
 import * as protocol from "../src/fleet/protocol";
 import { settingsIssues } from "../src/settings-schema";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 
 const target = {
   repository: "Owner/Repo",

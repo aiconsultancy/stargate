@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { CrewState } from "../src/crew/state";
-import { type CronRun, CronStore } from "../src/cron-store";
+import { type CronRun, CronStore } from "../src/cron/store";
 import { maintenanceSchema } from "../src/nightly/config";
 import { type Crew, crewDatabase, piDatabase } from "../src/nightly/crews";
 import {
@@ -17,7 +17,7 @@ import {
 } from "../src/nightly/idle";
 import type { OpenCodeControl } from "../src/nightly/opencode";
 import { bounds } from "../src/nightly/run";
-import { jobStatuses, Store } from "../src/store";
+import { jobStatuses, Store } from "../src/gateway/store";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-idle-"));
 afterAll(() => rm(root, { recursive: true, force: true }));

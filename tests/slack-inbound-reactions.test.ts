@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import { type AgentBackend, type SteerInput, sourceLine } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import { NotificationStore } from "../src/notification-store";
-import type { NotificationReader } from "../src/notifications";
-import { botKey } from "../src/routing";
-import { handleSlackRequest, SlackConnection } from "../src/slack";
-import { Store } from "../src/store";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { NotificationStore } from "../src/notifications/preferences/notification-store";
+import type { NotificationReader } from "../src/notifications/preferences/notifications";
+import { botKey } from "../src/gateway/routing";
+import { handleSlackRequest, SlackConnection } from "../src/slack/slack";
+import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 function reaction(name = "eyes", type = "reaction_added", id = "EvAdded") {

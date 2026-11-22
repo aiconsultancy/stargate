@@ -10,9 +10,9 @@ import {
   type PromptSourceContext,
   TranscriptUnavailable,
 } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import { failureText } from "../src/request-failure";
-import { Store } from "../src/store";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { failureText } from "../src/shared/request-failure";
+import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

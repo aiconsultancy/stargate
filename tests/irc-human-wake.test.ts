@@ -6,8 +6,8 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { type IrcConfig, ircSchema } from "../src/config";
-import { ircDashboardShip } from "../src/dashboard-source";
-import { Gateway } from "../src/gateway";
+import { ircDashboardShip } from "../src/dashboard/dashboard-source";
+import { Gateway } from "../src/gateway/gateway";
 import { fold, formatMessage, parseMessage } from "../src/irc/protocol";
 import {
   type IrcMember,
@@ -15,7 +15,7 @@ import {
   routeIrcMessage,
 } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const close: (() => unknown)[] = [];

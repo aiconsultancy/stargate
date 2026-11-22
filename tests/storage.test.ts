@@ -3,8 +3,8 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { lockInstance } from "../src/runtime";
-import { JobTransitionRefused, Store } from "../src/store";
+import { lockInstance } from "../src/app/runtime";
+import { JobTransitionRefused, Store } from "../src/gateway/store";
 
 test("state survives reopening and exclusive lock prevents two owners", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-test-"));

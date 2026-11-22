@@ -2,13 +2,13 @@ import { expect, test } from "bun:test";
 import { createServer } from "node:http";
 import { Schema } from "effect";
 import pino from "pino";
-import { resolveDestinations } from "../src/notify/binding";
-import { notifySchema } from "../src/notify/config";
+import { resolveDestinations } from "../src/notifications/ingest/binding";
+import { notifySchema } from "../src/notifications/ingest/config";
 import {
   notificationOutcome,
   slackNotificationSink,
-} from "../src/notify/slack";
-import { SlackConnection } from "../src/slack";
+} from "../src/notifications/ingest/slack";
+import { SlackConnection } from "../src/slack/slack";
 import { bot } from "./fixtures";
 import { notificationConfig } from "./notify-runtime-fixture";
 

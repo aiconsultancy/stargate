@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { Effect, Schema } from "effect";
-import { redactCredentials } from "../credentials";
+import { redactCredentials } from "../lib/credentials";
 
 export const journalInputSchema = Schema.Union([
   Schema.Struct({

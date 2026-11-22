@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { readInputOrigin } from "../src/crew/origin";
 import type { ResultAPI, ResultMessage } from "../src/crew/result";
 import { CrewState } from "../src/crew/state";
-import { inputBoundary } from "../src/input-boundary";
+import { inputBoundary } from "../src/backends/opencode/input-boundary";
 
 const message = (
   id: string,

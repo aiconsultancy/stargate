@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { piCrewBackendSchema } from "../config";
-import { isLocalhost } from "../loopback";
+import { isLocalhost } from "../lib/loopback";
 import { decodeSettings } from "../settings-errors";
 import {
   settingsCheck,

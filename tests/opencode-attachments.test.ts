@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Schema } from "effect";
 import { z } from "zod";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 
 test("attachment eval: OpenCode receives image and document bytes through native inline files", async () => {

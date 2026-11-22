@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { configSchema } from "../src/config";
-import type { QuotaSnapshot } from "../src/quota";
-import { QuotaWatch, quotaWatchSchema } from "../src/quota-watch";
-import { isAllowedChannel } from "../src/routing";
+import type { QuotaSnapshot } from "../src/quota/quota";
+import { QuotaWatch, quotaWatchSchema } from "../src/quota/quota-watch";
+import { isAllowedChannel } from "../src/gateway/routing";
 
 const start = Date.parse("2026-11-15T12:00:00Z");
 const config = {

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { OpenCode } from "@opencode/client";
 import { Schema } from "effect";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { CrewQuestionGateway } from "../src/irc/crew-question-gateway";
 

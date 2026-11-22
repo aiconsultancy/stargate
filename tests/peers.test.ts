@@ -3,9 +3,9 @@ import { Writable } from "node:stream";
 import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
 import {
   botSender,
   isCaptainName,
@@ -13,10 +13,10 @@ import {
   type PeerSender,
   peerInstructions,
   peerTurnsPerHour,
-} from "../src/peers";
-import { routeEvent } from "../src/routing";
-import { handleSlackRequest } from "../src/slack";
-import { Store } from "../src/store";
+} from "../src/gateway/peers";
+import { routeEvent } from "../src/gateway/routing";
+import { handleSlackRequest } from "../src/slack/slack";
+import { Store } from "../src/gateway/store";
 import { bot, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

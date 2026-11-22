@@ -8,10 +8,10 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
 import type { OutboxPage } from "../src/crew/irc-rpc";
-import { Gateway } from "../src/gateway";
+import { Gateway } from "../src/gateway/gateway";
 import type { CrewLink } from "../src/irc/crew-link";
 import { copyText, IrcShip } from "../src/irc/ship";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];

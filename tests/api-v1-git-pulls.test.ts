@@ -7,8 +7,11 @@ import {
   githubRepository,
   createGitReader as makeGitReader,
   parseAheadBehind,
-} from "../src/api/v1/git";
-import { createPullReader, mapPullRequest } from "../src/api/v1/pulls";
+} from "../src/dashboard/api/v1/git";
+import {
+  createPullReader,
+  mapPullRequest,
+} from "../src/dashboard/api/v1/pulls";
 
 // Every reader made here is stopped after the file, so no private temporary
 // snapshot folder is left behind.

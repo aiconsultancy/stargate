@@ -32,11 +32,11 @@ L3 owns implementation. Escalate only an actual unresolved scheduling,
 cancellation or crash-recovery defect to L4. Load TypeScript engineering,
 testing, change-readiness, idempotence, model-boundary and verification. Read
 the installed Effect 4.1.0 `AGENTS.md` fully and inspect APIs used. Retain
-`src/effect.ts:abortable` settlement semantics and Bun SQLite.
+`src/lib/effect.ts:abortable` settlement semantics and Bun SQLite.
 
 ## One-writer files
 
-New production files under `src/notify/` only:
+New production files under `src/notifications/ingest/` only:
 `model.ts`, `signature.ts`, `subscriptions.ts`, `store.ts`, `sink.ts`,
 `notifications.ts`. Adjacent pure helpers may share a file.
 
@@ -63,7 +63,7 @@ store or current migration worktree. Unit 01 can own all API paths in parallel.
 3. Build a separate synchronous SQLite store with schema version, dedup table
    and outbox table. Guard private file ownership and reject symlink/corrupt or
    unsupported-version state without replacing it. Reuse the privacy pattern
-   in `src/cron-store.ts:165-183`, with private mode before WAL/SHM creation,
+   in `src/cron/store.ts:165-183`, with private mode before WAL/SHM creation,
    rather than relying on process umask. Use WAL and bounded busy timeout.
    Caller must hold the existing runtime instance lock in production.
 4. Implement one admission transaction with dedup-first lookup, pending-only

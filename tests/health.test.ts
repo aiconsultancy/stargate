@@ -3,8 +3,11 @@ import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
-import { createHealthReader, readStarfleetSnapshot } from "../src/health";
-import { healthConfigSchema } from "../src/health-config";
+import {
+  createHealthReader,
+  readStarfleetSnapshot,
+} from "../src/health/health";
+import { healthConfigSchema } from "../src/health/health-config";
 import { maintenanceSchema } from "../src/nightly/config";
 import { bot } from "./fixtures";
 

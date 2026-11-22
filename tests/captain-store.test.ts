@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { Store, TranscriptConflict } from "../src/store";
+import { Store, TranscriptConflict } from "../src/gateway/store";
 
 const stores: Store[] = [];
 afterEach(() => {

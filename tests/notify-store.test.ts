@@ -15,8 +15,8 @@ import type {
   Destination,
   NotificationInput,
   Source,
-} from "../src/notify/model";
-import { NotifyStore } from "../src/notify/store";
+} from "../src/notifications/ingest/model";
+import { NotifyStore } from "../src/notifications/ingest/store";
 
 const root = process.env["TMPDIR"] ?? "/home/jack/.cache/tmp/opencode";
 const directories: string[] = [];

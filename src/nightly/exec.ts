@@ -1,4 +1,4 @@
-import { isLocalhost } from "../loopback";
+import { isLocalhost } from "../lib/loopback";
 
 /**
  * Every external command in maintenance goes through this runner, so tests

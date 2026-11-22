@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import type { NativeQuestion, QuestionOffer } from "../src/questions";
-import { botKey, conversationKey } from "../src/routing";
-import type { SlackPanelContent } from "../src/slack-format";
+import type { NativeQuestion, QuestionOffer } from "../src/questions/questions";
+import { botKey, conversationKey } from "../src/gateway/routing";
+import type { SlackPanelContent } from "../src/shared/slack-format";
 import {
   buildQuestionBlocks,
   SlackQuestionControls,
-} from "../src/slack-questions";
-import { Store } from "../src/store";
+} from "../src/questions/slack-questions";
+import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const token = "a".repeat(32);

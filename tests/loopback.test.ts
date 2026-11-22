@@ -3,7 +3,7 @@ import {
   isLocalhost,
   isLoopbackAddress,
   isLoopbackHost,
-} from "../src/loopback";
+} from "../src/lib/loopback";
 
 const hostname = (value: string) => new URL(value).hostname;
 

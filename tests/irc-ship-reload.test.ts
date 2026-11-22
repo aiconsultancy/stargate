@@ -7,7 +7,7 @@ import { Schema } from "effect";
 import pino from "pino";
 import { ircSchema } from "../src/config";
 import { type IrcRegistration, IrcShip } from "../src/irc/ship";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];

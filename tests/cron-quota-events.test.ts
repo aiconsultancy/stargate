@@ -3,9 +3,9 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CronInput } from "../src/cron-input";
-import { CronStore } from "../src/cron-store";
-import type { QuotaSnapshot } from "../src/quota";
+import type { CronInput } from "../src/cron/input";
+import { CronStore } from "../src/cron/store";
+import type { QuotaSnapshot } from "../src/quota/quota";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
 const hour = 3_600_000;

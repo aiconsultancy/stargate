@@ -15,7 +15,7 @@ import {
   readMaintenanceDrain,
   registerDrainParticipant,
   writeMaintenanceDrain,
-} from "../src/maintenance-drain";
+} from "../src/maintenance/maintenance-drain";
 
 const cleanup: string[] = [];
 afterEach(async () => {

@@ -1,19 +1,19 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
-import type { AttachmentTransport } from "../attachment-delivery";
+import type { AttachmentTransport } from "../attachments/attachment-delivery";
 import type {
   DeliveryUnit,
   IrcTurnStatus,
   RequestOutcome,
   SlackDelivery,
 } from "../gateway/ports";
-import type { ReactionName } from "../reactions";
+import type { ReactionName } from "../shared/reactions";
 import { settingsStruct } from "../settings-schema";
 import {
   type TurnProgress,
   type TurnStage,
   turnProgressText,
-} from "../turn-progress";
+} from "../shared/turn-progress";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";
 import { cleanText, utf8Bytes } from "./protocol";

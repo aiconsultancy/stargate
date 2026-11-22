@@ -2,15 +2,15 @@ import { expect, test } from "bun:test";
 import { Result, Schema } from "effect";
 import pino from "pino";
 import { botSchema } from "../src/config";
-import { isAllowedUser } from "../src/routing";
-import { SlackConnection } from "../src/slack";
+import { isAllowedUser } from "../src/gateway/routing";
+import { SlackConnection } from "../src/slack/slack";
 import {
   loadThreadContext,
   type ThreadContextRequest,
   ThreadContextUnavailable,
   threadContextLimits,
   withThreadContext,
-} from "../src/thread-context";
+} from "../src/gateway/thread-context";
 import { bot } from "./fixtures";
 
 function request(): ThreadContextRequest {

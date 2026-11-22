@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { CrewMaintenance } from "../src/crew/maintenance";
-import { maintenanceWindowMs, TurnBudget } from "../src/maintenance";
+import {
+  maintenanceWindowMs,
+  TurnBudget,
+} from "../src/maintenance/maintenance";
 
 const plan = {
   plan: "Restart Stargate",

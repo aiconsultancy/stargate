@@ -2,8 +2,11 @@ import { expect, test } from "bun:test";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { OpenCode } from "@opencode/client";
 import { Result, Schema } from "effect";
-import { type ActivitySnapshot, activitySnapshotSchema } from "../src/activity";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import {
+  type ActivitySnapshot,
+  activitySnapshotSchema,
+} from "../src/activity/activity";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { historyInputBranches, historyInputSchema } from "../src/crew/history";
 import { CrewIrc, outboxPageSchema } from "../src/crew/irc-rpc";

@@ -8,7 +8,7 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { configSchema, ircSchema } from "../src/config";
-import { Gateway } from "../src/gateway";
+import { Gateway } from "../src/gateway/gateway";
 import { auditLine } from "../src/irc/audit";
 import { IrcClient, type IrcTiming } from "../src/irc/client";
 import {
@@ -18,7 +18,7 @@ import {
   utf8Bytes,
 } from "../src/irc/protocol";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];

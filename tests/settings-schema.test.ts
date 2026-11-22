@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Predicate, Result, Schema } from "effect";
 import { z } from "zod";
-import { crewActivitySchema } from "../src/activity";
-import { captainPostSchema } from "../src/captain-post-config";
+import { crewActivitySchema } from "../src/activity/activity";
+import { captainPostSchema } from "../src/captain-post/captain-post-config";
 import {
   backendSchema,
   botSchema,
@@ -21,17 +21,20 @@ import {
 } from "../src/config";
 import { objectToolInput } from "../src/crew/tool-input";
 import { cronOperationSchema } from "../src/cron-control";
-import { cronjobsSchema } from "../src/cronjob-config";
+import { cronjobsSchema } from "../src/cron/job-config";
 import { fleetControlSchema } from "../src/fleet/protocol";
-import { fleetPolicySchema } from "../src/fleet-policy";
-import { healthConfigSchema } from "../src/health-config";
-import { mentionNameSchema, textMentionRuleSchema } from "../src/mentions";
+import { fleetPolicySchema } from "../src/fleet/fleet-policy";
+import { healthConfigSchema } from "../src/health/health-config";
+import {
+  mentionNameSchema,
+  textMentionRuleSchema,
+} from "../src/shared/mentions";
 import { cleanupSchema } from "../src/nightly/cleanup-config";
 import { maintenanceSchema } from "../src/nightly/config";
 import { nightlyWindowSchema } from "../src/nightly/instructions";
-import { piModelSchema, piProviderSchema } from "../src/pi-model";
-import { quotaConfigSchema } from "../src/quota";
-import { quotaWatchSchema } from "../src/quota-watch";
+import { piModelSchema, piProviderSchema } from "../src/backends/pi/pi-model";
+import { quotaConfigSchema } from "../src/quota/quota";
+import { quotaWatchSchema } from "../src/quota/quota-watch";
 import { decodeSettings } from "../src/settings-errors";
 import { legacySetting } from "../src/settings-legacy";
 import {
@@ -40,8 +43,8 @@ import {
   settingsIssues,
   settingsStruct,
 } from "../src/settings-schema";
-import { transcriptionSchema } from "../src/transcription";
-import { waitingSchema } from "../src/waiting";
+import { transcriptionSchema } from "../src/transcription/transcription";
+import { waitingSchema } from "../src/gateway/waiting";
 import {
   settingsCanonical,
   settingsCases,

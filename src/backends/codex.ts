@@ -19,7 +19,7 @@ import {
   type UserInput,
 } from "@openai/codex-sdk";
 import { Option, Schema } from "effect";
-import { type Attachment, checkAttachments } from "../attachments";
+import { type Attachment, checkAttachments } from "../attachments/attachments";
 import {
   type AgentBackend,
   type BackendContext,
@@ -33,8 +33,8 @@ import {
   BackendFailure,
   type BackendFailureKind,
   statusKind,
-} from "../request-failure";
-import type { TurnProgress, TurnStage } from "../turn-progress";
+} from "../shared/request-failure";
+import type { TurnProgress, TurnStage } from "../shared/turn-progress";
 import {
   bootTicks,
   inherited,

@@ -14,7 +14,7 @@ import {
   parseAttachments,
   preparedAttachmentSchema,
   readPreparedAttachment,
-} from "../src/attachments";
+} from "../src/attachments/attachments";
 import { ordinaryFileDirectory } from "./file-fixture";
 
 const cleanup: string[] = [];

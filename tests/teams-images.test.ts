@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { crc32, deflateSync } from "node:zlib";
-import type { Attachment } from "../src/attachments";
+import type { Attachment } from "../src/attachments/attachments";
 import type { OutgoingActivity } from "../src/teams/connector";
 import {
   inspectScreenshot,

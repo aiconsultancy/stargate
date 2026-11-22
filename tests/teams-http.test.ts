@@ -8,7 +8,7 @@ import {
   REQUEST_TIMEOUT_MS,
   type TeamsListenerOptions,
 } from "../src/teams/http";
-import { close } from "../src/teams/http-util";
+import { close } from "../src/lib/http-util";
 
 const token: VerifiedToken = { claims: {}, endorsements: ["msteams"] };
 const headers = {

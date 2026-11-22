@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Result, Schema } from "effect";
 import { backendSchema, configSchema, secret } from "../src/config";
-import { botKey, chunks, routeEvent } from "../src/routing";
+import { botKey, chunks, routeEvent } from "../src/gateway/routing";
 import { bot, event, identity } from "./fixtures";
 
 describe("routing", () => {

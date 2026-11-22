@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import { slackContent } from "../src/slack-format";
-import { Store } from "../src/store";
-import { LiveReply } from "../src/streaming";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { slackContent } from "../src/shared/slack-format";
+import { Store } from "../src/gateway/store";
+import { LiveReply } from "../src/gateway/streaming";
 import { bot, event, identity } from "./fixtures";
 
 test("text reaches Slack before generation completes, then updates in place", async () => {

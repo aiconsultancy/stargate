@@ -5,8 +5,8 @@ import {
   maxAttachments,
   maxAttachmentTotalBytes,
   UploadRefused,
-} from "../attachments";
-import { isLoopbackAddress } from "../loopback";
+} from "../attachments/attachments";
+import { isLoopbackAddress } from "../lib/loopback";
 
 /**
  * soju.im/FILEHOST (draft/FILEHOST): an HTTPS upload URL that the IRC server

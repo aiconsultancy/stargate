@@ -13,9 +13,9 @@ import {
 } from "../src/crew/engine";
 import { MemberActivityStore } from "../src/crew/member-activity";
 import { teamSchema } from "../src/crew/team";
-import { crewStatusSchema } from "../src/crew-status";
-import { CrewUI, crewStatusView } from "../src/crew-ui";
-import type { CronView } from "../src/cron-ui";
+import { crewStatusSchema } from "../src/shared/crew-status";
+import { CrewUI, crewStatusView } from "../src/slack/crew-ui";
+import type { CronView } from "../src/cron/ui";
 import { bot, identity } from "./fixtures";
 import {
   copyCrewDatabase,

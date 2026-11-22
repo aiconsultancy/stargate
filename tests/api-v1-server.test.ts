@@ -8,13 +8,16 @@ import {
   setImmediate as nextTurn,
   setTimeout as wait,
 } from "node:timers/promises";
-import type { ApiV1Config } from "../src/api/v1/config";
-import { diffEvents } from "../src/api/v1/diff";
-import { type ApiV1Diff, createEventStreams } from "../src/api/v1/events";
-import { cacheOpenCodeVersion } from "../src/api/v1/gateway";
-import { startHostMetrics } from "../src/api/v1/host";
-import { startApiV1Server } from "../src/api/v1/server";
-import { apiToken } from "../src/api/v1/token";
+import type { ApiV1Config } from "../src/dashboard/api/v1/config";
+import { diffEvents } from "../src/dashboard/api/v1/diff";
+import {
+  type ApiV1Diff,
+  createEventStreams,
+} from "../src/dashboard/api/v1/events";
+import { cacheOpenCodeVersion } from "../src/dashboard/api/v1/gateway";
+import { startHostMetrics } from "../src/dashboard/api/v1/host";
+import { startApiV1Server } from "../src/dashboard/api/v1/server";
+import { apiToken } from "../src/dashboard/api/v1/token";
 import type {
   ApiV1Source,
   V1CrewMember,
@@ -22,8 +25,8 @@ import type {
   V1Fleet,
   V1Host,
   V1ShipDetail,
-} from "../src/api/v1/types";
-import { OpenCodeBackend } from "../src/backends/opencode";
+} from "../src/dashboard/api/v1/types";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { decodeSettings } from "../src/settings-errors";
 

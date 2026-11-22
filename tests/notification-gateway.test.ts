@@ -3,16 +3,19 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
 import {
   NotificationStore,
   notificationInputSchema,
-} from "../src/notification-store";
-import { type NotificationReader, notificationKey } from "../src/notifications";
-import { PeerDirectory } from "../src/peers";
-import { handleSlackRequest } from "../src/slack";
-import { Store } from "../src/store";
-import type { Transcriber } from "../src/transcription";
+} from "../src/notifications/preferences/notification-store";
+import {
+  type NotificationReader,
+  notificationKey,
+} from "../src/notifications/preferences/notifications";
+import { PeerDirectory } from "../src/gateway/peers";
+import { handleSlackRequest } from "../src/slack/slack";
+import { Store } from "../src/gateway/store";
+import type { Transcriber } from "../src/transcription/transcription";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

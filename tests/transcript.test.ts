@@ -11,14 +11,14 @@ import {
   type Transcript,
   TranscriptUnavailable,
 } from "../src/backend";
-import { cancellationNotice } from "../src/cancellation";
+import { cancellationNotice } from "../src/gateway/cancellation";
 import type { BotConfig } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import type { RequestFailure } from "../src/request-failure";
-import { conversationKey } from "../src/routing";
-import { prepareSlackReply } from "../src/slack-format";
-import { type Job, Store } from "../src/store";
-import { repairTranscript } from "../src/transcript";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import type { RequestFailure } from "../src/shared/request-failure";
+import { conversationKey } from "../src/gateway/routing";
+import { prepareSlackReply } from "../src/shared/slack-format";
+import { type Job, Store } from "../src/gateway/store";
+import { repairTranscript } from "../src/ops/transcript";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

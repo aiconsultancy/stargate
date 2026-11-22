@@ -1,13 +1,13 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Result, Schema } from "effect";
-import type { CrewStatus, CrewStatusInput } from "../crew-status";
+import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
 import {
   HISTORY_PAGE,
   type HistoryChildrenInput,
   type HistoryEntriesInput,
   type HistorySession,
-} from "../session-history";
+} from "../shared/session-history";
 import {
   type CrewCaller,
   type CrewEngine,

@@ -31,7 +31,7 @@ import { type Report, writeAlert, writeReport } from "../src/nightly/report";
 import { updateState } from "../src/nightly/state";
 import { buildDroidUnits } from "../src/nightly/timer";
 import { stableJitter } from "../src/nightly/window";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-droid-"));

@@ -15,10 +15,10 @@ import {
   requestSchema,
 } from "../src/fleet/protocol";
 import { FleetResults, fleetOrigin } from "../src/fleet/results";
-import { sendFleetAssignment } from "../src/fleet-irc";
-import { Gateway } from "../src/gateway";
+import { sendFleetAssignment } from "../src/fleet/fleet-irc";
+import { Gateway } from "../src/gateway/gateway";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import {
   authenticateActivityRequest,
   BotFrameworkKeyStore,

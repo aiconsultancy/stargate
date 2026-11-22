@@ -428,7 +428,7 @@ and confirm the write with the operator before running this command:
 ```sh
 mise exec -- bun -e '
 import { z } from "zod";
-import { buildManifest } from "./src/setup.ts";
+import { buildManifest } from "./src/app/setup.ts";
 
 const token = process.env.SLACK_APP_CONFIG_TOKEN;
 if (!token) throw new Error("SLACK_APP_CONFIG_TOKEN is required");

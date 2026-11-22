@@ -14,11 +14,11 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { z } from "zod";
 import { latestInput, TranscriptUnavailable } from "../src/backend";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, loadConfig } from "../src/config";
-import { botKey, conversationKey } from "../src/routing";
-import { Store } from "../src/store";
-import { repairThread } from "../src/transcript";
+import { botKey, conversationKey } from "../src/gateway/routing";
+import { Store } from "../src/gateway/store";
+import { repairThread } from "../src/ops/transcript";
 import { bot, identity } from "./fixtures";
 
 const assistant = (

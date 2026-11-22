@@ -1,8 +1,8 @@
 import {
   NotificationControlError,
   runNotificationOperation,
-} from "../notification-control";
-import { notificationInputSchema } from "../notification-store";
+} from "../notifications/preferences/notification-control";
+import { notificationInputSchema } from "../notifications/preferences/notification-store";
 import type { CrewCaller } from "./engine";
 import { CrewError } from "./state";
 

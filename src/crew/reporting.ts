@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import type { ActivitySnapshot } from "../activity";
-import { redactCredentials } from "../credentials";
+import type { ActivitySnapshot } from "../activity/activity";
+import { redactCredentials } from "../lib/credentials";
 import type { CrewCaller, CrewEngine } from "./engine";
 import { JournalStore } from "./journal";
 import { reportTask } from "./pending";

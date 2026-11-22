@@ -45,7 +45,7 @@ different service registration. The selector and API must belong to the same
 installation; this helper does not support a remote server.
 
 ```sh
-bun run src/agent-profile-switch.ts PROFILE --directory /path/to/project
+bun run src/ops/agent-profile-switch.ts PROFILE --directory /path/to/project
 ```
 
 Replace `PROFILE` with an exact installed directory name. The default config
@@ -60,7 +60,7 @@ sessions or pending forms and permissions. For an operator-approved urgent
 switch, explicitly enable hot mode with `--hot`:
 
 ```sh
-bun run src/agent-profile-switch.ts PROFILE --directory /path/to/project --hot
+bun run src/ops/agent-profile-switch.ts PROFILE --directory /path/to/project --hot
 ```
 
 With `--hot`, the helper warns then proceeds without waiting for all sessions

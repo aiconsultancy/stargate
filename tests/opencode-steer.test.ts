@@ -2,11 +2,11 @@ import { afterEach, expect, test } from "bun:test";
 import { Schema } from "effect";
 import pino from "pino";
 import type { SteerInput } from "../src/backend";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { crewMessageMetadataKey } from "../src/crew/message-protocol";
-import { Gateway } from "../src/gateway";
-import { Store } from "../src/store";
+import { Gateway } from "../src/gateway/gateway";
+import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

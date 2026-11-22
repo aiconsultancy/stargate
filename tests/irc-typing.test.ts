@@ -6,13 +6,13 @@ import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
-import { Gateway } from "../src/gateway";
+import { Gateway } from "../src/gateway/gateway";
 import { IrcClient } from "../src/irc/client";
 import { type IrcMessage, parseMessage } from "../src/irc/protocol";
 import { IrcShip } from "../src/irc/ship";
-import { BackendFailure } from "../src/request-failure";
-import { Store } from "../src/store";
-import type { TurnProgress } from "../src/turn-progress";
+import { BackendFailure } from "../src/shared/request-failure";
+import { Store } from "../src/gateway/store";
+import type { TurnProgress } from "../src/shared/turn-progress";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];

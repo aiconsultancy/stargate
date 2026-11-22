@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import { activitySnapshotSchema } from "../src/activity";
-import { ActivityDelivery } from "../src/activity-delivery";
+import { activitySnapshotSchema } from "../src/activity/activity";
+import { ActivityDelivery } from "../src/activity/activity-delivery";
 import type { AgentBackend, TextSink } from "../src/backend";
-import { PiDurableBackend } from "../src/backends/pi-durable";
+import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
-import { redactCredentials } from "../src/credentials";
+import { redactCredentials } from "../src/lib/credentials";
 import {
   CrewEngine,
   type CrewOptions,
@@ -19,7 +19,7 @@ import {
 } from "../src/crew/engine";
 import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
 import { defaultTeam, teamSchema } from "../src/crew/team";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 
 async function fixture(safeReports = true) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-reporting-"));

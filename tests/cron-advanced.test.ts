@@ -9,12 +9,12 @@ import {
   CronScheduler,
   type CronServices,
   type ScheduledInput,
-} from "../src/cron";
+} from "../src/cron/index";
 import { runCronOperation } from "../src/cron-control";
-import { validateCronInput } from "../src/cron-input";
-import { CronStore } from "../src/cron-store";
-import { parseCronjob, renderCronjob } from "../src/cronjob-files";
-import { botKey } from "../src/routing";
+import { validateCronInput } from "../src/cron/input";
+import { CronStore } from "../src/cron/store";
+import { parseCronjob, renderCronjob } from "../src/cron/job-files";
+import { botKey } from "../src/gateway/routing";
 import { bot, identity } from "./fixtures";
 
 const now = Date.parse("2026-01-01T00:00:00Z");

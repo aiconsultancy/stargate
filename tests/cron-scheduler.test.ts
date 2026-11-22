@@ -8,9 +8,9 @@ import {
   CronScheduler,
   type ScheduledInput,
   type SchedulerGateway,
-} from "../src/cron";
-import { CronStore } from "../src/cron-store";
-import { botKey } from "../src/routing";
+} from "../src/cron/index";
+import { CronStore } from "../src/cron/store";
+import { botKey } from "../src/gateway/routing";
 import { bot, identity } from "./fixtures";
 
 const now = Date.parse("2026-01-01T00:00:00Z");

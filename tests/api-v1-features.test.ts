@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { Schema } from "effect";
-import { gatewayFeatures, registrationFeatures } from "../src/api/v1/features";
+import {
+  gatewayFeatures,
+  registrationFeatures,
+} from "../src/dashboard/api/v1/features";
 import { configSchema, ircFeatureDefaults } from "../src/config";
 import { bot } from "./fixtures";
 

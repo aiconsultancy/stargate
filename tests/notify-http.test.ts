@@ -3,11 +3,11 @@ import { expect, test } from "bun:test";
 import { request } from "node:http";
 import { join } from "node:path";
 import { Effect, Exit, Schema, Scope } from "effect";
-import { startApiServer } from "../src/api/server";
-import { notifySchema } from "../src/notify/config";
-import { notificationRoutes } from "../src/notify/http";
-import type { Destination } from "../src/notify/model";
-import { makeNotifications } from "../src/notify/notifications";
+import { startApiServer } from "../src/dashboard/api/server";
+import { notifySchema } from "../src/notifications/ingest/config";
+import { notificationRoutes } from "../src/notifications/ingest/http";
+import type { Destination } from "../src/notifications/ingest/model";
+import { makeNotifications } from "../src/notifications/ingest/notifications";
 import {
   envelope,
   notificationConfig,

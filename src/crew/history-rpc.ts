@@ -9,7 +9,7 @@ import {
   historyDescribeInputSchema,
   historyEntriesInputSchema,
   piHistoryPrefix,
-} from "../session-history";
+} from "../shared/session-history";
 import type { PiCrewWorkers } from "./pi-worker";
 import { CrewError, type CrewState } from "./state";
 import type { CrewMember, Team } from "./team";

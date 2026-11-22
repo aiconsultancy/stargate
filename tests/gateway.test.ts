@@ -5,11 +5,11 @@ import {
   latestInput,
   TranscriptUnavailable,
 } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import { PromptNotSubmitted } from "../src/request-failure";
-import { handleSlackRequest } from "../src/slack";
-import { Store } from "../src/store";
-import { ThreadContextUnavailable } from "../src/thread-context";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { PromptNotSubmitted } from "../src/shared/request-failure";
+import { handleSlackRequest } from "../src/slack/slack";
+import { Store } from "../src/gateway/store";
+import { ThreadContextUnavailable } from "../src/gateway/thread-context";
 import { bot, event, identity } from "./fixtures";
 
 const stores: Store[] = [];

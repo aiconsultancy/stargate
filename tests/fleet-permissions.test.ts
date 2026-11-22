@@ -6,7 +6,7 @@ import {
   validateFleetPermissions,
 } from "../src/fleet/permissions";
 import type { FleetRequest } from "../src/fleet/protocol";
-import { fleetPermissions } from "../src/fleet-policy";
+import { fleetPermissions } from "../src/fleet/fleet-policy";
 
 const caller = {
   sessionID: "ses_agent",

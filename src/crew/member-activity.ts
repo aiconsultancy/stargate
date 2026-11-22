@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { redactCredentials } from "../credentials";
-import { type CrewStatusTask, crewAssignmentText } from "../crew-status";
+import { redactCredentials } from "../lib/credentials";
+import { type CrewStatusTask, crewAssignmentText } from "../shared/crew-status";
 import type { CrewTask } from "./state";
 
 type Activity = Omit<CrewStatusTask, "id" | "status">;

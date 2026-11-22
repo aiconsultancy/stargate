@@ -17,7 +17,7 @@ import {
   createProfileApi,
   type ProfileApi,
   switchAgentProfile,
-} from "../src/agent-profile-switch";
+} from "../src/ops/agent-profile-switch";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -296,7 +296,7 @@ test("conflicting hot and require-idle flags fail before any API or selector cha
 
 test("CLI documents idle default and rejects contradictory flags without service discovery", async () => {
   const script = fileURLToPath(
-    new URL("../src/agent-profile-switch.ts", import.meta.url),
+    new URL("../src/ops/agent-profile-switch.ts", import.meta.url),
   );
   const run = (args: string[]) =>
     Bun.spawn([process.execPath, script, ...args], {

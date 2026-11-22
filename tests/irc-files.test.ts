@@ -5,16 +5,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import { maxAttachmentBytes, UploadRefused } from "../src/attachments";
+import {
+  maxAttachmentBytes,
+  UploadRefused,
+} from "../src/attachments/attachments";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { type IrcConfig, ircSchema } from "../src/config";
-import { Gateway } from "../src/gateway";
+import { Gateway } from "../src/gateway/gateway";
 import { Filehost, filehostURL } from "../src/irc/filehost";
 import { fold, parseMessage } from "../src/irc/protocol";
 import { routeIrcMessage } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/store";
-import type { Transcriber } from "../src/transcription";
+import { Store } from "../src/gateway/store";
+import type { Transcriber } from "../src/transcription/transcription";
 import { publishedFileDirectory } from "./file-fixture";
 import { FakeFilehost, FakeIrcServer, lineOf, until } from "./irc-fixture";
 

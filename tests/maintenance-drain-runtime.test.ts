@@ -10,8 +10,12 @@ import {
   type MaintenanceDrain,
   readDrainParticipants,
   writeMaintenanceDrain,
-} from "../src/maintenance-drain";
-import { type RuntimeDependencies, type SlackApp, serve } from "../src/runtime";
+} from "../src/maintenance/maintenance-drain";
+import {
+  type RuntimeDependencies,
+  type SlackApp,
+  serve,
+} from "../src/app/runtime";
 import { bot, identity } from "./fixtures";
 
 async function until(check: () => boolean) {

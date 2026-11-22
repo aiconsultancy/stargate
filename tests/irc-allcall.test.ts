@@ -7,10 +7,10 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
-import { Gateway } from "../src/gateway";
+import { Gateway } from "../src/gateway/gateway";
 import { ircNote } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import { FakeIrcServer, until } from "./irc-fixture";
 
 // Liveness bounds only: no assertion depends on how fast a step is.

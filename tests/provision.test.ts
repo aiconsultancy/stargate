@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { provisionBots } from "../src/provision";
-import { addBot, readConfiguration } from "../src/setup";
+import { provisionBots } from "../src/app/provision";
+import { addBot, readConfiguration } from "../src/app/setup";
 import {
   legacyProvisionDecoded,
   legacyProvisionInput,

@@ -59,7 +59,7 @@ includes `headersEnv` names, permissions and defaults, not just directory paths.
 Never normalize the old input with the new schema.
 
 - `backendFingerprint(bot)` is SHA-256 of `JSON.stringify(bot.backend)`, with
-  `sessionID` omitted for OpenCode. Read both versions of `src/routing.ts`.
+  `sessionID` omitted for OpenCode. Read both versions of `src/gateway/routing.ts`.
 - Slack `botKey` is JSON of `[registration ID, app ID, team ID, bot user ID,
   fingerprint]`. Keep its first four values exactly unchanged.
 - IRC `ircKey` is JSON of `["irc", registration ID, lower-case host, port,

@@ -2,19 +2,19 @@ import { afterEach, expect, test } from "bun:test";
 import { Writable } from "node:stream";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import type { Attachment } from "../src/attachments";
+import type { Attachment } from "../src/attachments/attachments";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import type { RequestFailure } from "../src/request-failure";
-import { conversationKey, routeEvent } from "../src/routing";
-import { Store } from "../src/store";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import type { RequestFailure } from "../src/shared/request-failure";
+import { conversationKey, routeEvent } from "../src/gateway/routing";
+import { Store } from "../src/gateway/store";
 import {
   spokenMention,
   spokenMentionNote,
   type Transcriber,
   transcriptionSchema,
-} from "../src/transcription";
+} from "../src/transcription/transcription";
 import { identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

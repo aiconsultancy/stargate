@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCli } from "../src/cli";
+import { runCli } from "../src/app/cli";
 
 test("maintenance cleanup requires a dry-run flag and documents its scope", async () => {
   const output = spyOn(console, "log").mockImplementation(() => {});

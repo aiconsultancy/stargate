@@ -11,7 +11,7 @@ import {
   waitingPhrase,
   waitingSchema,
   waitingSettingsPath,
-} from "../src/waiting";
+} from "../src/gateway/waiting";
 import { bot } from "./fixtures";
 
 test("waiting defaults distinguish disabled from immediate", () => {

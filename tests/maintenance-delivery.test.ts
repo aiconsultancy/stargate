@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import type { AgentBackend } from "../src/backend";
-import type { MaintenanceWatch } from "../src/maintenance";
-import { startMaintenanceDelivery } from "../src/maintenance-delivery";
+import type { MaintenanceWatch } from "../src/maintenance/maintenance";
+import { startMaintenanceDelivery } from "../src/maintenance/maintenance-delivery";
 
 const notice = {
   id: "notice",

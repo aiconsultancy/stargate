@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { prepareSlackReply, slackContent } from "../src/slack-format";
+import { prepareSlackReply, slackContent } from "../src/shared/slack-format";
 
 test("standard Markdown stays unchanged, including literal code and quotes", () => {
   const text =

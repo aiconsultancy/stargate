@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { IrcStatus, type StatusResult } from "../src/irc/status";
-import { waitingPhrase } from "../src/waiting";
+import { waitingPhrase } from "../src/gateway/waiting";
 
 type Attempt = {
   value: string | undefined;

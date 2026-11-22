@@ -1,7 +1,7 @@
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Effect, Predicate, Schema } from "effect";
 import { z } from "zod";
-import { quotaInputSchema } from "../quota";
+import { quotaInputSchema } from "../quota/quota";
 import { crewPiParameters } from "./crew-tool-input";
 import { crewInputSchema } from "./engine";
 import { journalInputSchema } from "./journal";

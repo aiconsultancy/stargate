@@ -7,11 +7,11 @@ import { Effect, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { ircSchema } from "../src/config";
-import { Gateway } from "../src/gateway";
+import { Gateway } from "../src/gateway/gateway";
 import { utf8Bytes } from "../src/irc/protocol";
 import { IrcShip } from "../src/irc/ship";
-import { serve } from "../src/runtime";
-import { Store } from "../src/store";
+import { serve } from "../src/app/runtime";
+import { Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];

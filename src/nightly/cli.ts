@@ -214,7 +214,7 @@ export async function maintenanceCli(
     console.log(JSON.stringify(z.toJSONSchema(reportSchema), null, 2));
     return 0;
   }
-  const { loadEnvironment } = await import("../runtime");
+  const { loadEnvironment } = await import("../app/runtime");
   await loadEnvironment(options.configPath);
   const config = await loadConfig(options.configPath);
   if (operation === "cleanup") {

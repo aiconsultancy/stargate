@@ -11,7 +11,7 @@ import {
   ReloadRejected,
   readReloadCandidate,
   restartRequired,
-} from "../src/config-reload";
+} from "../src/app/config-reload";
 
 const cleanup: string[] = [];
 afterEach(async () => {

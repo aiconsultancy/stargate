@@ -96,7 +96,7 @@ and NET1771 syntax import retarget, the respective PRs can add these entries:
     "reason": "Centralize the installation root."
   },
   {
-    "path": "src/update-notice.ts",
+    "path": "src/maintenance/update-notice.ts",
     "issue": "NET-1771",
     "reason": "Retarget the extracted syntax leaf."
   }

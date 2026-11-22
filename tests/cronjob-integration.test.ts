@@ -10,16 +10,16 @@ import {
   CronScheduler,
   type ScheduledInput,
   type SchedulerGateway,
-} from "../src/cron";
+} from "../src/cron/index";
 import { runCronOperation } from "../src/cron-control";
-import { CronStore } from "../src/cron-store";
+import { CronStore } from "../src/cron/store";
 import {
   type CronjobDefinition,
   readCronjob,
   renderCronjob,
   writeCronjob,
-} from "../src/cronjob-files";
-import { CronjobManager } from "../src/cronjob-manager";
+} from "../src/cron/job-files";
+import { CronjobManager } from "../src/cron/job-manager";
 import { bot, identity } from "./fixtures";
 
 const now = Date.parse("2026-01-01T00:00:00Z");

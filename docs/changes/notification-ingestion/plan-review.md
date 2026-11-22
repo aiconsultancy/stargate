@@ -38,8 +38,8 @@ Read-only local Git inspection confirmed its parent
 `71fc14dc070bc88135e104c3e16742e8a92c28cf` and tree
 `b19e69c8adc6ac60f2b00917d7a4fe995a6956e1`.
 
-The relevant migration diff was inspected in `src/runtime.ts`,
-`src/routing.ts`, `src/peers.ts` and `src/store.ts`. The plan correctly adopts
+The relevant migration diff was inspected in `src/app/runtime.ts`,
+`src/gateway/routing.ts`, `src/gateway/peers.ts` and `src/gateway/store.ts`. The plan correctly adopts
 Effect Schema/Result decoding and current inferred/mutable types. Instance
 ownership, API acquisition, peer access policy and store transactions retain
 the integration contracts examined in the earlier assessment.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { runCli } from "./cli";
-import { RuntimeStopped, start } from "./runtime";
+import { runCli } from "./app/cli";
+import { RuntimeStopped, start } from "./app/runtime";
 
 const result = await runCli(process.argv.slice(2)).catch((error: unknown) => {
   // CLI helpers sanitize errors; never expose raw SDK or credential failures.

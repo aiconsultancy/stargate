@@ -1,7 +1,7 @@
 import type { FleetJob, NativeMaker } from "../fleet/protocol";
-import type { NotificationContext } from "../notifications";
-import type { InboundReaction } from "../reactions";
-import type { RequestFailure } from "../request-failure";
+import type { NotificationContext } from "../notifications/preferences/notifications";
+import type { InboundReaction } from "../shared/reactions";
+import type { RequestFailure } from "../shared/request-failure";
 
 export type Incoming = {
   eventId: string;

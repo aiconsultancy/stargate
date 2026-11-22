@@ -32,8 +32,8 @@ import {
 import {
   AttachmentInputUnavailable,
   BackendFailure,
-} from "../src/request-failure";
-import { backendFingerprint } from "../src/routing";
+} from "../src/shared/request-failure";
+import { backendFingerprint } from "../src/gateway/routing";
 
 const apiKeyEnv = "STARGATE_CLAUDE_TEST_PROXY_KEY";
 const key = "local-proxy-test-only";

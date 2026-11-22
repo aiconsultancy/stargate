@@ -1,8 +1,8 @@
 import { OpenCode } from "@opencode/client";
 import { Service } from "@opencode/client/service";
 import { CrewReporting } from "../crew/report-rpc";
-import type { MaintenanceDrain } from "../maintenance-drain";
-import type { UpdateReceipt } from "../update-notice";
+import type { MaintenanceDrain } from "../maintenance/maintenance-drain";
+import type { UpdateReceipt } from "../maintenance/update-notice";
 import { StepError } from "./exec";
 import type { ModelRef } from "./versions";
 

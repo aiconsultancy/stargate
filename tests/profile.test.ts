@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
-import { runCli } from "../src/cli";
+import { runCli } from "../src/app/cli";
 import { crewPermissions } from "../src/crew/policy";
 import {
   defaultTeam,
@@ -22,12 +22,12 @@ import {
   type Team,
   teamSchema,
 } from "../src/crew/team";
-import { textMentionInstructions } from "../src/mentions";
+import { textMentionInstructions } from "../src/shared/mentions";
 import { nightlyInstructions } from "../src/nightly/instructions";
-import { peerInstructions } from "../src/peers";
-import { initializeProfile, renderProfile } from "../src/profile";
-import { reactionInstructions } from "../src/reactions";
-import { voiceInstructions } from "../src/transcription";
+import { peerInstructions } from "../src/gateway/peers";
+import { initializeProfile, renderProfile } from "../src/app/profile";
+import { reactionInstructions } from "../src/shared/reactions";
+import { voiceInstructions } from "../src/transcription/transcription";
 
 const directories: string[] = [];
 afterEach(async () => {

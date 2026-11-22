@@ -3,7 +3,7 @@ import {
   CaptainPostError,
   postInputSchema,
   runCaptainPost,
-} from "../captain-post";
+} from "../captain-post/captain-post";
 import type { CrewCaller } from "./engine";
 import { CrewError } from "./state";
 

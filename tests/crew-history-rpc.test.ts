@@ -11,7 +11,7 @@ import { type CrewMember, teamSchema } from "../src/crew/team";
 import {
   historySessionPageSchema,
   type SessionHistory,
-} from "../src/session-history";
+} from "../src/shared/session-history";
 
 const signal = () => new AbortController().signal;
 const unavailable = "Pi history unavailable or cancelled.";
