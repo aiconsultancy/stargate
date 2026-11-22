@@ -13,5 +13,10 @@
     "path": "src/notifications/preferences/notifications.ts",
     "issue": "NET-1787",
     "reason": "Replace the BotConfig type dependency with the consumed Slack identity view."
+  },
+  {
+    "path": "src/crew/pi-extension.ts",
+    "issue": "NET-1787",
+    "reason": "Import the same crew input schema from its input owner; keep Zod declarations unchanged."
   }
 ]

@@ -7,12 +7,99 @@ import {
   settingsAdvertisement,
   settingsInputAdvertisement,
 } from "../settings-legacy";
-import { settingsIssues } from "../settings-schema";
-import { crewInputBranches, crewInputSchema } from "./engine";
+import {
+  settingsDefault,
+  settingsDiscriminatedUnion,
+  settingsIssues,
+  settingsStartsWith,
+  settingsStruct,
+} from "../settings-schema";
 import {
   effectProjectKeySchema,
   effectProjectToolInput,
 } from "./project-options";
+
+import {
+  abandonInputSchema,
+  inspectInputSchema,
+  reconcileInputSchema,
+  resumeInputSchema,
+} from "./reconciliation";
+import { agentIDSchema } from "./team";
+import { workspaceInputSchemas } from "./workspace";
+
+const crewTaskID = Schema.String.check(
+  settingsStartsWith("task_"),
+  Schema.isMaxCodePoints(100),
+);
+const crewText = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(64000),
+);
+export const crewInputBranches = Schema.Union([
+  settingsStruct({ op: Schema.Literal("roster") }),
+  inspectInputSchema,
+  reconcileInputSchema,
+  resumeInputSchema,
+  abandonInputSchema,
+  ...workspaceInputSchemas,
+  settingsStruct({
+    op: Schema.Literal("ensure"),
+    crew: Schema.optional(agentIDSchema),
+  }),
+  settingsStruct({
+    op: Schema.Literal("dispatch"),
+    crew: agentIDSchema,
+    text: crewText,
+    queue: Schema.Boolean.pipe(settingsDefault(false)),
+  }),
+  settingsStruct({
+    op: Schema.Literal("wait"),
+    taskID: crewTaskID,
+    afterNoticeID: Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isGreaterThanOrEqualTo(0),
+    ).pipe(settingsDefault(0)),
+  }),
+  settingsStruct({ op: Schema.Literal("status"), taskID: crewTaskID }),
+  settingsStruct({
+    op: Schema.Literal("complete"),
+    taskID: crewTaskID,
+    result: crewText,
+  }),
+  settingsStruct({ op: Schema.Literal("compact"), crew: agentIDSchema }),
+  settingsStruct({
+    op: Schema.Literal("urgent"),
+    taskID: crewTaskID,
+    to: agentIDSchema,
+    text: crewText,
+  }),
+]);
+const crewBranchDecoders = new Map<
+  string,
+  (raw: unknown) => Result.Result<unknown, Schema.SchemaError>
+>(
+  crewInputBranches.members.map((member) => [
+    String(member.fields.op.ast.literal),
+    Schema.decodeUnknownResult(member, { errors: "all" }),
+  ]),
+);
+// Native union sentinel optimization can otherwise hide an invalid literal
+// acknowledgement behind a root error. Delegate to the known branch first.
+export const crewInputSchema = Schema.Unknown.check(
+  Schema.makeFilter((raw) => {
+    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string")
+      return undefined;
+    const decode = crewBranchDecoders.get(raw["op"]);
+    if (!decode) return undefined;
+    const result = decode(raw);
+    return Result.isFailure(result) ? result.failure.issue : undefined;
+  }),
+).pipe(
+  Schema.decodeTo(settingsDiscriminatedUnion("op", crewInputBranches.members)),
+);
+export type CrewInput = typeof crewInputSchema.Type;
+export { crewTaskID, crewText };
 
 /** Crew-only SDK object envelope; top-level branch defaults stay in the handler. */
 export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &

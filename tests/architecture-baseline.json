@@ -18,7 +18,7 @@
     "src/store.ts"
   ],
   "sourceFiles": 259,
-  "sourceEdges": 1106,
+  "sourceEdges": 1108,
   "rootFiles": [
     "src/backend.ts",
     "src/config.ts",
@@ -28,16 +28,8 @@
     "src/settings-legacy.ts",
     "src/settings-schema.ts"
   ],
-  "largestCycle": 6,
+  "largestCycle": 4,
   "cycleComponents": [
-    [
-      "src/backend.ts",
-      "src/backends/pi-durable.ts",
-      "src/crew/crew-tool-input.ts",
-      "src/crew/engine.ts",
-      "src/crew/pi-extension.ts",
-      "src/crew/pi-worker.ts"
-    ],
     [
       "src/config.ts",
       "src/notifications.ts",
@@ -47,19 +39,8 @@
     ["src/crew/messaging.ts", "src/crew/reporting.ts", "src/crew/state.ts"]
   ],
   "cyclicEdges": [
-    "src/backend.ts -> src/crew/pi-extension.ts",
-    "src/backends/pi-durable.ts -> src/backend.ts",
-    "src/backends/pi-durable.ts -> src/crew/pi-extension.ts",
     "src/config.ts -> src/notify/binding.ts",
-    "src/crew/crew-tool-input.ts -> src/crew/engine.ts",
-    "src/crew/engine.ts -> src/crew/pi-extension.ts",
-    "src/crew/engine.ts -> src/crew/pi-worker.ts",
     "src/crew/messaging.ts -> src/crew/state.ts",
-    "src/crew/pi-extension.ts -> src/crew/crew-tool-input.ts",
-    "src/crew/pi-extension.ts -> src/crew/engine.ts",
-    "src/crew/pi-worker.ts -> src/backend.ts",
-    "src/crew/pi-worker.ts -> src/backends/pi-durable.ts",
-    "src/crew/pi-worker.ts -> src/crew/pi-extension.ts",
     "src/crew/reporting.ts -> src/crew/state.ts",
     "src/crew/state.ts -> src/crew/messaging.ts",
     "src/crew/state.ts -> src/crew/reporting.ts",
