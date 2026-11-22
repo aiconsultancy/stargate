@@ -69,6 +69,9 @@ Follow the current runtime boundaries and future slice rules in
 [the architecture design](docs/design.md#source-layout-and-boundary-rules).
 Keep backend adapters independent of Slack and preserve session isolation.
 
+`src/config/composition.ts` owns configuration composition. `src/config.ts`
+retains the fixed public exports.
+
 Source modules have a limit of 1,000 non-blank lines, except exact identities in
 the architecture baseline's `largeFiles`. The measure is textual: ignore
 empty and whitespace-only lines, including inside template literals; count
