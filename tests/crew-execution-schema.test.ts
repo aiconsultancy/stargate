@@ -7,18 +7,24 @@ import {
   crewOpenCodeInput,
   crewPiParameters,
 } from "../src/crew/input/crew-tool-input";
-import { crewInputSchema, crewOptionsSchema } from "../src/crew/engine";
+import {
+  crewInputSchema,
+  crewOptionsSchema,
+} from "../src/crew/execution/engine";
 import { crewMessageMetadataKey } from "../src/crew/message-protocol";
 import { piCrewExtension } from "../src/crew/pi-extension";
 import { projectsSchema } from "../src/crew/input/project-options";
-import { CrewRecovery, recoveryRequestSchema } from "../src/crew/recovery-rpc";
+import {
+  CrewRecovery,
+  recoveryRequestSchema,
+} from "../src/crew/execution/recovery-rpc";
 import {
   MissingTaskResult,
   type ResultAPI,
   type ResultMessage,
   readTaskResult,
-} from "../src/crew/result";
-import type { CrewTask } from "../src/crew/state";
+} from "../src/crew/execution/result";
+import type { CrewTask } from "../src/crew/execution/state";
 import { settingsIssues } from "../src/config/settings-schema";
 import { settingsCanonical } from "./settings-cases";
 

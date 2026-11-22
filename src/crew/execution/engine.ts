@@ -24,18 +24,18 @@ import type {
   SessionSyntheticInput,
 } from "@opencode/client";
 import { Result, Schema } from "effect";
-import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
+import type { CrewStatus, CrewStatusInput } from "../../shared/crew-status";
 import {
   drainNoticeID,
   drainNoticePhase,
   drainNoticeText,
   type MaintenanceDrain,
-} from "../maintenance/maintenance-drain";
+} from "../../maintenance/maintenance-drain";
 import {
   QuotaReader,
   quotaConfigSchema,
   quotaInputSchema,
-} from "../quota/quota";
+} from "../../quota/quota";
 import {
   settingsCheck,
   settingsDefault,
@@ -44,36 +44,36 @@ import {
   settingsRecord,
   settingsRefine,
   settingsStruct,
-} from "../config/settings-schema";
+} from "../../config/settings-schema";
 import {
   noticeTools,
   scopedUpdate,
   type UpdateReceipt,
   type UpdateSnapshot,
-} from "../maintenance/update-notice";
+} from "../../maintenance/update-notice";
 import {
   crewInputSchema,
   crewTaskID,
   crewText,
   type CrewInput,
-} from "./input/crew-tool-input";
-export { crewInputBranches, crewInputSchema } from "./input/crew-tool-input";
-export type { CrewInput } from "./input/crew-tool-input";
-import { CrewHistoryRPC } from "./history/history-rpc";
+} from "../input/crew-tool-input";
+export { crewInputBranches, crewInputSchema } from "../input/crew-tool-input";
+export type { CrewInput } from "../input/crew-tool-input";
+import { CrewHistoryRPC } from "../history/history-rpc";
 import { crewFingerprint } from "./identity";
-import { MesijClient, type MesijMessage } from "./mesij";
-import { crewMessageMetadataKey, resumeMessageID } from "./message-protocol";
-import { CrewMessaging, type MailRoute, mailInputSchema } from "./messaging";
+import { MesijClient, type MesijMessage } from "../mesij";
+import { crewMessageMetadataKey, resumeMessageID } from "../message-protocol";
+import { CrewMessaging, type MailRoute, mailInputSchema } from "../messaging";
 import { readInputOrigin } from "./origin";
-import { piCrewToolDefinitions } from "./pi-extension";
+import { piCrewToolDefinitions } from "../pi-extension";
 
-export { mailInputSchema } from "./messaging";
+export { mailInputSchema } from "../messaging";
 
-import { redactCredentials } from "../lib/credentials";
-import { journalInputSchema } from "./reporting/journal";
-import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
+import { redactCredentials } from "../../lib/credentials";
+import { journalInputSchema } from "../reporting/journal";
+import { PiCrewWorkers, type PiWorkerFactory } from "../pi-worker";
 import { crewPermissions } from "./policy";
-import { projectsSchema } from "./input/project-options";
+import { projectsSchema } from "../input/project-options";
 import {
   type AbandonInput,
   type ExecutionInspection,
@@ -90,7 +90,7 @@ import {
   sha256,
   verifyResult,
 } from "./reconciliation";
-import { CrewReporter } from "./reporting/reporting";
+import { CrewReporter } from "../reporting/reporting";
 import { MissingTaskResult, type ResultAPI, readTaskResult } from "./result";
 import {
   type AbandonableStatus,
@@ -109,7 +109,7 @@ import {
   type CrewMember,
   defaultTeam,
   teamSchema,
-} from "./team";
+} from "../team";
 import {
   inspectWorkspace,
   resetWorkspace,
@@ -118,7 +118,7 @@ import {
   type WorkspaceInput,
   type WorkspaceInspection,
   workspaceRoot,
-} from "./workspace/workspace";
+} from "../workspace/workspace";
 
 const decodeJournalInput = Schema.decodeUnknownResult(journalInputSchema, {
   onExcessProperty: "error",

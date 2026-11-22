@@ -16,9 +16,9 @@ import {
   settingsIssues,
   settingsStruct,
 } from "../../config/settings-schema";
-import type { CrewCaller, WorkerModelPeer } from "../engine";
+import type { CrewCaller, WorkerModelPeer } from "../execution/engine";
 import { effectProjectToolInput } from "../input/project-options";
-import { CrewError } from "../state";
+import { CrewError } from "../execution/state";
 import { agentIDSchema, defaultModelProviders, type Team } from "../team";
 
 const target = agentIDSchema.pipe(settingsDefault("captain"));

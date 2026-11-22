@@ -13,10 +13,10 @@ import {
   type CrewEngine,
   type CrewOptions,
   crewOptionsSchema,
-} from "../engine";
+} from "../execution/engine";
 import type { FleetCrewStatus } from "../reporting/fleet-status";
 import { effectProjectKeySchema } from "../input/project-options";
-import { CrewError } from "../state";
+import { CrewError } from "../execution/state";
 import { defaultTeam } from "../team";
 import { projectRepository, workspaceRoot } from "./workspace";
 

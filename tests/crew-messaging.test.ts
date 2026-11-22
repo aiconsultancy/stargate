@@ -9,7 +9,7 @@ import {
   CrewEngine,
   type CrewOptions,
   type CrewSessions,
-} from "../src/crew/engine";
+} from "../src/crew/execution/engine";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import { teamSchema } from "../src/crew/team";
 

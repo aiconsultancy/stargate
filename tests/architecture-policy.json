@@ -2,6 +2,43 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "aliases": {
+    "src/crew/state.ts": ["src/crew/state.ts", "src/crew/execution/state.ts"],
+    "src/crew/shell-context.ts": [
+      "src/crew/shell-context.ts",
+      "src/crew/execution/shell-context.ts"
+    ],
+    "src/crew/result.ts": [
+      "src/crew/result.ts",
+      "src/crew/execution/result.ts"
+    ],
+    "src/crew/recovery-rpc.ts": [
+      "src/crew/recovery-rpc.ts",
+      "src/crew/execution/recovery-rpc.ts"
+    ],
+    "src/crew/reconciliation.ts": [
+      "src/crew/reconciliation.ts",
+      "src/crew/execution/reconciliation.ts"
+    ],
+    "src/crew/policy.ts": [
+      "src/crew/policy.ts",
+      "src/crew/execution/policy.ts"
+    ],
+    "src/crew/origin.ts": [
+      "src/crew/origin.ts",
+      "src/crew/execution/origin.ts"
+    ],
+    "src/crew/native-wait.ts": [
+      "src/crew/native-wait.ts",
+      "src/crew/execution/native-wait.ts"
+    ],
+    "src/crew/identity.ts": [
+      "src/crew/identity.ts",
+      "src/crew/execution/identity.ts"
+    ],
+    "src/crew/engine.ts": [
+      "src/crew/engine.ts",
+      "src/crew/execution/engine.ts"
+    ],
     "src/crew/reporting.ts": [
       "src/crew/reporting.ts",
       "src/crew/reporting/reporting.ts"

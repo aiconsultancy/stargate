@@ -23,7 +23,7 @@ import {
   sha256,
 } from "../scripts/migrate-stargate-state";
 import { configSchema, loadConfig } from "../src/config";
-import { crewFingerprint } from "../src/crew/identity";
+import { crewFingerprint } from "../src/crew/execution/identity";
 import { defaultTeam } from "../src/crew/team";
 import { ircKey } from "../src/irc/ship";
 import { botKey, conversationKey } from "../src/gateway/routing";

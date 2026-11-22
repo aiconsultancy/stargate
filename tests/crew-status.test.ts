@@ -10,7 +10,7 @@ import {
   CrewEngine,
   type CrewOptions,
   type CrewSessions,
-} from "../src/crew/engine";
+} from "../src/crew/execution/engine";
 import { MemberActivityStore } from "../src/crew/reporting/member-activity";
 import { teamSchema } from "../src/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";

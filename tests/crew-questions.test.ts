@@ -2,9 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CrewCaller } from "../src/crew/engine";
+import type { CrewCaller } from "../src/crew/execution/engine";
 import { CrewQuestions } from "../src/crew/questions/questions";
-import { CrewError, CrewState } from "../src/crew/state";
+import { CrewError, CrewState } from "../src/crew/execution/state";
 import { defaultTeam } from "../src/crew/team";
 import { saveQuestionSettings } from "../src/questions/question-settings";
 import type {

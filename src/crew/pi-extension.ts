@@ -6,7 +6,7 @@ import { crewPiParameters, crewInputSchema } from "./input/crew-tool-input";
 import { journalInputSchema } from "./reporting/journal";
 import { messagePiParameters } from "./message-tool-input";
 import { dmInputSchema, mailInputBranches, mailInputSchema } from "./messaging";
-import { CrewError } from "./state";
+import { CrewError } from "./execution/state";
 import { effectToolInputFields } from "./input/tool-input";
 
 const outputLimit = 50 * 1024;

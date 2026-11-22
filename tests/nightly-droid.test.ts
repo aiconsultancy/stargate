@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
-import { CrewState } from "../src/crew/state";
+import { CrewState } from "../src/crew/execution/state";
 import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import {
   type DroidDependencies,

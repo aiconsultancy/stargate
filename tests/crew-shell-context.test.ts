@@ -5,10 +5,10 @@ import {
   observePlacement,
   sha256,
   verifyResult,
-} from "../src/crew/reconciliation";
-import { readTaskResult } from "../src/crew/result";
-import { ShellCompletionContext } from "../src/crew/shell-context";
-import type { CrewTask } from "../src/crew/state";
+} from "../src/crew/execution/reconciliation";
+import { readTaskResult } from "../src/crew/execution/result";
+import { ShellCompletionContext } from "../src/crew/execution/shell-context";
+import type { CrewTask } from "../src/crew/execution/state";
 
 const agent = "captain-crew-worker";
 const task: CrewTask = {

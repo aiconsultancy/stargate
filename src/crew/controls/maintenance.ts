@@ -5,8 +5,8 @@ import {
   maintenancePlanSchema,
   maintenanceWindowMs,
 } from "../../maintenance/maintenance";
-import type { CrewCaller } from "../engine";
-import { CrewError } from "../state";
+import type { CrewCaller } from "../execution/engine";
+import { CrewError } from "../execution/state";
 
 type Owner = { sessionID: string; id: string };
 type Permit = { status: "window-elapsed"; windowMs: number };

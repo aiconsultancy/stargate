@@ -13,7 +13,7 @@ import {
   settingsDiscriminatedUnion,
   settingsStruct,
 } from "../../config/settings-schema";
-import { CrewError } from "../state";
+import { CrewError } from "../execution/state";
 
 const MAX_RESULTS = 20;
 const MAX_TEXT = 2000;

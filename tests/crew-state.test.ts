@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CrewState, pendingTaskLimit } from "../src/crew/state";
+import { CrewState, pendingTaskLimit } from "../src/crew/execution/state";
 
 const diskIntegrationTimeoutMs = 30_000;
 

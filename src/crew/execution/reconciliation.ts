@@ -13,20 +13,20 @@ import {
   settingsPattern,
   settingsStartsWith,
   settingsStruct,
-} from "../config/settings-schema";
-import { isNativeInstructionContext } from "./instruction-context";
+} from "../../config/settings-schema";
+import { isNativeInstructionContext } from "../instruction-context";
 import {
   crewMessageMetadataKey,
   isTaskResume,
   taskEnvelopePayload,
-} from "./message-protocol";
+} from "../message-protocol";
 import {
   isShellCompletionCandidate,
   ShellCompletionContext,
   type ShellContextRecord,
 } from "./shell-context";
 import { CrewError, type CrewTask } from "./state";
-import { agentIDSchema } from "./team";
+import { agentIDSchema } from "../team";
 
 type CrewSession = Pick<
   SessionInfo,

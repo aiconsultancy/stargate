@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { HistoryError } from "../src/crew/history/history";
 import { CrewError } from "../src/crew/pending";
-import { MissingTaskResult } from "../src/crew/result";
-import { CrewError as StateCrewError } from "../src/crew/state";
+import { MissingTaskResult } from "../src/crew/execution/result";
+import { CrewError as StateCrewError } from "../src/crew/execution/state";
 
 describe("canonical crew error", () => {
   test("the state export and both subclasses use the leaf constructor", () => {

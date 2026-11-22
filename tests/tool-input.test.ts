@@ -4,7 +4,7 @@ import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
 import { postInputSchema } from "../src/captain-post/captain-post";
 import { crewOpenCodeInput } from "../src/crew/input/crew-tool-input";
-import { crewInputSchema } from "../src/crew/engine";
+import { crewInputSchema } from "../src/crew/execution/engine";
 import {
   historyInputBranches,
   historyInputSchema,

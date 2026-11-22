@@ -5,15 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { crewOpenCodeInput } from "../src/crew/input/crew-tool-input";
-import { crewInputSchema, crewOptionsSchema } from "../src/crew/engine";
-import { canExpandCrew, crewFingerprint } from "../src/crew/identity";
+import {
+  crewInputSchema,
+  crewOptionsSchema,
+} from "../src/crew/execution/engine";
+import { canExpandCrew, crewFingerprint } from "../src/crew/execution/identity";
 import {
   modelInputSchema,
   modelToolInputSchema,
 } from "../src/crew/controls/models";
 import { projectsSchema } from "../src/crew/input/project-options";
-import { inspectInputSchema } from "../src/crew/reconciliation";
-import { CrewState } from "../src/crew/state";
+import { inspectInputSchema } from "../src/crew/execution/reconciliation";
+import { CrewState } from "../src/crew/execution/state";
 import { profileTeam, teamSchema } from "../src/crew/team";
 import { workspaceInputSchemas } from "../src/crew/workspace/workspace";
 import { renderProfile } from "../src/app/profile";

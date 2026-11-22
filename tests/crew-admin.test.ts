@@ -15,15 +15,15 @@ import {
   type CrewResult,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/engine";
+} from "../src/crew/execution/engine";
 import { resumeMessageID } from "../src/crew/message-protocol";
 import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
 import type {
   CrewInspectionAPI,
   EvidenceMessage,
-} from "../src/crew/reconciliation";
-import { runRecoveryOperator } from "../src/crew/recovery-rpc";
-import type { CrewTask } from "../src/crew/state";
+} from "../src/crew/execution/reconciliation";
+import { runRecoveryOperator } from "../src/crew/execution/recovery-rpc";
+import type { CrewTask } from "../src/crew/execution/state";
 import { gitProcessOptions } from "../src/crew/workspace/workspace";
 import { crewStatusSchema } from "../src/shared/crew-status";
 

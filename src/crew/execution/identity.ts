@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Schema } from "effect";
-import { settingsRecord, settingsStruct } from "../config/settings-schema";
-import type { Team } from "./team";
+import { settingsRecord, settingsStruct } from "../../config/settings-schema";
+import type { Team } from "../team";
 
 /** Shared with the explicit cutover planner; JSON ordering is persistent identity. */
 export function crewFingerprint(options: {

@@ -14,7 +14,7 @@ import {
   piDefinitionPath,
   piMemberDefinition,
 } from "../crew/instructions";
-import { crewPermissions } from "../crew/policy";
+import { crewPermissions } from "../crew/execution/policy";
 import {
   defaultModelProviders,
   defaultTeam,

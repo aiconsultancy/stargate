@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
-import { CrewState } from "../src/crew/state";
+import { CrewState } from "../src/crew/execution/state";
 import { CronStore } from "../src/cron/store";
 import {
   type CommandResult,

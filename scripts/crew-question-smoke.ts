@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { OpenCode } from "@opencode/client";
 import { Service } from "@opencode/client/service";
-import { crewFingerprint } from "../src/crew/identity";
-import { CrewState } from "../src/crew/state";
+import { crewFingerprint } from "../src/crew/execution/identity";
+import { CrewState } from "../src/crew/execution/state";
 import { CrewQuestionGateway } from "../src/irc/crew-question-gateway";
 import {
   questionSettingsPath,

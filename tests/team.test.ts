@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Result, Schema } from "effect";
-import { crewPermissions } from "../src/crew/policy";
+import { crewPermissions } from "../src/crew/execution/policy";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 
 const team = {

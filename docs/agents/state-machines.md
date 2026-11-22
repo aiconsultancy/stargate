@@ -79,7 +79,7 @@ unavailable.
 | Profile initialization      | Validate → inspect or create worktrees → inspect config → write                                 | Reuse identical files. Refuse conflicts and tracked files. Retain partial setup after failure.                                       |
 | Crew waiting setting        | Authorize captain → persist delay or off → apply on next turn                                   | Workers cannot change captain settings.                                                                                              |
 
-Crew state belongs to `crew/state.ts` and `crew/engine.ts`. The other owners
+Crew state belongs to `crew/execution/state.ts` and `crew/execution/engine.ts`. The other owners
 are `crew/mesij.ts`, `crew/compaction.ts`, `crew/controls/models.ts`, `crew/history.ts`,
 `crew/controls/waiting.ts`, and `profile.ts`.
 
