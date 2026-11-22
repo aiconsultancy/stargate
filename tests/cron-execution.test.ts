@@ -12,7 +12,7 @@ import {
   type CronArbiterFactory,
   type CronExecutionAPI,
   type CronExecutionAuthority,
-} from "../src/crew/cron-execution";
+} from "../src/crew/cron/cron-execution";
 import type { CrewSession } from "../src/crew/engine";
 import { defaultTeam } from "../src/crew/team";
 import {

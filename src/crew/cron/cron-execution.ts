@@ -8,14 +8,14 @@ import type {
   SessionGetInput,
 } from "@opencode/client";
 import { Schema } from "effect";
-import type { BackendContext } from "../backends/backend";
-import { PiDurableBackend } from "../backends/pi/pi-durable";
-import type { BackendConfig } from "../config";
+import type { BackendContext } from "../../backends/backend";
+import { PiDurableBackend } from "../../backends/pi/pi-durable";
+import type { BackendConfig } from "../../config";
 import {
   type CronAdvanced,
   type CronEvaluation,
   cronModelSchema,
-} from "../cron/advanced";
+} from "../../cron/advanced";
 import {
   cronDecision,
   cronDecisionInstructions,
@@ -25,10 +25,10 @@ import {
   cronObservationInstructions,
   cronPublicText,
   cronRisk,
-} from "../cron/decision";
-import type { CrewCaller, CrewSession } from "./engine";
-import { CrewError } from "./state";
-import { defaultModelProviders, type Team } from "./team";
+} from "../../cron/decision";
+import type { CrewCaller, CrewSession } from "../engine";
+import { CrewError } from "../state";
+import { defaultModelProviders, type Team } from "../team";
 
 type ModelRef = NonNullable<CrewSession["model"]>;
 type Request = { signal: AbortSignal };

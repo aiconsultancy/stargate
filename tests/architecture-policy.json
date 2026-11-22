@@ -552,6 +552,11 @@
     "src/crew/history.ts": [
       "src/crew/history.ts",
       "src/crew/history/history.ts"
+    ],
+    "src/crew/cron.ts": ["src/crew/cron.ts", "src/crew/cron/cron.ts"],
+    "src/crew/cron-execution.ts": [
+      "src/crew/cron-execution.ts",
+      "src/crew/cron/cron-execution.ts"
     ]
   },
   "slices": {
