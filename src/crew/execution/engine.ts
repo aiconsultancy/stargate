@@ -65,13 +65,13 @@ import { MesijClient, type MesijMessage } from "../mesij";
 import { crewMessageMetadataKey, resumeMessageID } from "../message-protocol";
 import { CrewMessaging, type MailRoute, mailInputSchema } from "../messaging";
 import { readInputOrigin } from "./origin";
-import { piCrewToolDefinitions } from "../pi-extension";
+import { piCrewToolDefinitions } from "../pi/pi-extension";
 
 export { mailInputSchema } from "../messaging";
 
 import { redactCredentials } from "../../lib/credentials";
 import { journalInputSchema } from "../reporting/journal";
-import { PiCrewWorkers, type PiWorkerFactory } from "../pi-worker";
+import { PiCrewWorkers, type PiWorkerFactory } from "../pi/pi-worker";
 import { crewPermissions } from "./policy";
 import { projectsSchema } from "../input/project-options";
 import {

@@ -1,13 +1,17 @@
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Effect, Predicate, Schema } from "effect";
 import { z } from "zod";
-import { quotaInputSchema } from "../quota/quota";
-import { crewPiParameters, crewInputSchema } from "./input/crew-tool-input";
-import { journalInputSchema } from "./reporting/journal";
-import { messagePiParameters } from "./message-tool-input";
-import { dmInputSchema, mailInputBranches, mailInputSchema } from "./messaging";
-import { CrewError } from "./execution/state";
-import { effectToolInputFields } from "./input/tool-input";
+import { quotaInputSchema } from "../../quota/quota";
+import { crewPiParameters, crewInputSchema } from "../input/crew-tool-input";
+import { journalInputSchema } from "../reporting/journal";
+import { messagePiParameters } from "../message-tool-input";
+import {
+  dmInputSchema,
+  mailInputBranches,
+  mailInputSchema,
+} from "../messaging";
+import { CrewError } from "../execution/state";
+import { effectToolInputFields } from "../input/tool-input";
 
 const outputLimit = 50 * 1024;
 

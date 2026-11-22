@@ -1,24 +1,24 @@
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { Attachment } from "../attachments/attachments";
+import type { Attachment } from "../../attachments/attachments";
 import type {
   AgentBackend,
   BackendContext,
   TextSink,
-} from "../backends/backend";
-import type { BackendConfig } from "../config";
-import { redactCredentials } from "../lib/credentials";
-import type { SessionHistory } from "../shared/session-history";
-import { piDefinitionPath, piMemberDefinition } from "./instructions";
+} from "../../backends/backend";
+import type { BackendConfig } from "../../config";
+import { redactCredentials } from "../../lib/credentials";
+import type { SessionHistory } from "../../shared/session-history";
+import { piDefinitionPath, piMemberDefinition } from "../instructions";
 import type { PiCrewBinding } from "./pi-extension";
 import {
   CrewError,
   type CrewState,
   type CrewTask,
   type Peer,
-} from "./execution/state";
-import type { CrewMember } from "./team";
+} from "../execution/state";
+import type { CrewMember } from "../team";
 
 type PiConfig = Extract<BackendConfig, { type: "pi-durable" }>;
 export interface PiWorkerBackend extends AgentBackend {
@@ -69,7 +69,7 @@ export type PiWorkerFactory = ((
 };
 const nativeFactory: PiWorkerFactory = Object.assign(
   async (config: PiConfig, context: BackendContext) => {
-    const { PiDurableBackend } = await import("../backends/pi/pi-durable");
+    const { PiDurableBackend } = await import("../../backends/pi/pi-durable");
     return PiDurableBackend.open(config, context);
   },
   {
@@ -79,7 +79,7 @@ const nativeFactory: PiWorkerFactory = Object.assign(
       requestID: string,
       signal: AbortSignal,
     ) {
-      const { PiDurableBackend } = await import("../backends/pi/pi-durable");
+      const { PiDurableBackend } = await import("../../backends/pi/pi-durable");
       return PiDurableBackend.recover(
         context,
         conversationID,
@@ -472,7 +472,7 @@ export class PiCrewWorkers {
           throw new CrewError("Pi history unavailable or cancelled.");
         return read(backend.history, signal);
       }
-      const { readPiHistory } = await import("../backends/pi/pi-history");
+      const { readPiHistory } = await import("../../backends/pi/pi-history");
       signal.throwIfAborted();
       return readPiHistory(dataDirectory, signal, (history) =>
         read(history, signal),

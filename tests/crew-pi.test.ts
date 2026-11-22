@@ -14,12 +14,12 @@ import {
 import { canExpandCrew } from "../src/crew/execution/identity";
 import { piDefinitionPath } from "../src/crew/instructions";
 import type { MesijInbox, MesijMessage, MesijSend } from "../src/crew/mesij";
-import type { PiCrewBinding } from "../src/crew/pi-extension";
+import type { PiCrewBinding } from "../src/crew/pi/pi-extension";
 import {
   PiCrewWorkers,
   type PiWorkerBackend,
   type PiWorkerFactory,
-} from "../src/crew/pi-worker";
+} from "../src/crew/pi/pi-worker";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 
 function twikiTeam(): Team {

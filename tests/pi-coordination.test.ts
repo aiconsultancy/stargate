@@ -7,7 +7,7 @@ import { Schema } from "effect";
 import { z } from "zod";
 import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
-import { piCrewExtension } from "../src/crew/pi-extension";
+import { piCrewExtension } from "../src/crew/pi/pi-extension";
 import { CrewError } from "../src/crew/execution/state";
 
 function completion(

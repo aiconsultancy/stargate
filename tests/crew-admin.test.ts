@@ -17,7 +17,10 @@ import {
   type CrewSessions,
 } from "../src/crew/execution/engine";
 import { resumeMessageID } from "../src/crew/message-protocol";
-import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
+import type {
+  PiWorkerBackend,
+  PiWorkerFactory,
+} from "../src/crew/pi/pi-worker";
 import type {
   CrewInspectionAPI,
   EvidenceMessage,

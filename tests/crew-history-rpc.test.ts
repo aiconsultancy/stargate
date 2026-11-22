@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { CrewHistoryRPC } from "../src/crew/history/history-rpc";
-import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
+import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi/pi-worker";
 import { CrewError, CrewState, type Peer } from "../src/crew/execution/state";
 import { type CrewMember, teamSchema } from "../src/crew/team";
 import {
