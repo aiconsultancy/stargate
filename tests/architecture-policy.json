@@ -1095,7 +1095,8 @@
         "src/fleet/protocol.ts",
         "src/fleet/results.ts",
         "src/fleet/store.ts",
-        "src/fleet/reviews.ts"
+        "src/fleet/reviews.ts",
+        "src/dispatch/polling.ts"
       ],
       "public": [
         "src/dispatch/protocol.ts",

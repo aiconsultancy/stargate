@@ -6,7 +6,6 @@
     "src/crew/engine.ts",
     "src/crew/state.ts",
     "src/cron-store.ts",
-    "src/dispatch/dispatcher.ts",
     "src/gateway.ts",
     "src/irc/client.ts",
     "src/irc/ship.ts",
@@ -16,8 +15,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 266,
-  "sourceEdges": 1110,
+  "sourceFiles": 267,
+  "sourceEdges": 1113,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
