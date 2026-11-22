@@ -407,7 +407,11 @@
     ],
     "src/pairing.ts": ["src/pairing.ts", "src/slack/pairing.ts"],
     "src/peers.ts": ["src/peers.ts", "src/gateway/peers.ts"],
-    "src/pi-model.ts": ["src/pi-model.ts", "src/backends/pi/pi-model.ts"],
+    "src/pi-model.ts": [
+      "src/pi-model.ts",
+      "src/backends/pi/pi-model.ts",
+      "src/backends/pi/config.ts"
+    ],
     "src/profile.ts": ["src/profile.ts", "src/app/profile.ts"],
     "src/provision.ts": ["src/provision.ts", "src/app/provision.ts"],
     "src/question-settings.ts": [
@@ -1053,9 +1057,14 @@
       "public": [
         "src/backend.ts",
         "src/backends/factory.ts",
-        "src/backends/opencode/config.ts"
+        "src/backends/opencode/config.ts",
+        "src/pi-model.ts"
       ],
-      "contracts": ["src/backend.ts", "src/backends/opencode/config.ts"],
+      "contracts": [
+        "src/backend.ts",
+        "src/backends/opencode/config.ts",
+        "src/pi-model.ts"
+      ],
       "neighbours": [
         "activity",
         "attachments",

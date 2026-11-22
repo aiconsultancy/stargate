@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { isLoopbackHost } from "../lib/loopback";
 import {
   Effect,
   RegExp as EffectRegExp,
@@ -202,3 +203,31 @@ const absolutePath = Schema.String.check(
 const envName = Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/));
 
 export { absolutePath, envName };
+
+export const secureLocalOrHttpsURL = settingsURL.check(
+  settingsRefine(
+    (value) => {
+      const url = new URL(value);
+      const loopback = isLoopbackHost(url.hostname);
+      return (
+        (url.protocol === "https:" || (url.protocol === "http:" && loopback)) &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash &&
+        !value.includes("?") &&
+        !value.includes("#")
+      );
+    },
+    {
+      message:
+        "Use HTTPS or loopback HTTP without credentials, query, or fragment",
+    },
+  ),
+);
+
+/** Explicit proxy endpoint; the key is an environment reference, never a value. */
+export const piProviderSchema = settingsStruct({
+  baseURL: secureLocalOrHttpsURL,
+  apiKeyEnv: envName,
+});

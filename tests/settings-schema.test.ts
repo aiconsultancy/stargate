@@ -32,7 +32,7 @@ import {
 import { cleanupSchema } from "../src/maintenance/nightly/cleanup-config";
 import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import { nightlyWindowSchema } from "../src/maintenance/nightly/instructions";
-import { piModelSchema, piProviderSchema } from "../src/backends/pi/pi-model";
+import { piModelSchema, piProviderSchema } from "../src/backends/pi/config";
 import { quotaConfigSchema } from "../src/quota/quota";
 import { quotaWatchSchema } from "../src/quota/quota-watch";
 import { decodeSettings } from "../src/config/settings-errors";
