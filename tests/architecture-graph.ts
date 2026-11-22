@@ -622,7 +622,10 @@ export function graphRegressions(
   const largest = Math.max(
     0,
     ...components(graph)
-      .filter((group) => group.length > 1)
+      .filter(
+        (group) =>
+          group.length > 1 || graph.get(group[0] ?? "")?.has(group[0] ?? ""),
+      )
       .map((group) => group.length),
   );
   if (baseline.largestCycle !== undefined && largest > baseline.largestCycle)
@@ -632,5 +635,47 @@ export function graphRegressions(
     failures.push(
       `crew-closure:${closure.length} > ${baseline.crewPlugin.members.length}`,
     );
+  return failures.sort();
+}
+
+/** Freshness is separate from growth checks: improvements must close their
+ * old allowance in the same PR. Module/edge totals and provenance are not caps.
+ */
+export function staleGraphBaseline(
+  graph: SourceGraph,
+  baseline: GraphBaseline & {
+    largestCycle: number;
+    cycleComponents: string[][];
+  },
+  rootFiles = [...graph.keys()].filter((file) => dirname(file) === "src"),
+): string[] {
+  const failures: string[] = [];
+  const roots = new Set(rootFiles);
+  const cycles = new Set(cyclicEdges(graph));
+  const groups = components(graph).filter(
+    (group) =>
+      group.length > 1 || graph.get(group[0] ?? "")?.has(group[0] ?? ""),
+  );
+  const largest = Math.max(0, ...groups.map((group) => group.length));
+  if (largest < baseline.largestCycle)
+    failures.push(`stale:largest-cycle:${largest} < ${baseline.largestCycle}`);
+  const inventory = (items: string[][]) =>
+    items.map((group) => JSON.stringify([...group].sort())).sort();
+  if (
+    JSON.stringify(inventory(groups)) !==
+    JSON.stringify(inventory(baseline.cycleComponents))
+  )
+    failures.push("stale:cycle-components");
+  for (const file of baseline.rootFiles)
+    if (!roots.has(file)) failures.push(`stale:root:${file}`);
+  for (const edge of baseline.cyclicEdges)
+    if (!cycles.has(edge)) failures.push(`stale:cycle:${edge}`);
+  const closure = new Set(importClosure(graph, baseline.crewPlugin.entry));
+  if (closure.size < baseline.crewPlugin.members.length)
+    failures.push(
+      `stale:crew-closure:${closure.size} < ${baseline.crewPlugin.members.length}`,
+    );
+  for (const file of baseline.crewPlugin.members)
+    if (!closure.has(file)) failures.push(`stale:crew-member:${file}`);
   return failures.sort();
 }
