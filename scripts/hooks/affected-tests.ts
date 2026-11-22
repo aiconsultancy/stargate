@@ -252,7 +252,29 @@ try {
   );
 }
 
-if (tests?.length === 0) {
+// Apply the bound only to a successfully computed selected set. Explicit
+// untrusted full runs and computation-error full fallbacks remain unchanged.
+const limitText = process.env["STARGATE_AFFECTED_TEST_LIMIT"] ?? "20";
+const limit = Number(limitText);
+const force = process.env["STARGATE_FORCE_AFFECTED_TESTS"] ?? "0";
+if (
+  !/^(0|[1-9]\d*)$/.test(limitText) ||
+  !Number.isSafeInteger(limit) ||
+  !["0", "1"].includes(force)
+) {
+  console.error(
+    "affected-tests: STARGATE_AFFECTED_TEST_LIMIT must be a nonnegative safe integer; STARGATE_FORCE_AFFECTED_TESTS must be 0 or 1",
+  );
+  process.exitCode = 1;
+} else if (tests && tests.length > limit && force !== "1") {
+  console.log(
+    `affected-tests: ${tests.length} selected files exceed the local limit ${limit}; deferring these tests:\n` +
+      tests.map((path) => `  ${path}`).join("\n"),
+  );
+  console.log(
+    "affected-tests: typecheck and lint remain required; hosted Quality checks runs the full suite. Set STARGATE_FORCE_AFFECTED_TESTS=1 to run this selection locally.",
+  );
+} else if (tests?.length === 0) {
   console.log(
     "affected-tests: no selected tests; full suite runs in hosted Quality checks",
   );

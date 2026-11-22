@@ -61,6 +61,8 @@ async function scenario() {
 function run(root: string, extra: NodeJS.ProcessEnv = {}) {
   const env = { ...process.env };
   delete env["STARGATE_UNTRUSTED_TESTS"];
+  delete env["STARGATE_AFFECTED_TEST_LIMIT"];
+  delete env["STARGATE_FORCE_AFFECTED_TESTS"];
   return spawnSync(process.execPath, [HOOK], {
     cwd: root,
     encoding: "utf8",
@@ -95,6 +97,145 @@ function untrustedPaths(output: string): Set<string> {
 }
 
 describe("affected-tests hook", () => {
+  test.each([
+    [3, true],
+    [2, true],
+    [1, false],
+  ] as const)(
+    "two selected files with limit %s run locally: %s",
+    async (limit, local) => {
+      const root = await scenario();
+      try {
+        await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
+        git(root, "add", "src/leaf.ts");
+        const result = run(root, {
+          STARGATE_AFFECTED_TEST_LIMIT: String(limit),
+        });
+        expect(result.status).toBe(0);
+        expect(await Bun.file(join(root, "ran")).exists()).toBe(local);
+        if (local) {
+          expect(await readFile(join(root, "ran"), "utf8")).toBe(
+            "test\n./tests/commonjs.test.ts\n./tests/dependent.test.ts\n",
+          );
+          expect(result.stdout).not.toContain("deferring these tests");
+        } else {
+          expect(result.stdout).toContain(
+            "2 selected files exceed the local limit 1",
+          );
+          expect(result.stdout).toContain(
+            "  tests/commonjs.test.ts\n  tests/dependent.test.ts",
+          );
+          expect(result.stdout).toContain(
+            "hosted Quality checks runs the full suite",
+          );
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("the default bound defers 21 files and names every deferred test", async () => {
+    const root = await scenario();
+    try {
+      const names = Array.from(
+        { length: 21 },
+        (_, n) => `tests/selected-${n}.test.ts`,
+      ).sort();
+      for (const name of names)
+        await writeFile(join(root, name), "export {};\n");
+      git(root, "add", ...names);
+      const result = run(root);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(
+        "21 selected files exceed the local limit 20",
+      );
+      for (const name of names) expect(result.stdout).toContain(`  ${name}\n`);
+      expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the explicit override runs an over-limit set and preserves failure", async () => {
+    const root = await scenario();
+    try {
+      await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
+      git(root, "add", "src/leaf.ts");
+      const result = run(root, {
+        STARGATE_AFFECTED_TEST_LIMIT: "1",
+        STARGATE_FORCE_AFFECTED_TESTS: "1",
+        RUNNER_EXIT: "7",
+      });
+      expect(result.status).toBe(7);
+      expect(result.stdout).not.toContain("deferring these tests");
+      expect(await readFile(join(root, "ran"), "utf8")).toBe(
+        "test\n./tests/commonjs.test.ts\n./tests/dependent.test.ts\n",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("untrusted full opt-in bypasses the selection bound", async () => {
+    const root = await scenario();
+    try {
+      await writeFile(join(root, "package.json"), "{}\n");
+      git(root, "add", "package.json");
+      const result = run(root, {
+        STARGATE_UNTRUSTED_TESTS: "full",
+        STARGATE_AFFECTED_TEST_LIMIT: "0",
+        RUNNER_EXIT: "7",
+      });
+      expect(result.status).toBe(7);
+      expect(result.stdout).toContain("Running the full suite locally");
+      expect(result.stdout).not.toContain("deferring these tests");
+      expect(await readFile(join(root, "ran"), "utf8")).toBe("test\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("selection errors retain full fallback even with a zero limit", async () => {
+    const root = await scenario();
+    try {
+      await writeFile(join(root, "src/leaf.ts"), "export const = ;\n");
+      git(root, "add", "src/leaf.ts");
+      const result = run(root, {
+        STARGATE_AFFECTED_TEST_LIMIT: "0",
+        RUNNER_EXIT: "7",
+      });
+      expect(result.status).toBe(7);
+      expect(result.stderr).toContain("computation error; running full suite");
+      expect(await readFile(join(root, "ran"), "utf8")).toBe("test\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    { STARGATE_AFFECTED_TEST_LIMIT: "-1" },
+    { STARGATE_AFFECTED_TEST_LIMIT: "1.5" },
+    { STARGATE_AFFECTED_TEST_LIMIT: "01" },
+    { STARGATE_AFFECTED_TEST_LIMIT: "9007199254740992" },
+    { STARGATE_FORCE_AFFECTED_TESTS: "yes" },
+  ])(
+    "invalid bound configuration fails without running tests: %j",
+    async (extra) => {
+      const root = await scenario();
+      try {
+        await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
+        git(root, "add", "src/leaf.ts");
+        const result = run(root, extra);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("must be a nonnegative safe integer");
+        expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("a staged source selects transitive dependent tests from the index", async () => {
     const root = await scenario();
     try {

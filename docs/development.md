@@ -71,6 +71,28 @@ create independent repositories. An empty staged diff, as in CI's
 This is not full-suite evidence. CI's separate `check` step supplies that evidence.
 Use `mise run check` or `make check` to run the full suite locally when needed.
 
+### Local selection limit
+
+Pre-commit runs at most 20 selected test files by default. Set
+`STARGATE_AFFECTED_TEST_LIMIT` to a nonnegative safe integer to change this
+count; zero defers every nonempty selection. A selection at the limit still
+runs. A larger set is listed in full, then deferred to hosted **Quality
+checks**. Typecheck and lint run first and still must pass. The selector
+does not choose an arbitrary subset of a wide selection.
+
+Set `STARGATE_FORCE_AFFECTED_TESTS=1` to run the complete selected set locally
+despite the limit; zero is the default. Invalid values fail without starting
+tests. The limit applies only to a successful selected set. The existing
+`STARGATE_UNTRUSTED_TESTS=full` opt-in and selection-error full-suite fallback
+are unchanged and bypass it. The full `check` command and hosted Quality
+are also unchanged. A deferred test failure is found in hosted Quality,
+not at commit time; auto-merge still waits for that full-suite gate.
+
+The default separates the observed small sets of 2–10 files from sets of
+44–224 files seen during wide changes. It is a file-count bound,
+not a time budget. A single slow test file can still make a commit slow,
+and concurrent small local runs can still contend for host resources.
+
 The pre-push hook runs no tests. It refuses to push a branch behind the freshly
 fetched `origin/main`: rebase first (`git fetch origin && git rebase
 origin/main`), re-run checks, then push. Pushes to `main` itself, branch
