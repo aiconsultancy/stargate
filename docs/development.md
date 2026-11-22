@@ -99,6 +99,34 @@ The quality gate is the root `.oxlintrc.json`; the vendored anti-slop rules
 and code-size thresholds live in the advisory `tools/oxlint/oxlint.config.ts`
 run by `mise run oxlint`.
 
+## Architecture inventory refresh
+
+After source changes reduce the recorded architecture inventory, preview the
+current working tree against an ancestor commit:
+
+```sh
+mise run architecture-refresh -- --base "$(git merge-base origin/main HEAD)"
+```
+
+Preview is the default and does not change the baseline. Add `--write` to the
+same command to format and atomically replace `tests/architecture-baseline.json`.
+Install locked dependencies first (`mise run deps`); writes use the checkout's
+installed Oxfmt. Review and stage the resulting diff. Do not edit guard JSON
+concurrently with the refresh.
+
+The tool reuses the architecture test's graph reader. It measures unstaged and
+untracked source files too. It compares roots, cyclic edges, largest cycle and
+crew-plugin closure size with the baseline at `--base`, a full 40-character
+ancestor commit hash. Module and edge totals are informational, not caps.
+Provenance, unknown fields and `largeFiles` remain unchanged. Remove resolved
+working-tree exceptions explicitly before refreshing; new, stale or duplicate
+exceptions fail validation. The tool cannot grant permissions, approve new
+exceptions or raise base caps. It does not replace the architecture guards or
+the separate source-size check.
+
+Use optional `--output PATH` for a JSON receipt outside the checkout, including
+in preview mode. Unknown and repeated options are errors.
+
 ## Dependency updates
 
 Dependabot checks Bun dependencies and pinned GitHub Actions daily.
