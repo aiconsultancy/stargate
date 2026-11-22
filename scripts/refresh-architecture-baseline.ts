@@ -30,7 +30,6 @@ import {
   sourceRootFiles,
   type ArchitecturePolicy,
 } from "../tests/architecture-graph";
-
 interface Inventory {
   sourceCommit: string;
   measurementStatus?: string;
@@ -51,7 +50,7 @@ const values = new Map<string, string>();
 for (let index = 0; index < argv.length; index++) {
   const argument = argv[index];
   if (!argument) throw new Error("Missing argument");
-  if (argument === "--write") {
+  if (argument === "--write" || argument === "--prune-stale") {
     if (flags.has(argument)) throw new Error(`Duplicate option: ${argument}`);
     flags.add(argument);
   } else if (["--root", "--base", "--output"].includes(argument)) {
@@ -65,7 +64,7 @@ const rootArg = values.get("--root");
 const baseArg = values.get("--base");
 if (!rootArg || !baseArg || !/^[a-f0-9]{40}$/.test(baseArg)) {
   throw new Error(
-    "Usage: bun scripts/refresh-architecture-baseline.ts --root PATH --base COMMIT [--output PATH] [--write]",
+    "Usage: bun scripts/refresh-architecture-baseline.ts --root PATH --base COMMIT [--output PATH] [--write] [--prune-stale]",
   );
 }
 const root = await realpath(resolve(rootArg));
@@ -149,7 +148,8 @@ subset(inventory.cyclicEdges, baseline.cyclicEdges, "cycle");
 if (new Set(working.exceptions).size !== working.exceptions.length)
   errors.push("duplicate-exception");
 subset(violations, working.exceptions, "new");
-subset(working.exceptions, violations, "stale");
+if (!flags.has("--prune-stale"))
+  subset(working.exceptions, violations, "stale");
 if (inventory.largestCycle > baseline.largestCycle)
   errors.push(
     `largest-cycle:${inventory.largestCycle} > ${baseline.largestCycle}`,
@@ -161,10 +161,17 @@ if (inventory.crewPlugin.members.length > closureCap)
   );
 if (errors.length)
   throw new Error(JSON.stringify({ errors: errors.sort() }, null, 2));
+const measuredExceptions = new Set(violations);
+const prunedExceptions = flags.has("--prune-stale")
+  ? working.exceptions.filter((item) => !measuredExceptions.has(item))
+  : [];
+const exceptions = flags.has("--prune-stale")
+  ? working.exceptions.filter((item) => measuredExceptions.has(item))
+  : working.exceptions;
 const next: Inventory = {
   ...working,
   ...inventory,
-  exceptions: working.exceptions,
+  exceptions,
 };
 if (flags.has("--write")) {
   const formatter = Bun.spawn(
@@ -218,7 +225,8 @@ const result = {
   flags: [...flags].sort(),
   inventory,
   cycleComponents,
-  exceptions: working.exceptions,
+  exceptions,
+  ...(flags.has("--prune-stale") ? { prunedExceptions } : {}),
   violations,
   errors,
 };
@@ -234,7 +242,8 @@ console.log(
     largestCycle: inventory.largestCycle,
     cyclicEdges: inventory.cyclicEdges.length,
     crewClosure: inventory.crewPlugin.members.length,
-    exceptions: working.exceptions.length,
+    exceptions: exceptions.length,
+    ...(flags.has("--prune-stale") ? { prunedExceptions } : {}),
     errors,
   }),
 );
