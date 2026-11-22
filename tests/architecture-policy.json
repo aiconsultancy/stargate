@@ -2,6 +2,26 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "aliases": {
+    "src/crew/reporting.ts": [
+      "src/crew/reporting.ts",
+      "src/crew/reporting/reporting.ts"
+    ],
+    "src/crew/report-rpc.ts": [
+      "src/crew/report-rpc.ts",
+      "src/crew/reporting/report-rpc.ts"
+    ],
+    "src/crew/member-activity.ts": [
+      "src/crew/member-activity.ts",
+      "src/crew/reporting/member-activity.ts"
+    ],
+    "src/crew/journal.ts": [
+      "src/crew/journal.ts",
+      "src/crew/reporting/journal.ts"
+    ],
+    "src/crew/fleet-status.ts": [
+      "src/crew/fleet-status.ts",
+      "src/crew/reporting/fleet-status.ts"
+    ],
     "src/crew/questions.ts": [
       "src/crew/questions.ts",
       "src/crew/questions/questions.ts"

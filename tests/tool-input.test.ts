@@ -9,7 +9,7 @@ import {
   historyInputBranches,
   historyInputSchema,
 } from "../src/crew/history/history";
-import { journalInputSchema } from "../src/crew/journal";
+import { journalInputSchema } from "../src/crew/reporting/journal";
 import {
   messageOpenCodeInput,
   messagePortableSchema,

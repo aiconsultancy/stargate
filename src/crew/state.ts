@@ -6,11 +6,11 @@ import { redactCredentials } from "../lib/credentials";
 import { UpdateNotices } from "../maintenance/update-notice";
 import { canExpandCrew } from "./identity";
 import { IrcSessions } from "./irc";
-import { MemberActivityStore } from "./member-activity";
+import { MemberActivityStore } from "./reporting/member-activity";
 import { MailRoutes } from "./messaging";
 import { CrewError, queuedPendingTask, reportTask } from "./pending";
 export { CrewError } from "./pending";
-import { ReportingStore } from "./reporting";
+import { ReportingStore } from "./reporting/reporting";
 export type CrewID = string;
 export type Peer = {
   crewID: CrewID;

@@ -9,7 +9,7 @@ import {
   type SessionMessageInfo,
 } from "@opencode/client";
 import { Schema } from "effect";
-import { CrewReporting } from "../../crew/report-rpc";
+import { CrewReporting } from "../../crew/reporting/report-rpc";
 import {
   clipHistory,
   HISTORY_PARTS,

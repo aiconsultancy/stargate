@@ -29,7 +29,7 @@ import { CrewEngine } from "./engine";
 import { CrewHistory, historyInputBranches } from "./history/history";
 import { workingAgreementContext } from "./instructions";
 import { CrewIrc } from "./irc-rpc";
-import { journalInputSchema } from "./journal";
+import { journalInputSchema } from "./reporting/journal";
 import { CrewMaintenance } from "./controls/maintenance";
 import {
   messageOpenCodeInput,
@@ -52,7 +52,7 @@ import {
 } from "./questions/question-handoff";
 import { CrewQuestions, crewQuestionInputSchema } from "./questions/questions";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
-import { CrewReporting } from "./report-rpc";
+import { CrewReporting } from "./reporting/report-rpc";
 import { CrewError } from "./state";
 import { objectToolInput } from "./input/tool-input";
 import { CrewWaiting, waitingInputSchema } from "./controls/waiting";

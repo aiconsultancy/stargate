@@ -21,8 +21,8 @@ import {
   type CrewSession,
   type CrewSessions,
 } from "../src/crew/engine";
-import { fleetCrewStatusSchema } from "../src/crew/fleet-status";
-import { journalInputSchema } from "../src/crew/journal";
+import { fleetCrewStatusSchema } from "../src/crew/reporting/fleet-status";
+import { journalInputSchema } from "../src/crew/reporting/journal";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import plugin from "../src/crew/plugin";
 import {
