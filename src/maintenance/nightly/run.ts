@@ -14,8 +14,8 @@ import {
   writeMaintenanceDrain,
 } from "../maintenance-drain";
 import { isAllowedChannel } from "../../gateway/routing";
-import { type CleanupResult, runCleanup } from "./cleanup";
-import { cleanupProtection } from "./cleanup-protection";
+import { type CleanupResult, runCleanup } from "./cleanup/cleanup";
+import { cleanupProtection } from "./cleanup/cleanup-protection";
 import { defaultCronHorizonMinutes, type MaintenanceConfig } from "./config";
 import { type Crew, crewDatabase, discoverCrews } from "./crews";
 import { type Clock, waitForMaintenanceDrain } from "./schedule/drain";

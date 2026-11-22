@@ -21,11 +21,11 @@ import {
   runCleanup as cleanup,
   cleanupPathUse,
   scratchBatch,
-} from "../src/maintenance/nightly/cleanup";
+} from "../src/maintenance/nightly/cleanup/cleanup";
 import {
   cleanupResultSchema,
   cleanupSchema,
-} from "../src/maintenance/nightly/cleanup-config";
+} from "../src/maintenance/nightly/cleanup/cleanup-config";
 import {
   type CommandRunner,
   processRunner,

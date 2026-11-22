@@ -29,7 +29,7 @@ import {
   mentionNameSchema,
   textMentionRuleSchema,
 } from "../src/shared/mentions";
-import { cleanupSchema } from "../src/maintenance/nightly/cleanup-config";
+import { cleanupSchema } from "../src/maintenance/nightly/cleanup/cleanup-config";
 import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import { nightlyWindowSchema } from "../src/maintenance/nightly/instructions";
 import { piModelSchema, piProviderSchema } from "../src/backends/pi/config";

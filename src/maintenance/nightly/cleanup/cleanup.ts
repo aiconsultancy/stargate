@@ -9,7 +9,7 @@ import type {
   CleanupResult,
   CleanupSettings,
 } from "./cleanup-config";
-import type { CommandResult, CommandRunner } from "./exec";
+import type { CommandResult, CommandRunner } from "../exec";
 
 export type {
   CleanupItem,

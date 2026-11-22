@@ -1,7 +1,7 @@
 import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { cleanupResultSchema } from "../cleanup-config";
+import { cleanupResultSchema } from "../cleanup/cleanup-config";
 import { type Reason, reasons } from "../exec";
 import { maintenanceDirectory } from "../paths";
 
