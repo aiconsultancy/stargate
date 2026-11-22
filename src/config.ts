@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { Result, Schema, SchemaTransformation } from "effect";
 import { crewActivitySchema } from "./activity/activity";
 import { apiV1ConfigSchema } from "./dashboard/api/v1/config";
@@ -28,6 +28,8 @@ import {
 import { quotaWatchSchema } from "./quota/quota-watch";
 import { decodeSettings } from "./config/settings-errors";
 import {
+  absolutePath,
+  envName,
   settingsCheck,
   settingsDefault,
   settingsDiscriminatedUnion,
@@ -41,10 +43,8 @@ import {
 import { transcriptionSchema } from "./transcription/transcription";
 import { waitingSchema } from "./gateway/waiting";
 
-const absolutePath = Schema.String.check(
-  settingsRefine(isAbsolute, { message: "Use an absolute path" }),
-);
-const envName = Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/));
+import { opencodeBackendSchema } from "./backends/opencode/config";
+
 const userRule = Schema.Union([
   Schema.Literal("*"),
   Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
@@ -320,41 +320,7 @@ const pairingSchema = settingsStruct({
 });
 
 export const backendSchema = settingsDiscriminatedUnion("type", [
-  settingsStruct({
-    type: Schema.Literal("opencode"),
-    url: settingsURL.check(
-      settingsRefine(
-        (value) => ["http:", "https:"].includes(new URL(value).protocol),
-        { message: "Invalid input" },
-      ),
-    ),
-    directory: absolutePath,
-    headersEnv: settingsRecord(Schema.String, envName).pipe(
-      settingsDefault({}),
-    ),
-    sessionID: Schema.optional(
-      Schema.String.check(Schema.isMaxCodePoints(256)).check(
-        settingsPattern(/^ses_[A-Za-z0-9]+$/),
-      ),
-    ),
-    agent: Schema.optional(Schema.String.check(Schema.isMinCodePoints(1))),
-    enforcePermissions: Schema.optional(Schema.Boolean),
-    model: Schema.optional(
-      settingsStruct({
-        providerID: Schema.String.check(Schema.isMinCodePoints(1)),
-        id: Schema.String.check(Schema.isMinCodePoints(1)),
-      }),
-    ),
-    permissions: Schema.mutable(
-      Schema.Array(
-        settingsStruct({
-          action: Schema.String.check(Schema.isMinCodePoints(1)),
-          resource: Schema.String.check(Schema.isMinCodePoints(1)),
-          effect: Schema.Literals(["allow", "deny", "ask"]),
-        }),
-      ),
-    ).pipe(settingsDefault([{ action: "*", resource: "*", effect: "deny" }])),
-  }),
+  opencodeBackendSchema,
   piDurableBackendSchema,
   claudeBackendSchema,
   codexBackendSchema,

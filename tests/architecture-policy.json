@@ -1041,10 +1041,15 @@
         "src/backends/pi-history.ts",
         "src/input-boundary.ts",
         "src/input-origin.ts",
-        "src/pi-model.ts"
+        "src/pi-model.ts",
+        "src/backends/opencode/config.ts"
       ],
-      "public": ["src/backend.ts", "src/backends/factory.ts"],
-      "contracts": ["src/backend.ts"],
+      "public": [
+        "src/backend.ts",
+        "src/backends/factory.ts",
+        "src/backends/opencode/config.ts"
+      ],
+      "contracts": ["src/backend.ts", "src/backends/opencode/config.ts"],
       "neighbours": [
         "activity",
         "attachments",

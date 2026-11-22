@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import {
   Effect,
   RegExp as EffectRegExp,
@@ -194,3 +195,10 @@ export const settingsEmail = Schema.String.check(
 
 /** Safe, input-free issues for mixed configuration consumers. */
 export const settingsIssues = SchemaIssue.makeFormatterStandardSchemaV1();
+
+const absolutePath = Schema.String.check(
+  settingsRefine(isAbsolute, { message: "Use an absolute path" }),
+);
+const envName = Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/));
+
+export { absolutePath, envName };
