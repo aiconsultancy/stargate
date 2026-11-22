@@ -449,7 +449,8 @@
     "src/gateway.ts": ["src/gateway.ts", "src/gateway/gateway.ts"],
     "src/health-config.ts": [
       "src/health-config.ts",
-      "src/health/health-config.ts"
+      "src/health/health-config.ts",
+      "src/health/config.ts"
     ],
     "src/health-host.ts": ["src/health-host.ts", "src/health/health-host.ts"],
     "src/health.ts": ["src/health.ts", "src/health/health.ts"],

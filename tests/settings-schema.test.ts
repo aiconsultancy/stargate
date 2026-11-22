@@ -24,7 +24,7 @@ import { cronOperationSchema } from "../src/cron/control";
 import { cronjobsSchema } from "../src/cron/job-config";
 import { fleetControlSchema } from "../src/fleet/protocol";
 import { fleetPolicySchema } from "../src/fleet/fleet-policy";
-import { healthConfigSchema } from "../src/health/health-config";
+import { healthConfigSchema } from "../src/health/config";
 import {
   mentionNameSchema,
   textMentionRuleSchema,

@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open, readdir, stat, statfs } from "node:fs/promises";
 import { cpus, loadavg, totalmem, uptime } from "node:os";
 import { z } from "zod";
-import type { HealthConfig } from "./health-config";
+import type { HealthConfig } from "./config";
 
 const metric = z.number().finite().nonnegative();
 const diskLabel = z.enum(["root", "stargate", "opencode", "crew"]);
