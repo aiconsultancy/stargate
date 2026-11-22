@@ -2,6 +2,20 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "aliases": {
+    "src/crew/waiting.ts": [
+      "src/crew/waiting.ts",
+      "src/crew/controls/waiting.ts"
+    ],
+    "src/crew/post.ts": ["src/crew/post.ts", "src/crew/controls/post.ts"],
+    "src/crew/notifications.ts": [
+      "src/crew/notifications.ts",
+      "src/crew/controls/notifications.ts"
+    ],
+    "src/crew/models.ts": ["src/crew/models.ts", "src/crew/controls/models.ts"],
+    "src/crew/maintenance.ts": [
+      "src/crew/maintenance.ts",
+      "src/crew/controls/maintenance.ts"
+    ],
     "src/nightly/archive.ts": [
       "src/nightly/archive.ts",
       "src/maintenance/nightly/archive.ts",

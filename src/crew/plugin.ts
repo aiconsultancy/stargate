@@ -30,16 +30,16 @@ import { CrewHistory, historyInputBranches } from "./history/history";
 import { workingAgreementContext } from "./instructions";
 import { CrewIrc } from "./irc-rpc";
 import { journalInputSchema } from "./journal";
-import { CrewMaintenance } from "./maintenance";
+import { CrewMaintenance } from "./controls/maintenance";
 import {
   messageOpenCodeInput,
   messagePortableSchema,
 } from "./message-tool-input";
 import { dmInputSchema, mailInputBranches } from "./messaging";
-import { CrewModels, modelToolInputSchema } from "./models";
+import { CrewModels, modelToolInputSchema } from "./controls/models";
 import { nativeWait } from "./native-wait";
-import { CrewNotifications } from "./notifications";
-import { CrewPost } from "./post";
+import { CrewNotifications } from "./controls/notifications";
+import { CrewPost } from "./controls/post";
 import { effectProjectToolInput, projectToolInput } from "./project-options";
 import { CrewProjects } from "./workspace/projects";
 import {
@@ -52,7 +52,7 @@ import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
 import { CrewError } from "./state";
 import { objectToolInput } from "./tool-input";
-import { CrewWaiting, waitingInputSchema } from "./waiting";
+import { CrewWaiting, waitingInputSchema } from "./controls/waiting";
 
 // greybeard: configured shared workers; only explicit DM wakes a captain.
 // Host tools and the general HTTP API are not an OS sandbox.

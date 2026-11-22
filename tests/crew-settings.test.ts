@@ -7,7 +7,10 @@ import { Result, Schema } from "effect";
 import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
 import { crewInputSchema, crewOptionsSchema } from "../src/crew/engine";
 import { canExpandCrew, crewFingerprint } from "../src/crew/identity";
-import { modelInputSchema, modelToolInputSchema } from "../src/crew/models";
+import {
+  modelInputSchema,
+  modelToolInputSchema,
+} from "../src/crew/controls/models";
 import { projectsSchema } from "../src/crew/project-options";
 import { inspectInputSchema } from "../src/crew/reconciliation";
 import { CrewState } from "../src/crew/state";

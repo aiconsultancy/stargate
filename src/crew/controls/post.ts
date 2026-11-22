@@ -3,9 +3,9 @@ import {
   CaptainPostError,
   postInputSchema,
   runCaptainPost,
-} from "../captain-post/captain-post";
-import type { CrewCaller } from "./engine";
-import { CrewError } from "./state";
+} from "../../captain-post/captain-post";
+import type { CrewCaller } from "../engine";
+import { CrewError } from "../state";
 
 interface PostAuthority {
   options: {

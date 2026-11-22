@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { CrewMaintenance } from "../src/crew/maintenance";
+import { CrewMaintenance } from "../src/crew/controls/maintenance";
 import {
   maintenanceWindowMs,
   TurnBudget,

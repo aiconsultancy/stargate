@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { botSchema } from "../src/config";
-import { CrewWaiting } from "../src/crew/waiting";
+import { CrewWaiting } from "../src/crew/controls/waiting";
 import {
   botDisplayName,
   resolveWaiting,

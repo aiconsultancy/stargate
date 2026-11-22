@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { configSchema } from "../src/config";
 import type { CrewCaller } from "../src/crew/engine";
-import { CrewNotifications } from "../src/crew/notifications";
+import { CrewNotifications } from "../src/crew/controls/notifications";
 import { CrewError } from "../src/crew/state";
 import {
   type NotificationDependencies,

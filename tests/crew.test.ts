@@ -24,9 +24,9 @@ import {
   type CrewSessions,
   type CrewWaitOptions,
 } from "../src/crew/engine";
-import { CrewMaintenance } from "../src/crew/maintenance";
+import { CrewMaintenance } from "../src/crew/controls/maintenance";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
-import { CrewModels, type ModelSessions } from "../src/crew/models";
+import { CrewModels, type ModelSessions } from "../src/crew/controls/models";
 import { nativeWait } from "../src/crew/native-wait";
 import plugin from "../src/crew/plugin";
 import type {
@@ -41,7 +41,7 @@ import {
   type Team,
   teamSchema,
 } from "../src/crew/team";
-import { CrewWaiting } from "../src/crew/waiting";
+import { CrewWaiting } from "../src/crew/controls/waiting";
 import { Gateway } from "../src/gateway/gateway";
 import { openStore } from "../src/app/open-store";
 import {

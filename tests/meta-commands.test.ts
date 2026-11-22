@@ -6,7 +6,7 @@ import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { botSchema } from "../src/config";
-import { CrewWaiting } from "../src/crew/waiting";
+import { CrewWaiting } from "../src/crew/controls/waiting";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { MetaOptions } from "../src/meta-commands/meta-commands";

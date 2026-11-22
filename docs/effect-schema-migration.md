@@ -156,7 +156,7 @@ that owns their production boundary, rather than a separate test-only PR.
 
 13. Files and delivery. Migrate `attachments.ts`, `slack-files.ts`,
     `captain-post.ts`, the remaining plan schema in `irc/delivery.ts`,
-    `crew/post.ts` and the coupled post registration in `crew/plugin.ts`.
+    `crew/controls/post.ts` and the coupled post registration in `crew/plugin.ts`.
 14. Cron operations and records. Migrate `cron-control.ts`, `cron-store.ts`,
     `cron-ui.ts`, `cron.ts` and `cronjob-files.ts`.
 15. Status, quota and notifications. Migrate `crew-status.ts`, `status-report.ts`,

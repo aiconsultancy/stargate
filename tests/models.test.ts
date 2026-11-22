@@ -4,7 +4,7 @@ import {
   CrewModels,
   type ModelAuthority,
   type ModelSessions,
-} from "../src/crew/models";
+} from "../src/crew/controls/models";
 import { crewPermissions } from "../src/crew/policy";
 import { CrewError } from "../src/crew/state";
 import { defaultTeam } from "../src/crew/team";
