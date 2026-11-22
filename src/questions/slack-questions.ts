@@ -261,7 +261,7 @@ export class SlackQuestionControls {
     const bot = this.bot();
     if (!bot) return;
     const key = botKey(bot, this.identity);
-    const offer = this.store.questionByToken(key, token);
+    const offer = this.store.questions.questionByToken(key, token);
     if (offer?.state !== "offered" || offer.expires <= Date.now()) return;
     const job = this.store.jobByInput(key, offer.inputID);
     if (
@@ -280,7 +280,7 @@ export class SlackQuestionControls {
 
   private bound(token: string) {
     const owner = this.owner(token);
-    const binding = this.store.slackQuestion(token);
+    const binding = this.store.questions.slackQuestion(token);
     if (!owner || !binding) return;
     try {
       const question = Schema.decodeUnknownSync(nativeQuestionSchema)(
@@ -362,7 +362,7 @@ export class SlackQuestionControls {
     );
     if (
       !open() ||
-      !this.store.advanceSlackQuestion(
+      !this.store.questions.advanceSlackQuestion(
         current.offer.token,
         current.binding.revision,
         text,
@@ -443,7 +443,7 @@ export class SlackQuestionControls {
     );
     if (typeof ts !== "string" || !/^\d{1,16}\.\d{1,6}$/.test(ts))
       throw new Error("Clarification publication unconfirmed");
-    this.store.saveSlackQuestion(offer.token, ts, trusted);
+    this.store.questions.saveSlackQuestion(offer.token, ts, trusted);
   }
 
   async interactive(

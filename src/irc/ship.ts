@@ -1478,7 +1478,7 @@ export class IrcShip {
       !input.fleet &&
       questionHuman(this.config, input.user, client.fold)
     )
-      this.store.recordQuestionSource(input);
+      this.store.questions.recordQuestionSource(input);
     const quietMs = this.config.access.humanMessageDebounceMs ?? 0;
     const trackThreads =
       member.role === "captain" &&

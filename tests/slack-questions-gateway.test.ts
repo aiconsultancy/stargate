@@ -134,7 +134,7 @@ test.each([false, true])(
     await gateway.pollQuestions(AbortSignal.timeout(3000));
     expect(posts).toHaveLength(1);
     expect(posts[0]?.content).toBeDefined();
-    const offer = store.questionOffers(gateway.key)[0];
+    const offer = store.questions.questionOffers(gateway.key)[0];
     if (!offer) throw new Error("Missing offered question");
     const answerEvent = event(
       `<@UBOT> answer ${offer.token}${multiple ? ":0" : ""} go`,
@@ -144,7 +144,7 @@ test.each([false, true])(
     expect(await gateway.receive(answerEvent)).toBe(false);
     if (multiple) {
       expect(answers).toEqual([]);
-      expect(store.slackQuestion(offer.token)?.revision).toBe(1);
+      expect(store.questions.slackQuestion(offer.token)?.revision).toBe(1);
       const staleAnswer = event(
         `<@UBOT> answer ${offer.token}:0 stale`,
         "5.000",

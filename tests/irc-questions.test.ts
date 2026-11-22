@@ -378,14 +378,15 @@ for (const multiline of [false, true]) {
       f.send("captain: investigate", "m1");
       await until(
         () =>
-          f.store.questionOffers(f.ships[0]?.registrations[0]?.key ?? "")[0]
-            ?.notified === 1,
+          f.store.questions.questionOffers(
+            f.ships[0]?.registrations[0]?.key ?? "",
+          )[0]?.notified === 1,
         5000,
         "native question offered",
       );
       const primary = f.ships[0]?.registrations[0];
       if (!primary) throw new Error("No primary");
-      const offer = f.store.questionOffers(primary.key)[0];
+      const offer = f.store.questions.questionOffers(primary.key)[0];
       if (!offer) throw new Error("No offer");
       const wire = [
         ...lineOf(f.server.received("captain"), "PRIVMSG"),
@@ -544,7 +545,7 @@ test("parser-bypassed open access never makes an unknown authenticated untagged 
     await gateway.pollQuestions(AbortSignal.timeout(3000));
   const key = f.ships[0]?.registrations[0]?.key;
   if (!key) throw new Error("No registration");
-  expect(f.store.questionOffers(key)).toEqual([]);
+  expect(f.store.questions.questionOffers(key)).toEqual([]);
   const at = f.send(
     `captain: answer ${"a".repeat(32)} 1`,
     "bot-answer",
@@ -566,11 +567,11 @@ test("removing explicit human authority blocks untagged bot and original-human r
   const key = f.ships[0]?.registrations[0]?.key;
   if (!key) throw new Error("No registration");
   await until(
-    () => f.store.questionOffers(key)[0]?.notified === 1,
+    () => f.store.questions.questionOffers(key)[0]?.notified === 1,
     5000,
     "owned question published",
   );
-  const offer = f.store.questionOffers(key)[0];
+  const offer = f.store.questions.questionOffers(key)[0];
   if (!offer) throw new Error("No offer");
   await f.dropHumanPolicy();
   f.send(`captain: answer ${offer.token} 1`, "bot-reply", "service-bot", "m1");
@@ -582,7 +583,9 @@ test("removing explicit human authority blocks untagged bot and original-human r
   );
   await f.received(at);
   expect(f.replies).toEqual([]);
-  expect(f.store.questionByToken(key, offer.token)?.state).toBe("offered");
+  expect(f.store.questions.questionByToken(key, offer.token)?.state).toBe(
+    "offered",
+  );
 }, 10_000);
 
 test("ordinary answer requests remain prompts when questions are disabled", async () => {
@@ -607,11 +610,11 @@ for (const target of ["captain", "CAP{TAIN}"]) {
     const key = f.ships[0]?.registrations[0]?.key;
     if (!key) throw new Error("No registration");
     await until(
-      () => f.store.questionOffers(key)[0]?.notified === 1,
+      () => f.store.questions.questionOffers(key)[0]?.notified === 1,
       5000,
       "question offered to current nick",
     );
-    const offer = f.store.questionOffers(key)[0];
+    const offer = f.store.questions.questionOffers(key)[0];
     if (!offer) throw new Error("No offer");
     expect(
       f.server
@@ -642,11 +645,11 @@ test("question replies resolve durable own-publication anchors after transport r
   const key = f.ships[0]?.registrations[0]?.key;
   if (!key) throw new Error("No registration");
   await until(
-    () => f.store.questionOffers(key)[0]?.notified === 1,
+    () => f.store.questions.questionOffers(key)[0]?.notified === 1,
     5000,
     "question published",
   );
-  const offer = f.store.questionOffers(key)[0];
+  const offer = f.store.questions.questionOffers(key)[0];
   if (!offer) throw new Error("No offer");
   const received = lineOf(f.server.received("captain"), "PRIVMSG").find((m) =>
     m.params[1]?.includes("OpenCode needs clarification"),
@@ -708,11 +711,11 @@ test("crew question publication anchors survive a new IRC connection", async () 
   const worker = f.ships[0]?.registrations.find((r) => r.role === "crew");
   if (!worker) throw new Error("No crew");
   await until(
-    () => f.store.questionOffers(worker.key)[0]?.notified === 1,
+    () => f.store.questions.questionOffers(worker.key)[0]?.notified === 1,
     5000,
     "crew question offered",
   );
-  const offer = f.store.questionOffers(worker.key)[0];
+  const offer = f.store.questions.questionOffers(worker.key)[0];
   if (!offer) throw new Error("No offer");
   const db = new Database(f.path, { readonly: true });
   const questionID = db

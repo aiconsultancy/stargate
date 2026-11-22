@@ -371,40 +371,42 @@ type QuestionStore = {
   readonly backgroundCases: BackgroundCases;
   session(conversation: string): string | undefined;
   jobByInput(botKey: string, input: string): Job | null;
-  ownsQuestionSource(job: Job): boolean;
-  recordedQuestionSource(job: Job): boolean;
   offerQuestion(offer: QuestionOffer): QuestionOffer | undefined;
-  questionByToken(botKey: string, token: string): QuestionOffer | undefined;
-  questionOffers(
-    botKey: string,
-    includeRunningOutcomes?: boolean,
-  ): QuestionOffer[];
-  activeQuestionSessions(botKey: string, pinned?: string): string[];
-  renewQuestion(
-    token: string,
-    replacement: string,
-    now: number,
-  ): QuestionOffer | undefined;
-  attemptQuestion(token: string, now: number): boolean;
-  claimExpiredQuestion(token: string, now: number): boolean;
-  claimQuestionStop(offer: QuestionOffer): boolean;
-  questionOutcome(
-    token: string,
-    outcome: NonNullable<QuestionOffer["outcome"]>,
-  ): void;
-  questionOutcomeNotified(token: string): void;
-  retireQuestion(token: string): void;
-  closeQuestion(token: string): void;
-  questionNotified(token: string): void;
-  questionRecovering(token: string): void;
-  questionSourceCancelled(offer: QuestionOffer): boolean;
   failQuestionRecovery(offer: QuestionOffer): void;
   finishQuestionRecovery(offer: QuestionOffer): void;
-  startQuestionPublication(
-    botKey: string,
-    token: string,
-    timeoutMs?: number,
-  ): QuestionOffer | undefined;
+  readonly questions: {
+    ownsQuestionSource(job: Job): boolean;
+    recordedQuestionSource(job: Job): boolean;
+    questionByToken(botKey: string, token: string): QuestionOffer | undefined;
+    questionOffers(
+      botKey: string,
+      includeRunningOutcomes?: boolean,
+    ): QuestionOffer[];
+    activeQuestionSessions(botKey: string, pinned?: string): string[];
+    renewQuestion(
+      token: string,
+      replacement: string,
+      now: number,
+    ): QuestionOffer | undefined;
+    attemptQuestion(token: string, now: number): boolean;
+    claimExpiredQuestion(token: string, now: number): boolean;
+    claimQuestionStop(offer: QuestionOffer): boolean;
+    questionOutcome(
+      token: string,
+      outcome: NonNullable<QuestionOffer["outcome"]>,
+    ): void;
+    questionOutcomeNotified(token: string): void;
+    retireQuestion(token: string): void;
+    closeQuestion(token: string): void;
+    questionNotified(token: string): void;
+    questionRecovering(token: string): void;
+    questionSourceCancelled(offer: QuestionOffer): boolean;
+    startQuestionPublication(
+      botKey: string,
+      token: string,
+      timeoutMs?: number,
+    ): QuestionOffer | undefined;
+  };
 };
 
 /**
@@ -490,7 +492,7 @@ export class Questions {
       job.deferDelivery ||
       job.sender ||
       job.fleet ||
-      !this.store.ownsQuestionSource(job) ||
+      !this.store.questions.ownsQuestionSource(job) ||
       !this.port()?.human(job.user) ||
       !(this.port()?.authorized?.(job) ?? this.allowed(job)) ||
       (this.backend.sessionID ?? this.store.session(job.conversation)) !==
@@ -512,7 +514,7 @@ export class Questions {
       job.deferDelivery ||
       job.sender ||
       job.fleet ||
-      !this.store.recordedQuestionSource(job) ||
+      !this.store.questions.recordedQuestionSource(job) ||
       (this.backend.sessionID ?? this.store.session(job.conversation)) !==
         offer.sessionID
     )
@@ -523,12 +525,12 @@ export class Questions {
   /** New holds need pending forms; established holds preserve their exact input. */
   async recover(signal: AbortSignal): Promise<string[]> {
     const retained: string[] = [];
-    for (const offer of this.store.questionOffers(this.key, true)) {
+    for (const offer of this.store.questions.questionOffers(this.key, true)) {
       // A form may disappear while its original input still runs. Preserve an
       // established hold through that unknown interval without restoring any
       // permission to answer or notify the original requester.
       if (this.establishedWaiter(offer)) {
-        this.store.questionRecovering(offer.token);
+        this.store.questions.questionRecovering(offer.token);
         retained.push(offer.inputID);
         continue;
       }
@@ -543,7 +545,7 @@ export class Questions {
           signal,
         )
       ) {
-        this.store.questionRecovering(offer.token);
+        this.store.questions.questionRecovering(offer.token);
         retained.push(offer.inputID);
       }
     }
@@ -552,7 +554,7 @@ export class Questions {
 
   /** Called only for a newly received, authenticated Stop, never by recovery. */
   async stop(jobID: number, signal: AbortSignal): Promise<boolean> {
-    const offer = this.store
+    const offer = this.store.questions
       .questionOffers(this.key)
       .find((o) => o.jobID === jobID && o.recovering);
     if (!offer || !this.backend.interruptInput) return false;
@@ -560,13 +562,13 @@ export class Questions {
     const port = this.port();
     if (
       !job ||
-      !this.store.questionSourceCancelled(offer) ||
+      !this.store.questions.questionSourceCancelled(offer) ||
       !port?.human(job.user) ||
       !(port.authorized?.(job) ?? this.allowed(job))
     )
       return false;
     signal.throwIfAborted();
-    if (!this.store.claimQuestionStop(offer)) return false;
+    if (!this.store.questions.claimQuestionStop(offer)) return false;
     // The adapter revalidates exact input ownership. Never fall back to a
     // whole-session interruption, and never replay an uncertain Stop on boot.
     await this.backend.interruptInput(offer.sessionID, offer.inputID, signal);
@@ -782,13 +784,16 @@ export class Questions {
   }
 
   private async pollOwned(signal: AbortSignal) {
-    const offers = this.store.questionOffers(this.key);
+    const offers = this.store.questions.questionOffers(this.key);
     const tokens = new Set(offers.map((o) => o.token));
     for (const token of this.noticeFailures.keys())
       if (!tokens.has(token)) this.noticeFailures.delete(token);
     const sessions = [
       ...new Set([
-        ...this.store.activeQuestionSessions(this.key, this.backend.sessionID),
+        ...this.store.questions.activeQuestionSessions(
+          this.key,
+          this.backend.sessionID,
+        ),
         ...offers.map((o) => o.sessionID),
       ]),
     ].sort();
@@ -833,15 +838,15 @@ export class Questions {
 
   private async pollSession(session: string, signal: AbortSignal) {
     let missingSession = false;
-    for (const offer of this.store
+    for (const offer of this.store.questions
       .questionOffers(this.key)
       .filter((o) => o.sessionID === session)) {
-      if (this.store.questionSourceCancelled(offer)) {
+      if (this.store.questions.questionSourceCancelled(offer)) {
         if (!this.inFlight.has(offer.token)) {
           if (offer.state === "attempted" && !offer.outcome)
-            this.store.questionOutcome(offer.token, "uncertain");
-          this.store.questionOutcomeNotified(offer.token);
-          this.store.retireQuestion(offer.token);
+            this.store.questions.questionOutcome(offer.token, "uncertain");
+          this.store.questions.questionOutcomeNotified(offer.token);
+          this.store.questions.retireQuestion(offer.token);
         }
         continue;
       }
@@ -850,16 +855,16 @@ export class Questions {
         !offer.outcome &&
         !this.inFlight.has(offer.token)
       )
-        this.store.questionOutcome(offer.token, "uncertain");
+        this.store.questions.questionOutcome(offer.token, "uncertain");
       await this.notifyOutcome(
-        this.store.questionByToken(this.key, offer.token) ?? offer,
+        this.store.questions.questionByToken(this.key, offer.token) ?? offer,
       );
     }
     if (
-      !this.store
+      !this.store.questions
         .activeQuestionSessions(this.key, this.backend.sessionID)
         .includes(session) &&
-      !this.store
+      !this.store.questions
         .questionOffers(this.key)
         .some(
           (o) =>
@@ -933,7 +938,7 @@ export class Questions {
         continue;
       await this.publishOffer(job, offer, question, signal);
     }
-    for (const offer of this.store
+    for (const offer of this.store.questions
       .questionOffers(this.key)
       .filter((o) => o.sessionID === session)) {
       if (pending.some((q) => q.id === offer.formID)) continue;
@@ -949,7 +954,7 @@ export class Questions {
       // attempt writable until that request records its success/uncertainty.
       // Check after the awaited state read: an answer may start during it.
       if (this.inFlight.has(offer.token)) continue;
-      this.store.closeQuestion(offer.token);
+      this.store.questions.closeQuestion(offer.token);
       if (state === "missing-session") {
         missingSession = true;
         if (offer.recovering) this.store.failQuestionRecovery(offer);
@@ -973,7 +978,9 @@ export class Questions {
     if (
       missingSession &&
       pending.length === 0 &&
-      !this.store.questionOffers(this.key).some((o) => o.sessionID === session)
+      !this.store.questions
+        .questionOffers(this.key)
+        .some((o) => o.sessionID === session)
     )
       this.missing.set(session, Date.now() + 60_000);
   }
@@ -986,7 +993,7 @@ export class Questions {
     prefix = "",
   ) {
     const port = this.port();
-    let current = this.store.questionByToken(this.key, offer.token);
+    let current = this.store.questions.questionByToken(this.key, offer.token);
     if (
       !port ||
       this.offering.has(offer.token) ||
@@ -1003,7 +1010,7 @@ export class Questions {
       // Persist before sending: an ACK loss must not silently renew a seen token.
       const settings = await port.settings?.();
       if (settings && !settings.enabled) return;
-      current = this.store.startQuestionPublication(
+      current = this.store.questions.startQuestionPublication(
         this.key,
         offer.token,
         settings?.timeoutMs,
@@ -1024,7 +1031,7 @@ export class Questions {
             : prefix + questionText(question, port.account, offer.token),
           () => !signal.aborted && !!this.owner(offer),
         );
-      this.store.questionNotified(offer.token);
+      this.store.questions.questionNotified(offer.token);
     } finally {
       this.offering.delete(offer.token);
     }
@@ -1051,15 +1058,15 @@ export class Questions {
     if (
       (settings && !settings.enabled) ||
       !this.owner(offer) ||
-      !this.store.claimExpiredQuestion(offer.token, Date.now())
+      !this.store.questions.claimExpiredQuestion(offer.token, Date.now())
     )
       return;
     this.inFlight.add(offer.token);
     try {
       await this.backend.replyQuestion?.(question, null, signal);
-      this.store.questionOutcome(offer.token, "cancelled");
+      this.store.questions.questionOutcome(offer.token, "cancelled");
     } catch {
-      this.store.questionOutcome(offer.token, "uncertain");
+      this.store.questions.questionOutcome(offer.token, "uncertain");
     } finally {
       this.inFlight.delete(offer.token);
     }
@@ -1069,7 +1076,7 @@ export class Questions {
       () => !signal.aborted && !!this.owner(offer),
     );
     await this.notifyOutcome(
-      this.store.questionByToken(this.key, offer.token) ?? offer,
+      this.store.questions.questionByToken(this.key, offer.token) ?? offer,
     );
   }
 
@@ -1086,10 +1093,10 @@ export class Questions {
     if (!job || !port) {
       // Policy loss is a delivery denial, not permission to retain an unusable
       // notice in every poll. Preserve the outcome and any native recovery hold.
-      this.store.questionOutcomeNotified(offer.token);
+      this.store.questions.questionOutcomeNotified(offer.token);
       this.noticeFailures.delete(offer.token);
       if (!this.inFlight.has(offer.token))
-        this.store.retireQuestion(offer.token);
+        this.store.questions.retireQuestion(offer.token);
       return;
     }
     if (
@@ -1106,7 +1113,7 @@ export class Questions {
           : "Clarification decision recorded. This grants no tool permission.",
         () => !this.lifetime.aborted && !!this.owner(offer),
       );
-      this.store.questionOutcomeNotified(offer.token);
+      this.store.questions.questionOutcomeNotified(offer.token);
       this.noticeFailures.delete(offer.token);
     } catch {
       // A lost ACK may repeat a notice, but never flood each poll or replay the
@@ -1131,7 +1138,7 @@ export class Questions {
   ) {
     const settings = await this.port()?.settings?.();
     if (settings && !settings.enabled) return;
-    const offer = this.store.questionByToken(this.key, control.token);
+    const offer = this.store.questions.questionByToken(this.key, control.token);
     if (
       control.invalid ||
       offer?.state !== "offered" ||
@@ -1184,7 +1191,7 @@ export class Questions {
       const port = this.port();
       if (!port || !this.owner(offer)) return;
       signal.throwIfAborted();
-      const fresh = this.store.renewQuestion(
+      const fresh = this.store.questions.renewQuestion(
         offer.token,
         randomBytes(16).toString("hex"),
         Date.now(),
@@ -1226,7 +1233,7 @@ export class Questions {
       (currentSettings && !currentSettings.enabled) ||
       !actorAllowed ||
       !this.owner(offer) ||
-      !this.store.attemptQuestion(offer.token, Date.now())
+      !this.store.questions.attemptQuestion(offer.token, Date.now())
     )
       return;
     this.inFlight.add(offer.token);
@@ -1234,17 +1241,17 @@ export class Questions {
       if (!this.backend.replyQuestion)
         throw new Error("Question reply unavailable");
       await this.backend.replyQuestion(question, answer, signal);
-      this.store.questionOutcome(
+      this.store.questions.questionOutcome(
         offer.token,
         answer === null ? "cancelled" : "answered",
       );
     } catch {
-      this.store.questionOutcome(offer.token, "uncertain");
+      this.store.questions.questionOutcome(offer.token, "uncertain");
     } finally {
       this.inFlight.delete(offer.token);
     }
     await this.notifyOutcome(
-      this.store.questionByToken(this.key, offer.token) ?? offer,
+      this.store.questions.questionByToken(this.key, offer.token) ?? offer,
     );
   }
 }
