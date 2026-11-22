@@ -17,6 +17,7 @@ import { createRequire } from "node:module";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BackendConfig, Config } from "../config";
+import { installationDirectory } from "../lib/installation-paths";
 
 type CodexConfig = Extract<BackendConfig, { type: "codex" }>;
 
@@ -56,9 +57,6 @@ export function nativeCodex() {
     ],
   };
 }
-
-/** Stargate's own installation: the directory that holds `src/`. */
-const installation = resolve(import.meta.dir, "..", "..");
 
 /**
  * The real path of `path` after symlink resolution, also when it does not
@@ -227,7 +225,7 @@ export async function checkCodexPaths(
   const turn = temporary ? await realPath(temporary) : undefined;
   const named: [string, string[]][] = [
     ["Stargate's data directory", [data]],
-    ["Stargate's installation", [installation]],
+    ["Stargate's installation", [installationDirectory]],
     ["the Codex SDK and CLI", nativeCodex().packages],
   ];
   for (const [name, paths] of named)

@@ -1,7 +1,7 @@
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { installationDirectory } from "../lib/installation-paths";
 import { readMetadata } from "./release";
 
 /**
@@ -43,9 +43,7 @@ export const readySchema = z.strictObject({
 });
 export type Ready = z.infer<typeof readySchema>;
 
-export const packageDirectory = fileURLToPath(
-  new URL("../..", import.meta.url),
-);
+export const packageDirectory = installationDirectory;
 
 export async function runningVersion(directory = packageDirectory) {
   return (await readMetadata(directory))?.version ?? null;

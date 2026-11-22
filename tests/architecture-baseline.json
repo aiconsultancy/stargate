@@ -1,8 +1,8 @@
 {
-  "sourceCommit": "b61bceebf265795f7a7570b384ce989c8fdd9de3",
-  "measurementStatus": "measured NET-1771 plus NET-1772 plus NET-1773 against incoming main b61bcee",
-  "sourceFiles": 251,
-  "sourceEdges": 1089,
+  "sourceCommit": "b28d7b1cc6f48137715f21de1136e0b1edbfb434",
+  "measurementStatus": "measured NET-1769 on main after NET-1771, NET-1772 and NET-1773; crew closure unchanged",
+  "sourceFiles": 252,
+  "sourceEdges": 1096,
   "rootFiles": [
     "src/activity-delivery.ts",
     "src/activity-slack.ts",

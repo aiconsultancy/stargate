@@ -490,6 +490,7 @@
       "files": [
         "src/credentials.ts",
         "src/effect.ts",
+        "src/lib/installation-paths.ts",
         "src/loopback.ts",
         "src/read-deadline.ts",
         "src/teams/http-util.ts",
@@ -498,6 +499,7 @@
       "public": [
         "src/credentials.ts",
         "src/effect.ts",
+        "src/lib/installation-paths.ts",
         "src/loopback.ts",
         "src/read-deadline.ts",
         "src/teams/http-util.ts",
