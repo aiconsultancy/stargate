@@ -3,7 +3,6 @@
   "measurementStatus": "measured NET-1769 on main after NET-1771, NET-1772 and NET-1773; crew closure unchanged",
   "largeFiles": [
     "src/backends/opencode.ts",
-    "src/config.ts",
     "src/crew/engine.ts",
     "src/crew/state.ts",
     "src/cron-store.ts",
@@ -17,8 +16,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 265,
-  "sourceEdges": 1105,
+  "sourceFiles": 266,
+  "sourceEdges": 1110,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -111,6 +110,7 @@
       "src/health-config.ts",
       "src/input-boundary.ts",
       "src/input-origin.ts",
+      "src/irc/config.ts",
       "src/irc/protocol.ts",
       "src/loopback.ts",
       "src/maintenance-drain.ts",

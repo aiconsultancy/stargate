@@ -1291,7 +1291,8 @@
         "src/irc/status.ts",
         "src/irc/text.ts",
         "src/irc/store.ts",
-        "src/irc/store-contract.ts"
+        "src/irc/store-contract.ts",
+        "src/irc/config.ts"
       ],
       "public": [
         "src/irc/client.ts",
@@ -1300,9 +1301,14 @@
         "src/irc/ship.ts",
         "src/irc/text.ts",
         "src/irc/store.ts",
-        "src/irc/store-contract.ts"
+        "src/irc/store-contract.ts",
+        "src/irc/config.ts"
       ],
-      "contracts": ["src/irc/protocol.ts", "src/irc/store-contract.ts"],
+      "contracts": [
+        "src/irc/protocol.ts",
+        "src/irc/store-contract.ts",
+        "src/irc/config.ts"
+      ],
       "neighbours": [
         "attachments",
         "backends",
