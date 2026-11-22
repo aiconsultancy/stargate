@@ -1,5 +1,8 @@
 # Configuration reference
 
+`src/config/composition.ts` owns configuration composition. `src/config.ts`
+retains the fixed public exports.
+
 For Microsoft Teams, use the optional `teams` registrations described in
 [Teams transport](teams.md). [Fleet controls](fleet-tools.md) are separately
 opt-in. Teams registrations and fleet-control settings require a restart;

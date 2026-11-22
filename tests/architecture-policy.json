@@ -714,6 +714,7 @@
       "layer": "config",
       "files": [
         "src/config.ts",
+        "src/config/composition.ts",
         "src/settings-errors.ts",
         "src/settings-legacy.ts",
         "src/settings-schema.ts",
@@ -721,6 +722,7 @@
       ],
       "public": [
         "src/config.ts",
+        "src/config/composition.ts",
         "src/settings-errors.ts",
         "src/settings-legacy.ts",
         "src/settings-schema.ts",
