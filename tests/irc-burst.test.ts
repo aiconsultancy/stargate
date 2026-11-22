@@ -123,7 +123,7 @@ test("a burst waits for quiet, preserves separate sources and raw text, and alia
   expect(store.ready("captain", 4000, 10).map((job) => job.id)).toEqual([
     head.id,
   ]);
-  const messages = store.ircBurstMessages(head.id);
+  const messages = store.irc.ircBurstMessages(head.id);
   expect(messages.map((message) => message.originalText)).toEqual([
     "captain: original a",
     "captain: original b",
@@ -141,7 +141,7 @@ test("a burst waits for quiet, preserves separate sources and raw text, and alia
   expect(store.jobByEvent("another-registration", "#bridge:b")).toBeNull();
   expect(enqueue(store, incoming("b"), 1600)).toBe(false);
   expect(store.enqueue(incoming("b"))).toBe(false);
-  expect(store.ircBurstMessages(head.id)).toHaveLength(2);
+  expect(store.irc.ircBurstMessages(head.id)).toHaveLength(2);
 });
 
 test("quiet deadlines use host time and cannot slide beyond ten seconds or shorten all-call staggering", () => {
@@ -153,7 +153,7 @@ test("quiet deadlines use host time and cannot slide beyond ten seconds or short
   expect(store.ready("captain", 12_000, 20)).toHaveLength(1);
   const head = store.jobByEvent("captain", "#bridge:0");
   if (!head) throw new Error("Missing head");
-  expect(store.ircBurstMessages(head.id)).toHaveLength(10);
+  expect(store.irc.ircBurstMessages(head.id)).toHaveLength(10);
   enqueue(store, incoming("after-max"), 11_000);
   expect(store.jobByEvent("captain", "#bridge:after-max")?.id).not.toBe(
     head.id,
@@ -197,8 +197,10 @@ test("running or stopped requests cannot be extended; a queued Stop on a later m
   const store = state();
   enqueue(store, incoming("a"), 1000);
   enqueue(store, incoming("b"), 1100);
-  expect(store.ircThreadRoot("captain", "#bridge", "b")).toBe("a");
-  expect(store.ircThreadParticipating("captain", "#bridge", "a")).toBe(false);
+  expect(store.irc.ircThreadRoot("captain", "#bridge", "b")).toBe("a");
+  expect(store.irc.ircThreadParticipating("captain", "#bridge", "a")).toBe(
+    false,
+  );
   const parsed = parseMessage(
     formatMessage("TAGMSG", ["#bridge"], {
       account: "jac",
@@ -219,7 +221,7 @@ test("running or stopped requests cannot be extended; a queued Stop on a later m
     },
     currentNick: "discovery",
     fold,
-    anchor: (msgid) => store.ircRequestAnchor("captain", "#bridge", msgid),
+    anchor: (msgid) => store.irc.ircRequestAnchor("captain", "#bridge", msgid),
   });
   if (!stop) throw new Error("Stop not admitted");
   expect(stop.thread).toBe("a");
@@ -241,7 +243,7 @@ test("message and attachment limits start another request without dropping origi
     enqueue(store, incoming(String(i)), 1000 + i);
   const first = store.jobByEvent("captain", "#bridge:0");
   if (!first) throw new Error("Missing first burst");
-  expect(store.ircBurstMessages(first.id)).toHaveLength(16);
+  expect(store.irc.ircBurstMessages(first.id)).toHaveLength(16);
   expect(store.jobByEvent("captain", "#bridge:16")?.id).not.toBe(first.id);
   const files = Array.from({ length: 10 }, (_, i) => `https://files.test/${i}`);
   enqueue(store, incoming("files", { files }), 1100);
@@ -286,7 +288,7 @@ test("attachment URLs are deduplicated while source snapshots remain separate an
   expect(records[0].text).toBe(forged);
   expect(records[0].source).not.toContain("forged");
   expect(
-    store.ircBurstMessages(job.id).map((message) => message.files),
+    store.irc.ircBurstMessages(job.id).map((message) => message.files),
   ).toEqual([
     ["https://files.test/one"],
     ["https://files.test/one", "https://files.test/two"],
@@ -345,7 +347,7 @@ test("restart preserves original evidence, deduplication, and per-member native-
       source.origin?.eventId,
     );
   }
-  expect(store.ircBurstMessages(job.id)).toHaveLength(2);
+  expect(store.irc.ircBurstMessages(job.id)).toHaveLength(2);
   expect(store.enqueue(incoming("b"))).toBe(false);
   expect(() =>
     ledger.verify("unrelated-session", sources[1]?.reference ?? ""),
@@ -442,7 +444,7 @@ test("real IRC intake batches admitted human fragments once, preserves source ID
   expect(prompts[0]?.context?.source.message).toBe(ids[0]);
   const head = f.store.jobByEvent(primary.key, `#bridge:${ids[0]}`);
   if (!head) throw new Error("Missing queued burst");
-  expect(f.store.ircBurstMessages(head.id)).toHaveLength(2);
+  expect(f.store.irc.ircBurstMessages(head.id)).toHaveLength(2);
   const refusedReply = f.fake.say(
     { nick: "jac", account: "jac" },
     "#bridge",
@@ -464,7 +466,7 @@ test("real IRC intake batches admitted human fragments once, preserves source ID
   expect(f.store.jobByEvent(primary.key, `#bridge:${late}`)?.id).not.toBe(
     head.id,
   );
-  expect(f.store.ircBurstMessages(head.id)).toHaveLength(2);
+  expect(f.store.irc.ircBurstMessages(head.id)).toHaveLength(2);
   release?.();
   await until(
     () => prompts.length === 2,
@@ -488,7 +490,7 @@ test("default IRC intake, bots, and replay do not acquire a human burst", async 
   for (const id of ids) {
     const job = f.store.jobByEvent(f.registration.key, `#bridge:${id}`);
     if (!job) throw new Error("Missing legacy job");
-    expect(f.store.ircBurstMessages(job.id)).toEqual([]);
+    expect(f.store.irc.ircBurstMessages(job.id)).toEqual([]);
   }
   const opted = await live(250);
   opted.fake.sendTo("discovery", ":fake BATCH +history chathistory #bridge");
@@ -537,13 +539,13 @@ test("default IRC intake, bots, and replay do not acquire a human burst", async 
       `#bridge:${id}`,
     );
     if (!history) throw new Error("History fixture did not reach intake");
-    expect(opted.store.ircBurstMessages(history.id)).toEqual([]);
+    expect(opted.store.irc.ircBurstMessages(history.id)).toEqual([]);
   }
   const peerJob = opted.store.jobByEvent(
     opted.registration.key,
     `#bridge:${peer}`,
   );
-  expect(opted.store.ircBurstMessages(peerJob?.id ?? -1)).toEqual([]);
+  expect(opted.store.irc.ircBurstMessages(peerJob?.id ?? -1)).toEqual([]);
 });
 
 test("a reload rechecks the original addressing inside a pending burst instead of trusting its wrapper", async () => {
@@ -565,10 +567,10 @@ test("a reload rechecks the original addressing inside a pending burst instead o
   );
   const job = f.store.jobByEvent(f.registration.key, `#bridge:${first}`);
   if (!job) throw new Error("Missing pending burst");
-  expect(f.store.ircBurstMessages(job.id)[0]?.originalText).toContain(
+  expect(f.store.irc.ircBurstMessages(job.id)[0]?.originalText).toContain(
     "\u0002phoenix\u0002",
   );
-  expect(f.store.ircBurstMessages(job.id)[0]?.text).toBe(
+  expect(f.store.irc.ircBurstMessages(job.id)[0]?.text).toBe(
     "phoenix: please take this work",
   );
   expect(f.registration.transport.allowed(job.user, job.channel, job)).toBe(
@@ -598,7 +600,7 @@ test("a reload rechecks the original addressing inside a pending burst instead o
   expect(f.registration.transport.allowed(job.user, job.channel, job)).toBe(
     false,
   );
-  expect(f.store.ircBurstMessages(job.id)).toHaveLength(2);
+  expect(f.store.irc.ircBurstMessages(job.id)).toHaveLength(2);
 });
 
 test("a raw-wire long single paragraph multiline batch preserves concat spaces and Unicode without debounce", async () => {
@@ -632,7 +634,7 @@ test("a raw-wire long single paragraph multiline batch preserves concat spaces a
   expect(job.thread).toBe("long-paragraph");
   expect(job.user).toBe("jac");
   expect(f.store.queueCounts(f.registration.key).queued).toBe(1);
-  expect(f.store.ircBurstMessages(job.id)).toEqual([]);
+  expect(f.store.irc.ircBurstMessages(job.id)).toEqual([]);
 });
 
 test("optional burst metadata failures preserve the complete ordinary admitted message", () => {
@@ -662,9 +664,9 @@ test("optional burst metadata failures preserve the complete ordinary admitted m
     const job = store.jobByEvent(input.botKey, input.eventId);
     if (!job) throw new Error("Ordinary fallback lost an admitted message");
     expect(job.text).toBe(input.text);
-    expect(store.ircBurstMessages(job.id)).toEqual([]);
+    expect(store.irc.ircBurstMessages(job.id)).toEqual([]);
     expect(
-      store.ircThreadRoot(input.botKey, input.channel, input.thread),
+      store.irc.ircThreadRoot(input.botKey, input.channel, input.thread),
     ).toBeUndefined();
   }
 });
@@ -708,7 +710,7 @@ test("internal transcript delivery and fleet-result continuations do not split c
     (id) => store.jobByEvent("captain", `#bridge:${id}`)?.id,
   );
   expect(new Set(ids).size).toBe(1);
-  expect(store.ircBurstMessages(ids[0] ?? -1)).toHaveLength(3);
+  expect(store.irc.ircBurstMessages(ids[0] ?? -1)).toHaveLength(3);
 });
 
 for (const keepPolicy of [false, true])
@@ -742,13 +744,13 @@ for (const keepPolicy of [false, true])
     );
     const head = f.store.jobByEvent(f.registration.key, `#bridge:${first}`);
     if (!head) throw new Error("Missing ordinary burst");
-    expect(f.store.ircBurstMessages(head.id)).toHaveLength(2);
+    expect(f.store.irc.ircBurstMessages(head.id)).toHaveLength(2);
     for (const id of [first, second])
       expect(
-        f.store.ircThreadRoot(f.registration.key, "#bridge", id),
+        f.store.irc.ircThreadRoot(f.registration.key, "#bridge", id),
       ).toBeUndefined();
     expect(
-      f.store.ircThreadParticipating(f.registration.key, "#bridge", first),
+      f.store.irc.ircThreadParticipating(f.registration.key, "#bridge", first),
     ).toBe(false);
     f.registration.stopTurn = (conversation, thread) =>
       f.store.cancelTurn(f.registration.key, conversation, thread) !==
@@ -799,7 +801,7 @@ test("all-call context excludes every grouped source while retaining unrelated c
   );
   const job = f.store.jobByEvent(f.registration.key, `#bridge:${first}`);
   if (!job) throw new Error("Missing all-call burst");
-  expect(f.store.ircBurstMessages(job.id)).toHaveLength(2);
+  expect(f.store.irc.ircBurstMessages(job.id)).toHaveLength(2);
   const note = f.registration.transport.note(job);
   expect(note).toContain("unrelated channel context");
   expect(note).not.toContain("alpha instruction");

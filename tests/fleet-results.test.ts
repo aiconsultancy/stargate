@@ -1040,7 +1040,8 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
     () =>
       f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 1)
         .length === 1 &&
-      f.captainStore.ircCursor(f.targetIrc.gateway.key, "#command") === time,
+      f.captainStore.irc.ircCursor(f.targetIrc.gateway.key, "#command") ===
+        time,
     2000,
     "human message routed to its explicit recipient",
   );
@@ -1342,7 +1343,7 @@ test("fleet results: recovery refuses retained misaddressed human jobs but a cor
   await until(
     () =>
       f.captainStore.ready(key, Number.MAX_SAFE_INTEGER, 1).length === 1 &&
-      f.ownerStore.ircCursor(f.ownerIrc.gateway.key, "#command") === time,
+      f.ownerStore.irc.ircCursor(f.ownerIrc.gateway.key, "#command") === time,
     2000,
     "correctly addressed nested-prefix request retained",
   );

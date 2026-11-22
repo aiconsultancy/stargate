@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { settingsStartsWith, settingsStruct } from "../config/settings-schema";
 import type { Incoming } from "../gateway/store-types";
 import { validMsgid } from "./protocol";
+import type { IrcBurstMessage } from "./store-contract";
 
 /** Bounds apply to accepted live messages, never to already running work. */
 export const ircBurstLimits = {
@@ -37,7 +38,6 @@ export const ircBurstMessageSchema = settingsStruct({
     Schema.Array(Schema.String.check(Schema.isMaxCodePoints(2048))),
   ).check(Schema.isMaxLength(10)),
 });
-export type IrcBurstMessage = typeof ircBurstMessageSchema.Type;
 
 /** Transport admission remains separate; only ordinary human jobs can group. */
 export function ircBurstEligible(input: Incoming): boolean {

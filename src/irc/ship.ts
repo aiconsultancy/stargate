@@ -373,7 +373,7 @@ function shipTransport(
     // source that a later policy would refuse before execution or delivery.
     return (
       !stored ||
-      store
+      store.irc
         .ircBurstMessages(stored.id)
         .every(({ text }) =>
           ircResultJobAllowed(
@@ -520,7 +520,7 @@ function shipTransport(
           job.received !== null
           ? said(job.channel, job.received, [
               job.thread,
-              ...store.ircBurstMessages(job.id).map(({ thread }) => thread),
+              ...store.irc.ircBurstMessages(job.id).map(({ thread }) => thread),
             ])
           : [],
       ),
@@ -981,7 +981,7 @@ export class IrcShip {
               const anchor = requested
                 ? root
                 : root &&
-                  this.store.ircRequestAnchor(identity.key, channel, root);
+                  this.store.irc.ircRequestAnchor(identity.key, channel, root);
               const job =
                 requested ||
                 (anchor &&
@@ -1162,7 +1162,7 @@ export class IrcShip {
           fleetTyping: config.features.fleetTyping === true,
           reactions: config.features.reactions,
         },
-        (thread) => this.store.ircReplyParent(key, thread),
+        (thread) => this.store.irc.ircReplyParent(key, thread),
       ),
       filehost,
       client,
@@ -1201,10 +1201,10 @@ export class IrcShip {
    */
   private since(key: string, target: string) {
     if (!this.config.features.catchUp) return;
-    const cursor = this.store.ircCursor(key, target);
+    const cursor = this.store.irc.ircCursor(key, target);
     const now = new Date();
     if (!cursor) {
-      this.store.saveIrcCursor(key, target, now.toISOString());
+      this.store.irc.saveIrcCursor(key, target, now.toISOString());
       return;
     }
     const oldest = now.getTime() - this.config.catchUpHours * 3_600_000;
@@ -1222,8 +1222,8 @@ export class IrcShip {
   private partnerSince(key: string, target: string, latest?: string) {
     if (!this.config.features.catchUp) return;
     const cursor =
-      this.store.ircCursor(key, target) ??
-      this.store.ircCursor(key, directBaseline);
+      this.store.irc.ircCursor(key, target) ??
+      this.store.irc.ircCursor(key, directBaseline);
     if (!cursor) return;
     if (latest && Number.isFinite(Date.parse(latest)) && latest <= cursor)
       return;
@@ -1297,16 +1297,16 @@ export class IrcShip {
       joined: (channel) => client.inChannel(channel),
       anchor: (msgid) =>
         (ownControl
-          ? this.store.ircThreadRoot(
+          ? this.store.irc.ircThreadRoot(
               member.key,
               client.fold(message.params[0] ?? ""),
               msgid,
             )
           : undefined) ?? client.anchor(msgid),
       threadRoot: (channel, msgid) =>
-        this.store.ircThreadRoot(member.key, channel, msgid),
+        this.store.irc.ircThreadRoot(member.key, channel, msgid),
       participating: (channel, root) =>
-        this.store.ircThreadParticipating(member.key, channel, root),
+        this.store.irc.ircThreadParticipating(member.key, channel, root),
       replay,
       now: Date.now,
       fold: client.fold,
@@ -1358,7 +1358,7 @@ export class IrcShip {
         this.config,
         {
           shipKeys: this.keys,
-          count: (input) => this.store.turnsSince(input),
+          count: (input) => this.store.irc.turnsSince(input),
         },
         client.fold,
       )
@@ -1545,11 +1545,11 @@ export class IrcShip {
     if (!time || !Number.isFinite(Date.parse(time))) return;
     if (client.isChannel(target)) {
       if (client.channel(target))
-        this.store.saveIrcCursor(member.key, client.fold(target), time);
+        this.store.irc.saveIrcCursor(member.key, client.fold(target), time);
     } else if (client.fold(target) === client.fold(client.nick)) {
       const partner = sourceNick(message.source);
       if (partner)
-        this.store.saveIrcCursor(
+        this.store.irc.saveIrcCursor(
           member.key,
           partnerCursor(client.fold(partner)),
           time,
@@ -1571,7 +1571,7 @@ export class IrcShip {
     let failing = false;
     while (!signal.aborted) {
       try {
-        const cursor = this.store.stargateDmCursor(captain.key);
+        const cursor = this.store.irc.stargateDmCursor(captain.key);
         const page = await link.outbox(
           cursor === undefined ? { limit: 50 } : { after: cursor, limit: 50 },
           AbortSignal.any([signal, AbortSignal.timeout(bindMs)]),
@@ -1583,7 +1583,7 @@ export class IrcShip {
           cursor === undefined ||
           (!page.items.length && page.latest > cursor)
         )
-          this.store.saveStargateDmCursor(captain.key, page.latest);
+          this.store.irc.saveStargateDmCursor(captain.key, page.latest);
         for (const item of cursor === undefined ? [] : page.items) {
           if ((await this.copy(item)) === "retry") {
             const since = first.get(item.id) ?? Date.now();
@@ -1595,7 +1595,7 @@ export class IrcShip {
             );
           }
           first.delete(item.id);
-          this.store.saveStargateDmCursor(captain.key, item.sequence);
+          this.store.irc.saveStargateDmCursor(captain.key, item.sequence);
         }
       } catch {
         if (signal.aborted) break;
@@ -1642,7 +1642,7 @@ export class IrcShip {
     if (!client.hasCap("message-tags")) return "skipped";
     try {
       const nick = await client.verifiedNick(recipient.account);
-      this.store.markStargateDmCopy(item.id);
+      this.store.irc.markStargateDmCopy(item.id);
       const tags = { [copyTag]: item.id };
       const guard = () => client.holds(recipient.account, nick);
       for (const line of ircLines(
@@ -1673,7 +1673,7 @@ export class IrcShip {
       !client.isChannel(target) &&
       client.fold(target) === client.fold(client.nick) &&
       shipAccounts(this.config, client.fold).has(client.fold(account)) &&
-      this.store.stargateDmCopy(id)
+      this.store.irc.stargateDmCopy(id)
     );
   }
 
@@ -1906,8 +1906,8 @@ export class IrcShip {
       currentNick: client.nick,
       fold: client.fold,
       anchor: (msgid) =>
-        this.store.ircRequestAnchor(registration.key, channel, msgid) ??
-        this.store.ircBurstRequest(registration.key, channel, msgid) ??
+        this.store.irc.ircRequestAnchor(registration.key, channel, msgid) ??
+        this.store.irc.ircBurstRequest(registration.key, channel, msgid) ??
         client.requestAnchor(msgid),
     });
     if (!stop) return;
