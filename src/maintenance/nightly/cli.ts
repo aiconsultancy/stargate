@@ -7,7 +7,7 @@ import { runCleanup } from "./cleanup/cleanup";
 import { cleanupProtection } from "./cleanup/cleanup-protection";
 import type { MaintenanceConfig } from "./config";
 import { discoverCrews } from "./crews";
-import { runDroid } from "./droid";
+import { runDroid } from "./droid/droid";
 import { processRunner } from "./exec";
 import { nightlyInstructions } from "./instructions";
 import { recoveryBudgetMs } from "./journal";

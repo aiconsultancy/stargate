@@ -51,15 +51,18 @@
     ],
     "src/nightly/droid-agent.ts": [
       "src/nightly/droid-agent.ts",
-      "src/maintenance/nightly/droid-agent.ts"
+      "src/maintenance/nightly/droid-agent.ts",
+      "src/maintenance/nightly/droid/droid-agent.ts"
     ],
     "src/nightly/droid-facts.ts": [
       "src/nightly/droid-facts.ts",
-      "src/maintenance/nightly/droid-facts.ts"
+      "src/maintenance/nightly/droid-facts.ts",
+      "src/maintenance/nightly/droid/droid-facts.ts"
     ],
     "src/nightly/droid.ts": [
       "src/nightly/droid.ts",
-      "src/maintenance/nightly/droid.ts"
+      "src/maintenance/nightly/droid.ts",
+      "src/maintenance/nightly/droid/droid.ts"
     ],
     "src/nightly/exec.ts": [
       "src/nightly/exec.ts",

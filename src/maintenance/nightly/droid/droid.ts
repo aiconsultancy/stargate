@@ -2,9 +2,9 @@ import { Database } from "bun:sqlite";
 import { appendFile, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import type { Config } from "../../config";
-import { redactCredentials } from "../../lib/credentials";
-import type { MaintenanceConfig } from "./config";
+import type { Config } from "../../../config";
+import { redactCredentials } from "../../../lib/credentials";
+import type { MaintenanceConfig } from "../config";
 import { type DroidAgent, type DroidTools, openPiDroid } from "./droid-agent";
 import {
   collectFacts,
@@ -15,24 +15,24 @@ import {
   readUnit,
   runningUnit,
 } from "./droid-facts";
-import type { Reason } from "./exec";
-import { atomicWrite, readOptional } from "./files";
-import { queuedTaskAction } from "./schedule/idle";
-import { Journal } from "./journal";
-import { maintenanceDirectory } from "./paths";
+import type { Reason } from "../exec";
+import { atomicWrite, readOptional } from "../files";
+import { queuedTaskAction } from "../schedule/idle";
+import { Journal } from "../journal";
+import { maintenanceDirectory } from "../paths";
 import {
   noticeSchemaID,
   queueNotice,
   type Report,
   summary,
-} from "./reports/report";
+} from "../reports/report";
 import {
   type Dependencies,
   defaultDependencies,
   nothingToRecover,
   recoverWhenIdle,
   runMaintenance,
-} from "./run";
+} from "../run";
 
 /**
  * stargate-maintenance-droid: a Pi Durable agent that explains maintenance and

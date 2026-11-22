@@ -15,7 +15,10 @@ import {
   maintenanceDrainSchema,
   readMaintenanceDrain,
 } from "../maintenance/maintenance-drain";
-import { readReports, readUnit } from "../maintenance/nightly/droid-facts";
+import {
+  readReports,
+  readUnit,
+} from "../maintenance/nightly/droid/droid-facts";
 import { type CommandRunner, processRunner } from "../maintenance/nightly/exec";
 import { readReady, readySchema } from "../maintenance/nightly/update/ready";
 import { reportSchema } from "../maintenance/nightly/reports/report";

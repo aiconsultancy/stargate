@@ -1,18 +1,13 @@
 [
   {
-    "path": "src/maintenance/nightly/droid.ts",
+    "path": "src/health/health.ts",
     "issue": "NET-1791",
-    "reason": "Formatter-wrapped import of the reports move at 80 columns; names and schemas unchanged."
+    "reason": "Formatter-wrapped import of the droid move at 80 columns; names and schemas unchanged."
   },
   {
     "path": "src/maintenance/nightly/cli.ts",
     "issue": "NET-1791",
     "reason": "Formatter-wrapped import of the schedule move at 80 columns; names and schemas unchanged."
-  },
-  {
-    "path": "src/maintenance/nightly/droid-agent.ts",
-    "issue": "NET-1789",
-    "reason": "Retarget only the Pi configuration import after its rename; Zod declarations and all bodies unchanged."
   },
   {
     "path": "src/maintenance/nightly/run.ts",

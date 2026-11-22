@@ -16,9 +16,9 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { z } from "zod";
-import { piModels } from "../../backends/pi/pi-durable";
-import type { PiModelSettings } from "../../backends/pi/config";
-import { atomicWrite, readOptional } from "./files";
+import { piModels } from "../../../backends/pi/pi-durable";
+import type { PiModelSettings } from "../../../backends/pi/config";
+import { atomicWrite, readOptional } from "../files";
 
 /**
  * The only things the droid's model can do. Each is Stargate code: reads return
