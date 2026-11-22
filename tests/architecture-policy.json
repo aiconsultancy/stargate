@@ -1151,20 +1151,23 @@
         "src/input-origin.ts",
         "src/pi-model.ts",
         "src/backends/opencode/config.ts",
-        "src/backends/claude/config.ts"
+        "src/backends/claude/config.ts",
+        "src/backends/codex/config.ts"
       ],
       "public": [
         "src/backend.ts",
         "src/backends/factory.ts",
         "src/backends/opencode/config.ts",
         "src/pi-model.ts",
-        "src/backends/claude/config.ts"
+        "src/backends/claude/config.ts",
+        "src/backends/codex/config.ts"
       ],
       "contracts": [
         "src/backend.ts",
         "src/backends/opencode/config.ts",
         "src/pi-model.ts",
-        "src/backends/claude/config.ts"
+        "src/backends/claude/config.ts",
+        "src/backends/codex/config.ts"
       ],
       "neighbours": [
         "activity",
