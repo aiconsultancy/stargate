@@ -13,7 +13,7 @@ import {
   type CronExecutionAPI,
   type CronExecutionAuthority,
 } from "../src/crew/cron/cron-execution";
-import type { CrewSession } from "../src/crew/engine";
+import type { CrewSession } from "../src/crew/execution/engine";
 import { defaultTeam } from "../src/crew/team";
 import {
   cronDecision,

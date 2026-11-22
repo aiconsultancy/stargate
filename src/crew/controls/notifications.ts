@@ -3,8 +3,8 @@ import {
   runNotificationOperation,
 } from "../../notifications/preferences/notification-control";
 import { notificationInputSchema } from "../../notifications/preferences/notification-store";
-import type { CrewCaller } from "../engine";
-import { CrewError } from "../state";
+import type { CrewCaller } from "../execution/engine";
+import { CrewError } from "../execution/state";
 
 interface NotificationAuthority {
   options: {

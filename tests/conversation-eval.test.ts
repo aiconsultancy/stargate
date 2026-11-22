@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Context, Deferred, Effect } from "effect";
-import { nativeWait } from "../src/crew/native-wait";
+import { nativeWait } from "../src/crew/execution/native-wait";
 
 function fixture() {
   const idle = Effect.runSync(Deferred.make<void>());

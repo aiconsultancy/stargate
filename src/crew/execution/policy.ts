@@ -1,4 +1,4 @@
-import type { PermissionProfile } from "./team";
+import type { PermissionProfile } from "../team";
 
 type Rule = {
   action: string;

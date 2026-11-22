@@ -3,9 +3,9 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readInputOrigin } from "../src/crew/origin";
-import type { ResultAPI, ResultMessage } from "../src/crew/result";
-import { CrewState } from "../src/crew/state";
+import { readInputOrigin } from "../src/crew/execution/origin";
+import type { ResultAPI, ResultMessage } from "../src/crew/execution/result";
+import { CrewState } from "../src/crew/execution/state";
 import { inputBoundary } from "../src/backends/opencode/input-boundary";
 
 const message = (

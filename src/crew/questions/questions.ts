@@ -10,13 +10,13 @@ import {
   nativeQuestionSchema,
   questionAnswer,
 } from "../../questions/questions";
-import type { CrewCaller } from "../engine";
+import type { CrewCaller } from "../execution/engine";
 import {
   CrewError,
   type CrewQuestionOffer,
   type CrewState,
   type CrewTask,
-} from "../state";
+} from "../execution/state";
 import type { Team } from "../team";
 
 const token = Schema.String.check(Schema.isPattern(/^[a-f0-9]{32}$/));

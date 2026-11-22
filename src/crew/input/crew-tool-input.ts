@@ -24,7 +24,7 @@ import {
   inspectInputSchema,
   reconcileInputSchema,
   resumeInputSchema,
-} from "../reconciliation";
+} from "../execution/reconciliation";
 import { agentIDSchema } from "../team";
 import { workspaceInputSchemas } from "../workspace/workspace";
 

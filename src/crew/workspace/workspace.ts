@@ -9,7 +9,7 @@ import {
   settingsStartsWith,
   settingsStruct,
 } from "../../config/settings-schema";
-import { CrewError } from "../state";
+import { CrewError } from "../execution/state";
 import { agentIDSchema } from "../team";
 
 const expected = settingsStruct({

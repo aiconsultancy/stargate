@@ -7,10 +7,10 @@ import {
   type CrewSession,
   type CrewSessions,
   type ResultConnector,
-} from "../src/crew/engine";
+} from "../src/crew/execution/engine";
 import type { MesijMessage } from "../src/crew/mesij";
-import type { ResultAPI, ResultMessage } from "../src/crew/result";
-import type { CrewTask } from "../src/crew/state";
+import type { ResultAPI, ResultMessage } from "../src/crew/execution/result";
+import type { CrewTask } from "../src/crew/execution/state";
 
 const diskIntegrationTimeoutMs = 30_000;
 

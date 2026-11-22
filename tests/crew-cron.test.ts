@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { CrewCron } from "../src/crew/cron/cron";
-import type { CrewCaller } from "../src/crew/engine";
-import { CrewError } from "../src/crew/state";
+import type { CrewCaller } from "../src/crew/execution/engine";
+import { CrewError } from "../src/crew/execution/state";
 import { CronControlError, type runCronOperation } from "../src/cron/control";
 
 function fixture() {

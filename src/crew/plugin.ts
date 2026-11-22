@@ -25,7 +25,7 @@ import { compactOnServer } from "./history/compaction";
 import { crewOpenCodeInput } from "./input/crew-tool-input";
 import { CrewCron } from "./cron/cron";
 import { CrewCronExecution } from "./cron/cron-execution";
-import { CrewEngine } from "./engine";
+import { CrewEngine } from "./execution/engine";
 import { CrewHistory, historyInputBranches } from "./history/history";
 import { workingAgreementContext } from "./instructions";
 import { CrewIrc } from "./irc-rpc";
@@ -37,7 +37,7 @@ import {
 } from "./message-tool-input";
 import { dmInputSchema, mailInputBranches } from "./messaging";
 import { CrewModels, modelToolInputSchema } from "./controls/models";
-import { nativeWait } from "./native-wait";
+import { nativeWait } from "./execution/native-wait";
 import { CrewNotifications } from "./controls/notifications";
 import { CrewPost } from "./controls/post";
 import {
@@ -51,9 +51,9 @@ import {
   crewQuestionConsumerLeaseMs,
 } from "./questions/question-handoff";
 import { CrewQuestions, crewQuestionInputSchema } from "./questions/questions";
-import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
+import { CrewRecovery, runRecoveryOperator } from "./execution/recovery-rpc";
 import { CrewReporting } from "./reporting/report-rpc";
-import { CrewError } from "./state";
+import { CrewError } from "./execution/state";
 import { objectToolInput } from "./input/tool-input";
 import { CrewWaiting, waitingInputSchema } from "./controls/waiting";
 

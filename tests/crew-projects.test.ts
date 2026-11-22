@@ -20,7 +20,7 @@ import {
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/engine";
+} from "../src/crew/execution/engine";
 import { fleetCrewStatusSchema } from "../src/crew/reporting/fleet-status";
 import { journalInputSchema } from "../src/crew/reporting/journal";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";

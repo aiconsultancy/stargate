@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { CrewQuestionHandoff } from "../src/crew/questions/question-handoff";
-import type { CrewTask } from "../src/crew/state";
+import type { CrewTask } from "../src/crew/execution/state";
 import type { NativeQuestion } from "../src/questions/questions";
 
 test("an unspecified route follows a current poll from the owning pinned captain", () => {

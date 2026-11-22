@@ -8,13 +8,13 @@ import {
   settingsPattern,
   settingsStartsWith,
   settingsStruct,
-} from "../config/settings-schema";
-import { isNativeInstructionContext } from "./instruction-context";
+} from "../../config/settings-schema";
+import { isNativeInstructionContext } from "../instruction-context";
 import {
   crewMessageMetadataKey,
   isTaskResume,
   taskEnvelopePayload,
-} from "./message-protocol";
+} from "../message-protocol";
 import {
   ShellCompletionContext,
   type ShellContextRecord,

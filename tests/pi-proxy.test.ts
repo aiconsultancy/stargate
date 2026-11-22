@@ -24,7 +24,7 @@ import { Schema } from "effect";
 import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piCrewBackendSchema, piDurableBackendSchema } from "../src/config";
 import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
-import { CrewState, type CrewTask } from "../src/crew/state";
+import { CrewState, type CrewTask } from "../src/crew/execution/state";
 import { teamSchema } from "../src/crew/team";
 import { BackendFailure } from "../src/shared/request-failure";
 

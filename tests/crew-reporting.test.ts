@@ -16,7 +16,7 @@ import {
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/engine";
+} from "../src/crew/execution/engine";
 import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
 import { defaultTeam, teamSchema } from "../src/crew/team";
 import { openStore } from "../src/app/open-store";

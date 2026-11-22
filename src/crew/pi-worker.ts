@@ -12,7 +12,12 @@ import { redactCredentials } from "../lib/credentials";
 import type { SessionHistory } from "../shared/session-history";
 import { piDefinitionPath, piMemberDefinition } from "./instructions";
 import type { PiCrewBinding } from "./pi-extension";
-import { CrewError, type CrewState, type CrewTask, type Peer } from "./state";
+import {
+  CrewError,
+  type CrewState,
+  type CrewTask,
+  type Peer,
+} from "./execution/state";
 import type { CrewMember } from "./team";
 
 type PiConfig = Extract<BackendConfig, { type: "pi-durable" }>;

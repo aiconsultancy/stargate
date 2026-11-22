@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { runCli } from "../src/app/cli";
-import { crewPermissions } from "../src/crew/policy";
+import { crewPermissions } from "../src/crew/execution/policy";
 import {
   defaultTeam,
   profileTeam,

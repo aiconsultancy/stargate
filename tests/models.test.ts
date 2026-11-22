@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
-import type { CrewCaller } from "../src/crew/engine";
+import type { CrewCaller } from "../src/crew/execution/engine";
 import {
   CrewModels,
   type ModelAuthority,
   type ModelSessions,
 } from "../src/crew/controls/models";
-import { crewPermissions } from "../src/crew/policy";
-import { CrewError } from "../src/crew/state";
+import { crewPermissions } from "../src/crew/execution/policy";
+import { CrewError } from "../src/crew/execution/state";
 import { defaultTeam } from "../src/crew/team";
 
 function fixture() {

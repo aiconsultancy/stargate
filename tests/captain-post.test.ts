@@ -19,9 +19,9 @@ import {
   runCaptainPost,
 } from "../src/captain-post/captain-post";
 import { configSchema } from "../src/config";
-import type { CrewCaller } from "../src/crew/engine";
+import type { CrewCaller } from "../src/crew/execution/engine";
 import { CrewPost } from "../src/crew/controls/post";
-import { CrewError } from "../src/crew/state";
+import { CrewError } from "../src/crew/execution/state";
 import { settingsIssues } from "../src/config/settings-schema";
 
 const directories: string[] = [];

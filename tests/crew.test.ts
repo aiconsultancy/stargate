@@ -23,18 +23,21 @@ import {
   type CrewSession,
   type CrewSessions,
   type CrewWaitOptions,
-} from "../src/crew/engine";
+} from "../src/crew/execution/engine";
 import { CrewMaintenance } from "../src/crew/controls/maintenance";
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import { CrewModels, type ModelSessions } from "../src/crew/controls/models";
-import { nativeWait } from "../src/crew/native-wait";
+import { nativeWait } from "../src/crew/execution/native-wait";
 import plugin from "../src/crew/plugin";
 import type {
   CrewInspectionAPI,
   EvidenceMessage,
-} from "../src/crew/reconciliation";
-import { CrewRecovery, runRecoveryOperator } from "../src/crew/recovery-rpc";
-import type { CrewTask } from "../src/crew/state";
+} from "../src/crew/execution/reconciliation";
+import {
+  CrewRecovery,
+  runRecoveryOperator,
+} from "../src/crew/execution/recovery-rpc";
+import type { CrewTask } from "../src/crew/execution/state";
 import {
   defaultTeam,
   profileTeam,

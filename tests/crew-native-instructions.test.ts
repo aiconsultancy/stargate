@@ -6,9 +6,9 @@ import {
   observePlacement,
   sha256,
   verifyResult,
-} from "../src/crew/reconciliation";
-import { readTaskResult } from "../src/crew/result";
-import type { CrewTask } from "../src/crew/state";
+} from "../src/crew/execution/reconciliation";
+import { readTaskResult } from "../src/crew/execution/result";
+import type { CrewTask } from "../src/crew/execution/state";
 
 const task: CrewTask = {
   id: "task_fixture",

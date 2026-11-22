@@ -8,7 +8,7 @@ import {
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/engine";
+} from "../src/crew/execution/engine";
 import type { MesijInbox, MesijMessage, MesijSend } from "../src/crew/mesij";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 import type { MaintenanceDrain } from "../src/maintenance/maintenance-drain";

@@ -10,8 +10,8 @@ import {
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/engine";
-import { canExpandCrew } from "../src/crew/identity";
+} from "../src/crew/execution/engine";
+import { canExpandCrew } from "../src/crew/execution/identity";
 import { piDefinitionPath } from "../src/crew/instructions";
 import type { MesijInbox, MesijMessage, MesijSend } from "../src/crew/mesij";
 import type { PiCrewBinding } from "../src/crew/pi-extension";
