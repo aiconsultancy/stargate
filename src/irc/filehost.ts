@@ -9,7 +9,7 @@ import {
 import { isLoopbackAddress } from "../lib/loopback";
 
 /**
- * soju.im/FILEHOST (draft/FILEHOST): an HTTPS upload URL that the IRC server
+ * Soju.im/FILEHOST (draft/FILEHOST): an HTTPS upload URL that the IRC server
  * advertises. Uploads POST with HTTP Basic (the SASL PLAIN credentials) and
  * answer 201 with a Location; files are read with GET.
  * https://github.com/emersion/soju/blob/master/doc/ext/filehost.md
@@ -23,10 +23,14 @@ import { isLoopbackAddress } from "../lib/loopback";
 export function filehostURL(value: string, tlsIrc: boolean) {
   if (!URL.canParse(value)) return;
   const url = new URL(value);
+
   if (url.username || url.password || url.search || url.hash) return;
+
   if (url.protocol === "https:") return url;
+
   if (url.protocol === "http:" && !tlsIrc && isLoopbackAddress(url.hostname))
     return url;
+
   return;
 }
 
@@ -36,6 +40,7 @@ export function safeFileURL(url: URL, filehost: URL) {
 }
 
 const mimePattern = /^[\w.+-]+\/[\w.+-]+$/;
+
 const htmlTypes = new Set([
   "text/html",
   "application/xhtml+xml",
@@ -50,6 +55,7 @@ const htmlTypes = new Set([
 function safeMime(header: string | null, data: Uint8Array) {
   const declared = header?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   const start = new TextDecoder().decode(data.subarray(0, 512));
+
   if (
     htmlTypes.has(declared) ||
     /^\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b|<script\b|<svg\b)/i.test(
@@ -57,6 +63,7 @@ function safeMime(header: string | null, data: Uint8Array) {
     )
   )
     return "text/plain";
+
   return mimePattern.test(declared) ? declared : "application/octet-stream";
 }
 
@@ -65,6 +72,7 @@ function fileName(disposition: string | null, url: URL) {
   const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition ?? "")?.[1];
   const plain = /filename="?([^";]+)"?/i.exec(disposition ?? "")?.[1];
   let name = "";
+
   try {
     name = decodeURIComponent(
       star ?? plain ?? url.pathname.split("/").at(-1) ?? "",
@@ -72,6 +80,7 @@ function fileName(disposition: string | null, url: URL) {
   } catch {
     name = "";
   }
+
   const safe = [...name]
     .filter(
       (char) =>
@@ -83,6 +92,7 @@ function fileName(disposition: string | null, url: URL) {
     .join("")
     .trim()
     .slice(0, 255);
+
   return safe || "file";
 }
 
@@ -92,15 +102,19 @@ async function readBounded(
   signal: AbortSignal,
 ) {
   const reader = response.body?.getReader();
+
   if (!reader) throw new Error("FILEHOST response has no body");
   const parts: Uint8Array[] = [];
   let used = 0;
+
   try {
     for (;;) {
       signal.throwIfAborted();
       const chunk = await reader.read();
+
       if (chunk.done) break;
       used += chunk.value.byteLength;
+
       if (used > limit) throw new Error("FILEHOST file too large");
       parts.push(chunk.value);
     }
@@ -108,12 +122,15 @@ async function readBounded(
     await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
+
   const data = new Uint8Array(used);
   let offset = 0;
+
   for (const part of parts) {
     data.set(part, offset);
     offset += part.byteLength;
   }
+
   return data;
 }
 
@@ -148,7 +165,9 @@ export class Filehost {
   /** The current upload URL; throws when the server offers none. */
   private uploadURL(): URL {
     const url = this.url();
+
     if (!url) throw new UploadRefused();
+
     return url;
   }
 
@@ -159,6 +178,7 @@ export class Filehost {
     const authorization = `Basic ${Buffer.from(
       `${this.options.account}:${this.options.password}`,
     ).toString("base64")}`;
+
     return {
       headers: { ...headers, authorization },
       redirect: "error",
@@ -173,7 +193,9 @@ export class Filehost {
   /** True when `value` is a file URL on the current FILEHOST origin. */
   owns(value: string) {
     const host = this.url();
+
     if (!host || !URL.canParse(value)) return false;
+
     return safeFileURL(new URL(value), host);
   }
 
@@ -184,24 +206,29 @@ export class Filehost {
     if (urls.length > maxAttachments) throw new Error("Too many attachments");
     const files: Attachment[] = [];
     let total = 0;
+
     for (const value of urls) {
       if (!this.owns(value)) throw new Error("File is not on the FILEHOST");
       const url = new URL(value);
       let response: Response;
+
       try {
         response = await fetch(url, this.init(signal));
       } catch {
         signal.throwIfAborted();
         throw new Error("FILEHOST download failed");
       }
+
       try {
         if (response.status !== 200)
           throw new Error("FILEHOST download failed");
         const declared = response.headers.get("content-length");
+
         if (declared !== null && Number(declared) > maxAttachmentBytes)
           throw new Error("FILEHOST file too large");
         const data = await readBounded(response, maxAttachmentBytes, signal);
         total += data.byteLength;
+
         if (total > maxAttachmentTotalBytes)
           throw new Error("FILEHOST files too large");
         files.push({
@@ -214,7 +241,9 @@ export class Filehost {
         await response.body?.cancel().catch(() => {});
       }
     }
+
     checkAttachments(files);
+
     return files;
   }
 
@@ -229,6 +258,7 @@ export class Filehost {
     const target = this.uploadURL();
     const ascii = /^[ -~]+$/.test(file.name) && !/["\\]/.test(file.name);
     let response: Response;
+
     try {
       response = await fetch(target, {
         ...this.init(signal, {
@@ -244,20 +274,25 @@ export class Filehost {
       signal.throwIfAborted();
       throw new Error("FILEHOST upload failed");
     }
+
     try {
       if (response.status !== 201)
         throw refusedStatuses.has(response.status)
           ? new UploadRefused()
           : new Error("FILEHOST upload unconfirmed");
       const location = response.headers.get("location");
+
       if (!location) throw new Error("FILEHOST upload unconfirmed");
+
       // The link is posted in public: only a plain URL on the FILEHOST's own
-      // origin, never one that carries credentials.
+      // Origin, never one that carries credentials.
       const url = URL.canParse(location, target)
         ? new URL(location, target)
         : undefined;
+
       if (!url || !safeFileURL(url, target))
         throw new Error("FILEHOST returned an unsafe location");
+
       return url.href;
     } finally {
       await response.body?.cancel().catch(() => {});

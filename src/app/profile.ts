@@ -49,6 +49,7 @@ const absolute = Schema.String.check(
     message: "Invalid input",
   }),
 );
+
 const optionsSchema = settingsStruct({
   directory: absolute,
   projectDirectory: absolute,
@@ -86,11 +87,14 @@ const optionsSchema = settingsStruct({
   /** Nightly maintenance window rendered into captain and crew instructions. */
   maintenanceWindow: Schema.optional(nightlyWindowSchema),
 });
+
 type Options = typeof optionsSchema.Encoded;
+
 const document = settingsRecord(
   Schema.String,
   Schema.mutableKey(Schema.Unknown),
 );
+
 const templateSchema = document.pipe(
   Schema.decodeTo(
     Schema.StructWithRest(
@@ -107,16 +111,20 @@ const templateSchema = document.pipe(
 
 function parseOptions(input: Options) {
   const parsed = Schema.decodeUnknownResult(optionsSchema)(input);
+
   if (Result.isFailure(parsed))
     throw new Error(
       "Invalid profile paths, team, namespace, proxy URL, or credential reference.",
     );
+
   const options = {
     ...parsed.success,
     namespace: parsed.success.namespace ?? parsed.success.team.captain.id,
   };
+
   options.team = profileTeam(options.team, options.namespace);
   const proxy = new URL(options.proxyURL);
+
   if (
     !["http:", "https:"].includes(proxy.protocol) ||
     proxy.username ||
@@ -124,11 +132,13 @@ function parseOptions(input: Options) {
   ) {
     throw new Error("Proxy URL must be HTTP(S), without credentials.");
   }
+
   if (
     options.directory === options.worktreeDirectory ||
     options.worktreeDirectory.startsWith(`${options.directory}/`) ||
     options.team.crew.some(({ id }) => {
       const worker = join(options.worktreeDirectory, id);
+
       return (
         options.directory === worker ||
         options.directory.startsWith(`${worker}/`)
@@ -139,6 +149,7 @@ function parseOptions(input: Options) {
       "Captain and crew configuration trees must be distinct and non-nested.",
     );
   }
+
   return options;
 }
 
@@ -146,18 +157,24 @@ export async function renderProfile(input: Options, role: string) {
   const options = parseOptions(input);
   const captain = role === options.team.captain.id;
   const member = options.team.crew.find((member) => member.id === role);
+
   if (member?.backend)
     throw new Error("Pi workers do not use OpenCode agent profiles.");
   const agent = captain ? options.team.captain : member;
+
   if (!agent) throw new Error("Agent does not belong to the configured team.");
   const profile = captain ? "captain" : member?.permissionProfile;
+
   if (!profile) throw new Error("Missing team permission profile.");
+
   const config = await Bun.file(
     join(templatesDirectory, "opencode.json"),
   ).json();
+
   // The template is project-owned; untrusted inputs are validated above.
   const parsed = Schema.decodeUnknownSync(templateSchema)(config);
   const providers = parsed.providers;
+
   for (const provider of Object.values(providers)) {
     provider["settings"] = {
       ...Schema.decodeUnknownSync(document)(provider["settings"]),
@@ -165,12 +182,14 @@ export async function renderProfile(input: Options, role: string) {
       apiKey: options.apiKeyReference,
     };
   }
+
   const worktrees = Object.fromEntries(
     options.team.crew.map(({ id }) => [
       id,
       join(options.worktreeDirectory, id),
     ]),
   );
+
   return {
     ...parsed,
     providers,
@@ -236,6 +255,7 @@ async function writeProfileFile(
   preserveExisting = false,
 ) {
   const info = await present(path);
+
   if (info) {
     if (
       !info.isFile() ||
@@ -243,10 +263,13 @@ async function writeProfileFile(
     ) {
       throw new Error(`Refusing to overwrite existing profile file: ${path}`);
     }
+
     return;
   }
+
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const file = await open(path, "wx", 0o600);
+
   try {
     await file.writeFile(text);
   } finally {
@@ -257,9 +280,11 @@ async function writeProfileFile(
 async function configDirectory(directory: string) {
   const canonical = join(directory, ".agents", "opco");
   const compatible = join(directory, ".opencode");
+
   if (await present(canonical)) {
     if (!(await lstat(canonical)).isDirectory())
       throw new Error("Canonical OpenCode directory must be a directory.");
+
     if (await present(compatible)) {
       if (
         !(await lstat(compatible)).isSymbolicLink() ||
@@ -270,12 +295,16 @@ async function configDirectory(directory: string) {
         );
       }
     } else await symlink(".agents/opco", compatible);
+
     return canonical;
   }
+
   const info = await present(compatible);
+
   if (info && !info.isDirectory())
     throw new Error("Refusing an unrelated .opencode symlink or file.");
   await mkdir(compatible, { recursive: true, mode: 0o700 });
+
   return compatible;
 }
 
@@ -288,26 +317,33 @@ async function excludeGenerated(
     project,
     git(project, "rev-parse", "--git-common-dir"),
   );
+
   const path = join(common, "info", "exclude");
   const info = await present(path);
+
   if (info && !info.isFile())
     throw new Error("Git excludes must be a regular file.");
   const previous = info ? await readFile(path, "utf8") : "";
   const patterns = ["/.opencode/opencode.json", "/.agents/opco/opencode.json"];
+
   // Ignore compatibility symlinks, not unrelated source .opencode directories.
   if (compatibilitySymlink) patterns.push("/.opencode", "!/.opencode/");
+
   for (const role of agentIDs) {
     patterns.push(
       `/.opencode/agents/${role}.md`,
       `/.agents/opco/agents/${role}.md`,
     );
   }
+
   const missing = patterns.filter(
     (pattern) => !previous.split("\n").includes(pattern),
   );
+
   if (!missing.length) return;
   await mkdir(dirname(path), { recursive: true });
   const file = await open(path, "a", 0o600);
+
   try {
     await file.writeFile(
       `${previous && !previous.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`,
@@ -320,6 +356,7 @@ async function excludeGenerated(
 export async function initializeProfile(input: Options) {
   const options = parseOptions(input);
   let cloneOrigin = options.projectDirectory;
+
   if (options.workspaceMode === "clone") {
     try {
       cloneOrigin = git(
@@ -339,28 +376,34 @@ export async function initializeProfile(input: Options) {
       git(options.projectDirectory, "rev-parse", "--git-common-dir"),
     ),
   );
+
   const base = git(
     options.projectDirectory,
     "rev-parse",
     "--verify",
     `${options.base}^{commit}`,
   );
+
   const worktrees = Object.fromEntries(
     options.team.crew.map(({ id }) => [
       id,
       join(options.worktreeDirectory, id),
     ]),
   );
+
   await mkdir(options.directory, { recursive: true, mode: 0o700 });
   const state = join(options.directory, ".local", "stargate-crew");
   await mkdir(state, { recursive: true, mode: 0o700 });
+
   if (((await lstat(state)).mode & 0o077) !== 0)
     throw new Error("Crew state directory must be private (0700).");
   const agents = [options.team.captain, ...options.team.crew];
+
   const roster = [
     `- ${options.team.captain.id}: Captain and coordinator`,
     ...options.team.crew.map((member) => `- ${member.id}: ${member.role}`),
   ].join("\n");
+
   await writeProfileFile(
     join(options.directory, "WAYS_OF_WORKING.md"),
     (
@@ -374,14 +417,17 @@ export async function initializeProfile(input: Options) {
     "# Ship log\n\nRecord verified team lessons and useful inspection findings.\n",
     true,
   );
+
   const shipInstructions = await readFile(
     join(templatesDirectory, "ship-instructions.md"),
     "utf8",
   );
+
   await excludeGenerated(
     options.projectDirectory,
     agents.map(({ id, agent }) => agent ?? id),
   );
+
   for (const agent of agents) {
     const role = agent.id;
     const journalPath = join(ship, "journals", `${role}.md`);
@@ -393,18 +439,23 @@ export async function initializeProfile(input: Options) {
     const captain = role === options.team.captain.id;
     const member = options.team.crew.find((member) => member.id === role);
     const directory = captain ? options.directory : worktrees[role];
+
     if (!directory) throw new Error("Missing crew directory.");
+
     if (!captain) {
       const info = await present(directory);
+
       if (info && !info.isDirectory())
         throw new Error(
           "Existing crew path must be a real worktree directory, not a symlink or file.",
         );
+
       if (!info) {
         await mkdir(options.worktreeDirectory, {
           recursive: true,
           mode: 0o700,
         });
+
         if (options.workspaceMode === "clone") {
           git(
             options.projectDirectory,
@@ -435,10 +486,13 @@ export async function initializeProfile(input: Options) {
           );
         }
       }
+
       const common = await realpath(
         resolve(directory, git(directory, "rev-parse", "--git-common-dir")),
       );
+
       const branch = git(directory, "branch", "--show-current");
+
       if (
         (options.workspaceMode === "clone"
           ? common === sourceCommon ||
@@ -451,12 +505,14 @@ export async function initializeProfile(input: Options) {
           "Existing crew workspace must belong to this project and use a non-main feature branch.",
         );
       }
+
       if (options.workspaceMode === "clone")
         await excludeGenerated(
           directory,
           agents.map(({ id, agent }) => agent ?? id),
         );
     }
+
     if (member?.backend) {
       await writeProfileFile(
         piDefinitionPath(options.directory, member),
@@ -470,13 +526,17 @@ export async function initializeProfile(input: Options) {
       );
       continue;
     }
+
     const configPath = await configDirectory(directory);
+
     if (!captain && configPath === join(directory, ".agents", "opco")) {
       await excludeGenerated(options.projectDirectory, [], true);
     }
+
     // Never hide a replacement of tracked Indra configuration as local setup.
     if (!captain) {
       const relative = configPath.slice(directory.length + 1);
+
       if (
         git(
           directory,
@@ -491,10 +551,12 @@ export async function initializeProfile(input: Options) {
         );
       }
     }
+
     const template = await readFile(
       join(templatesDirectory, "agents", `${captain ? "captain" : "crew"}.md`),
       "utf8",
     );
+
     const substitutions: Record<string, string> = {
       projectDirectory: options.projectDirectory,
       worktreeDirectory: options.worktreeDirectory,
@@ -538,10 +600,12 @@ export async function initializeProfile(input: Options) {
         agent.instructions ??
         "Follow the assigned task and project instructions.",
     };
+
     const prompt = `${template.trimEnd()}\n\n${shipInstructions}`.replace(
       /\{\{(\w+)\}\}/g,
       (match, key: string) => substitutions[key] ?? match,
     );
+
     await writeProfileFile(
       join(configPath, "agents", `${agent.agent ?? role}.md`),
       managedPrompt(prompt),
@@ -551,6 +615,7 @@ export async function initializeProfile(input: Options) {
       `${JSON.stringify(await renderProfile(options, role), null, 2)}\n`,
     );
   }
+
   return {
     directory: options.directory,
     worktrees,

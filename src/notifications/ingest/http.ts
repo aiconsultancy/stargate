@@ -45,6 +45,7 @@ function failure(status: number, code: string, retry = 1) {
     },
   );
 }
+
 /** Header-only policy; body bounds and work reservations belong to the host. */
 export function notificationRoutes(
   config: NotifyConfig,
@@ -56,8 +57,10 @@ export function notificationRoutes(
   const credentials = producerCredentials(config, environment, operatorToken);
   let open = true;
   const routes: NotificationRoute[] = [];
+
   for (const [name, adapter] of Object.entries(config.adapters)) {
     if (!adapter.enabled) continue;
+
     const sources = credentials
       .filter((entry) => entry.adapter === name)
       .map((entry) => ({
@@ -72,6 +75,7 @@ export function notificationRoutes(
         count: 0,
         expires: 0,
       }));
+
     routes.push({
       owner: `notify/${name}`,
       method: "POST",
@@ -80,17 +84,23 @@ export function notificationRoutes(
       authorize(headers) {
         if (!open)
           return { allowed: false, response: failure(503, "shutting_down") };
+
         if (headers.has("Origin"))
           return { allowed: false, response: failure(403, "forbidden") };
+
         const token = /^Bearer ([A-Za-z0-9_-]{32,256})$/i.exec(
           headers.get("Authorization") ?? "",
         )?.[1];
+
         const matches = sources.filter((entry) =>
           equalCredential(entry.token, token ?? ""),
         );
+
         const entry = matches.length === 1 ? matches[0] : undefined;
+
         if (!token || !entry)
           return { allowed: false, response: failure(401, "unauthorized") };
+
         if (
           !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(
             headers.get("Content-Type") ?? "",
@@ -101,10 +111,12 @@ export function notificationRoutes(
             response: failure(415, "unsupported_media_type"),
           };
         const time = now();
+
         if (time >= entry.expires) {
           entry.count = 0;
           entry.expires = time + 60_000;
         }
+
         if (entry.count >= entry.rate)
           return {
             allowed: false,
@@ -115,27 +127,34 @@ export function notificationRoutes(
             ),
           };
         entry.count++;
+
         return { allowed: true, caller: entry.source };
       },
       async handle(request, caller, signal) {
         if (!open) return failure(503, "shutting_down");
         const source = Schema.decodeUnknownResult(Source)(caller);
+
         if (Result.isFailure(source)) return failure(401, "unauthorized");
         let input: unknown;
+
         try {
           input = await request.json();
         } catch {
           return failure(400, "invalid_notification");
         }
+
         // The core decoder is authoritative and rejects all producer identity claims.
         const decoded = Schema.decodeUnknownResult(NotificationInput)(input);
+
         if (Result.isFailure(decoded))
           return failure(400, "invalid_notification");
+
         try {
           const result = await Effect.runPromise(
             core.publish(source.success, decoded.success).pipe(Effect.result),
             { signal },
           );
+
           if (Result.isSuccess(result))
             return Response.json(result.success, {
               status: 202,
@@ -144,6 +163,7 @@ export function notificationRoutes(
                 "X-Content-Type-Options": "nosniff",
               },
             });
+
           switch (result.failure._tag) {
             case "InvalidNotification":
               return failure(400, "invalid_notification");
@@ -162,6 +182,7 @@ export function notificationRoutes(
       },
     });
   }
+
   return {
     routes,
     closeAdmission: () => {

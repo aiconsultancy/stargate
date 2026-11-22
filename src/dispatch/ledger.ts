@@ -71,7 +71,9 @@ const walkSchema = Schema.Struct({
 });
 
 export type AssignmentWalk = typeof walkSchema.Type;
+
 export type DispatchOfferRecord = typeof offerSchema.Type;
+
 export type TrackedIssue = {
   -readonly [
     K in keyof typeof trackedSchema.Type
@@ -152,10 +154,13 @@ export class DispatchLedger {
   /** An unfinished assignment listing; an unreadable value starts it again. */
   get assignmentWalk(): AssignmentWalk | undefined {
     const value = this.meta("assignmentWalk");
+
     if (value === undefined) return undefined;
+
     const parsed = Schema.decodeUnknownResult(
       Schema.fromJsonString(walkSchema),
     )(value);
+
     return Result.isSuccess(parsed) ? parsed.success : undefined;
   }
 
@@ -191,6 +196,7 @@ export class DispatchLedger {
         const value = Number(this.meta("rotation") ?? "0");
         const current = Number.isSafeInteger(value) && value >= 0 ? value : 0;
         this.setMeta("rotation", String(current + 1));
+
         return current;
       })
       .immediate();
@@ -225,7 +231,9 @@ export class DispatchLedger {
     const parsed = Schema.decodeUnknownResult(
       Schema.fromJsonString(trackedSchema),
     )(value);
+
     if (Result.isFailure(parsed)) return;
+
     return { ...parsed.success, order: [...parsed.success.order] };
   }
 
@@ -235,6 +243,7 @@ export class DispatchLedger {
         "SELECT value FROM dispatch_issues WHERE issue=?",
       )
       .get(issue);
+
     return row ? this.decode(row.value) : undefined;
   }
 
@@ -247,6 +256,7 @@ export class DispatchLedger {
       .all()
       .flatMap((row) => {
         const value = this.decode(row.value);
+
         return value ? [value] : [];
       })
       .sort(
@@ -260,6 +270,7 @@ export class DispatchLedger {
         "SELECT value FROM dispatch_issues WHERE offerID=?",
       )
       .get(offerID);
+
     return row ? this.decode(row.value) : undefined;
   }
 
@@ -285,6 +296,7 @@ export class DispatchLedger {
       )
       .all()) {
       const value = this.decode(row.value);
+
       if (!value || value.updatedAt < now - keepMs)
         this.db
           .query("DELETE FROM dispatch_issues WHERE issue=?")

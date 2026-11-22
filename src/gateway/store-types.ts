@@ -64,6 +64,7 @@ export const jobStatuses = [
   "done",
   "failed",
 ] as const;
+
 export type JobStatus = (typeof jobStatuses)[number];
 
 export type Job = Incoming & {

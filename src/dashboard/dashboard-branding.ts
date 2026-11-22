@@ -12,6 +12,7 @@ const artwork = {
   "{{stargate-favicon-dark}}": png("stargate-dark-32.png"),
   "{{stargate-favicon-light}}": png("stargate-light-32.png"),
 };
+
 const favicons = new Set([
   artwork["{{stargate-favicon-dark}}"],
   artwork["{{stargate-favicon-light}}"],
@@ -21,6 +22,7 @@ const favicons = new Set([
 export function dashboardBranding(html: string): string {
   for (const [token, image] of Object.entries(artwork))
     html = html.replaceAll(token, image);
+
   return html;
 }
 

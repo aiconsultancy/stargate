@@ -8,14 +8,17 @@ const decodeCrewOrigin = Schema.decodeUnknownOption(
     originInputID: Schema.optional(Schema.NonEmptyString),
   }),
 );
+
 const decodeRestart = Schema.decodeUnknownOption(
   Schema.Struct({ notice: Schema.Literal("restart") }),
   { onExcessProperty: "error" },
 );
+
 // OpenCode 2.3.0 SessionRunner.continueOutputLimit emits same-turn context
-// without description or metadata, not an asynchronous completion.
+// Without description or metadata, not an asynchronous completion.
 const outputLimitContinuation =
   "Your last response hit the output token limit (stop reason: length). Do not apologize, recap, or repeat yourself. Break the remaining work into smaller pieces.";
+
 type BoundaryMessage = {
   id: string;
   type: string;
@@ -30,22 +33,27 @@ export function inputBoundary(
   sessionID: string,
 ): string | undefined {
   if (message.type === "user" || message.type === "shell") return message.id;
+
   // A shell callback is not a continuation of the latest chat. A reader with
-  // retained launch ancestry may replace this native-only boundary.
+  // Retained launch ancestry may replace this native-only boundary.
   if (message.type === "synthetic" && message.metadata?.["source"] === "shell")
     return message.id;
+
   if (message.type !== "synthetic") return;
+
   if (
     message.metadata &&
     Object.hasOwn(message.metadata, crewMessageMetadataKey)
   ) {
     const origin = decodeCrewOrigin(message.metadata[crewMessageMetadataKey]);
+
     return Option.isSome(origin) && origin.value.originCaptainID === sessionID
       ? (origin.value.originInputID ?? message.id)
       : message.id;
   }
+
   // These native context records do not start asynchronous work. Every other
-  // unproven synthetic input clears ownership, including missing metadata.
+  // Unproven synthetic input clears ownership, including missing metadata.
   if (
     isNativeInstructionContext(message) ||
     Option.isSome(decodeRestart(message.metadata)) ||
@@ -55,6 +63,7 @@ export function inputBoundary(
         Object.keys(message.metadata).length === 0))
   )
     return;
+
   return message.id;
 }
 
@@ -70,6 +79,7 @@ export function boundaryRecord(
   sessionID: string,
 ): InputBoundaryRecord {
   const input = inputBoundary(message, sessionID);
+
   return {
     id: message.id,
     type: message.type,
@@ -88,16 +98,20 @@ export class InputBoundaryFold {
       this.adjacent = false;
       this.mixed = false;
     }
+
     if (message.input === undefined) return;
+
     const mixed =
       message.type === "synthetic" &&
       this.adjacent &&
       (this.mixed || message.input !== this.previous);
+
     const input = mixed ? message.id : message.input;
     this.mixed =
       mixed || (message.type === "synthetic" && message.input === message.id);
     this.previous = input;
     this.adjacent = true;
+
     return input;
   }
 }
@@ -112,13 +126,16 @@ export function closesBoundaryContext(message: InputBoundaryRecord): boolean {
 }
 
 export function resolveBoundaryContext(
-  descending: ReadonlyArray<InputBoundaryRecord>,
+  descending: readonly InputBoundaryRecord[],
 ): string | undefined {
   const fold = new InputBoundaryFold();
   let input: string | undefined;
+
   for (let index = descending.length - 1; index >= 0; index--) {
     const message = descending[index];
+
     if (message) input = fold.next(message) ?? input;
   }
+
   return input;
 }

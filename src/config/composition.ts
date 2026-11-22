@@ -48,6 +48,7 @@ const userRule = Schema.Union([
   Schema.Literal("*"),
   Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
 ]);
+
 const channelRule = Schema.Union([
   Schema.Literal("*"),
   Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
@@ -67,6 +68,7 @@ const pairingOrigin = settingsURL
       (value) => {
         if (!URL.canParse(value) || !/^https?:\/\//i.test(value)) return false;
         const url = new URL(value);
+
         if (
           /[\s\\?#@]/.test(value) ||
           url.username ||
@@ -74,10 +76,13 @@ const pairingOrigin = settingsURL
           url.pathname !== "/"
         )
           return false;
+
         if (url.protocol === "https:") return true;
+
         if (url.protocol !== "http:") return false;
         const host = url.hostname;
         const parts = host.split(".").map(Number);
+
         return (
           host.endsWith(".ts.net") ||
           (parts.length === 4 &&
@@ -101,7 +106,7 @@ const pairingOrigin = settingsURL
       Schema.String,
       SchemaTransformation.transform({
         // The checks above own rejection. Failure-only diagnostic decoding
-        // disables checks and must retain the string instead of throwing.
+        // Disables checks and must retain the string instead of throwing.
         decode: (value) =>
           URL.canParse(value) ? new URL(value).origin : value,
         encode: (value) => value,
@@ -191,7 +196,7 @@ export const botSchema = settingsStruct({
   /** Speech-to-text for accepted audio and video messages; absent is off. */
   transcription: Schema.optional(transcriptionSchema),
   waiting: waitingSchema.pipe(
-    settingsDefault({ delayMs: 5000, intervalMs: 10000 }),
+    settingsDefault({ delayMs: 5000, intervalMs: 10_000 }),
   ),
   crewActivity: crewActivitySchema.pipe(
     settingsDefault({
@@ -209,19 +214,23 @@ export const botSchema = settingsStruct({
 });
 
 export { defaultAllCallWords, ircFeatureDefaults } from "../irc/config";
+
 export const { ircSchema, ircFeedbackDefaults, effectiveIrcConfig } =
   createIrcConfig({
     backendSchema,
     transcriptionSchema,
     validateFleetPermissions,
   });
+
 export type IrcConfig = typeof ircSchema.Type;
+
 export type EffectiveIrcConfig = ReturnType<typeof effectiveIrcConfig>;
 
 const dispatchSeconds = (minimum: number, maximum: number) =>
   Schema.Finite.check(Schema.isInt())
     .check(Schema.isGreaterThanOrEqualTo(minimum))
     .check(Schema.isLessThanOrEqualTo(maximum));
+
 /** Headers that the dispatch client owns or that no proxy needs from config. */
 const reservedDispatchHeaders = new Set([
   "accept",
@@ -232,6 +241,7 @@ const reservedDispatchHeaders = new Set([
   "host",
   "transfer-encoding",
 ]);
+
 export const agentDispatchDefaults = {
   pollIntervalSeconds: 120,
   answerTimeoutSeconds: 300,
@@ -296,6 +306,7 @@ export const agentDispatchSchema = settingsStruct({
     .check(Schema.isMaxLength(10))
     .pipe(settingsDefault([...agentDispatchDefaults.retryLadderSeconds])),
 });
+
 export type AgentDispatchConfig = typeof agentDispatchSchema.Type;
 
 /** The rear admiral registration and channel that dispatch uses, or why not. */
@@ -306,19 +317,26 @@ export function agentDispatchTarget(
   const registration = irc.find(
     (entry) => entry.id === dispatch.messaging.registration,
   );
+
   if (!registration)
     return "Agent dispatch messaging.registration must name an IRC registration";
+
   if (registration.fleetPolicy?.role !== "rear_admiral")
     return "Agent dispatch runs only on a rear admiral's IRC registration (fleetPolicy.role rear_admiral)";
+
   const channel =
     dispatch.messaging.channel ?? registration.fleetChannels?.command;
+
   if (!channel)
     return "Set agent dispatch messaging.channel or the registration's fleetChannels.command";
+
   const joined = effectiveIrcConfig(registration).channels.find(
     (name) => fold(name) === fold(channel),
   );
+
   if (!joined)
     return "The agent dispatch channel must be one of the rear admiral registration's channels";
+
   return { registration, channel: joined };
 }
 
@@ -366,7 +384,7 @@ export const teamsSchema = settingsStruct({
     .check(Schema.isLessThanOrEqualTo(3_600_000))
     .pipe(settingsDefault(600_000)),
   waiting: waitingSchema.pipe(
-    settingsDefault({ delayMs: 5000, intervalMs: 10000 }),
+    settingsDefault({ delayMs: 5000, intervalMs: 10_000 }),
   ),
   crewActivity: crewActivitySchema.pipe(settingsDefault({ detail: "off" })),
   concurrency: Schema.Finite.check(Schema.isInt())
@@ -384,6 +402,7 @@ export const teamsSchema = settingsStruct({
         code: "custom",
         message: "Approval users must be allowed human users",
       });
+
     if (value.approvalUsers.length && value.backend.type !== "opencode")
       context.addIssue({
         code: "custom",
@@ -391,6 +410,7 @@ export const teamsSchema = settingsStruct({
       });
   }),
 );
+
 export type TeamsConfig = typeof teamsSchema.Type;
 
 /** Registration IDs: Slack bots, IRC captains and `<irc id>-<crew id>`. */
@@ -460,6 +480,7 @@ const configFields = settingsStruct({
   /** Rear admiral agent dispatch from Subspace issues; off by default. */
   agentDispatch: Schema.optional(agentDispatchSchema),
 });
+
 const configCheck = (liveNotificationPolicy = false) =>
   settingsCheck<typeof configFields.Type>(
     (
@@ -480,6 +501,7 @@ const configCheck = (liveNotificationPolicy = false) =>
       // A disabled section is inert: it names nothing that must exist yet.
       if (agentDispatch?.enabled) {
         const target = agentDispatchTarget(agentDispatch, irc);
+
         if (typeof target === "string")
           context.addIssue({
             code: "custom",
@@ -487,6 +509,7 @@ const configCheck = (liveNotificationPolicy = false) =>
             message: target,
           });
       }
+
       if (notify) {
         const message = notifyConfigError(
           notify,
@@ -494,15 +517,18 @@ const configCheck = (liveNotificationPolicy = false) =>
           api?.listen,
           liveNotificationPolicy,
         );
+
         if (message)
           context.addIssue({ code: "custom", path: ["notify"], message });
       }
+
       if (dashboardSocket && dashboard !== true)
         context.addIssue({
           code: "custom",
           path: ["dashboardSocket"],
           message: "A shared dashboard socket requires dashboard: true",
         });
+
       if (bots.length + irc.length + teams.length === 0)
         context.addIssue({
           code: "custom",
@@ -510,36 +536,42 @@ const configCheck = (liveNotificationPolicy = false) =>
           message: "Configure at least one Slack, Teams or IRC registration",
         });
       const ids = registrationIds({ bots, irc, teams });
+
       if (new Set(ids).size !== ids.length)
         context.addIssue({
           code: "custom",
           message: "Duplicate registration ID across bots, irc and IRC crew",
         });
+
       // One Slack bot and one IRC captain may share a pin: each delivers only
-      // replies attributed to its own native inputs. Same-transport pins stay
-      // unique, so one queue never owns another's cursor.
+      // Replies attributed to its own native inputs. Same-transport pins stay
+      // Unique, so one queue never owns another's cursor.
       const ircPins = irc.flatMap((registration) =>
         registration.backend.type === "opencode" &&
         registration.backend.sessionID !== undefined
           ? [registration.backend.sessionID]
           : [],
       );
+
       if (new Set(ircPins).size !== ircPins.length)
         context.addIssue({
           code: "custom",
           message:
             "Duplicate pinned OpenCode sessionID across IRC registrations",
         });
+
       const teamPins = teams.flatMap((team) =>
         team.backend.type === "opencode" && team.backend.sessionID
           ? [team.backend.sessionID]
           : [],
       );
+
       const slackPins = bots.flatMap((bot) =>
         bot.backend.type === "opencode" && bot.backend.sessionID
           ? [bot.backend.sessionID]
           : [],
       );
+
       if (
         new Set(teamPins).size !== teamPins.length ||
         teamPins.some((pin) => slackPins.includes(pin))
@@ -548,45 +580,54 @@ const configCheck = (liveNotificationPolicy = false) =>
           code: "custom",
           message: "A pinned session needs one primary chat transport owner",
         });
+
       if (new Set(teams.map((team) => team.socketPath)).size !== teams.length)
         context.addIssue({
           code: "custom",
           message: "Teams registrations need separate socket paths",
         });
+
       // An audit channel is never a conversation in any registration: another
-      // ship listing it would answer mirrored lines. Host names and ports do
-      // not prove two servers distinct (aliases, addresses, proxies), so every
+      // Ship listing it would answer mirrored lines. Host names and ports do
+      // Not prove two servers distinct (aliases, addresses, proxies), so every
       // IRC registration counts, under the widest name folding.
       const shipChannels = new Set(
         irc.flatMap((registration) => registration.channels.map(widestFold)),
       );
+
       for (const registration of irc) {
         const audit = registration.audit?.channel;
+
         if (audit !== undefined && shipChannels.has(widestFold(audit)))
           context.addIssue({
             code: "custom",
             message: `IRC audit channel of ${registration.id} is a ship channel of an IRC registration`,
           });
       }
+
       const ircSecrets = irc.flatMap((registration) => [
         ...(registration.passwordEnv ? [registration.passwordEnv] : []),
         ...registration.crew.flatMap((member) =>
           member.passwordEnv ? [member.passwordEnv] : [],
         ),
       ]);
+
       if (new Set(ircSecrets).size !== ircSecrets.length)
         context.addIssue({
           code: "custom",
           message: "Each IRC account needs its own passwordEnv",
         });
+
       for (const [feature, report] of [
         ["maintenance", maintenance?.report],
         ["quotaWatch", quotaWatch?.report],
       ] as const) {
         if (!report) continue;
         const bot = bots.find((item) => item.id === report.bot);
+
         const matches = (rules: readonly string[]) =>
           rules.includes("*") || rules.includes(report.channel);
+
         if (
           !bot ||
           matches(bot.access.deniedChannels) ||
@@ -601,6 +642,7 @@ const configCheck = (liveNotificationPolicy = false) =>
                 : "Quota report bot must exist and not deny the report channel",
           });
       }
+
       for (const [index, bot] of bots.entries())
         if (bot.captainPost && bot.backend.type !== "opencode")
           context.addIssue({
@@ -608,19 +650,23 @@ const configCheck = (liveNotificationPolicy = false) =>
             path: ["bots", index, "captainPost"],
             message: "captainPost requires an OpenCode captain backend",
           });
+
       const cronDirectories = bots.flatMap((bot) =>
         bot.cronjobs ? [resolve(bot.cronjobs.directory)] : [],
       );
+
       if (new Set(cronDirectories).size !== cronDirectories.length)
         context.addIssue({
           code: "custom",
           message: "Each bot needs a separate cronjobs directory",
         });
+
       const pinnedSessions = bots.flatMap((bot) =>
         bot.backend.type === "opencode" && bot.backend.sessionID !== undefined
           ? [bot.backend.sessionID]
           : [],
       );
+
       if (new Set(pinnedSessions).size !== pinnedSessions.length) {
         context.addIssue({
           code: "custom",
@@ -628,6 +674,7 @@ const configCheck = (liveNotificationPolicy = false) =>
             "Duplicate pinned OpenCode sessionID; each root needs one bot owner",
         });
       }
+
       for (const field of [
         "id",
         "appId",
@@ -637,6 +684,7 @@ const configCheck = (liveNotificationPolicy = false) =>
         const values = bots.map((bot) =>
           field === "id" ? bot.id : bot.slack[field],
         );
+
         if (new Set(values).size !== values.length) {
           context.addIssue({
             code: "custom",
@@ -646,13 +694,17 @@ const configCheck = (liveNotificationPolicy = false) =>
       }
     },
   );
+
 export const configSchema = configFields.check(configCheck());
+
 /** Live access changes may revoke pending display work, never redirect it.
  * The reload planner still requires identical notification topology. */
 export const reloadConfigSchema = configFields.check(configCheck(true));
 
 export type BackendConfig = typeof backendSchema.Type;
+
 export type BotConfig = typeof botSchema.Type;
+
 /** Loaded configuration; `dataDirectory` is absolute. */
 export type Config = typeof configSchema.Type;
 
@@ -661,13 +713,16 @@ export function secret(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   const value = env[name];
+
   if (!value?.trim()) throw new Error(`Missing environment variable: ${name}`);
+
   return value;
 }
 
 export async function loadConfig(path: string) {
   const config = decodeSettings(configSchema, await Bun.file(path).json());
   const dataDirectory = resolve(dirname(resolve(path)), config.dataDirectory);
+
   // Rejection, not a compatibility reader: never create a parallel empty store.
   if (
     existsSync(join(dataDirectory, "pogo.sqlite")) ||
@@ -678,6 +733,7 @@ export async function loadConfig(path: string) {
     throw new Error(
       "Unconverted Pogo state detected. Stop and complete docs/hard-cutover.md before starting Stargate; do not delete state.",
     );
+
   return {
     ...config,
     dataDirectory,

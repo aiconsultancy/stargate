@@ -4,6 +4,7 @@ import { prepareSlackReply, slackContent } from "../src/shared/slack-format";
 test("standard Markdown stays unchanged, including literal code and quotes", () => {
   const text =
     '# Heading\n\n**Bold** and [link](https://example.test).\n\n> Quote\n\n```html\n<!DOCTYPE html>\n<a href="x">A & B</a>\n```';
+
   expect(slackContent(text).blocks).toEqual([{ type: "markdown", text }]);
 });
 
@@ -90,8 +91,10 @@ test("mixed content retains lists, quotes, headings, links and inline code", () 
       "# Title <@U123>\n\n- **one**\n- `two`\n\n> *quote*\n\n[docs](https://example.test)",
     ).blocks,
   );
+
   for (const type of ["rich_text_list", "rich_text_quote", "link", "user"])
     expect(encoded).toContain(`"type":"${type}"`);
+
   for (const style of ["bold", "italic", "code"])
     expect(encoded).toContain(`"${style}":true`);
 });
@@ -110,6 +113,7 @@ test("invalid or dangerous link targets remain literal and fallback is escaped",
       '"type":"user"',
     );
   }
+
   expect(slackContent("<@U123> **bold** & <!here>").text).toBe(
     "&lt;@U123&gt; **bold** &amp; &lt;!here&gt;",
   );
@@ -142,6 +146,7 @@ test("mixed nested lists retain indentation and numbering, quotes retain lines",
       "<@U123>\n\n3. outer\n   - nested\n4. next\n\n> first\n>\n> second",
     ).blocks,
   );
+
   expect(encoded).toContain('"indent":1');
   expect(encoded).toContain('"offset":2');
   expect(encoded).toContain('"offset":3');
@@ -154,6 +159,7 @@ test("mixed headings, tables and images degrade to readable content", () => {
       "# Heading <@U123>\n\n| Name | State |\n| --- | --- |\n| Ship | Ready |\n\n![Ship image](https://example.test/ship.png)",
     ).blocks,
   );
+
   for (const content of [
     "Heading",
     "Name",
@@ -182,6 +188,7 @@ test("multiple blocks inside one list item retain a separator", () => {
   const encoded = JSON.stringify(
     slackContent("<@U1>\n\n- first\n\n  second").blocks,
   );
+
   expect(encoded).toContain(
     '"text":"first"},{"type":"text","text":"\\n"},{"type":"text","text":"second"',
   );
@@ -210,6 +217,7 @@ test("code, escaped and entity controls in image or unsafe-link labels stay lite
   ]) {
     const encoded = JSON.stringify(slackContent(text).blocks);
     expect(encoded).not.toContain('"type":"user"');
+
     if (text.startsWith("[`")) expect(encoded).toContain('"code":true');
     expect(encoded).not.toContain('"literal":');
   }
@@ -229,6 +237,7 @@ test("full classification retains leading indented code whitespace", () => {
   const encoded = JSON.stringify(
     prepareSlackReply("    <@U123> code example\n    second line"),
   );
+
   expect(encoded).not.toContain('"user_id":"U123"');
   expect(encoded).toContain('"type":"rich_text_preformatted"');
 });
@@ -237,6 +246,7 @@ test("rejected destination metadata cannot promote an escaped mention", () => {
   const encoded = JSON.stringify(
     prepareSlackReply(String.raw`[docs](https://example.test/\<@U123>)`),
   );
+
   expect(encoded).not.toContain('"user_id":"U123"');
   expect(encoded).not.toContain('"literal":');
 });
@@ -245,14 +255,17 @@ test("link URLs and labels both consume the Slack chunk budget", () => {
   const source = Array.from(
     { length: 250 },
     (_, index) =>
-      `- [#${12000 + index}](https://github.com/example-org/project/pull/${12000 + index})`,
+      `- [#${12_000 + index}](https://github.com/example-org/project/pull/${12_000 + index})`,
   ).join("\n");
+
   const parts = prepareSlackReply("<@U9>\n\n" + source);
   expect(parts.length).toBeGreaterThanOrEqual(5);
+
   for (const part of parts) {
     if (typeof part === "string")
       throw new Error("Expected classified content");
     let characters = 0;
+
     const count = (value: unknown) => {
       if (Array.isArray(value)) for (const child of value) count(child);
       else if (value && typeof value === "object")
@@ -262,6 +275,7 @@ test("link URLs and labels both consume the Slack chunk budget", () => {
           else count(child);
         }
     };
+
     count(part.content.blocks);
     expect(characters).toBeLessThanOrEqual(2800);
   }
@@ -276,6 +290,7 @@ test("ordinary replies keep main's exact native Markdown payload", () => {
     const parts = prepareSlackReply(text);
     expect(parts).toHaveLength(1);
     const part = parts[0];
+
     if (!part || typeof part === "string")
       throw new Error("Missing prepared payload");
     expect(part.content).toEqual({

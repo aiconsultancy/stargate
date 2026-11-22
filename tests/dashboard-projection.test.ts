@@ -18,10 +18,13 @@ import { openStore } from "../src/app/open-store";
 import { bot } from "./fixtures";
 
 const cleanup: { close(): unknown }[] = [];
+
 afterEach(() => {
   for (const store of cleanup.splice(0)) store.close();
 });
+
 const signal = new AbortController().signal;
+
 const task = {
   id: "active-task",
   status: "running" as const,
@@ -34,6 +37,7 @@ const task = {
   updatedAt: 2,
   finishedAt: null,
 };
+
 function roster(): CrewStatus {
   return {
     total: 20,
@@ -123,6 +127,7 @@ function transport(
         access: { deniedAccounts: [], deniedChannels: [], peerCaptains: [] },
       };
 }
+
 function registration(
   id: string,
   kind: "irc" | "teams",
@@ -138,6 +143,7 @@ function registration(
     headersEnv: {},
     permissions: [],
   };
+
   const backend: AgentBackend = {
     sessionID: "ses_shared",
     async createSession() {
@@ -177,6 +183,7 @@ function registration(
       },
     },
   };
+
   return {
     bot: config,
     backend,
@@ -192,6 +199,7 @@ test("shared captain display keeps both registration aliases and never unions co
   cleanup.push(store, cron);
   const irc = registration("captain", "irc");
   const teams = registration("captain-teams", "teams");
+
   for (const ship of [irc, teams]) {
     const conversation = conversationKey(ship.key, "channel", "thread");
     store.enqueue({
@@ -205,6 +213,7 @@ test("shared captain display keeps both registration aliases and never unions co
     });
     store.saveSession(conversation, `ses_${ship.bot.id}_only`);
   }
+
   const source = dashboardSource([teams, irc], store, cron);
   const fleet = await source.fleet(signal);
   expect(fleet.ships).toHaveLength(2);
@@ -217,12 +226,14 @@ test("shared captain display keeps both registration aliases and never unions co
     "captain-teams",
   );
   expect((await source.ship("captain", signal))?.crewMembers).toHaveLength(4);
+
   const input = {
     sessionID: "ses_captain-teams_only",
     order: "desc" as const,
     detail: "summary" as const,
     limit: 30,
   };
+
   expect(await source.entries("captain", input, signal)).toBeUndefined();
   expect(
     await source.entries(
@@ -244,6 +255,7 @@ test("different tenants, endpoints or unpinned backends never acquire a display 
   const store = openStore(":memory:");
   const cron = new CronStore(":memory:");
   cleanup.push(store, cron);
+
   for (const ships of [
     [
       registration("team-a", "teams", "tenant-a"),
@@ -265,10 +277,12 @@ test("different tenants, endpoints or unpinned backends never acquire a display 
       ),
     ).toBe(true);
   const original = registration("teams", "teams");
+
   const unpinned = {
     ...original,
     backend: { ...original.backend, sessionID: undefined },
   };
+
   const ships = [registration("irc", "irc"), unpinned];
   expect(
     (await dashboardSource(ships, store, cron).fleet(signal)).ships.every(
@@ -288,13 +302,18 @@ test("a fleet request reads shared captain crew once and retries only a failed e
   let fail = false;
   irc.backend.crewStatus = async () => {
     primaryCalls++;
+
     if (fail) throw new Error("Fixture unavailable");
+
     return roster();
   };
+
   teams.backend.crewStatus = async () => {
     aliasCalls++;
+
     return roster();
   };
+
   const ships = [teams, irc];
   const source = dashboardSource(ships, store, cron);
   expect(
@@ -327,17 +346,23 @@ test("retiring a pinned captain alias aborts its read and discards its late samp
   primary.backend.crewStatus = async () => {
     throw new Error("Fixture unavailable");
   };
+
   alias.backend.crewStatus = async (_input, reading) => {
     started.resolve(reading);
+
     return late.promise;
   };
+
   const ships = [primary, alias];
+
   const source = dashboardSource(ships, store, cron, Date.now, {
     fleetCrewReadMs: 5,
     fleetCrewDeadlineMs: 500,
   });
+
   const read = () => source.fleetWithCrew(signal, new Set([primary.bot.id]));
   const first = read();
+
   try {
     const reading = await started.promise;
     source.invalidateFleetCrew();
@@ -374,8 +399,11 @@ async function page() {
     new URL("../templates/dashboard/index.html", import.meta.url),
     "utf8",
   );
+
   const script = /<script>([\s\S]*?)<\/script>/i.exec(html)?.[1];
+
   if (!script) throw new Error("Missing dashboard script");
+
   class Element {
     children: Element[] = [];
     dataset: { focus?: string; section?: string; context?: string } = {};
@@ -433,8 +461,10 @@ async function page() {
       this.listeners.get("click")?.({ preventDefault() {} });
     }
   }
+
   const main = new Element("main");
   const breadcrumbs = new Element("nav");
+
   const document = {
     activeElement: null as Element | null,
     title: "",
@@ -442,6 +472,7 @@ async function page() {
     createTextNode: (value: string) => {
       const node = new Element("text");
       node.textContent = value;
+
       return node;
     },
     getElementById: (id: string) =>
@@ -451,6 +482,7 @@ async function page() {
           ? breadcrumbs
           : new Element(id),
   };
+
   const ui = runInNewContext(
     `${script.slice(0, script.lastIndexOf('refresh.addEventListener("click"'))}\n({ renderFleet, renderShip, renderCrew, replaceView, projectLabel });`,
     {
@@ -466,12 +498,14 @@ async function page() {
     replaceView(nodes: Element[]): void;
     projectLabel(context: unknown): string;
   };
+
   return { ui, main, document, breadcrumbs };
 }
 
 test("page retains exact context activity beyond a truncated page and registration focus", async () => {
   const { ui, main, document } = await page();
   const captain = { key: "shared", id: "captain", name: "IRC Captain" };
+
   const irc = {
     id: "captain",
     name: "IRC Captain",
@@ -481,6 +515,7 @@ test("page retains exact context activity beyond a truncated page and registrati
     queue: {},
     cronjobs: 0,
   };
+
   const teams = {
     ...irc,
     id: "captain-teams",
@@ -488,18 +523,23 @@ test("page retains exact context activity beyond a truncated page and registrati
     transport: "teams",
     crew: { total: 42, busy: 1, people: { total: 20, busy: 0, partial: true } },
   };
+
   const fleet = { ships: [irc, teams] };
   ui.renderFleet(fleet);
   const fields = main.all().filter((node) => node.tagName === "dl")[0];
   const values = fields?.children ?? [];
+
   const value = (label: string) =>
     values[values.findIndex((node) => node.textContent === label) + 1]
       ?.textContent;
+
   expect(value("Recorded current contexts")).toBe("1");
   expect(value("Crew with current recorded tasks")).toBe("at least 0");
+
   const alias = main
     .all()
     .find((node) => node.dataset.focus === "registration-captain-teams");
+
   alias?.focus();
   ui.renderFleet(fleet);
   expect(document.activeElement).not.toBe(alias);
@@ -515,20 +555,27 @@ test("project labels never infer a crew checkout from the captain directory; pol
   expect(ui.projectLabel({ project: "desktop" })).toBe("desktop");
   const status = roster();
   const context = status.members[0];
+
   if (!context) throw new Error("Missing fixture context");
+
   // A legacy gateway response without crewMembers still preserves all contexts.
   const data = {
     crew: status,
     bot: { backend: { directory: "/unrelated/captain" } },
   };
+
   const render = () => {
     ui.replaceView([ui.renderCrew(data)]);
+
     const details = main
       .all()
       .find((node) => node.dataset.context === "project-7-default-stamets");
+
     if (!details) throw new Error("Missing context");
+
     return details;
   };
+
   expect(render().open).toBe(false);
   context.current = { ...task };
   expect(render().open).toBe(true);
@@ -558,18 +605,22 @@ test("selected registration heading, title, breadcrumb and focus remain consiste
   const teams = registration("captain-teams", "teams");
   irc.bot.displayName = "IRC Captain";
   teams.bot.displayName = "Teams Captain";
+
   const data = await dashboardSource([irc, teams], store, cron).ship(
     "captain-teams",
     signal,
   );
+
   const { ui, main, document, breadcrumbs } = await page();
   ui.renderShip(data);
   expect(main.children[0]?.textContent).toBe("Teams Captain");
   expect(document.title).toBe("Teams Captain | Stargate");
   expect(breadcrumbs.textContent).toBe("Fleet / Teams Captain");
+
   const alias = main
     .all()
     .find((node) => node.dataset.focus === "registration-captain-teams");
+
   expect(alias?.attributes["aria-current"]).toBe("page");
   alias?.focus();
   ui.renderShip(data);

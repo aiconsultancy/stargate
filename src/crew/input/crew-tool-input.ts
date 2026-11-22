@@ -32,10 +32,12 @@ const crewTaskID = Schema.String.check(
   settingsStartsWith("task_"),
   Schema.isMaxCodePoints(100),
 );
+
 const crewText = Schema.String.check(
   Schema.isMinCodePoints(1),
-  Schema.isMaxCodePoints(64000),
+  Schema.isMaxCodePoints(64_000),
 );
+
 export const crewInputBranches = Schema.Union([
   settingsStruct({ op: Schema.Literal("roster") }),
   inspectInputSchema,
@@ -75,6 +77,7 @@ export const crewInputBranches = Schema.Union([
     text: crewText,
   }),
 ]);
+
 const crewBranchDecoders = new Map<
   string,
   (raw: unknown) => Result.Result<unknown, Schema.SchemaError>
@@ -84,21 +87,26 @@ const crewBranchDecoders = new Map<
     Schema.decodeUnknownResult(member, { errors: "all" }),
   ]),
 );
+
 // Native union sentinel optimization can otherwise hide an invalid literal
-// acknowledgement behind a root error. Delegate to the known branch first.
+// Acknowledgement behind a root error. Delegate to the known branch first.
 export const crewInputSchema = Schema.Unknown.check(
   Schema.makeFilter((raw) => {
     if (!Predicate.isObject(raw) || typeof raw["op"] !== "string")
       return undefined;
     const decode = crewBranchDecoders.get(raw["op"]);
+
     if (!decode) return undefined;
     const result = decode(raw);
+
     return Result.isFailure(result) ? result.failure.issue : undefined;
   }),
 ).pipe(
   Schema.decodeTo(settingsDiscriminatedUnion("op", crewInputBranches.members)),
 );
+
 export type CrewInput = typeof crewInputSchema.Type;
+
 export { crewTaskID, crewText };
 
 /** Crew-only SDK object envelope; top-level branch defaults stay in the handler. */
@@ -106,10 +114,13 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
   StandardJSONSchemaV1<Record<string, unknown>> {
   const native = effectProjectToolInput(crewInputBranches);
   const decode = Schema.decodeUnknownResult(native, { errors: "all" });
+
   const operation = Schema.decodeUnknownResult(crewInputSchema, {
     errors: "all",
   });
+
   const fields = new Map<string, Schema.Constraint[]>();
+
   for (const member of crewInputBranches.members)
     for (const [key, field] of Object.entries(member.fields)) {
       const variants = fields.get(key) ?? [];
@@ -120,19 +131,25 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
       );
       fields.set(key, variants);
     }
+
   const properties: Record<string, unknown> = {};
+
   const decoders = new Map<
     string,
-    Array<(raw: unknown) => Result.Result<unknown, Schema.SchemaError>>
+    ((raw: unknown) => Result.Result<unknown, Schema.SchemaError>)[]
   >();
+
   for (const [key, variants] of fields) {
     const schemas = variants.map((variant) =>
       settingsInputAdvertisement(variant),
     );
+
     for (const schema of schemas) {
       delete schema["default"];
+
       if (key === "reason") delete schema["pattern"];
     }
+
     const only = schemas[0];
     properties[key] =
       schemas.length === 1 &&
@@ -150,25 +167,30 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
       ),
     );
   }
+
   properties["project"] = settingsInputAdvertisement(
     effectProjectKeySchema.annotate({
       description:
         "Configured repository key, never a path. Captain omission uses default; worker omission uses its persisted native context.",
     }),
   );
+
   const json = {
     type: "object",
     properties,
     required: ["op"],
     additionalProperties: false,
   };
+
   const order = Object.keys(properties);
+
   const project = (target: StandardJSONSchemaV1.Target) => {
     if (target === "draft-2020-12")
       return structuredClone({
         $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12,
         ...json,
       });
+
     if (target === "draft-07")
       return structuredClone({
         $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
@@ -180,16 +202,19 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
       });
     throw new Error(`Unsupported crew schema target: ${target}`);
   };
+
   return {
     "~standard": {
       version: 1,
       vendor: "effect",
       validate: (raw) => {
         const result = decode(raw);
+
         if (Result.isFailure(result)) {
           if (Predicate.isObject(raw)) {
             const { project: _project, ...input } = raw;
             const failed = operation(input);
+
             if (Result.isFailure(failed))
               return {
                 issues: [
@@ -200,22 +225,29 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
                 ],
               };
           }
+
           return settingsIssues(result.failure.issue);
         }
+
         const value: Record<string, unknown> = {};
+
         for (const key of order) {
           if (!Object.hasOwn(result.success, key)) continue;
           const rawValue = result.success[key];
           value[key] = rawValue;
+
           if (rawValue === undefined) continue;
+
           for (const decode of decoders.get(key) ?? []) {
             const decoded = decode(rawValue);
+
             if (Result.isSuccess(decoded)) {
               value[key] = decoded.success;
               break;
             }
           }
         }
+
         return { value };
       },
       jsonSchema: {
@@ -231,21 +263,27 @@ export function crewPiParameters() {
   const json = settingsAdvertisement(
     Schema.Union(crewInputBranches.members, { mode: "oneOf" }),
   );
+
   // Trim is a handler transformation, not an extra Pi whitespace constraint.
   const branches = json["oneOf"] ?? json["anyOf"];
+
   if (Array.isArray(branches)) {
     json["oneOf"] = branches;
     delete json["anyOf"];
   }
+
   if (Array.isArray(branches))
     for (const branch of branches) {
       const properties = Predicate.isObject(branch)
         ? branch["properties"]
         : undefined;
+
       const reason = Predicate.isObject(properties)
         ? properties["reason"]
         : undefined;
+
       if (Predicate.isObject(reason)) delete reason["pattern"];
     }
+
   return { $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12, ...json };
 }

@@ -23,7 +23,38 @@ The deeper exceed-parity type-aware rules (unsafe returns, unbound methods,
 misused spreads and more) stay in the advisory `mise run oxlint` layer until
 triaged.
 
-`format` runs Oxfmt over the repository. `hooks-install` installs prek's
+`make format` applies six supported Oxlint fixes, then the statement-spacing
+rule, then Oxfmt. It repeats until a round makes no changes. It does not apply
+suggestions, dangerous fixes, or fixes from the advisory configuration.
+The new lint rules and the formatter skip the explicit Zod paths in
+`.oxlintrc.json`. The previous lint and formatting checks still run on those
+paths. The approved bundle may apply tool-only form changes to the four fixed
+entry files if compiler-emitted JavaScript stays equal. This does not permit
+hand-written changes to their bodies. For an emit comparison, use
+`bun scripts/compare-js-emit.ts --capture OUT_DIR` before and after the sweep,
+with the tool files present in both trees. Then run
+`bun scripts/compare-js-emit.ts BEFORE_DIR AFTER_DIR`. It parses the pinned
+TypeScript compiler’s JavaScript output and reports each file as raw-equal,
+syntax-equal or failed. Keep new comments out of the emit; test and check
+types separately. Numeric and cooked string spelling can differ. Tagged
+template raw text, regex pattern text and directive spelling must match. `bun run lint` checks the Zod list
+using the same module syntax
+and source scope as the touched-Zod guard. Listed files must exist and import
+Zod. All guarded Zod imports must be listed; test imports need not be listed.
+
+When a file no longer imports Zod after migration, remove its path from the
+`excludeFiles` list in `.oxlintrc.json` in the same change. Run `make format`,
+inspect the diff and run `bun run lint`. If a guarded file moves and retains Zod,
+update its path in the same change, subject to the touched-Zod policy.
+
+For a bulk sweep, use `bun scripts/regenerate-hard-mode.ts` from a clean feature
+checkout that contains the tooling. For the initial bundle, run the supplied
+script with `--tool-patch /absolute/path/to/tool.patch` from a clean feature
+branch at freshly fetched `origin/main`. It applies the tool patch to the index,
+leaves the generated sweep unstaged, reports changes by top-level folder, and
+fails if a second format run changes anything.
+
+`hooks-install` installs prek's
 pre-commit and pre-push hooks for this clone. `hooks` runs the pre-commit gate,
 including workflow validation, merge/case conflicts, broken symlinks, large
 files, private keys, trailing whitespace, final newlines, and TOML/YAML syntax.

@@ -18,13 +18,17 @@ export async function readInputOrigin(
   let cursor: string | undefined;
   const cursors = new Set<string>();
   const chain: InputBoundaryRecord[] = [];
+
   const origin = () => {
     const input = resolveBoundaryContext(chain);
+
     return input === chain[0]?.id ? null : (input ?? null);
   };
-  // greybeard: 512 retained messages; unknown ancestry remains native-only.
+
+  // Greybeard: 512 retained messages; unknown ancestry remains native-only.
   for (let pageIndex = 0; pageIndex < 8; pageIndex++) {
     signal.throwIfAborted();
+
     const page = await api.message.list(
       {
         sessionID,
@@ -33,26 +37,39 @@ export async function readInputOrigin(
       },
       { signal },
     );
+
     signal.throwIfAborted();
+
     for (const message of page.data) {
       if (!anchored) {
         if (message.id !== messageID) continue;
+
         if (message.type !== "assistant") return null;
         anchored = true;
       }
+
       const record = await boundaries.record(message);
+
       if (chain.length && closesBoundaryContext(record)) {
         chain.push(record);
+
         return origin();
       }
+
       if (record.input === undefined) continue;
+
       if (!chain.length && record.type !== "synthetic") return record.input;
       chain.push(record);
     }
+
     cursor = page.cursor.next ?? undefined;
+
     if (cursor && cursors.has(cursor)) return null;
+
     if (cursor) cursors.add(cursor);
+
     if (!cursor) return origin();
   }
+
   return null;
 }

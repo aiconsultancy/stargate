@@ -38,6 +38,7 @@ import { backendFingerprint } from "../src/gateway/routing";
 const apiKeyEnv = "STARGATE_CLAUDE_TEST_PROXY_KEY";
 const key = "local-proxy-test-only";
 const fixture = join(import.meta.dir, "claude-fixture.ts");
+
 // Host secrets that must never reach the Claude Code child.
 const hostSecrets = {
   ANTHROPIC_API_KEY: "native-key-must-not-be-sent",
@@ -51,6 +52,7 @@ const hostSecrets = {
   HTTPS_PROXY: "http://127.0.0.1:2",
   NODE_OPTIONS: "--require /host/hook.js",
 };
+
 const saved = new Map<string, string | undefined>();
 const cleanup: (() => Promise<unknown>)[] = [];
 
@@ -65,6 +67,7 @@ afterEach(async () => {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
   }
+
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
@@ -105,29 +108,36 @@ async function open(
   );
   const dataDirectory = join(root, "data");
   await mkdir(dataDirectory);
+
   const backend = await ClaudeBackend.open(
     config(extra, root),
     { dataDirectory },
     { executable, graceMs: 200, ...runtime },
   );
+
   cleanup.push(() => backend.close());
+
   const log = async () =>
     (await readFile(join(dataDirectory, "claude", "fixture.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .map((line) => logEntry.parse(JSON.parse(line)));
+
   const runs = async () =>
     (await log()).flatMap((entry) => ("argv" in entry ? [entry] : []));
+
   return { root, dataDirectory, executable, backend, log, runs };
 }
 
 const signal = () => AbortSignal.timeout(20_000);
+
 const session = (backend: ClaudeBackend) =>
   backend.createSession({ key: "k", title: "Stargate test", signal: signal() });
 
 function alive(pid: number) {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -136,6 +146,7 @@ function alive(pid: number) {
 
 async function until(check: () => Promise<boolean> | boolean, ms = 10_000) {
   const deadline = Date.now() + ms;
+
   while (!(await check())) {
     if (Date.now() > deadline) throw new Error("Condition not reached");
     await delay(25);
@@ -148,6 +159,7 @@ test("Claude turn streams visible text and returns this turn's answer", async ()
   expect(id).toMatch(/^[0-9a-f-]{36}$/);
   const previews: string[] = [];
   const inputs: string[] = [];
+
   const answer = await backend.prompt(
     id,
     "Say hello",
@@ -155,14 +167,17 @@ test("Claude turn streams visible text and returns this turn's answer", async ()
     (text) => previews.push(text),
     (input) => inputs.push(input),
   );
+
   expect(answer).toBe("Hello world\n\nDone.");
   expect(previews).toContain("Hello");
   expect(previews.at(-1)).toBe("Hello world\n\nDone.");
+
   for (const text of previews) {
     expect(text).not.toContain("private");
     expect(text).not.toContain("subagent");
     expect(text).not.toContain("/secret");
   }
+
   const [run] = await runs();
   expect(run?.argv).toContain(`--session-id=${id}`);
   expect(run?.argv).toContain("--model=claude-sonnet-5-5");
@@ -170,9 +185,11 @@ test("Claude turn streams visible text and returns this turn's answer", async ()
   expect(run?.argv.some((argument) => argument.startsWith("--resume"))).toBe(
     false,
   );
+
   const user = (await log()).find(
     (entry) => "input" in entry && entry.input.type === "user",
   );
+
   expect(user && "input" in user ? user.input["uuid"] : undefined).toBe(
     inputs[0],
   );
@@ -191,11 +208,13 @@ test("Claude resumes its own transcript and never another namespace's", async ()
   );
   // A restarted adapter resumes the same native session from disk.
   await first.backend.close();
+
   const reopened = await ClaudeBackend.open(
     config({}, first.root),
     { dataDirectory: first.dataDirectory },
     { executable: first.executable },
   );
+
   cleanup.push(() => reopened.close());
   await reopened.prompt(id, "after restart", signal());
   const [created, resumed, restarted] = await first.runs();
@@ -216,11 +235,13 @@ test("Claude resumes its own transcript and never another namespace's", async ()
   expect(other?.env["CLAUDE_CONFIG_DIR"]).not.toBe(
     created?.env["CLAUDE_CONFIG_DIR"],
   );
+
   // Backend settings select the namespace, as for other backends.
   const fingerprint = (backend: unknown) =>
     backendFingerprint({
       backend: Schema.decodeUnknownSync(backendSchema)(backend),
     });
+
   expect(fingerprint(config())).not.toBe(
     fingerprint(config({ allowedTools: ["Read"] })),
   );
@@ -234,6 +255,7 @@ test("Claude resumes its own transcript and never another namespace's", async ()
 
 test("Claude preserves supported UUID session IDs at the process boundary", async () => {
   const { backend, runs } = await open();
+
   const ids = [
     "12345678-1234-1234-8234-123456789abc",
     "12345678-1234-2234-9234-123456789abc",
@@ -247,6 +269,7 @@ test("Claude preserves supported UUID session IDs at the process boundary", asyn
     "00000000-0000-0000-0000-000000000000",
     "ffffffff-ffff-ffff-ffff-ffffffffffff",
   ];
+
   for (const id of ids)
     expect(await backend.prompt(id, "hi", signal())).toBe(
       "Hello world\n\nDone.",
@@ -260,6 +283,7 @@ test("Claude preserves supported UUID session IDs at the process boundary", asyn
 
 test("Claude rejects unsupported UUID forms without launching the CLI", async () => {
   const { backend, dataDirectory } = await open();
+
   for (const id of [
     "",
     "../session",
@@ -278,6 +302,7 @@ test("Claude rejects unsupported UUID forms without launching the CLI", async ()
     );
     await expect(backend.interrupt(id, signal())).resolves.toBeUndefined();
   }
+
   expect(await readdir(join(dataDirectory, "claude"))).not.toContain(
     "fixture.jsonl",
   );
@@ -288,6 +313,7 @@ test("Claude child receives only a minimal, explicit environment", async () => {
   await backend.prompt(await session(backend), "hi", signal());
   const [run] = await runs();
   const env = run?.env ?? {};
+
   for (const name of Object.keys(hostSecrets))
     if (name !== "ANTHROPIC_AUTH_TOKEN" && name !== "ANTHROPIC_BASE_URL")
       if (name !== "CLAUDE_CONFIG_DIR") expect(env[name]).toBeUndefined();
@@ -299,6 +325,7 @@ test("Claude child receives only a minimal, explicit environment", async () => {
   // Each turn gets a private temporary directory, removed after the turn.
   expect(env["TMPDIR"]).toStartWith(join(tmpdir(), "stargate-claude-"));
   await expect(readdir(env["TMPDIR"] ?? "")).rejects.toThrow();
+
   const allowed = new Set([
     ...inheritedEnvironment,
     ...Object.keys(claudeEnvironment(config(), "/private")),
@@ -311,6 +338,7 @@ test("Claude child receives only a minimal, explicit environment", async () => {
     // A random value per turn that finds the turn's processes.
     "STARGATE_CLAUDE_TURN",
   ]);
+
   expect(Object.keys(env).filter((name) => !allowed.has(name))).toEqual([]);
   expect(
     Object.keys(
@@ -353,15 +381,18 @@ test("Claude tools default to none; allowed names map to the SDK", async () => {
   expect(none?.argv).toContain("--permission-prompts=none");
   expect(none?.argv).toContain("--setting-sources=");
   expect(none?.argv).toContain("--strict-mcp-config");
+
   for (const argument of none?.argv ?? []) {
     expect(argument).not.toMatch(/allowedTools|^--mcp-config|bypass|dangerous/);
     // The key travels only in the environment, never in arguments.
     expect(argument).not.toContain(key);
   }
+
   // Loaded settings cannot run hooks or change the endpoint or model.
   const flags = JSON.parse(
     none?.argv[(none?.argv.indexOf("--settings") ?? -2) + 1] ?? "{}",
   );
+
   expect(flags).toEqual({
     env: {
       ANTHROPIC_BASE_URL: "http://127.0.0.1:8317",
@@ -375,10 +406,12 @@ test("Claude tools default to none; allowed names map to the SDK", async () => {
     },
     disableAllHooks: true,
   });
+
   const open_ = await open({
     allowedTools: ["Read", "Bash"],
     settingSources: ["project"],
   });
+
   await open_.backend.prompt(await session(open_.backend), "hi", signal());
   const [some] = await open_.runs();
   expect(some?.argv).toContain("--tools=Read,Bash");
@@ -399,7 +432,9 @@ test.each(["2.1.327 (Claude Code)", "2.1.328 (Claude Code)"])(
       runs,
       log,
     } = await open({}, version);
+
     await unused.close();
+
     // Trusted internal input exercises SDK fields that public config forbids.
     const stdio = {
       type: "stdio" as const,
@@ -407,16 +442,19 @@ test.each(["2.1.327 (Claude Code)", "2.1.328 (Claude Code)"])(
       args: [],
       env: { MCP_KEY: "mcp-env-canary" },
     };
+
     const http = {
       type: "http" as const,
       url: "https://mcp.example/",
       headers: { Authorization: "mcp-header-canary" },
     };
+
     const backend = await ClaudeBackend.open(
       { ...config({}, root), mcpServers: { stdio, http } },
       { dataDirectory },
       { executable, graceMs: 200 },
     );
+
     cleanup.push(() => backend.close());
     expect(await backend.prompt(await session(backend), "hi", signal())).toBe(
       "Hello world\n\nDone.",
@@ -426,9 +464,11 @@ test.each(["2.1.327 (Claude Code)", "2.1.328 (Claude Code)"])(
     expect(run?.argv.join(" ")).not.toMatch(
       /--mcp-config|mcp-env-canary|mcp-header-canary|MCP_KEY|Authorization/,
     );
+
     const initialize = (await log()).find(
       (entry) => "input" in entry && entry.input.type === "control_request",
     );
+
     expect(
       initialize && "input" in initialize
         ? initialize.input["request"]
@@ -445,20 +485,24 @@ test.each(["2.1.327 (Claude Code)", "2.1.328 (Claude Code)"])(
 
 test("older Claude explicitly falls back to argv with a safe warning", async () => {
   const warning = spyOn(process, "emitWarning").mockImplementation(() => {});
+
   try {
     const { backend, runs, log } = await open(
       { mcpServers: { docs: { type: "http", url: "https://mcp.example/" } } },
       "2.1.326 (Claude Code)",
     );
+
     expect(await backend.prompt(await session(backend), "hi", signal())).toBe(
       "Hello world\n\nDone.",
     );
     const [run] = await runs();
     expect(run?.argv).toContain("--mcp-config");
     expect(run?.argv).not.toContain("--await-initialize");
+
     const initialize = (await log()).find(
       (entry) => "input" in entry && entry.input.type === "control_request",
     );
+
     expect(
       initialize && "input" in initialize
         ? initialize.input["request"]
@@ -506,13 +550,16 @@ test("Claude version probe timeout kills the process, even if SIGTERM is ignored
   const { backend, root, runs } = await open({}, "hang", {
     versionTimeoutMs: 1500,
   });
+
   const turn = backend.prompt(await session(backend), "hi", signal());
   await expect(turn).rejects.toThrow(
     "Cannot verify Claude Code version for MCP delivery",
   );
+
   const probe = JSON.parse(
     await readFile(join(root, "fixture-probe.json"), "utf8"),
   );
+
   expect(alive(probe.pid)).toBe(false);
   expect(probe.argv).toEqual(["--version"]);
   expect(probe.env["ANTHROPIC_AUTH_TOKEN"]).toBeUndefined();
@@ -525,6 +572,7 @@ test("cancelling a Claude version probe stops it before any SDK turn starts", as
   const { backend, root, runs } = await open({}, "hang", {
     versionTimeoutMs: 2000,
   });
+
   const controller = new AbortController();
   const turn = backend.prompt(await session(backend), "hi", controller.signal);
   const path = join(root, "fixture-probe.json");
@@ -548,10 +596,12 @@ test("cancelling a Claude turn stops the CLI and its tool processes", async () =
   const id = await session(backend);
   const controller = new AbortController();
   const turn = backend.prompt(id, "hang", controller.signal, () => {});
+
   const grandchild = async () =>
     (await log().catch(() => [])).flatMap((entry) =>
       "grandchild" in entry ? [entry.grandchild] : [],
     )[0];
+
   await until(async () => (await grandchild()) !== undefined);
   const [run] = await runs();
   const record = join(dataDirectory, "claude-runs", `${id}.json`);
@@ -565,17 +615,20 @@ test("cancelling a Claude turn stops the CLI and its tool processes", async () =
 
 test("no tool process outlives its Claude turn, even one ignoring SIGTERM", async () => {
   const { backend, log } = await open();
+
   const grandchildren = async () =>
     (await log().catch(() => [])).flatMap((entry) =>
       "grandchild" in entry ? [entry.grandchild] : [],
     );
+
   cleanup.push(async () => {
     for (const pid of await grandchildren())
       if (alive(pid)) process.kill(pid, "SIGKILL");
   });
   const id = await session(backend);
+
   // In the CLI's group or in its own session (as Claude Code runs Bash),
-  // after a normal exit, an early exit or cancellation.
+  // After a normal exit, an early exit or cancellation.
   for (const placement of ["", "detached "]) {
     expect(await backend.prompt(id, `${placement}stubborn`, signal())).toBe(
       "Hello world\n\nDone.",
@@ -585,15 +638,18 @@ test("no tool process outlives its Claude turn, even one ignoring SIGTERM", asyn
     ).rejects.toThrow("Backend failure: crash");
     const before = (await grandchildren()).length;
     const controller = new AbortController();
+
     const turn = backend.prompt(
       id,
       `${placement}stubborn hang`,
       controller.signal,
     );
+
     await until(async () => (await grandchildren()).length === before + 2);
     controller.abort();
     await expect(turn).rejects.toThrow();
   }
+
   const pids = await grandchildren();
   expect(pids.length).toBe(8);
   await until(() => pids.every((pid) => !alive(pid)), 3000);
@@ -613,9 +669,11 @@ test("Claude failures carry fixed causes, never CLI or provider text", async () 
   const { backend } = await open();
   const id = await session(backend);
   const previews: string[] = [];
+
   const failed = backend.prompt(id, "fail", signal(), (text) =>
     previews.push(text),
   );
+
   await expect(failed).rejects.toThrow("Backend failure: quota");
   await failed.catch((error: Error) =>
     expect(error.message).not.toContain("raw upstream"),
@@ -652,12 +710,14 @@ test("Claude frames preserve optional fields, safe indices and finite statuses",
     ["0", false],
   ] as const) {
     const turn = new ClaudeTurn();
+
     const frame = (event: unknown) => ({
       type: "stream_event",
       parent_tool_use_id: null,
       event,
       extra: "ignored",
     });
+
     turn.add(frame({ type: "message_start", message: { id: "m", extra: 1 } }));
     expect(
       turn.add(
@@ -679,6 +739,7 @@ test("Claude frames preserve optional fields, safe indices and finite statuses",
     ).toBe(accepted);
     expect(turn.visible()).toBe(accepted ? "visible" : "");
   }
+
   for (const [status, accepted] of [
     [undefined, true],
     [null, true],
@@ -707,6 +768,7 @@ test("Claude frames preserve optional fields, safe indices and finite statuses",
         : undefined,
     );
   }
+
   for (const content of [
     [{ type: "text", text: "visible", extra: "ignored" }, { type: "text" }],
     [{ type: "text", text: null }],
@@ -746,6 +808,7 @@ test("Claude work frames require a string parent or a tool-use block", () => {
     expect(turn.worked).toBe(worked);
     expect(turn.answer()).toBe("");
   }
+
   const turn = new ClaudeTurn();
   turn.add({ type: "system", subtype: "init", session_id: "", extra: 1 });
   expect(turn.session).toBe("");
@@ -757,11 +820,13 @@ test("Claude recovery accepts only strict UUID records with safe integer bounds"
   const { backend, dataDirectory } = await open();
   const id = await session(backend);
   const path = join(dataDirectory, "claude-runs", `${id}.json`);
+
   const record = {
     pid: Number.MAX_SAFE_INTEGER,
     turn: crypto.randomUUID(),
     since: Number.MAX_SAFE_INTEGER,
   };
+
   for (const [change, accepted] of [
     [{}, true],
     [{ pid: 1, since: 0 }, true],
@@ -784,9 +849,11 @@ test("Claude recovery accepts only strict UUID records with safe integer bounds"
     const text = JSON.stringify({ ...record, ...change });
     await writeFile(path, text);
     await backend.interrupt(id, signal());
+
     if (accepted) await expect(readFile(path)).rejects.toThrow();
     else expect(await readFile(path, "utf8")).toBe(text);
   }
+
   const overflow = `{"pid":1,"turn":"${record.turn}","since":1e400}`;
   await writeFile(path, overflow);
   await backend.interrupt(id, signal());
@@ -798,6 +865,7 @@ test.skipIf(process.platform !== "linux")(
   async () => {
     const { backend, dataDirectory } = await open();
     const id = await session(backend);
+
     const sleeper = async (
       argument: string,
       env: Record<string, string> = {},
@@ -807,6 +875,7 @@ test.skipIf(process.platform !== "linux")(
         ["-e", "setTimeout(() => {}, 600000)", argument],
         { detached: true, stdio: "ignore", env: { ...process.env, ...env } },
       );
+
       const pid = child.pid ?? 0;
       cleanup.push(async () => {
         if (alive(pid)) process.kill(pid, "SIGKILL");
@@ -815,23 +884,31 @@ test.skipIf(process.platform !== "linux")(
       await until(async () =>
         (await readFile(`/proc/${pid}/cmdline`, "utf8")).includes(argument),
       );
+
       return pid;
     };
+
     const start = async (pid: number) => {
       const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+
       return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
     };
+
     const record = join(dataDirectory, "claude-runs", `${id}.json`);
+
     const write = (pid: number, turn: string, since: number) =>
       writeFile(record, JSON.stringify({ pid, turn, since }));
+
     const interrupt = async () => {
       await backend.interrupt(id, signal());
       await expect(readFile(record)).rejects.toThrow();
     };
+
     const turn = (marker = crypto.randomUUID()) => ({
       marker,
       env: { STARGATE_CLAUDE_TURN: marker },
     });
+
     // Neither the session ID nor the marker.
     const foreign = await sleeper("unrelated", turn().env);
     await write(foreign, crypto.randomUUID(), await start(foreign));
@@ -842,11 +919,12 @@ test.skipIf(process.platform !== "linux")(
     await write(impostor, crypto.randomUUID(), await start(impostor));
     await interrupt();
     // The session ID and marker match, but the PID started earlier than
-    // the recorded CLI: a reused PID.
+    // The recorded CLI: a reused PID.
     const reused = turn();
     const older = await sleeper(`--resume=${id}`, reused.env);
     await write(older, reused.marker, (await start(older)) + 1);
     await interrupt();
+
     for (const pid of [foreign, impostor, older]) expect(alive(pid)).toBe(true);
     // The recorded CLI and a marked tool process outside its group.
     const real = turn();
@@ -855,6 +933,7 @@ test.skipIf(process.platform !== "linux")(
     await write(leader, real.marker, await start(leader));
     await interrupt();
     await until(() => !alive(leader) && !alive(tool));
+
     for (const pid of [foreign, impostor, older]) expect(alive(pid)).toBe(true);
   },
 );
@@ -876,6 +955,7 @@ test("Claude attachments become content blocks or fail closed", () => {
     mime,
     data: new TextEncoder().encode(data),
   });
+
   expect(claudeInputContent("text", [])).toBe("text");
   expect(
     claudeInputContent("look", [
@@ -901,6 +981,7 @@ test("Claude attachments become content blocks or fail closed", () => {
     },
     { type: "text", text: "Attachment: file\nhello" },
   ]);
+
   for (const bad of [
     file("application/zip"),
     file("text/plain", "\u0000"),
@@ -922,12 +1003,14 @@ test("Claude configuration is strict and fails closed", () => {
         ...extra,
       }),
     );
+
   const defaults = config();
   expect(defaults.allowedTools).toEqual([]);
   expect(defaults.settingSources).toEqual([]);
   expect(defaults.maxTurns).toBe(50);
   expect(parse({})).toBe(true);
   expect(parse({ provider: undefined })).toBe(false);
+
   for (const provider of [
     { baseURL: "http://proxy.example/v1", apiKeyEnv },
     { baseURL: "https://user:pw@proxy.example/v1", apiKeyEnv },
@@ -939,6 +1022,7 @@ test("Claude configuration is strict and fails closed", () => {
   expect(
     parse({ provider: { baseURL: "https://proxy.example/v1", apiKeyEnv } }),
   ).toBe(true);
+
   for (const extra of [
     { directory: "relative" },
     { model: "claude proxy" },
@@ -1019,12 +1103,14 @@ test("createBackend opens the Claude adapter on demand", async () => {
 test("Claude maps what the CLI reports to one shared failure category", async () => {
   const { backend } = await open();
   const id = await session(backend);
+
   const failure = (prompt: string) =>
     backend.prompt(id, prompt, signal()).then(
       () => undefined,
       (error: unknown) =>
         error instanceof BackendFailure ? error.failure : String(error),
     );
+
   // The SDK's cause, the provider's HTTP status, and whether a tool ran.
   const cases: [prompt: string, cause: string][] = [
     ["fail:rate_limit:429", "provider:quota:429:idle"],
@@ -1043,6 +1129,7 @@ test("Claude maps what the CLI reports to one shared failure category", async ()
     // No result: Stargate cannot know what the CLI did.
     ["crash", "provider:crash:0:ran"],
   ];
+
   for (const [prompt, cause] of cases)
     expect([prompt, await failure(prompt)]).toEqual([prompt, cause]);
   // Not a provider failure: the generic failure stays.
@@ -1054,10 +1141,12 @@ test("Claude maps what the CLI reports to one shared failure category", async ()
 test("Claude request progress reports only the main turn's block type", () => {
   const turn = new ClaudeTurn();
   const stages: string[] = [];
+
   const frame = (event: unknown, parent_tool_use_id: string | null = null) =>
     turn.add({ type: "stream_event", parent_tool_use_id, event }, (s) =>
       stages.push(s),
     );
+
   frame({ type: "message_start", message: { id: "first" } });
   frame({
     type: "content_block_start",

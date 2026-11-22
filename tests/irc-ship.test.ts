@@ -18,6 +18,7 @@ import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -27,6 +28,7 @@ const passwords = {
   STARGATE_IRC_GALACTICA_CHIEF: "chief-pass",
   STARGATE_IRC_GALACTICA_TYROL: "tyrol-pass",
 };
+
 const backend = {
   type: "opencode",
   url: "http://localhost:4096",
@@ -40,6 +42,7 @@ function fakeBackend(
   pinned?: string,
 ): AgentBackend & { prompts: Prompt[] } {
   const prompts: Prompt[] = [];
+
   return {
     prompts,
     ...(pinned ? { sessionID: pinned } : {}),
@@ -48,6 +51,7 @@ function fakeBackend(
     },
     async prompt(_session, text, _signal, _onText, _onInput, _files, context) {
       prompts.push({ text, ...(context ? { context } : {}) });
+
       return answer(text);
     },
     async close() {},
@@ -70,6 +74,7 @@ async function setup(
     },
     inviteOnly: ["#galactica"],
   }).start();
+
   cleanup.push(() => fake.stop());
   // The founder is never refused: grant the captain up front.
   fake.invited.add("galactica:#galactica");
@@ -77,6 +82,7 @@ async function setup(
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     displayName: "Galactica",
@@ -103,7 +109,9 @@ async function setup(
     ],
     backend: { ...backend, sessionID: "ses_captain" },
   });
+
   const log = pino({ level: "silent" });
+
   const ship = await IrcShip.create(config, store, log, {
     env: passwords,
     timing: {
@@ -116,6 +124,7 @@ async function setup(
     },
     readyMs: 2000,
   });
+
   const backends = {
     captain: fakeBackend(
       answers.captain ?? (() => "[[stargate:silent]]"),
@@ -124,10 +133,14 @@ async function setup(
     chief: fakeBackend(answers.chief ?? (() => "[[stargate:silent]]")),
     tyrol: fakeBackend(answers.tyrol ?? (() => "[[stargate:silent]]")),
   };
+
   const controller = new AbortController();
+
   const workers = ship.registrations.map((registration, index) => {
     const selected = [backends.captain, backends.chief, backends.tyrol][index];
+
     if (!selected) throw new Error("missing backend");
+
     return new Gateway(
       registration.settings,
       registration.identity,
@@ -140,6 +153,7 @@ async function setup(
       registration.transport,
     ).work(controller.signal);
   });
+
   let open = true;
   ship.start(() => open);
   cleanup.push(async () => {
@@ -149,6 +163,7 @@ async function setup(
     await ship.close();
   });
   const [captain, chief, tyrol] = ship.registrations;
+
   if (!captain || !chief || !tyrol) throw new Error("missing registration");
   await until(
     () =>
@@ -158,6 +173,7 @@ async function setup(
     5000,
     "every member in the ship channel",
   );
+
   return { fake, store, ship, backends, captain, chief, tyrol };
 }
 
@@ -183,14 +199,17 @@ test("irc ship: captain invites crew into the invite-only ship channel only", as
 
 test("irc ship: a mention reaches the pinned captain and replies as plain IRC lines", async () => {
   const long = `**Status**: ${"all systems nominal ".repeat(60)}`;
+
   const { fake, backends } = await setup({
     captain: () => `# Report\n\n${long}`,
   });
+
   const msgid = fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "galactica: status?",
   );
+
   await until(
     () => lineOf(fake.received("galactica"), "PRIVMSG").length >= 3,
     5000,
@@ -209,6 +228,7 @@ test("irc ship: a mention reaches the pinned captain and replies as plain IRC li
   expect(lines[0]?.params).toEqual(["#galactica", "Report"]);
   expect(lines.every((line) => !line.tags.has("+draft/reply"))).toBe(true);
   expect(lines[1]?.params[1]?.startsWith("Status: all systems")).toBe(true);
+
   for (const line of fake.received("galactica"))
     expect(utf8Bytes(line) + 2).toBeLessThanOrEqual(512);
   // Messages without an account tag never reach the agent.
@@ -222,6 +242,7 @@ test("irc ship: silent replies post nothing; DMs are per account", async () => {
     captain: (text) =>
       text === "quiet" ? "[[stargate:silent]]" : "Hello Jack.",
   });
+
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "galactica: quiet");
   fake.say({ nick: "jack", account: "jack" }, "galactica", "hi there");
   await until(
@@ -247,14 +268,15 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
     chief: () => "galactica-tyrol: can you look at the flaky test?",
     tyrol: () => "galactica: done, the flake is fixed.",
   });
+
   fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "galactica: is CI green?",
   );
-  // jack → captain; captain → chief (1); chief → tyrol (2); tyrol → captain
+  // Jack → captain; captain → chief (1); chief → tyrol (2); tyrol → captain
   // (3). Main-channel answers carry no reply tag, so the chief's answer
-  // does not also trigger the captain. A fourth ship mention is refused.
+  // Does not also trigger the captain. A fourth ship mention is refused.
   await until(() => backends.tyrol.prompts.length === 1, 5000, "tyrol prompt");
   await until(
     () => backends.captain.prompts.length === 2,
@@ -298,6 +320,7 @@ test("irc ship: a failed delivery retries without rerunning the agent", async ()
   const { fake, backends, store, captain } = await setup({
     captain: () => "Retry-safe answer.",
   });
+
   fake.refuse.add("galactica #galactica");
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "galactica: hello");
   await until(() => backends.captain.prompts.length === 1, 5000, "prompt");
@@ -321,9 +344,11 @@ test("irc runtime: an IRC-only config serves, answers and QUITs on shutdown", as
   const fake = new FakeIrcServer({
     accounts: { galactica: "captain-pass" },
   }).start();
+
   cleanup.push(() => fake.stop());
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-irc-runtime-"));
   cleanup.push(() => rm(dataDirectory, { recursive: true, force: true }));
+
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
@@ -332,9 +357,11 @@ test("irc runtime: an IRC-only config serves, answers and QUITs on shutdown", as
     channels: ["#galactica"],
     backend: { ...backend, sessionID: "ses_captain" },
   });
+
   const captain = fakeBackend(() => "Aye.", "ses_captain");
   const controller = new AbortController();
   const log = pino({ level: "silent" });
+
   const running = Effect.runPromise(
     serve({ dataDirectory, bots: [], irc: [config] }, log, controller.signal, {
       slack: () => {
@@ -348,6 +375,7 @@ test("irc runtime: an IRC-only config serves, answers and QUITs on shutdown", as
         }),
     }),
   );
+
   await until(
     () => lineOf(fake.received("galactica"), "JOIN").length === 1,
     5000,
@@ -375,32 +403,38 @@ test("irc runtime: an IRC-only config serves, answers and QUITs on shutdown", as
 
 test("irc ship: a DM reply never goes to a nick another account now holds", async () => {
   const gate = Promise.withResolvers<void>();
+
   const { fake, store, captain } = await setup({
     captain: async () => {
       await gate.promise;
+
       return "Private answer for jack.";
     },
   });
+
   fake.say({ nick: "jackie", account: "jack" }, "galactica", "status?");
   await until(() => store.queueCounts(captain.key).running === 1, 5000, "turn");
-  // jack disconnects unseen; mallory takes the nick before the reply.
+  // Jack disconnects unseen; mallory takes the nick before the reply.
   fake.setUser("jackie", "mallory");
   gate.resolve();
   await until(
     () => {
       const counts = store.queueCounts(captain.key);
+
       return counts.responding + counts.done === 1;
     },
     5000,
     "reply stored",
   );
   await delay(300);
+
   const direct = () =>
     lineOf(fake.received("galactica"), "PRIVMSG").filter(
       (m) => !m.params[0]?.startsWith("#"),
     );
+
   expect(direct()).toHaveLength(0);
-  // jack is back under his account name: the stored reply reaches him.
+  // Jack is back under his account name: the stored reply reaches him.
   fake.setUser("jack", "jack");
   await until(() => store.queueCounts(captain.key).done === 1, 5000, "retry");
   expect(direct().map((m) => m.params)).toEqual([
@@ -427,6 +461,7 @@ test("irc ship: an all-call reaches the captain and every crew member", async ()
   expect(backends.captain.prompts[0]?.text).toBe(
     "[Admitted by text mention: everyone]\n\nEveryone, report status",
   );
+
   for (const crew of [backends.chief, backends.tyrol])
     expect(crew.prompts[0]?.text).toContain("This is an all-call");
   // Untagged traffic that is not an all-call reaches nobody.

@@ -22,16 +22,19 @@ import {
 import { settingsPattern } from "../config/settings-schema";
 
 type CrewView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
+
 type SlackAck = (payload?: Record<string, unknown>) => Promise<void>;
 
 export interface CrewUIApi {
   open(triggerID: string, view: CrewView): Promise<string>;
   update(viewID: string, view: CrewView): Promise<void>;
 }
+
 const id = Schema.String.check(
   Schema.isMinCodePoints(1),
   Schema.isMaxCodePoints(255),
 );
+
 const commandSchema = Schema.Struct({
   command: Schema.Literal("/stargate"),
   text: Schema.Trim.check(
@@ -47,15 +50,18 @@ const commandSchema = Schema.Struct({
   is_bot: Schema.optional(Schema.Literal(false)),
   bot_id: Schema.optional(Schema.Never),
 });
+
 const plain = (text: string) => ({
   type: "plain_text" as const,
   text,
   emoji: false,
 });
+
 const section = (text: string) => ({
   type: "section" as const,
   text: plain(redactCredentials(text, 3000)),
 });
+
 function notice(text: string, title = "Crew activity"): CrewView {
   return {
     type: "modal",
@@ -65,16 +71,20 @@ function notice(text: string, title = "Crew activity"): CrewView {
     blocks: [section(text)],
   };
 }
+
 function age(time: number | null, now: number) {
   if (time === null) return "unknown";
   const seconds = Math.max(0, Math.floor((now - time) / 1000));
+
   return seconds < 60
     ? `${seconds}s`
     : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
+
 function taskLine(task: CrewStatusTask) {
   return `${task.kind === "report" ? "Report" : task.kind === "assignment" ? "Assignment" : "Task"}: ${task.summary || "Summary unavailable"}\n${task.id}: ${task.status}${task.phase !== task.status ? ` (${task.phase})` : ""}`;
 }
+
 function timing(task: CrewStatusTask, now: number) {
   return `Since recorded start: ${age(task.startedAt, now)}; last update: ${age(task.updatedAt, now)}${task.updatedAt === null ? "" : " ago"}.`;
 }
@@ -90,6 +100,7 @@ export function crewStatusView(
       "Read-only snapshot. Stored running/ready state is not proof of live execution. No work is started, retried or repaired. Close and run /stargate crew [member] again to refresh. Times may be unknown for older tasks.",
     ),
   ];
+
   for (const member of status.members) {
     blocks.push(
       section(
@@ -113,7 +124,9 @@ export function crewStatusView(
           .join("\n"),
       ),
     );
+
     if (!detail) continue;
+
     if (member.current?.progress)
       blocks.push(
         section(
@@ -125,12 +138,14 @@ export function crewStatusView(
         `Queued tasks: showing ${member.queued.length} of ${member.queuedCount}${member.queuedCount > member.queued.length ? " (truncated)" : ""}.`,
       ),
     );
+
     for (const task of member.queued) blocks.push(section(taskLine(task)));
     blocks.push(
       section(
         `Recent outcomes: showing ${member.recent.length} of ${member.recentCount}${member.recentCount > member.recent.length ? " (truncated; only recent status details retained)" : ""}.`,
       ),
     );
+
     for (const task of member.recent)
       blocks.push(
         section(
@@ -138,18 +153,21 @@ export function crewStatusView(
         ),
       );
   }
+
   if (!status.members.length)
     blocks.push(
       section(
         "No configured crew member found. Use /stargate crew for the roster.",
       ),
     );
+
   if (status.truncated)
     blocks.push(
       section(
         `Roster truncated: showing ${status.members.length} of ${status.total}. Query a member directly with /stargate crew <member-id>.`,
       ),
     );
+
   return { ...notice("Crew activity"), blocks };
 }
 
@@ -161,19 +179,23 @@ export function quotaStatusView(
   const lines = formatQuota(snapshot, now);
   const blocks = [section(lines.slice(0, 2).join("\n"))];
   let text = "";
+
   for (const line of lines.slice(2)) {
     if (text.length + line.length + 1 > 2900) {
       blocks.push(section(text));
       text = "";
     }
+
     text += `${text ? "\n" : ""}${line}`;
   }
+
   if (text) blocks.push(section(text));
   blocks.push(
     section(
       "Close and run /stargate usage again to refresh. No model is called; no account data is posted to the channel.",
     ),
   );
+
   return { ...notice("Usage", "Provider usage"), blocks };
 }
 
@@ -209,6 +231,7 @@ export class CrewUI {
   async command(body: unknown, ack: SlackAck) {
     const parsed = Schema.decodeUnknownResult(commandSchema)(body);
     const usage = Result.isSuccess(parsed) && parsed.success.text === "usage";
+
     if (
       Result.isFailure(parsed) ||
       !this.allowed(parsed.success) ||
@@ -218,12 +241,15 @@ export class CrewUI {
         response_type: "ephemeral",
         text: "Status unavailable. Use /stargate crew [member] or /stargate usage in an allowed channel with a configured captain backend.",
       });
+
       return;
     }
+
     // ACK and consume the three-second trigger before reading any backend state.
     await ack();
     const data = parsed.success;
     let viewID: string | undefined;
+
     try {
       viewID = await this.api.open(
         data.trigger_id,
@@ -234,27 +260,37 @@ export class CrewUI {
           usage ? "Provider usage" : "Crew activity",
         ),
       );
+
       if (!this.allowed(data)) return;
       const member = data.text.split(/\s+/)[1];
       const signal = AbortSignal.any([this.signal, this.deadline()]);
       signal.throwIfAborted();
+
       if (usage && this.backend.quota) {
         const snapshot = quotaSnapshotSchema.parse(
           await this.backend.quota(signal),
         );
+
         signal.throwIfAborted();
+
         if (this.allowed(data))
           await this.api.update(viewID, quotaStatusView(snapshot));
+
         return;
       }
+
       if (!this.backend.crewStatus) return;
+
       const status = crewStatusSchema.parse(
         await this.backend.crewStatus(member ? { member } : {}, signal),
       );
+
       signal.throwIfAborted();
+
       if (!this.allowed(data)) return;
+
       // Defense at adapter boundary: module backends get the same redaction and
-      // literal rendering. Schema bounds rows and forbids native session fields.
+      // Literal rendering. Schema bounds rows and forbids native session fields.
       const safe = member
         ? {
             ...status,
@@ -263,10 +299,13 @@ export class CrewUI {
               .slice(0, 1),
           }
         : status;
+
       await this.api.update(viewID, crewStatusView(safe, !!member));
     } catch {
       this.log.error("Could not read or display Stargate status");
+
       if (!viewID || !this.allowed(data)) return;
+
       try {
         await this.api.update(
           viewID,

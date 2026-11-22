@@ -7,11 +7,12 @@ import {
 } from "../src/maintenance/nightly/update/catalog";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+
 const text = json({
   model: "openai-proxy/gpt-6.1-sol",
   providers: {
     "openai-proxy": {
-      settings: { timeout: 10000 },
+      settings: { timeout: 10_000 },
       models: {
         "gpt-6-sol": { limit: { context: 1000 } },
         "gpt-6.1-sol": {
@@ -27,6 +28,7 @@ const text = json({
     other: { models: { "gpt-6.1-sol": { name: "Other" } } },
   },
 });
+
 const providers = ["openai-proxy"];
 const families = ["gpt-sol", "gpt-astra"];
 
@@ -48,6 +50,7 @@ test("catalog adds only selected newer members, copying all settings without rew
     families,
     providers,
   );
+
   const before = JSON.parse(text);
   const after = JSON.parse(result.text);
   const models = after.providers["openai-proxy"].models;
@@ -90,6 +93,7 @@ test("catalog never overwrites a declaration or creates suffixed products or dow
       ).text,
     ).toBe(text);
   }
+
   expect(() =>
     catalogRefs(JSON.stringify(JSON.parse(text)), families, providers),
   ).toThrow("config-format");
@@ -102,6 +106,7 @@ test("an older route still copies the newest declared family template", () => {
     families,
     providers,
   );
+
   const models = JSON.parse(result.text).providers["openai-proxy"].models;
   expect(models["gpt-6.2-sol"]).toEqual(models["gpt-6.1-sol"]);
 });
@@ -120,12 +125,14 @@ test("a new declaration sends the probed model ID, not the template's API model 
       },
     },
   });
+
   const result = upgradeGlobalCatalog(
     source,
     new Map([["gpt-6.1-sol", "gpt-6.2-sol"]]),
     families,
     providers,
   );
+
   const models = JSON.parse(result.text).providers["openai-proxy"].models;
   expect(models["gpt-6.2-sol"]).toEqual({
     ...models["gpt-6.1-sol"],

@@ -15,39 +15,51 @@ import {
 
 const standalone = process.argv.includes("--standalone");
 const loseAck = process.argv.includes("--lose-ack");
+
 const [binary, mesij, brokerPath] = process.argv
   .slice(2)
   .filter((arg) => arg !== "--lose-ack" && arg !== "--standalone");
+
 if (!binary || !mesij)
   throw new Error(
     "Pass the OpenCode binary and pinned mesij paths; optionally the read-only history broker script",
   );
+
 if (standalone && (brokerPath || loseAck))
   throw new Error(
     "--standalone uses native service discovery without a gateway or broker",
   );
+
 const home = await realpath(
   await mkdtemp(join(tmpdir(), "crew-clarification-")),
 );
+
 const captainDirectory = join(home, "captain"),
   worktree = join(home, "worker"),
   captainID = "ses_fixtureCaptain";
+
 await Promise.all([captainDirectory, worktree].map((p) => mkdir(p)));
+
 const auth = "Basic " + Buffer.from("opencode:fixture").toString("base64");
 let captainAnswers = 0;
 let modelCalls = 0;
+
 const model = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   async fetch(req) {
     const body = await req.json();
+
     const answered = body.messages.some(
       (m: { role: string }) => m.role === "tool",
     );
+
     modelCalls++;
+
     const token = /op=answer, token=([a-f0-9]{32})/.exec(
       JSON.stringify(body.messages),
     )?.[1];
+
     if (token && !answered) captainAnswers++;
 
     const question = {
@@ -62,6 +74,7 @@ const model = Bun.serve({
         },
       ],
     };
+
     const delta = answered
       ? { content: "Recorded." }
       : {
@@ -79,6 +92,7 @@ const model = Bun.serve({
             },
           ],
         };
+
     const chunk = (value: object, reason: string | null) =>
       "data: " +
       JSON.stringify({
@@ -89,6 +103,7 @@ const model = Bun.serve({
         choices: [{ index: 0, delta: value, finish_reason: reason }],
       }) +
       "\n\n";
+
     return new Response(
       chunk({ role: "assistant" }, null) +
         chunk(delta, null) +
@@ -98,12 +113,15 @@ const model = Bun.serve({
     );
   },
 });
+
 const socket = Bun.listen({
   hostname: "127.0.0.1",
   port: 0,
   socket: { data() {} },
 });
+
 const port = socket.port;
+
 socket.stop(true);
 
 // Optional loopback broker fixture exposing Server(bindPort, upstreamPort, password).
@@ -121,7 +139,9 @@ const broker = brokerPath
       { stdout: "pipe", stderr: "inherit" },
     )
   : undefined;
+
 let brokerPort: number | undefined;
+
 if (broker) {
   const reader = broker.stdout.getReader();
   const first = await reader.read();
@@ -129,6 +149,7 @@ if (broker) {
   reader.releaseLock();
   assert.ok(Number.isInteger(brokerPort) && brokerPort > 0);
 }
+
 const plan = {
   namespace: "smoke",
   stateDirectory: join(home, "state-crew"),
@@ -157,6 +178,7 @@ const plan = {
         }),
   },
 };
+
 const state = await CrewState.open(
   plan.stateDirectory,
   plan.namespace,
@@ -165,11 +187,17 @@ const state = await CrewState.open(
   false,
   captainID,
 );
+
 const peer = state.reservePeer("worker");
+
 state.readyPeer("worker");
+
 const task = state.reserveTask(peer, captainID);
+
 assert.ok(task);
+
 state.running(task.id);
+
 if (standalone)
   await saveQuestionSettings(
     captainDirectory,
@@ -177,8 +205,11 @@ if (standalone)
     { enabled: true, timeoutMs: 300_000, answer: "requester" },
     new AbortController().signal,
   );
+
 const config = join(home, "config/opencode");
+
 await mkdir(config, { recursive: true });
+
 await writeFile(
   join(config, "opencode.json"),
   JSON.stringify({
@@ -208,6 +239,7 @@ await writeFile(
     ],
   }),
 );
+
 const engine = Bun.spawn(
   [
     binary,
@@ -234,12 +266,15 @@ const engine = Bun.spawn(
     stderr: "inherit",
   },
 );
+
 async function wait<T>(get: () => Promise<T | undefined>, label: string) {
   for (let i = 0; i < 160; i++) {
     const value = await get();
+
     if (value) return value;
     await Bun.sleep(150);
   }
+
   throw new Error(
     "Timed out waiting for " + label + "; provider calls " + modelCalls,
   );
@@ -247,6 +282,7 @@ async function wait<T>(get: () => Promise<T | undefined>, label: string) {
 
 let stop = new AbortController();
 let gateway: Promise<void> | undefined;
+
 try {
   const endpoint = standalone
     ? await wait(
@@ -262,6 +298,7 @@ try {
           password: "fixture",
         },
       };
+
   const client = OpenCode.make({
     baseUrl: endpoint.url,
     headers:
@@ -271,6 +308,7 @@ try {
           : { url: endpoint.url },
       ) ?? {},
   });
+
   await wait(
     () => client.session.active().catch(() => undefined),
     "native engine",
@@ -296,11 +334,13 @@ try {
     delivery: "queue",
     resume: true,
   });
+
   const form = await wait(
     async () =>
       (await client.session.form.list({ sessionID: peer.sessionID }))[0],
     "native crew form",
   );
+
   if (brokerPort) {
     const url =
       "http://127.0.0.1:" +
@@ -308,6 +348,7 @@ try {
       "/api/session/" +
       peer.sessionID +
       "/form";
+
     const headers = { Authorization: auth };
     const list = await fetch(url, { headers });
     assert.equal(list.status, 200);
@@ -325,27 +366,34 @@ try {
     await Bun.sleep(3500);
     assert.deepEqual(state.crewQuestionOffers(task.id), []);
   }
+
   let writes = 0;
+
   const traced = OpenCode.make({
     baseUrl: "http://127.0.0.1:" + port,
     headers: { Authorization: auth },
     fetch: Object.assign(
       async (req: RequestInfo | URL, init?: RequestInit) => {
         const request = new Request(req, init);
+
         const isWrite =
           request.method === "POST" &&
           new URL(request.url).pathname.endsWith("/form/" + form.id + "/reply");
+
         if (isWrite) writes++;
         const result = await fetch(request);
+
         if (isWrite && loseAck) {
           stop.abort();
           throw new Error("Disconnected after native delivery");
         }
+
         return result;
       },
       { preconnect: fetch.preconnect },
     ),
   });
+
   const config = {
     type: "opencode" as const,
     sessionID: captainID,
@@ -354,8 +402,10 @@ try {
     headersEnv: {},
     permissions: [],
   };
+
   if (!standalone)
     gateway = new CrewQuestionGateway(config, {}, traced).run(stop.signal);
+
   if (loseAck) {
     await wait(
       async () => (writes === 1 && stop.signal.aborted) || undefined,
@@ -365,15 +415,18 @@ try {
     stop = new AbortController();
     gateway = new CrewQuestionGateway(config, {}, traced).run(stop.signal);
   }
+
   const offer = await wait(
     async () =>
       state.crewQuestionOffers(task.id).find((o) => o.outcome === "answered"),
     "retained captain answer",
   );
+
   const current = await client.session.form.get({
     sessionID: peer.sessionID,
     formID: form.id,
   });
+
   assert.equal(current.state.status, "answered");
   assert.deepEqual(
     current.state.status === "answered" && current.state.answer,
@@ -388,10 +441,12 @@ try {
     await Bun.file(questionSettingsPath(captainDirectory, "build")).exists(),
     standalone,
   );
+
   const history = await client.message.list({
     sessionID: peer.sessionID,
     limit: 100,
   });
+
   assert.deepEqual(
     history.data
       .filter((m) => m.type === "synthetic" || m.type === "user")

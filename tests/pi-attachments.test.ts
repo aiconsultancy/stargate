@@ -21,6 +21,7 @@ test("Pi maps image bytes to native base64 blocks and UTF-8 files to text", () =
       { type: "image", data: "AID/", mimeType: mime },
     ]);
   }
+
   for (const mime of [
     "text/plain",
     "text/markdown",
@@ -32,6 +33,7 @@ test("Pi maps image bytes to native base64 blocks and UTF-8 files to text", () =
       { type: "text", text: "Attachment: notes.txt\nFile contents: café" },
     ]);
   }
+
   expect(piInputContent("Unchanged", [], false)).toBe("Unchanged");
 });
 
@@ -43,11 +45,13 @@ test("Pi rejects unsupported files, binary text, non-vision images, and bounds",
   ]) {
     expect(() => piInputContent("Read", [textFile(mime)], true)).toThrow();
   }
+
   for (const data of [Uint8Array.of(255), Uint8Array.of(0)]) {
     expect(() =>
       piInputContent("Read", [{ ...textFile(), data }], true),
     ).toThrow();
   }
+
   expect(() =>
     piInputContent("Read", [textFile("image/png")], false),
   ).toThrow();
@@ -66,12 +70,15 @@ test("Pi rejects unsupported files, binary text, non-vision images, and bounds",
 function fixture(acceptsImages = true) {
   const submissions: SubmissionDraft[] = [];
   let lookups = 0;
+
   const harness = {
     async conversation() {
       lookups++;
+
       return {
         async submit(draft: SubmissionDraft) {
           submissions.push(draft);
+
           return {
             async wait() {
               return { type: "input", status: "done", entry: 1, answer: 2 };
@@ -89,6 +96,7 @@ function fixture(acceptsImages = true) {
       };
     },
   };
+
   const backend: PiDurableBackend = Reflect.construct(PiDurableBackend, [
     harness,
     { model: "openai/test" },
@@ -96,6 +104,7 @@ function fixture(acceptsImages = true) {
     {},
     acceptsImages,
   ]);
+
   return { backend, submissions, lookups: () => lookups };
 }
 
@@ -135,9 +144,11 @@ test("Pi submits attachments with admission ID and preserves crew request IDs", 
 test("Pi refuses files and aborted input before admission or harness access", async () => {
   const { backend, submissions, lookups } = fixture();
   let admissions = 0;
+
   const admitted = () => {
     admissions++;
   };
+
   await expect(
     backend.prompt(
       "1",
@@ -164,6 +175,7 @@ test("Pi admits real image blocks only for image-capable models", async () => {
     mime: "image/png",
     data: Uint8Array.of(137, 80, 78, 71),
   };
+
   const signal = new AbortController().signal;
   const vision = fixture();
   await vision.backend.prompt("1", "", signal, undefined, undefined, [file]);

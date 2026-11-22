@@ -23,6 +23,7 @@ const policy = Schema.decodeUnknownSync(fleetPolicySchema)({
   assignedCheckout: "/srv/assigned",
   capabilities: ["read_code", "subspace", "dispatch"],
 });
+
 test("review native permissions require explicit opt-in and a dispatch-capable captain", () => {
   const captain = { ...policy, role: "captain" as const };
   expect(
@@ -45,6 +46,7 @@ test("review native permissions require explicit opt-in and a dispatch-capable c
     ).some((r) => r.action === "fleet_review"),
   ).toBe(false);
 });
+
 test("fleet controls are explicit and preserve human authority", () => {
   expect(fleetAuthority(policy, "OPERATOR")).toBe("human");
   expect(fleetAuthority(policy, "captain")).toBe("agent");
@@ -83,6 +85,7 @@ test("fleet controls are explicit and preserve human authority", () => {
     ),
   ).toBe(true);
 });
+
 test("IRC fleet and profile instructions use one plain pull request reference", () => {
   for (const guidance of [
     fleetInstructions(policy, "irc"),
@@ -93,8 +96,10 @@ test("IRC fleet and profile instructions use one plain pull request reference", 
     expect(guidance).toContain("Use one form per reference");
     expect(guidance).not.toContain("An ordinary Markdown link");
   }
+
   expect(fleetInstructions(policy)).toContain("An ordinary Markdown link");
 });
+
 test("authority is separate from source transport and sender rank", () => {
   expect(
     sourceLine({
@@ -122,6 +127,7 @@ test("authority is separate from source transport and sender rank", () => {
     }),
   ).toContain(";k=captain;a=agent");
 });
+
 test("wake channels are opt-in, authenticated and constrained to joined channels", () => {
   const input = {
     id: "test",
@@ -136,6 +142,7 @@ test("wake channels are opt-in, authenticated and constrained to joined channels
       directory: "/srv/assigned",
     },
   };
+
   const member: IrcMember = {
     id: "test",
     role: "captain",
@@ -144,15 +151,18 @@ test("wake channels are opt-in, authenticated and constrained to joined channels
     channels: ["#ship"],
     key: "key",
   };
+
   const context = {
     currentNick: "ship",
     now: () => 0,
     fold: (value: string) => value.toLowerCase(),
     sent: () => false,
   };
+
   const message = parseMessage(
     "@account=operator;msgid=original :person!u@h PRIVMSG #ship :ordinary instruction",
   );
+
   if (!message) throw new Error("Missing fixture message");
   expect(
     routeIrcMessage(message, {
@@ -161,16 +171,20 @@ test("wake channels are opt-in, authenticated and constrained to joined channels
       member,
     }),
   ).toBeUndefined();
+
   const enabled = Schema.decodeUnknownSync(ircSchema)({
     ...input,
     access: { wakeChannels: ["#ship"] },
   });
+
   expect(
     routeIrcMessage(message, { ...context, config: enabled, member })?.user,
   ).toBe("operator");
+
   const stranger = parseMessage(
     "@account=outsider;msgid=original :person!u@h PRIVMSG #ship :ordinary instruction",
   );
+
   if (!stranger) throw new Error("Missing fixture message");
   expect(
     routeIrcMessage(stranger, { ...context, config: enabled, member }),

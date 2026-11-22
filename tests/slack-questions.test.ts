@@ -11,9 +11,11 @@ import { bot, event, identity } from "./fixtures";
 
 const token = "a".repeat(32);
 const cleanups: (() => void)[] = [];
+
 afterEach(() => {
   for (const close of cleanups.splice(0)) close();
 });
+
 function question(): NativeQuestion {
   return {
     id: "frm_question",
@@ -53,11 +55,14 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
     text: "Investigate",
   });
   const queued = store.queuedJob(key, "C123:1.000");
+
   if (!queued) throw new Error("Missing fixture job");
   store.running(queued.id);
   store.saveInput(key, queued.id, native.inputID, native.sessionID);
   const job = store.jobByInput(key, native.inputID);
+
   if (!job) throw new Error("Missing fixture input");
+
   const offer: QuestionOffer = {
     token,
     botKey: key,
@@ -71,6 +76,7 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
     notified: 0,
     recovering: 0,
   };
+
   store.offerQuestion(offer);
   const posts: SlackPanelContent[] = [];
   const updates: SlackPanelContent[] = [];
@@ -84,6 +90,7 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
   let beforeHuman: (() => void) | undefined;
   let failUpdate = false;
   let failSubmit = false;
+
   const controls = () =>
     new SlackQuestionControls(
       store,
@@ -91,14 +98,17 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
         async post(_channel, _thread, _text, _stop, unit, content) {
           if (!unit?.allowed?.()) throw new Error("Denied publication");
           posts.push(content as SlackPanelContent);
+
           return "2.000";
         },
         async update(_channel, _ts, _text, _stop, content) {
           expect(
             store.questions.slackQuestion(token)?.revision,
           ).toBeGreaterThan(0);
+
           if (failUpdate) throw new Error("Slack unavailable");
           updates.push(content as SlackPanelContent);
+
           return true;
         },
         async ephemeral(_channel, _user, _thread, text) {
@@ -110,10 +120,12 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
       async () => {
         if (requireAck) expect(acked).toBe(true);
         beforeHuman?.();
+
         return human;
       },
       async () => {
         if (requireAck) expect(acked).toBe(true);
+
         return { enabled, timeoutMs: 60_000, answer: policy };
       },
       async (_job, _token, answer, user) => {
@@ -122,7 +134,9 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
         answers.push({ answer, user });
       },
     );
+
   let ui = controls();
+
   return {
     config,
     store,
@@ -157,6 +171,7 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
     click: async (raw: unknown) => {
       acked = false;
       requireAck = true;
+
       return ui.interactive(
         raw,
         async () => {
@@ -185,6 +200,7 @@ function press(id = "stargate_question_pick_0_1", value = `${token}:0:1`) {
 test("renders literal single-choice buttons with trusted indexed values and native custom policy", () => {
   const native = question();
   const field = native.fields[0];
+
   if (!field) throw new Error("Missing fixture field");
   field.custom = false;
   const panel = buildQuestionBlocks(native, token);
@@ -194,6 +210,7 @@ test("renders literal single-choice buttons with trusted indexed values and nati
   expect(json).toContain(`${token}:0:1`);
   expect(json).not.toContain("Type your own");
   expect(json).not.toContain('"value":"native_go"');
+
   for (const block of panel.blocks) {
     if (block.type !== "actions") continue;
     const ids = block.elements.map((element) => element.action_id);
@@ -226,6 +243,7 @@ test("checkbox change never answers; Submit reads state and ignores labels", asy
   const f = fixture(native);
   await f.publish();
   expect(JSON.stringify(f.posts)).toContain("checkboxes");
+
   const selection = {
     ...press(),
     actions: [
@@ -238,8 +256,10 @@ test("checkbox change never answers; Submit reads state and ignores labels", asy
       },
     ],
   };
+
   await f.click(selection);
   expect(f.answers).toEqual([]);
+
   const submit = {
     ...press("stargate_question_submit", token),
     state: {
@@ -256,9 +276,11 @@ test("checkbox change never answers; Submit reads state and ignores labels", asy
       },
     },
   };
+
   const selected =
     submit.state.values[`${token}:0`]?.stargate_question_select
       .selected_options[0];
+
   if (!selected) throw new Error("Missing fixture selection");
   selected.value = `${token}:0:9`;
   await f.click(submit);
@@ -275,6 +297,7 @@ test("refuses forged routing, source message, bot user, stale and disabled offer
   const f = fixture();
   await f.publish();
   const original = press();
+
   const variants = [
     { ...original, api_app_id: "AOTHER" },
     { ...original, team: { id: "TOTHER" } },
@@ -289,6 +312,7 @@ test("refuses forged routing, source message, bot user, stale and disabled offer
       actions: [{ ...original.actions[0], value: `${token}:1:0` }],
     },
   ];
+
   for (const raw of variants) expect(await f.click(raw)).toBe(true);
   f.human(false);
   await f.click(original);
@@ -325,6 +349,7 @@ test("custom intake reserves only explicit bot answer tokens and original thread
   await f.publish();
   expect(f.receive(event("ordinary answer prose"))).toBe(false);
   expect(f.receive(event(`answer ${token} wait`))).toBe(false);
+
   const raw = {
     ...event(`<@UBOT> answer ${token} My own step`),
     event: {
@@ -334,12 +359,14 @@ test("custom intake reserves only explicit bot answer tokens and original thread
       ts: "4.000",
     },
   };
+
   await f.receive({ ...raw, event: { ...raw.event, thread_ts: "9.000" } });
   expect(f.answers).toEqual([]);
   await f.receive(raw);
   expect(f.answers).toEqual([{ answer: '{"q0":"My own step"}', user: "U123" }]);
   const closed = question();
   const field = closed.fields[0];
+
   if (!field) throw new Error("Missing fixture field");
   field.custom = false;
   const g = fixture(closed);
@@ -351,6 +378,7 @@ test("custom intake reserves only explicit bot answer tokens and original thread
 test("disabled questions leave explicit-looking answer text to ordinary intake", async () => {
   const f = fixture();
   f.enabled(false);
+
   const raw = {
     ...event(`<@UBOT> answer ${token} ordinary chat`, "4.000"),
     event: {
@@ -360,6 +388,7 @@ test("disabled questions leave explicit-looking answer text to ordinary intake",
       thread_ts: "1.000",
     },
   };
+
   expect(await f.receive(raw)).toBe(false);
   expect(f.answers).toEqual([]);
   expect(await f.click(press())).toBe(true);
@@ -392,6 +421,7 @@ test("sequential fields persist progress, survive restart and submit the complet
   await f.click(press());
   expect(f.store.questions.slackQuestion(token)?.revision).toBe(1);
   expect(f.answers).toEqual([]);
+
   const submit = {
     ...press("stargate_question_submit", `${token}:1`),
     state: {
@@ -405,6 +435,7 @@ test("sequential fields persist progress, survive restart and submit the complet
       },
     },
   };
+
   await f.click(submit);
   expect(f.answers).toEqual([
     { answer: '{"q0":"native_go","q7":["native_south"]}', user: "U123" },
@@ -432,6 +463,7 @@ test("failed repaint retains accepted progress and stale event retry only refres
   f.restart();
   await f.click(press());
   expect(f.updates.at(-1)?.text).toContain("Explain");
+
   const reply = (suffix: string) => ({
     ...event(`<@UBOT> answer ${token}${suffix} reason`, "4.000"),
     event: {
@@ -441,6 +473,7 @@ test("failed repaint retains accepted progress and stale event retry only refres
       thread_ts: "1.000",
     },
   });
+
   await f.receive(reply(""));
   await f.receive(reply(":0"));
   expect(f.answers).toEqual([]);
@@ -475,6 +508,7 @@ test("all eight native fields advance under one offer and preserve their field k
   }));
   const f = fixture(native);
   await f.publish();
+
   for (let revision = 0; revision < 8; revision++) {
     await f.click(
       press(`stargate_question_pick_${revision}_0`, `${token}:${revision}:0`),
@@ -482,6 +516,7 @@ test("all eight native fields advance under one offer and preserve their field k
     expect(f.store.questions.slackQuestion(token)?.revision).toBe(revision + 1);
     expect(f.answers).toHaveLength(revision === 7 ? 1 : 0);
   }
+
   expect(JSON.parse(f.answers[0]?.answer ?? "null")).toEqual({
     q0: "native_0",
     q1: "native_1",
@@ -521,6 +556,7 @@ test("twenty choices fit Slack checkbox limits and submit across all groups", as
   ];
   const f = fixture(native);
   await f.publish();
+
   const checkboxGroups = f.posts.flatMap((panel) =>
     panel.blocks.flatMap((block) =>
       block.type === "actions"
@@ -528,9 +564,12 @@ test("twenty choices fit Slack checkbox limits and submit across all groups", as
         : [],
     ),
   );
+
   expect(checkboxGroups).toHaveLength(2);
+
   for (const group of checkboxGroups)
     expect(group.options.length).toBeLessThanOrEqual(10);
+
   const raw = {
     ...press("stargate_question_submit", token),
     state: {
@@ -550,6 +589,7 @@ test("twenty choices fit Slack checkbox limits and submit across all groups", as
       },
     },
   };
+
   await f.click(raw);
   expect(f.answers).toEqual([
     { answer: '{"q0":["native_3","native_15"]}', user: "U123" },

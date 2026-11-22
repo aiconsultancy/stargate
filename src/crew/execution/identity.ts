@@ -46,7 +46,9 @@ export function canExpandCrew(previous: string, next: string): boolean {
     const before = Schema.decodeUnknownSync(identitySchema)(
       JSON.parse(previous),
     );
+
     const after = Schema.decodeUnknownSync(identitySchema)(JSON.parse(next));
+
     if (
       before.namespace !== after.namespace ||
       before.projectDirectory !== after.projectDirectory ||
@@ -54,6 +56,7 @@ export function canExpandCrew(previous: string, next: string): boolean {
       before.crew.length >= after.crew.length
     )
       return false;
+
     if (
       !before.crew.every((old) =>
         after.crew.some(
@@ -62,14 +65,18 @@ export function canExpandCrew(previous: string, next: string): boolean {
       )
     )
       return false;
+
     const added = after.crew.filter(
       (member) => !before.crew.some((old) => old["id"] === member["id"]),
     );
+
     return (
       added.length > 0 &&
       added.every((member) => {
         const backend = member["backend"];
+
         if (backend === undefined) return true;
+
         return (
           typeof backend === "object" &&
           backend !== null &&

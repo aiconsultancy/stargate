@@ -30,6 +30,7 @@ export function crewLink(
   env: NodeJS.ProcessEnv,
 ): CrewLink | undefined {
   if (captain.type !== "opencode") return;
+
   return new OpenCodeCrewLink(captain, env);
 }
 

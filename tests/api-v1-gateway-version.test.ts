@@ -8,6 +8,7 @@ import { gatewayVersion } from "../src/dashboard/api/v1/gateway";
 
 test("the Fleet API reports the installed release's version", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-release-"));
+
   try {
     await writeFile(
       join(directory, ".stargate-release.json"),
@@ -30,6 +31,7 @@ test("the Fleet API reports the installed release's version", async () => {
 
 test("a source checkout without a release record reports the package version", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-source-"));
+
   try {
     expect(await gatewayVersion(directory)).toBe(packageManifest.version);
   } finally {
@@ -48,6 +50,7 @@ function gitCheckout(directory: string, tags: string[]) {
         GIT_CONFIG_VALUE_0: "false",
       },
     });
+
   git("init", "-q");
   git(
     "-c",
@@ -60,11 +63,13 @@ function gitCheckout(directory: string, tags: string[]) {
     "-m",
     "release",
   );
+
   for (const tag of tags) git("tag", tag);
 }
 
 test("a git checkout at a release tag reports that tag's version", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-tagged-"));
+
   try {
     gitCheckout(directory, ["v0.40.1"]);
     expect(await gatewayVersion(directory)).toBe("0.40.1");
@@ -76,6 +81,7 @@ test("a git checkout at a release tag reports that tag's version", async () => {
 test("an untagged or ambiguously tagged checkout reports the package version", async () => {
   const untagged = await mkdtemp(join(tmpdir(), "stargate-untagged-"));
   const ambiguous = await mkdtemp(join(tmpdir(), "stargate-ambiguous-"));
+
   try {
     gitCheckout(untagged, ["not-a-release"]);
     gitCheckout(ambiguous, ["v0.40.0", "v0.40.1"]);

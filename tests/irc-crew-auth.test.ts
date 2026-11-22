@@ -12,6 +12,7 @@ const backend = {
   directory: "/project",
   url: "http://localhost:4096",
 };
+
 const member = (id: string, auth: Record<string, unknown>) => ({
   id,
   account: `ship-${id}`,
@@ -19,6 +20,7 @@ const member = (id: string, auth: Record<string, unknown>) => ({
   backend,
   ...auth,
 });
+
 const registration = (
   crew: unknown[],
   extra: Record<string, unknown> = {},
@@ -32,7 +34,9 @@ const registration = (
   crew,
   ...extra,
 });
+
 const cleanup: string[] = [];
+
 afterEach(async () => {
   for (const dir of cleanup.splice(0))
     await rm(dir, { recursive: true, force: true });
@@ -44,6 +48,7 @@ test("crew auth accepts mixed and multiple EXTERNAL members without password col
     member("apollo", { clientPemFile: "/private/apollo.pem" }),
     member("bosun", { passwordEnv: "BOSUN" }),
   ]);
+
   expect(
     Result.isSuccess(Schema.decodeUnknownResult(configSchema)({ irc: [irc] })),
   ).toBe(true);
@@ -90,6 +95,7 @@ test("crew auth refuses missing, both, non-TLS and duplicate PLAIN references", 
     ),
   ).toBe(false);
   const first = registration([member("chief", { passwordEnv: "SHARED" })]);
+
   const second = registration(
     [member("other-chief", { passwordEnv: "SHARED" })],
     {
@@ -98,6 +104,7 @@ test("crew auth refuses missing, both, non-TLS and duplicate PLAIN references", 
       passwordEnv: "OTHER",
     },
   );
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(configSchema)({ irc: [first, second] }),
@@ -111,8 +118,10 @@ test("crew PEM references are restart-only without changing session routing", ()
       registration([member("chief", { clientPemFile: "/private/chief.pem" })]),
     ],
   });
+
   const after = structuredClone(before);
   const chief = after.irc[0]?.crew[0];
+
   if (!chief) throw new Error("missing test member");
   chief.clientPemFile = "/private/rotated.pem";
   expect(
@@ -128,9 +137,11 @@ test("credential checks validate crew PEMs without requiring an undefined passwo
   cleanup.push(dir);
   const pem = join(dir, "unsafe.pem");
   await writeFile(pem, "not a certificate", { mode: 0o644 });
+
   const config = Schema.decodeUnknownSync(ircSchema)(
     registration([member("chief", { clientPemFile: pem })]),
   );
+
   await expect(
     checkCredentials(join(dir, "config.json"), [], { CAPTAIN: "synthetic" }, [
       config,

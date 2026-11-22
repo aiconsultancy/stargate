@@ -21,6 +21,7 @@ import {
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 test("startup constructs the configured transcription provider", () => {
   const transcriber = createTranscriber({
     provider: {
@@ -32,6 +33,7 @@ test("startup constructs the configured transcription provider", () => {
     },
     timeoutMs: 120_000,
   });
+
   expect(transcriber).toBeInstanceOf(AzureOpenAITranscriber);
   expect(transcriber.label).toBe("Azure OpenAI deployment startup-fixture");
 });
@@ -43,17 +45,19 @@ afterEach(async () => {
 const audio = new TextEncoder().encode("fixture m4a bytes, not real audio");
 const spoken = "Please merge pull request forty-two SPOKEN_PRIVATE_TEXT";
 const secretToken = "entra-token-PRIVATE_TOKEN";
+
 const voice = (change: Partial<Attachment> = {}): Attachment => ({
   name: "Audio clip (2026-11-11 08:14:15).m4a",
   mime: "audio/mp4",
   data: audio,
-  source: { id: "F0VOICE", durationMs: 68638 },
+  source: { id: "F0VOICE", durationMs: 68_638 },
   ...change,
 });
 
 /** Local stand-in for Azure IMDS and the Azure OpenAI transcription route. */
 function provider() {
   const tokens: (string | null)[] = [];
+
   const requests: {
     path: string;
     version: string | null;
@@ -63,6 +67,7 @@ function provider() {
     bytes: number;
     format: FormDataEntryValue | null;
   }[] = [];
+
   const state = {
     now: Date.UTC(2026, 10, 11, 12),
     lifetimeSeconds: 86_400,
@@ -75,13 +80,16 @@ function provider() {
     active: 0,
     peak: 0,
   };
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const url = new URL(request.url);
+
       if (url.pathname === "/metadata/identity/oauth2/token") {
         tokens.push(request.headers.get("Metadata"));
+
         if (
           state.tokenStatus !== 200 ||
           request.headers.get("Metadata") !== "true"
@@ -89,6 +97,7 @@ function provider() {
           return new Response("identity PRIVATE_IDENTITY_ERROR", {
             status: state.tokenStatus === 200 ? 400 : state.tokenStatus,
           });
+
         return Response.json({
           access_token: `${secretToken}-${tokens.length}`,
           expires_on: String(
@@ -97,8 +106,10 @@ function provider() {
           token_type: "Bearer",
         });
       }
+
       const form = await request.formData();
       const file = form.get("file");
+
       if (!(file instanceof File)) return new Response(null, { status: 400 });
       requests.push({
         path: url.pathname,
@@ -110,14 +121,17 @@ function provider() {
         format: form.get("response_format"),
       });
       const limit = state.limited.shift();
+
       if (limit)
         return new Response("provider PRIVATE_PROVIDER_ERROR", {
           status: limit[0],
           headers: limit[1] === undefined ? {} : { "retry-after": limit[1] },
         });
       state.peak = Math.max(state.peak, ++state.active);
+
       try {
         await state.hold;
+
         return state.status === 200
           ? Response.json(state.body)
           : new Response("provider PRIVATE_PROVIDER_ERROR", {
@@ -128,8 +142,10 @@ function provider() {
       }
     },
   });
+
   cleanup.push(() => server.stop(true));
   const origin = server.url.origin;
+
   const config = Schema.decodeUnknownSync(transcriptionSchema)({
     provider: {
       type: "azure-openai",
@@ -139,7 +155,9 @@ function provider() {
       auth: "managedIdentity",
     },
   });
+
   const waits: number[] = [];
+
   const transcriber = new AzureOpenAITranscriber(config.provider, {
     identityURL: `${origin}/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fcognitiveservices.azure.com%2F`,
     now: () => state.now,
@@ -148,6 +166,7 @@ function provider() {
       signal.throwIfAborted();
     },
   });
+
   return { state, tokens, requests, waits, config, transcriber };
 }
 
@@ -155,6 +174,7 @@ const signal = () => new AbortController().signal;
 
 test("transcription is off by default and accepts only the keyless Azure shape", () => {
   expect(bot().transcription).toBeUndefined();
+
   const provider = {
     type: "azure-openai",
     endpoint: "https://example.openai.azure.com",
@@ -162,11 +182,14 @@ test("transcription is off by default and accepts only the keyless Azure shape",
     apiVersion: "2024-06-01",
     auth: "managedIdentity",
   };
+
   const parsed = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     transcription: { provider },
   });
+
   expect(parsed.transcription?.timeoutMs).toBe(120_000);
+
   for (const change of [
     { endpoint: "http://example.openai.azure.com" },
     { endpoint: "https://example.openai.azure.com/openai" },
@@ -223,6 +246,7 @@ test("Azure provider sends the audio with a cached managed-identity token and no
 test("Azure preserves raw transcript strings and accepts extra provider fields", async () => {
   const f = provider();
   const file = { data: audio, mime: "audio/mp4", extension: "m4a" };
+
   for (const text of ["", "  \t\n", "Unicode 🦘\nsecond line\u0000"]) {
     f.state.body = { text, extra: "ignored provider metadata" };
     expect(await f.transcriber.transcribe(file, signal())).toBe(text);
@@ -231,6 +255,7 @@ test("Azure preserves raw transcript strings and accepts extra provider fields",
 
 test("Azure token expiry uses Number coercion and positive safe integers", async () => {
   const file = { data: audio, mime: "audio/mp4", extension: "m4a" };
+
   const providerConfig = Schema.decodeUnknownSync(transcriptionSchema)({
     provider: {
       type: "azure-openai",
@@ -240,6 +265,7 @@ test("Azure token expiry uses Number coercion and positive safe integers", async
       auth: "managedIdentity",
     },
   }).provider;
+
   for (const [expires_on, accepted, cached] of [
     ["3600", true, true],
     [" 0xE10 ", true, true],
@@ -261,21 +287,26 @@ test("Azure token expiry uses Number coercion and positive safe integers", async
   ] as const) {
     let identities = 0;
     const authorizations: (string | null)[] = [];
+
     const transcriber = new AzureOpenAITranscriber(providerConfig, {
       now: () => 0,
       fetch: async (_url, init) => {
         if (init?.method !== "POST") {
           identities++;
+
           return Response.json({
             access_token: secretToken,
             expires_on,
             extra: "ignored",
           });
         }
+
         authorizations.push(new Headers(init.headers).get("authorization"));
+
         return Response.json({ text: "answer" });
       },
     });
+
     for (let attempt = 0; attempt < 2; attempt++) {
       if (accepted)
         expect(await transcriber.transcribe(file, signal())).toBe("answer");
@@ -284,6 +315,7 @@ test("Azure token expiry uses Number coercion and positive safe integers", async
           /^Transcription request failed$/,
         );
     }
+
     expect(identities).toBe(cached ? 1 : 2);
     expect(authorizations).toEqual(
       accepted ? [`Bearer ${secretToken}`, `Bearer ${secretToken}`] : [],
@@ -294,6 +326,7 @@ test("Azure token expiry uses Number coercion and positive safe integers", async
 test("provider failures are one fixed error, drop a refused token and honour cancellation", async () => {
   const f = provider();
   const file = { data: audio, mime: "audio/mp4", extension: "m4a" };
+
   for (const [status, body] of [
     [500, undefined],
     [401, undefined],
@@ -306,10 +339,13 @@ test("provider failures are one fixed error, drop a refused token and honour can
     [200, []],
   ] as const) {
     f.state.status = status;
+
     if (body !== undefined) f.state.body = body;
+
     const error = await f.transcriber
       .transcribe(file, signal())
       .catch((e: unknown) => e);
+
     expect(error).toBeInstanceOf(Error);
     expect(error instanceof Error ? error.message : undefined).toBe(
       "Transcription request failed",
@@ -318,6 +354,7 @@ test("provider failures are one fixed error, drop a refused token and honour can
       error instanceof Error ? `${error.stack} ${String(error.cause)}` : "",
     ).not.toContain("PRIVATE");
   }
+
   // 500 kept the token; 401 dropped it, so the next request read a new one.
   expect(f.tokens).toHaveLength(2);
   f.state.tokenStatus = 500;
@@ -342,6 +379,7 @@ test("a rate limit waits for the provider's own delay and sends the same audio a
   expect(f.waits).toEqual([34_000, 1000]);
   expect(f.requests).toHaveLength(3);
   expect(f.tokens).toHaveLength(1);
+
   // No usable delay, an excessive one, or another refusal is final.
   for (const limit of [
     [429, undefined],
@@ -354,17 +392,20 @@ test("a rate limit waits for the provider's own delay and sends the same audio a
       "Transcription request failed",
     );
   }
+
   expect(f.waits).toHaveLength(2);
 });
 
 test("media becomes marked blocks; other files pass through unchanged", async () => {
   const f = provider();
+
   const image: Attachment = {
     name: "proof.png",
     mime: "image/png",
     data: new Uint8Array([1, 2, 3]),
     source: { id: "F0IMAGE" },
   };
+
   const result = await transcribeMedia(
     [
       image,
@@ -375,6 +416,7 @@ test("media becomes marked blocks; other files pass through unchanged", async ()
     5000,
     signal(),
   );
+
   expect(result.files).toEqual([image]);
   expect(result.blocks).toEqual([
     `[Voice message transcript: file F0VOICE, 68.6 s, machine transcription by Azure OpenAI deployment whisper-transcription. These are the sender's own spoken words. The text can contain recognition errors.]\n${spoken}\n[End of voice message transcript]`,
@@ -388,12 +430,14 @@ test("media becomes marked blocks; other files pass through unchanged", async ()
 
 test("a complete Slack transcript is used without any provider or identity request", async () => {
   const f = provider();
+
   const result = await transcribeMedia(
     [voice({ source: { id: "F0VOICE", transcript: " Ship it. " } })],
     f.transcriber,
     5000,
     signal(),
   );
+
   expect(result).toEqual({
     files: [],
     transcripts: ["Ship it."],
@@ -412,8 +456,10 @@ test("silence and very long speech are marked, not hidden", async () => {
     (await transcribeMedia([voice()], f.transcriber, 5000, signal())).blocks[0],
   ).toContain("\n[No speech detected]\n");
   f.state.body = { text: "a".repeat(maxTranscriptCharacters + 10) };
+
   const long = (await transcribeMedia([voice()], f.transcriber, 5000, signal()))
     .blocks[0];
+
   expect(long).toContain(
     `\n${"a".repeat(maxTranscriptCharacters)}\n[Transcript cut at ${maxTranscriptCharacters} characters]\n`,
   );
@@ -421,6 +467,7 @@ test("silence and very long speech are marked, not hidden", async () => {
 
 test("unsupported formats, provider errors and timeouts are one fixed refusal", async () => {
   const f = provider();
+
   for (const file of [
     voice({ name: "note.ogg", mime: "audio/ogg" }),
     voice({ name: "clip.mov", mime: "video/quicktime" }),
@@ -432,9 +479,11 @@ test("unsupported formats, provider errors and timeouts are one fixed refusal", 
       5000,
       signal(),
     ).catch((e: unknown) => e);
+
     expect(error).toBeInstanceOf(TranscriptionUnavailable);
     expect(error instanceof Error ? error.message : undefined).toBe("");
   }
+
   expect(f.requests).toEqual([]);
   f.state.status = 503;
   await expect(
@@ -443,17 +492,20 @@ test("unsupported formats, provider errors and timeouts are one fixed refusal", 
   f.state.status = 200;
   const release = Promise.withResolvers<void>();
   f.state.hold = release.promise;
+
   try {
     await expect(
       transcribeMedia([voice()], f.transcriber, 50, signal()),
     ).rejects.toBeInstanceOf(TranscriptionUnavailable);
     const stop = new AbortController();
+
     const waiting = transcribeMedia(
       [voice()],
       f.transcriber,
       5000,
       stop.signal,
     );
+
     stop.abort(new Error("Stop pressed"));
     await expect(waiting).rejects.toThrow("Stop pressed");
   } finally {
@@ -466,16 +518,20 @@ test("only one provider request runs at a time in the process", async () => {
   const release = Promise.withResolvers<void>();
   f.state.hold = release.promise;
   const calls: number[] = [];
+
   const counting: Transcriber = {
     label: f.transcriber.label,
     async transcribe(file, signal) {
       calls.push(calls.length);
+
       return f.transcriber.transcribe(file, signal);
     },
   };
+
   const work = [1, 2, 3].map(() =>
     transcribeMedia([voice()], counting, 5000, signal()),
   );
+
   await Bun.sleep(50);
   expect(calls).toHaveLength(1);
   release.resolve();
@@ -492,11 +548,14 @@ function gatewayFixture(
   const f = provider();
   const store = openStore(":memory:");
   cleanup.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     ...(options.configured === false ? {} : { transcription: f.config }),
   });
+
   const logged: string[] = [];
+
   const log = pino(
     { level: "trace" },
     new Writable({
@@ -506,11 +565,13 @@ function gatewayFixture(
       },
     }),
   );
+
   let files: Attachment[] = [voice()];
   let downloads = 0;
   const prompts: { text: string; files: readonly Attachment[] }[] = [];
   const posts: string[] = [];
   const failures: RequestFailure[] = [];
+
   const backend: AgentBackend = {
     ...(options.supportsAttachments === false
       ? {}
@@ -520,14 +581,17 @@ function gatewayFixture(
     },
     async prompt(_session, text, _signal, _onText, _onInput, files = []) {
       prompts.push({ text, files });
+
       return "Understood.";
     },
     async close() {},
   };
+
   const slack: TransportDelivery = {
     files: {
       async download() {
         downloads++;
+
         return files;
       },
       async reserveUpload() {
@@ -544,9 +608,11 @@ function gatewayFixture(
     },
     async failure(_channel, _thread, cause) {
       failures.push(cause);
+
       return "status";
     },
   };
+
   const gateway = new Gateway(
     config,
     identity,
@@ -556,7 +622,9 @@ function gatewayFixture(
     log,
     options.configured === false ? undefined : f.transcriber,
   );
+
   cleanup.push(() => gateway.close());
+
   const accept = (text: string, ts = "1.000", ids = ["F0VOICE"]) => {
     const body = event(text, ts);
     gateway.accept({
@@ -571,12 +639,16 @@ function gatewayFixture(
       },
     });
   };
+
   const run = async () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!job) throw new Error("Missing job");
     await gateway.process(job, signal());
+
     return job;
   };
+
   return {
     ...f,
     store,
@@ -606,12 +678,14 @@ test("a voice-only DM reaches the agent as a marked transcript and no media", as
   ]);
   expect(f.posts).toEqual(["Understood."]);
   expect(f.failures).toEqual([]);
+
   // Typed text stays first; an image in the same message still reaches the agent.
   const image: Attachment = {
     name: "proof.png",
     mime: "image/png",
     data: new Uint8Array([1, 2, 3]),
   };
+
   f.setFiles([image, voice()]);
   f.accept("see the screenshot", "2.000", ["F0IMAGE", "F0VOICE"]);
   await f.run();
@@ -694,6 +768,7 @@ test("logs never contain speech, tokens, file names or provider errors", async (
   await identity.run();
   const logged = [...good.logged, ...bad.logged, ...identity.logged].join("");
   expect(bad.logged.join("")).toContain("Agent request failed or timed out");
+
   for (const secret of [
     "SPOKEN_PRIVATE_TEXT",
     "PRIVATE_TOKEN",

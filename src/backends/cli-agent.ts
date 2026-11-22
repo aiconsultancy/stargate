@@ -30,10 +30,13 @@ export const inheritedEnvironment = [
 /** The inherited variables that are set in `parent`. */
 export function inherited(parent: NodeJS.ProcessEnv) {
   const env: Record<string, string> = {};
+
   for (const name of inheritedEnvironment) {
     const value = parent[name];
+
     if (value) env[name] = value;
   }
+
   return env;
 }
 
@@ -52,6 +55,7 @@ export function isTextAttachment(file: Attachment) {
 /** The attachment as a labelled text block; refuses invalid or binary text. */
 export function textAttachment(file: Attachment) {
   let decoded: string;
+
   try {
     decoded = new TextDecoder("utf-8", { fatal: true }).decode(file.data);
   } catch {
@@ -59,6 +63,7 @@ export function textAttachment(file: Attachment) {
       "Text attachments require valid UTF-8",
     );
   }
+
   if (
     file.data.some(
       (byte) =>
@@ -68,6 +73,7 @@ export function textAttachment(file: Attachment) {
     throw new AttachmentInputUnavailable(
       "Text attachment contains binary control bytes",
     );
+
   return `Attachment: ${file.name}\n${decoded}`;
 }
 
@@ -87,6 +93,7 @@ export type ProcessTable = {
   uid: number | undefined;
   kill(pid: number, signal: NodeJS.Signals): void;
 };
+
 export const systemProcesses: ProcessTable = {
   root: "/proc",
   uid: process.getuid?.(),
@@ -95,6 +102,7 @@ export const systemProcesses: ProcessTable = {
 
 /** A process found for a turn: its PID and start time pin its identity. */
 export type TurnProcess = { pid: number; start: number };
+
 /** A recorded CLI: the leader of its process group. */
 export type TurnLeader = TurnProcess & { marker: TurnMarker; session: string };
 
@@ -113,6 +121,7 @@ export async function bootTicks(table: ProcessTable = systemProcesses) {
     const uptime = Number(
       (await readFile(join(table.root, "uptime"), "utf8")).split(" ")[0],
     );
+
     return Number.isFinite(uptime)
       ? Math.max(0, Math.floor(uptime * 100) - 2)
       : 0;
@@ -127,8 +136,10 @@ function facts(stat: string, status: string) {
   const start = Number(fields[19]);
   const group = Number(fields[2]);
   const uids = /^Uid:[ \t]+(.+)$/m.exec(status)?.[1]?.trim().split(/\s+/);
+
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(group) || !uids)
     return undefined;
+
   return { start, group, uids };
 }
 
@@ -151,10 +162,12 @@ function carries(environ: Buffer, marker: TurnMarker) {
 function inspect(table: ProcessTable, pid: number) {
   try {
     const base = join(table.root, String(pid));
+
     const known = facts(
       readFileSync(join(base, "stat"), "utf8"),
       readFileSync(join(base, "status"), "utf8"),
     );
+
     return known && { ...known, environ: readFileSync(join(base, "environ")) };
   } catch {
     return undefined;
@@ -171,22 +184,28 @@ export async function turnProcesses(
   since: number,
 ): Promise<TurnProcess[]> {
   let entries: string[];
+
   try {
     entries = await readdir(table.root);
   } catch {
     return [];
   }
+
   const found: TurnProcess[] = [];
   await Promise.all(
     entries.map(async (entry) => {
       if (!/^\d+$/.test(entry) || Number(entry) === process.pid) return;
+
       try {
         const base = join(table.root, entry);
+
         const known = facts(
           await readFile(join(base, "stat"), "utf8"),
           await readFile(join(base, "status"), "utf8"),
         );
+
         if (!known || known.start < since || !owned(table, known.uids)) return;
+
         if (carries(await readFile(join(base, "environ")), marker))
           found.push({ pid: Number(entry), start: known.start });
       } catch {
@@ -194,6 +213,7 @@ export async function turnProcesses(
       }
     }),
   );
+
   return found.sort((a, b) => a.pid - b.pid);
 }
 
@@ -211,8 +231,10 @@ export function signalTurnProcesses(
   signal: NodeJS.Signals,
 ) {
   let sent = 0;
+
   for (const { pid, start } of processes) {
     const now = inspect(table, pid);
+
     if (
       !now ||
       now.start !== start ||
@@ -220,6 +242,7 @@ export function signalTurnProcesses(
       !carries(now.environ, marker)
     )
       continue;
+
     try {
       table.kill(pid, signal);
       sent++;
@@ -227,6 +250,7 @@ export function signalTurnProcesses(
       // Exited after the check.
     }
   }
+
   return sent;
 }
 
@@ -237,6 +261,7 @@ export function signalTurnProcesses(
  */
 function leads(table: ProcessTable, leader: TurnLeader) {
   const now = inspect(table, leader.pid);
+
   if (
     !now ||
     now.start !== leader.start ||
@@ -245,6 +270,7 @@ function leads(table: ProcessTable, leader: TurnLeader) {
     !carries(now.environ, leader.marker)
   )
     return false;
+
   try {
     return readFileSync(join(table.root, String(leader.pid), "cmdline"), "utf8")
       .split("\0")
@@ -261,8 +287,10 @@ export function signalTurnGroup(
   signal: NodeJS.Signals,
 ) {
   if (!leads(table, leader)) return false;
+
   try {
     table.kill(-leader.pid, signal);
+
     return true;
   } catch {
     return false;
@@ -275,10 +303,12 @@ async function until(
   signal?: AbortSignal,
 ) {
   const deadline = Date.now() + ms;
+
   while (!(await done())) {
     if (Date.now() >= deadline || signal?.aborted) return false;
     await delay(50);
   }
+
   return true;
 }
 
@@ -290,8 +320,11 @@ export async function stopTurnGroup(
   signal?: AbortSignal,
 ) {
   const gone = () => !leads(table, leader);
+
   if (!signalTurnGroup(table, leader, "SIGTERM")) return;
+
   if (await until(gone, grace, signal)) return;
+
   if (signalTurnGroup(table, leader, "SIGKILL")) await until(gone, grace);
 }
 
@@ -305,8 +338,11 @@ export async function stopTurnProcesses(
 ) {
   const left = () => turnProcesses(table, marker, since);
   const gone = async () => (await left()).length === 0;
+
   if (!signalTurnProcesses(table, await left(), marker, "SIGTERM")) return;
+
   if (await until(gone, grace, signal)) return;
+
   if (signalTurnProcesses(table, await left(), marker, "SIGKILL"))
     await until(gone, grace);
 }

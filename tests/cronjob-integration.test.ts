@@ -36,16 +36,21 @@ test("bundled maintenance example is valid and never enabled by default", async 
     skills: ["stargate-cronjobs"],
   });
 });
+
 afterEach(async () => {
   for (const store of stores.splice(0)) store.close();
+
   for (const path of directories.splice(0))
     await rm(path, { recursive: true, force: true });
 });
+
 async function fixture() {
   const directory = await mkdtemp(
     join(tmpdir(), "stargate-cronjob-integration-"),
   );
+
   directories.push(directory);
+
   const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     cronjobs: {
@@ -55,10 +60,12 @@ async function fixture() {
       dailyReport: {},
     },
   });
+
   const store = new CronStore(join(directory, "cron.sqlite"));
   stores.push(store);
   const manager = new CronjobManager(config, identity, store);
   const scope = { botKey: manager.key, channel: "C123", user: "U123" };
+
   const definition: CronjobDefinition = {
     name: "maintenance",
     description: "Nightly maintenance",
@@ -70,11 +77,14 @@ async function fixture() {
     enabled: true,
     report: "daily",
   };
+
   const jobs: ScheduledInput[] = [];
   let status: "running" | "done" = "running";
+
   const gateway: SchedulerGateway = {
     enqueueScheduled(input) {
       jobs.push(input);
+
       return jobs.length;
     },
     scheduledStatus() {
@@ -87,13 +97,17 @@ async function fixture() {
       };
     },
   };
+
   const posts: { channel: string; text: string }[] = [];
+
   const delivery = {
     async announce(channel: string, text: string) {
       posts.push({ channel, text });
+
       return "1.000";
     },
   };
+
   const scheduler = () =>
     new CronScheduler(
       config,
@@ -103,6 +117,7 @@ async function fixture() {
       delivery,
       pino({ level: "silent" }),
     );
+
   return {
     directory,
     config,
@@ -123,6 +138,7 @@ async function fixture() {
 test("files run silently overnight and share one durable 08:30 UTC report", async () => {
   const f = await fixture();
   const root = f.config.cronjobs?.directory;
+
   if (!root) throw new Error("Missing fixture root");
   await writeCronjob(root, f.definition, now);
   await writeCronjob(root, { ...f.definition, name: "other-maintenance" }, now);
@@ -154,12 +170,15 @@ test("files run silently overnight and share one durable 08:30 UTC report", asyn
 test("paused files allow owner run-now; edits and missing files fail closed", async () => {
   const f = await fixture();
   const root = f.config.cronjobs?.directory;
+
   if (!root) throw new Error("Missing fixture root");
+
   const path = await writeCronjob(
     root,
     { ...f.definition, enabled: false },
     now,
   );
+
   expect(await f.manager.sync(now)).toEqual([]);
   expect(f.store.claimDue(f.manager.key, now + 4 * 3_600_000)).toEqual([]);
   const first = f.store.runNow(f.scope, "maintenance", now, "manual-request");
@@ -185,12 +204,15 @@ test("uncertain daily report is not retried and revoked destinations receive not
   f.delivery.announce = async () => {
     throw new Error("private network details");
   };
+
   const cutoff = now + 8.5 * 3_600_000;
   await f.scheduler().tick(cutoff, signal);
   f.delivery.announce = async (channel, text) => {
     f.posts.push({ channel, text });
+
     return "2.000";
   };
+
   await f.scheduler().tick(cutoff + 1000, signal);
   expect(f.posts).toEqual([]);
   f.config.access.deniedChannels.push("C123");
@@ -205,17 +227,20 @@ test("local control creates idempotent files, binds workspace and admits durable
     configPath,
     JSON.stringify({ dataDirectory: f.directory, bots: [f.config] }),
   );
+
   const dependencies = {
     async identity() {
       return identity;
     },
     now: () => now,
   };
+
   const binding = {
     configPath,
     bot: f.config.id,
     expectedDirectory: "/workspace",
   };
+
   const add = {
     op: "add",
     name: "maintenance",
@@ -226,15 +251,18 @@ test("local control creates idempotent files, binds workspace and admits durable
     report: "daily",
     skills: ["stargate-cronjobs"],
   };
+
   await runCronOperation(add, binding, signal, dependencies);
   await runCronOperation(add, binding, signal, dependencies);
   expect(f.store.list(f.scope)).toHaveLength(1);
+
   const result = await runCronOperation(
     { op: "run", name: "maintenance", requestId: "same-request" },
     binding,
     signal,
     dependencies,
   );
+
   expect(result).toMatchObject({
     status: "pending",
     effect: "durably-admitted-not-completed",
@@ -281,6 +309,7 @@ test("cron config rejects duplicate file roots and unsupported report times", ()
       dailyReport: {},
     },
   };
+
   expect(
     Schema.decodeUnknownSync(botSchema)(config).cronjobs?.dailyReport,
   ).toEqual({
@@ -318,6 +347,7 @@ test("cron config rejects duplicate file roots and unsupported report times", ()
 test("file cron sync follows reloaded access without restarting the scheduler", async () => {
   const f = await fixture();
   const settings = f.config.cronjobs;
+
   if (!settings) throw new Error("Missing cron fixture");
   await writeCronjob(
     settings.directory,

@@ -16,19 +16,23 @@ test("cron identities survive credential reordering, disabling, removal and rest
   const now = Date.parse("2026-01-01T00:00:00Z");
   let clock = now;
   let firstReset = now + 600_000;
+
   const first = {
     provider: "codex",
     auth_index: "a".repeat(16),
     email: "first@example.com",
     account_id: "private-first-account",
   };
+
   const second = {
     provider: "codex",
     auth_index: "b".repeat(16),
     email: "second@example.com",
     account_id: "private-second-account",
   };
+
   let files: (typeof first & { disabled?: boolean })[] = [first, second];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -36,6 +40,7 @@ test("cron identities survive credential reordering, disabling, removal and rest
       if (new URL(request.url).pathname === "/v8/management/credentials")
         return Response.json({ files });
       const body = await request.json();
+
       return Response.json({
         status_code: 200,
         body: {
@@ -46,23 +51,26 @@ test("cron identities survive credential reordering, disabling, removal and rest
                 (body.auth_index === first.auth_index
                   ? firstReset
                   : now + 900_000) / 1000,
-              limit_window_seconds: 18000,
+              limit_window_seconds: 18_000,
             },
           },
         },
       });
     },
   });
+
   const reader = () =>
     new QuotaReader(
       { baseURL: server.url.origin, managementKeyFile },
       () => clock,
       ["codex"],
     );
+
   const signal = new AbortController().signal;
   const path = join(directory, "cron.sqlite");
   let store = new CronStore(path);
   const owner = { botKey: "bot", channel: "C123", user: "U123" };
+
   try {
     const definition = {
       name: "Quota",
@@ -70,6 +78,7 @@ test("cron identities survive credential reordering, disabling, removal and rest
       timezone: "UTC",
       prompt: "Check work.",
     };
+
     store.add(
       owner,
       {
@@ -91,10 +100,12 @@ test("cron identities survive credential reordering, disabling, removal and rest
       now,
     );
     const initialReader = reader();
+
     // Exercise the private JSON transport used by the cron RPC.
     const initial = quotaObservationSchema.parse(
       JSON.parse(JSON.stringify(await initialReader.readForCron(signal))),
     );
+
     const firstIdentity = initial.accounts[0]?.identity;
     const secondIdentity = initial.accounts[1]?.identity;
     expect(firstIdentity).toMatch(/^sha256:[a-f0-9]{64}$/);
@@ -111,6 +122,7 @@ test("cron identities survive credential reordering, disabling, removal and rest
     );
     const admitted = store.claimQuota(owner.botKey, initial, clock);
     expect(admitted).toHaveLength(1);
+
     for (const run of admitted) store.finish(run.id, "done", clock);
 
     files = [second, first];
@@ -147,16 +159,19 @@ test("cron identities survive credential reordering, disabling, removal and rest
     // The previous deadline has elapsed and the next cycle moves over an hour.
     firstReset = now + 18_600_000;
     clock = now + 600_000;
+
     const advanced = store.claimQuota(
       owner.botKey,
       await reader().readForCron(signal),
       clock,
     );
+
     expect(advanced).toHaveLength(2);
     expect(advanced.map((run) => run.quotaEvent?.type).sort()).toEqual([
       "quota-reset",
       "quota-threshold",
     ]);
+
     for (const run of advanced) {
       expect(run.quotaEvent).toMatchObject({
         account: "codex-1",
@@ -167,6 +182,7 @@ test("cron identities survive credential reordering, disabling, removal and rest
         /identity|sha256|example|private|fixture|aaaaaaaa|bbbbbbbb/,
       );
     }
+
     store.close();
     store = new CronStore(path);
     expect(

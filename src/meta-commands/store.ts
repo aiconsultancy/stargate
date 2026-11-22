@@ -85,6 +85,7 @@ export class MetaRecords {
       .query(`UPDATE config_panels SET ts=?
       WHERE registration=? AND nonce=? AND ts IS NULL`)
       .run(ts, registration, nonce).changes;
+
     if (changed !== 1) throw new Error("Config panel binding unavailable");
   }
 
@@ -118,6 +119,7 @@ export class MetaRecords {
           panel.nonce,
           panel.revision - 1,
         ).changes;
+
       if (changed !== 1) throw new Error("Config panel revision changed");
       this.applyMeta(
         panel.registration,
@@ -169,6 +171,7 @@ export class MetaRecords {
       .query(`UPDATE meta_receipts SET state='applied',
       reply=?,oldDelayMs=?,newDelayMs=? WHERE registration=? AND message=? AND state='pending'`)
       .run(reply, oldDelayMs, newDelayMs, registration, message).changes;
+
     if (changed !== 1) throw new Error("Meta command claim unavailable");
   }
 

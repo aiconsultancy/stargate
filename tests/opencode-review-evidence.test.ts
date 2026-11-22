@@ -12,6 +12,7 @@ import { reviewContextPrompt, reviewNativePrompt } from "../src/fleet/reviews";
 
 const diff =
   "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n";
+
 function binding(kind: "crew" | "captain" = "crew"): FleetReviewBinding {
   return Schema.decodeUnknownSync(reviewBindingSchema)({
     id: "proof_" + "1".repeat(32),
@@ -44,6 +45,7 @@ function binding(kind: "crew" | "captain" = "crew"): FleetReviewBinding {
     createdAt: "2026-11-16T00:00:00.000Z",
   });
 }
+
 type Changes = {
   busy?: boolean;
   queued?: boolean;
@@ -62,10 +64,12 @@ type Changes = {
   earlierTool?: string;
   shellCallback?: "owned" | "missing" | "foreign";
 };
+
 function fixture(b: FleetReviewBinding, changes: Changes = {}) {
   const calls: { path: string; method: string }[] = [];
   const admissions: Record<string, unknown>[] = [];
   const creates: Record<string, unknown>[] = [];
+
   const {
     id: _id,
     authorShip: _author,
@@ -74,24 +78,29 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
     dispatchID: _dispatch,
     ...resultContext
   } = b.context;
+
   const resultText = JSON.stringify({
     ...resultContext,
     verdict: "approve",
     summary: "Native review of the exact supplied diff",
     findings: [],
   });
+
   const input = () =>
     b.reviewer.kind === "crew"
       ? reviewNativePrompt(b)
       : "s=irc;a=agent\n\nPeer assignment\n\n" +
         reviewContextPrompt(b.context, b.contextText);
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const url = new URL(request.url),
         path = url.pathname;
+
       calls.push({ path, method: request.method });
+
       if (path === `/api/agent/${b.reviewer.agent}`)
         return Response.json({
           location: { directory: b.reviewer.directory },
@@ -108,10 +117,12 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
             },
           },
         });
+
       if (path === "/api/session/active")
         return Response.json({
           data: changes.busy ? { ses_other: { type: "running" } } : {},
         });
+
       if (path === "/api/session" && request.method === "GET")
         return Response.json({
           data:
@@ -126,24 +137,32 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
               : [],
           cursor: {},
         });
+
       if (path === "/api/session/ses_other/inbox")
         return Response.json({
           data: changes.queued ? [{ id: "queued-work" }] : [],
         });
+
       if (path === "/api/session" && request.method === "POST") {
         const data = z
           .record(z.string(), z.unknown())
           .parse(await request.json());
+
         creates.push(data);
+
         return Response.json({ data: { ...data } });
       }
+
       if (path === `/api/session/${b.sessionID}/prompt`) {
         const data = z
           .record(z.string(), z.unknown())
           .parse(await request.json());
+
         admissions.push(data);
+
         return Response.json({ data: { id: data["id"] } });
       }
+
       if (path === `/api/session/${b.sessionID}`)
         return Response.json({
           data: {
@@ -164,6 +183,7 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
             time: { created: 0, updated: 10, idle: 10 },
           },
         });
+
       if (path === `/api/session/${b.sessionID}/message`) {
         const assistant = {
           id: "assistant-review",
@@ -196,6 +216,7 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
               : []),
           ],
         };
+
         return Response.json({
           data: [
             ...(changes.later
@@ -322,9 +343,11 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
           cursor: {},
         });
       }
+
       return new Response(null, { status: 404 });
     },
   });
+
   const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
@@ -332,8 +355,10 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
     agent: "captain-peer",
     sessionID: "ses_peer",
   });
+
   if (config.type !== "opencode") throw new Error("Wrong fixture backend");
   const backend = new OpenCodeBackend(config);
+
   return {
     backend,
     calls,
@@ -346,11 +371,13 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
     },
   };
 }
+
 const signal = () => new AbortController().signal;
 
 test("review admission uses exact configured PRIMARY agent/model and persisted native IDs/context without changing a checkout", async () => {
   const b = binding();
   const f = fixture(b);
+
   try {
     await f.backend.startReview(b, signal());
     expect(f.creates).toHaveLength(1);
@@ -387,6 +414,7 @@ test("wrong profile/model or busy/queued permanent directory refuses native revi
   ]) {
     const b = binding();
     const f = fixture(b, changes);
+
     try {
       await expect(f.backend.startReview(b, signal())).rejects.toThrow();
       expect(f.creates).toEqual([]);
@@ -400,6 +428,7 @@ test("wrong profile/model or busy/queued permanent directory refuses native revi
 test("native review evidence identifies exact settled assistant makers and ignores a later conversation", async () => {
   const b = binding();
   const f = fixture(b, { later: true });
+
   try {
     expect(await f.backend.readReview(b, signal())).toEqual({
       resultText: f.resultText,
@@ -427,6 +456,7 @@ test("quoted input, another native session, changed ownership nonce and failed i
   ]) {
     const b = binding();
     const f = fixture(b, changes);
+
     try {
       await expect(f.backend.readReview(b, signal())).rejects.toThrow();
       expect(f.admissions).toEqual([]);
@@ -439,12 +469,15 @@ test("quoted input, another native session, changed ownership nonce and failed i
 test("unfinished native work yields no proof; actual mixed-model makers remain visible for policy rejection", async () => {
   const b = binding();
   const pending = fixture(b, { pending: true });
+
   try {
     expect(await pending.backend.readReview(b, signal())).toBeUndefined();
   } finally {
     await pending.close();
   }
+
   const mixed = fixture(b, { mixed: true });
+
   try {
     const evidence = await mixed.backend.readReview(b, signal());
     expect(evidence?.makers.map((m) => m.model)).toEqual(["claude", "gpt"]);
@@ -456,6 +489,7 @@ test("unfinished native work yields no proof; actual mixed-model makers remain v
 test("captain substitution reads the existing exact ingress and never creates/prompts another root", async () => {
   const b = binding("captain");
   const f = fixture(b, { later: true });
+
   try {
     const evidence = await f.backend.readReview(b, signal());
     expect(evidence?.makers[0]?.agent).toBe("captain-peer");
@@ -475,6 +509,7 @@ test("native proof refuses mutating tools and unsuccessful final states for crew
       { finish: "length" },
     ]) {
       const f = fixture(binding(kind), changes);
+
       try {
         await expect(
           f.backend.readReview(binding(kind), signal()),
@@ -485,7 +520,9 @@ test("native proof refuses mutating tools and unsuccessful final states for crew
         await f.close();
       }
     }
+
     const f = fixture(binding(kind), { tool: "read" });
+
     try {
       expect(await f.backend.readReview(binding(kind), signal())).toBeDefined();
     } finally {
@@ -497,6 +534,7 @@ test("native proof refuses mutating tools and unsuccessful final states for crew
 test("native review preserves all makers and readonly tool checks across instruction context", async () => {
   const b = binding();
   const f = fixture(b, { instruction: "native" });
+
   try {
     const result = await f.backend.readReview(b, signal());
     expect(result?.resultText).toBe(f.resultText);
@@ -516,6 +554,7 @@ for (const changes of [
   test(`native review rejects unknown steering or unsafe pre-context tool: ${JSON.stringify(changes)}`, async () => {
     const b = binding();
     const f = fixture(b, changes);
+
     try {
       await expect(f.backend.readReview(b, signal())).rejects.toThrow();
     } finally {
@@ -527,6 +566,7 @@ for (const callback of ["owned", "foreign"] as const)
   test(`review shell callback keeps unsafe-tool refusal: ${callback}`, async () => {
     const b = binding();
     const f = fixture(b, { shellCallback: callback });
+
     try {
       await expect(f.backend.readReview(b, signal())).rejects.toThrow(
         "outside the read-only review boundary",
@@ -540,6 +580,7 @@ for (const callback of ["owned", "foreign"] as const)
 test("unowned review shell notice retains the original pending boundary behaviour", async () => {
   const b = binding();
   const f = fixture(b, { shellCallback: "missing" });
+
   try {
     expect(await f.backend.readReview(b, signal())).toBeUndefined();
     expect(f.calls.every((call) => call.method === "GET")).toBe(true);

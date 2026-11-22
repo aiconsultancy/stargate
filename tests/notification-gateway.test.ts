@@ -20,6 +20,7 @@ import type { Transcriber } from "../src/transcription/transcription";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -44,26 +45,32 @@ function fixture() {
   const calls: string[] = [];
   const prompts: string[] = [];
   const outputs: string[] = [];
+
   const backend: AgentBackend = {
     supportsAttachments: true,
     async createSession() {
       calls.push("session");
+
       return "session";
     },
     async prompt(_session, text) {
       calls.push("prompt");
       prompts.push(text);
+
       return "Answer.";
     },
     async close() {},
   };
+
   const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       outputs.push(text);
+
       return "10.000";
     },
     async threadContext() {
       calls.push("history");
+
       return {
         messages: [{ author: "this_bot", text: "Prior answer." }],
         truncated: false,
@@ -72,6 +79,7 @@ function fixture() {
     files: {
       async download() {
         calls.push("download");
+
         return [];
       },
       async reserveUpload() {
@@ -84,16 +92,21 @@ function fixture() {
       },
     },
   };
+
   const transcriber: Transcriber = {
     label: "test",
     async transcribe() {
       calls.push("transcribe");
+
       return "all captains";
     },
   };
+
   const peerLookup = { run: async () => true };
+
   const peers = new PeerDirectory(async () => {
     await peerLookup.run();
+
     return {
       ok: true,
       user: {
@@ -105,8 +118,10 @@ function fixture() {
       },
     };
   }, identity.team);
+
   const reader: NotificationReader = (channel, thread) =>
     preferences.status(key, channel, thread, now);
+
   const gateway = new Gateway(
     config,
     identity,
@@ -119,16 +134,21 @@ function fixture() {
     undefined,
     reader,
   );
+
   cleanup.push(
     () => preferences.close(),
     () => store.close(),
     () => gateway.close(),
   );
+
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!job) throw new Error("Missing job");
+
     return job;
   };
+
   return {
     config,
     preferences,
@@ -155,17 +175,21 @@ function fixture() {
     run: async () => gateway.process(next(), new AbortController().signal),
   };
 }
+
 const target = {
   scope: "thread",
   channel: "C123",
   thread_ts: "1.000",
 } as const;
+
 const reply = (text = "ordinary", ts = "2.000") => ({
   ...event(text, ts),
   event: { ...event(text, ts).event, type: "message", thread_ts: "1.000" },
 });
+
 const peer = (text: string, ts = "2.000") => {
   const request = reply(text, ts);
+
   return {
     ...request,
     event: { ...request.event, user: "UPEER", bot_id: "BPEER" },
@@ -186,6 +210,7 @@ test("muted ordinary and spoken-gated traffic stops before history, files, model
     timeoutMs: 1000,
     spokenMentions: { channels: ["C123"], names: ["all captains"] },
   };
+
   for (const text of [
     "ordinary",
     "helper",
@@ -204,6 +229,7 @@ test("muted ordinary and spoken-gated traffic stops before history, files, model
       }),
     ).toBe(false);
   }
+
   expect(await f.gateway.receive(peer("Calling all captains"))).toBe(false);
   expect(f.calls).toEqual([]);
   expect(f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10)).toEqual([]);
@@ -215,6 +241,7 @@ test("muted ordinary and spoken-gated traffic stops before history, files, model
 test("direct and approved human broadcasts wake a muted reply once without unmuting", async () => {
   const f = fixture();
   f.control({ op: "mute", ...target });
+
   for (const [index, text] of [
     "<@UBOT> inspect",
     "> <@UBOT> quoted typed tag",
@@ -229,6 +256,7 @@ test("direct and approved human broadcasts wake a muted reply once without unmut
       "addressed-only",
     );
   }
+
   expect(f.prompts[0]).not.toContain("<@UBOT>");
   expect(f.prompts[2]).toContain('"wake":"broadcast"');
   expect(f.outputs).toEqual(["Answer.", "Answer.", "Answer."]);
@@ -244,11 +272,14 @@ test("unmuted alias routing, hard denies, other targets and DM behavior stay unc
   await f.run();
   expect(f.prompts[0]).not.toContain("[Notification wake:");
   f.control({ op: "mute", ...target });
+
   const unrelated = {
     ...reply("<@UBOT> other"),
     event: { ...reply("<@UBOT> other").event, channel: "COTHER" },
   };
+
   expect(f.gateway.accept(unrelated)).toBe(true);
+
   const dm = {
     ...event("hello", "4.000"),
     event: {
@@ -257,6 +288,7 @@ test("unmuted alias routing, hard denies, other targets and DM behavior stay unc
       channel_type: "im",
     },
   };
+
   expect(f.gateway.accept(dm)).toBe(true);
   f.config.access.deniedUsers = ["U123"];
   expect(f.gateway.accept(reply("<@UBOT> denied"))).toBe(false);
@@ -285,10 +317,12 @@ test("mute racing async resume or peer verification is checked again before enqu
     const f = fixture();
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
+
     if (source === "resume")
       f.slack.threadContext = async () => {
         entered.resolve();
         await release.promise;
+
         return {
           messages: [{ author: "this_bot", text: "Prior" }],
           truncated: false,
@@ -298,11 +332,14 @@ test("mute racing async resume or peer verification is checked again before enqu
       f.peerLookup.run = async () => {
         entered.resolve();
         await release.promise;
+
         return true;
       };
+
     const admitted = f.gateway.receive(
       source === "resume" ? reply() : peer("ordinary"),
     );
+
     await entered.promise;
     f.control({ op: "mute", ...target });
     release.resolve();
@@ -350,6 +387,7 @@ test("queued chat persists wake, suppresses ordinary terminally, and exempts leg
       requeue: [ordinary.eventId],
     }),
   ).toThrow();
+
   const legacy = {
     eventId: "C123:5.000",
     botKey: f.gateway.key,
@@ -359,6 +397,7 @@ test("queued chat persists wake, suppresses ordinary terminally, and exempts leg
     user: "U123",
     text: "legacy",
   };
+
   expect(f.store.enqueue(legacy)).toBe(true);
   await f.run();
   expect(f.prompts.at(-1)).toBe("legacy");
@@ -406,6 +445,7 @@ test("expiry and clear affect only future existing routing, with stateless redel
 test("preference faults hold chat without suppressing DM, queued history, outputs or controls", async () => {
   const f = fixture();
   let fault = false;
+
   const gateway = new Gateway(
     f.config,
     identity,
@@ -418,9 +458,11 @@ test("preference faults hold chat without suppressing DM, queued history, output
     undefined,
     (channel, thread) => {
       if (fault) throw new Error("private failure");
+
       return f.preferences.status(f.key, channel, thread, f.now());
     },
   );
+
   cleanup.push(() => gateway.close());
   expect(gateway.accept(event())).toBe(true);
   const pending = f.next();
@@ -461,8 +503,10 @@ test("preference faults hold chat without suppressing DM, queued history, output
   f.backend.prompt = async () => {
     entered.resolve();
     await release.promise;
+
     return "Mute acknowledged.";
   };
+
   const work = gateway.process(pending, new AbortController().signal);
   await entered.promise;
   f.control({ op: "mute", ...target });
@@ -496,6 +540,7 @@ test("queued wake markers report dispatch-time mute state, not stale intake expi
 test("a held preference fault backs off chat but permits pinned cron/native jobs past it", async () => {
   const f = fixture();
   let fault = false;
+
   const backend: AgentBackend = {
     ...f.backend,
     sessionID: "captain",
@@ -503,6 +548,7 @@ test("a held preference fault backs off chat but permits pinned cron/native jobs
       return "captain";
     },
   };
+
   const gateway = new Gateway(
     f.config,
     identity,
@@ -515,9 +561,11 @@ test("a held preference fault backs off chat but permits pinned cron/native jobs
     undefined,
     (channel, thread) => {
       if (fault) throw new Error("private error");
+
       return f.preferences.status(f.key, channel, thread, f.now());
     },
   );
+
   cleanup.push(() => gateway.close());
   expect(gateway.accept(event())).toBe(true);
   const held = f.next();
@@ -534,6 +582,7 @@ test("a held preference fault backs off chat but permits pinned cron/native jobs
       deferDelivery: true,
     }),
   ).toBeDefined();
+
   const native = {
     eventId: "native:completion",
     botKey: gateway.key,
@@ -543,6 +592,7 @@ test("a held preference fault backs off chat but permits pinned cron/native jobs
     user: "U123",
     text: "native completion",
   };
+
   expect(f.store.enqueue(native)).toBe(true);
   const now = Date.now();
   const scheduled = f.store.ready(gateway.key, now, 10, true);
@@ -575,6 +625,7 @@ test("released chat holds wait for a bypassed same-thread reply without deadlock
     }),
   ).toBe(true);
   const native = f.store.ready(f.gateway.key, 0, 10, true)[0];
+
   if (!native) throw new Error("Expected native bypass");
   expect(native.text).toBe("native");
   f.store.running(native.id);
@@ -624,6 +675,7 @@ test("text mute bypass configuration must be an explicit subset on Slack text ru
     ),
   ).toBe(true);
   const changed = bot();
+
   if (changed.backend.type === "opencode")
     changed.backend.directory = "/different";
   expect(notificationKey(changed, identity)).toBe(

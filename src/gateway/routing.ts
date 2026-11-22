@@ -4,6 +4,7 @@ import {
   isAllowedChannel,
   isAllowedUser,
 } from "../shared/registration";
+
 export {
   backendFingerprint,
   botKey,
@@ -11,6 +12,7 @@ export {
   isAllowedChannel,
   isAllowedUser,
 } from "../shared/registration";
+
 import { Result, Schema } from "effect";
 import { maxAttachments } from "../attachments/attachments";
 import { markdownChunks } from "../slack/markdown-chunks";
@@ -93,8 +95,10 @@ export function routeReaction<T extends Parameters<typeof botKey>[0]>(
 ) {
   if (!config.slack.inboundReactions || config.access.mentionOnly) return;
   const parsed = Schema.decodeUnknownResult(reactionEnvelopeSchema)(raw);
+
   if (Result.isFailure(parsed)) return;
   const { api_app_id, team_id, event_id, event } = parsed.success;
+
   if (
     api_app_id !== config.slack.appId ||
     team_id !== identity.team ||
@@ -105,6 +109,7 @@ export function routeReaction<T extends Parameters<typeof botKey>[0]>(
     !isAllowedChannel(config, event.item.channel)
   )
     return;
+
   return {
     eventId: `reaction:${event_id}`,
     botKey: botKey(config, identity),
@@ -130,18 +135,23 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
   notifications?: NotificationReader,
 ) {
   const parsed = Schema.decodeUnknownResult(envelopeSchema)(raw);
+
   if (Result.isFailure(parsed)) return;
   const body = parsed.success;
+
   if (body.api_app_id !== config.slack.appId || body.team_id !== identity.team)
     return;
   const result = Schema.decodeUnknownResult(eventSchema)(body.event);
+
   if (Result.isFailure(result)) return;
   const event = result.success;
+
   const captain =
     event.bot_id !== undefined &&
     config.access.peerCaptains &&
     peer?.user === event.user &&
     peer.bot === event.bot_id;
+
   if (
     (event.bot_id && !captain) ||
     (event.subtype && event.subtype !== "file_share") ||
@@ -149,6 +159,7 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
     event.user === identity.user
   )
     return;
+
   if (
     !isAllowedUser(config, event.user) ||
     !isAllowedChannel(config, event.channel)
@@ -158,23 +169,29 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
   const mentioned = event.text.includes(mention);
   const direct = event.channel_type === "im";
   const text = event.text.split(mention).join("").trim();
+
   const notification =
     !direct && !event.channel.startsWith("D")
       ? notifications?.(event.channel, event.thread_ts ?? event.ts)
       : undefined;
+
   const muted = notification?.mode === "addressed-only";
   // A top-level channel message can address the bot by name, without a mention.
   const textRule = config.access.textMentions;
+
   const broadcast =
     !event.bot_id && textRule?.channels.includes(event.channel)
       ? findMention([visibleText(text)], textRule.muteBypassNames ?? [])
       : undefined;
+
   const wake: NotificationContext["wake"] = mentioned
     ? "direct"
     : broadcast
       ? "broadcast"
       : "ordinary";
+
   if (muted && wake === "ordinary") return;
+
   const named =
     (!mentioned &&
     !direct &&
@@ -182,6 +199,7 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
     textRule?.channels.includes(event.channel)
       ? findMention([visibleText(text)], textRule.names)
       : undefined) ?? (muted ? broadcast : undefined);
+
   // Speech can name the bot; the gateway decides after transcription.
   const spoken =
     !mentioned &&
@@ -190,11 +208,14 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
     (event.files?.length ?? 0) > 0 &&
     config.transcription?.spokenMentions?.channels.includes(event.channel) ===
       true;
+
   if (config.access.mentionOnly && !mentioned && !spoken && !named) return;
+
   if (!text && !event.files?.length) return;
   const key = botKey(config, identity);
+
   return {
-    // app_mention and message can describe the same Slack message.
+    // App_mention and message can describe the same Slack message.
     eventId: `${event.channel}:${event.ts}`,
     botKey: key,
     conversation: conversationKey(
@@ -238,15 +259,19 @@ export function chunks(text: string): string[] {
   const points = Array.from(
     text.trim() || "Agent finished without a text reply.",
   );
+
   const truncated = points.length > 60_000;
   const bounded = points.slice(0, 60_000);
+
   if (truncated)
     bounded.push(...Array.from("\n[Response truncated by Stargate.]"));
+
   return markdownChunks(bounded);
 }
 
 /** Every chunk of settled transcript text; history replies are never clipped. */
 export function transcriptChunks(text: string): string[] {
   const trimmed = text.trim();
+
   return trimmed ? markdownChunks(Array.from(trimmed)) : [];
 }

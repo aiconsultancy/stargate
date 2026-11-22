@@ -52,6 +52,7 @@ test("Pi proxy configuration validates endpoint and environment references", () 
   ]) {
     expect(config(baseURL).provider?.baseURL).toBe(baseURL);
   }
+
   for (const baseURL of [
     "http://proxy.example/v1",
     "http://127.0.0.1.example/v1",
@@ -64,6 +65,7 @@ test("Pi proxy configuration validates endpoint and environment references", () 
   ]) {
     expect(() => config(baseURL)).toThrow();
   }
+
   const valid = config("http://127.0.0.1/v1");
   expect(() =>
     Schema.decodeUnknownSync(piDurableBackendSchema)({
@@ -90,6 +92,7 @@ function completion(text = "Proxy answer") {
       model: "opencode-go/deepseek-v4.1-flash",
       choices: [{ index: 0, delta, finish_reason }],
     })}\n\n`;
+
   return new Response(
     chunk({ role: "assistant", reasoning_content: "PRIVATE" }) +
       chunk({ content: text }) +
@@ -103,12 +106,15 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-proxy-"));
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "local-proxy-test-only";
+
   const requests: {
     path: string;
     headers: Headers;
     body: Record<string, unknown>;
   }[] = [];
+
   let denied = false;
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -118,6 +124,7 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
         headers: request.headers,
         body: await request.json(),
       });
+
       if (denied)
         return Response.json(
           {
@@ -128,20 +135,25 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
           },
           { status: 401 },
         );
+
       return completion();
     },
   });
+
   let backend: PiDurableBackend | undefined;
+
   try {
     const settings = config(new URL("/v1", server.url).href, directory);
     backend = await PiDurableBackend.open(settings, {
       dataDirectory: directory,
     });
+
     const first = await backend.createSession({
       key: "one",
       title: "one",
       signal: signal(),
     });
+
     const requestID = crypto.randomUUID();
     let recordedInput: string | undefined;
     expect(
@@ -159,11 +171,13 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
     ).toBe("Proxy answer");
     expect(recordedInput).toBe(requestID);
     expect(await backend.prompt(first, "again", signal())).toBe("Proxy answer");
+
     const second = await backend.createSession({
       key: "two",
       title: "two",
       signal: signal(),
     });
+
     expect(await backend.prompt(second, "hello", signal())).toBe(
       "Proxy answer",
     );
@@ -175,6 +189,7 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
       "Proxy answer",
     );
     expect(requests).toHaveLength(4);
+
     for (const request of requests) {
       expect(request.path).toBe("/v1/chat/completions");
       expect(request.headers.get("authorization")).toBe(
@@ -188,9 +203,11 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
       expect((request.body["tools"] as unknown[]).length).toBeGreaterThan(0);
       expect(request.body["store"]).toBeUndefined();
     }
+
     const ids = requests.map((request) =>
       request.headers.get("x-opencode-session"),
     );
+
     expect(ids[0]).toMatch(/^[a-f0-9-]{36}$/);
     expect(ids[1]).toBe(ids[0]);
     expect(ids[2]).not.toBe(ids[0]);
@@ -204,6 +221,7 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
   } finally {
     await backend?.close();
     await server.stop(true);
+
     if (previous === undefined) delete process.env[apiKeyEnv];
     else process.env[apiKeyEnv] = previous;
     await rm(directory, { recursive: true, force: true });
@@ -245,6 +263,7 @@ test("Pi cancellation closes the underlying proxy stream", async () => {
   process.env[apiKeyEnv] = "local-proxy-test-only";
   const started = Promise.withResolvers<void>();
   const cancelled = Promise.withResolvers<void>();
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -253,6 +272,7 @@ test("Pi cancellation closes the underlying proxy stream", async () => {
       request.signal.addEventListener("abort", () => cancelled.resolve(), {
         once: true,
       });
+
       return new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
@@ -267,17 +287,21 @@ test("Pi cancellation closes the underlying proxy stream", async () => {
       );
     },
   });
+
   let backend: PiDurableBackend | undefined;
+
   try {
     backend = await PiDurableBackend.open(
       config(new URL("/v1", server.url).href, directory),
       { dataDirectory: directory },
     );
+
     const session = await backend.createSession({
       key: "cancel",
       title: "cancel",
       signal: signal(),
     });
+
     const controller = new AbortController();
     const pending = backend.prompt(session, "hello", controller.signal);
 
@@ -288,6 +312,7 @@ test("Pi cancellation closes the underlying proxy stream", async () => {
   } finally {
     await backend?.close();
     await server.stop(true);
+
     if (previous === undefined) delete process.env[apiKeyEnv];
     else process.env[apiKeyEnv] = previous;
     await rm(directory, { recursive: true, force: true });
@@ -311,6 +336,7 @@ for (const cancelQueued of [false, true]) {
       let priorCancelled = false;
       let requests = 0;
       const encoder = new TextEncoder();
+
       const chunk = (content: string, finish_reason: string | null = null) =>
         encoder.encode(
           `data: ${JSON.stringify({
@@ -327,13 +353,16 @@ for (const cancelQueued of [false, true]) {
             ],
           })}\n\n`,
         );
+
       const finish = (index: number, text: string) => {
         const stream = streams[index];
+
         if (!stream) throw new Error("Fixture provider is not connected");
         stream.enqueue(chunk(text, "stop"));
         stream.enqueue(encoder.encode("data: [DONE]\n\n"));
         stream.close();
       };
+
       const server = Bun.serve({
         port: 0,
         hostname: "127.0.0.1",
@@ -347,6 +376,7 @@ for (const cancelQueued of [false, true]) {
             },
             { once: true },
           );
+
           return new Response(
             new ReadableStream<Uint8Array>({
               start(controller) {
@@ -364,31 +394,40 @@ for (const cancelQueued of [false, true]) {
           );
         },
       });
+
       let backend: PiDurableBackend | undefined;
       let pending: Promise<string> | undefined;
       const controller = new AbortController();
+
       try {
         backend = await PiDurableBackend.open(
           config(new URL("/v1", server.url).href, directory),
           { dataDirectory: directory },
         );
+
         const session = await backend.createSession({
           key: "native",
           title: "native",
           signal: signal(),
         });
+
         // Reuse this backend's real harness, not a competing storage owner.
         const harness: Harness = Reflect.get(backend, "harness");
+
         const conversation = await harness.conversation(
           Number(session) as ConversationId,
           BACKGROUND_CONTEXT,
         );
+
         if (!conversation) throw new Error("Fixture conversation is missing");
+
         const native = await conversation.submit(
           { type: "input", content: "Prior native request" },
           BACKGROUND_CONTEXT,
         );
+
         await priorStarted.promise;
+
         const observation = harness.observeCommits({
           advance(publication) {
             for (const change of publication.changes) {
@@ -401,6 +440,7 @@ for (const cancelQueued of [false, true]) {
           },
           end() {},
         });
+
         const snapshots: string[] = [];
         pending = backend.prompt(
           session,
@@ -408,18 +448,22 @@ for (const cancelQueued of [false, true]) {
           controller.signal,
           (text) => {
             snapshots.push(text);
+
             if (text.includes("OWN PARTIAL")) ownPartial.resolve();
           },
         );
         await queued.promise;
         observation.detach();
+
         if (cancelQueued) {
           controller.abort();
           await expect(pending).rejects.toThrow();
           expect(priorCancelled).toBe(false);
         }
+
         finish(0, "PRIOR COMMITTED");
         expect((await native.wait(BACKGROUND_CONTEXT)).status).toBe("done");
+
         if (cancelQueued) {
           await conversation.waitForIdle(BACKGROUND_CONTEXT);
           expect(requests).toBe(1);
@@ -430,12 +474,14 @@ for (const cancelQueued of [false, true]) {
           expect(await pending).toBe("OWN PARTIAL OWN FINAL");
           expect(snapshots.length).toBeGreaterThan(0);
         }
+
         expect(snapshots.join("\n")).not.toContain("PRIOR");
       } finally {
         controller.abort();
         await pending?.catch(() => {});
         await backend?.close();
         await server.stop(true);
+
         if (previous === undefined) delete process.env[apiKeyEnv];
         else process.env[apiKeyEnv] = previous;
         await rm(directory, { recursive: true, force: true });
@@ -453,6 +499,7 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
       const started = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
       let providerAborted = false;
+
       const server = Bun.serve({
         port: 0,
         hostname: "127.0.0.1",
@@ -467,27 +514,35 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
           );
           started.resolve();
           await release.promise;
+
           return completion();
         },
       });
+
       let backend: PiDurableBackend | undefined;
+
       try {
         backend = await PiDurableBackend.open(
           config(new URL("/v1", server.url).href, directory),
           { dataDirectory: directory },
         );
+
         const session = await backend.createSession({
           key: "admission",
           title: "admission",
           signal: signal(),
         });
+
         const harness: Harness = Reflect.get(backend, "harness");
+
         const conversation = await harness.conversation(
           Number(session) as ConversationId,
           BACKGROUND_CONTEXT,
         );
+
         if (!conversation) throw new Error("Fixture conversation is missing");
         let native: Submission | undefined;
+
         if (placement !== "placed") {
           native = await conversation.submit(
             { type: "input", content: "Prior native input" },
@@ -495,12 +550,14 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
           );
           await started.promise;
         }
+
         const controller = new AbortController();
         let own: Submission | undefined;
         let requestId: string | undefined;
         let attempts = 0;
         let interrupts = 0;
         let queried = false;
+
         // One real harness owns storage. Only lose its admission response.
         const recovering: PiDurableBackend = Reflect.construct(
           PiDurableBackend,
@@ -513,6 +570,7 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
                     attempts++;
                     requestId = draft.requestId;
                     own = await conversation.submit(draft, context);
+
                     if (aborted) controller.abort();
                     throw new Error("Admission handle lost after commit");
                   },
@@ -521,8 +579,10 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
                     context: Context,
                   ) {
                     queried = true;
+
                     if (placement === "unreadable")
                       throw new Error("Lookup unavailable");
+
                     return conversation.commit(change, context);
                   },
                   async abort(context: Context) {
@@ -536,12 +596,14 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
             {},
           ],
         );
+
         await expect(
           recovering.prompt(session, "Own input", controller.signal),
         ).rejects.toThrow();
         expect(requestId).toMatch(/^[a-f0-9-]{36}$/);
         expect(attempts).toBe(1);
         expect(queried).toBe(true);
+
         if (!own) throw new Error("Own input was not admitted");
         const status = await own.status(BACKGROUND_CONTEXT);
         expect(status.requestId).toBe(requestId);
@@ -549,13 +611,14 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
           placement === "unreadable" ? "queued" : "unanswered",
         );
         expect(interrupts).toBe(placement === "placed" ? 1 : 0);
+
         if (native) {
           expect(providerAborted).toBe(false);
           expect((await native.status(BACKGROUND_CONTEXT)).status).toBe(
             "placed",
           );
           // The unreadable-lookup outcome remains uncertain; fixture cleanup
-          // withdraws it explicitly before releasing the unrelated native run.
+          // Withdraws it explicitly before releasing the unrelated native run.
           await own.abort(BACKGROUND_CONTEXT);
           release.resolve();
           expect((await native.wait(BACKGROUND_CONTEXT)).status).toBe("done");
@@ -564,6 +627,7 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
         release.resolve();
         await backend?.close();
         await server.stop(true);
+
         if (previous === undefined) delete process.env[apiKeyEnv];
         else process.env[apiKeyEnv] = previous;
         await rm(directory, { recursive: true, force: true });
@@ -584,28 +648,34 @@ for (const report of [false, true]) {
     let requests = 0;
     let opens = 0;
     let nativeDirectory = "";
+
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       async fetch(request) {
         const body: Record<string, unknown> = await request.json();
         requests++;
+
         if (requests === 2) {
           if (!task) throw new Error("Task is missing");
           expect(state.piTaskConversation(task.id)).toBeDefined();
+
           if (report) {
             expect(body["tools"] ?? []).toEqual([]);
             expect(JSON.stringify(body)).not.toContain("Prior maintenance");
           }
         }
+
         return completion(requests === 1 ? "PRIOR ANSWER" : "TASK CANONICAL");
       },
     });
+
     try {
       const { directory: _, ...settings } = config(
         new URL("/v1", server.url).href,
         directory,
       );
+
       const member = Schema.decodeUnknownSync(teamSchema)({
         captain: { id: "captain" },
         crew: [
@@ -617,18 +687,23 @@ for (const report of [false, true]) {
           },
         ],
       }).crew[0];
+
       if (!member) throw new Error("Member is missing");
+
       const factory: PiWorkerFactory = async (config, context) => {
         opens++;
         nativeDirectory = context.dataDirectory;
         backend = await PiDurableBackend.open(config, context);
+
         return backend;
       };
+
       workers = new PiCrewWorkers(state, directory, factory);
       const peer = state.reservePeer(member.id);
       await workers.ensure(member, directory, peer, signal());
       state.readyPeer(member.id);
       const maintenance = state.piPeer(peer.sessionID)?.conversationID;
+
       if (!backend || !maintenance) throw new Error("Native worker is missing");
       expect(
         await backend.prompt(
@@ -640,33 +715,40 @@ for (const report of [false, true]) {
           "unrelated-prior-input",
         ),
       ).toBe("PRIOR ANSWER");
+
       if (report) {
         const capture = state.reporting.start("captain", "request", member.id);
         state.reporting.finish(capture);
+
         const queued = state.enqueue(
           peer,
           "captain",
           "Report input",
           capture.id,
         );
+
         task = state.promote(queued.id, null)?.task;
       } else
         task = state.reserveTask(peer, "captain", "Maintenance") ?? undefined;
+
       if (!task) throw new Error("Task is missing");
       const interrupted = Promise.withResolvers<void>();
       state.complete = () => {
         throw new Error("Crash after native commit, before crew completion");
       };
+
       const uncertain = state.uncertain.bind(state);
       state.uncertain = (...args) => {
         uncertain(...args);
         interrupted.resolve();
       };
+
       workers.start(member, directory, peer, task, "Task input");
       await interrupted.promise;
       expect(state.task(task.id)?.status).toBe("uncertain");
       const bound = state.piTaskConversation(task.id);
       expect(bound).toBeDefined();
+
       if (report) expect(bound).not.toBe(maintenance);
       else expect(bound).toBe(maintenance);
       expect(requests).toBe(2);
@@ -684,12 +766,14 @@ for (const report of [false, true]) {
       // Read-only inspection needs neither provider setup nor a replacement session.
       delete process.env[apiKeyEnv];
       workers = new PiCrewWorkers(state, directory);
+
       const recovered = await workers.recover(
         task,
         member,
         directory,
         signal(),
       );
+
       expect(recovered).toMatchObject({
         id: task.id,
         inputID: task.inputID,
@@ -705,6 +789,7 @@ for (const report of [false, true]) {
       await workers?.close();
       state.close();
       await server.stop(true);
+
       if (previous === undefined) delete process.env[apiKeyEnv];
       else process.env[apiKeyEnv] = previous;
       await rm(directory, { recursive: true, force: true });
@@ -716,12 +801,15 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-readonly-"));
   const path = `${directory}/pi.sqlite`;
   const storage = await openNodeSqliteStorage(path);
+
   const harness = await Harness.open(
     storage,
     { models: createModels(), registry: createRegistry() },
     BACKGROUND_CONTEXT,
   );
+
   let closed = false;
+
   try {
     const conversation = await harness.createConversation(
       {
@@ -730,14 +818,17 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
       },
       BACKGROUND_CONTEXT,
     );
+
     // Native commit reproduces the durable input/live/inbox/task records of an
-    // interrupted run. No scheduler is enabled while constructing the fixture.
+    // Interrupted run. No scheduler is enabled while constructing the fixture.
     const seeded = await conversation.commit(async (tx) => {
       const live = await tx.doc(LiveDoc, conversation.id);
       const inbox = await tx.doc(InboxDoc, conversation.id);
+
       const entry = await tx.appendEntry(UserEntry, conversation.id, {
         model: [{ role: "user", content: "Placed input", timestamp: 0 }],
       });
+
       const placed = await tx.createSubmission({
         conversationId: conversation.id,
         type: "input",
@@ -745,12 +836,14 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
         status: "placed",
         entry: entry.id,
       });
+
       const queued = await tx.createSubmission({
         conversationId: conversation.id,
         type: "input",
         requestId: "queued-input",
         status: "queued",
       });
+
       const unanswered = await tx.createSubmission({
         conversationId: conversation.id,
         type: "input",
@@ -758,6 +851,7 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
         status: "unanswered",
         reason: "interrupted",
       });
+
       const task = await tx.createTask(
         GenerationTask,
         {},
@@ -766,6 +860,7 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
           ownership: { kind: "conversation" },
         },
       );
+
       live.run = {
         taskId: task,
         inputs: [placed.id],
@@ -777,8 +872,10 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
         mode: "followUp",
         content: "Queued input",
       });
+
       return { placed, queued, unanswered, task };
     }, BACKGROUND_CONTEXT);
+
     expect(
       (await harness.getTask(seeded.task, BACKGROUND_CONTEXT))?.state.status,
     ).toBe("pending");
@@ -788,8 +885,10 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
     // A normal Harness open would rewrite this running task during recovery.
     const crashed = await openNodeSqliteStorage(path);
     let expectedTask: Awaited<ReturnType<typeof crashed.task>>;
+
     try {
       const task = await crashed.task(seeded.task, BACKGROUND_CONTEXT);
+
       if (task?.state.status !== "pending")
         throw new Error("Pending generation is missing");
       expectedTask = {
@@ -807,6 +906,7 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
     } finally {
       await crashed.close(BACKGROUND_CONTEXT);
     }
+
     for (const requestID of [
       "placed-input",
       "queued-input",
@@ -822,7 +922,9 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
         ),
       ).toBeUndefined();
     }
+
     const inspection = await openNodeSqliteStorage(path);
+
     try {
       for (const record of [seeded.placed, seeded.queued, seeded.unanswered])
         expect(
@@ -845,8 +947,9 @@ test("Pi maps the proxy's answer to one shared failure category", async () => {
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "local-proxy-test-only";
   // The next answers of the proxy: a status, "tool" for a tool call, or
-  // undefined for a completion.
+  // Undefined for a completion.
   let answers: (number | "tool" | undefined)[] = [];
+
   const toolCall = () => {
     const chunk = (delta: object, finish_reason: string | null = null) =>
       `data: ${JSON.stringify({
@@ -856,6 +959,7 @@ test("Pi maps the proxy's answer to one shared failure category", async () => {
         model: "opencode-go/deepseek-v4.1-flash",
         choices: [{ index: 0, delta, finish_reason }],
       })}\n\n`;
+
     return new Response(
       chunk({
         role: "assistant",
@@ -874,15 +978,20 @@ test("Pi maps the proxy's answer to one shared failure category", async () => {
       { headers: { "content-type": "text/event-stream" } },
     );
   };
+
   let calls = 0;
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch() {
       calls++;
       const status = answers.shift();
+
       if (status === undefined) return completion();
+
       if (status === "tool") return toolCall();
+
       return Response.json(
         {
           error: {
@@ -896,30 +1005,36 @@ test("Pi maps the proxy's answer to one shared failure category", async () => {
       );
     },
   });
+
   let backend: PiDurableBackend | undefined;
+
   try {
     const settings = config(new URL("/v1", server.url).href, directory);
     backend = await PiDurableBackend.open(settings, {
       dataDirectory: directory,
     });
     const pi = backend;
+
     const failure = async (statuses: (number | "tool")[]) => {
       const session = await pi.createSession({
         key: crypto.randomUUID(),
         title: "failure",
         signal: signal(),
       });
+
       // The client may retry: every call of this turn gets the same answer.
       answers = Array.from(
         { length: 20 },
         (_, index) => statuses[index] ?? statuses.at(-1),
       );
+
       return pi.prompt(session, "hello", AbortSignal.timeout(20_000)).then(
         () => undefined,
         (error: unknown) =>
           error instanceof BackendFailure ? error.failure : String(error),
       );
     };
+
     const cases: [status: number, cause: string][] = [
       [429, "provider:quota:429:idle"],
       [402, "provider:quota:402:idle"],
@@ -927,8 +1042,9 @@ test("Pi maps the proxy's answer to one shared failure category", async () => {
       [403, "provider:auth:403:idle"],
       [404, "provider:model:404:idle"],
       // The harness retries 429 and 5xx with a backoff of about 14 s, so
-      // one retried status is enough here; `statusKind` covers the rest.
+      // One retried status is enough here; `statusKind` covers the rest.
     ];
+
     for (const [status, cause] of cases)
       expect([status, await failure([status])]).toEqual([status, cause]);
     expect(calls).toBeGreaterThanOrEqual(cases.length);
@@ -940,6 +1056,7 @@ test("Pi maps the proxy's answer to one shared failure category", async () => {
   } finally {
     await backend?.close();
     await server.stop(true);
+
     if (previous === undefined) delete process.env[apiKeyEnv];
     else process.env[apiKeyEnv] = previous;
     await rm(directory, { recursive: true, force: true });

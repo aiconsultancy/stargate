@@ -56,6 +56,7 @@ import { piInputContent } from "./pi-attachments";
 import { piSessionHistory } from "./pi-history";
 
 type Config = Extract<BackendConfig, { type: "pi-durable" }>;
+
 // Leading zeros are accepted; the decoded safe integer is the native ID.
 const conversationId = Schema.decodeUnknownSync(
   Schema.String.check(Schema.isPattern(/^\d+$/)).pipe(
@@ -80,6 +81,7 @@ type ProviderCalls = {
   accepted: number;
   failure?: { kind: BackendFailureKind; status?: number };
 };
+
 const providerCalls = new Map<string, ProviderCalls>();
 
 // An explicit proxy must not redirect credentials or inference elsewhere.
@@ -88,8 +90,10 @@ const proxyFetch = (conversation: string | undefined) =>
   Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const calls = conversation ? providerCalls.get(conversation) : undefined;
+
       try {
         const response = await fetch(input, { ...init, redirect: "error" });
+
         if (calls) {
           if (response.ok) {
             calls.accepted++;
@@ -100,6 +104,7 @@ const proxyFetch = (conversation: string | undefined) =>
               status: response.status,
             };
         }
+
         return response;
       } catch (error) {
         if (calls && !init?.signal?.aborted)
@@ -130,24 +135,30 @@ function proxyAuth(proxy: PiProxy) {
 }
 
 function proxyProvider(config: PiModelSettings) {
-  // greybeard: only the named proxy models; extend from the pinned catalog
-  // when another explicit proxy model is needed, never infer a native route.
+  // Greybeard: only the named proxy models; extend from the pinned catalog
+  // When another explicit proxy model is needed, never infer a native route.
   const proxy = config.provider;
+
   if (!proxy || !piProxyModels.includes(config.model))
     throw new Error(`Pi proxy requires model ${piProxyModels.join(" or ")}`);
   secret(proxy.apiKeyEnv);
+
   if (config.model === piClaudeProxyModel) return claudeProxyProvider(proxy);
+
   // Reuse the pinned SDK's Go catalog: tools, reasoning and input limits stay
-  // aligned with its wire implementation. Never register native providers here.
+  // Aligned with its wire implementation. Never register native providers here.
   const source = opencodeGoProvider()
     .getModels()
     .find((model) => model.id === "deepseek-v4.1-flash");
+
   if (!source || !hasApi(source, "openai-completions"))
     throw new Error("Pi SDK has no DeepSeek V4.1 Flash chat model");
   const api = openAICompletionsApi();
+
   const requestOptions = (options: Parameters<typeof api.streamSimple>[2]) => {
     if (!options?.sessionId)
       throw new Error("Pi proxy request requires a conversation identity");
+
     return {
       ...options,
       headers: {
@@ -158,6 +169,7 @@ function proxyProvider(config: PiModelSettings) {
       fetch: proxyFetch(options.sessionId),
     };
   };
+
   return createProvider({
     id: "openai",
     name: "Stargate CLIProxyAPI",
@@ -191,12 +203,15 @@ function claudeProxyProvider(proxy: PiProxy) {
     throw new Error("Pi Claude proxy baseURL must end with /v1");
   const baseUrl = proxy.baseURL.slice(0, -"/v1".length);
   const id = piClaudeProxyModel.slice("anthropic/".length);
+
   const source = anthropicProvider()
     .getModels()
     .find((model) => model.id === id);
+
   if (!source || !hasApi(source, "anthropic-messages"))
     throw new Error(`Pi SDK has no ${id} chat model`);
   const api = anthropicMessagesApi();
+
   return createProvider({
     id: "anthropic",
     name: "Stargate CLIProxyAPI",
@@ -224,6 +239,7 @@ function claudeProxyProvider(proxy: PiProxy) {
  */
 export function piModels(config: PiModelSettings) {
   const models = createModels();
+
   if (config.provider) {
     models.setProvider(proxyProvider(config));
   } else if (config.model === piProxyModel) {
@@ -235,13 +251,16 @@ export function piModels(config: PiModelSettings) {
     secret("OPENAI_API_KEY");
     models.setProvider(openaiProvider());
   }
+
   if (config.thinkingLevel) {
     // Fail closed: the SDK would otherwise clamp to another level silently.
     const separator = config.model.indexOf("/");
+
     const model = models.getModel(
       config.model.slice(0, separator),
       config.model.slice(separator + 1),
     );
+
     if (
       !model ||
       !getSupportedThinkingLevels(model).includes(config.thinkingLevel)
@@ -250,6 +269,7 @@ export function piModels(config: PiModelSettings) {
         `Pi model ${config.model} does not support thinking level ${config.thinkingLevel}`,
       );
   }
+
   return models;
 }
 
@@ -317,27 +337,34 @@ export class PiDurableBackend implements AgentBackend {
     const storage = await openNodeSqliteStorage(path);
     const call = withAbortSignal(signal, BACKGROUND_CONTEXT);
     let harness: Harness | undefined;
+
     try {
       harness = await Harness.open(
         storage,
         { models: createModels(), registry: createRegistry(), readOnly: true },
         call,
       );
+
       const conversation = await harness.conversation(
         conversationId(sessionId) as ConversationId,
         call,
       );
+
       if (!conversation) return undefined;
+
       return await conversation.commit(async (tx) => {
         const receipt = await tx.submissionByRequest(
           conversation.id,
           requestId,
         );
+
         if (receipt?.type !== "input" || receipt.status !== "done")
           return undefined;
         const answer = await tx.entry(AssistantEntry, receipt.answer);
+
         if (!answer || answer.conversationId !== conversation.id)
           return undefined;
+
         return (answer.model ?? [])
           .flatMap((message) =>
             message.role === "assistant"
@@ -357,6 +384,7 @@ export class PiDurableBackend implements AgentBackend {
   static async open(config: Config, context: BackendContext) {
     const models = piModels(config);
     const registry = createRegistry();
+
     if (context.workingAgreement) {
       const agreement = context.workingAgreement;
       const notice = workingAgreementNotice(agreement.path);
@@ -367,8 +395,10 @@ export class PiDurableBackend implements AgentBackend {
             hook(GenerationTask, {
               async beforeRequest(request, api) {
                 const id = String(api.conversationId);
+
                 if (!agreement.owns(id)) return undefined;
                 const changed = await notice(id);
+
                 return changed
                   ? {
                       messages: [
@@ -387,29 +417,37 @@ export class PiDurableBackend implements AgentBackend {
         }),
       );
     }
+
     let openedHarness: Harness | undefined;
+
     if (config.tools === "coding") registry.install(CodingTools);
+
     if (config.tools === "coding" && context.crew)
       registry.install(
         piCrewExtension(context.crew, async (id, input, signal) => {
           const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+
           const conversation = await openedHarness?.conversation(
             conversationId(id) as ConversationId,
             context,
           );
+
           if (!conversation) throw new Error("Pi conversation unavailable");
+
           const page = await conversation.entries(
             {},
             input.limit,
             input.cursor,
             context,
           );
+
           return {
             next: page.next ?? null,
             items: page.items.flatMap((entry) =>
               (entry.model ?? []).flatMap((message) => {
                 if (message.role !== "user" && message.role !== "assistant")
                   return [];
+
                 const visible =
                   typeof message.content === "string"
                     ? message.content
@@ -418,7 +456,9 @@ export class PiDurableBackend implements AgentBackend {
                           block.type === "text" ? [block.text] : [],
                         )
                         .join("\n");
+
                 const text = redactCredentials(visible);
+
                 return text
                   ? [
                       {
@@ -436,6 +476,7 @@ export class PiDurableBackend implements AgentBackend {
         }),
       );
     const activeReports = new Set<ConversationId>();
+
     const reportGuard = defineExtension({
       name: "stargate.capture-only-report",
       hooks: [
@@ -446,6 +487,7 @@ export class PiDurableBackend implements AgentBackend {
               api.conversationId,
               context,
             );
+
             if (
               agent?.instructions === reportInstructions &&
               !activeReports.has(api.conversationId)
@@ -462,17 +504,22 @@ export class PiDurableBackend implements AgentBackend {
               api.conversationId,
               context,
             );
+
             if (agent?.instructions === reportInstructions)
               return { decline: true };
+
             return undefined;
           },
         }),
       ],
     });
+
     registry.install(reportGuard);
+
     const storage = await openNodeSqliteStorage(
       join(context.dataDirectory, "pi.sqlite"),
     );
+
     try {
       const harness = await Harness.open(
         storage,
@@ -484,8 +531,10 @@ export class PiDurableBackend implements AgentBackend {
         },
         BACKGROUND_CONTEXT,
       );
+
       openedHarness = harness;
       const separator = config.model.indexOf("/");
+
       const acceptsImages =
         models
           .getModel(
@@ -493,6 +542,7 @@ export class PiDurableBackend implements AgentBackend {
             config.model.slice(separator + 1),
           )
           ?.input.includes("image") ?? false;
+
       return new PiDurableBackend(
         harness,
         config,
@@ -510,6 +560,7 @@ export class PiDurableBackend implements AgentBackend {
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
     const separator = this.config.model.indexOf("/");
+
     const conversation = await this.harness.createConversation(
       {
         ownership: { kind: "ownerless" },
@@ -528,6 +579,7 @@ export class PiDurableBackend implements AgentBackend {
       },
       withAbortSignal(signal, BACKGROUND_CONTEXT),
     );
+
     return String(conversation.id);
   }
 
@@ -541,27 +593,35 @@ export class PiDurableBackend implements AgentBackend {
     request: string | readonly Attachment[] = crypto.randomUUID(),
   ) {
     signal.throwIfAborted();
+
     const content = piInputContent(
       text,
       typeof request === "string" ? [] : request,
       this.acceptsImages,
     );
+
     const requestId =
       typeof request === "string" ? request : crypto.randomUUID();
+
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+
     const conversation = await this.harness.conversation(
       conversationId(sessionId) as ConversationId,
       context,
     );
+
     if (!conversation) throw new Error("Pi conversation not found");
+
     let observation:
       | Awaited<ReturnType<Harness["observeConversation"]>>
       | undefined;
+
     const visible = new Map<number, string>();
     let attempted = false;
     let submission: Submission | undefined;
     // Proxy answers of this turn, for the failure category.
     const calls: ProviderCalls = { accepted: 0 };
+
     // Model calls carry the conversation's provider-facing identity.
     const provider = await conversation
       .commit(
@@ -569,11 +629,13 @@ export class PiDurableBackend implements AgentBackend {
         context,
       )
       .catch(() => undefined);
+
     if (provider) providerCalls.set(provider, calls);
     let latestView: ConversationView | undefined;
     let updates = Promise.resolve();
     let settled = false;
     let lastText = "";
+
     const collect = (view: ConversationView, record: SubmissionRecord) => {
       // Attachment and admission do not own the previous run. Placement does.
       if (
@@ -582,6 +644,7 @@ export class PiDurableBackend implements AgentBackend {
         record.entry === undefined
       )
         return;
+
       for (const entry of view.entries) {
         if (
           entry.id <= record.entry ||
@@ -602,30 +665,37 @@ export class PiDurableBackend implements AgentBackend {
             .join(""),
         );
       }
+
       const live = Option.getOrUndefined(liveText(view.docs["pi.live"]));
+
       // A delayed view/status read may straddle placement or completion.
       const partial =
         record.status === "placed" && live?.run?.inputs.includes(record.id)
           ? piPartialText(view)
           : "";
+
       const text = [...visible.values(), partial].filter(Boolean).join("\n\n");
+
       if (text && text !== lastText) {
         lastText = text;
         onText?.(text);
       }
     };
+
     const update = (view: ConversationView) => {
       latestView = view;
       updates = updates
         .then(async () => {
           if (!submission || settled) return;
           const record = await submission.status(context);
+
           if (!settled) collect(view, record);
         })
         .catch(() => {
           // Observation is best effort; the submission's answer is authoritative.
         });
     };
+
     try {
       if (onText) {
         observation = await this.harness.observeConversation(
@@ -641,28 +711,36 @@ export class PiDurableBackend implements AgentBackend {
         );
         latestView ??= observation.value;
       }
+
       signal.throwIfAborted();
+
       if (typeof result === "function") result(requestId);
       attempted = true;
       submission = await conversation.submit(
         { type: "input", requestId, content, whenBusy: "followUp" },
         context,
       );
+
       if (latestView) update(latestView);
       const completed = await submission.wait(context);
       await updates;
       settled = true;
+
       if (completed.status !== "done" || completed.type !== "input")
         throw new Error("Pi input did not complete");
+
       // Status can move ahead of observation; bound retained text at the answer.
       for (const id of visible.keys()) {
         if (id <= completed.entry || id > completed.answer) visible.delete(id);
       }
+
       const entry = await conversation.commit(
         (tx) => tx.entry(AssistantEntry, completed.answer),
         context,
       );
+
       if (!entry) throw new Error("Pi answer not found");
+
       const answer = (entry.model ?? [])
         .flatMap((message) =>
           message.role === "assistant"
@@ -672,38 +750,45 @@ export class PiDurableBackend implements AgentBackend {
             : [],
         )
         .join("");
+
       // Crew progress observation must not change its canonical task result.
       // Normal Slack streaming still returns all visible text for this turn.
       if (!onText || result === "final") return answer;
       visible.set(entry.id, answer);
+
       return [...visible.values()].filter(Boolean).join("\n\n");
     } catch (error) {
       // Withdrawal is atomic with placement. Never abort a prior native run
-      // merely because our follow-up is still queued or already settled.
+      // Merely because our follow-up is still queued or already settled.
       if (attempted) {
         const cleanup = withAbortSignal(
           AbortSignal.timeout(5000),
           BACKGROUND_CONTEXT,
         );
+
         try {
           if (!submission) {
             // Read the committed request index; never replay admission to
-            // recover its handle. Cleanup must survive the caller's abort.
+            // Recover its handle. Cleanup must survive the caller's abort.
             const record = await conversation.commit(
               (tx) => tx.submissionByRequest(conversation.id, requestId),
               cleanup,
             );
+
             if (record)
               submission = await this.harness.submission(record.id, cleanup);
           }
+
           const outcome = await submission?.abort(cleanup);
+
           if (outcome === "already_placed") await conversation.abort(cleanup);
         } catch {
           // Unreadable admission/placement remains uncertain; no broad abort.
         }
       }
+
       // The proxy refused or could not be reached. An accepted call before
-      // it means that the turn ran tools between the two calls.
+      // It means that the turn ran tools between the two calls.
       if (!signal.aborted && calls.failure)
         throw new BackendFailure(calls.failure.kind, {
           status: calls.failure.status,
@@ -734,6 +819,7 @@ export class PiDurableBackend implements AgentBackend {
     },
   ) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+
     if (
       !(await this.harness.conversation(
         conversationId(sessionId) as ConversationId,
@@ -742,6 +828,7 @@ export class PiDurableBackend implements AgentBackend {
     )
       throw new Error("Pi worker conversation not found");
     const separator = this.config.model.indexOf("/");
+
     const report = await this.harness.createConversation(
       {
         ownership: { kind: "ownerless" },
@@ -762,8 +849,10 @@ export class PiDurableBackend implements AgentBackend {
       },
       context,
     );
+
     receipt?.onConversation(String(report.id));
     this.activeReports.add(report.id);
+
     try {
       return await this.prompt(
         String(report.id),
@@ -780,19 +869,23 @@ export class PiDurableBackend implements AgentBackend {
 
   async interrupt(sessionId: string, signal: AbortSignal) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+
     const conversation = await this.harness.conversation(
       conversationId(sessionId) as ConversationId,
       context,
     );
+
     if (conversation) await conversation.abort(context);
   }
 
   async waitForIdle(sessionId: string, signal: AbortSignal) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+
     const conversation = await this.harness.conversation(
       conversationId(sessionId) as ConversationId,
       context,
     );
+
     if (!conversation) throw new Error("Pi conversation not found");
     await conversation.waitForIdle(context);
   }
@@ -805,10 +898,12 @@ export class PiDurableBackend implements AgentBackend {
     signal: AbortSignal,
   ) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+
     const conversation = await this.harness.conversation(
       conversationId(sessionId) as ConversationId,
       context,
     );
+
     if (!conversation) throw new Error("Pi conversation not found");
     await conversation.submit(
       {

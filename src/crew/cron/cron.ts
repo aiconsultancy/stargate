@@ -22,17 +22,21 @@ export class CrewCron {
 
   async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
     const parsed = cronOperationSchema.safeParse(raw);
+
     if (!parsed.success)
       throw new CrewError(
         "Invalid stargate_cron input. Use the declared fields.",
       );
+
     const cancelled = () => {
       if (caller.signal.aborted)
         throw new CrewError(
           "Cronjob operation cancelled; inspect retained status before retrying.",
         );
     };
+
     cancelled();
+
     try {
       await this.authority.captain(caller);
     } catch (error) {
@@ -41,18 +45,22 @@ export class CrewCron {
         "Captain verification unavailable; raw details withheld.",
       );
     }
+
     cancelled();
     const { captainDirectory, cron } = this.authority.options;
+
     if (!cron)
       throw new CrewError(
         "Cronjobs unavailable: configure this captain's cron configPath and bot binding first.",
       );
     const input = parsed.data;
+
     // Stable host tool identity makes a retry reuse its durable admission.
     const operation =
       input.op === "run" && !input.requestId && caller.id
         ? { ...input, requestId: caller.id }
         : input;
+
     try {
       const result = await this.runner(
         operation,
@@ -63,7 +71,9 @@ export class CrewCron {
         },
         caller.signal,
       );
+
       cancelled();
+
       return result;
     } catch (error) {
       cancelled();

@@ -3,6 +3,7 @@ import { legacySetting } from "../config/settings-legacy";
 import { settingsPattern, settingsStruct } from "../config/settings-schema";
 
 const provider = Schema.Literals(["claude", "codex"]);
+
 const selector = {
   provider,
   window: Schema.optional(Schema.Literals(["5h", "weekly", "other"])),
@@ -17,6 +18,7 @@ const selector = {
     ]),
   ),
 };
+
 export const cronTriggerSchema = Schema.Union([
   settingsStruct({ type: Schema.Literal("quota-reset"), ...selector }),
   settingsStruct({
@@ -27,7 +29,9 @@ export const cronTriggerSchema = Schema.Union([
     ),
   }),
 ]);
+
 export type CronTrigger = typeof cronTriggerSchema.Type;
+
 export const cronQuotaEventSchema = settingsStruct({
   type: Schema.Literals(["quota-reset", "quota-threshold"]),
   provider,
@@ -46,25 +50,33 @@ export const cronQuotaEventSchema = settingsStruct({
   resetAt: Schema.Int.check(Schema.isGreaterThan(0)),
   observedAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
+
 export type CronQuotaEvent = typeof cronQuotaEventSchema.Type;
 
 export const cronModelSchema = Schema.String.check(
   Schema.isMaxLength(256),
   settingsPattern(/^[^/\s#]+\/[^\s#]+(?:#[^\s#]+)?$/),
 );
+
 export const cronArbiterSchema = Schema.String.check(
   settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/),
 );
+
 const modelFields = {
   model: Schema.optional(cronModelSchema),
   arbiter: Schema.optional(cronArbiterSchema),
 };
+
 export const cronModelInputSchema = settingsStruct(modelFields);
+
 export const cronEvaluateInputSchema = settingsStruct({
   ...modelFields,
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
   // Accepted job text remains 12000; the gateway appends bounded quota evidence.
-  prompt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(14000)),
+  prompt: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(14_000),
+  ),
 });
 
 export const cronAdvancedSchema = settingsStruct({
@@ -73,13 +85,17 @@ export const cronAdvancedSchema = settingsStruct({
   once: Schema.optional(Schema.Boolean),
   arbiter: Schema.optional(cronArbiterSchema),
 });
+
 export type CronAdvanced = typeof cronAdvancedSchema.Type;
+
 export const cronEvaluationSchema = settingsStruct({
-  text: Schema.String.check(Schema.isMaxLength(12000)),
+  text: Schema.String.check(Schema.isMaxLength(12_000)),
   model: cronModelSchema,
   verdict: Schema.Literals(["act", "ignore", "escalate"]),
 });
+
 export type CronEvaluation = typeof cronEvaluationSchema.Type;
+
 export const cronAdvancedFields = {
   trigger: legacySetting(cronTriggerSchema).optional(),
   model: legacySetting(cronModelSchema).optional(),

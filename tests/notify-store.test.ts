@@ -21,25 +21,31 @@ import { NotifyStore } from "../src/notifications/ingest/store";
 const root = process.env["TMPDIR"] ?? "/home/jack/.cache/tmp/opencode";
 const directories: string[] = [];
 const stores: NotifyStore[] = [];
+
 function fixture(limits: ConstructorParameters<typeof NotifyStore>[1] = {}) {
   const directory = mkdtempSync(join(root, "notify-store-"));
   directories.push(directory);
   const path = join(directory, "notify.sqlite");
   const store = new NotifyStore(path, limits);
   stores.push(store);
+
   return { path, store };
 }
+
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
+
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
+
 const source: Source = {
   adapter: "http",
   principal: "ci",
   audience: "internal",
   topics: ["release.*"],
 };
+
 const destination: Destination = {
   transport: "slack",
   registrationId: "pegasus",
@@ -49,14 +55,17 @@ const destination: Destination = {
   channel: "CONE",
   audience: "internal",
 };
+
 const input = (title = "Ready"): NotificationInput => ({
   schema: 1,
   topic: "release.desktop",
   occurredAt: "2026-11-19T02:00:00Z",
   payload: { title },
 });
+
 function rows(path: string) {
   const db = new Database(path, { readonly: true });
+
   try {
     return {
       outbox: db.query("SELECT * FROM notify_outbox ORDER BY id").all(),
@@ -69,12 +78,14 @@ function rows(path: string) {
 
 test("dedup precedes full capacities and resolution, including zero matches", () => {
   const { store, path } = fixture({ outboxRows: 1, dedupRecords: 1 });
+
   const accepted = store.admit(
     source,
     input(),
     () => [destination, { ...destination }],
     100,
   );
+
   expect(accepted.duplicate).toBe(false);
   expect(
     store.admit(
@@ -113,6 +124,7 @@ test.each(["dedup", "fanout", "eviction"])(
     store.admit(source, input("old"), () => [destination], 100);
     const before = rows(path);
     const db = new Database(path);
+
     try {
       const trigger =
         point === "dedup"
@@ -120,6 +132,7 @@ test.each(["dedup", "fanout", "eviction"])(
           : point === "fanout"
             ? "CREATE TRIGGER fail AFTER INSERT ON notify_outbox WHEN json_extract(NEW.destination,'$.channel')='CTWO' BEGIN SELECT RAISE(ABORT,'test'); END"
             : "CREATE TRIGGER fail AFTER DELETE ON notify_outbox BEGIN SELECT RAISE(ABORT,'test'); END";
+
       db.exec(trigger);
       expect(() =>
         store.admit(
@@ -156,11 +169,13 @@ test("pending oldest eviction preserves leased rows and all-leased refuses", () 
   store.admit(source, input("active"), () => [destination], 100);
   const claim = store.claim(100);
   expect(claim?.attempts).toBe(1);
+
   if (!claim) throw new Error("expected claim");
   store.admit(source, input("pending-old"), () => [destination], 101);
   store.admit(source, input("pending-new"), () => [destination], 102);
   expect(rows(path).outbox).toHaveLength(2);
   const db = new Database(path, { readonly: true });
+
   try {
     expect(
       db
@@ -172,13 +187,15 @@ test("pending oldest eviction preserves leased rows and all-leased refuses", () 
   } finally {
     db.close();
   }
-  expect(store.claim(100000)).toBeUndefined();
-  expect(() => store.recover(100000)).toThrow();
+
+  expect(store.claim(100_000)).toBeUndefined();
+  expect(() => store.recover(100_000)).toThrow();
   expect(() => store.close()).toThrow();
-  store.settle(claim, { state: "sent" }, 100001);
+  store.settle(claim, { state: "sent" }, 100_001);
   const one = fixture({ perDestination: 1 });
   one.store.admit(source, input(), () => [destination], 100);
   const leased = one.store.claim(100);
+
   if (!leased) throw new Error("expected claim");
   const before = rows(one.path);
   expect(() =>
@@ -195,6 +212,7 @@ test("dedup retention protects outstanding events and permits bounded late copie
   expect(() => store.admit(source, input("next"), () => [], 250)).toThrow();
   expect(rows(path).dedup).toHaveLength(1);
   const claim = store.claim(250);
+
   if (!claim) throw new Error("expected claim");
   store.settle(claim, { state: "sent" }, 251);
   store.claim(252);
@@ -216,26 +234,29 @@ test("claims persist attempts, isolate destinations, honor RetryAfter and stop a
   );
   const first = store.claim(100);
   const second = store.claim(100);
+
   if (!first || !second) throw new Error("two destinations must progress");
   expect(first.destination.channel).not.toBe(second.destination.channel);
   store.settle(
     first,
-    { state: "refused", retryable: true, retryAfterMs: 10000 },
+    { state: "refused", retryable: true, retryAfterMs: 10_000 },
     101,
   );
   store.settle(second, { state: "sent" }, 102);
-  expect(store.claim(10100)).toBeUndefined();
-  const retry = store.claim(10101);
+  expect(store.claim(10_100)).toBeUndefined();
+  const retry = store.claim(10_101);
   expect(retry?.attempts).toBe(2);
+
   if (!retry) throw new Error("retry due");
-  store.settle(retry, { state: "unknown" }, 10102);
-  expect(store.claim(12101)).toBeUndefined();
-  const third = store.claim(12102);
+  store.settle(retry, { state: "unknown" }, 10_102);
+  expect(store.claim(12_101)).toBeUndefined();
+  const third = store.claim(12_102);
   expect(third?.attempts).toBe(3);
+
   if (!third) throw new Error("third due");
-  store.settle(third, { state: "unknown" }, 12103);
+  store.settle(third, { state: "unknown" }, 12_103);
   expect(rows(path).outbox).toHaveLength(0);
-  expect(store.claim(999999)).toBeUndefined();
+  expect(store.claim(999_999)).toBeUndefined();
   const aged = fixture({ maxAgeMs: 100 });
   aged.store.admit(source, input(), () => [destination], 100);
   expect(aged.store.claim(200)).toBeUndefined();
@@ -246,22 +267,24 @@ test("fractional RetryAfter rounds up and remains due-safe after reopen", () => 
   const { store, path } = fixture();
   store.admit(source, input(), () => [destination], 100);
   const first = store.claim(100);
+
   if (!first) throw new Error("expected first claim");
   store.settle(
     first,
-    { state: "refused", retryable: true, retryAfterMs: 10000.5 },
+    { state: "refused", retryable: true, retryAfterMs: 10_000.5 },
     101,
   );
   store.close();
   const reopened = new NotifyStore(path);
   stores.push(reopened);
   reopened.recover(200);
-  expect(rows(path).outbox[0]).toMatchObject({ nextAt: 10102, attempts: 1 });
-  expect(reopened.claim(10101)).toBeUndefined();
-  const retry = reopened.claim(10102);
+  expect(rows(path).outbox[0]).toMatchObject({ nextAt: 10_102, attempts: 1 });
+  expect(reopened.claim(10_101)).toBeUndefined();
+  const retry = reopened.claim(10_102);
+
   if (!retry) throw new Error("expected retry at rounded deadline");
   expect(retry.attempts).toBe(2);
-  reopened.settle(retry, { state: "sent" }, 10103);
+  reopened.settle(retry, { state: "sent" }, 10_103);
 });
 
 test.each(["attempts", "age"])(
@@ -271,6 +294,7 @@ test.each(["attempts", "age"])(
     store.admit(source, input(), () => [destination], 100);
     store.close();
     const db = new Database(path);
+
     try {
       db.query(
         "UPDATE notify_outbox SET state='leased',attempts=?,leaseEnd=60100",
@@ -278,10 +302,12 @@ test.each(["attempts", "age"])(
     } finally {
       db.close();
     }
+
     const reopened = new NotifyStore(
       path,
       bound === "age" ? { maxAgeMs: 100 } : {},
     );
+
     stores.push(reopened);
     reopened.recover(200);
     expect(reopened.claim(200)).toBeUndefined();
@@ -293,6 +319,7 @@ test.each(["attempts", "age"])(
 
 test("private database and sidecars precede SQLite WAL, even with permissive umask", () => {
   const old = process.umask(0);
+
   try {
     const { path } = fixture();
     expect(lstatSync(path).mode & 0o777).toBe(0o600);
@@ -306,8 +333,10 @@ test("private database and sidecars precede SQLite WAL, even with permissive uma
 test("unknown versions and corrupt databases preserve bytes, symlinks refuse", () => {
   const directory = mkdtempSync(join(root, "notify-refuse-"));
   directories.push(directory);
+
   for (const name of ["unknown", "corrupt"]) {
     const path = join(directory, name);
+
     if (name === "unknown") {
       const db = new Database(path);
       db.exec(
@@ -319,6 +348,7 @@ test("unknown versions and corrupt databases preserve bytes, symlinks refuse", (
     expect(() => new NotifyStore(path)).toThrow();
     expect(readFileSync(path)).toEqual(before);
   }
+
   const target = join(directory, "target");
   writeFileSync(target, "keep");
   const link = join(directory, "link");

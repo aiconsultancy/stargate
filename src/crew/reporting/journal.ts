@@ -8,7 +8,7 @@ export const journalInputSchema = Schema.Union([
     op: Schema.Literal("append"),
     text: Schema.Trim.check(
       Schema.isMinCodePoints(1),
-      Schema.isMaxCodePoints(64000),
+      Schema.isMaxCodePoints(64_000),
     ),
   }),
   Schema.Struct({
@@ -27,6 +27,7 @@ export const journalInputSchema = Schema.Union([
     ).pipe(Schema.withDecodingDefault(Effect.succeed(20))),
   }),
 ]);
+
 export type JournalEntry = {
   id: number;
   created: number;
@@ -66,12 +67,15 @@ export class JournalStore {
         redactCredentials(input.text),
         replayKey,
       );
+
     const entry = this.db
       .query<JournalEntry, [string, string]>(
         "SELECT id,created,member,captainID,taskID,kind,text FROM journal WHERE member=? AND replayKey=?",
       )
       .get(input.member, replayKey);
+
     if (!entry) throw new Error("Journal append unavailable");
+
     return entry;
   }
 
@@ -93,14 +97,18 @@ export class JournalStore {
     member?: string,
   ) {
     const scope = captainID === null ? "captainID!=''" : "captainID=?1";
+
     const entries = this.db
       .query<JournalEntry, [string, number, string | null, number]>(
         `SELECT id,created,member,captainID,taskID,kind,text FROM journal
        WHERE ${scope} AND id>?2 AND (?3 IS NULL OR member=?3) ORDER BY id LIMIT ?4`,
       )
       .all(captainID ?? "", after, member ?? null, limit + 1);
+
     const truncated = entries.length > limit;
+
     if (truncated) entries.pop();
+
     return { entries, nextAfter: entries.at(-1)?.id ?? after, truncated };
   }
 

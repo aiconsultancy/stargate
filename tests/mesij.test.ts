@@ -5,24 +5,29 @@ import { join, resolve } from "node:path";
 import { MesijClient, MesijError } from "../src/crew/messaging/mesij";
 
 // Release checks run `bun test` with a minimal PATH and no mise; only the
-// real-binary tests need the pinned Mesij, so skip just those there.
+// Real-binary tests need the pinned Mesij, so skip just those there.
 const mise = Bun.which("mise");
+
 // Fake-command tests replace this; it only has to pass option validation.
 let command = "/nonexistent/mesij";
+
 if (mise) {
   const locator = Bun.spawn([mise, "which", "mesij"], {
     cwd: resolve(import.meta.dir, ".."),
     stdout: "pipe",
     stderr: "ignore",
   });
+
   const [locatedCommand, locatorExit] = await Promise.all([
     new Response(locator.stdout).text(),
     locator.exited,
   ]);
+
   if (locatorExit !== 0)
     throw new Error("Install the pinned Mesij tool with mise.");
   command = locatedCommand.trim();
 }
+
 const realMesij = test.skipIf(!mise);
 const signal = new AbortController().signal;
 
@@ -33,12 +38,15 @@ async function fixture() {
   const dataDirectory = join(directory, "data");
   await mkdir(projectDirectory, { mode: 0o700 });
   await mkdir(dataDirectory, { mode: 0o700 });
+
   const init = Bun.spawn(["git", "init", "--quiet", projectDirectory], {
     stdout: "ignore",
     stderr: "ignore",
   });
+
   if ((await init.exited) !== 0) throw new Error("Temporary Git init failed.");
   const options = { command, projectDirectory, dataDirectory };
+
   return {
     directory,
     options,
@@ -48,6 +56,7 @@ async function fixture() {
       await writeFile(path, `#!${process.execPath}\n${source}`, {
         mode: 0o700,
       });
+
       return path;
     },
     async close() {
@@ -68,12 +77,14 @@ realMesij(
   "real Mesij preserves named sessions, direct replies and inbox cursors",
   async () => {
     const setup = await fixture();
+
     try {
       const first = await setup.client.register(
         "Bowser",
         "indra-bowser",
         signal,
       );
+
       await setup.client.register("Mario", "indra-mario", signal);
       expect(
         await setup.client.inbox({ sessionID: "indra-mario" }, signal),
@@ -96,6 +107,7 @@ realMesij(
           text: message.text,
         },
       ]);
+
       const reply = await reopened.send(
         {
           actor: "Mario",
@@ -107,6 +119,7 @@ realMesij(
         },
         signal,
       );
+
       expect(
         await reopened.inbox(
           { sessionID: "indra-bowser", after: sent.sequence },
@@ -129,10 +142,12 @@ realMesij(
           signal,
         ),
       ).toEqual([]);
+
       const isolated = new MesijClient({
         ...setup.options,
         dataDirectory: join(setup.directory, "other-data"),
       });
+
       await isolated.register("Mario", "indra-mario", signal);
       expect(
         await isolated.inbox({ sessionID: "indra-mario" }, signal),
@@ -147,24 +162,29 @@ realMesij(
   "real Mesij paginates and rejects changed idempotent retries safely",
   async () => {
     const setup = await fixture();
+
     try {
       await setup.client.register("Bowser", "indra-bowser", signal);
       await setup.client.register("Mario", "indra-mario", signal);
       const first = await setup.client.send(message, signal);
+
       const second = await setup.client.send(
         { ...message, text: "Next task.", key: "next:assignment" },
         signal,
       );
+
       expect(
         await setup.client.inbox(
           { sessionID: "indra-mario", limit: 1 },
           signal,
         ),
       ).toHaveLength(1);
+
       const page = await setup.client.inbox(
         { sessionID: "indra-mario", after: first.sequence, limit: 1 },
         signal,
       );
+
       expect(page[0]?.id).toBe(second.id);
       await expect(
         setup.client.send(
@@ -180,6 +200,7 @@ realMesij(
 
 test("emit sends strict JSON on stdin, never prompt text in argv", async () => {
   const setup = await fixture();
+
   try {
     const fake = await setup.executable(`
 const input = JSON.parse(await Bun.stdin.text());
@@ -193,6 +214,7 @@ process.stdout.write(JSON.stringify({
   type: "message.posted", payload: {message: input.message}, inserted: true
 }));
 `);
+
     const client = new MesijClient({ ...setup.options, command: fake });
     expect(await client.send(message, signal)).toEqual({
       id: "a".repeat(32),
@@ -205,6 +227,7 @@ process.stdout.write(JSON.stringify({
 
 test("Mesij preserves untrimmed 65536-code-point text, identity controls and stripping events", async () => {
   const setup = await fixture();
+
   try {
     const fake = await setup.executable(`
 const input = JSON.parse(await Bun.stdin.text());
@@ -215,18 +238,20 @@ process.stdout.write(JSON.stringify({
   extra: "source"
 }));
 `);
+
     const client = new MesijClient({ ...setup.options, command: fake });
-    const text = ` ${"😀".repeat(65533)}\0 `;
-    expect([...text]).toHaveLength(65536);
+    const text = ` ${"😀".repeat(65_533)}\0 `;
+    expect([...text]).toHaveLength(65_536);
     expect(
       await client.send({ ...message, actor: " Padded actor ", text }, signal),
     ).toEqual({ id: "a".repeat(32), sequence: 1 });
+
     for (const change of [
       { text: `${text}x` },
       { text: " \t " },
       { actor: "a\nb" },
       { sessionID: "a\0b" },
-      { to: "a\x7fb" },
+      { to: "a\u007fb" },
     ])
       await expect(
         client.send({ ...message, ...change }, signal),
@@ -238,10 +263,12 @@ process.stdout.write(JSON.stringify({
 
 test("invalid options and inputs produce sanitised typed errors", async () => {
   const setup = await fixture();
+
   try {
     expect(
       () => new MesijClient({ ...setup.options, command: "mesij" }),
     ).toThrow("Invalid Mesij options.");
+
     for (const input of [
       { sessionID: "indra-mario", after: -1 },
       { sessionID: "indra-mario", after: Number.MAX_SAFE_INTEGER + 1 },
@@ -252,6 +279,7 @@ test("invalid options and inputs produce sanitised typed errors", async () => {
         "Invalid Mesij input.",
       );
     }
+
     await expect(
       setup.client.send({ ...message, text: "" }, signal),
     ).rejects.toBeInstanceOf(MesijError);
@@ -265,6 +293,7 @@ test("invalid options and inputs produce sanitised typed errors", async () => {
 
 test("command failures and malformed output never expose private data", async () => {
   const setup = await fixture();
+
   try {
     for (const source of [
       'process.stderr.write("PRIVATE STDERR"); process.stdout.write("PRIVATE ENVELOPE"); process.exit(1);',
@@ -273,6 +302,7 @@ test("command failures and malformed output never expose private data", async ()
     ]) {
       const fake = await setup.executable(source);
       const client = new MesijClient({ ...setup.options, command: fake });
+
       try {
         await client.send(message, signal);
         throw new Error("Expected failure.");
@@ -285,10 +315,12 @@ test("command failures and malformed output never expose private data", async ()
         ).toBeUndefined();
       }
     }
+
     const missing = new MesijClient({
       ...setup.options,
       command: join(setup.directory, "missing-private-command"),
     });
+
     await expect(missing.send(message, signal)).rejects.toThrow(
       "Mesij command failed.",
     );
@@ -299,16 +331,19 @@ test("command failures and malformed output never expose private data", async ()
 
 test("oversized stdout kills and awaits the subprocess", async () => {
   const setup = await fixture();
+
   try {
     const fake = await setup.executable(`
 process.stdout.write("x".repeat(4096));
 setInterval(() => {}, 10000);
 `);
+
     const client = new MesijClient({
       ...setup.options,
       command: fake,
       maxOutputBytes: 1024,
     });
+
     await expect(client.send(message, signal)).rejects.toThrow(
       "Mesij output exceeded its limit.",
     );
@@ -319,6 +354,7 @@ setInterval(() => {}, 10000);
 
 test("inbox rejects invalid sequence order, cursors and oversized pages", async () => {
   const setup = await fixture();
+
   const event = {
     id: "a".repeat(32),
     sequence: 2,
@@ -328,6 +364,7 @@ test("inbox rejects invalid sequence order, cursors and oversized pages", async 
     type: "message.posted",
     payload: { message: "Private message." },
   };
+
   try {
     for (const page of [
       [event, event],
@@ -338,6 +375,7 @@ test("inbox rejects invalid sequence order, cursors and oversized pages", async 
       const fake = await setup.executable(
         `process.stdout.write(${JSON.stringify(JSON.stringify(page))});`,
       );
+
       const client = new MesijClient({ ...setup.options, command: fake });
       await expect(
         client.inbox({ sessionID: "indra-mario", after: 1, limit: 2 }, signal),
@@ -350,13 +388,16 @@ test("inbox rejects invalid sequence order, cursors and oversized pages", async 
 
 test("command timeout stops a subprocess that never exits", async () => {
   const setup = await fixture();
+
   try {
     const fake = await setup.executable("setInterval(() => {}, 10000);");
+
     const client = new MesijClient({
       ...setup.options,
       command: fake,
       timeoutMs: 25,
     });
+
     await expect(client.send(message, signal)).rejects.toThrow(
       "Mesij operation timed out.",
     );
@@ -369,27 +410,32 @@ test("abort kills underlying work and waits for process exit", async () => {
   const setup = await fixture();
   const controller = new AbortController();
   let pid: number | undefined;
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       pid = Number(new URL(request.url).searchParams.get("pid"));
       controller.abort();
+
       return new Response("ready");
     },
   });
+
   try {
     const fake = await setup.executable(`
 process.on("SIGTERM", () => {});
 await fetch(${JSON.stringify(`${server.url}?pid=`)} + process.pid);
 setInterval(() => {}, 10000);
 `);
+
     const client = new MesijClient({ ...setup.options, command: fake });
     await expect(client.send(message, controller.signal)).rejects.toThrow(
       "Mesij operation cancelled.",
     );
     expect(pid).toBeGreaterThan(0);
     const exitedPID = pid;
+
     if (exitedPID !== undefined)
       expect(() => process.kill(exitedPID, 0)).toThrow();
     await expect(client.send(message, controller.signal)).rejects.toThrow(

@@ -28,6 +28,7 @@ test("installation root does not depend on the caller's working directory", asyn
   const module = fileURLToPath(
     new URL("../src/lib/installation-paths.ts", import.meta.url),
   );
+
   const child = Bun.spawn(
     [
       process.execPath,
@@ -36,11 +37,13 @@ test("installation root does not depend on the caller's working directory", asyn
     ],
     { cwd: tmpdir(), stdin: "ignore", stdout: "pipe", stderr: "pipe" },
   );
+
   const [output, errors, exit] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
     child.exited,
   ]);
+
   expect(errors).toBe("");
   expect(exit).toBe(0);
   expect(output).toBe(`${root}\n`);

@@ -6,10 +6,13 @@ export const crewMessageMetadataKey = "pogoCrew";
 /** Historical native inputs stay immutable; new inputs use the Stargate label. */
 export function taskEnvelopePayload(text: string | undefined) {
   const line = text?.split("\n", 1)[0];
+
   if (line === undefined) return;
+
   const prefix = ["Stargate task envelope: ", "Pogo task envelope: "].find(
     (prefix) => line.startsWith(prefix),
   );
+
   return prefix === undefined ? undefined : line.slice(prefix.length);
 }
 
@@ -26,6 +29,7 @@ export function resumeMessageID(task: TaskBinding, idleAt: number): string {
     task.inputID,
     idleAt,
   ]);
+
   return `msg_${createHash("sha256").update(binding).digest("hex").slice(0, 32)}`;
 }
 
@@ -35,6 +39,7 @@ export function isTaskResume(
   task: TaskBinding,
 ): boolean {
   const metadata = message.metadata?.[crewMessageMetadataKey];
+
   return (
     message.type === "synthetic" &&
     metadata !== null &&

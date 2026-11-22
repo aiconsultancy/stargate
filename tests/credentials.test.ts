@@ -15,6 +15,7 @@ test("redaction and detection use the same rules", () => {
     expect(redacted).toContain("[REDACTED");
     expect(redacted).not.toContain(secret);
   }
+
   expect(containsCredential("an ordinary sentence")).toBe(false);
   expect(redactCredentials("an ordinary sentence")).toBe(
     "an ordinary sentence",

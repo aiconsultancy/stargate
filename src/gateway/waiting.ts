@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { Schema } from "effect";
 import { settingsStruct } from "../config/settings-schema";
 import { waitingDelaySchema, type WaitingSettings } from "../config/waiting";
+
 export {
   waitingDelaySchema,
   waitingSchema,
@@ -18,11 +19,13 @@ type WaitingRegistration = {
     | { type: "opencode"; directory: string; agent?: string | undefined }
     | { type: "pi-durable" | "claude" | "codex" | "module" };
 };
+
 const overrideSchema = settingsStruct({ delayMs: waitingDelaySchema });
 
 /** Shared captain workspace settings, isolated by configured agent identity. */
 export function waitingSettingsPath(directory: string, agent: string): string {
   const id = createHash("sha256").update(agent).digest("hex");
+
   return join(directory, ".local", "stargate-waiting", `${id}.json`);
 }
 
@@ -31,13 +34,16 @@ export async function resolveWaiting<
   T extends Pick<WaitingRegistration, "backend" | "waiting">,
 >(bot: T): Promise<WaitingSettings> {
   const backend = bot.backend;
+
   if (backend.type !== "opencode" || !backend.agent) return bot.waiting;
+
   try {
     const override = Schema.decodeUnknownSync(overrideSchema)(
       await Bun.file(
         waitingSettingsPath(backend.directory, backend.agent),
       ).json(),
     );
+
     return { ...bot.waiting, ...override };
   } catch {
     return bot.waiting;
@@ -56,6 +62,7 @@ export async function saveWaitingDelay(
   const path = waitingSettingsPath(directory, agent);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
+
   try {
     await writeFile(temporary, `${JSON.stringify(settings)}\n`, {
       flag: "wx",

@@ -59,6 +59,7 @@ import {
 } from "./cli-agent";
 
 type Config = Extract<BackendConfig, { type: "claude" }>;
+
 type UserContent = Exclude<SDKUserMessage["message"]["content"], string>;
 
 /** Fixed, safe failure text produced by this adapter. */
@@ -73,41 +74,51 @@ function claudeCLI() {
   const entry = import.meta.resolve("@anthropic-ai/claude-agent-sdk");
   const require = createRequire(entry);
   const root = dirname(fileURLToPath(entry));
+
   const { claudeCodeVersion } = Schema.decodeUnknownSync(sdkMetadata)(
     JSON.parse(readFileSync(join(root, "package.json"), "utf8")),
   );
+
   if (!parseVersion(claudeCodeVersion))
     throw new ClaudeTurnError(versionFailure);
+
   const native = () => {
     const report = process.report?.getReport() as
       | { header?: { glibcVersionRuntime?: string } }
       | undefined;
+
     const platform = `${process.platform}-${process.arch}`;
+
     const candidates =
       process.platform === "linux"
         ? report && report.header?.glibcVersionRuntime === undefined
           ? [`${platform}-musl`, platform]
           : [platform, `${platform}-musl`]
         : [platform];
+
     for (const target of candidates) {
       try {
         const path = require.resolve(
           `@anthropic-ai/claude-agent-sdk-${target}/claude${process.platform === "win32" ? ".exe" : ""}`,
         );
+
         if (existsSync(path)) return path;
       } catch {}
     }
+
     throw new ClaudeTurnError(versionFailure);
   };
+
   return { version: claudeCodeVersion, native };
 }
 
 // A CLI that ends without a result proves nothing about its tools: frames
-// can be lost with the process. Never report that nothing ran.
+// Can be lost with the process. Never report that nothing ran.
 const crashed = { ran: true } as const;
 
 /** Claude session IDs are UUIDs; anything else never reaches the filesystem. */
 const maximumSessionID = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+
 const sessionIDSchema = Schema.String.check(
   Schema.isUUID(),
   // Zod accepted the max UUID only in lowercase; preserve existing ID spelling.
@@ -115,6 +126,7 @@ const sessionIDSchema = Schema.String.check(
     (id) => id.toLowerCase() !== maximumSessionID || id === maximumSessionID,
   ),
 );
+
 const isSessionID = Schema.is(sessionIDSchema);
 
 /**
@@ -124,6 +136,7 @@ const isSessionID = Schema.is(sessionIDSchema);
  */
 export function claudeRouting(config: Config): Record<string, string> {
   const model = config.model;
+
   return {
     ANTHROPIC_BASE_URL: config.provider.baseURL.slice(0, -"/v1".length),
     // Background, subagent and alias requests must not pick another model.
@@ -178,12 +191,16 @@ export function claudeInputContent(
       "Invalid or oversized Claude attachments",
     );
   }
+
   if (!files.length) return text;
   const content: UserContent = [];
+
   if (text) content.push({ type: "text", text });
+
   for (const file of files) {
     const data = Buffer.from(file.data).toString("base64");
     const image = imageTypes.find((type) => type === file.mime);
+
     if (image) {
       content.push(
         { type: "text", text: `Attachment: ${file.name}` },
@@ -206,6 +223,7 @@ export function claudeInputContent(
       );
     }
   }
+
   return content;
 }
 
@@ -215,6 +233,7 @@ const streamFrame = Schema.Struct({
   parent_tool_use_id: Schema.Null,
   event: Schema.Unknown,
 });
+
 const streamEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("message_start"),
@@ -237,6 +256,7 @@ const streamEvent = Schema.Union([
     }),
   }),
 ]);
+
 const assistantFrame = Schema.Struct({
   type: Schema.Literal("assistant"),
   parent_tool_use_id: Schema.Null,
@@ -251,11 +271,13 @@ const assistantFrame = Schema.Struct({
   }),
   error: Schema.optional(Schema.String),
 });
+
 const initFrame = Schema.Struct({
   type: Schema.Literal("system"),
   subtype: Schema.Literal("init"),
   session_id: Schema.String,
 });
+
 const resultFrame = Schema.Struct({
   type: Schema.Literal("result"),
   subtype: Schema.String,
@@ -263,6 +285,7 @@ const resultFrame = Schema.Struct({
   result: Schema.optional(Schema.String),
   api_error_status: Schema.optional(Schema.NullOr(Schema.Finite)),
 });
+
 // Any frame of a tool call: this turn did work.
 const toolFrame = Schema.Union([
   Schema.Struct({ parent_tool_use_id: Schema.String }),
@@ -277,6 +300,7 @@ const toolFrame = Schema.Union([
     }),
   }),
 ]);
+
 const decodeStreamFrame = Schema.decodeUnknownOption(streamFrame);
 const decodeStreamEvent = Schema.decodeUnknownOption(streamEvent);
 const decodeAssistantFrame = Schema.decodeUnknownOption(assistantFrame);
@@ -327,10 +351,12 @@ export function claudeFailure(turn: ClaudeTurn): BackendFailure | undefined {
   if (!turn.result || turn.result.ok) return undefined;
   const { cause, status } = turn.result;
   const byStatus = status === undefined ? undefined : statusKind(status);
+
   const kind =
     byStatus && byStatus !== "provider"
       ? byStatus
       : (causeKinds[cause] ?? byStatus);
+
   return kind && new BackendFailure(kind, { status, ran: turn.worked });
 }
 
@@ -357,64 +383,92 @@ export class ClaudeTurn {
   add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
     if (isToolFrame(raw)) this.worked = true;
     const init = decodeInitFrame(raw);
+
     if (Option.isSome(init)) {
       this.session = init.value.session_id;
+
       return false;
     }
+
     const frame = decodeStreamFrame(raw);
+
     if (Option.isSome(frame)) {
       const event = decodeStreamEvent(frame.value.event);
+
       if (Option.isNone(event)) return false;
+
       if (event.value.type === "message_start") {
         stage?.("model");
         this.streaming = event.value.message.id;
         this.seen(this.streaming);
+
         if (!this.streamed.has(this.streaming))
           this.streamed.set(this.streaming, new Map());
+
         return false;
       }
+
       const blocks = this.streaming && this.streamed.get(this.streaming);
+
       if (!blocks) return false;
+
       if (event.value.type === "content_block_start") {
         const kind = event.value.content_block.type;
+
         if (kind === "thinking" || kind === "redacted_thinking")
           stage?.("reasoning");
+
         if (kind === "tool_use" || kind === "server_tool_use") stage?.("tool");
+
         if (kind !== "text") return false;
         stage?.("reply");
         blocks.set(event.value.index, event.value.content_block.text ?? "");
+
         return true;
       }
+
       if (event.value.delta.type !== "text_delta" || !event.value.delta.text)
         return false;
       blocks.set(
         event.value.index,
         (blocks.get(event.value.index) ?? "") + event.value.delta.text,
       );
+
       return true;
     }
+
     const assistant = decodeAssistantFrame(raw);
+
     if (Option.isSome(assistant)) {
       const id = assistant.value.message.id;
+
       if (assistant.value.error) {
         // Error text can quote the provider; only the fixed cause is kept.
         this.failure = assistant.value.error;
         const shown = this.streamed.has(id) || this.complete.has(id);
         this.streamed.delete(id);
         this.complete.delete(id);
+
         return shown;
       }
+
       this.seen(id);
+
       const texts = assistant.value.message.content.flatMap((block) =>
         block.type === "text" && block.text ? [block.text] : [],
       );
+
       if (!texts.length) return false;
       this.complete.set(id, [...(this.complete.get(id) ?? []), ...texts]);
+
       return true;
     }
+
     const result = decodeResultFrame(raw);
+
     if (Option.isSome(result)) {
       const { subtype, is_error } = result.value;
+
       if (subtype === "success" && !is_error)
         this.result = { ok: true, text: result.value.result ?? "" };
       else {
@@ -427,6 +481,7 @@ export class ClaudeTurn {
         };
       }
     }
+
     return false;
   }
 
@@ -438,6 +493,7 @@ export class ClaudeTurn {
     return this.order
       .map((id) => {
         const blocks = this.streamed.get(id);
+
         const streamed = blocks
           ? [...blocks]
               .sort(([a], [b]) => a - b)
@@ -445,6 +501,7 @@ export class ClaudeTurn {
               .filter(Boolean)
               .join("\n")
           : "";
+
         return streamed || (this.complete.get(id) ?? []).join("\n");
       })
       .filter(Boolean)
@@ -456,6 +513,7 @@ export class ClaudeTurn {
       .map((id) => (this.complete.get(id) ?? []).join("\n"))
       .filter(Boolean)
       .join("\n\n");
+
     return text || (this.result?.ok ? this.result.text : "");
   }
 }
@@ -502,9 +560,11 @@ class ClaudeProcess implements SpawnedProcess {
   kill(signal: NodeJS.Signals) {
     if (!this.running) return false;
     this.signalled = true;
+
     try {
       if (this.child.pid === undefined) return false;
       process.kill(-this.child.pid, signal);
+
       return true;
     } catch {
       return this.child.kill(signal);
@@ -571,6 +631,7 @@ const recordSchema = Schema.Struct({
   turn: sessionIDSchema,
   since: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
+
 const decodeRecord = Schema.decodeUnknownSync(recordSchema, {
   onExcessProperty: "error",
 });
@@ -614,10 +675,12 @@ export class ClaudeBackend implements AgentBackend {
     secret(config.provider.apiKeyEnv);
     const home = join(context.dataDirectory, "claude");
     const records = join(context.dataDirectory, "claude-runs");
+
     for (const directory of [home, records]) {
       await mkdir(directory, { recursive: true, mode: 0o700 });
       await chmod(directory, 0o700);
     }
+
     return new ClaudeBackend(config, home, records, runtime);
   }
 
@@ -626,10 +689,12 @@ export class ClaudeBackend implements AgentBackend {
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
     signal.throwIfAborted();
+
     if (this.closed) throw new Error("Claude backend is closing");
     // The first turn creates the native session with this ID.
     const id = crypto.randomUUID();
     this.titles.set(id, title);
+
     return id;
   }
 
@@ -637,18 +702,22 @@ export class ClaudeBackend implements AgentBackend {
   private async started(id: string) {
     const projects = join(this.home, "projects");
     let directories: string[];
+
     try {
       directories = await readdir(projects);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     }
+
     for (const directory of directories) {
       try {
         await access(join(projects, directory, `${id}.jsonl`));
+
         return true;
       } catch {}
     }
+
     return false;
   }
 
@@ -670,18 +739,25 @@ export class ClaudeBackend implements AgentBackend {
             backend: "claude",
           })
       : undefined;
+
     signal.throwIfAborted();
+
     if (this.closed) throw new Error("Claude backend is closing");
+
     if (!isSessionID(sessionId))
       throw new ClaudeTurnError("Claude session ID is not valid");
     const id = sessionId;
+
     if (this.runs.has(id)) throw new ClaudeTurnError("Claude session is busy");
+
     const content = claudeInputContent(
       context ? `${sourceLine(context)}\n\n${text}` : text,
       files,
     );
+
     const env = claudeEnvironment(this.config, this.home);
     let temporary: string | undefined;
+
     const run: Run = {
       controller: new AbortController(),
       done: Promise.resolve(),
@@ -689,23 +765,29 @@ export class ClaudeBackend implements AgentBackend {
       since: 0,
       record: join(this.records, `${id}.json`),
     };
+
     env[turnVariable] = run.turn;
     this.runs.set(id, run);
     const finished = Promise.withResolvers<void>();
     run.done = finished.promise;
+
     const stop = () => {
       run.controller.abort();
       run.process?.kill("SIGTERM");
     };
+
     signal.addEventListener("abort", stop, { once: true });
+
     try {
       // Never resume a session that an earlier process is still running.
       await this.stopOrphan(id, AbortSignal.timeout(5000));
       let executable: string;
       let mcpServersDelivery: "initialize" | "argv" = "initialize";
+
       try {
         const bundled = claudeCLI();
         executable = this.runtime.executable ?? bundled.native();
+
         const { stdout } = await exec(executable, ["--version"], {
           cwd: this.config.directory,
           env: {
@@ -718,11 +800,15 @@ export class ClaudeBackend implements AgentBackend {
           killSignal: "SIGKILL",
           maxBuffer: 4096,
         });
+
         const version = /^(\S+)(?: \(Claude Code\))?$/.exec(stdout.trim())?.[1];
+
         if (!version || !parseVersion(version))
           throw new ClaudeTurnError(versionFailure);
+
         if (compareVersions(version, bundled.version) < 0) {
           mcpServersDelivery = "argv";
+
           if (Object.keys(this.config.mcpServers ?? {}).length)
             process.emitWarning(
               "Claude Code is older than the SDK bundled CLI; using MCP argv delivery. MCP environment and headers may be visible to other local users. Update Claude Code to use initialize delivery.",
@@ -733,6 +819,7 @@ export class ClaudeBackend implements AgentBackend {
         // Probe output and command errors can contain secrets; discard both.
         throw new ClaudeTurnError(versionFailure);
       }
+
       run.controller.signal.throwIfAborted();
       // A private temporary directory per turn, removed after the CLI exits.
       temporary = await mkdtemp(join(tmpdir(), "stargate-claude-"));
@@ -744,17 +831,20 @@ export class ClaudeBackend implements AgentBackend {
       const title = this.titles.get(id);
       this.titles.delete(id);
       const answered = Promise.withResolvers<void>();
+
       const message: SDKUserMessage = {
         type: "user",
         message: { role: "user", content },
         parent_tool_use_id: null,
         uuid: input,
       };
+
       async function* messages() {
         yield message;
         // Closing input after the result lets the CLI exit cleanly.
         await answered.promise;
       }
+
       const options: Options = {
         abortController: run.controller,
         cwd: this.config.directory,
@@ -800,17 +890,23 @@ export class ClaudeBackend implements AgentBackend {
         pathToClaudeCodeExecutable: executable,
         spawnClaudeCodeProcess: (spawn) => this.spawn(run, spawn),
       };
+
       const turn = new ClaudeTurn();
       let settle: ReturnType<typeof setTimeout> | undefined;
+
       try {
         for await (const frame of query({ prompt: messages(), options })) {
           const changed = turn.add(frame, stage);
+
           if (turn.session !== undefined && turn.session !== id)
             throw new ClaudeTurnError("Claude session identity changed");
+
           if (changed && onText) {
             const visible = turn.visible();
+
             if (visible) onText(visible);
           }
+
           if (turn.result && !settle) {
             answered.resolve();
             // Background work can keep the CLI alive; it ends with the turn.
@@ -820,24 +916,30 @@ export class ClaudeBackend implements AgentBackend {
       } catch (error) {
         // The result completes the turn; a later teardown error does not.
         if (signal.aborted) throw error;
+
         // The CLI ended without a result. SDK errors can carry CLI output.
         if (!turn.result) throw new BackendFailure("crash", crashed);
       } finally {
         clearTimeout(settle);
         answered.resolve();
       }
+
       signal.throwIfAborted();
+
       if (!turn.result) throw new BackendFailure("crash", crashed);
+
       if (!turn.result.ok)
         throw (
           claudeFailure(turn) ??
           new ClaudeTurnError(`Claude turn failed: ${turn.result.cause}`)
         );
+
       return turn.answer();
     } catch (error) {
       // A failed turn must not leave its CLI running.
       stop();
       signal.throwIfAborted();
+
       if (
         error instanceof AttachmentInputUnavailable ||
         error instanceof BackendFailure ||
@@ -849,8 +951,10 @@ export class ClaudeBackend implements AgentBackend {
     } finally {
       signal.removeEventListener("abort", stop);
       await this.finish(run);
+
       if (temporary)
         await rm(temporary, { recursive: true, force: true }).catch(() => {});
+
       if (this.runs.get(id) === run) this.runs.delete(id);
       finished.resolve();
     }
@@ -864,14 +968,17 @@ export class ClaudeBackend implements AgentBackend {
       stdio: ["pipe", "pipe", "ignore"],
       detached: true,
     });
+
     const cli = new ClaudeProcess(child);
     run.process = cli;
+
     if (child.pid !== undefined) {
       try {
         run.since = statStart(readFileSync(`/proc/${child.pid}/stat`, "utf8"));
       } catch {
         // Not Linux: there is no marker scan to bound.
       }
+
       // Removed in finish(), after everything the turn started has stopped.
       writeFileSync(
         run.record,
@@ -879,10 +986,13 @@ export class ClaudeBackend implements AgentBackend {
         { mode: 0o600 },
       );
     }
+
     options.signal.addEventListener("abort", () => cli.kill("SIGTERM"), {
       once: true,
     });
+
     if (run.controller.signal.aborted) cli.kill("SIGTERM");
+
     return cli;
   }
 
@@ -892,7 +1002,9 @@ export class ClaudeBackend implements AgentBackend {
    */
   private async finish(run: Run) {
     const cli = run.process;
+
     if (!cli) return;
+
     const exited = async () => {
       const grace = new AbortController();
       await Promise.race([
@@ -901,13 +1013,16 @@ export class ClaudeBackend implements AgentBackend {
       ]);
       grace.abort();
     };
+
     await exited();
+
     if (cli.running) {
       run.controller.abort();
       cli.kill("SIGTERM");
       await exited();
       cli.kill("SIGKILL");
     }
+
     await cli.exited;
     await stopTurnProcesses(
       systemProcesses,
@@ -928,18 +1043,22 @@ export class ClaudeBackend implements AgentBackend {
     if (this.runs.get(id)?.process) return;
     const path = join(this.records, `${id}.json`);
     let record: typeof recordSchema.Type;
+
     try {
       record = decodeRecord(JSON.parse(await readFile(path, "utf8")));
     } catch {
       return;
     }
+
     const marker = { variable: turnVariable, value: record.turn };
+
     const leader = {
       pid: record.pid,
       start: record.since,
       marker,
       session: id,
     };
+
     await stopTurnGroup(systemProcesses, leader, this.grace, signal);
     await stopTurnProcesses(
       systemProcesses,
@@ -954,22 +1073,27 @@ export class ClaudeBackend implements AgentBackend {
   async interrupt(sessionId: string, signal: AbortSignal) {
     if (!isSessionID(sessionId)) return;
     const run = this.runs.get(sessionId);
+
     if (run) {
       run.controller.abort();
       run.process?.kill("SIGTERM");
       await run.done;
+
       return;
     }
+
     await this.stopOrphan(sessionId, signal);
   }
 
   async close() {
     this.closed = true;
     const runs = [...this.runs.values()];
+
     for (const run of runs) {
       run.controller.abort();
       run.process?.kill("SIGTERM");
     }
+
     await Promise.all(runs.map((run) => run.done));
   }
 }

@@ -7,6 +7,7 @@ import { buildUpdateSnapshot } from "../src/maintenance/update-notice";
 import { bot } from "./fixtures";
 
 const sessionID = "ses_captain";
+
 const session = {
   id: sessionID,
   agent: "captain",
@@ -17,22 +18,30 @@ const session = {
 
 test("update notice admission queues local context via RPC, never native input", async () => {
   const requests: { path: string; body: unknown }[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const path = new URL(request.url).pathname;
+
       const body: unknown =
         request.method === "GET" ? undefined : await request.json();
+
       requests.push({ path, body });
+
       if (path.endsWith("/queueUpdateNotice"))
         return Response.json({ output: { id: "msg_update", sessionID } });
+
       if (path === `/api/session/${sessionID}`)
         return Response.json({ data: session });
+
       return new Response("Tool RPC unavailable", { status: 404 });
     },
   });
+
   const adapter = backend(server.url.href);
+
   try {
     const snapshot = await adapter.updateNoticeContext(
       sessionID,
@@ -43,6 +52,7 @@ test("update notice admission queues local context via RPC, never native input",
       ),
       new AbortController().signal,
     );
+
     expect(snapshot.configDigest).toMatch(/^[a-f0-9]{64}$/);
     await adapter.queueUpdateNotice(
       sessionID,
@@ -79,7 +89,9 @@ function backend(url: string, options: Record<string, unknown> = {}) {
     agent: "captain",
     ...options,
   });
+
   if (config.type !== "opencode") throw new Error("Invalid fixture");
+
   return new OpenCodeBackend(config);
 }
 
@@ -87,6 +99,7 @@ test("OpenCode session pin validates a bounded native session ID", () => {
   for (const value of ["ses_captain", `ses_${"a".repeat(252)}`]) {
     expect(backend("http://127.0.0.1", { sessionID: value })).toBeDefined();
   }
+
   for (const value of [
     "",
     "ses_",
@@ -101,6 +114,7 @@ test("OpenCode session pin validates a bounded native session ID", () => {
 
 test("one bot per pinned root; distinct and absent pins stay valid", () => {
   const first = bot("first");
+
   const second = {
     ...bot("second"),
     slack: {
@@ -109,6 +123,7 @@ test("one bot per pinned root; distinct and absent pins stay valid", () => {
       botTokenEnv: "SECOND_BOT_TOKEN",
     },
   };
+
   expect(() =>
     Schema.decodeUnknownSync(configSchema)({ bots: [first, second] }),
   ).not.toThrow();
@@ -142,6 +157,7 @@ test("one bot per pinned root; distinct and absent pins stay valid", () => {
 
 test("pinned OpenCode calls reuse the root without changing stored settings", async () => {
   const requests: { method: string; path: string; body: string }[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -151,14 +167,18 @@ test("pinned OpenCode calls reuse the root without changing stored settings", as
         path: new URL(request.url).pathname,
         body: await request.text(),
       });
+
       return Response.json({ data: session });
     },
   });
+
   try {
     const adapter: AgentBackend = backend(server.url.href, {
       model: { providerID: "configured", id: "different" },
     });
+
     expect(adapter.sessionID).toBe(sessionID);
+
     for (const key of ["dm", "channel-thread"]) {
       expect(
         await adapter.createSession({
@@ -168,6 +188,7 @@ test("pinned OpenCode calls reuse the root without changing stored settings", as
         }),
       ).toBe(sessionID);
     }
+
     expect(requests).toEqual(
       ["dm", "channel-thread"].map(() => ({
         method: "GET",
@@ -201,14 +222,17 @@ test("missing, incompatible and failed pinned lookups never create a root", asyn
     { status: 200, data: null },
   ]) {
     const methods: string[] = [];
+
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
         methods.push(request.method);
+
         return Response.json({ data: result.data }, { status: result.status });
       },
     });
+
     try {
       await expect(
         backend(server.url.href).createSession({
@@ -227,23 +251,28 @@ test("missing, incompatible and failed pinned lookups never create a root", asyn
 test("OpenCode boundary corpus: pinned response strips keys and checks optional fields", async () => {
   let response: unknown;
   const paths: string[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname;
       paths.push(path);
+
       if (path.startsWith("/api/agent/"))
         return Response.json({
           location: { directory: "/captain", ignored: true },
           data: { id: "captain", ignored: true },
           ignored: true,
         });
+
       return Response.json({ data: response });
     },
   });
+
   try {
     const adapter = backend(server.url.href, { enforcePermissions: true });
+
     const base = {
       id: sessionID,
       agent: "captain",
@@ -252,6 +281,7 @@ test("OpenCode boundary corpus: pinned response strips keys and checks optional 
         { effect: "deny", extra: true, resource: "*", action: "*" },
       ],
     };
+
     for (const [change, accepted] of [
       [{ extra: true, location: { directory: "/captain", extra: true } }, true],
       [{ parentID: undefined, fork: undefined }, true],
@@ -270,17 +300,20 @@ test("OpenCode boundary corpus: pinned response strips keys and checks optional 
       [{ id: null }, false],
     ] as const) {
       response = { ...base, ...change };
+
       const run = adapter.createSession({
         key: "corpus",
         title: "unused",
         signal: AbortSignal.timeout(3000),
       });
+
       if (accepted) expect(await run).toBe(sessionID);
       else
         await expect(run).rejects.toThrow(
           "Pinned OpenCode session unavailable or incompatible",
         );
     }
+
     expect(
       paths.every(
         (path) =>
@@ -296,6 +329,7 @@ test("OpenCode boundary corpus: pinned response strips keys and checks optional 
 test("OpenCode boundary corpus: ready response rejects missing or mistyped fields", async () => {
   let response: unknown;
   let creates = 0;
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -303,14 +337,17 @@ test("OpenCode boundary corpus: ready response rejects missing or mistyped field
       if (new URL(request.url).pathname.startsWith("/api/agent/"))
         return Response.json(response);
       creates++;
+
       return Response.json({ data: { id: "ses_created" } });
     },
   });
+
   try {
     const adapter = backend(server.url.href, {
       sessionID: undefined,
       enforcePermissions: true,
     });
+
     for (const [body, accepted] of [
       [
         {
@@ -329,11 +366,13 @@ test("OpenCode boundary corpus: ready response rejects missing or mistyped field
     ] as const) {
       response = body;
       const before = creates;
+
       const run = adapter.createSession({
         key: "corpus",
         title: "unused",
         signal: AbortSignal.timeout(3000),
       });
+
       if (accepted) expect(await run).toBe("ses_created");
       else
         await expect(run).rejects.toThrow(
@@ -350,15 +389,18 @@ test("pinned lookup cancellation before and during GET never creates", async () 
   const received = Promise.withResolvers<void>();
   const response = Promise.withResolvers<Response>();
   const methods: string[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       methods.push(request.method);
       received.resolve();
+
       return response.promise;
     },
   });
+
   try {
     const adapter = backend(server.url.href);
     await expect(
@@ -370,11 +412,13 @@ test("pinned lookup cancellation before and during GET never creates", async () 
     ).rejects.toThrow();
     expect(methods).toEqual([]);
     const controller = new AbortController();
+
     const run = adapter.createSession({
       key: "during",
       title: "unused",
       signal: controller.signal,
     });
+
     await received.promise;
     controller.abort();
     response.resolve(Response.json({ data: session }));
@@ -388,15 +432,18 @@ test("pinned lookup cancellation before and during GET never creates", async () 
 
 test("lost pinned lookup response never creates a replacement", async () => {
   const methods: string[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request, server) {
       methods.push(request.method);
       void server.stop(true);
+
       return new Response();
     },
   });
+
   try {
     await expect(
       backend(server.url.href).createSession({
@@ -415,19 +462,23 @@ test("lost pinned lookup response never creates a replacement", async () => {
 test("unpinned OpenCode still creates separate sessions with configured settings", async () => {
   const bodies: unknown[] = [];
   const methods: string[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       methods.push(request.method);
       bodies.push(await request.json());
+
       return Response.json({ data: { id: `ses_new${bodies.length}` } });
     },
   });
+
   try {
     const model = { providerID: "configured", id: "model" };
     const adapter = backend(server.url.href, { sessionID: undefined, model });
     expect(adapter.sessionID).toBeUndefined();
+
     for (const key of ["first", "second"]) {
       expect(
         await adapter.createSession({
@@ -437,6 +488,7 @@ test("unpinned OpenCode still creates separate sessions with configured settings
         }),
       ).toBe(`ses_new${bodies.length}`);
     }
+
     expect(methods).toEqual(["POST", "POST"]);
     expect(bodies).toEqual(
       ["first", "second"].map((title) => ({
@@ -466,12 +518,14 @@ test.each(["owned", "user", "shell"])(
   async (latest) => {
     const paths: string[] = [];
     const input = "owned-input";
+
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
         const path = new URL(request.url).pathname;
         paths.push(path);
+
         if (path.endsWith("/message"))
           return Response.json({
             data: [
@@ -486,10 +540,13 @@ test.each(["owned", "user", "shell"])(
             ],
             cursor: {},
           });
+
         if (path.endsWith("/interrupt")) return Response.json({});
+
         return new Response(null, { status: 204 });
       },
     });
+
     try {
       await backend(server.url.href).interruptInput(
         sessionID,
@@ -508,15 +565,18 @@ test.each(["owned", "user", "shell"])(
 
 test("transcript attributes settled text to only preceding window inputs", async () => {
   let messages: unknown[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       if (new URL(request.url).pathname.endsWith("/message"))
         return Response.json({ data: messages.toReversed(), cursor: {} });
+
       return Response.json({ data: { time: { busy: 100, idle: 0 } } });
     },
   });
+
   try {
     const adapter = backend(server.url.href);
     const signal = new AbortController().signal;
@@ -593,20 +653,25 @@ test.each(["user", "shell"])(
     let input = "";
     let persisted = "";
     const methods: string[] = [];
+
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       async fetch(request) {
         const url = new URL(request.url);
         methods.push(`${request.method} ${url.pathname}`);
+
         if (url.pathname.endsWith("/prompt")) {
           const body: { id: string } = await request.json();
           input = body.id;
           expect(persisted).toBe(input);
+
           return Response.json({ data: { id: input } });
         }
+
         if (url.pathname.endsWith("/wait"))
           return new Response(null, { status: 204 });
+
         if (url.pathname.endsWith("/message")) {
           if (url.searchParams.has("cursor"))
             return Response.json({
@@ -627,6 +692,7 @@ test.each(["user", "shell"])(
               ],
               cursor: {},
             });
+
           return Response.json({
             data: [
               {
@@ -638,9 +704,11 @@ test.each(["user", "shell"])(
             cursor: { next: "older" },
           });
         }
+
         return new Response(null, { status: 404 });
       },
     });
+
     try {
       expect(
         await backend(server.url.href).prompt(
@@ -669,19 +737,23 @@ test.each(["user", "shell"])(
     let input = "";
     let persisted = "";
     const paths: string[] = [];
+
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       async fetch(request) {
         const path = new URL(request.url).pathname;
         paths.push(path);
+
         if (path.endsWith("/prompt")) {
           const body: { id: string } = await request.json();
           input = body.id;
           expect(persisted).toBe(input);
+
           // Input was accepted; its receipt was lost/failed. Never resubmit.
           return Response.json({ message: "Lost receipt" }, { status: 503 });
         }
+
         if (path.endsWith("/message"))
           return Response.json({
             data: [
@@ -692,11 +764,14 @@ test.each(["user", "shell"])(
             ],
             cursor: {},
           });
+
         if (request.method === "DELETE")
           return new Response(null, { status: 204 });
+
         return new Response(null, { status: 404 });
       },
     });
+
     try {
       await expect(
         backend(server.url.href).prompt(
@@ -721,14 +796,17 @@ test.each(["user", "shell"])(
 
 test("input persistence failure prevents HTTP admission", async () => {
   const requests: string[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       requests.push(request.url);
+
       return new Response(null, { status: 500 });
     },
   });
+
   try {
     await expect(
       backend(server.url.href).prompt(
@@ -756,6 +834,7 @@ test.each(["user", "shell"])(
     const snapshots: string[] = [];
     const encoder = new TextEncoder();
     let sequence = 0;
+
     const emit = (event: string, data: Record<string, unknown>) => {
       if (!stream) throw new Error("Fixture SSE connection is not open");
       stream.enqueue(
@@ -770,11 +849,13 @@ test.each(["user", "shell"])(
         ),
       );
     };
+
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       async fetch(request) {
         const path = new URL(request.url).pathname;
+
         if (path === "/api/event")
           return new Response(
             new ReadableStream<Uint8Array>({
@@ -788,11 +869,14 @@ test.each(["user", "shell"])(
             }),
             { headers: { "content-type": "text/event-stream" } },
           );
+
         if (path.endsWith("/prompt")) {
           const body: { id: string } = await request.json();
           input = body.id;
+
           return Response.json({ data: { id: input } });
         }
+
         if (path.endsWith("/wait")) {
           emit("session.text.ended", {
             sessionID,
@@ -807,9 +891,12 @@ test.each(["user", "shell"])(
             text: "Own preview",
           });
           await finish.promise;
+
           return new Response(null, { status: 204 });
         }
+
         if (path.endsWith("/inbox")) return Response.json({ data: [] });
+
         if (path.endsWith("/message"))
           return Response.json({
             data: [
@@ -820,19 +907,24 @@ test.each(["user", "shell"])(
             ],
             cursor: {},
           });
+
         return new Response(null, { status: 404 });
       },
     });
+
     const controller = new AbortController();
+
     const run = backend(server.url.href).prompt(
       sessionID,
       "hello",
       controller.signal,
       (text) => {
         snapshots.push(text);
+
         if (text.includes("Own preview")) finish.resolve();
       },
     );
+
     try {
       expect(await run).toBe("Own final reply");
       expect(snapshots.join("\n")).toContain("Own preview");

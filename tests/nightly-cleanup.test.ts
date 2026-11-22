@@ -32,29 +32,39 @@ import {
 } from "../src/maintenance/nightly/exec";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-cleanup-"));
+
 // Even epoch day: oversized scratch batches start with the first window.
 const now = Date.parse("2026-01-01T00:00:00Z");
 const day = 86_400_000;
+
 afterAll(() => rm(root, { recursive: true, force: true }));
+
 let sequence = 0;
+
 async function fixture() {
   const directory = join(root, String(sequence++));
   await mkdir(directory);
+
   return directory;
 }
+
 async function age(path: string, days = 10) {
   const info = await lstat(path);
+
   if (info.isDirectory())
     for (const name of await readdir(path)) await age(join(path, name), days);
+
   if (!info.isSymbolicLink())
     await utimes(path, (now - days * day) / 1000, (now - days * day) / 1000);
 }
+
 async function exists(path: string) {
   return lstat(path).then(
     () => true,
     () => false,
   );
 }
+
 function input(
   scratchRoots: string[],
   extra: Partial<CleanupInput> = {},
@@ -73,6 +83,7 @@ function input(
     ...extra,
   };
 }
+
 async function git(path: string, ...args: string[]) {
   const result = await processRunner.run(["git", "-C", path, ...args], {
     timeoutMs: 10_000,
@@ -84,9 +95,12 @@ async function git(path: string, ...args: string[]) {
       GIT_COMMITTER_EMAIL: "fixture@example.test",
     },
   });
+
   if (result.code) throw new Error(`fixture git ${args[0]} failed`);
+
   return result.stdout.trim();
 }
+
 async function repository() {
   const directory = await fixture();
   const remote = join(directory, "remote.git");
@@ -98,6 +112,7 @@ async function repository() {
   await git(repo, "commit", "--allow-empty", "-m", "initial");
   await git(repo, "remote", "add", "origin", remote);
   await git(repo, "push", "-u", "origin", "main");
+
   return { directory, remote, repo };
 }
 
@@ -109,6 +124,7 @@ test("strict schema is disabled by default and rejects relative paths and unknow
     repositories: [],
     protectedPaths: [],
   });
+
   for (const value of [
     { scratchRoots: ["relative"] },
     { repositories: ["/a\nsecret"] },
@@ -126,9 +142,11 @@ test("disabled does not inspect or run commands; plan never deletes or writes", 
   await mkdir(stale);
   await writeFile(join(stale, "data"), "123");
   await age(stale);
+
   const disabled = await cleanup(
     input([scratch], { settings: Schema.decodeUnknownSync(cleanupSchema)({}) }),
   );
+
   expect(disabled.items).toEqual([]);
   const plan = await cleanup(input([scratch], { plan: true }));
   expect(plan.items[0]?.status).toBe("planned");
@@ -143,6 +161,7 @@ test("records intent before one stale directory deletion and verifies it is gone
   await writeFile(join(stale, "data"), "123");
   await age(stale);
   let recorded = false;
+
   const result = await cleanup(
     input([scratch], {
       beforeItem: async (item) => {
@@ -152,6 +171,7 @@ test("records intent before one stale directory deletion and verifies it is gone
       },
     }),
   );
+
   expect(recorded).toBe(true);
   expect(result.items[0]?.status).toBe("removed");
   expect(result.freedBytes).toBe(3);
@@ -169,10 +189,13 @@ test("unsafe scratch names and oversized branch names cannot invalidate the audi
   expect(result.items.some((item) => item.reason === "unsafe-path")).toBe(true);
   expect(await exists(unsafe)).toBe(true);
   const { repo } = await repository();
+
   const longBranch = Array.from({ length: 12 }, () => "a".repeat(100)).join(
     "/",
   );
+
   await git(repo, "branch", longBranch);
+
   const branches = await cleanup(
     input([], {
       settings: Schema.decodeUnknownSync(cleanupSchema)({
@@ -181,6 +204,7 @@ test("unsafe scratch names and oversized branch names cannot invalidate the audi
       }),
     }),
   );
+
   expect(cleanupResultSchema.safeParse(branches).success).toBe(true);
   expect(branches.items.some((item) => item.reason === "unsafe-path")).toBe(
     true,
@@ -200,6 +224,7 @@ test.skipIf(process.getuid?.() === 0)(
     await writeFile(join(locked, "file"), "z");
     await age(stale);
     await chmod(locked, 0o500);
+
     try {
       const result = await cleanup(input([scratch]));
       expect(result.items[0]?.status).toBe("failed");
@@ -224,9 +249,11 @@ test("recent, special, protected, active and symlink directories stay", async ()
     "unknown",
     "symlink",
   ];
+
   for (const name of cases) {
     const scratch = await fixture();
     const candidate = join(scratch, name);
+
     if (name === "symlink") await symlink(await fixture(), candidate);
     else {
       await mkdir(candidate);
@@ -236,6 +263,7 @@ test("recent, special, protected, active and symlink directories stay", async ()
         name === "recent" ? 1 : name.includes("inspect") ? 6 : 10,
       );
     }
+
     const result = await cleanup(
       input([scratch], {
         protectedPaths: name === "protected" ? [join(candidate, "data")] : [],
@@ -248,6 +276,7 @@ test("recent, special, protected, active and symlink directories stay", async ()
               : "unused",
       }),
     );
+
     expect(result.items[0]?.status).toBe("skipped");
     expect(await exists(candidate)).toBe(true);
   }
@@ -265,9 +294,11 @@ test("nested retention exceptions, credential names, symlinks and hard links fai
     const scratch = await fixture();
     const candidate = join(scratch, "stale");
     await mkdir(candidate);
+
     if (name === "link") await symlink(await fixture(), join(candidate, name));
     else await writeFile(join(candidate, name), "not read");
     await age(candidate);
+
     if (name.includes("inspect") || name.endsWith("relay.json"))
       await utimes(join(candidate, name), now / 1000, now / 1000);
     const result = await cleanup(input([scratch]));
@@ -283,23 +314,28 @@ test("abort, deadline, changed identity, changed content and failed intent preve
     await mkdir(candidate);
     await age(candidate);
     const controller = new AbortController();
+
     const result = await cleanup(
       input([scratch], {
         signal: controller.signal,
         ...(mode === "deadline" ? { deadline: Date.now() - 1 } : {}),
         beforeItem: async () => {
           if (mode === "abort") controller.abort();
+
           if (mode === "identity") {
             await rm(candidate, { recursive: true });
             await mkdir(candidate);
             await age(candidate);
           }
+
           if (mode === "content")
             await writeFile(join(candidate, "new"), "new");
+
           if (mode === "intent") throw new Error("private error");
         },
       }),
     );
+
     expect(result.freedBytes).toBe(0);
     expect(await exists(candidate)).toBe(true);
     expect(JSON.stringify(result)).not.toContain("private error");
@@ -316,19 +352,26 @@ test("scratch repositories require clean trees and every branch and detached HEA
     "missing-remote",
   ]) {
     const { directory, repo } = await repository();
+
     if (mode === "dirty") await writeFile(join(repo, "untracked"), "new");
+
     if (["unpushed", "detached", "hidden-branch"].includes(mode)) {
       if (mode === "hidden-branch") await git(repo, "checkout", "-b", "hidden");
+
       if (mode === "detached") await git(repo, "checkout", "--detach");
       await git(repo, "commit", "--allow-empty", "-m", "local");
+
       if (mode === "hidden-branch") await git(repo, "checkout", "main");
     }
+
     if (mode === "missing-remote")
       await git(repo, "remote", "remove", "origin");
     await age(repo);
+
     const result = await cleanup(
       input([directory], { protectedPaths: [join(directory, "remote.git")] }),
     );
+
     const item = result.items.find((item) => item.path === repo);
     expect(item?.status).toBe(mode === "clean" ? "removed" : "skipped");
   }
@@ -341,16 +384,20 @@ test("branches use only safe deletion, skip checked-out branches, and plan never
   const worktree = join(directory, "checked-out");
   await git(repo, "worktree", "add", "-b", "checked", worktree);
   const commands: string[][] = [];
+
   const runner: CommandRunner = {
     run: async (command, options) => {
       commands.push([...command]);
+
       return processRunner.run(command, options);
     },
   };
+
   const settings = Schema.decodeUnknownSync(cleanupSchema)({
     enabled: true,
     repositories: [repo],
   });
+
   const plan = await cleanup(input([], { settings, runner, plan: true }));
   expect(plan.items.find((item) => item.branch === "merged")?.status).toBe(
     "planned",
@@ -390,15 +437,20 @@ test("worktrees preserve primary, locked, dirty, unpushed, active and permanent 
     const { directory, repo } = await repository();
     const worktree = join(directory, "leaked");
     await git(repo, "worktree", "add", "-b", "leaked", worktree);
+
     if (["pushed", "unpushed", "detached-unpushed"].includes(mode)) {
       if (mode === "detached-unpushed")
         await git(worktree, "checkout", "--detach");
       await git(worktree, "commit", "--allow-empty", "-m", "local");
+
       if (mode === "pushed") await git(worktree, "push", "origin", "leaked");
     }
+
     if (mode === "dirty") await writeFile(join(worktree, "new"), "new");
+
     if (mode === "locked") await git(repo, "worktree", "lock", worktree);
     await age(worktree, mode === "recent" ? 1 : 10);
+
     const result = await cleanup(
       input([], {
         settings: Schema.decodeUnknownSync(cleanupSchema)({
@@ -409,6 +461,7 @@ test("worktrees preserve primary, locked, dirty, unpushed, active and permanent 
         taskDirectories: mode === "active" ? [worktree] : [],
       }),
     );
+
     expect(await exists(repo)).toBe(true);
     expect(
       result.items.find(
@@ -424,10 +477,12 @@ test("audit checkpoints bracket deletion; plan calls neither write callback", as
   await mkdir(candidate);
   await age(candidate);
   const statuses: string[] = [];
+
   const record: CleanupInput["record"] = async (item) => {
     statuses.push(item.status);
     expect(await exists(item.path)).toBe(item.status !== "removed");
   };
+
   await cleanup(
     input([scratch], {
       plan: true,
@@ -444,10 +499,12 @@ test("audit checkpoints bracket deletion; plan calls neither write callback", as
 
 test("failed intent checkpoint stops later items and preserves every candidate", async () => {
   const scratch = await fixture();
+
   for (const name of ["one", "two"]) {
     await mkdir(join(scratch, name));
     await age(join(scratch, name));
   }
+
   const result = await cleanup(
     input([scratch], {
       record: async () => {
@@ -455,6 +512,7 @@ test("failed intent checkpoint stops later items and preserves every candidate",
       },
     }),
   );
+
   expect((await readdir(scratch)).sort()).toEqual(["one", "two"]);
   expect(result.items[0]?.reason).toBe("audit-failed");
   expect(JSON.stringify(result)).not.toContain("private audit failure");
@@ -498,10 +556,12 @@ test("a scratch root with more children than one run inspects is cleaned in batc
   await Promise.all(
     Array.from({ length: 505 }, (_, i) => mkdir(join(wide, `recent-${i}`))),
   );
+
   for (let i = 0; i < 6; i++) {
     await mkdir(join(wide, `stale-${i}`));
     await age(join(wide, `stale-${i}`), 10 + i);
   }
+
   // An old plain file is never a candidate and takes no place in a batch.
   await writeFile(join(wide, "old-file"), "keep");
   await age(join(wide, "old-file"), 30);
@@ -531,15 +591,19 @@ test("every child of an oversized scratch root gets its turn, also when all of t
   const wide = await fixture();
   // Start on an even UTC day, when the first rotation window is selected.
   const rotationStart = now - (Math.floor(now / day) % 2) * day;
+
   const names = Array.from(
     { length: 501 },
     (_, i) => `d${String(i).padStart(3, "0")}`,
   );
+
   await Promise.all(names.map((name) => mkdir(join(wide, name))));
+
   // The same age for all: the order is by name.
   for (const name of names) await age(join(wide, name), 30);
   const seen = new Set<string>();
   const counts: number[] = [];
+
   for (const run of [0, 1, 2, 3]) {
     const result = await cleanup(
       input([wide], {
@@ -548,14 +612,17 @@ test("every child of an oversized scratch root gets its turn, also when all of t
         inUse: async () => "in-use",
       }),
     );
+
     // The root report and the children share the report limit.
     expect(result.items.length).toBeLessThanOrEqual(500);
     expect(result.items[0]).toMatchObject({ path: wide, reason: "scan-limit" });
     const children = result.items.slice(1);
     expect(children.every((item) => item.reason === "in-use")).toBe(true);
     counts.push(children.length);
+
     for (const item of children) seen.add(item.path);
   }
+
   // Two windows: 499 children, then the other two. None is left out.
   expect(counts).toEqual([499, 2, 499, 2]);
   expect([...seen].sort()).toEqual(names.map((name) => join(wide, name)));
@@ -564,17 +631,22 @@ test("every child of an oversized scratch root gets its turn, also when all of t
 test("an earlier scratch root's report items reduce the batch of the next root, not its tail", async () => {
   const first = await fixture();
   const wide = await fixture();
+
   for (let i = 0; i < 10; i++) {
     await mkdir(join(first, `f${i}`));
     await age(join(first, `f${i}`), 30);
   }
+
   const names = Array.from(
     { length: 495 },
     (_, i) => `d${String(i).padStart(3, "0")}`,
   );
+
   await Promise.all(names.map((name) => mkdir(join(wide, name))));
+
   for (const name of names) await age(join(wide, name), 30);
   const seen = new Set<string>();
+
   for (const run of [0, 1]) {
     const result = await cleanup(
       input([first, wide], {
@@ -583,24 +655,30 @@ test("an earlier scratch root's report items reduce the batch of the next root, 
         inUse: async () => "in-use",
       }),
     );
+
     expect(result.items.length).toBeLessThanOrEqual(500);
+
     for (const item of result.items)
       if (item.path.startsWith(`${wide}/`)) seen.add(item.path);
   }
+
   // 495 children fit in a run by themselves; behind ten other items they
-  // take two runs, and every one is inspected.
+  // Take two runs, and every one is inspected.
   expect(seen.size).toBe(495);
 });
 
 test("batches of an oversized scratch root rotate, oldest first, so every child is reached", () => {
   const children = Array.from({ length: 25 }, (_, i) => ({
     name: `d${String(i).padStart(2, "0")}`,
-    // d00 is the oldest.
+    // D00 is the oldest.
     mtimeMs: now - (40 - i) * day,
   }));
+
   const cutoff = now - 5 * day;
+
   const names = (run: number, list = children) =>
     scratchBatch(list, run * day, cutoff, 10);
+
   // Within the limit: every child, by name, as before.
   expect(scratchBatch(children.slice(0, 10), now, cutoff, 10)).toEqual({
     names: children.slice(0, 10).map((child) => child.name),
@@ -611,16 +689,19 @@ test("batches of an oversized scratch root rotate, oldest first, so every child 
   const windows = [0, 1, 2].map((run) => names(run).names);
   expect(windows[0]).toEqual(children.slice(0, 10).map((child) => child.name));
   expect(windows.map((window) => window.length)).toEqual([10, 10, 5]);
+
   for (const name of windows.flat()) seen.add(name);
   expect(seen.size).toBe(25);
   expect(names(3).names).toEqual(windows[0] ?? []);
   expect(names(0).partial).toBe(true);
+
   // A directory changed after the cutoff cannot be stale: never in a batch.
   const mixed = [
     ...children,
     { name: "new", mtimeMs: now - day },
     { name: "newer", mtimeMs: now },
   ];
+
   expect([0, 1, 2].flatMap((run) => names(run, mixed).names)).not.toContain(
     "new",
   );
@@ -648,6 +729,7 @@ test.skipIf(process.getuid?.() === 0)(
     const proc = join(directory, "proc");
     const me = process.getuid?.() ?? 0;
     const locked: string[] = [];
+
     // One thread, as `/proc/<pid>/task/<pid>`; links are relative to it.
     const process_ = async (
       pid: number,
@@ -657,20 +739,24 @@ test.skipIf(process.getuid?.() === 0)(
       const thread = join(proc, String(pid), "task", String(pid));
       const fd = join(thread, "fd");
       await mkdir(fd, { recursive: true });
+
       for (const [name, target] of Object.entries(links))
         await symlink(target, join(thread, name));
+
       // As for another user's process: its open files cannot be listed.
       if (!readable) {
         await chmod(fd, 0);
         locked.push(fd);
       }
     };
+
     // Mine, elsewhere; another user's and root's: their files cannot be read.
     await process_(100, { cwd: "/elsewhere", "fd/0": "/elsewhere/file" });
     await process_(200, { cwd: "/secret" }, false);
     await process_(300, { cwd: "/root" }, false);
     await mkdir(join(proc, "self"));
     const owners: Record<string, number> = { "200": me + 1, "300": 0 };
+
     // The candidate's parent is private or not; nothing else is.
     const view = (parentMode: number) => ({
       root: proc,
@@ -681,17 +767,21 @@ test.skipIf(process.getuid?.() === 0)(
             uid: owners[path.slice(proc.length + 1)] ?? me,
             mode: 0o555,
           };
+
         return {
           uid: me,
           mode: path === join(directory, "private") ? parentMode : 0o755,
         };
       },
     });
+
     const use = (parentMode: number) =>
       cleanupPathUse(candidate, undefined, undefined, view(parentMode));
+
     try {
       // Private: other users cannot reach the path; root is accepted.
       expect(await use(0o700)).toBe("unused");
+
       // Not private: an unreadable process of another user can be using it.
       for (const mode of [0o750, 0o755, 0o701])
         expect(await use(mode)).toBe("unknown");
@@ -734,22 +824,27 @@ async function processes() {
   await mkdir(candidate);
   const proc = join(directory, "proc");
   const me = process.getuid?.() ?? 0;
+
   const view = {
     root: proc,
     uid: me,
     stat: async () => ({ uid: me, mode: 0o700 }),
   };
+
   /** `links` are relative to `/proc/<pid>`; a thread is `task/<tid>`. */
   const add = async (pid: number, links: Record<string, string>) => {
     await mkdir(join(proc, String(pid), "task", String(pid), "fd"), {
       recursive: true,
     });
+
     for (const [name, target] of Object.entries(links)) {
       await mkdir(dirname(join(proc, String(pid), name)), { recursive: true });
       await symlink(target, join(proc, String(pid), name));
     }
   };
+
   const use = () => cleanupPathUse(candidate, undefined, undefined, view);
+
   return { candidate, proc, add, use };
 }
 
@@ -769,6 +864,7 @@ test("an executable, a mapped file and a root directory inside the path are uses
     await f.add(7, { [name]: join(f.candidate, "bin", "tool") });
     expect([name, await f.use()]).toEqual([name, expected]);
   }
+
   // A running binary that was replaced: the kernel marks the old name.
   const replaced = await processes();
   await replaced.add(7, {
@@ -787,6 +883,7 @@ test("an executable, a mapped file and a root directory inside the path are uses
       ),
       "",
     ].join("\n");
+
   for (const [mapped, expected] of [
     [[], "unused"],
     [["/elsewhere/data.bin"], "unused"],
@@ -835,12 +932,14 @@ test.skipIf(process.getuid?.() === 0)(
       expect([name, await f.use()]).toEqual([name, "unused"]);
       const path = join(f.proc, "7", name);
       await chmod(path, 0);
+
       try {
         expect([name, await f.use()]).toEqual([name, "unknown"]);
       } finally {
         await chmod(path, 0o700);
       }
     }
+
     // A process or thread that exited during the scan is not a use.
     const f = await processes();
     await mkdir(join(f.proc, "9"), { recursive: true });
@@ -855,6 +954,7 @@ async function only(pid: number) {
   await mkdir(proc);
   await symlink(join("/proc", String(pid)), join(proc, String(pid)));
   const me = process.getuid?.();
+
   return {
     root: proc,
     uid: me,
@@ -865,6 +965,7 @@ async function only(pid: number) {
 
 test("a real process that runs a binary inside the path, or has mapped a file of it, is a use", async () => {
   const tool = Bun.which("sleep");
+
   if (!tool) throw new Error("sleep is required");
   const elsewhere = await fixture();
   // The executable is in the path; the working directory is not.
@@ -872,14 +973,17 @@ test("a real process that runs a binary inside the path, or has mapped a file of
   // The same name: a multi-call binary selects its tool by name.
   await copyFile(tool, join(binary, "sleep"));
   await chmod(join(binary, "sleep"), 0o700);
+
   const running = Bun.spawn([join(binary, "sleep"), "60"], {
     cwd: elsewhere,
     stdout: "ignore",
     stderr: "ignore",
   });
+
   // A mapped file whose descriptor is closed; nothing else points there.
   const data = await fixture();
   await writeFile(join(data, "data.bin"), "x".repeat(8192));
+
   const mapping = Bun.spawn(
     [
       process.execPath,
@@ -889,10 +993,13 @@ test("a real process that runs a binary inside the path, or has mapped a file of
     ],
     { cwd: elsewhere, stdout: "pipe", stderr: "ignore" },
   );
+
   try {
     await mapping.stdout.getReader().read();
+
     const use = async (path: string, pid: number) =>
       cleanupPathUse(path, undefined, undefined, await only(pid));
+
     expect(await use(binary, running.pid)).toBe("in-use");
     expect(await use(data, mapping.pid)).toBe("in-use");
     // Each process uses only its own path.
@@ -908,6 +1015,7 @@ test("a real process that runs a binary inside the path, or has mapped a file of
 test("real mapped paths preserve literal escapes and ambiguous newlines", async () => {
   const scratch = await fixture();
   const elsewhere = await fixture();
+
   for (const name of [
     "literal\\040space",
     "literal\\012newline",
@@ -918,6 +1026,7 @@ test("real mapped paths preserve literal escapes and ambiguous newlines", async 
     await mkdir(candidate, { mode: 0o700 });
     const file = join(candidate, "data.bin");
     await writeFile(file, "x".repeat(8192));
+
     const mapping = Bun.spawn(
       [
         process.execPath,
@@ -928,6 +1037,7 @@ test("real mapped paths preserve literal escapes and ambiguous newlines", async 
       ],
       { cwd: elsewhere, stdout: "pipe", stderr: "ignore" },
     );
+
     try {
       expect((await mapping.stdout.getReader().read()).done).toBe(false);
       // Linux escapes only newline, leaving literal backslashes unchanged.
@@ -938,6 +1048,7 @@ test("real mapped paths preserve literal escapes and ambiguous newlines", async 
         name,
         await cleanupPathUse(candidate, undefined, undefined, view),
       ]).toEqual([name, "in-use"]);
+
       if (name.includes("\\040"))
         expect(
           await cleanupPathUse(
@@ -947,15 +1058,18 @@ test("real mapped paths preserve literal escapes and ambiguous newlines", async 
             view,
           ),
         ).toBe("unused");
+
       // Both spellings must be protected: maps cannot distinguish them.
       if (name.includes("\\012") || name.includes("\n")) {
         const ambiguous = candidate.includes("\n")
           ? candidate.replaceAll("\n", "\\012")
           : candidate.replaceAll("\\012", "\n");
+
         expect(
           await cleanupPathUse(ambiguous, undefined, undefined, view),
         ).toBe("in-use");
       }
+
       expect(
         await cleanupPathUse(`${candidate}-other`, undefined, undefined, view),
       ).toBe("unused");
@@ -970,6 +1084,7 @@ test("real process cwd is detected without reading contents", async () => {
   const scratch = await fixture();
   const candidate = join(scratch, "cwd");
   await mkdir(candidate);
+
   const child = Bun.spawn(
     [
       process.execPath,
@@ -978,6 +1093,7 @@ test("real process cwd is detected without reading contents", async () => {
     ],
     { cwd: candidate, stdout: "pipe", stderr: "ignore" },
   );
+
   try {
     await child.stdout.getReader().read();
     expect(await cleanupPathUse(candidate)).not.toBe("unused");
@@ -993,6 +1109,7 @@ test("fetch errors and malformed worktree metadata fail closed without exposing 
   for (const failure of ["fetch", "metadata"]) {
     const { repo } = await repository();
     await git(repo, "branch", "merged");
+
     const runner: CommandRunner = {
       run: async (command, options) => {
         if (
@@ -1006,9 +1123,11 @@ test("fetch errors and malformed worktree metadata fail closed without exposing 
             stdout: "private malformed output",
             stderr: "private secret",
           };
+
         return processRunner.run(command, options);
       },
     };
+
     const result = await cleanup(
       input([], {
         settings: Schema.decodeUnknownSync(cleanupSchema)({
@@ -1018,6 +1137,7 @@ test("fetch errors and malformed worktree metadata fail closed without exposing 
         runner,
       }),
     );
+
     expect(result.items.some((item) => item.status === "removed")).toBe(false);
     expect(await git(repo, "branch", "--list", "merged")).toContain("merged");
     expect(JSON.stringify(result)).not.toContain("private");
@@ -1029,13 +1149,17 @@ test("abort during completed Git deletion still records removed outcome", async 
   await git(repo, "branch", "merged");
   const controller = new AbortController();
   const statuses: string[] = [];
+
   const runner: CommandRunner = {
     run: async (command, options) => {
       const result = await processRunner.run(command, options);
+
       if (command.includes("-d")) controller.abort();
+
       return result;
     },
   };
+
   const result = await cleanup(
     input([], {
       settings: Schema.decodeUnknownSync(cleanupSchema)({
@@ -1049,6 +1173,7 @@ test("abort during completed Git deletion still records removed outcome", async 
       },
     }),
   );
+
   expect(result.items.find((item) => item.branch === "merged")?.status).toBe(
     "removed",
   );
@@ -1058,6 +1183,7 @@ test("abort during completed Git deletion still records removed outcome", async 
 test("permanent primary protection permits unused branch management, never directory removal", async () => {
   const { repo } = await repository();
   await git(repo, "branch", "merged");
+
   const result = await cleanup(
     input([], {
       settings: Schema.decodeUnknownSync(cleanupSchema)({
@@ -1067,6 +1193,7 @@ test("permanent primary protection permits unused branch management, never direc
       protectedPaths: [repo],
     }),
   );
+
   expect(result.items.find((item) => item.branch === "merged")?.status).toBe(
     "removed",
   );
@@ -1081,15 +1208,19 @@ test("scratch evidence stays offline, including nested repositories", async () =
     await mkdir(candidate);
     const nested = join(candidate, "nested");
     await git(candidate, "clone", "--no-hardlinks", "--", repo, nested);
+
     if (dirty) await writeFile(join(nested, "new"), "preserve");
     await age(candidate);
     const commands: string[][] = [];
+
     const runner: CommandRunner = {
       run: async (command, options) => {
         commands.push([...command]);
+
         return processRunner.run(command, options);
       },
     };
+
     const result = await cleanup(input([scratch], { runner }));
     expect(result.items[0]?.status).toBe(dirty ? "skipped" : "removed");
     expect(
@@ -1106,6 +1237,7 @@ test("Git state and process use are checked again after the durable intent", asy
     const { repo } = await repository();
     await git(repo, "branch", "merged");
     let recorded = false;
+
     const result = await cleanup(
       input([], {
         settings: Schema.decodeUnknownSync(cleanupSchema)({
@@ -1117,7 +1249,9 @@ test("Git state and process use are checked again after the durable intent", asy
         record: async (item) => {
           if (item.branch !== "merged" || item.status !== "planned") return;
           recorded = true;
+
           if (mode === "dirty") await writeFile(join(repo, "new"), "preserve");
+
           if (mode === "tip") {
             await git(repo, "commit", "--allow-empty", "-m", "new");
             await git(repo, "branch", "-f", "merged", "HEAD");
@@ -1125,6 +1259,7 @@ test("Git state and process use are checked again after the durable intent", asy
         },
       }),
     );
+
     expect(recorded).toBe(true);
     expect(result.items.find((item) => item.branch === "merged")?.status).toBe(
       "skipped",
@@ -1139,9 +1274,11 @@ test("an upstream configured to a local branch cannot prove pushed commits", asy
   await git(repo, "config", "branch.main.remote", ".");
   await git(repo, "config", "branch.main.merge", "refs/heads/main");
   await age(repo);
+
   const result = await cleanup(
     input([directory], { protectedPaths: [join(directory, "remote.git")] }),
   );
+
   expect(result.items.find((item) => item.path === repo)?.reason).toBe(
     "unpushed",
   );

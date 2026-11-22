@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { ReplyChunk } from "../shared/slack-format";
 import type { JobStatus } from "./store-types";
+
 export class TranscriptRecords {
   constructor(private readonly db: Database) {}
 
@@ -21,6 +22,7 @@ export class TranscriptRecords {
         "UPDATE sessions SET cursor=? WHERE conversation=? AND cursor IS NULL",
       )
       .run(cursor, conversation);
+
     return this.transcriptCursor(conversation);
   }
 
@@ -56,6 +58,7 @@ export class TranscriptRecords {
       WHERE j.botKey=? AND s.conversation=? AND (j.gate IS NULL OR j.gate='admitted') AND j.failure IS NOT 'muted'
       ORDER BY j.id DESC LIMIT 1`)
       .get(botKey, conversation);
+
     return (
       row && {
         ...row,

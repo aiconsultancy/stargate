@@ -3,15 +3,19 @@ export function parseVersion(text: string): [number, number, number] | null {
   const match = /^v?(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$/.exec(
     text.trim(),
   );
+
   if (!match) return null;
+
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
 function compareParts(a: readonly number[], b: readonly number[]) {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const difference = (a[i] ?? 0) - (b[i] ?? 0);
+
     if (difference) return Math.sign(difference);
   }
+
   return 0;
 }
 
@@ -19,12 +23,15 @@ function compareParts(a: readonly number[], b: readonly number[]) {
 export function compareVersions(a: string, b: string) {
   const left = parseVersion(a);
   const right = parseVersion(b);
+
   if (!left || !right) throw new Error("Invalid version.");
+
   return compareParts(left, right);
 }
 
 export function normalizeVersion(text: string) {
   const parsed = parseVersion(text);
+
   return parsed ? parsed.join(".") : null;
 }
 
@@ -45,26 +52,32 @@ export type ModelVersion = {
 export function parseModel(id: string): ModelVersion | null {
   const claude =
     /^claude-([a-z]+)-(0|[1-9]\d{0,3})(?:-(0|[1-9]\d{0,3}))?$/.exec(id);
+
   if (claude?.[1] && claude[2]) {
     const version = [
       Number(claude[2]),
       ...(claude[3] ? [Number(claude[3])] : []),
     ];
+
     return {
       family: `claude-${claude[1]}`,
       version,
       token: [claude[1], ...version].join("-"),
     };
   }
+
   const gpt = /^gpt-(0|[1-9]\d{0,3})(?:\.(0|[1-9]\d{0,3}))?-([a-z]+)$/.exec(id);
+
   if (gpt?.[1] && gpt[3]) {
     const version = [Number(gpt[1]), ...(gpt[2] ? [Number(gpt[2])] : [])];
+
     return {
       family: `gpt-${gpt[3]}`,
       version,
       token: [gpt[3], ...version].join("-"),
     };
   }
+
   return null;
 }
 
@@ -83,11 +96,14 @@ export function newerModels(
   families: readonly string[],
 ) {
   const base = parseModel(current);
+
   if (!base || !families.includes(base.family)) return [];
   const seen = new Set<string>();
+
   return catalog
     .flatMap((id) => {
       const parsed = parseModel(id);
+
       if (
         !parsed ||
         seen.has(id) ||
@@ -96,6 +112,7 @@ export function newerModels(
       )
         return [];
       seen.add(id);
+
       return [{ id, parsed }];
     })
     .sort(
@@ -109,7 +126,9 @@ export type ModelRef = { providerID: string; id: string; variant?: string };
 
 export function parseRef(text: string): ModelRef | null {
   const match = /^([^/\s#]+)\/([^\s#]+)(?:#([^\s#]+))?$/.exec(text);
+
   if (!match?.[1] || !match[2]) return null;
+
   return {
     providerID: match[1],
     id: match[2],

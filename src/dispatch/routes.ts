@@ -21,8 +21,11 @@ export const dispatchRoutes = {
     cursor?: string,
   ) => {
     const query = new URLSearchParams();
+
     for (const id of assignees) query.append("assignee", id);
+
     if (updatedSince !== undefined) query.set("updatedSince", updatedSince);
+
     return `${prefix}/issues?${query.toString()}&${page(cursor)}`;
   },
   /** Behaviour 2: unassigned issues flagged Ready for agents. */
@@ -31,6 +34,7 @@ export const dispatchRoutes = {
       readyForAgents: "true",
       assignee: "none",
     });
+
     return `${prefix}/issues?${query.toString()}&${page(cursor)}`;
   },
   /** One issue by UUID or identifier; PATCH it with `version` to edit. */
@@ -49,6 +53,8 @@ export const commentBody = (body: string) => ({ body });
 
 function page(cursor: string | undefined) {
   const query = new URLSearchParams({ limit: String(pageLimit) });
+
   if (cursor !== undefined) query.set("cursor", cursor);
+
   return query.toString();
 }

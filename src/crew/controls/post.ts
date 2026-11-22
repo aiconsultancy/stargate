@@ -25,17 +25,21 @@ export class CrewPost {
 
   async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
     const parsed = Schema.decodeUnknownResult(postInputSchema)(raw);
+
     if (Result.isFailure(parsed))
       throw new CrewError(
         "Invalid stargate_post input. Use the declared fields; nothing was posted.",
       );
+
     const cancelled = () => {
       if (caller.signal.aborted)
         throw new CrewError(
           "Post cancelled; retry with the same key to read any recorded outcome.",
         );
     };
+
     cancelled();
+
     try {
       await this.authority.captain(caller);
     } catch (error) {
@@ -44,17 +48,21 @@ export class CrewPost {
         "Captain verification unavailable; nothing was posted.",
       );
     }
+
     cancelled();
     const { captainDirectory, captainSessionID, cron } = this.authority.options;
+
     if (!cron)
       throw new CrewError(
         "stargate_post unavailable: bind this captain to its gateway config and bot (plugin option cron: { configPath, bot }) first.",
       );
+
     // Stable host tool identity makes a retry read its recorded outcome.
     const input =
       !parsed.success.key && caller.id
         ? { ...parsed.success, key: caller.id }
         : parsed.success;
+
     try {
       return await this.runner(
         input,

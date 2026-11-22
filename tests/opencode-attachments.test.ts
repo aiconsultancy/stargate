@@ -16,21 +16,27 @@ test("attachment eval: OpenCode receives image and document bytes through native
       }),
     ),
   });
+
   const received: z.infer<typeof payload>[] = [];
   let input = "";
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const url = new URL(request.url);
+
       if (url.pathname.endsWith("/prompt")) {
         const body = payload.parse(await request.json());
         received.push(body);
         input = body.id;
+
         return Response.json({ data: { id: input } });
       }
+
       if (url.pathname.endsWith("/wait"))
         return new Response(null, { status: 204 });
+
       if (url.pathname.endsWith("/message"))
         return Response.json({
           data: [
@@ -44,17 +50,21 @@ test("attachment eval: OpenCode receives image and document bytes through native
           ],
           cursor: {},
         });
+
       return new Response(null, { status: 404 });
     },
   });
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     const backend = new OpenCodeBackend(config);
+
     const files = [
       {
         name: "screen.png",
@@ -67,6 +77,7 @@ test("attachment eval: OpenCode receives image and document bytes through native
         data: new TextEncoder().encode("%PDF-1.7\nfixture"),
       },
     ];
+
     const signal = new AbortController().signal;
     expect(
       await backend.prompt(

@@ -53,6 +53,7 @@ export class LiveReply {
     if (!text.trim()) return;
     this.hasText = true;
     this.waitingStop.abort();
+
     if (this.held) return;
     this.enqueue(text);
   };
@@ -70,12 +71,16 @@ export class LiveReply {
     this.waitingStop.abort();
     await this.task;
     this.signal.throwIfAborted();
+
     if (!this.allowed()) throw new Error("Delivery access denied");
+
     if (!this.slack.update || !this.slack.remove || this.disabled)
       throw new Error("Cancellable maintenance notices unavailable");
+
     const preview = this.store
       .previews(this.job.id)
       .find(({ part }) => part === 0);
+
     if (
       !preview ||
       (await this.slack.update(
@@ -86,15 +91,18 @@ export class LiveReply {
       )) === false
     ) {
       if (preview) this.store.removePreview(this.job.id, 0);
+
       const ts = await this.slack.post(
         this.job.channel,
         this.job.thread,
         text,
         this.job.id,
       );
+
       if (!ts) throw new Error("Maintenance notice delivery unconfirmed");
       this.store.savePreview(this.job.id, 0, ts);
     }
+
     this.signal.throwIfAborted();
     this.shown.set(0, text);
   }
@@ -112,6 +120,7 @@ export class LiveReply {
     )
       return;
     this.pending = text;
+
     if (this.task !== undefined) return;
     this.task = this.flush()
       .catch(() => {
@@ -124,12 +133,14 @@ export class LiveReply {
       })
       .finally(() => {
         this.task = undefined;
+
         if (this.pending !== undefined) this.enqueue(this.pending);
       });
   }
 
   private async waiting(options: LiveReplyOptions) {
     const settings = options.waiting;
+
     if (
       !settings ||
       settings.delayMs === null ||
@@ -140,6 +151,7 @@ export class LiveReply {
     const signal = AbortSignal.any([this.signal, this.waitingStop.signal]);
     await this.wait(settings.delayMs, signal);
     let index = 0;
+
     while (!signal.aborted && !this.hasText && !this.disabled) {
       this.enqueue(
         options.phrase?.(settings.name, index++) ??
@@ -152,31 +164,41 @@ export class LiveReply {
   private async flush() {
     while (this.pending !== undefined && !this.signal.aborted) {
       const wait = this.nextWrite - Date.now();
+
       if (wait > 0) await this.wait(wait, this.signal);
       this.signal.throwIfAborted();
       const text = this.pending;
       this.pending = undefined;
+
       if (text === undefined) continue;
+
       const previews = new Map(
         this.store.previews(this.job.id).map(({ part, ts }) => [part, ts]),
       );
+
       // Classify the whole cleaned snapshot once, then deliver each chunk
-      // with its own content; the transport never reparses a chunk.
+      // With its own content; the transport never reparses a chunk.
       const parts: ReplyChunk[] =
         this.slack.prepareReply?.(text) ?? chunks(text);
+
       for (let i = 0; i < parts.length; i++) {
         this.signal.throwIfAborted();
+
         if (!this.allowed()) throw new Error("Delivery access denied");
         const part = parts[i];
+
         if (part === undefined) continue;
         const body = replyText(part);
         const content = typeof part === "string" ? undefined : part.content;
+
         const key =
           typeof part === "string"
             ? part
             : JSON.stringify({ text: body, content });
+
         if (this.shown.get(i) === key) continue;
         const ts = previews.get(i);
+
         if (
           !ts ||
           (await this.slack.update?.(
@@ -188,6 +210,7 @@ export class LiveReply {
           )) === false
         ) {
           if (ts) this.store.removePreview(this.job.id, i);
+
           const created = await this.slack.post(
             this.job.channel,
             this.job.thread,
@@ -196,12 +219,15 @@ export class LiveReply {
             undefined,
             content,
           );
+
           if (!created)
             throw new Error("Slack did not return a message timestamp");
           this.store.savePreview(this.job.id, i, created);
         }
+
         this.shown.set(i, key);
         this.nextWrite = Date.now() + this.intervalMs;
+
         // Respect channel posting limits even when a snapshot spans messages.
         if (this.intervalMs > 0 && i + 1 < parts.length)
           await this.wait(this.intervalMs, this.signal);

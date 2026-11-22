@@ -28,7 +28,9 @@ export type Session = {
   id: string;
   scope: "captain-session" | "crew-session";
 };
+
 type Settings = NonNullable<MaintenanceConfig["models"]>;
+
 type Proxy = NonNullable<MaintenanceConfig["proxy"]>;
 
 /** Everything read once for model planning; rebuilt into work as needed. */
@@ -69,6 +71,7 @@ export async function readModelInputs(input: {
 }): Promise<ModelInputs> {
   const { settings } = input;
   const refs: ModelRef[] = [];
+
   const globalCatalog = settings.updateGlobalCatalog
     ? {
         path: globalCatalogPath(settings),
@@ -76,22 +79,27 @@ export async function readModelInputs(input: {
         families: settings.families,
       }
     : undefined;
+
   if (globalCatalog)
     refs.push(
       ...catalogRefs(globalCatalog.text, settings.families, settings.providers),
     );
   let snapshot: ProfilesSnapshot | undefined;
+
   if (settings.agentProfiles) {
     snapshot = await readProfiles(settings.agentProfiles);
     refs.push(...refsInProfiles(snapshot));
   }
+
   const documents: ModelInputs["documents"] = [];
+
   for (const path of settings.teamFiles)
     documents.push({
       path,
       scope: "team-file",
       text: await readFile(path, "utf8"),
     });
+
   for (const crew of input.crews)
     for (const root of crew.roots)
       documents.push({
@@ -99,19 +107,23 @@ export async function readModelInputs(input: {
         scope: "opencode-config",
         text: await readFile(root.configPath, "utf8"),
       });
+
   for (const document of documents) refs.push(...modelRefs(document.text));
   const live: ModelInputs["live"] = [];
   const opencode = await input.connect().catch(() => undefined);
+
   if (opencode)
     for (const session of input.sessions.slice(0, 500)) {
       const model = await opencode
         .sessionModel(session.id, input.signal)
         .catch(() => null);
+
       if (model) {
         live.push({ session, model });
         refs.push(model);
       }
     }
+
   return {
     providers: settings.providers,
     profilesRoot: settings.agentProfiles,
@@ -142,16 +154,20 @@ export async function selectModelUpgrades(input: {
 }) {
   const { inputs, settings, proxy, signal } = input;
   const catalog = await proxyModels(proxy, signal);
+
   const candidates = upgradeCandidates(
     inputs.refs,
     catalog,
     settings.families,
     inputs.providers,
   );
+
   const rejected: ModelChange[] = [];
+
   for (const id of catalog) {
     const match = /^(.*)-(?:fast|ultrafast)$/.exec(id);
     const family = match?.[1] ? parseModel(match[1]) : null;
+
     if (family && settings.families.includes(family.family))
       rejected.push({
         scope: "catalog",
@@ -162,17 +178,22 @@ export async function selectModelUpgrades(input: {
         reason: "new-product",
       });
   }
+
   if (!input.probe) {
     const upgrades = new Map<string, string>();
+
     for (const [from, list] of candidates)
       if (list[0]) upgrades.set(from, list[0]);
+
     return { upgrades, rejected };
   }
+
   const { chosen, failed } = await chooseUpgrades(
     candidates,
     (id) => probeModel(proxy, id, signal),
     settings.probes,
   );
+
   const additions = inputs.globalCatalog
     ? upgradeGlobalCatalog(
         inputs.globalCatalog.text,
@@ -181,6 +202,7 @@ export async function selectModelUpgrades(input: {
         inputs.providers,
       ).additions
     : [];
+
   for (const miss of failed)
     rejected.push({
       scope: "catalog",
@@ -190,19 +212,24 @@ export async function selectModelUpgrades(input: {
       status: "skipped",
       reason: "probe-failed",
     });
+
   const opencode = chosen.size
     ? await input.connect().catch(() => undefined)
     : undefined;
+
   const locations = [
     undefined,
     ...input.crews.flatMap((crew) => crew.roots.map((root) => root.directory)),
   ];
+
   for (const directory of opencode ? locations : []) {
     const models = await opencode?.catalog(directory, signal).catch(() => null);
+
     for (const [from, to] of [...chosen]) {
       const needed = inputs.refs.filter(
         (ref) => ref.id === from && inputs.providers.includes(ref.providerID),
       );
+
       const ok =
         !!models &&
         needed.every(
@@ -220,6 +247,7 @@ export async function selectModelUpgrades(input: {
                 (!ref.variant || addition.variants.includes(ref.variant)),
             ),
         );
+
       if (ok) continue;
       chosen.delete(from);
       rejected.push({
@@ -232,6 +260,7 @@ export async function selectModelUpgrades(input: {
       });
     }
   }
+
   if (!opencode)
     for (const [from, to] of chosen) {
       chosen.delete(from);
@@ -244,6 +273,7 @@ export async function selectModelUpgrades(input: {
         reason: "catalog-missing",
       });
     }
+
   return { upgrades: chosen, rejected };
 }
 
@@ -260,8 +290,10 @@ export function buildModelWork(
     sessions: [],
     changes: [],
   };
+
   if (!upgrades.size) return work;
   const { providers } = inputs;
+
   if (inputs.globalCatalog) {
     const catalog = upgradeGlobalCatalog(
       inputs.globalCatalog.text,
@@ -269,12 +301,14 @@ export function buildModelWork(
       inputs.globalCatalog.families,
       providers,
     );
+
     if (catalog.additions.length) {
       work.files.push({
         path: inputs.globalCatalog.path,
         text: catalog.text,
         expected: inputs.globalCatalog.text,
       });
+
       for (const addition of catalog.additions)
         work.changes.push({
           scope: "catalog",
@@ -289,6 +323,7 @@ export function buildModelWork(
           ...catalog.additions.map((addition) => addition.to),
           ...inputs.refs.flatMap((ref) => {
             const to = upgrades.get(ref.id);
+
             return to && providers.includes(ref.providerID)
               ? [{ ...ref, id: to }]
               : [];
@@ -297,19 +332,23 @@ export function buildModelWork(
       };
     }
   }
+
   if (inputs.snapshot) {
     try {
       const result = upgradeProfiles(inputs.snapshot, upgrades, providers);
+
       for (const write of result.writes)
         work.files.push({ path: write.path, text: write.content });
       work.profileLinks.push(...result.links);
       work.agents.push(...result.live);
+
       for (const change of result.changes)
         work.changes.push({
           scope: "agent-profile",
           ...change,
           status: "planned",
         });
+
       for (const change of result.skipped)
         work.changes.push({
           scope: "agent-profile",
@@ -328,14 +367,17 @@ export function buildModelWork(
       });
     }
   }
+
   for (const document of inputs.documents) {
     try {
       const result =
         document.scope === "team-file"
           ? upgradeTeamFile(document.text, upgrades, providers)
           : upgradeOpenCodeProfile(document.text, upgrades, providers);
+
       if (!result.changes.length) continue;
       work.files.push({ path: document.path, text: result.text });
+
       for (const change of result.changes)
         work.changes.push({
           scope: document.scope,
@@ -355,10 +397,12 @@ export function buildModelWork(
       });
     }
   }
+
   for (const { session, model } of inputs.live) {
     const next = providers.includes(model.providerID)
       ? upgrades.get(model.id)
       : undefined;
+
     if (!next) continue;
     const to = { ...model, id: next };
     work.sessions.push({ session, from: model, to });
@@ -370,6 +414,7 @@ export function buildModelWork(
       status: "planned",
     });
   }
+
   return work;
 }
 
@@ -388,16 +433,21 @@ export async function applyLiveModels(
   clock: { now(): number; until: number },
 ): Promise<{ ok: boolean; skipped: Session[] }> {
   const skipped: Session[] = [];
+
   for (const directory of work.catalogChecks?.directories ?? []) {
     const remaining = clock.until - clock.now();
+
     if (remaining < openCodeCallMs) return { ok: false, skipped };
+
     const catalogSignal = AbortSignal.any([
       signal,
       AbortSignal.timeout(remaining),
     ]);
+
     const catalog = await opencode
       .catalog(directory, catalogSignal)
       .catch(() => null);
+
     if (
       clock.now() >= clock.until ||
       !catalog ||
@@ -412,13 +462,16 @@ export async function applyLiveModels(
     )
       return { ok: false, skipped };
   }
+
   for (const item of work.sessions) {
     if (clock.now() >= clock.until) {
       skipped.push(item.session);
       continue;
     }
+
     try {
       const current = await opencode.sessionModel(item.session.id, signal);
+
       // The session moved on its own since planning: leave it alone.
       if (!current || formatRef(current) !== formatRef(item.from)) continue;
       await journal.set("sessions", [
@@ -427,20 +480,25 @@ export async function applyLiveModels(
       ]);
       await opencode.switchModel(item.session.id, item.to, signal);
       const after = await opencode.sessionModel(item.session.id, signal);
+
       if (!after || formatRef(after) !== formatRef(item.to))
         return { ok: false, skipped };
     } catch {
       signal.throwIfAborted();
+
       return { ok: false, skipped };
     }
   }
+
   if (!work.agents.length) return { ok: true, skipped };
   const agents = await opencode.agents(undefined, signal).catch(() => null);
+
   return {
     ok:
       agents !== null &&
       work.agents.every((agent) => {
         const live = agents.find((candidate) => candidate.id === agent.name);
+
         return (
           live?.model !== undefined &&
           live.model !== null &&

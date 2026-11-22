@@ -36,7 +36,7 @@ export function redactCredentials(text: string, limit = 1500): string {
     .reduce(
       (redacted, [pattern, replacement]) =>
         redacted.replace(pattern, replacement),
-      text.slice(0, 64000),
+      text.slice(0, 64_000),
     )
     .replace(/\p{Cc}/gu, (character) =>
       ["\n", "\r", "\t"].includes(character) ? character : "",

@@ -22,16 +22,20 @@ const recoveryBranches = [
   abandonInputSchema,
   ...workspaceInputSchemas,
 ] as const;
+
 // Known-branch decoding retains acknowledgement paths before union routing.
 const recoveryOperationSchema = Schema.Unknown.check(
   Schema.makeFilter((raw) => {
     if (!Predicate.isObject(raw) || typeof raw["op"] !== "string")
       return undefined;
+
     const branch = recoveryBranches.find(
       (member) => member.fields.op.ast.literal === raw["op"],
     );
+
     if (!branch) return undefined;
     const parsed = Schema.decodeUnknownResult(branch, { errors: "all" })(raw);
+
     return Result.isFailure(parsed) ? parsed.failure.issue : undefined;
   }),
 ).pipe(Schema.decodeTo(settingsDiscriminatedUnion("op", recoveryBranches)));
@@ -44,11 +48,15 @@ export const recoveryRequestSchema = settingsStruct({
   project: Schema.optional(effectProjectKeySchema),
   request: recoveryOperationSchema,
 });
+
 const recoveryNativeInput = Schema.toStandardSchemaV1(recoveryRequestSchema);
+
 const recoveryJSON = ({ target }: { target: StandardJSONSchemaV1.Target }) => {
   const json = settingsInputAdvertisement(recoveryRequestSchema);
+
   if (target === "draft-2020-12")
     return { $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12, ...json };
+
   if (target === "draft-07")
     return {
       $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
@@ -60,14 +68,16 @@ const recoveryJSON = ({ target }: { target: StandardJSONSchemaV1.Target }) => {
     };
   throw new Error(`Unsupported recovery schema target: ${target}`);
 };
+
 // Keep the Effect codec prototype/AST recognized by the installed SDK, with
-// input-side JSON metadata separate from decoded required defaults.
+// Input-side JSON metadata separate from decoded required defaults.
 const recoveryPortableInput = Object.assign(recoveryNativeInput, {
   "~standard": {
     ...recoveryNativeInput["~standard"],
     jsonSchema: { input: recoveryJSON, output: recoveryJSON },
   },
 });
+
 export const CrewRecovery = Rpc.define({
   id: "stargate.crew.recovery",
   events: {},
@@ -88,6 +98,7 @@ export async function runRecoveryOperator(
   signal: AbortSignal,
 ): Promise<string> {
   const input = decodeSettings(recoveryRequestSchema, raw);
+
   return JSON.stringify(
     await engine.run(input.request, {
       sessionID: input.sessionID,

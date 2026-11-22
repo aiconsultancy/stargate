@@ -3,6 +3,7 @@ import { openStore } from "../src/app/open-store";
 import { TranscriptConflict, type Store } from "../src/gateway/store";
 
 const stores: Store[] = [];
+
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
 });
@@ -20,6 +21,7 @@ test("captain cursor seeds only from its matching root's last started owner", ()
     text: "old",
   });
   const job = store.ready("bot", Date.now(), 1)[0];
+
   if (!job) throw new Error("Missing job");
   store.running(job.id);
   store.saveSession("source", "captain", "head");
@@ -49,6 +51,7 @@ test("captain cursor seeds only from its matching root's last started owner", ()
 test("captain response, cursor and explicit previous-source outbox commit atomically", () => {
   const store = openStore(":memory:");
   stores.push(store);
+
   const enqueue = (eventId: string, channel: string) => {
     store.enqueue({
       eventId,
@@ -59,12 +62,16 @@ test("captain response, cursor and explicit previous-source outbox commit atomic
       user: "U123",
       text: eventId,
     });
+
     const job = store
       .ready("bot", Date.now(), 10)
       .find((job) => job.eventId === eventId);
+
     if (!job) throw new Error("Missing job");
+
     return job;
   };
+
   const old = enqueue("old", "D123");
   store.running(old.id);
   store.respond(old.id, ["old answer"]);
@@ -72,6 +79,7 @@ test("captain response, cursor and explicit previous-source outbox commit atomic
   const current = enqueue("current", "C123");
   store.running(current.id);
   const from = store.captainCursor("bot", "pin");
+
   const commit = {
     botKey: "bot",
     sessionID: "pin",
@@ -82,14 +90,17 @@ test("captain response, cursor and explicit previous-source outbox commit atomic
       { job: old.id, eventId: "transcript:late", chunks: ["old continuation"] },
     ],
   };
+
   store.respond(current.id, ["current answer"], undefined, { captain: commit });
   expect(store.captainCursor("bot", "pin")).toEqual({
     cursor: "head",
     owner: current.id,
   });
+
   const outbox = store
     .ready("bot", Date.now(), 10)
     .find((job) => job.eventId === "transcript:late");
+
   expect(outbox).toMatchObject({
     channel: "D123",
     thread: "1.000",
@@ -126,6 +137,7 @@ test("persisted input anchors failed baselines and cannot cross bot namespaces",
     text: "start",
   });
   const job = store.ready("bot", Date.now(), 1)[0];
+
   if (!job) throw new Error("Missing job");
   store.running(job.id);
   store.captainCursor("bot", "pin");
@@ -143,6 +155,7 @@ test("persisted input anchors failed baselines and cannot cross bot namespaces",
 test("serial ready selection keeps FIFO across sources during delivery backoff", () => {
   const store = openStore(":memory:");
   stores.push(store);
+
   for (const [eventId, conversation] of [
     ["reply", "a"],
     ["first-input", "a"],
@@ -159,7 +172,9 @@ test("serial ready selection keeps FIFO across sources during delivery backoff",
       text: eventId,
     });
   }
+
   const first = store.ready("bot", Date.now(), 1)[0];
+
   if (!first) throw new Error("Missing job");
   store.running(first.id);
   store.respond(first.id, ["reply"]);

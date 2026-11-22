@@ -24,6 +24,7 @@ function runHook(dir: string, env: { remoteBranch?: string; toRef?: string }) {
       PRE_COMMIT_TO_REF: env.toRef ?? "",
     },
   });
+
   return {
     status: result.status ?? -1,
     output: `${result.stdout}${result.stderr}`,
@@ -35,8 +36,10 @@ function git(dir: string, ...args: string[]) {
     timeout: 30_000,
     encoding: "utf8",
   });
+
   if (result.status !== 0)
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+
   return result.stdout.trim();
 }
 
@@ -54,22 +57,26 @@ async function scenario() {
   git(work, "commit", "-m", "base");
   git(work, "remote", "add", "origin", remote);
   git(work, "push", "--quiet", "origin", "main");
+
   return { root, remote, work };
 }
 
 describe("pre-push main-ancestor hook", () => {
   test("an up-to-date branch push passes", async () => {
     const { root, work } = await scenario();
+
     try {
       git(work, "checkout", "-b", "feature");
       await writeFile(join(work, "file.txt"), "two\n");
       git(work, "commit", "-am", "feature");
       git(work, "fetch", "--quiet", "origin");
       const sha = git(work, "rev-parse", "HEAD");
+
       const { status } = runHook(work, {
         remoteBranch: "refs/heads/feature",
         toRef: sha,
       });
+
       expect(status).toBe(0);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -78,6 +85,7 @@ describe("pre-push main-ancestor hook", () => {
 
   test("a behind-main branch is refused with rebase instructions", async () => {
     const { root, remote, work } = await scenario();
+
     try {
       // Move the remote's main forward without updating the local clone.
       const other = join(root, "other");
@@ -93,10 +101,12 @@ describe("pre-push main-ancestor hook", () => {
       git(work, "commit", "-am", "stale");
       git(work, "fetch", "--quiet", "origin");
       const sha = git(work, "rev-parse", "HEAD");
+
       const { status, output } = runHook(work, {
         remoteBranch: "refs/heads/stale",
         toRef: sha,
       });
+
       expect(status).toBe(1);
       expect(output).toContain("behind the fetched origin/main");
       expect(output).toContain("git rebase origin/main");
@@ -107,6 +117,7 @@ describe("pre-push main-ancestor hook", () => {
 
   test("main pushes, deletions and non-branch refs are skipped", async () => {
     const { root, work } = await scenario();
+
     try {
       const sha = git(work, "rev-parse", "HEAD");
       expect(
@@ -125,12 +136,14 @@ describe("pre-push main-ancestor hook", () => {
 
   test("outside prek, with no push context, the hook passes", async () => {
     const { root, work } = await scenario();
+
     try {
       const result = spawnSync("/bin/sh", [HOOK], {
         cwd: work,
         timeout: 30_000,
         encoding: "utf8",
       });
+
       expect(result.status).toBe(0);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -139,14 +152,17 @@ describe("pre-push main-ancestor hook", () => {
 
   test("a failed fetch refuses the push with a clear message", async () => {
     const { root, work } = await scenario();
+
     try {
       git(work, "remote", "set-url", "origin", join(root, "missing.git"));
       git(work, "checkout", "-b", "feature");
       const featureSha = git(work, "rev-parse", "HEAD");
+
       const { status, output } = runHook(work, {
         remoteBranch: "refs/heads/feature",
         toRef: featureSha,
       });
+
       expect(status).toBe(1);
       expect(output).toContain("cannot fetch origin/main");
       expect(output).toContain("--no-verify");

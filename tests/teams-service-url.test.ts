@@ -23,7 +23,7 @@ describe("Bot Connector service URL allow-list", () => {
     );
   });
 
-  const refused: Array<[string, string]> = [
+  const refused: [string, string][] = [
     ["plain http", "http://smba.trafficmanager.net/emea/"],
     ["another host", "https://evil.example.com/"],
     [
@@ -42,6 +42,7 @@ describe("Bot Connector service URL allow-list", () => {
     ["a fragment", "https://smba.trafficmanager.net/emea/#x"],
     ["an unparseable URL", "not a url"],
   ];
+
   for (const [name, url] of refused) {
     test(`refuses ${name}`, () => {
       assert.equal(isAllowedServiceUrl(url), false, url);

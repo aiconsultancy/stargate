@@ -2,6 +2,7 @@ import { Predicate, Result, Schema, type SchemaAST, SchemaIssue } from "effect";
 import { settingsIssues } from "./settings-schema";
 
 type Issue = ReturnType<typeof settingsIssues>["issues"][number];
+
 const pathOf = (issue: Issue): PropertyKey[] =>
   issue.path?.map((part) => (typeof part === "object" ? part.key : part)) ?? [];
 
@@ -18,6 +19,7 @@ function customIssues(
   issues: Issue[],
 ): void {
   let decoded: Result.Result<unknown, Schema.SchemaError> | undefined;
+
   try {
     decoded = Schema.decodeUnknownResult(
       Schema.make<Schema.Codec<unknown>>(ast),
@@ -27,6 +29,7 @@ function customIssues(
     // A transform may require a previously checked format (for example a URL).
     // Its authoritative failure is already present; do not invent diagnostics.
   }
+
   const check = (filter: SchemaAST.Check<unknown>): void => {
     if (filter._tag === "FilterGroup") {
       for (const child of filter.checks) check(child);
@@ -43,7 +46,9 @@ function customIssues(
             : decoded && Result.isSuccess(decoded)
               ? decoded.success
               : undefined;
+
         const issue = filter.run(value, ast, { errors: "all" });
+
         if (issue)
           for (const item of settingsIssues(
             new SchemaIssue.Filter(filter, issue),
@@ -57,15 +62,19 @@ function customIssues(
       }
     }
   };
+
   for (const filter of ast.checks ?? []) check(filter);
+
   for (const link of ast.encoding ?? [])
     customIssues(link.to, input, path, issues);
+
   switch (ast._tag) {
     case "Objects":
       if (Predicate.isObject(input)) {
         const fields = new Set(
           ast.propertySignatures.map((property) => property.name),
         );
+
         for (const property of ast.propertySignatures)
           customIssues(
             property.type,
@@ -73,18 +82,22 @@ function customIssues(
             [...path, property.name],
             issues,
           );
+
         for (const key of Object.keys(input))
           if (!fields.has(key))
             for (const index of ast.indexSignatures)
               customIssues(index.type, input[key], [...path, key], issues);
       }
+
       break;
     case "Arrays":
       if (Array.isArray(input))
         for (const [index, value] of input.entries()) {
           const item = ast.elements[index] ?? ast.rest[0];
+
           if (item) customIssues(item, value, [...path, index], issues);
         }
+
       break;
     case "Union":
       for (const member of ast.types) {
@@ -104,6 +117,7 @@ function customIssues(
           /* A different branch can still be structurally valid. */
         }
       }
+
       break;
     default:
       break;
@@ -116,11 +130,14 @@ export function decodeSettings<S extends Schema.Codec<unknown, unknown>>(
   input: unknown,
 ): S["Type"] {
   const result = Schema.decodeUnknownResult(schema, { errors: "all" })(input);
+
   if (Result.isSuccess(result)) return result.success;
   const issues = [...settingsIssues(result.failure.issue).issues];
   customIssues(schema.ast, input, [], issues);
+
   const lines = new Set(
     issues.map((issue) => `${JSON.stringify(pathOf(issue))}: ${issue.message}`),
   );
+
   throw new Error(`Invalid configuration:\n${[...lines].join("\n")}`);
 }

@@ -39,6 +39,7 @@ const headers = {
 
 function contentPolicy(html: string): string {
   const hashes = { script: new Set<string>(), style: new Set<string>() };
+
   // Reject external assets; only exact bundled favicon data may use link href.
   if (
     /(?:https?|wss?|ftp):\/\/|(?:url\(\s*["']?|@import\s*["'])\s*\/\//i.test(
@@ -47,11 +48,13 @@ function contentPolicy(html: string): string {
   ) {
     throw new Error("Dashboard HTML must be self-contained");
   }
+
   let block: { kind: "script" | "style"; body: string } | undefined;
   new HTMLRewriter()
     .on("*", {
       element(element) {
         const name = element.tagName;
+
         const favicon =
           name === "link" &&
           element.getAttribute("rel") === "icon" &&
@@ -64,9 +67,11 @@ function contentPolicy(html: string): string {
           [...element.attributes].every(([key]) =>
             ["rel", "type", "sizes", "href", "media"].includes(key),
           );
+
         for (const [key, value] of element.attributes) {
           const embeddedFavicon =
             favicon && key === "href" && isDashboardFavicon(value);
+
           if (
             key.startsWith("on") ||
             ((name === "script" || name === "style" || name === "link") &&
@@ -79,11 +84,13 @@ function contentPolicy(html: string): string {
             throw new Error("Dashboard HTML must be self-contained");
           }
         }
+
         if (name === "script" || name === "style") {
           const inline = { kind: name, body: "" } satisfies {
             kind: "script" | "style";
             body: string;
           };
+
           block = inline;
           element.onEndTag(() => {
             hashes[inline.kind].add(
@@ -100,8 +107,10 @@ function contentPolicy(html: string): string {
       },
     })
     .transform(html);
+
   if (block)
     throw new Error("Dashboard HTML contains an unclosed inline block");
+
   return [
     "default-src 'none'",
     `script-src ${[...hashes.script].join(" ") || "'none'"}`,
@@ -121,6 +130,7 @@ function createDashboard(options: Options) {
 
   async function fetch(request: Request): Promise<Response> {
     const head = request.method === "HEAD";
+
     const respond = (
       status: number,
       body: unknown,
@@ -134,34 +144,43 @@ function createDashboard(options: Options) {
           ...extra,
         },
       });
+
     const error = (
       status: number,
       text: string,
       extra?: Record<string, string>,
     ) => respond(status, { error: text }, extra);
+
     if (request.method !== "GET" && !head) {
       return error(405, "Method not allowed", { Allow: "GET, HEAD" });
     }
+
     const url = new URL(request.url);
+
     const route = /^\/api\/ships\/([^/]+)(?:\/(sessions|entries))?$/.exec(
       url.pathname,
     );
+
     const kind =
       url.pathname === "/api/fleet" ? "fleet" : (route?.[2] ?? "ship");
+
     if (url.pathname !== "/" && url.pathname !== "/api/fleet" && !route) {
       return error(404, "Not found");
     }
+
     const allowed =
       kind === "sessions"
         ? ["parent", "cursor"]
         : kind === "entries"
           ? ["session", "cursor", "order", "detail", "limit"]
           : [];
+
     for (const key of url.searchParams.keys()) {
       if (!allowed.includes(key) || url.searchParams.getAll(key).length !== 1) {
         return error(400, "Invalid request");
       }
     }
+
     if (url.pathname === "/") {
       return new Response(head ? null : html, {
         headers: {
@@ -171,15 +190,20 @@ function createDashboard(options: Options) {
         },
       });
     }
+
     const id = route?.[1] ?? "";
+
     if (route && !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) {
       return error(400, "Invalid request");
     }
+
     const query = Object.fromEntries(url.searchParams);
+
     const children = decodeChildren({
       parentID: query["parent"],
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
     });
+
     const entries = decodeEntries({
       sessionID: query["session"],
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
@@ -193,19 +217,24 @@ function createDashboard(options: Options) {
           }
         : {}),
     });
+
     if (
       (kind === "sessions" && Option.isNone(children)) ||
       (kind === "entries" && Option.isNone(entries))
     ) {
       return error(400, "Invalid request");
     }
+
     if (options.signal.aborted) return error(503, "Service unavailable");
+
     if (pending.size >= 8)
       return error(503, "Service unavailable", { "Retry-After": "1" });
+
     const signal = AbortSignal.any([
       options.signal,
       AbortSignal.timeout(options.timeoutMs ?? 20_000),
     ]);
+
     const work = Promise.resolve().then<unknown>(() => {
       switch (kind) {
         case "fleet":
@@ -230,8 +259,10 @@ function createDashboard(options: Options) {
         default:
           return options.source.ship(id, signal);
       }
+
       return undefined;
     });
+
     pending.add(work);
     // Keep the slot until underlying work ends, even if it ignores cancellation.
     void work.then(
@@ -239,25 +270,32 @@ function createDashboard(options: Options) {
       () => pending.delete(work),
     );
     let onAbort = () => {};
+
     const aborted = new Promise<never>((_resolve, reject) => {
       onAbort = () => reject(signal.reason);
       signal.addEventListener("abort", onAbort, { once: true });
+
       if (signal.aborted) onAbort();
     });
+
     try {
       const result = await Promise.race([work, aborted]);
+
       return result === undefined
         ? error(404, "Not found")
         : respond(200, result);
     } catch {
       if (options.signal.aborted) return error(503, "Service unavailable");
+
       if (signal.aborted) return error(504, "Gateway timeout");
       options.log.warn({ route: kind }, "Dashboard source failed");
+
       return error(502, "Bad gateway");
     } finally {
       signal.removeEventListener("abort", onAbort);
     }
   }
+
   return {
     fetch,
     drain: async () => {
@@ -280,6 +318,7 @@ export async function startDashboard(
   },
 ): Promise<{ stop(): Promise<void> }> {
   const parent = await lstat(dirname(options.socket));
+
   if (
     !parent.isDirectory() ||
     parent.uid !== process.getuid?.() ||
@@ -293,11 +332,14 @@ export async function startDashboard(
         : "Dashboard socket directory must be private and owned by the current user",
     );
   }
+
   const shutdown = new AbortController();
+
   const dashboard = createDashboard({
     ...options,
     signal: AbortSignal.any([options.signal, shutdown.signal]),
   });
+
   if (options.groupAccess) {
     // The existing listener checks every ancestor and binds under umask 0117.
     // The setgid directory controls the operator group; no chgrp or home access.
@@ -324,10 +366,12 @@ export async function startDashboard(
           response.end();
         });
     });
+
     server.requestTimeout = 30_000;
     server.headersTimeout = 10_000;
     server.keepAliveTimeout = 1000;
     let identity: SocketIdentity | undefined;
+
     try {
       identity = await listenOnUnixSocket(
         server,
@@ -338,7 +382,9 @@ export async function startDashboard(
       await closeHttpServer(server);
       throw error;
     }
+
     let stopping: Promise<void> | undefined;
+
     return {
       stop() {
         stopping ??= (async () => {
@@ -347,32 +393,40 @@ export async function startDashboard(
           await dashboard.drain();
           unlinkOwnSocket(options.socket, identity, options.ownership);
         })();
+
         return stopping;
       },
     };
   }
+
   const old = await socketStat(options.socket);
+
   if (old) {
     if (!old.isSocket())
       throw new Error("Dashboard socket path is not a socket");
     await unlink(options.socket);
   }
+
   const server = Bun.serve({
     unix: options.socket,
     fetch(request, server) {
       server.timeout(request, 30);
+
       return dashboard.fetch(request);
     },
   });
+
   // Bun removes its socket path on stop. The caller's exclusive lock on this
-  // directory means no other process creates that path meanwhile.
+  // Directory means no other process creates that path meanwhile.
   try {
     await chmod(options.socket, 0o600);
   } catch (error) {
     await server.stop(true);
     throw error;
   }
+
   let stopping: Promise<void> | undefined;
+
   return {
     stop() {
       stopping ??= (async () => {
@@ -380,6 +434,7 @@ export async function startDashboard(
         await server.stop();
         await dashboard.drain();
       })();
+
       return stopping;
     },
   };

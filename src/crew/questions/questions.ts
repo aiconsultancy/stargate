@@ -20,6 +20,7 @@ import {
 import type { Team } from "../team";
 
 const token = Schema.String.check(Schema.isPattern(/^[a-f0-9]{32}$/));
+
 export const crewQuestionInputSchema = Schema.Union([
   Schema.Struct({
     op: Schema.Literal("answer"),
@@ -31,12 +32,15 @@ export const crewQuestionInputSchema = Schema.Union([
   }),
   Schema.Struct({ op: Schema.Literal("cancel"), token }),
 ]);
+
 const decode = Schema.decodeUnknownResult(crewQuestionInputSchema, {
   onExcessProperty: "error",
 });
+
 const decodeReceipt = Schema.decodeUnknownResult(
   Schema.Struct({ stored: Schema.Literal(true) }),
 );
+
 type QuestionBackend = Pick<
   Required<AgentBackend>,
   "pendingQuestions" | "questionBelongsToInput" | "replyQuestion"
@@ -47,12 +51,14 @@ type QuestionBackend = Pick<
     signal: AbortSignal,
   ) => Promise<"answered" | "cancelled" | undefined>;
 };
+
 interface Authority {
   options: { captainDirectory: string; team: Team };
   state: CrewState;
   captain(caller: CrewCaller): Promise<void>;
   dm(input: unknown, caller: CrewCaller): Promise<unknown>;
 }
+
 type Options = {
   settings?: () => Promise<QuestionSettings>;
   enableWhenMissing?: () => boolean;
@@ -107,6 +113,7 @@ export class CrewQuestions {
     >,
   ) {
     const task = this.authority.state.task(offer.taskID);
+
     if (
       task?.status !== "running" ||
       task.released ||
@@ -116,10 +123,13 @@ export class CrewQuestions {
       this.authority.state.activeTask(task.crewID)?.id !== task.id
     )
       return;
+
     const member = this.authority.options.team.crew.find(
       (m) => m.id === task.crewID,
     );
+
     const peer = this.authority.state.peer(task.crewID);
+
     if (
       !member ||
       member.backend ||
@@ -127,25 +137,33 @@ export class CrewQuestions {
       peer.status !== "ready"
     )
       return;
+
     return task;
   }
 
   async poll(signal: AbortSignal, available = true) {
     const settings = await this.settings();
+
     if (!settings.enabled) return;
     const members = this.authority.options.team.crew.filter((m) => !m.backend);
+
     // Rotate before I/O: one unavailable worker cannot starve later workers.
     for (let count = 0; count < Math.min(16, members.length); count++) {
       signal.throwIfAborted();
       const member = members[this.offset % members.length];
       this.offset = (this.offset + 1) % members.length;
+
       if (!member) continue;
       const task = this.authority.state.activeTask(member.id);
+
       if (!task || !this.owner({ taskID: task.id, ...task })) continue;
+
       if (!available) {
         this.options.onUnavailable?.();
+
         return;
       }
+
       for (const offer of this.authority.state.crewQuestionOffers(task.id)) {
         if (
           offer.state === "attempted" &&
@@ -154,39 +172,50 @@ export class CrewQuestions {
         )
           this.authority.state.crewQuestionOutcome(offer.token, "uncertain");
       }
+
       try {
         const backend = await this.connect(task, signal);
+
         if (backend.outcome) {
           for (const offer of this.authority.state.crewQuestionOffers(
             task.id,
           )) {
             if (offer.state !== "attempted" || offer.outcome !== "uncertain")
               continue;
+
             const outcome = await backend
               .outcome(offer.formID, offer.fingerprint, signal)
               .catch(() => undefined);
+
             signal.throwIfAborted();
+
             if (outcome)
               this.authority.state.crewQuestionOutcome(offer.token, outcome);
           }
         }
+
         const pending = await backend.pendingQuestions(
           task.workerSessionID,
           signal,
         );
+
         if (pending.length > 16)
           throw new CrewError("Too many crew clarifications.");
+
         for (const raw of pending) {
           if ("unsupported" in raw) continue;
           const parsed = Schema.decodeUnknownResult(nativeQuestionSchema)(raw);
+
           if (Result.isFailure(parsed)) continue;
           const question = parsed.success;
+
           if (
             question.sessionID !== task.workerSessionID ||
             question.inputID !== task.inputID ||
             !this.owner({ taskID: task.id, ...task })
           )
             continue;
+
           const offer = this.authority.state.offerCrewQuestion({
             token: createHash("sha256")
               .update(
@@ -206,8 +235,11 @@ export class CrewQuestions {
             state: "offered",
             outcome: null,
           });
+
           if (!offer || offer.fingerprint !== question.fingerprint) continue;
+
           if (offer.state === "attempted") continue;
+
           if (
             !(await backend.questionBelongsToInput(
               offer.workerSessionID,
@@ -219,11 +251,14 @@ export class CrewQuestions {
             !this.owner(offer)
           )
             continue;
+
           if (offer.expires <= this.now()) {
             await this.write(offer, question, backend, null, signal, true);
             continue;
           }
+
           if (offer.notified) continue;
+
           const text = [
             `Crew clarification for ${member.id}, task ${task.id}. This grants no tool permission.`,
             question.title,
@@ -237,7 +272,9 @@ export class CrewQuestions {
             `Use stargate_question with ${this.options.project ? `project=${this.options.project}, ` : ""}op=answer, token=${offer.token}, answer=<choice number or JSON field values>. For multiple choices use comma-separated numbers or JSON arrays.`,
             `Or use op=cancel with the same token. Expires ${new Date(offer.expires).toISOString()}. Never send credentials.`,
           ].join("\n");
+
           signal.throwIfAborted();
+
           const receipt = await this.authority.dm(
             {
               op: "send",
@@ -253,6 +290,7 @@ export class CrewQuestions {
               id: `question:${offer.token}`,
             },
           );
+
           if (Result.isSuccess(decodeReceipt(receipt)))
             this.authority.state.crewQuestionNotified(offer.token);
         }
@@ -265,13 +303,16 @@ export class CrewQuestions {
 
   async run(raw: unknown, caller: CrewCaller) {
     const input = decode(raw);
+
     if (Result.isFailure(input))
       throw new CrewError("Invalid crew clarification input.");
     await this.authority.captain(caller);
     caller.signal.throwIfAborted();
+
     if (!(await this.settings()).enabled)
       throw new CrewError("Crew clarifications are disabled.");
     const offer = this.authority.state.crewQuestion(input.success.token);
+
     if (
       !offer ||
       offer.originCaptainID !== caller.sessionID ||
@@ -282,9 +323,11 @@ export class CrewQuestions {
         "Crew clarification is expired, consumed or belongs to another captain.",
       );
     const task = this.owner(offer);
+
     if (!task)
       throw new CrewError("Crew clarification task is no longer active.");
     const backend = await this.connect(task, caller.signal);
+
     const question = (
       await backend.pendingQuestions(offer.workerSessionID, caller.signal)
     ).find(
@@ -294,6 +337,7 @@ export class CrewQuestions {
         q.inputID === offer.inputID &&
         q.fingerprint === offer.fingerprint,
     );
+
     if (
       !question ||
       "unsupported" in question ||
@@ -309,6 +353,7 @@ export class CrewQuestions {
         "Native crew clarification changed; no reply submitted.",
       );
     let answer: ReturnType<typeof questionAnswer> | null;
+
     try {
       answer =
         input.success.op === "cancel"
@@ -322,6 +367,7 @@ export class CrewQuestions {
         "Invalid clarification answer; use displayed choices or JSON field values.",
       );
     }
+
     return this.write(offer, question, backend, answer, caller.signal);
   }
 
@@ -336,6 +382,7 @@ export class CrewQuestions {
     if (!(await this.settings()).enabled)
       throw new CrewError("Crew clarifications are disabled.");
     signal.throwIfAborted();
+
     if (
       !this.owner(offer) ||
       !this.authority.state.claimCrewQuestion(offer.token, this.now(), expired)
@@ -343,6 +390,7 @@ export class CrewQuestions {
       throw new CrewError("Crew clarification is stale or already consumed.");
     this.writing.add(offer.token);
     let outcome: NonNullable<CrewQuestionOffer["outcome"]> = "uncertain";
+
     try {
       await backend.replyQuestion(question, answer, signal);
       outcome = answer === null ? "cancelled" : "answered";
@@ -352,6 +400,7 @@ export class CrewQuestions {
       this.authority.state.crewQuestionOutcome(offer.token, outcome);
       this.writing.delete(offer.token);
     }
+
     return { outcome };
   }
 }

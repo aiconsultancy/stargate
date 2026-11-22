@@ -21,7 +21,9 @@ const target = {
   baseSHA: "b".repeat(40),
   mergeBaseSHA: "c".repeat(40),
 };
+
 const diff = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n";
+
 const source = {
   reference: "source",
   transport: "irc",
@@ -32,6 +34,7 @@ const source = {
   messageID: "message",
   receivedAt: "2024-02-29T12:30:00.123456Z",
 } as const;
+
 const maker = {
   messageID: "message",
   agent: "worker",
@@ -65,11 +68,13 @@ test("all fleet runtime protocol validators are native", () => {
 
 test("fleet decoding keeps raw text, omitted versus undefined keys, transforms and field order", () => {
   const decode = Schema.decodeUnknownSync(protocol.dispatchInputSchema);
+
   const input = {
     sourceReference: "source",
     text: " note\n\t😀 ",
     target: "captain",
   };
+
   expect(JSON.stringify(decode(input))).toBe(
     '{"target":"captain","text":" note\\n\\t😀 ","sourceReference":"source"}',
   );
@@ -77,6 +82,7 @@ test("fleet decoding keeps raw text, omitted versus undefined keys, transforms a
   expect(
     Object.hasOwn(decode({ ...input, requestID: undefined }), "requestID"),
   ).toBe(true);
+
   for (const value of [
     { ...input, requestID: null },
     { ...input, target: " captain " },
@@ -102,12 +108,14 @@ test("fleet decoding keeps raw text, omitted versus undefined keys, transforms a
 
 test("UTC timestamps retain spelling and require valid calendar dates and seconds", () => {
   const decode = Schema.decodeUnknownSync(protocol.sourceSchema);
+
   for (const receivedAt of [
     source.receivedAt,
     "2000-02-29T00:00:00Z",
     "2026-11-19T23:59:59.0Z",
   ])
     expect(decode({ ...source, receivedAt }).receivedAt).toBe(receivedAt);
+
   for (const receivedAt of [
     "2023-02-29T12:30:00Z",
     "1900-02-29T00:00:00Z",
@@ -143,6 +151,7 @@ test("strict runtime objects reject own/inherited and nested extras on native de
       review: { ...target, context: diff },
     },
   };
+
   for (const value of [
     { ...request, extra: true },
     {
@@ -167,6 +176,7 @@ test("strict runtime objects reject own/inherited and nested extras on native de
       ].validate(value),
     ).toHaveProperty("issues");
   }
+
   const failed = Schema.decodeUnknownResult(protocol.requestSchema)({
     ...request,
     input: {
@@ -174,21 +184,26 @@ test("strict runtime objects reject own/inherited and nested extras on native de
       review: { ...target, pullRequest: 0, context: diff },
     },
   });
+
   if (Result.isSuccess(failed)) throw new Error("Invalid nested PR accepted");
   expect(settingsIssues(failed.failure.issue).issues).toContainEqual(
     expect.objectContaining({ path: ["input", "review", "pullRequest"] }),
   );
+
   const badTag = Schema.decodeUnknownResult(protocol.reviewInputSchema)({
     op: "unknown",
   });
+
   if (Result.isSuccess(badTag)) throw new Error("Unknown review accepted");
   expect(settingsIssues(badTag.failure.issue).issues).toContainEqual(
     expect.objectContaining({ path: ["op"] }),
   );
+
   const badSource = Schema.decodeUnknownResult(protocol.sourceSchema)({
     ...source,
     transport: "fleet",
   });
+
   if (Result.isSuccess(badSource))
     throw new Error("Human fleet context accepted");
   expect(settingsIssues(badSource.failure.issue).issues).toContainEqual(
@@ -203,10 +218,13 @@ test("review diff and proof byte limits remain separate from code-point bounds",
   expect(decode(diff)).toBe(diff);
   const prefix = "diff --git a/a b/a\nrename from ";
   const suffix = "\nrename to a\n";
+
   const bounded =
-    prefix + "x".repeat(256000 - prefix.length - suffix.length) + suffix;
-  expect(Buffer.byteLength(bounded)).toBe(256000);
+    prefix + "x".repeat(256_000 - prefix.length - suffix.length) + suffix;
+
+  expect(Buffer.byteLength(bounded)).toBe(256_000);
   expect(decode(bounded)).toBe(bounded);
+
   for (const value of [
     diff.replace("+new\n", "+new"),
     diff.replace("+new\n", ""),
@@ -219,6 +237,7 @@ test("review diff and proof byte limits remain separate from code-point bounds",
         Schema.decodeUnknownResult(protocol.reviewContextTextSchema)(value),
       ),
     ).toBe(true);
+
   const proof = {
     ...target,
     id: "proof",
@@ -235,15 +254,17 @@ test("review diff and proof byte limits remain separate from code-point bounds",
     family: "family",
     outcome: "completed",
     verdict: "approve",
-    resultText: "😀".repeat(16000),
+    resultText: "😀".repeat(16_000),
     resultDigest: "b".repeat(64),
     completedAt: source.receivedAt,
     authority: "agent",
     humanApproval: false,
   };
+
   expect(
     Schema.decodeUnknownSync(protocol.reviewProofSchema)(proof).resultText,
-  ).toHaveLength(32000);
+  ).toHaveLength(32_000);
+
   for (const resultText of [proof.resultText + "x", "\ud800"])
     expect(
       Result.isFailure(
@@ -281,9 +302,12 @@ test("binding reviewer defaults are fresh mutable arrays and nested rules stay s
     inputID: "input",
     createdAt: source.receivedAt,
   };
+
   const decode = Schema.decodeUnknownSync(protocol.reviewBindingSchema);
+
   const first = decode(input),
     second = decode(input);
+
   expect(first.reviewer.permissions).toEqual([]);
   expect(first.reviewer.permissions).not.toBe(second.reviewer.permissions);
   first.reviewer.permissions.push({
@@ -310,6 +334,7 @@ test("Store fleet makers preserve read101/write100 and immutable first-save beha
   const directory = await mkdtemp(join(tmpdir(), "stargate-fleet-schema-"));
   const path = join(directory, "state.sqlite");
   const store = openStore(path);
+
   try {
     store.enqueue({
       eventId: "event",
@@ -322,6 +347,7 @@ test("Store fleet makers preserve read101/write100 and immutable first-save beha
       fleet: { kind: "assignment", dispatchID: "dispatch" },
     });
     const job = store.jobByEvent("bot", "event");
+
     if (!job) throw new Error("Missing fixture job");
     expect(job.fleet).toEqual({ kind: "assignment", dispatchID: "dispatch" });
     expect(() =>
@@ -334,6 +360,7 @@ test("Store fleet makers preserve read101/write100 and immutable first-save beha
     store.fleet.saveMakers(job.id, [{ ...maker, agent: "different" }]);
     expect(store.jobByEvent("bot", "event")?.makers).toEqual([maker]);
     const db = new Database(path);
+
     try {
       db.query("UPDATE jobs SET makers=? WHERE id=?").run(
         JSON.stringify(Array.from({ length: 101 }, () => maker)),
@@ -342,6 +369,7 @@ test("Store fleet makers preserve read101/write100 and immutable first-save beha
     } finally {
       db.close();
     }
+
     expect(store.jobByEvent("bot", "event")?.makers).toHaveLength(101);
   } finally {
     store.close();
@@ -352,6 +380,7 @@ test("Store fleet makers preserve read101/write100 and immutable first-save beha
 test("actual fleet tool registrations stay native with explicit review opt-in and union advertisement", async () => {
   for (const reviews of [undefined, true]) {
     const tools: Info[] = [];
+
     const editor: ToolEditor = {
       list: () => [],
       get: () => undefined,
@@ -362,6 +391,7 @@ test("actual fleet tool registrations stay native with explicit review opt-in an
       update() {},
       remove() {},
     };
+
     const dispose = await installFleetTools({
       options: {
         socketPath: "/fleet.sock",
@@ -370,6 +400,7 @@ test("actual fleet tool registrations stay native with explicit review opt-in an
       tool: {
         async transform(edit) {
           edit(editor);
+
           return { async dispose() {} };
         },
       },
@@ -379,6 +410,7 @@ test("actual fleet tool registrations stay native with explicit review opt-in an
         },
       },
     });
+
     try {
       expect(tools.map(({ name }) => name)).toEqual([
         ...(reviews ? ["fleet_review"] : []),
@@ -387,8 +419,10 @@ test("actual fleet tool registrations stay native with explicit review opt-in an
         "fleet_answer_offer",
         "fleet_status",
       ]);
+
       for (const tool of tools) expect(Schema.isSchema(tool.input)).toBe(true);
       const dispatch = tools.find(({ name }) => name === "fleet_dispatch");
+
       if (!dispatch || !("~standard" in dispatch.input))
         throw new Error("Missing Standard dispatch input");
       expect(
@@ -400,16 +434,20 @@ test("actual fleet tool registrations stay native with explicit review opt-in an
       ).toEqual({
         value: { target: "captain", text: " note ", sourceReference: "source" },
       });
+
       const dispatchJSON = (
         dispatch.input as StandardSchemaV1 & StandardJSONSchemaV1
       )["~standard"].jsonSchema.input({ target: "draft-2020-12" });
+
       expect(dispatchJSON).toMatchObject({
         type: "object",
         required: ["target", "text", "sourceReference"],
         additionalProperties: false,
       });
+
       if (reviews) {
         const review = tools.find(({ name }) => name === "fleet_review");
+
         if (!review) throw new Error("Missing opted-in review");
         expect(
           (review.input as StandardSchemaV1 & StandardJSONSchemaV1)[
@@ -421,6 +459,7 @@ test("actual fleet tool registrations stay native with explicit review opt-in an
       await dispose();
     }
   }
+
   await expect(
     installFleetTools({
       options: { socketPath: "/fleet.sock", reviews: null },

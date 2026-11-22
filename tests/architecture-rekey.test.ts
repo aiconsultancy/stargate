@@ -15,10 +15,12 @@ const script = join(
   import.meta.dir,
   "../scripts/refresh-architecture-baseline.ts",
 );
+
 const baselinePath = "tests/architecture-baseline.json";
 const oldKey = "private:src/feature/entry.ts -> src/other/private.ts";
 const newKey = "private:src/feature/composition.ts -> src/other/private.ts";
 const roots: string[] = [];
+
 afterEach(async () => {
   for (const root of roots.splice(0))
     await rm(root, { recursive: true, force: true });
@@ -26,18 +28,23 @@ afterEach(async () => {
 
 function git(root: string, ...args: string[]) {
   const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+
   if (result.status !== 0) throw new Error(result.stderr);
+
   return result.stdout.trim();
 }
+
 async function put(root: string, name: string, text: string) {
   await mkdir(dirname(join(root, name)), { recursive: true });
   await writeFile(join(root, name), text);
 }
+
 async function fixture(
   options: { existingDestination?: boolean; missingBaseEdge?: boolean } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "stargate-rekey-"));
   roots.push(root);
+
   const policy = {
     slices: {
       feature: {
@@ -61,6 +68,7 @@ async function fixture(
       },
     },
   };
+
   const baseline = {
     sourceCommit: "1111111111111111111111111111111111111111",
     sourceFiles: 5,
@@ -76,6 +84,7 @@ async function fixture(
     exceptions: [oldKey],
     largeFiles: [],
   };
+
   for (const [name, text] of Object.entries({
     "src/main.ts": 'import "./feature/entry";\n',
     "src/feature/entry.ts": options.missingBaseEdge
@@ -113,10 +122,12 @@ async function fixture(
     "fixture",
   );
   const base = git(root, "rev-parse", "HEAD");
+
   if (!options.existingDestination) {
     policy.slices.feature.files.push("src/feature/composition.ts");
     await put(root, "tests/architecture-policy.json", JSON.stringify(policy));
   }
+
   await put(root, "src/feature/entry.ts", 'import "./composition";\n');
   await put(root, "src/feature/composition.ts", 'import "../other/private";\n');
   await put(
@@ -125,6 +136,7 @@ async function fixture(
     `#!${process.execPath}\nprocess.stdout.write(await Bun.stdin.text());\n`,
   );
   await chmod(join(root, "node_modules/.bin/oxfmt"), 0o755);
+
   const run = (...args: string[]) =>
     spawnSync(
       process.execPath,
@@ -138,8 +150,9 @@ async function fixture(
         "src/feature/composition.ts",
         ...args,
       ],
-      { cwd: root, encoding: "utf8", timeout: 30000 },
+      { cwd: root, encoding: "utf8", timeout: 30_000 },
     );
+
   return { root, base, run };
 }
 
@@ -197,7 +210,9 @@ for (const scenario of [
       existingDestination: scenario === "new-source-existed-at-base",
       missingBaseEdge: scenario === "base-edge-missing",
     });
+
     let next = newKey;
+
     if (scenario === "different-target") {
       next = newKey.replace("private.ts", "second.ts");
       await put(
@@ -206,14 +221,17 @@ for (const scenario of [
         'import "../other/second";\n',
       );
     }
+
     if (scenario === "different-kind")
       next = newKey.replace("private:", "direction:");
+
     if (scenario === "old-key-present")
       await put(
         root,
         "src/feature/entry.ts",
         'import "./composition"; import "../other/private";\n',
       );
+
     if (scenario === "exception-total-increase")
       await put(
         root,
@@ -222,6 +240,7 @@ for (const scenario of [
       );
     const before = await readFile(join(root, baselinePath), "utf8");
     const args = ["--write", "--rekey-exception", oldKey, next];
+
     if (scenario === "duplicate-old")
       args.push("--rekey-exception", oldKey, next);
     const result = run(...args);

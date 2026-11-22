@@ -14,6 +14,7 @@ function fixture() {
   const reads: string[] = [];
   const controls: ({ requireReady?: boolean } | undefined)[] = [];
   let current = { providerID: "openai-proxy", id: "old" };
+
   const authority: ModelAuthority = {
     options: {
       captainDirectory: "/captain",
@@ -26,13 +27,16 @@ function fixture() {
     async authorize(caller) {
       if (caller.agent === "bowser" && caller.sessionID === "ses_captain")
         return;
+
       if (caller.agent === "mario" && caller.sessionID === "ses_mario") return;
       throw new Error("not configured caller");
     },
     async inspectWorkerModel(crew, caller) {
       await this.captain(caller);
+
       if (crew !== "mario")
         throw new CrewError("Unknown configured crew member.");
+
       return {
         crewID: crew,
         sessionID: "ses_mario",
@@ -42,10 +46,12 @@ function fixture() {
     },
     async withWorkerControl(crew, caller, operation, options) {
       await this.captain(caller);
+
       if (crew !== "mario")
         throw new CrewError("Unknown configured crew member.");
       controls.push(options);
       calls.push("lock");
+
       try {
         return await operation({
           crewID: crew,
@@ -58,6 +64,7 @@ function fixture() {
       }
     },
   };
+
   const sessions: ModelSessions = {
     async switchModel(input) {
       calls.push(`switch:${input.sessionID}`);
@@ -65,6 +72,7 @@ function fixture() {
     },
     async get({ sessionID }) {
       reads.push(sessionID);
+
       return { model: current };
     },
     async compact(input) {
@@ -74,6 +82,7 @@ function fixture() {
       calls.push(`interrupt:${input.sessionID}`);
     },
   };
+
   const models = {
     async list() {
       return {
@@ -95,19 +104,23 @@ function fixture() {
       };
     },
   };
+
   const caller: CrewCaller = {
     sessionID: "ses_captain",
     agent: "bowser",
     signal: new AbortController().signal,
   };
+
   const tool = new CrewModels(authority, sessions, models, async () => {
     calls.push("compacted");
   });
+
   return { tool, calls, reads, controls, caller, sessions, models };
 }
 
 test("captain switches its session model without replacing the session", async () => {
   const f = fixture();
+
   const result = await f.tool.run(
     {
       op: "switch",
@@ -118,6 +131,7 @@ test("captain switches its session model without replacing the session", async (
     },
     f.caller,
   );
+
   expect(result).toMatchObject({
     status: "switched",
     sessionID: "ses_captain",
@@ -131,13 +145,16 @@ test("get reads the caller session and reports its stored variant without mutati
   f.models.list = async () => {
     throw new Error("Catalog must not be queried");
   };
+
   f.sessions.get = async (input, request) => {
     expect(input).toEqual({ sessionID: f.caller.sessionID });
     expect(request?.signal).toBe(f.caller.signal);
+
     return {
       model: { providerID: "outside-catalog", id: "stored", variant: "high" },
     };
   };
+
   expect(await f.tool.run({ op: "get" }, f.caller)).toEqual({
     sessionID: "ses_captain",
     model: { providerID: "outside-catalog", id: "stored", variant: "high" },
@@ -163,9 +180,11 @@ test("worker reads its own selected model without control locks or catalog calls
   f.models.list = async () => {
     throw new Error("No catalog read required");
   };
+
   const worker = { ...f.caller, sessionID: "ses_mario", agent: "mario" };
   f.sessions.get = async ({ sessionID }) => {
     expect(sessionID).toBe(worker.sessionID);
+
     return {
       model: {
         providerID: "openai-proxy",
@@ -174,6 +193,7 @@ test("worker reads its own selected model without control locks or catalog calls
       },
     };
   };
+
   expect(await f.tool.run({ op: "get", target: "self" }, worker)).toMatchObject(
     {
       sessionID: "ses_mario",
@@ -204,6 +224,7 @@ test("get fails closed on missing model, unauthorized caller, abort and API fail
   f.sessions.get = async () => {
     throw new Error("PRIVATE_CREDENTIAL");
   };
+
   await expect(f.tool.run({ op: "get" }, f.caller)).rejects.toThrow(
     "Raw details withheld",
   );
@@ -244,6 +265,7 @@ test("worker compact-first holds control until compaction and model selection fi
 
 test("model operations reject missing variants, disabled or unapproved routes", async () => {
   const f = fixture();
+
   for (const model of [
     { providerID: "paid", id: "other" },
     { providerID: "openai-proxy", id: "disabled" },
@@ -272,6 +294,7 @@ test("worker cannot use model controls; abort and SDK failures do not expose det
   f.sessions.switchModel = async () => {
     throw new Error("PRIVATE_CREDENTIAL");
   };
+
   await expect(
     f.tool.run(
       {
@@ -327,6 +350,7 @@ test("inspect is read-only and effort refuses unknown targets and foreign caller
     await f.tool.run({ op: "inspect", target: "mario" }, f.caller),
   ).toMatchObject({ sessionID: "ses_mario", model: { id: "old" } });
   expect(f.calls).toEqual([]);
+
   for (const target of ["captain", "foreign"])
     await expect(
       f.tool.run({ op: "effort", target, variant: "high" }, f.caller),
@@ -359,6 +383,7 @@ test("effort requires ready-only control and reports missing model or outside pr
     f.models.list = async () => {
       throw new Error("Catalogue must not be queried");
     };
+
     await expect(
       f.tool.run({ op: "effort", target: "mario", variant: "high" }, f.caller),
     ).rejects.toThrow(

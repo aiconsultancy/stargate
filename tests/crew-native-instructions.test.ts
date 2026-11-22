@@ -22,7 +22,9 @@ const task: CrewTask = {
   released: 0,
   notifying: 0,
 };
+
 const path = "/fixture/worker/project/nested/AGENTS.md";
+
 const context: EvidenceMessage = {
   id: "msg_context",
   type: "synthetic",
@@ -31,6 +33,7 @@ const context: EvidenceMessage = {
   description: "Loaded nested/AGENTS.md",
   text: `Instructions from: ${path}\n# Fixture instructions\n\nUse the assigned checkout.`,
 };
+
 const input: EvidenceMessage = {
   id: task.inputID,
   type: "user",
@@ -45,6 +48,7 @@ const input: EvidenceMessage = {
     pogoCrew: { taskID: task.id, originCaptainID: task.originCaptainID },
   },
 };
+
 const answer: EvidenceMessage = {
   id: "msg_final",
   type: "assistant",
@@ -53,6 +57,7 @@ const answer: EvidenceMessage = {
   time: { created: 69, completed: 70 },
   content: [{ type: "text", text: "Fixture retained final" }],
 };
+
 const execution = {
   state: "idle" as const,
   pendingInputs: 0,
@@ -61,6 +66,7 @@ const execution = {
   time: { updated: 74, busy: 4, idle: 74 },
   outcome: "succeeded" as const,
 };
+
 const reconciliation = {
   op: "reconcile" as const,
   taskID: task.id,
@@ -74,6 +80,7 @@ const reconciliation = {
   resultSha256: sha256("Fixture retained final"),
   reason: "Read retained fixture turn",
 };
+
 const signal = () => AbortSignal.timeout(3000);
 
 function api(history: EvidenceMessage[]): CrewInspectionAPI {
@@ -95,11 +102,15 @@ function api(history: EvidenceMessage[]): CrewInspectionAPI {
           query.type ?? "",
           "0",
         ];
+
         const offset = Number(position);
+
         const rows = history
           .toReversed()
           .filter((m) => !filter || m.type === filter);
+
         const data = rows.slice(offset, offset + 2);
+
         return {
           data,
           cursor: {
@@ -122,6 +133,7 @@ test("native instruction context preserves automatic, explicit and placement lin
     answer,
     { id: "msg_idle", type: "idle" as const, time: { created: 74 } },
   ];
+
   const original = structuredClone(history);
   const reader = api(history);
   expect(await readTaskResult(reader, task, signal())).toBe(
@@ -138,7 +150,7 @@ test("native instruction context preserves automatic, explicit and placement lin
   expect(task.status).toBe("uncertain"); // Readers do not mutate task state.
 });
 
-const invalid: Array<[string, Partial<EvidenceMessage>]> = [
+const invalid: [string, Partial<EvidenceMessage>][] = [
   ["missing instruction metadata", { metadata: {} }],
   [
     "extra metadata",
@@ -194,6 +206,7 @@ const invalid: Array<[string, Partial<EvidenceMessage>]> = [
   ["wrong user type", { type: "user" }],
   ["wrong shell type", { type: "shell" }],
 ];
+
 for (const [name, changes] of invalid)
   test(`unknown or forged instruction shape remains a boundary: ${name}`, async () => {
     const record = { ...context, ...changes };
@@ -249,6 +262,7 @@ test("literal instruction headers inside a file body remain opaque context", asy
     ...context,
     text: `${context.text}\n\nDocumentation example:\nInstructions from: /example/AGENTS.md\nquoted content`,
   };
+
   expect(isNativeInstructionContext(quoted)).toBe(true);
   const reader = api([input, quoted, answer]);
   expect(await readTaskResult(reader, task, signal())).toBe(
@@ -268,15 +282,18 @@ test("instruction context does not hide a later real assignment or wrong retaine
     text: "Different work",
     time: { created: 60 },
   };
+
   await expect(
     readTaskResult(api([input, context, later, answer]), task, signal()),
   ).rejects.toThrow("later input");
+
   const wrong = {
     ...input,
     metadata: {
       pogoCrew: { taskID: "task_other", originCaptainID: task.originCaptainID },
     },
   };
+
   await expect(
     readTaskResult(api([wrong, context, answer]), task, signal()),
   ).rejects.toThrow("task envelope");

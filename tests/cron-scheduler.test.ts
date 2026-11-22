@@ -14,12 +14,14 @@ import { botKey } from "../src/gateway/routing";
 import { bot, identity } from "./fixtures";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
+
 const input = {
   name: "Report",
   expression: "* * * * *",
   timezone: "UTC",
   prompt: "Prepare private report.",
 };
+
 const stores: CronStore[] = [];
 const directories: string[] = [];
 const signal = new AbortController().signal;
@@ -29,41 +31,53 @@ function fixture() {
   directories.push(directory);
   const path = join(directory, "cron.sqlite");
   const config = bot();
+
   const scope = {
     botKey: botKey(config, identity),
     channel: "C123",
     user: "U123",
   };
+
   const store = new CronStore(path);
   stores.push(store);
   const roots: string[] = [];
+
   const jobs = new Map<
     string,
     { id: number; input: ScheduledInput; status: "running" | "done" | "failed" }
   >();
+
   const gateway: SchedulerGateway = {
     enqueueScheduled(value) {
       const existing = jobs.get(value.runId);
+
       if (existing) return existing.id;
       const id = jobs.size + 1;
       jobs.set(value.runId, { id, input: value, status: "running" });
+
       return id;
     },
     scheduledStatus(id) {
       return [...jobs.values()].find((job) => job.id === id)?.status;
     },
   };
+
   const slack = {
     async announce(_channel: string, text: string, _signal: AbortSignal) {
       roots.push(text);
+
       return `${roots.length}.000`;
     },
   };
+
   const log = pino({ level: "silent" });
+
   const scheduler = () =>
     new CronScheduler(config, identity, store, gateway, slack, log);
+
   function rows() {
     const db = new Database(path, { readonly: true });
+
     try {
       return db
         .query<{ status: string; thread: string | null }, []>(
@@ -74,11 +88,13 @@ function fixture() {
       db.close();
     }
   }
+
   return { config, scope, store, roots, jobs, gateway, slack, scheduler, rows };
 }
 
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
+
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
@@ -98,6 +114,7 @@ describe("CronScheduler", () => {
     expect(f.rows()).toEqual([{ status: "queued", thread: "1.000" }]);
     await worker.tick(now + 120_000, signal);
     expect(f.jobs.size).toBe(1);
+
     if (!job) throw new Error("Expected queued job");
     job.status = "done";
     await worker.tick(now + 180_000, signal);
@@ -120,6 +137,7 @@ describe("CronScheduler", () => {
     const f = fixture();
     f.store.add(f.scope, input, now);
     const run = f.store.claimDue(f.scope.botKey, now + 60_000)[0];
+
     if (!run) throw new Error("Expected due run");
     f.store.announcing(run.id);
     await f.scheduler().tick(now + 60_000, signal);
@@ -136,6 +154,7 @@ describe("CronScheduler", () => {
     f.slack.announce = async () => {
       throw new Error("secret transport payload");
     };
+
     const worker = f.scheduler();
     await worker.tick(now + 60_000, signal);
     await worker.tick(now + 60_000, signal);
@@ -150,6 +169,7 @@ describe("CronScheduler", () => {
     const f = fixture();
     f.store.add(f.scope, input, now);
     const run = f.store.claimDue(f.scope.botKey, now + 60_000)[0];
+
     if (!run) throw new Error("Expected due run");
     f.store.announcing(run.id);
     f.store.announced(run.id, "5.000");
@@ -188,8 +208,10 @@ describe("CronScheduler", () => {
     f.store.add(f.scope, input, now);
     f.slack.announce = async () => {
       f.config.access.deniedUsers.push("U123");
+
       return "1.000";
     };
+
     await f.scheduler().tick(now + 60_000, signal);
     expect(f.jobs.size).toBe(0);
     expect(f.rows()[0]?.status).toBe("failed");
@@ -200,8 +222,10 @@ describe("CronScheduler", () => {
     const schedule = f.store.add(f.scope, input, now);
     f.slack.announce = async () => {
       f.store.remove(f.scope, schedule.id);
+
       return "1.000";
     };
+
     const worker = f.scheduler();
     await worker.tick(now + 60_000, signal);
     await worker.tick(now + 120_000, signal);
@@ -215,8 +239,10 @@ describe("CronScheduler", () => {
     const shutdown = new AbortController();
     f.slack.announce = async () => {
       shutdown.abort();
+
       return "9.000";
     };
+
     await f.scheduler().tick(now + 60_000, shutdown.signal);
     expect(f.rows()).toEqual([{ status: "announced", thread: "9.000" }]);
     expect(f.jobs.size).toBe(0);
@@ -251,6 +277,7 @@ describe("CronScheduler", () => {
     other.gateway.enqueueScheduled = () => {
       throw new Error("uncertain write");
     };
+
     const otherWorker = other.scheduler();
     await otherWorker.tick(now + 60_000, signal);
     await otherWorker.tick(now + 120_000, signal);
@@ -273,19 +300,24 @@ describe("CronScheduler", () => {
 
   test("status polling reaches later batches behind long-running jobs", async () => {
     const f = fixture();
+
     for (let index = 0; index < 101; index++) f.store.add(f.scope, input, now);
     const worker = f.scheduler();
     await worker.tick(now + 60_000, signal);
     await worker.tick(now + 60_000, signal);
     expect(f.jobs.size).toBe(101);
+
     const firstBatch = new Set(
       f.store.queued(f.scope.botKey).map((run) => run.id),
     );
+
     const last = [...f.jobs.values()].find(
       (job) => !firstBatch.has(job.input.runId),
     );
+
     if (!last) throw new Error("Expected later queued run");
     last.status = "done";
+
     // A batch added behind the cursor waits for the next complete scan.
     for (let pass = 0; pass < 3; pass++)
       await worker.tick(now + 60_000, signal);

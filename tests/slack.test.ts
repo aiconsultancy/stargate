@@ -7,6 +7,7 @@ import { replyText, type SlackPanelContent } from "../src/shared/slack-format";
 
 test("trusted configuration blocks survive the existing post and update transport", async () => {
   const calls: { path: string; data: URLSearchParams }[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -15,15 +16,18 @@ test("trusted configuration blocks survive the existing post and update transpor
         path: new URL(request.url).pathname,
         data: new URLSearchParams(await request.text()),
       });
+
       return Response.json({ ok: true, ts: "2.000" });
     },
   });
+
   const slack = new SlackConnection(
     "fixture-app",
     "fixture-bot",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   const panel: SlackPanelContent = {
     text: "Waiting delay: 5 seconds",
     blocks: [
@@ -45,6 +49,7 @@ test("trusted configuration blocks survive the existing post and update transpor
       },
     ],
   };
+
   try {
     await slack.post("C123", "1.000", panel.text, undefined, undefined, panel);
     await slack.update("C123", "2.000", panel.text, undefined, panel);
@@ -52,12 +57,14 @@ test("trusted configuration blocks survive the existing post and update transpor
       "/chat.postMessage",
       "/chat.update",
     ]);
+
     for (const call of calls) {
       expect(JSON.parse(call.data.get("blocks") ?? "null")).toEqual(
         panel.blocks,
       );
       expect(call.data.get("text")).toBe(panel.text);
     }
+
     expect(calls[1]?.data.get("ts")).toBe("2.000");
   } finally {
     await server.stop(true);
@@ -66,21 +73,25 @@ test("trusted configuration blocks survive the existing post and update transpor
 
 test("configuration notices use literal ephemeral messages in the source thread", async () => {
   const calls: URLSearchParams[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       expect(new URL(request.url).pathname).toBe("/chat.postEphemeral");
       calls.push(new URLSearchParams(await request.text()));
+
       return Response.json({ ok: true, message_ts: "2.000" });
     },
   });
+
   const slack = new SlackConnection(
     "fixture-app",
     "fixture-bot",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   try {
     await slack.ephemeral(
       "C123",
@@ -102,6 +113,7 @@ test("configuration notices use literal ephemeral messages in the source thread"
 
 test("crew UI consumes trigger for loading modal and updates that private view without posting messages", async () => {
   const calls: { path: string; fields: URLSearchParams }[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -110,20 +122,24 @@ test("crew UI consumes trigger for loading modal and updates that private view w
         path: new URL(request.url).pathname,
         fields: new URLSearchParams(await request.text()),
       });
+
       return Response.json({ ok: true, view: { id: "V_CREW" } });
     },
   });
+
   const slack = new SlackConnection(
     "fixture-app",
     "fixture-bot",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   try {
     const view = crewStatusView(
       { members: [], total: 0, truncated: false },
       false,
     );
+
     const viewID = await slack.crewUI.open("fixture-trigger", view);
     expect(viewID).toBe("V_CREW");
     await slack.crewUI.update(viewID, view);
@@ -133,6 +149,7 @@ test("crew UI consumes trigger for loading modal and updates that private view w
     ]);
     expect(calls[0]?.fields.get("trigger_id")).toBe("fixture-trigger");
     expect(calls[1]?.fields.get("view_id")).toBe("V_CREW");
+
     for (const call of calls)
       expect(JSON.parse(call.fields.get("view") ?? "null")).toEqual(view);
   } finally {
@@ -142,33 +159,41 @@ test("crew UI consumes trigger for loading modal and updates that private view w
 
 test("Slack posts and edits preserve mixed Markdown with safe fallback; reactions use the fixed target", async () => {
   const calls: { path: string; fields: URLSearchParams }[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const path = new URL(request.url).pathname;
       calls.push({ path, fields: new URLSearchParams(await request.text()) });
+
       if (
         path === "/chat.update" &&
         calls.at(-1)?.fields.get("ts") === "missing"
       )
         return Response.json({ ok: false, error: "message_not_found" });
+
       if (path === "/reactions.add")
         return Response.json({ ok: false, error: "already_reacted" });
+
       if (path === "/chat.delete")
         return Response.json({ ok: false, error: "message_not_found" });
+
       return Response.json({ ok: true, ts: "2.000" });
     },
   });
+
   const slack = new SlackConnection(
     "local-app-token",
     "local-bot-token",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   try {
     const text = "<@UOTHER> **bold** & <https://example.test|Docs> <!here>";
     const prepared = slack.prepareReply(text)[0];
+
     if (!prepared || typeof prepared === "string")
       throw new Error("Expected classified content");
     expect(
@@ -196,6 +221,7 @@ test("Slack posts and edits preserve mixed Markdown with safe fallback; reaction
       "/reactions.add",
       "/chat.delete",
     ]);
+
     for (const call of calls.slice(0, 2)) {
       expect(JSON.parse(call.fields.get("blocks") ?? "null")).toEqual(
         prepared.content.blocks,
@@ -203,11 +229,13 @@ test("Slack posts and edits preserve mixed Markdown with safe fallback; reaction
       expect(call.fields.get("blocks")).toContain(
         '"type":"user","user_id":"UOTHER"',
       );
+
       if (call.path === "/chat.postMessage")
         expect(call.fields.get("mrkdwn")).toBe("false");
       expect(call.fields.get("text")).toBe(prepared.content.text);
       expect(call.fields.get("parse")).toBe("none");
     }
+
     expect(calls[2]?.fields.get("timestamp")).toBe("1.000");
     expect(calls[2]?.fields.get("name")).toBe("eyes");
     expect(await slack.update("C123", "missing", "Replacement")).toBe(false);
@@ -218,24 +246,29 @@ test("Slack posts and edits preserve mixed Markdown with safe fallback; reaction
 
 test("Stop controls appear only on live posts and edits and disappear on final delivery", async () => {
   const payloads: URLSearchParams[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       payloads.push(new URLSearchParams(await request.text()));
+
       return Response.json({ ok: true, ts: "2.000" });
     },
   });
+
   const slack = new SlackConnection(
     "local-app-token",
     "local-bot-token",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   try {
     await slack.post("C123", "1.000", "Working", 42);
     await slack.update("C123", "2.000", "Partial", 42);
     await slack.update("C123", "2.000", "Final");
+
     for (const payload of payloads.slice(0, 2)) {
       const blocks = JSON.parse(payload.get("blocks") ?? "null");
       expect(blocks.at(-1)).toEqual(stopBlock(42));
@@ -246,6 +279,7 @@ test("Stop controls appear only on live posts and edits and disappear on final d
         text: { type: "plain_text", text: "Stop" },
       });
     }
+
     expect(JSON.parse(payloads[2]?.get("blocks") ?? "null")).toEqual([
       {
         type: "section",
@@ -259,24 +293,30 @@ test("Stop controls appear only on live posts and edits and disappear on final d
 
 test("Slack posts and streamed edits preserve classified Markdown", async () => {
   const payloads: URLSearchParams[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       payloads.push(new URLSearchParams(await request.text()));
+
       return Response.json({ ok: true, ts: "2.000" });
     },
   });
+
   const slack = new SlackConnection(
     "local-app-token",
     "local-bot-token",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   const text =
     "# Result\n\n**Bold**, _italic_, [docs](https://example.test).\n\n> Quote\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```ts\nconst x = a < b && c > d;\n```";
+
   try {
     const prepared = slack.prepareReply(text)[0];
+
     if (!prepared || typeof prepared === "string")
       throw new Error("Expected classified content");
     await slack.post(
@@ -294,6 +334,7 @@ test("Slack posts and streamed edits preserve classified Markdown", async () => 
       undefined,
       prepared.content,
     );
+
     for (const payload of payloads) {
       expect(JSON.parse(payload.get("blocks") ?? "null")).toEqual(
         prepared.content.blocks,
@@ -309,10 +350,13 @@ test("Slack posts and streamed edits preserve classified Markdown", async () => 
 test("Socket Mode commands and interactions are not double-ACKed as message events", async () => {
   const calls: string[] = [];
   const log = pino({ enabled: false });
+
   const accept = () => {
     calls.push("persist");
+
     return true;
   };
+
   const handlers = {
     async command(_body: unknown, ack: () => Promise<void>) {
       calls.push("command");
@@ -323,6 +367,7 @@ test("Socket Mode commands and interactions are not double-ACKed as message even
       await ack();
     },
   };
+
   for (const type of ["events_api", "slash_commands", "interactive"]) {
     await handleSlackRequest(
       {
@@ -337,6 +382,7 @@ test("Socket Mode commands and interactions are not double-ACKed as message even
       handlers,
     );
   }
+
   expect(calls).toEqual([
     "persist",
     "ack",
@@ -367,6 +413,7 @@ test("Socket Mode does not ACK an event when durable acceptance fails", async ()
 
 test("Slack opens, pushes, and updates cron views and posts scheduled roots", async () => {
   const calls: { path: string; fields: URLSearchParams }[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -375,20 +422,24 @@ test("Slack opens, pushes, and updates cron views and posts scheduled roots", as
         path: new URL(request.url).pathname,
         fields: new URLSearchParams(await request.text()),
       });
+
       return Response.json({ ok: true, ts: "8.000" });
     },
   });
+
   const slack = new SlackConnection(
     "local-app-token",
     "local-bot-token",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   const view = {
     type: "modal" as const,
     title: { type: "plain_text" as const, text: "Cron jobs" },
     blocks: [],
   };
+
   try {
     await slack.cronUI.open("trigger", view);
     await slack.cronUI.push("trigger-2", view);
@@ -418,20 +469,24 @@ test("Slack opens, pushes, and updates cron views and posts scheduled roots", as
 
 test("long mixed replies retain bounded element text and at most two outgoing blocks", async () => {
   const payloads: URLSearchParams[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       payloads.push(new URLSearchParams(await request.text()));
+
       return Response.json({ ok: true, ts: "2.000" });
     },
   });
+
   const slack = new SlackConnection(
     "fixture-app",
     "fixture-bot",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   try {
     const text = `${"🦘".repeat(2798)}<@U123>\n\n${"**bold** <#C123>\n\n".repeat(500)}\n\`\`\`\n${"<@U123> ".repeat(1000)}\n\`\`\``;
     const parts = slack.prepareReply(text);
@@ -439,6 +494,7 @@ test("long mixed replies retain bounded element text and at most two outgoing bl
     expect(parts.some((part) => replyText(part).includes("<@U123>"))).toBe(
       true,
     );
+
     for (const part of parts) {
       expect(Array.from(replyText(part)).length).toBeLessThanOrEqual(2800);
       await slack.post(
@@ -450,12 +506,15 @@ test("long mixed replies retain bounded element text and at most two outgoing bl
         typeof part === "string" ? undefined : part.content,
       );
     }
+
     for (const payload of payloads) {
       const blocks: unknown = JSON.parse(payload.get("blocks") ?? "null");
       expect(Array.isArray(blocks)).toBe(true);
+
       if (!Array.isArray(blocks)) throw new Error("Missing blocks");
       expect(blocks.length).toBe(2); // One content block + Stop, below Slack's 50.
       const lengths: number[] = [];
+
       const inspect = (value: unknown) => {
         if (Array.isArray(value)) {
           for (const child of value) inspect(child);
@@ -466,12 +525,13 @@ test("long mixed replies retain bounded element text and at most two outgoing bl
             else inspect(child);
           }
       };
+
       inspect(blocks[0]);
       expect(Math.max(0, ...lengths)).toBeLessThanOrEqual(3000);
       expect(
         lengths.reduce((sum, length) => sum + length, 0),
-      ).toBeLessThanOrEqual(12000);
-      expect(Array.from(payload.get("text") ?? "").length).toBeLessThan(40000);
+      ).toBeLessThanOrEqual(12_000);
+      expect(Array.from(payload.get("text") ?? "").length).toBeLessThan(40_000);
     }
   } finally {
     await server.stop(true);
@@ -480,29 +540,35 @@ test("long mixed replies retain bounded element text and at most two outgoing bl
 
 test("prepared quoted-code chunks reach Slack without reclassification", async () => {
   const payloads: URLSearchParams[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       payloads.push(new URLSearchParams(await request.text()));
+
       return Response.json({ ok: true, ts: "2.000" });
     },
   });
+
   const slack = new SlackConnection(
     "fixture-app",
     "fixture-bot",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   const quote =
     "> ```\n" +
     ("> " + "x".repeat(70) + "\n").repeat(60) +
     "> <@U123> ping\n" +
     ("> " + "y".repeat(70) + "\n").repeat(10) +
     "> ```\n\nActual mention <@U9>";
+
   try {
     const parts = slack.prepareReply(quote);
     expect(parts.length).toBeGreaterThan(1);
+
     for (const part of parts) {
       if (typeof part === "string")
         throw new Error("Expected classified chunk");
@@ -516,6 +582,7 @@ test("prepared quoted-code chunks reach Slack without reclassification", async (
       );
       await slack.update("C123", "2.000", part.text, undefined, part.content);
     }
+
     const blocks = payloads.map((payload) => payload.get("blocks")).join("");
     expect(blocks).not.toContain('"user_id":"U123"');
     expect(blocks).toContain('"user_id":"U9"');
@@ -527,24 +594,29 @@ test("prepared quoted-code chunks reach Slack without reclassification", async (
 
 test("legacy or unclassified chunks fail closed to literal Slack content", async () => {
   const payloads: URLSearchParams[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       payloads.push(new URLSearchParams(await request.text()));
+
       return Response.json({ ok: true, ts: "2.000" });
     },
   });
+
   const slack = new SlackConnection(
     "fixture-app",
     "fixture-bot",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   try {
     const text = "<@U123> code continuation **literal**";
     await slack.post("C123", "1.000", text);
     await slack.update("C123", "2.000", text);
+
     for (const payload of payloads) {
       expect(payload.get("blocks")).toContain('"type":"plain_text"');
       expect(payload.get("blocks")).not.toContain('"type":"user"');

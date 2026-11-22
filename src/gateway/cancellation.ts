@@ -6,6 +6,7 @@ import { settingsPattern } from "../config/settings-schema";
 export { cancellationNotice } from "../shared/request-failure";
 
 const timestamp = Schema.String.check(settingsPattern(/^\d+\.\d+$/));
+
 const actionSchema = Schema.Struct({
   type: Schema.Literal("block_actions"),
   api_app_id: Schema.String,
@@ -53,9 +54,11 @@ export function cancellationTarget(
   identity: Identity,
 ) {
   const parsed = Schema.decodeUnknownResult(actionSchema)(raw);
+
   if (Result.isFailure(parsed)) return;
   const data = parsed.success;
   const action = data.actions[0];
+
   if (
     !action ||
     data.api_app_id !== config.slack.appId ||
@@ -68,6 +71,7 @@ export function cancellationTarget(
     !isAllowedChannel(config, data.channel.id)
   )
     return;
+
   return {
     id: action.value,
     user: data.user.id,

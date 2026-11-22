@@ -22,6 +22,7 @@ const expected = settingsStruct({
     ),
   ),
 });
+
 /** Captain-only, configured worker worktree only. Copy expected from inspect. */
 export const workspaceInputSchemas = [
   settingsStruct({
@@ -43,13 +44,16 @@ export const workspaceInputSchemas = [
     acknowledgeUnconfirmedExecution: Schema.optional(Schema.Literal(true)),
   }),
 ] as const;
+
 export type WorkspaceInput = (typeof workspaceInputSchemas)[number]["Type"];
+
 export type WorkspaceChange = {
   path: string;
   index: string;
   worktree: string;
   kind: "tracked" | "unmerged" | "untracked";
 };
+
 export type WorkspaceInspection = {
   crew: string;
   directory: string;
@@ -65,6 +69,7 @@ export type WorkspaceInspection = {
   diffstat: { path: string; added: number | null; deleted: number | null }[];
   patch?: { text: string; truncated: boolean; excluded: string[] };
 };
+
 export type WorkspaceCheckpoint = {
   oid: string;
   message: string;
@@ -74,6 +79,7 @@ export type WorkspaceCheckpoint = {
 const listLimit = 100;
 const hashLimit = 64 * 1024 * 1024;
 const patchLimit = 32 * 1024;
+
 // Same patterns the crew read policy denies; never put them in a patch.
 const secretPaths = ["*.env", "*.env.*", "*.key", "*.pem"];
 
@@ -89,7 +95,7 @@ export function gitProcessOptions(write: boolean, signal?: AbortSignal) {
   };
 }
 
-/** argv only; repository config cannot run hooks, fsmonitor or recursion. */
+/** Argv only; repository config cannot run hooks, fsmonitor or recursion. */
 function git(
   directory: string,
   args: string[],
@@ -102,10 +108,13 @@ function git(
   },
 ): Promise<{ text: string; truncated: boolean }> {
   const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" };
+
   for (const [name, value] of Object.entries(process.env))
     if (value !== undefined && !name.startsWith("GIT_")) env[name] = value;
+
   if (!options.write) env["GIT_OPTIONAL_LOCKS"] = "0";
   const limit = options.limit ?? 1024 * 1024;
+
   return new Promise((resolve, reject) => {
     const child = spawn(
       "git",
@@ -127,18 +136,22 @@ function git(
         ...gitProcessOptions(!!options.write, options.signal),
       },
     );
+
     const chunks: Buffer[] = [];
     let length = 0;
     let truncated = false;
     let failed = false;
     child.stdout.on("data", (chunk: Buffer) => {
       if (truncated) return;
+
       if (length + chunk.length > limit) {
         chunks.push(chunk.subarray(0, limit - length));
         truncated = true;
         child.kill("SIGKILL");
+
         return;
       }
+
       chunks.push(chunk);
       length += chunk.length;
     });
@@ -147,6 +160,7 @@ function git(
     });
     child.on("close", (code) => {
       const text = Buffer.concat(chunks).toString("utf8");
+
       if (truncated && options.truncate) resolve({ text, truncated });
       else if (truncated)
         reject(
@@ -162,6 +176,7 @@ function git(
 
 function within(parent: string, child: string): boolean {
   const path = relative(parent, child);
+
   return (
     path === "" ||
     (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path))
@@ -174,25 +189,31 @@ export async function projectRepository(
   signal: AbortSignal,
 ) {
   const info = await lstat(directory).catch(() => null);
+
   if (!info?.isDirectory() || info.isSymbolicLink())
     throw new CrewError("Project must be an existing real Git checkout.");
   const root = await realpath(directory);
+
   if (root !== resolve(directory))
     throw new CrewError("Project directory contains a symbolic-link alias.");
+
   const read = (args: string[]) =>
     git(root, args, {
       signal,
       failure: "Project Git identity is unavailable; no Git change made.",
     }).then(({ text }) => text.trim());
+
   if (
     (await realpath(await read(["rev-parse", "--show-toplevel"])).catch(
       () => "",
     )) !== root
   )
     throw new CrewError("Project must be its exact Git checkout root.");
+
   const common = await realpath(
     resolve(root, await read(["rev-parse", "--git-common-dir"])),
   );
+
   return { directory: root, common };
 }
 
@@ -205,24 +226,32 @@ export async function workspaceRoot(
 ): Promise<string> {
   const failure =
     "Configured worker worktree is not a readable Git worktree. No Git change made.";
+
   const info = await lstat(configured).catch(() => null);
+
   if (!info?.isDirectory() || info.isSymbolicLink())
     throw new CrewError(
       "Configured worker worktree must be an existing real directory, not a symlink or file.",
     );
   const root = await realpath(configured);
+
   const captain = await realpath(captainDirectory).catch(() =>
     resolve(captainDirectory),
   );
+
   if (within(root, captain) || within(captain, root))
     throw new CrewError("Worker worktree overlaps the captain directory.");
+
   const read = (directory: string, args: string[]) =>
     git(directory, args, { signal, failure }).then(({ text }) => text.trim());
+
   const top = await read(root, ["rev-parse", "--show-toplevel"]);
+
   if ((await realpath(top).catch(() => "")) !== root)
     throw new CrewError(
       "Configured worktree is not its own Git worktree root; nested or foreign repositories are refused.",
     );
+
   const common = async (directory: string) =>
     realpath(
       resolve(
@@ -230,14 +259,17 @@ export async function workspaceRoot(
         await read(directory, ["rev-parse", "--git-common-dir"]),
       ),
     ).catch(() => "");
+
   const [worker, project] = await Promise.all([
     common(root),
     common(projectDirectory),
   ]);
+
   if (!worker || worker !== project)
     throw new CrewError(
       "Configured worktree does not belong to this team's project repository.",
     );
+
   return root;
 }
 
@@ -247,16 +279,22 @@ async function untrackedHash(
   budget: { bytes: number },
 ): Promise<string> {
   const absolute = join(root, path);
+
   if (!within(root, absolute)) throw new CrewError("Invalid workspace path.");
   const info = await lstat(absolute).catch(() => null);
+
   if (!info) return "missing";
+
   if (info.isSymbolicLink()) return `link:${await readlink(absolute)}`;
+
   if (!info.isFile()) return "other";
   budget.bytes += info.size;
+
   if (budget.bytes > hashLimit)
     throw new CrewError(
       "Untracked files exceed Stargate's bounded inspection; review them natively. No Git change made.",
     );
+
   return createHash("sha256")
     .update(await readFile(absolute))
     .digest("hex");
@@ -271,12 +309,14 @@ export async function inspectWorkspace(
 ): Promise<WorkspaceInspection> {
   const failure =
     "Workspace Git inspection failed; raw details withheld. No Git change made.";
+
   const read = (args: string[], limit?: number) =>
     git(root, args, {
       signal,
       failure,
       ...(limit ? { limit } : {}),
     }).then(({ text }) => text);
+
   const head = (
     await read(["rev-parse", "--verify", "HEAD^{commit}"]).catch(() => {
       throw new CrewError(
@@ -284,7 +324,9 @@ export async function inspectWorkspace(
       );
     })
   ).trim();
+
   const branch = (await read(["branch", "--show-current"])).trim() || null;
+
   const status = await read(
     [
       "status",
@@ -296,18 +338,23 @@ export async function inspectWorkspace(
     ],
     4 * 1024 * 1024,
   );
+
   const changes: WorkspaceChange[] = [];
   let nested = false;
+
   for (const entry of status.split("\0")) {
     const fields = entry.split(" ");
     const type = fields[0];
+
     if (type === "?") {
       const path = entry.slice(2);
+
       // Git shows a nested repository as one untracked directory.
       if (path.endsWith("/")) nested = true;
       changes.push({ path, index: "?", worktree: "?", kind: "untracked" });
     } else if (type === "1" || type === "u") {
       const xy = fields[1] ?? "..";
+
       if (fields[2]?.startsWith("S")) nested = true;
       changes.push({
         path: fields.slice(type === "1" ? 8 : 10).join(" "),
@@ -317,7 +364,9 @@ export async function inspectWorkspace(
       });
     }
   }
+
   const diff = ["--binary", "--no-ext-diff", "--no-textconv", "--no-color"];
+
   const [index, worktree, numstat] = await Promise.all([
     read(["diff", "--cached", ...diff, "--no-renames", "HEAD"], hashLimit),
     read(["diff", ...diff, "--no-renames"], hashLimit),
@@ -331,31 +380,39 @@ export async function inspectWorkspace(
       "HEAD",
     ]),
   ]);
+
   const budget = { bytes: 0 };
   const untracked: string[] = [];
+
   for (const change of changes)
     if (change.kind === "untracked" && !change.path.endsWith("/"))
       untracked.push(
         `${change.path}\0${await untrackedHash(root, change.path, budget)}`,
       );
   const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+
   const diffstat = numstat
     .split("\0")
     .filter(Boolean)
     .slice(0, listLimit)
     .map((line) => {
       const [added, deleted, ...path] = line.split("\t");
+
       const count = (value?: string) =>
         value === undefined || value === "-" ? null : Number(value);
+
       return {
         path: path.join("\t"),
         added: count(added),
         deleted: count(deleted),
       };
     });
+
   let patch: WorkspaceInspection["patch"];
+
   if (includePatch) {
     const excluded = secretPaths.map((glob) => `:(exclude,glob)**/${glob}`);
+
     const output = await git(
       root,
       [
@@ -371,8 +428,10 @@ export async function inspectWorkspace(
       ],
       { signal, failure, limit: patchLimit, truncate: true },
     );
+
     patch = { ...output, excluded: secretPaths };
   }
+
   return {
     crew,
     directory: root,
@@ -409,6 +468,7 @@ async function refuseObstructions(root: string, action: string) {
     failure: `Workspace obstruction check failed; nothing ${action}.`,
     limit: 32 * 1024 * 1024,
   };
+
   const [tree, others] = await Promise.all([
     git(
       root,
@@ -418,23 +478,29 @@ async function refuseObstructions(root: string, action: string) {
     // Ignored entries included; whole untracked directories stay one entry.
     git(root, ["ls-files", "-z", "--others", "--directory"], options),
   ]);
+
   const files = new Set(split(tree.text));
   const directories = new Set<string>();
+
   for (const path of files)
     for (let at = path.indexOf("/"); at !== -1; at = path.indexOf("/", at + 1))
       directories.add(path.slice(0, at));
   const blocked: string[] = [];
+
   for (const entry of split(others.text)) {
     const path = entry.replace(/\/$/, "");
     let hit = files.has(path) || directories.has(path);
+
     for (
       let at = path.indexOf("/");
       !hit && at !== -1;
       at = path.indexOf("/", at + 1)
     )
       hit = files.has(path.slice(0, at));
+
     if (hit) blocked.push(entry);
   }
+
   if (blocked.length)
     throw new CrewError(
       `Untracked or ignored entries occupy paths that HEAD would restore (${blocked.length}: ${blocked
@@ -458,10 +524,13 @@ async function findStash(root: string, message: string) {
       failure: "Stash list unavailable; inspect the worktree natively.",
     },
   );
+
   for (const line of text.split("\n")) {
     const [oid, subject] = line.split("\t", 2);
+
     if (oid && subject?.endsWith(message)) return oid;
   }
+
   return null;
 }
 
@@ -485,14 +554,17 @@ export async function stashWorkspace(
     failed = true;
   });
   const oid = await findStash(root, message);
+
   if (!oid)
     throw new CrewError(
       "git stash did not record a Stargate stash; inspect the worktree again.",
     );
+
   if (failed)
     throw new CrewError(
       `git stash recorded ${oid} but did not finish; inspect before ${restore(root, oid)}.`,
     );
+
   return { oid, message, restore: restore(root, oid) };
 }
 
@@ -508,24 +580,29 @@ export async function resetWorkspace(
 ): Promise<WorkspaceCheckpoint | null> {
   await refuseObstructions(root, "reset");
   const message = `stargate reset checkpoint ${crew} ${randomUUID()}`;
+
   const write = (args: string[], failure: string) =>
     git(root, args, { signal, failure, write: true }).then(({ text }) =>
       text.trim(),
     );
+
   const oid = await write(
     ["stash", "create", message],
     "Checkpoint creation failed; nothing reset.",
   );
+
   if (!oid) return null;
   await write(
     ["stash", "store", "-m", message, oid],
     `Checkpoint ${oid} was not retained; nothing reset.`,
   );
   const checkpoint = { oid, message, restore: restore(root, oid) };
+
   const current = await write(
     ["rev-parse", "--verify", "HEAD^{commit}"],
     `HEAD unreadable; nothing reset. Checkpoint ${oid} is retained.`,
   );
+
   if (current !== head)
     throw new CrewError(
       `HEAD moved before reset; nothing reset. Checkpoint ${oid} is retained.`,
@@ -534,5 +611,6 @@ export async function resetWorkspace(
     ["reset", "--hard", "--quiet", "HEAD"],
     `Reset did not finish; inspect before ${checkpoint.restore}.`,
   );
+
   return checkpoint;
 }

@@ -9,9 +9,11 @@ import { JobTransitionRefused, type Store } from "../src/gateway/store";
 
 test("state survives reopening and exclusive lock prevents two owners", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-test-"));
+
   try {
     const path = join(directory, "stargate.sqlite");
     const lock = lockInstance(join(directory, "lock.sqlite"));
+
     try {
       expect(() => lockInstance(join(directory, "lock.sqlite"))).toThrow(
         "already using",
@@ -19,6 +21,7 @@ test("state survives reopening and exclusive lock prevents two owners", async ()
     } finally {
       lock.close();
     }
+
     const reopenedLock = lockInstance(join(directory, "lock.sqlite"));
     reopenedLock.close();
     const store = openStore(path);
@@ -34,6 +37,7 @@ test("state survives reopening and exclusive lock prevents two owners", async ()
     store.saveSession("thread", "session");
     store.close();
     const reopened = openStore(path);
+
     try {
       expect(reopened.session("thread")).toBe("session");
       expect(reopened.ready("bot", 0, 1)[0]?.text).toBe("hello");
@@ -49,6 +53,7 @@ test("state survives reopening and exclusive lock prevents two owners", async ()
 test("migration preserves old jobs and accepted Stop survives database reopen", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-cancel-"));
   const path = join(directory, "stargate.sqlite");
+
   try {
     const initial = openStore(path);
     initial.enqueue({
@@ -81,6 +86,7 @@ test("migration preserves old jobs and accepted Stop survives database reopen", 
     ).toBe(true);
     migrated.close();
     const reopened = openStore(path);
+
     try {
       expect(reopened.transcript.interruptedSessions("bot")).toEqual([
         "session",
@@ -111,12 +117,15 @@ function queued(store: Store, eventId = "event") {
     text: "hello",
   });
   const job = store.queuedJob("bot", eventId);
+
   if (!job) throw new Error("missing job");
+
   return job.id;
 }
 
 test("a reply is stored only for a running job", () => {
   const store = openStore(":memory:");
+
   try {
     const id = queued(store);
     expect(() => store.respond(id, ["early"])).toThrow(JobTransitionRefused);
@@ -138,6 +147,7 @@ test("a reply is stored only for a running job", () => {
 
 test("only a stored reply is finished; a queued job can only fail", () => {
   const store = openStore(":memory:");
+
   try {
     const id = queued(store);
     expect(store.finish(id)).toBe(false);
@@ -162,6 +172,7 @@ test("only a stored reply is finished; a queued job can only fail", () => {
 
 test("the delivery cursor and retry apply only to a stored reply", () => {
   const store = openStore(":memory:");
+
   try {
     const id = queued(store);
     const row = () => store.ready("bot", Number.MAX_SAFE_INTEGER, 1)[0];

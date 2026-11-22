@@ -3,6 +3,7 @@ import type { Destination, DisplayPayload, Source } from "./model";
 export interface DeliveryDestination extends Destination {
   readonly sourceAudience: Source["audience"];
 }
+
 export type SinkOutcome =
   | { readonly state: "sent" }
   | {

@@ -6,6 +6,7 @@ function fixture() {
   const idle = Effect.runSync(Deferred.make<void>());
   const started = Promise.withResolvers<void>();
   let observers = 0;
+
   const wait = nativeWait(
     () =>
       Effect.gen(function* () {
@@ -21,6 +22,7 @@ function fixture() {
       ),
     Context.empty(),
   );
+
   return {
     wait,
     started: started.promise,
@@ -33,12 +35,14 @@ function fixture() {
 test("conversation eval: aborting an observation frees its waiter, not the busy worker", async () => {
   const f = fixture();
   const stop = new AbortController();
+
   const observation = f
     .wait({ sessionID: "ses_worker" }, { signal: stop.signal })
     .then(
       () => "idle",
       () => "cancelled",
     );
+
   try {
     await f.started;
     stop.abort();
@@ -55,12 +59,14 @@ test("conversation eval: aborting an observation frees its waiter, not the busy 
 
 test("conversation eval: already-cancelled requests do not start a native observation", async () => {
   const f = fixture();
+
   const observation = f
     .wait({ sessionID: "ses_worker" }, { signal: AbortSignal.abort() })
     .then(
       () => "idle",
       () => "cancelled",
     );
+
   try {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(f.observers()).toBe(0);

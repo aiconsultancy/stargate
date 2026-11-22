@@ -46,8 +46,10 @@ function git(directory: string, ...args: string[]) {
     ],
     { env: { PATH: process.env["PATH"] ?? "", HOME: directory } },
   );
+
   if (run.exitCode !== 0)
     throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`);
+
   return run.stdout.toString().trim();
 }
 
@@ -56,9 +58,11 @@ async function fixture(
 ) {
   const base = await mkdtemp(join(tmpdir(), "stargate-admin-"));
   const project = join(base, "project");
+
   const worktrees = Object.fromEntries(
     crew.map((id) => [id, join(base, "worktrees", id)]),
   );
+
   if (options.repository) {
     await mkdir(project, { recursive: true });
     git(project, "init", "-q", "-b", "main");
@@ -77,6 +81,7 @@ async function fixture(
       worktrees["bosun"] ?? "",
     );
   }
+
   const config = {
     namespace: "admin",
     exclusiveWorkerInput: options.exclusiveWorkerInput ?? true,
@@ -94,8 +99,10 @@ async function fixture(
       })),
     },
   };
+
   await mkdir(config.captainDirectory, { recursive: true });
   const sessions = new Map<string, CrewSession>();
+
   for (const id of ["ses_captain_a", "ses_captain_b"])
     sessions.set(id, {
       id,
@@ -106,10 +113,12 @@ async function fixture(
   const busy = new Set<string>();
   const inbox = new Map<string, string[]>();
   const history = new Map<string, EvidenceMessage[]>();
+
   const pages = new Map<
     string,
     { offset: number; type?: string | undefined }
   >();
+
   const state = {
     placement: "placed" as "placed" | "queued",
     loseReceipt: false,
@@ -119,16 +128,20 @@ async function fixture(
     nativeDown: false,
     inspectionDown: false,
   };
+
   const native: CrewSessions = {
     async get({ sessionID }) {
       if (state.nativeDown) throw new Error("PRIVATE native outage");
       const session = sessions.get(sessionID);
+
       if (!session) throw { _tag: "Session.NotFoundError" };
+
       return session;
     },
     async create(input) {
       if (!input.id || !input.agent || !input.location)
         throw new Error("Invalid fixture create");
+
       const session = {
         id: input.id,
         agent: input.agent,
@@ -137,12 +150,15 @@ async function fixture(
         time: { updated: 1, busy: 1, idle: 1 },
         outcome: "succeeded" as const,
       };
+
       sessions.set(session.id, session);
+
       return session;
     },
     async prompt(input) {
       calls.push(`prompt:${input.sessionID}`);
       const id = input.id ?? "missing";
+
       if (state.placement === "queued")
         inbox.set(input.sessionID, [...(inbox.get(input.sessionID) ?? []), id]);
       else
@@ -157,11 +173,14 @@ async function fixture(
           },
         ]);
       busy.add(input.sessionID);
+
       if (state.loseReceipt) throw new Error("PRIVATE lost receipt");
+
       return { id, sessionID: input.sessionID };
     },
     async wait({ sessionID }, request) {
       if (state.nativeDown) throw new Error("PRIVATE native outage");
+
       if (!busy.has(sessionID)) return;
       const signal = request?.signal;
       await new Promise<void>((_, reject) => {
@@ -173,26 +192,33 @@ async function fixture(
     },
     async interrupt({ sessionID }) {
       calls.push(`interrupt:${sessionID}`);
+
       if (state.nativeDown) throw new Error("PRIVATE native outage");
       busy.delete(sessionID);
+
       return { interrupted: true };
     },
     async synthetic(input) {
       calls.push("synthetic");
+
       if (state.loseResumeReceipt)
         throw new Error("PRIVATE resume receipt lost");
+
       if (
         input.resume &&
         input.description === "Captain resume of retained crew task"
       ) {
         if (!input.id) throw new Error("Resume requires a native message ID");
+
         if (state.queueResume) {
           inbox.set(input.sessionID, [
             ...(inbox.get(input.sessionID) ?? []),
             input.id,
           ]);
+
           return;
         }
+
         history.set(input.sessionID, [
           ...(history.get(input.sessionID) ?? []),
           {
@@ -209,11 +235,13 @@ async function fixture(
       calls.push("compact");
     },
   };
+
   const api: CrewInspectionAPI = {
     session: {
       get: (input, request) => native.get(input, request),
       async active() {
         if (state.inspectionDown) throw new Error("PRIVATE inspection outage");
+
         return Object.fromEntries(
           [...busy].map((id) => [id, { type: "busy" }]),
         );
@@ -222,6 +250,7 @@ async function fixture(
         async list({ sessionID }) {
           if (state.inspectionDown)
             throw new Error("PRIVATE inspection outage");
+
           return (inbox.get(sessionID) ?? []).map((id) => ({ id }));
         },
         async cancel({ sessionID, inboxID }) {
@@ -239,28 +268,37 @@ async function fixture(
       // Native-like pages: newest first, optional type filter kept by cursor.
       async list(input) {
         if (state.inspectionDown) throw new Error("PRIVATE inspection outage");
+
         if (!input.type && input.limit === 100) state.beforeResumeAdmission();
+
         const query = input.cursor
           ? pages.get(input.cursor)
           : { offset: 0, type: input.type };
+
         if (!query) throw new Error("Unknown cursor");
+
         const all = (history.get(input.sessionID) ?? [])
           .toReversed()
           .filter(({ type }) => !query.type || type === query.type);
+
         const data = all.slice(
           query.offset,
           query.offset + (input.limit ?? 100),
         );
+
         const offset = query.offset + data.length;
         let next: string | null = null;
+
         if (offset < all.length) {
           next = `cursor-${pages.size}`;
           pages.set(next, { offset, type: query.type });
         }
+
         return { data, cursor: { next } };
       },
     },
   };
+
   const engine = await CrewEngine.open(
     config,
     native,
@@ -273,11 +311,14 @@ async function fixture(
     undefined,
     async () => {
       if (state.inspectionDown) throw new Error("PRIVATE inspection outage");
+
       return api;
     },
     async () => api,
   );
+
   let call = 0;
+
   const captain = (
     id = "ses_captain_a",
     signal = new AbortController().signal,
@@ -287,27 +328,34 @@ async function fixture(
     signal,
     id: `call-${++call}`,
   });
+
   const worker = (sessionID: string, agent: string) => ({
     sessionID,
     agent,
     signal: new AbortController().signal,
     id: `call-${++call}`,
   });
+
   const dispatch = async (id: string, text = "Work", queue = false) => {
     const result = await engine.run(
       { op: "dispatch", crew: id, text, queue },
       captain(),
     );
+
     if (!result.task)
       throw new Error(`Missing task: ${JSON.stringify(result)}`);
+
     return result;
   };
+
   /** Native turn ended without a successful answer; idle but unproven. */
   const interrupted = (task: CrewTask) => {
     const session = sessions.get(task.workerSessionID);
+
     if (session) session.outcome = "interrupted";
     busy.delete(task.workerSessionID);
   };
+
   const expected = (task: CrewTask, controlID: string | null = null) => ({
     status: task.status as "uncertain",
     workerSessionID: task.workerSessionID,
@@ -315,6 +363,7 @@ async function fixture(
     inputID: task.inputID,
     controlID,
   });
+
   return {
     base,
     project,
@@ -339,6 +388,7 @@ async function fixture(
     },
   };
 }
+
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 const abandon = (
@@ -373,16 +423,19 @@ function resumeInput(task: CrewTask) {
 
 async function stuckTask(f: Fixture) {
   const { task } = await f.dispatch("bosun", "Original assignment");
+
   if (!task) throw new Error("No fixture task");
   f.interrupted(task);
   expect(
     (await f.engine.run({ op: "status", taskID: task.id }, f.captain())).status,
   ).toBe("uncertain");
+
   return task;
 }
 
 function finalAnswer(f: Fixture, task: CrewTask) {
   const session = f.sessions.get(task.workerSessionID);
+
   if (!session) throw new Error("No fixture session");
   f.busy.delete(task.workerSessionID);
   session.outcome = "succeeded";
@@ -398,9 +451,11 @@ function finalAnswer(f: Fixture, task: CrewTask) {
 
 test("captain resumes the original worker, and the final answer completes that task", async () => {
   const f = await fixture();
+
   try {
     const task = await stuckTask(f);
     const queued = (await f.dispatch("bosun", "Next assignment", true)).task;
+
     if (!queued) throw new Error("No queued fixture task");
     expect(await f.engine.run(resumeInput(task), f.captain())).toMatchObject({
       status: "resume-admitted",
@@ -435,6 +490,7 @@ test("captain resumes the original worker, and the final answer completes that t
 
 test("a lost resume receipt consumes only the inspected idle boundary", async () => {
   const f = await fixture();
+
   try {
     const task = await stuckTask(f);
     const input = resumeInput(task);
@@ -452,6 +508,7 @@ test("a lost resume receipt consumes only the inspected idle boundary", async ()
       "resume-already-admitted",
     );
     const session = f.sessions.get(task.workerSessionID);
+
     if (!session) throw new Error("No fixture session");
     session.time = { updated: 2, idle: 2, busy: 2 };
     expect((await f.engine.run(input, f.captain())).status).toBe(
@@ -475,12 +532,15 @@ test("a lost resume receipt consumes only the inspected idle boundary", async ()
 
 test("abandon withdraws only this task's queued continuation", async () => {
   const f = await fixture();
+
   try {
     const task = await stuckTask(f);
     f.state.queueResume = true;
     const result = await f.engine.run(resumeInput(task), f.captain());
+
     if (!result.task) throw new Error("Missing admitted task");
     const [continuation] = f.inbox.get(task.workerSessionID) ?? [];
+
     if (!continuation) throw new Error("Missing queued continuation");
     f.inbox.set(task.workerSessionID, [continuation, "unrelated-input"]);
     const outcome = await f.engine.run(abandon(f, result.task), f.captain());
@@ -495,9 +555,11 @@ test("abandon withdraws only this task's queued continuation", async () => {
 
 test("an unconfirmed resume holds its slot until a late native admission is found", async () => {
   const f = await fixture();
+
   try {
     const task = await stuckTask(f);
     const uncertain = f.engine.state.task(task.id);
+
     if (!uncertain) throw new Error("Missing uncertain task");
     f.state.loseResumeReceipt = true;
     expect((await f.engine.run(resumeInput(task), f.captain())).status).toBe(
@@ -521,6 +583,7 @@ test("an unconfirmed resume holds its slot until a late native admission is foun
 
 test("resume defaults to off on shared native worker profiles", async () => {
   const f = await fixture({ exclusiveWorkerInput: false });
+
   try {
     const task = await stuckTask(f);
     await expect(f.engine.run(resumeInput(task), f.captain())).rejects.toThrow(
@@ -534,20 +597,24 @@ test("resume defaults to off on shared native worker profiles", async () => {
 
 test("resume rechecks the worker after history inspection and serializes captain controls", async () => {
   const f = await fixture();
+
   try {
     const task = await stuckTask(f);
     const input = resumeInput(task);
     f.state.beforeResumeAdmission = () => {
       f.busy.add(task.workerSessionID);
     };
+
     await expect(f.engine.run(input, f.captain())).rejects.toThrow("busy");
     expect(f.calls).not.toContain("synthetic");
     f.busy.delete(task.workerSessionID);
     f.state.beforeResumeAdmission = () => {};
+
     const attempts = await Promise.allSettled([
       f.engine.run(input, f.captain()),
       f.engine.run(input, f.captain()),
     ]);
+
     expect(
       attempts.filter((result) => result.status === "fulfilled"),
     ).toHaveLength(1);
@@ -559,6 +626,7 @@ test("resume rechecks the worker after history inspection and serializes captain
 
 test("resume refuses other captains, crew, changed bindings, and worker activity", async () => {
   const f = await fixture();
+
   try {
     const task = await stuckTask(f);
     const input = resumeInput(task);
@@ -601,6 +669,7 @@ test("resume refuses other captains, crew, changed bindings, and worker activity
 
 test("a retained final answer takes precedence over resume", async () => {
   const f = await fixture();
+
   try {
     const task = await stuckTask(f);
     finalAnswer(f, task);
@@ -619,14 +688,17 @@ test("a retained final answer takes precedence over resume", async () => {
 
 test("captain recovers idle uncertain slots without replay, promotion or result loss", async () => {
   const f = await fixture();
+
   try {
     // Bosun: interrupted, idle, no final answer. Dispatch stays busy.
     const bosun = (await f.dispatch("bosun")).task as CrewTask;
     f.interrupted(bosun);
+
     const status = await f.engine.run(
       { op: "status", taskID: bosun.id },
       f.captain(),
     );
+
     expect(status.status).toBe("uncertain");
     expect(
       (
@@ -654,16 +726,19 @@ test("captain recovers idle uncertain slots without replay, promotion or result 
       { op: "inspect", crew: "bosun" },
       f.captain("ses_captain_b"),
     );
+
     expect(inspected).toMatchObject({
       active: { id: bosun.id, status: "uncertain" },
       execution: { state: "idle", outcome: "interrupted" },
       controlID: null,
     });
     const current = f.engine.state.task(bosun.id) as CrewTask;
+
     const result = await f.engine.run(
       abandon(f, current),
       f.captain("ses_captain_b"),
     );
+
     expect(result).toMatchObject({
       status: "abandoned",
       task: { id: bosun.id, status: "abandoned", released: 1, result: null },
@@ -740,6 +815,7 @@ test("captain recovers idle uncertain slots without replay, promotion or result 
 test("abandon is idempotent, CAS-guarded and captain-only", async () => {
   const f = await fixture();
   const other = await fixture();
+
   try {
     const task = (await f.dispatch("bosun")).task as CrewTask;
     f.interrupted(task);
@@ -815,13 +891,16 @@ test("abandon is idempotent, CAS-guarded and captain-only", async () => {
 
 test("unknown native state keeps local ownership visible and abandons honestly", async () => {
   const f = await fixture();
+
   try {
     const task = (await f.dispatch("bosun")).task as CrewTask;
     f.state.inspectionDown = true;
+
     const inspected = await f.engine.run(
       { op: "inspect", crew: "bosun" },
       f.captain(),
     );
+
     expect(inspected).toMatchObject({
       active: { id: task.id, status: "running", inputID: task.inputID },
       execution: { state: "unknown" },
@@ -834,11 +913,13 @@ test("unknown native state keeps local ownership visible and abandons honestly",
         f.captain(),
       ),
     ).rejects.toThrow();
+
     // Worker still busy; history API down: no proof of own placement.
     const abandoned = await f.engine.run(
       abandon(f, task, { key: "unknown" }),
       f.captain(),
     );
+
     expect(abandoned.abandonment).toMatchObject({
       stop: "unconfirmed",
       previousStatus: "running",
@@ -870,6 +951,7 @@ test("unknown native state keeps local ownership visible and abandons honestly",
 
 test("abandon interrupts only proven own placement and late completion stays rejected", async () => {
   const f = await fixture();
+
   try {
     const task = (await f.dispatch("bosun")).task as CrewTask;
     const result = await f.engine.run(abandon(f, task), f.captain());
@@ -895,15 +977,18 @@ test("abandon interrupts only proven own placement and late completion stays rej
 
 test("held controls need the inspected controlID; live controls are never cleared", async () => {
   const f = await fixture();
+
   try {
     const task = (await f.dispatch("bosun")).task as CrewTask;
     f.interrupted(task);
     f.engine.state.uncertain(task.id);
     const current = f.engine.state.task(task.id) as CrewTask;
     const live = f.engine.state.reserveReconciliation(current);
+
     const liveID = (
       await f.engine.run({ op: "inspect", crew: "bosun" }, f.captain())
     ).controlID;
+
     await expect(
       f.engine.run(abandon(f, current), f.captain()),
     ).rejects.toThrow("controlID");
@@ -916,18 +1001,22 @@ test("held controls need the inspected controlID; live controls are never cleare
     f.engine.state.releaseControl("bosun", live);
     // Crash-held control: present in SQLite, not owned by this process.
     const db = new Database(f.engine.state.path);
+
     try {
       db.query("INSERT INTO worker_controls VALUES ('bosun','orphan')").run();
     } finally {
       db.close();
     }
+
     const orphan = (
       await f.engine.run({ op: "inspect", crew: "bosun" }, f.captain())
     ).controlID;
+
     const result = await f.engine.run(
       abandon(f, current, { controlID: orphan ?? null }),
       f.captain(),
     );
+
     expect(result.abandonment?.clearedControlID).toBe(orphan ?? "missing");
     expect(f.engine.state.controlled("bosun")).toBe(false);
   } finally {
@@ -937,11 +1026,13 @@ test("held controls need the inspected controlID; live controls are never cleare
 
 test("a crash-pending abandon resumes its own stop attempt once", async () => {
   const f = await fixture();
+
   try {
     const task = (await f.dispatch("bosun")).task as CrewTask;
     f.interrupted(task);
     f.engine.state.uncertain(task.id);
     const db = new Database(f.engine.state.path);
+
     try {
       db.query("UPDATE tasks SET released=1 WHERE id=?").run(task.id);
       db.query("INSERT INTO worker_controls VALUES ('bosun','crashed')").run();
@@ -961,10 +1052,12 @@ test("a crash-pending abandon resumes its own stop attempt once", async () => {
     } finally {
       db.close();
     }
+
     const result = await f.engine.run(
       abandon(f, { ...task, status: "uncertain" }),
       f.captain(),
     );
+
     expect(result.abandonment?.stop).toBe("confirmed");
     expect(f.engine.state.controlled("bosun")).toBe(false);
   } finally {
@@ -974,30 +1067,37 @@ test("a crash-pending abandon resumes its own stop attempt once", async () => {
 
 test("lost receipt with own input queued runs without resubmission; cancel withdraws only it", async () => {
   const f = await fixture();
+
   try {
     // Idle probe passes, then foreign native work starts and the own input
-    // queues behind it; the prompt receipt is lost.
+    // Queues behind it; the prompt receipt is lost.
     f.state.placement = "queued";
     f.state.loseReceipt = true;
+
     const admitted = await f.engine.run(
       { op: "dispatch", crew: "bosun", text: "Queued behind foreign work" },
       f.captain(),
     );
+
     expect(admitted).toMatchObject({ status: "running" });
     expect(admitted.diagnostic).toContain("queued natively");
     const task = admitted.task as CrewTask;
     expect(f.inbox.get(task.workerSessionID)).toEqual([task.inputID]);
     expect(f.prompts()).toBe(1);
+
     const status = await f.engine.run(
       { op: "status", taskID: task.id },
       f.captain(),
     );
+
     expect(status.task?.status).toBe("running");
     const controller = new AbortController();
+
     const pending = f.engine.run(
       { op: "wait", taskID: task.id },
       f.captain("ses_captain_a", controller.signal),
     );
+
     controller.abort();
     await expect(pending).rejects.toThrow("withdrawn before execution");
     expect(f.calls).toContain(`withdraw:${task.inputID}`);
@@ -1024,6 +1124,7 @@ test("lost receipt with own input queued runs without resubmission; cancel withd
 
 test("lost receipt after placement recovers the own answer; observation loss allows exact completion", async () => {
   const f = await fixture();
+
   try {
     f.state.loseReceipt = true;
     const admitted = await f.dispatch("bosun");
@@ -1062,14 +1163,17 @@ test("lost receipt after placement recovers the own answer; observation loss all
 
 test("uncertain task with own input still queued on an active worker is readmitted", async () => {
   const f = await fixture();
+
   try {
     f.state.placement = "queued";
     const task = (await f.dispatch("bosun")).task as CrewTask;
     f.engine.state.uncertain(task.id);
+
     const status = await f.engine.run(
       { op: "status", taskID: task.id },
       f.captain(),
     );
+
     expect(status).toMatchObject({ status: "running" });
     expect(status.diagnostic).toContain("without resubmission");
     expect(f.prompts()).toBe(1);
@@ -1085,6 +1189,7 @@ async function dirty(f: Fixture) {
   await writeFile(join(root, "notes.txt"), "unstaged\n");
   await writeFile(join(root, "new.txt"), "untracked\n");
   await writeFile(join(root, ".env"), "TOKEN=fixture-secret\n");
+
   return root;
 }
 
@@ -1098,18 +1203,22 @@ const inspect = async (f: Fixture, caller = f.captain()) =>
 
 test("workspace inspection is read-only and bounded to the configured worktree", async () => {
   const f = await fixture({ repository: true });
+
   try {
     const root = await dirty(f);
+
     const before = git(
       root,
       "status",
       "--porcelain=v2",
       "--untracked-files=all",
     );
+
     const result = await f.engine.run(
       { op: "workspace", crew: "bosun", patch: true },
       f.captain(),
     );
+
     expect(result).toMatchObject({
       status: "workspace",
       slot: { taskID: null, controlled: false, queued: 0 },
@@ -1143,9 +1252,11 @@ test("workspace inspection is read-only and bounded to the configured worktree",
 
 test("workspace refuses symlinked, foreign and nested repositories", async () => {
   const f = await fixture({ repository: true });
+
   try {
     const run = (id: string) =>
       f.engine.run({ op: "workspace", crew: id }, f.captain());
+
     await symlink(f.worktrees["bosun"] ?? "", f.worktrees["chief"] ?? "");
     await expect(run("chief")).rejects.toThrow("not a symlink");
     await rm(f.worktrees["chief"] ?? "");
@@ -1175,10 +1286,12 @@ test("workspace refuses symlinked, foreign and nested repositories", async () =>
 
 test("stash retains staged, unstaged and untracked changes but never ignored files", async () => {
   const f = await fixture({ repository: true });
+
   try {
     await f.engine.run({ op: "ensure", crew: "bosun" }, f.captain());
     const root = await dirty(f);
     const { workspace } = await inspect(f);
+
     const result = await f.engine.run(
       {
         op: "stash",
@@ -1191,6 +1304,7 @@ test("stash retains staged, unstaged and untracked changes but never ignored fil
       },
       f.captain(),
     );
+
     const oid = result.checkpoint?.oid ?? "";
     expect(result).toMatchObject({
       status: "stashed",
@@ -1214,15 +1328,18 @@ test("stash retains staged, unstaged and untracked changes but never ignored fil
 
 test("reset requires exact state and acknowledgement, and keeps a recoverable checkpoint", async () => {
   const f = await fixture({ repository: true });
+
   try {
     await f.engine.run({ op: "ensure", crew: "bosun" }, f.captain());
     const root = await dirty(f);
     const { workspace } = await inspect(f);
+
     const expected = {
       head: workspace.head,
       fingerprint: workspace.fingerprint,
       taskID: null,
     };
+
     await expect(
       f.engine.run({ op: "reset", crew: "bosun", expected }, f.captain()),
     ).rejects.toThrow("Invalid stargate_crew input");
@@ -1235,6 +1352,7 @@ test("reset requires exact state and acknowledgement, and keeps a recoverable ch
     ).rejects.toThrow("differ from the inspected state");
     expect(git(root, "stash", "list")).toBe("");
     const fresh = (await inspect(f)).workspace;
+
     const moved = git(
       root,
       "commit-tree",
@@ -1244,6 +1362,7 @@ test("reset requires exact state and acknowledgement, and keeps a recoverable ch
       "-m",
       "moved",
     );
+
     git(root, "update-ref", "HEAD", moved);
     await expect(
       f.engine.run(
@@ -1262,6 +1381,7 @@ test("reset requires exact state and acknowledgement, and keeps a recoverable ch
     ).rejects.toThrow("differ from the inspected state");
     git(root, "update-ref", "HEAD", fresh.head);
     const exact = (await inspect(f)).workspace;
+
     const result = await f.engine.run(
       {
         op: "reset",
@@ -1275,6 +1395,7 @@ test("reset requires exact state and acknowledgement, and keeps a recoverable ch
       },
       f.captain(),
     );
+
     const oid = result.checkpoint?.oid ?? "";
     expect(result.status).toBe("reset");
     expect(git(root, "status", "--porcelain")).toBe("?? new.txt");
@@ -1289,15 +1410,18 @@ test("reset requires exact state and acknowledgement, and keeps a recoverable ch
 
 test("workspace mutation is blocked by active work, held controls, slot races and unconfirmed idle", async () => {
   const f = await fixture({ repository: true });
+
   try {
     await dirty(f);
     const running = (await f.dispatch("bosun")).task as CrewTask;
     const seen = (await inspect(f)).workspace;
+
     const expected = {
       head: seen.head,
       fingerprint: seen.fingerprint,
       taskID: running.id,
     };
+
     const stash = { op: "stash" as const, crew: "bosun", expected };
     await expect(f.engine.run(stash, f.captain())).rejects.toThrow(
       "Stargate-active work",
@@ -1346,6 +1470,7 @@ test("Pi status adopts only the bound committed answer after restart; abandoned 
   const base = await mkdtemp(join(tmpdir(), "stargate-admin-pi-"));
   const answers = new Map<string, string>();
   const requests: string[] = [];
+
   const backend: PiWorkerBackend = {
     createSession: async () => "17",
     prompt: async () => {
@@ -1356,11 +1481,14 @@ test("Pi status adopts only the bound committed answer after restart; abandoned 
     waitForIdle: async () => {},
     close: async () => {},
   };
+
   const factory: PiWorkerFactory = Object.assign(async () => backend, {
     recover: async (_context: unknown, conversation: string, request: string) =>
       answers.get(`${conversation}:${request}`),
   });
+
   const captainDirectory = join(base, "captain");
+
   const engine = await CrewEngine.open(
     {
       namespace: "admin-pi",
@@ -1410,26 +1538,35 @@ test("Pi status adopts only the bound committed answer after restart; abandoned 
     undefined,
     factory,
   );
+
   const captain = {
     sessionID: "ses_captain",
     agent: "captain",
     signal: new AbortController().signal,
   };
+
   try {
     const peer = (await engine.run({ op: "ensure", crew: "twiki" }, captain))
       .peers?.[0];
+
     if (!peer) throw new Error("Missing Pi peer");
+
     // Crash after native admission: bound conversation, no live execution.
     const admit = (text: string) => {
       const task = engine.state.reserveTask(peer, captain.sessionID, text);
+
       if (!task) throw new Error("Missing Pi task");
       engine.state.running(task.id);
       engine.state.savePiTaskConversation(task.id, "17");
+
       return task;
     };
+
     const task = admit("Maintain");
+
     const status = (id: string) =>
       engine.run({ op: "status", taskID: id }, captain);
+
     expect((await status(task.id)).status).toBe("uncertain");
     answers.set(`17:${task.inputID}`, "Committed answer");
     expect(await status(task.id)).toMatchObject({
@@ -1439,6 +1576,7 @@ test("Pi status adopts only the bound committed answer after restart; abandoned 
     expect(engine.state.release(task.id)).toBe(true);
     const later = admit("Later");
     const current = engine.state.task(later.id) as CrewTask;
+
     const abandoned = await engine.run(
       {
         op: "abandon",
@@ -1455,6 +1593,7 @@ test("Pi status adopts only the bound committed answer after restart; abandoned 
       },
       captain,
     );
+
     expect(abandoned.abandonment?.stop).toBe("confirmed");
     answers.set(`17:${later.inputID}`, "Late answer");
     expect(await status(later.id)).toMatchObject({
@@ -1470,6 +1609,7 @@ test("Pi status adopts only the bound committed answer after restart; abandoned 
 
 test("legacy task status CHECK upgrades in place and keeps uncertain rows", async () => {
   const f = await fixture();
+
   try {
     const task = (await f.dispatch("bosun")).task as CrewTask;
     f.engine.state.uncertain(task.id);
@@ -1477,6 +1617,7 @@ test("legacy task status CHECK upgrades in place and keeps uncertain rows", asyn
     await f.engine.close();
     // Recreate the pre-upgrade CHECK while keeping every row and rowid.
     const db = new Database(f.engine.state.path);
+
     try {
       db.exec(`PRAGMA foreign_keys=OFF;
         CREATE TABLE tasks_legacy (
@@ -1496,15 +1637,21 @@ test("legacy task status CHECK upgrades in place and keeps uncertain rows", asyn
     } finally {
       db.close();
     }
+
     const before = new Database(f.engine.state.path);
+
     const legacyRowid = before
       .query<{ rowid: number }, [string]>("SELECT rowid FROM tasks WHERE id=?")
       .get(task.id)?.rowid;
+
     before.close();
+
     const reopened = await CrewEngine.open(f.config, {
       get: async ({ sessionID }) => {
         const session = f.sessions.get(sessionID);
+
         if (!session) throw { _tag: "Session.NotFoundError" };
+
         return session;
       },
       create: async () => {
@@ -1518,6 +1665,7 @@ test("legacy task status CHECK upgrades in place and keeps uncertain rows", asyn
       wait: async () => {},
       interrupt: async () => {},
     });
+
     try {
       expect(reopened.state.task(task.id)).toMatchObject({
         status: "uncertain",
@@ -1525,6 +1673,7 @@ test("legacy task status CHECK upgrades in place and keeps uncertain rows", asyn
       });
       expect(reopened.state.notices(task.id, 0)[0]?.text).toBe("Legacy notice");
       const check = new Database(reopened.state.path);
+
       try {
         expect(
           check
@@ -1537,10 +1686,12 @@ test("legacy task status CHECK upgrades in place and keeps uncertain rows", asyn
       } finally {
         check.close();
       }
+
       const result = await reopened.run(
         abandon(f, reopened.state.task(task.id) as CrewTask),
         f.captain(),
       );
+
       expect(result.task?.status).toBe("abandoned");
     } finally {
       await reopened.close();
@@ -1553,10 +1704,12 @@ test("legacy task status CHECK upgrades in place and keeps uncertain rows", asyn
 for (const shape of ["directory-for-file", "file-for-directory"] as const)
   test(`reset and stash refuse untracked or ignored obstructions of HEAD paths: ${shape}`, async () => {
     const f = await fixture({ repository: true });
+
     try {
       await f.engine.run({ op: "ensure", crew: "bosun" }, f.captain());
       const root = f.worktrees["bosun"] ?? "";
       const kept: string[] = [];
+
       if (shape === "directory-for-file") {
         await writeFile(join(root, "tracked"), "tracked\n");
         git(root, "add", "tracked");
@@ -1583,12 +1736,16 @@ for (const shape of ["directory-for-file", "file-for-directory"] as const)
         );
         kept.push(join(root, "dir"));
       }
+
       await writeFile(join(root, "notes.txt"), "tracked change\n");
       kept.push(join(root, "notes.txt"));
+
       const snapshot = () =>
         Promise.all(kept.map((path) => readFile(path, "utf8")));
+
       const before = await snapshot();
       const head = git(root, "rev-parse", "HEAD");
+
       for (const op of ["reset", "stash"] as const) {
         const { workspace } = await inspect(f);
         await expect(
@@ -1607,6 +1764,7 @@ for (const shape of ["directory-for-file", "file-for-directory"] as const)
           ),
         ).rejects.toThrow("HEAD would restore");
       }
+
       expect(await snapshot()).toEqual(before);
       expect(git(root, "stash", "list")).toBe("");
       expect(git(root, "rev-parse", "HEAD")).toBe(head);
@@ -1625,9 +1783,11 @@ for (const later of [
 ] as const)
   test(`placement past a long tool-heavy turn interrupts only own latest input: ${later}`, async () => {
     const f = await fixture();
+
     try {
       const task = (await f.dispatch("bosun")).task as CrewTask;
       const history = f.history.get(task.workerSessionID) ?? [];
+
       const tools = (from: number, count: number) => {
         for (let index = 0; index < count; index++)
           history.push({
@@ -1637,10 +1797,13 @@ for (const later of [
             time: { created: 20 + from + index },
           });
       };
+
       tools(0, 600); // Beyond the 8x64 unfiltered window.
+
       const metadata = (taskID: string, originCaptainID: string) => ({
         pogoCrew: { taskID, originCaptainID, messageID: "e".repeat(32) },
       });
+
       if (later === "user")
         history.push({
           id: "msg_foreign",
@@ -1648,12 +1811,14 @@ for (const later of [
           text: "Foreign",
           time: { created: 700 },
         });
+
       if (later === "shell")
         history.push({
           id: "msg_shell",
           type: "shell",
           time: { created: 700 },
         });
+
       if (later === "synthetic")
         history.push({
           id: "msg_foreign_dm",
@@ -1661,6 +1826,7 @@ for (const later of [
           metadata: metadata("task_other", "ses_captain_b"),
           time: { created: 700 },
         });
+
       if (later === "own-steer")
         history.push({
           id: "msg_own_dm",

@@ -6,9 +6,11 @@ import { compareModels, type ModelRef, parseModel } from "./versions";
 
 const record = Schema.Record(Schema.String, Schema.Unknown);
 const decodeRecord = Schema.decodeUnknownSync(record);
+
 const decodeModels = Schema.decodeUnknownSync(
   Schema.Record(Schema.String, record),
 );
+
 const decodeVariants = Schema.decodeUnknownSync(
   Schema.Array(Schema.Struct({ id: Schema.String })),
 );
@@ -29,8 +31,10 @@ export function globalCatalogPath(settings: {
 function parseCatalog(text: string) {
   try {
     const config = decodeRecord(JSON.parse(text));
+
     if (`${JSON.stringify(config, null, 2)}\n` !== text) throw new Error();
     const providers = decodeRecord(config["providers"]);
+
     return { config, providers };
   } catch {
     throw new StepError("config-format");
@@ -45,22 +49,29 @@ export function catalogRefs(
 ): ModelRef[] {
   const parsed = parseCatalog(text);
   const refs: ModelRef[] = [];
+
   for (const providerID of providers) {
     if (!Object.hasOwn(parsed.providers, providerID)) continue;
     const provider = decodeRecord(parsed.providers[providerID]);
+
     if (provider["models"] === undefined) continue;
     const models = decodeModels(provider["models"]);
     const newest = new Map<string, string>();
+
     for (const id of Object.keys(models)) {
       const model = parseModel(id);
+
       if (!model || !families.includes(model.family)) continue;
       const previous = newest.get(model.family);
       const before = previous ? parseModel(previous) : null;
+
       if (!before || compareModels(model, before) > 0)
         newest.set(model.family, id);
     }
+
     refs.push(...[...newest.values()].map((id) => ({ providerID, id })));
   }
+
   return refs;
 }
 
@@ -80,14 +91,17 @@ export function upgradeGlobalCatalog(
   const parsed = parseCatalog(text);
   const additions: CatalogAddition[] = [];
   const updatedProviders = { ...parsed.providers };
+
   for (const from of catalogRefs(text, families, providers)) {
     const before = parseModel(from.id);
+
     for (const next of new Set(
       [...upgrades].flatMap(([id, to]) =>
         parseModel(id)?.family === before?.family ? [to] : [],
       ),
     )) {
       const after = next ? parseModel(next) : null;
+
       if (
         !next ||
         !before ||
@@ -98,13 +112,17 @@ export function upgradeGlobalCatalog(
         continue;
       const provider = { ...decodeRecord(updatedProviders[from.providerID]) };
       const models = { ...decodeModels(provider["models"]) };
+
       if (Object.hasOwn(models, next)) continue;
       const template = models[from.id];
+
       if (!template) throw new StepError("config-format");
+
       const variants =
         template["variants"] === undefined
           ? []
           : decodeVariants(template["variants"]).map((variant) => variant.id);
+
       Object.defineProperty(models, next, {
         value: {
           ...structuredClone(template),
@@ -123,6 +141,7 @@ export function upgradeGlobalCatalog(
       });
     }
   }
+
   return {
     text: additions.length
       ? `${JSON.stringify({ ...parsed.config, providers: updatedProviders }, null, 2)}\n`

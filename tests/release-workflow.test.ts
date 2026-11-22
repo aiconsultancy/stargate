@@ -6,6 +6,7 @@ test("main checks do not invoke a release and retain self-update environment tes
     new URL("../.github/workflows/check.yml", import.meta.url),
     "utf8",
   );
+
   expect(check).not.toContain("uses: ./.github/workflows/release.yml");
   expect(check).not.toMatch(/^ {2}release:/m);
   expect(check).toContain("mise run test-release-env");
@@ -16,6 +17,7 @@ test("only explicit manual publication crosses the release environment approval 
     new URL("../.github/workflows/release.yml", import.meta.url),
     "utf8",
   );
+
   expect(release).not.toContain("workflow_call:");
   expect(release).toContain("workflow_dispatch:");
   expect(release).toMatch(/dry_run:[\s\S]*?type: boolean[\s\S]*?default: true/);

@@ -9,6 +9,7 @@ describe("canonical crew error", () => {
     expect(StateCrewError).toBe(CrewError);
     expect(Object.getPrototypeOf(CrewError)).toBe(Error);
     expect(Object.getPrototypeOf(CrewError.prototype)).toBe(Error.prototype);
+
     for (const Subclass of [HistoryError, MissingTaskResult]) {
       expect(Object.getPrototypeOf(Subclass)).toBe(CrewError);
       expect(Object.getPrototypeOf(Subclass.prototype)).toBe(
@@ -44,8 +45,10 @@ describe("canonical crew error", () => {
     function captureCaller() {
       const error = new CrewError("probe");
       Error.captureStackTrace(error, captureCaller);
+
       return error;
     }
+
     const error = captureCaller();
     expect(error.stack).toContain("Error: probe");
     expect(error.stack).not.toContain("at captureCaller");

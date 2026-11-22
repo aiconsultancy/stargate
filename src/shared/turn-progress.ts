@@ -16,6 +16,7 @@ const descriptions = {
 };
 
 export type TurnStage = keyof typeof descriptions;
+
 export type TurnProgress = {
   stage: TurnStage;
   observedAt: number;
@@ -27,5 +28,6 @@ export function turnProgressText(progress?: TurnProgress) {
   if (!progress)
     return "Stargate has no confirmed backend activity for this request.";
   const time = new Date(progress.observedAt).toISOString().slice(11, 16);
+
   return `${progress.disconnected ? "OpenCode event stream disconnected. " : ""}${descriptions[progress.stage].replace("OpenCode", progress.backend === "claude" ? "Claude" : progress.backend === "codex" ? "Codex" : "OpenCode")} Observed at ${time} UTC.`;
 }

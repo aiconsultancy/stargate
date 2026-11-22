@@ -15,6 +15,7 @@ import { openStore } from "../src/app/open-store";
 import { bot, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -29,12 +30,14 @@ function fixture(path: string, held: { value: boolean }) {
   cleanup.push(() => store.close());
   const prompts: string[] = [];
   const handlers: DrainHandler[] = [];
+
   const backend: AgentBackend = {
     async createSession() {
       return "session-1";
     },
     async prompt(_session, text) {
       prompts.push(text);
+
       return `done ${text}`;
     },
     async close() {},
@@ -42,14 +45,18 @@ function fixture(path: string, held: { value: boolean }) {
       notices.push({ sessionID, id });
     },
   };
+
   const notices: { sessionID: string; id: string }[] = [];
+
   const control: DrainControl = {
     held: () => held.value,
     tick() {},
     attach: (handler) => handlers.push(handler),
   };
+
   const config = bot();
   config.waiting.delayMs = 0;
+
   const gateway = new Gateway(
     config,
     identity,
@@ -65,7 +72,9 @@ function fixture(path: string, held: { value: boolean }) {
     undefined,
     control,
   );
+
   cleanup.push(() => gateway.close());
+
   const enqueue = (runId: string) => {
     const id = gateway.enqueueScheduled({
       runId,
@@ -76,9 +85,12 @@ function fixture(path: string, held: { value: boolean }) {
       name: "Held",
       deferDelivery: true,
     });
+
     if (id === undefined) throw new Error("Scheduled job rejected");
+
     return id;
   };
+
   return { store, gateway, prompts, notices, handlers, enqueue };
 }
 
@@ -97,6 +109,7 @@ test("a drain holds new turns but keeps accepting jobs; they run FIFO after rele
   expect(first.store.queueCounts(first.gateway.key).queued).toBe(2);
   // A turn the poll listed before the drain began still refuses at the last check.
   const ready = first.store.ready(first.gateway.key, Date.now(), 1)[0];
+
   if (!ready) throw new Error("Expected a queued job");
   await first.gateway.process(ready, new AbortController().signal);
   expect(first.prompts).toEqual([]);
@@ -157,6 +170,7 @@ test("held queued jobs cannot hide a responding delivery in the bounded ready qu
     text: "finished",
   });
   const responding = f.store.queuedJob(f.gateway.key, "late")?.id;
+
   if (responding === undefined) throw new Error("Missing job");
   f.store.running(responding);
   f.store.respond(responding, ["done"]);
@@ -175,6 +189,7 @@ test("the gateway broadcast queues each mapped unpinned session once with a dete
   await until(() => f.prompts.length === 1);
   stop.abort();
   await work;
+
   const record = {
     schema: "stargate.maintenance.drain.v1" as const,
     runID: "run-9",
@@ -185,7 +200,9 @@ test("the gateway broadcast queues each mapped unpinned session once with a dete
     deadlineAt: 2,
     phase: "draining" as const,
   };
+
   const handler = f.handlers[0];
+
   if (!handler) throw new Error("Gateway did not attach");
   const signal = new AbortController().signal;
   await handler.broadcast(record, signal);

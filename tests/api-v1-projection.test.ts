@@ -88,6 +88,7 @@ function fixture(
   >,
 ) {
   let at = 4_000_000;
+
   let config: ApiV1Config = Schema.decodeUnknownSync(configSchema)({
     bots: [bot("captain")],
     irc: [
@@ -138,14 +139,17 @@ function fixture(
       },
     ],
   });
+
   const statuses = new Map<string, CrewStatus | Error | Promise<CrewStatus>>();
   const crewSignals = new Map<string, AbortSignal>();
   const queue = new Map<string, V1QueueCounts>();
+
   const calls = {
     status: [] as string[],
     children: [] as string[],
     git: [] as string[],
   };
+
   const roots = [
     session("root-default", {
       kind: "crew",
@@ -155,6 +159,7 @@ function fixture(
     session("root-ops", { kind: "crew", member: "pilot" }),
     session("root-other", { kind: "crew", member: "other" }),
   ];
+
   const children = [
     session("newest", { parentID: "root-ops", updatedAt: at, title: "Review" }),
     session("second", {
@@ -175,13 +180,19 @@ function fixture(
   ): Promise<CrewStatus> {
     calls.status.push(member ? `${id}/${member}` : id);
     const found = await statuses.get(id);
+
     if (found instanceof Error) throw found;
+
     if (!found) return { members: [], total: 0, truncated: false };
+
     if (!member) return found;
     const members = found.members.filter((context) => context.id === member);
+
     return { members, total: members.length, truncated: false };
   }
+
   const ships: DashboardShip[] = [];
+
   for (const entry of [
     ...config.bots,
     ...(config.irc ?? []),
@@ -189,6 +200,7 @@ function fixture(
     { ...bot(), id: "other-worker" },
   ]) {
     const id = entry.id;
+
     const backend: AgentBackend = {
       async createSession() {
         throw new Error("Read attempted to create a session");
@@ -205,6 +217,7 @@ function fixture(
             async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
               crewSignals.set(id, signal);
               const scoped = await status(id, input);
+
               return {
                 status: scoped,
                 metadata: {
@@ -237,6 +250,7 @@ function fixture(
                 calls.children.push(parentID);
                 expect(updatedSince).toBe(at - 3_600_000);
                 expect(limit).toBe(3);
+
                 return {
                   sessions: children.filter(
                     (child) => child.parentID === parentID,
@@ -250,12 +264,14 @@ function fixture(
           }
         : {}),
     };
+
     const {
       displayName,
       backend: settings,
       concurrency,
       turnTimeoutMs,
     } = entry;
+
     ships.push({
       bot: { id, displayName, backend: settings, concurrency, turnTimeoutMs },
       identity,
@@ -263,8 +279,10 @@ function fixture(
       backend,
     });
   }
+
   const now = () => at;
   const counts = { queued: 0, running: 0, responding: 0, done: 0, failed: 0 };
+
   const dashboard = dashboardSource(
     ships,
     {
@@ -279,6 +297,7 @@ function fixture(
     now,
     options,
   );
+
   const source = createApiV1Source({
     config: () => config,
     dashboard,
@@ -286,6 +305,7 @@ function fixture(
     git: async (directory): Promise<V1Git | null> => {
       if (!directory) return null;
       calls.git.push(directory);
+
       return {
         branch: "test/change",
         head: "123abcd",
@@ -300,6 +320,7 @@ function fixture(
     pullRequest: () => null,
     ...overrides,
   });
+
   return {
     dashboard,
     source,
@@ -309,6 +330,7 @@ function fixture(
     advance: () => ++at,
     replaceBackend: (id: string) => {
       const ship = ships.find((entry) => entry.bot.id === id);
+
       if (ship) ship.backend = { ...ship.backend };
     },
     useConfig: (next: (current: ApiV1Config) => ApiV1Config) => {
@@ -331,6 +353,7 @@ test("IRC Fleet detail includes live request progress unless explicitly disabled
     stale: false,
     failure: null,
   };
+
   const requests = mock(() => [progress]);
   const f = fixture(undefined, { requests });
   expect((await f.source.ship("other", signal))?.captain.requests).toEqual([
@@ -378,6 +401,7 @@ function fleetEvents(
       features: [],
     },
   });
+
   return createEventStreams(
     {
       ...source,
@@ -397,11 +421,14 @@ async function nextEvent(
 ) {
   const decoder = new TextDecoder();
   let frames = "";
+
   while (!frames.includes(marker)) {
     const next = await reader.read();
+
     if (next.done) throw new Error(`Missing frame containing ${marker}`);
     frames += decoder.decode(next.value, { stream: true });
   }
+
   return frames;
 }
 
@@ -413,14 +440,17 @@ describe("Fleet API projection", () => {
     f.statuses.set("captain", held.promise);
     f.set("other", [context("pilot")]);
     const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-"));
+
     const reservation = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       fetch: () => new Response(null),
     });
+
     const listen = `127.0.0.1:${reservation.port}`;
     await reservation.stop(true);
     let server: Awaited<ReturnType<typeof startApiV1Server>> | undefined;
+
     try {
       server = await startApiV1Server({
         config: { listen },
@@ -435,10 +465,12 @@ describe("Fleet API projection", () => {
         signal: shutdown.signal,
         timing: { requestMs: 300 },
       });
+
       const response = await fetch(new URL("/api/v1/fleet", server.url), {
         headers: { Authorization: `Bearer ${await apiToken(dataDirectory)}` },
         signal: AbortSignal.timeout(1000),
       });
+
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
         ships: [
@@ -464,8 +496,10 @@ describe("Fleet API projection", () => {
       projectDirectory: "/fixture",
       contexts: [{ member: "pilot", project: "ops", directory: "/old" }],
     };
+
     const held = Promise.withResolvers<void>();
     let stall = false;
+
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -480,19 +514,25 @@ describe("Fleet API projection", () => {
           total: 1,
           truncated: false,
         };
+
         if (!new URL(request.url).pathname.endsWith("/fleetStatus"))
           return Response.json({ output: status });
+
         if (stall) await held.promise;
+
         return Response.json({ output: { status, metadata } });
       },
     });
+
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid backend fixture");
     const backend = new OpenCodeBackend(config);
+
     try {
       expect(await backend.fleetCrewStatus({}, signal)).toMatchObject({
         status: { members: [{ id: "pilot", project: "ops" }] },
@@ -517,6 +557,7 @@ describe("Fleet API projection", () => {
       port: 0,
       async fetch() {
         await Bun.sleep(550);
+
         return Response.json({
           output: {
             status: { members: [], total: 0, truncated: false },
@@ -525,20 +566,25 @@ describe("Fleet API projection", () => {
         });
       },
     });
+
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid backend fixture");
     const backend = new OpenCodeBackend(config);
+
     try {
       expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
       let recovered: Awaited<ReturnType<typeof backend.fleetCrewStatus>>;
+
       for (let i = 0; i < 20 && !recovered; i++) {
         await Bun.sleep(5); // Fetch may still be aborting after the deadline.
         recovered = await backend.fleetCrewStatus({}, signal);
       }
+
       expect(recovered).toMatchObject({
         metadata: { projectDirectory: "/fixture" },
       });
@@ -557,20 +603,26 @@ describe("Fleet API projection", () => {
     const status = { members: [], total: 0, truncated: false };
     const metadata = { projectDirectory: "/fixture", contexts: [] };
     const filtered = { projectDirectory: "/filtered", contexts: [] };
+
     const fetchProbe = mock(async () => {
       if (fetchProbe.mock.calls.length === 1) {
         started.resolve();
         await held.promise;
+
         return Response.json({ output: { status, metadata } });
       }
+
       return Response.json({ output: { status, metadata: filtered } });
     });
+
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: "http://127.0.0.1:1",
       directory: "/",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+
     const backend = new OpenCodeBackend(
       config,
       OpenCode.make({
@@ -578,6 +630,7 @@ describe("Fleet API projection", () => {
         fetch: Object.assign(fetchProbe, { preconnect: fetch.preconnect }),
       }),
     );
+
     try {
       const caller = new AbortController();
       const first = backend.fleetCrewStatus({}, caller.signal);
@@ -603,22 +656,29 @@ describe("Fleet API projection", () => {
     const status = { members: [], total: 0, truncated: false };
     const metadata = { projectDirectory: "/fixture", contexts: [] };
     let probes = 0;
+
     const mockFetch = async (url: URL | RequestInfo) => {
       const path = new URL(url instanceof Request ? url.url : url).pathname;
+
       if (!path.endsWith("/fleetStatus"))
         return Response.json({ output: status });
+
       if (++probes === 1) {
         started.resolve();
         await held.promise;
       }
+
       return Response.json({ output: { status, metadata } });
     };
+
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: "http://127.0.0.1:1",
       directory: "/",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+
     const backend = new OpenCodeBackend(
       config,
       OpenCode.make({
@@ -626,10 +686,13 @@ describe("Fleet API projection", () => {
         fetch: Object.assign(mockFetch, { preconnect: fetch.preconnect }),
       }),
     );
+
     const deadline = new AbortController();
+
     const timeout = spyOn(AbortSignal, "timeout").mockReturnValueOnce(
       deadline.signal,
     );
+
     try {
       const first = backend.fleetCrewStatus({}, signal);
       await started.promise;
@@ -657,6 +720,7 @@ describe("Fleet API projection", () => {
     const retry = Promise.withResolvers<void>();
     const status = { members: [], total: 0, truncated: false };
     const metadata = { projectDirectory: "/fixture", contexts: [] };
+
     const fetchProbe = mock(async () => {
       switch (fetchProbe.mock.calls.length) {
         case 1:
@@ -668,14 +732,18 @@ describe("Fleet API projection", () => {
         case 4:
           await retry.promise;
       }
+
       return Response.json({ output: { status, metadata } });
     });
+
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: "http://127.0.0.1:1",
       directory: "/",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+
     const backend = new OpenCodeBackend(
       config,
       OpenCode.make({
@@ -683,9 +751,11 @@ describe("Fleet API projection", () => {
         fetch: Object.assign(fetchProbe, { preconnect: fetch.preconnect }),
       }),
     );
+
     const clock = spyOn(performance, "now").mockReturnValue(0);
     const timeout = spyOn(AbortSignal, "timeout");
-    const hardCap = 3 * 6_400;
+    const hardCap = 3 * 6400;
+
     const startAndTimeOut = async (count: number) => {
       const deadline = new AbortController();
       timeout.mockReturnValueOnce(deadline.signal);
@@ -695,6 +765,7 @@ describe("Fleet API projection", () => {
       deadline.abort(new DOMException("Fixture deadline", "TimeoutError"));
       expect(await read).toBeUndefined();
     };
+
     try {
       expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
       expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
@@ -732,32 +803,39 @@ describe("Fleet API projection", () => {
 
   test("a cancelled OpenCode fleet probe leaves ordinary status available", async () => {
     const methods: string[] = [];
+
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       async fetch(request) {
         const method = new URL(request.url).pathname.split("/").at(-1) ?? "";
         methods.push(method);
-        if (method === "fleetStatus") await Bun.sleep(1_300);
+
+        if (method === "fleetStatus") await Bun.sleep(1300);
+
         return Response.json({
           output: { members: [], total: 0, truncated: false },
         });
       },
     });
+
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid backend fixture");
     const backend = new OpenCodeBackend(config);
+
     try {
       const caller = new AbortController();
       const cancelled = backend.fleetCrewStatus({}, caller.signal);
+
       while (!methods.length) await Bun.sleep(5);
       caller.abort();
       await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
-      const reading = AbortSignal.timeout(1_000);
+      const reading = AbortSignal.timeout(1000);
       expect(await backend.crewStatus({}, reading)).toMatchObject({
         members: [],
       });
@@ -790,9 +868,11 @@ describe("Fleet API projection", () => {
     await f.source.fleet(signal);
     const next = Promise.withResolvers<CrewStatus>();
     f.statuses.set("captain", next.promise);
+
     const clock = spyOn(performance, "now").mockReturnValue(
-      performance.now() + 6_000,
+      performance.now() + 6000,
     );
+
     try {
       const fleet = await f.source.fleet(signal);
       expect(fleet.ships.find(({ id }) => id === "captain")).toMatchObject({
@@ -821,15 +901,20 @@ describe("Fleet API projection", () => {
   test("an expired crew failure waits for the shared refresh", async () => {
     const f = fixture({ fleetCrewReadMs: 5 });
     f.statuses.set("captain", new Error("Fixture unavailable"));
+
     const captain = (fleet: Awaited<ReturnType<typeof f.source.fleet>>) =>
       fleet.ships.find(({ id }) => id === "captain");
+
     expect(captain(await f.source.fleet(signal))?.available).toBe(false);
     const held = Promise.withResolvers<CrewStatus>();
     f.statuses.set("captain", held.promise);
+
     const clock = spyOn(performance, "now").mockReturnValue(
       performance.now() + 24_000,
     );
+
     const refresh = f.source.fleet(signal);
+
     try {
       expect(
         await Promise.race([
@@ -859,12 +944,14 @@ describe("Fleet API projection", () => {
     const joined = f.source.fleet(signal);
     await Bun.sleep(0);
     caller.abort();
+
     // Cancellation must finish even though the crew backend is still blocked.
     try {
       await expect(first).rejects.toMatchObject({ name: "AbortError" });
     } finally {
       held.resolve({ members: [context("pilot")], total: 1, truncated: false });
     }
+
     expect(
       (await joined).ships.find(({ id }) => id === "captain"),
     ).toMatchObject({
@@ -881,6 +968,7 @@ describe("Fleet API projection", () => {
     f.statuses.set("captain", held.promise);
     const read = f.source.fleet(signal);
     void read.catch(() => {});
+
     try {
       await Bun.sleep(0);
       const backendRead = f.crewSignals.get("captain");
@@ -902,8 +990,10 @@ describe("Fleet API projection", () => {
     const first = f.source.fleet(signal);
     const reads = [first];
     void first.catch(() => {});
+
     try {
       await Bun.sleep(0);
+
       for (let i = 0; i < 3; i++) {
         f.dashboard.invalidateFleetCrew();
         const read = f.source.fleet(signal);
@@ -911,6 +1001,7 @@ describe("Fleet API projection", () => {
         reads.push(read);
         await Bun.sleep(0);
       }
+
       expect(f.calls.status.filter((id) => id === "captain")).toHaveLength(2);
       const last = reads[reads.length - 1] ?? first;
       expect(
@@ -936,12 +1027,14 @@ describe("Fleet API projection", () => {
   test("an older OpenCode plugin skips repeated missing fleet-status calls", async () => {
     const methods: string[] = [];
     let missing = false;
+
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
         const method = new URL(request.url).pathname.split("/").at(-1) ?? "";
         methods.push(method);
+
         if (method === "fleetStatus")
           return Response.json(
             {
@@ -951,20 +1044,24 @@ describe("Fleet API projection", () => {
             },
             { status: missing ? 400 : 500 },
           );
+
         return Response.json({
           output: { members: [], total: 0, truncated: false },
         });
       },
     });
+
     try {
       const config = Schema.decodeUnknownSync(backendSchema)({
         type: "opencode",
         url: server.url.href,
         directory: "/",
       });
+
       if (config.type !== "opencode")
         throw new Error("Invalid backend fixture");
       const backend = new OpenCodeBackend(config);
+
       try {
         expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
         missing = true;
@@ -984,26 +1081,32 @@ describe("Fleet API projection", () => {
 
   test("backs off after repeated fleet-status failures with a different wire format", async () => {
     const methods: string[] = [];
+
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
         const method = new URL(request.url).pathname.split("/").at(-1) ?? "";
         methods.push(method);
+
         if (method === "fleetStatus")
           return new Response("Not found", { status: 404 });
+
         return Response.json({
           output: { members: [], total: 0, truncated: false },
         });
       },
     });
+
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid backend fixture");
     const backend = new OpenCodeBackend(config);
+
     try {
       for (let i = 0; i < 4; i++)
         expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
@@ -1027,18 +1130,23 @@ describe("Fleet API projection", () => {
     f.set("captain", [
       context("pilot", { current: task("running", "running") }),
     ]);
+
     const streams = fleetEvents(f.source, {
       pollMs: 30,
       hostMs: 1000,
       heartbeatMs: 1000,
     });
+
     try {
       const reader = streams.open(AbortSignal.timeout(700))?.getReader();
+
       if (!reader) throw new Error("Cannot open event stream");
+
       const initial = await nextEvent(
         reader,
         'event: ship\ndata: {"id":"captain"',
       );
+
       const at = /"detailUpdatedAt":(\d+)/.exec(initial)?.[1];
       expect(at).toBeDefined();
       f.advance();
@@ -1049,6 +1157,7 @@ describe("Fleet API projection", () => {
       const stale = await nextEvent(reader, '"detailStale":true');
       expect(stale).toContain('"id":"running"');
       expect(stale).toContain(`"detailUpdatedAt":${at}`);
+
       const detail = stale
         .split("\n")
         .find(
@@ -1056,6 +1165,7 @@ describe("Fleet API projection", () => {
             line.startsWith('data: {"id":"captain"') &&
             line.includes('"detailStale":true'),
         );
+
       expect(detail && JSON.parse(detail.slice(6))).toMatchObject({
         available: false,
         error: "Crew status unavailable.",
@@ -1069,15 +1179,19 @@ describe("Fleet API projection", () => {
     const f = fixture({ fleetCrewReadMs: 5, fleetCrewDeadlineMs: 180 });
     const held = Promise.withResolvers<CrewStatus>();
     f.set("captain", [context("pilot")]);
+
     const streams = fleetEvents(f.source, {
       pollMs: 30,
       hostMs: 1000,
       heartbeatMs: 1000,
     });
+
     try {
       const reader = streams.open(AbortSignal.timeout(750))?.getReader();
+
       if (!reader) throw new Error("Cannot open event stream");
       const marker = 'event: ship\ndata: {"id":"captain"';
+
       const detailLine = (frames: string) =>
         frames
           .split("\n")
@@ -1086,6 +1200,7 @@ describe("Fleet API projection", () => {
               line.startsWith('data: {"id":"captain"') &&
               line.includes('"crewMembers"'),
           ) ?? "";
+
       const initial = detailLine(await nextEvent(reader, marker));
       const at = /"detailUpdatedAt":(\d+)/.exec(initial)?.[1];
       expect(at).toBeDefined();
@@ -1106,13 +1221,16 @@ describe("Fleet API projection", () => {
     const f = fixture({ fleetCrewReadMs: 5, fleetCrewDeadlineMs: 25 });
     const held = Promise.withResolvers<CrewStatus>();
     f.statuses.set("captain", held.promise);
+
     const streams = fleetEvents(f.source, {
       pollMs: 10,
       hostMs: 1000,
       heartbeatMs: 1000,
     });
+
     try {
       const reader = streams.open(AbortSignal.timeout(450))?.getReader();
+
       if (!reader) throw new Error("Cannot open event stream");
       expect(
         await nextEvent(reader, '"error":"Crew status unavailable."'),
@@ -1129,6 +1247,7 @@ describe("Fleet API projection", () => {
 
   test("only a configured checkout binding can authorize a PR lookup", async () => {
     const pullRequest = mock(() => null);
+
     const f = fixture(undefined, {
       git: async (directory): Promise<V1Git | null> =>
         directory
@@ -1146,9 +1265,12 @@ describe("Fleet API projection", () => {
           : null,
       pullRequest,
     });
+
     f.set("captain", [context("pilot"), context("pilot", { project: "ops" })]);
+
     const read = async () =>
       (await f.source.ship("captain", signal))?.crewMembers[0]?.contexts;
+
     expect((await read())?.[0]).not.toHaveProperty("pullRequestKnown");
     expect(pullRequest).not.toHaveBeenCalled();
 
@@ -1178,6 +1300,7 @@ describe("Fleet API projection", () => {
       f.set("captain", [context("old-crew")]);
       const held = Promise.withResolvers<void>();
       const started = Promise.withResolvers<AbortSignal>();
+
       const streams = fleetEvents(
         {
           ...f.source,
@@ -1185,6 +1308,7 @@ describe("Fleet API projection", () => {
             f.source.fleet(signal, (id, read) =>
               capture?.(id, async (reading) => {
                 const detail = await read(reading);
+
                 if (
                   detail?.crewMembers.some(
                     (member) => member.id === "old-pending",
@@ -1193,18 +1317,22 @@ describe("Fleet API projection", () => {
                   started.resolve(reading);
                   await held.promise;
                 }
+
                 return detail;
               }),
             ),
         },
         { pollMs: 15, hostMs: 1000, heartbeatMs: 1000, readMs: 1000 },
       );
+
       try {
         const first = streams.open(AbortSignal.timeout(700))?.getReader();
+
         if (!first) throw new Error("Cannot open stream");
         await nextEvent(first, '"id":"old-crew"');
         f.set("captain", [context("old-pending")]);
         const reading = await started.promise;
+
         if (connection === "across reconnects") {
           await first.cancel();
           f.useConfig((config) => ({
@@ -1215,14 +1343,18 @@ describe("Fleet API projection", () => {
             })),
           }));
         }
+
         f.replaceBackend("captain");
         f.statuses.set("captain", new Error("Replacement offline"));
         const next = streams.open(AbortSignal.timeout(700))?.getReader();
+
         if (!next) throw new Error("Cannot reopen stream");
+
         const unavailable = await nextEvent(
           next,
           'event: ship\ndata: {"id":"captain"',
         );
+
         expect(reading.aborted).toBe(true);
         expect(unavailable).toContain('"crewMembers":[]');
         expect(unavailable).not.toContain("old-crew");
@@ -1241,19 +1373,24 @@ describe("Fleet API projection", () => {
     const f = fixture();
     f.statuses.set("captain", new Error("Crew offline"));
     f.queue("captain", { queued: 2 });
+
     const streams = fleetEvents(f.source, {
       pollMs: 20,
       hostMs: 1000,
       heartbeatMs: 1000,
     });
+
     try {
       const reader = streams.open(AbortSignal.timeout(700))?.getReader();
+
       if (!reader) throw new Error("Cannot open event stream");
+
       const failed = (
         await nextEvent(reader, 'event: ship\ndata: {"id":"captain"')
       )
         .split("\n")
         .find((line) => line.startsWith('data: {"id":"captain"'));
+
       expect(failed && JSON.parse(failed.slice(6))).toMatchObject({
         available: false,
         error: "Crew status unavailable.",
@@ -1272,15 +1409,19 @@ describe("Fleet API projection", () => {
     const f = fixture({ fleetCrewReadMs: 40, fleetCrewDeadlineMs: 140 });
     f.set("other", [context("remote")]);
     f.set("captain", [context("pilot")]);
+
     const streams = fleetEvents(f.source, {
       pollMs: 15,
       hostMs: 1000,
       heartbeatMs: 1000,
       readMs: 250,
     });
+
     const held = Promise.withResolvers<CrewStatus>();
+
     try {
       const reader = streams.open(AbortSignal.timeout(850))?.getReader();
+
       if (!reader) throw new Error("Cannot open event stream");
       await nextEvent(reader, 'event: ship\ndata: {"id":"other"');
       f.statuses.set("other", held.promise);
@@ -1292,6 +1433,7 @@ describe("Fleet API projection", () => {
       expect(unavailable).toContain('"crew":{"people":1,"busy":0,"queued":0}');
       const stale = await nextEvent(reader, '"detailStale":true');
       expect(stale).toContain('"id":"remote"');
+
       if (!(unavailable + stale).includes("healthy-task"))
         expect(await nextEvent(reader, "healthy-task")).toContain(
           "event: ship",
@@ -1313,8 +1455,10 @@ describe("Fleet API projection", () => {
     const f = fixture();
     f.set("captain", [context("pilot")]);
     const streams = fleetEvents(f.source);
+
     try {
       const reader = streams.open(signal)?.getReader();
+
       if (!reader) throw new Error("Cannot open event stream");
       await nextEvent(reader, 'event: ship\ndata: {"id":"captain"');
       expect(f.calls.status.filter((id) => id === "captain")).toEqual([

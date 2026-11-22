@@ -99,6 +99,7 @@ export class QuestionRecords {
       )
       .all(botKey)
       .map((v) => v.session_id);
+
     if (
       pinned &&
       this.db
@@ -108,6 +109,7 @@ export class QuestionRecords {
         .get(botKey)
     )
       sessions.push(pinned);
+
     return [...new Set(sessions)];
   }
 
@@ -117,12 +119,15 @@ export class QuestionRecords {
     now: number,
   ): QuestionOffer | undefined {
     const row = this.questionByTokenForRenewal(token);
+
     if (!row) return;
+
     const changed = this.db
       .query(
         "UPDATE native_questions SET token=?,expires=?,notified=0,publicationStarted=0,recorded=? WHERE token=? AND state='offered' AND expires<=?",
       )
       .run(replacement, now + 1_800_000, now, token, now).changes;
+
     return changed === 1
       ? this.questionByToken(row.botKey, replacement)
       : undefined;
@@ -236,6 +241,7 @@ export class QuestionRecords {
       )
       .run(now, now + timeoutMs, botKey, token);
     const offer = this.questionByToken(botKey, token);
+
     return offer?.state === "offered" && !offer.notified && offer.expires > now
       ? offer
       : undefined;

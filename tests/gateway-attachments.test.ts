@@ -17,9 +17,11 @@ import { publishedFileDirectory } from "./file-fixture";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
 const png = Uint8Array.from(
   Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j8i0AAAAASUVORK5CYII=",
@@ -37,35 +39,42 @@ async function fixture(pinned = false) {
   const database = join(directory, "state.sqlite");
   const store = openStore(database);
   let closed = false;
+
   const closeStore = () => {
     if (!closed) {
       closed = true;
       store.close();
     }
   };
+
   cleanup.push(closeStore);
   const posts: { channel: string; thread: string; text: string }[] = [];
+
   const uploads: {
     channel: string;
     thread: string;
     id: string;
     title: string;
   }[] = [];
+
   const prompts: { text: string; files: readonly Attachment[] }[] = [];
   let reservations = 0;
   let puts = 0;
   let answer = "Received";
   let failComplete = false;
   let isShared = true;
+
   const transport: AttachmentTransport = {
     async download(ids, channel) {
       expect(channel).toBe("D123");
       expect(ids).toEqual(["FPROOF"]);
+
       return [{ name: "proof.png", mime: "image/png", data: png }];
     },
     async reserveUpload(name, length) {
       expect(name).toBe("proof.png");
       expect(length).toBe(png.byteLength);
+
       return {
         fileID: `FUPLOAD${++reservations}`,
         url: "https://files.slack.com/upload/v1/test",
@@ -82,12 +91,14 @@ async function fixture(pinned = false) {
     },
     async completeUpload(channel, thread, id, title) {
       uploads.push({ channel, thread, id, title });
+
       if (failComplete) throw new Error("Lost completion response");
     },
     async sharedIn() {
       return isShared;
     },
   };
+
   const backend: AgentBackend = {
     ...(pinned ? { sessionID: "ses_captain" } : {}),
     supportsAttachments: true,
@@ -98,16 +109,19 @@ async function fixture(pinned = false) {
       prompts.push({ text, files });
       onInput?.(`msg_input${prompts.length}`);
       onText?.(answer);
+
       return answer;
     },
     async close() {},
   };
+
   const slack: TransportDelivery = {
     files: transport,
     async post(channel, thread, text) {
       posts.push({ channel, thread, text });
     },
   };
+
   const gateway = new Gateway(
     config,
     identity,
@@ -116,7 +130,9 @@ async function fixture(pinned = false) {
     slack,
     pino({ enabled: false }),
   );
+
   cleanup.push(() => gateway.close());
+
   const source = (
     channel: string,
     text: string,
@@ -124,6 +140,7 @@ async function fixture(pinned = false) {
     files?: { id: string }[],
   ) => {
     const body = event(text, ts);
+
     return {
       ...body,
       event: {
@@ -135,11 +152,14 @@ async function fixture(pinned = false) {
       },
     };
   };
+
   const signal = new AbortController().signal;
+
   const drain = async () => {
     for (const job of store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20))
       await gateway.process(job, signal);
   };
+
   return {
     directory,
     database,
@@ -215,6 +235,7 @@ test("attachment eval: missing read permission fails before any agent admission"
   f.transport.download = async () => {
     throw new Error("missing_scope");
   };
+
   f.gateway.accept(f.source("D123", "Read this", "1.000", [{ id: "FPROOF" }]));
   await f.drain();
   expect(f.prompts).toEqual([]);
@@ -245,6 +266,7 @@ for (const shared of [true, false]) {
     expect(f.store.attachmentRecords.attachments(1)[0]?.phase).toBe(
       shared ? "shared" : "unavailable",
     );
+
     if (!shared) expect(f.posts.at(-1)?.text).toContain("unconfirmed");
   });
 }
@@ -283,6 +305,7 @@ test("attachment eval: restart reconciles persisted upload without a second prom
   expect(reopened.attachmentRecords.attachments(1)[0]?.fileID).toBe(
     before?.fileID,
   );
+
   const gateway = new Gateway(
     f.config,
     identity,
@@ -291,7 +314,9 @@ test("attachment eval: restart reconciles persisted upload without a second prom
     f.slack,
     pino({ enabled: false }),
   );
+
   cleanup.push(() => gateway.close());
+
   for (const job of reopened.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20))
     await gateway.process(job, f.signal);
   expect(reopened.attachmentRecords.attachments(1)[0]?.phase).toBe("shared");
@@ -304,6 +329,7 @@ test("attachment eval: real OpenCode parser routes late private proof, not publi
   const f = await fixture(true);
   const history: Record<string, unknown>[] = [];
   let time = 0;
+
   const add = (message: Record<string, unknown>) =>
     history.push({
       ...message,
@@ -312,30 +338,37 @@ test("attachment eval: real OpenCode parser routes late private proof, not publi
         ...(message["type"] === "assistant" ? { completed: time } : {}),
       },
     });
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     fetch(request) {
       const url = new URL(request.url);
+
       if (!url.pathname.endsWith("/message"))
         return Response.json({
           data: { id: "ses_captain", time: { busy: 0, idle: time + 1 } },
         });
       const start = Number(url.searchParams.get("cursor") ?? 0);
+
       const end =
         start + Math.min(3, Number(url.searchParams.get("limit") ?? 20));
+
       return Response.json({
         data: history.toReversed().slice(start, end),
         cursor: end < history.length ? { next: String(end) } : {},
       });
     },
   });
+
   cleanup.push(() => server.stop(true));
+
   const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: f.directory,
   });
+
   if (config.type !== "opencode") throw new Error("Invalid fixture");
   const native = new OpenCodeBackend(config);
   f.backend.transcript = (...args) => native.transcript(...args);
@@ -349,8 +382,10 @@ test("attachment eval: real OpenCode parser routes late private proof, not publi
       type: "assistant",
       content: [{ type: "text", text: `Answer ${f.prompts.length}` }],
     });
+
     return `Answer ${f.prompts.length}`;
   };
+
   f.gateway.accept(f.source("D123", "Private proof A", "1.000"));
   await f.drain();
   f.gateway.accept(f.source("C456", "<@UBOT> Public B", "2.000"));
@@ -404,6 +439,7 @@ test("attachment eval: real OpenCode parser routes late private proof, not publi
 test("attachment delivery rechecks a live deny after upload and before sharing", async () => {
   const f = await fixture();
   const put = f.transport.putUpload;
+
   if (!put) throw new Error("Missing upload fixture");
   f.transport.putUpload = async (...args) => {
     await put(...args);
@@ -412,6 +448,7 @@ test("attachment delivery rechecks a live deny after upload and before sharing",
       access: { ...f.config.access, deniedUsers: ["U123"] },
     });
   };
+
   f.answer(`Proof.\n![proof](${pathToFileURL(f.image).href})`);
   f.gateway.accept(f.source("D123", "Show proof", "1.000"));
   await f.drain();

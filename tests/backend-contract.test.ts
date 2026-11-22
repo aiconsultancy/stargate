@@ -6,6 +6,7 @@ test("backend contract has no executable dependency on adapters or factory", asy
     new URL("../src/backends/backend.ts", import.meta.url),
     "utf8",
   );
+
   const transpiler = new Bun.Transpiler({ loader: "ts" });
   const imports = transpiler.scanImports(transpiler.transformSync(source));
   expect(

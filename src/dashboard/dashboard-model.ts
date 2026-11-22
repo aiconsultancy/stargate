@@ -47,6 +47,7 @@ export type DashboardCaptain = {
     transport: "slack" | DashboardTransport["kind"];
   }[];
 };
+
 export type DashboardCrewMember = {
   id: string;
   name: string;
@@ -72,6 +73,7 @@ export type ShipSummary = {
   queue: QueueCounts;
   cronjobs: number;
 };
+
 export type FleetView = { generatedAt: number; ships: ShipSummary[] };
 
 /** Prompt and reply text stay out of the queue view; open the session. */
@@ -84,6 +86,7 @@ export type JobView = {
   failure?: string;
   deferred: boolean;
 };
+
 export type CronRunView = {
   id: string;
   name: string;
@@ -93,6 +96,7 @@ export type CronRunView = {
   manual: boolean;
   report: "immediate" | "daily";
 };
+
 export type ShipView = {
   generatedAt: number;
   id: string;

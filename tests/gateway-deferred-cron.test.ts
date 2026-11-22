@@ -17,6 +17,7 @@ import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -29,14 +30,17 @@ function fixture(path = ":memory:", pinned = false) {
   config.waiting.delayMs = 0;
   const calls: string[] = [];
   const posts: { channel: string; thread: string; text: string }[] = [];
+
   const slack: TransportDelivery = {
     async post(channel, thread, text) {
       calls.push("post");
       posts.push({ channel, thread, text });
+
       return "10.000";
     },
     async update() {
       calls.push("update");
+
       return true;
     },
     async remove() {
@@ -47,23 +51,28 @@ function fixture(path = ":memory:", pinned = false) {
     },
     async failure() {
       calls.push("failure");
+
       return "10.000";
     },
     async activity() {
       calls.push("activity");
+
       return "10.000";
     },
     async threadContext() {
       calls.push("threadContext");
+
       return { messages: [], truncated: false };
     },
     files: {
       async download() {
         calls.push("download");
+
         return [];
       },
       async reserveUpload() {
         calls.push("reserveUpload");
+
         return { fileID: "F123", url: "https://example.invalid/upload" };
       },
       async putUpload() {
@@ -74,12 +83,15 @@ function fixture(path = ":memory:", pinned = false) {
       },
       async sharedIn() {
         calls.push("sharedIn");
+
         return true;
       },
     },
   };
+
   const prompts: { text: string; context?: PromptSourceContext }[] = [];
   let sessions = 0;
+
   const backend: AgentBackend = {
     ...(pinned ? { sessionID: "captain" } : {}),
     async createSession() {
@@ -88,10 +100,12 @@ function fixture(path = ":memory:", pinned = false) {
     async prompt(_session, text, _signal, onText, _onInput, _files, context) {
       prompts.push({ text, ...(context ? { context } : {}) });
       onText?.("[[stargate:react:eyes]]\nPublic preview");
+
       return "[[stargate:react:eyes]]\nPublic result\n![private file](file:///private/report.txt)";
     },
     async close() {},
   };
+
   const createGateway = () =>
     new Gateway(
       config,
@@ -101,14 +115,19 @@ function fixture(path = ":memory:", pinned = false) {
       slack,
       pino({ enabled: false }),
     );
+
   let gateway = createGateway();
   cleanup.push(() => gateway.close());
   const signal = new AbortController().signal;
+
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!job) throw new Error("Expected a job");
+
     return job;
   };
+
   const enqueue = (runId = "daily-1", deferDelivery = true) => {
     const id = gateway.enqueueScheduled({
       runId,
@@ -119,9 +138,12 @@ function fixture(path = ":memory:", pinned = false) {
       name: "Daily",
       deferDelivery,
     });
+
     if (id === undefined) throw new Error("Scheduled job rejected");
+
     return id;
   };
+
   return {
     get store() {
       return store;
@@ -153,6 +175,7 @@ function fixture(path = ":memory:", pinned = false) {
 async function databasePath() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-deferred-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
+
   return join(directory, "stargate.sqlite");
 }
 
@@ -187,6 +210,7 @@ test("deferred cron failures expose only safe persisted status without Slack", a
   f.backend.prompt = async () => {
     throw new Error("SECRET RAW BACKEND ERROR");
   };
+
   const id = f.enqueue();
   await f.drain();
   expect(f.gateway.scheduledResult(id)).toEqual({
@@ -210,7 +234,8 @@ test("deferred cron uses run identity, isolates conversations and keeps policy g
   expect(jobs.every((job) => job.thread === "" && job.deferDelivery)).toBe(
     true,
   );
-  expect(f.gateway.scheduledResult(99999)).toBeUndefined();
+  expect(f.gateway.scheduledResult(99_999)).toBeUndefined();
+
   const other = new Gateway(
     { ...f.config, id: "other" },
     identity,
@@ -219,6 +244,7 @@ test("deferred cron uses run identity, isolates conversations and keeps policy g
     { async post() {} },
     pino({ enabled: false }),
   );
+
   cleanup.push(() => other.close());
   expect(other.scheduledResult(first)).toBeUndefined();
   f.config.access.deniedUsers = ["U123"];
@@ -283,8 +309,10 @@ test("deferred native inputs retain the captain execution lock", () => {
   const f = fixture(":memory:", true);
   const first = f.enqueue("run-1");
   f.enqueue("run-2");
+
   const ready = () =>
     f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10, true);
+
   expect(ready().map((job) => job.id)).toEqual([first]);
   f.store.running(first);
   expect(ready()).toEqual([]);
@@ -324,7 +352,9 @@ function nativeHistory(f: ReturnType<typeof fixture>) {
     text: string;
     input?: string;
   }[] = [];
+
   let latest: string | undefined;
+
   const add = (
     kind: (typeof history)[number]["kind"],
     text: string,
@@ -332,8 +362,10 @@ function nativeHistory(f: ReturnType<typeof fixture>) {
   ) => {
     const id = `native-${history.length + 1}`;
     history.push({ id, kind, text, ...(input ? { input } : {}) });
+
     return id;
   };
+
   f.backend.prompt = async (_session, text, _signal, onText, onInput) => {
     f.prompts.push({ text });
     latest = `native-${history.length + 1}`;
@@ -343,16 +375,21 @@ function nativeHistory(f: ReturnType<typeof fixture>) {
     const answer = `answer: ${text}`;
     add("assistant", answer, latest);
     onText?.(answer);
+
     return answer;
   };
+
   f.backend.transcript = async (_session, after) => {
     const cursor = after === latestInput ? latest : after;
+
     const index =
       cursor === "" ? -1 : history.findIndex((row) => row.id === cursor);
+
     if (cursor !== undefined && cursor !== "" && index < 0)
       throw new TranscriptUnavailable("cursor");
     const rows = cursor === undefined ? [] : history.slice(index + 1);
     const input = rows.findLast((row) => row.kind === "input")?.id;
+
     return {
       cursor: history.at(-1)?.id ?? "",
       entries: rows.flatMap((row) =>
@@ -370,6 +407,7 @@ function nativeHistory(f: ReturnType<typeof fixture>) {
       ...(input ? { input } : {}),
     };
   };
+
   return {
     add,
     get latest() {
@@ -389,12 +427,14 @@ for (const pinned of [false, true]) {
     const origin = history.latest;
     expect(f.calls).toEqual([]);
     await f.restart();
+
     if (pinned) {
       expect(
         f.gateway.accept(event("<@UBOT> immediate question", "2.000")),
       ).toBe(true);
       await f.drain();
     }
+
     history.add(
       "assistant",
       "[[stargate:react:eyes]]\nLate deferred result",
@@ -418,6 +458,7 @@ for (const pinned of [false, true]) {
     expect(f.posts.map((post) => post.text).join("\n")).not.toContain(
       "Late deferred result",
     );
+
     if (!pinned) expect(f.calls).toEqual([]);
     const before = result;
     f.gateway.settle();
@@ -437,6 +478,7 @@ test("deferred activity cannot start or resume and grants no maintenance permit"
   const started: string[] = [];
   f.backend.startMaintenance = async () => {
     started.push("maintenance");
+
     return {
       async read() {
         return {
@@ -452,14 +494,17 @@ test("deferred activity cannot start or resume and grants no maintenance permit"
       async close() {},
     };
   };
+
   f.backend.startActivity = async () => {
     started.push("activity");
     throw new Error("Unexpected deferred activity");
   };
+
   f.backend.resumeActivity = () => {
     started.push("resumeActivity");
     throw new Error("Unexpected deferred activity resume");
   };
+
   const id = f.enqueue();
   f.store.activityRecords.saveActivity(id, {
     capture: "legacy-capture",
@@ -485,8 +530,10 @@ test("late deferred completion found during an immediate turn cannot leak", asyn
   f.backend.prompt = async (...args) => {
     const result = await prompt(...args);
     history.add("assistant", "PRIVATE DEFERRED CONTINUATION", origin);
+
     return result;
   };
+
   f.gateway.accept(event("<@UBOT> immediate question", "2.000"));
   await f.drain();
   expect(f.gateway.scheduledResult(id)?.text).toContain(
@@ -503,17 +550,22 @@ test("unreadable deferred history catches up locally without promising a Slack t
   nativeHistory(f);
   const prompt = f.backend.prompt;
   const transcript = f.backend.transcript;
+
   if (!transcript) throw new Error("Expected transcript");
   let readable = true;
   f.backend.prompt = async (...args) => {
     const result = await prompt(...args);
     readable = false;
+
     return result;
   };
+
   f.backend.transcript = (...args) => {
     if (!readable) throw new TranscriptUnavailable("cursor");
+
     return transcript(...args);
   };
+
   const id = f.enqueue();
   await f.drain();
   expect(f.gateway.scheduledResult(id)?.failure).toBe("history");

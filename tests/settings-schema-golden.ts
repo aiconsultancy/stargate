@@ -98,6 +98,7 @@ export const settingsGolden = {
     hash: "cafdb338b72dc7f400ce1e96136e2c308335e685b17fb0a5bf8805af52f97c0d",
   },
 } as const;
+
 export const cronAdvertisementHash =
   "805102783f02eb7c49a877cb0796e6f5bfca3a3853a9f4b981354958cfe21bba";
 
@@ -128,6 +129,7 @@ export const legacyProvisionInput = {
     },
   ],
 } as const;
+
 export const legacyProvisionDecoded = {
   version: 1,
   teamId: "T123",
@@ -159,13 +161,13 @@ export const legacyProvisionDecoded = {
       threadContext: false,
       waiting: {
         delayMs: 5000,
-        intervalMs: 10000,
+        intervalMs: 10_000,
       },
       crewActivity: {
         detail: "off",
       },
       concurrency: 4,
-      turnTimeoutMs: 1800000,
+      turnTimeoutMs: 1_800_000,
       name: "Fixture",
       app: {
         mode: "create",

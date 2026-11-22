@@ -35,10 +35,12 @@ test("Fleet API bind is limited to supported private literal addresses", () => {
       decodeSettings(configSchema, { ...example, api: { listen } }).api?.listen,
     ).toBe(listen);
   }
+
   expect(parseApiListen(":8080")).toEqual({
     hostname: "127.0.0.1",
     port: 8080,
   });
+
   for (const listen of [
     "8080",
     "localhost:8080",
@@ -61,6 +63,7 @@ test("Fleet API bind is limited to supported private literal addresses", () => {
       decodeSettings(configSchema, { ...example, api: { listen } }),
     ).toThrow("private-network only");
   }
+
   expect(
     decodeSettings(configSchema, { ...example, api: undefined }).api,
   ).toBeUndefined();
@@ -72,8 +75,10 @@ test("Fleet PR bindings require exact absolute paths and GitHub repository names
       ...example,
       api: { listen: ":8484", pullRequestRepositories },
     }).api?.pullRequestRepositories;
+
   const binding = { "/srv/crew/checkout": "Example/project" };
   expect(config(binding)).toEqual(binding);
+
   for (const invalid of [
     { "crew/checkout": "example/project" },
     { "/srv/../checkout": "example/project" },
@@ -85,6 +90,7 @@ test("Fleet PR bindings require exact absolute paths and GitHub repository names
 
 test("Fleet API rejects CIDRs reaching outside private ranges and unknown config keys", () => {
   const listen = "127.0.0.1:8080";
+
   for (const cidr of [
     "0.0.0.0/0",
     "172.16.0.0/11",
@@ -105,18 +111,21 @@ test("Fleet API rejects CIDRs reaching outside private ranges and unknown config
       }),
     ).toThrow("private-network only");
   }
+
   const allowedNetworks = [
     "127.0.0.1/32",
     "100.101.102.0/24",
     "fd12::/32",
     "::1/128",
   ];
+
   expect(
     decodeSettings(configSchema, {
       ...example,
       api: { listen, allowedNetworks },
     }).api?.allowedNetworks,
   ).toEqual(allowedNetworks);
+
   for (const extra of [
     { allowedNetworks: [] },
     { corsOrigins: ["https://subspace*"] },
@@ -132,10 +141,12 @@ test("Fleet API rejects CIDRs reaching outside private ranges and unknown config
 
 test("Fleet API settings are restart-only", () => {
   const environment = {};
+
   const off = {
     config: decodeSettings(configSchema, { ...example, api: undefined }),
     environment,
   };
+
   const on = {
     config: decodeSettings(configSchema, {
       ...example,
@@ -143,6 +154,7 @@ test("Fleet API settings are restart-only", () => {
     }),
     environment,
   };
+
   const changed = {
     config: decodeSettings(configSchema, {
       ...example,
@@ -150,6 +162,7 @@ test("Fleet API settings are restart-only", () => {
     }),
     environment,
   };
+
   expect(restartRequired(off, on)).toEqual(["api"]);
   expect(restartRequired(on, off)).toEqual(["api"]);
   expect(restartRequired(on, changed)).toEqual(["api.listen"]);
@@ -158,6 +171,7 @@ test("Fleet API settings are restart-only", () => {
 test("Unix API mode is an explicit exclusive opt-in without an enabled alias", () => {
   const api = { listen: "unix", allowedNetworks: ["127.0.0.1/32"] };
   expect(decodeSettings(configSchema, { ...example, api }).api).toEqual(api);
+
   for (const extra of [{ enabled: true }, { socket: "/other.sock" }]) {
     expect(() =>
       decodeSettings(configSchema, { ...example, api: { ...api, ...extra } }),
@@ -171,6 +185,7 @@ test("origin wildcards match exactly one ASCII label", () => {
     "https://subspace.*",
     "https://console.example.com:8443",
   ]);
+
   for (const origin of [
     "subspace://space-123",
     "https://subspace.space-123",
@@ -178,6 +193,7 @@ test("origin wildcards match exactly one ASCII label", () => {
     "https://console.example.com:8443",
   ])
     expect(allows(origin)).toBe(true);
+
   for (const origin of [
     null,
     "null",
@@ -214,12 +230,15 @@ test("host parsers compute available bytes and aggregate CPU deltas", () => {
   expect(
     memAvailableBytes("MemAvailable: 9999999999999999 kB\n"),
   ).toBeUndefined();
+
   const first = cpuTotals([
     { times: { user: 20, nice: 5, sys: 5, idle: 70, irq: 0 } },
   ]);
+
   const next = cpuTotals([
     { times: { user: 50, nice: 10, sys: 20, idle: 110, irq: 10 } },
   ]);
+
   expect(cpuUsage(first, next)).toBe(0.6);
   expect(cpuUsage(first, first)).toBeNull();
   expect(cpuUsage(next, first)).toBeNull();
@@ -234,6 +253,7 @@ test("api token CLI creates one private token, prints only it, and rotates it", 
   const stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
   const stderr = spyOn(process.stderr, "write").mockImplementation(() => true);
   const run = (...args: string[]) => runCli([...args, "--config", config]);
+
   try {
     await writeFile(
       config,
@@ -267,9 +287,11 @@ test("api token CLI creates one private token, prints only it, and rotates it", 
     expect(stderr).not.toHaveBeenCalled();
     expect((await stat(path)).mode & 0o7777).toBe(0o600);
     const concurrentDirectory = join(directory, "concurrent");
+
     const tokens = await Promise.all(
       Array.from({ length: 8 }, () => apiToken(concurrentDirectory)),
     );
+
     expect(new Set(tokens).size).toBe(1);
   } finally {
     stdout.mockRestore();

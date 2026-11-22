@@ -34,6 +34,7 @@ const rawTeam = {
     { id: "shaw", role: " Backend ", permissionProfile: "coding" },
   ],
 };
+
 const fingerprint =
   '{"version":2,"namespace":"fixture","projectDirectory":"/project","captain":{"id":"cain","directory":"/captain"},"crew":[{"id":"shaw","permissionProfile":"coding","directory":"/crew/shaw"},{"id":"twiki","permissionProfile":"research","directory":"/crew/twiki","backend":{"type":"pi-durable","model":"openai/fixture","systemPrompt":"You are a helpful assistant responding in Slack.","tools":"coding"}}]}';
 
@@ -47,6 +48,7 @@ test("crew containers compose native team and agent-ID validation and advertisem
     worktrees: { shaw: "/crew/shaw", twiki: "/crew/twiki" },
     team: rawTeam,
   };
+
   expect(Schema.decodeUnknownSync(crewOptionsSchema)(options).team).toEqual(
     Schema.decodeUnknownSync(teamSchema)(rawTeam),
   );
@@ -68,6 +70,7 @@ test("crew containers compose native team and agent-ID validation and advertisem
       }),
     ),
   ).toBe(false);
+
   for (const [schema, input] of [
     [crewInputSchema, { op: "dispatch", crew: "shaw", text: "fixture" }],
     [inspectInputSchema, { op: "inspect", crew: "shaw" }],
@@ -82,6 +85,7 @@ test("crew containers compose native team and agent-ID validation and advertisem
       ),
     ).toBe(false);
   }
+
   expect(
     JSON.stringify(
       crewOpenCodeInput()["~standard"].jsonSchema.input({
@@ -99,8 +103,10 @@ test("crew decoding preserves legacy fingerprint bytes and persisted identity", 
     worktrees: { shaw: "/crew/shaw", twiki: "/crew/twiki" },
     team: Schema.decodeUnknownSync(teamSchema)(rawTeam),
   });
+
   expect(actual).toBe(fingerprint);
   const directory = await mkdtemp(join(tmpdir(), "stargate-identity-schema-"));
+
   try {
     const before = await CrewState.open(directory, "fixture", fingerprint);
     before.close();
@@ -122,14 +128,17 @@ test("append-only identity compares raw member order and shallow record values",
   const previous = JSON.parse(fingerprint) as {
     crew: Record<string, unknown>[];
   };
+
   const added = {
     id: "hoshi",
     permissionProfile: "research",
     directory: "/crew/hoshi",
   };
+
   const next = { ...previous, crew: [...previous.crew, added] };
   expect(canExpandCrew(fingerprint, JSON.stringify(next))).toBe(true);
   const first = previous.crew[0];
+
   if (!first) throw new Error("Missing identity fixture");
   const reordered = Object.fromEntries(Object.entries(first).reverse());
   expect(
@@ -146,14 +155,17 @@ test("append-only identity compares raw member order and shallow record values",
   expect(canExpandCrew(JSON.stringify(ownProto), JSON.stringify(next))).toBe(
     true,
   );
+
   const nested = {
     ...first,
     metadata: JSON.parse('{"__proto__":{"kept":true},"constructor":1}'),
   };
+
   const beforeNested = {
     ...previous,
     crew: [nested, ...previous.crew.slice(1)],
   };
+
   const afterNested = { ...beforeNested, crew: [...beforeNested.crew, added] };
   expect(
     canExpandCrew(JSON.stringify(beforeNested), JSON.stringify(afterNested)),
@@ -163,14 +175,19 @@ test("append-only identity compares raw member order and shallow record values",
 
 test("model native envelope preserves raw arguments, branch defaults and strictness", () => {
   const envelope = modelToolInputSchema["~standard"];
+
   const decode = (input: unknown) => {
     const result = envelope.validate(input);
+
     if (result instanceof Promise)
       throw new Error("Expected synchronous native model validation");
+
     if (result.issues)
       throw new Error(result.issues.map((issue) => issue.message).join("\n"));
+
     return result.value;
   };
+
   const json = envelope.jsonSchema.input({ target: "draft-2020-12" });
   // Captured through SDK 2.3.2's Standard Schema input contract at merged3e82863.
   expect(
@@ -181,8 +198,10 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
   expect(json["type"]).toBe("object");
   expect(json["required"]).toEqual(["op"]);
   expect(json["additionalProperties"]).toBe(false);
+
   for (const keyword of ["anyOf", "oneOf", "allOf"])
     expect(json).not.toHaveProperty(keyword);
+
   for (const input of [
     { op: "get" },
     { op: "list" },
@@ -215,6 +234,7 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
     id: "model",
     compactFirst: false,
   });
+
   for (const input of [
     { op: "get", variant: "high" },
     { op: "inspect" },
@@ -236,6 +256,7 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
     ),
   ).toBe(true);
   const invalid = envelope.validate({ op: "inspect", project: "../bad" });
+
   if (invalid instanceof Promise)
     throw new Error("Expected synchronous native model validation");
   expect(invalid.issues).toEqual(
@@ -244,9 +265,11 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
       expect.objectContaining({ path: ["target"] }),
     ]),
   );
+
   const unknown = Schema.decodeUnknownResult(modelInputSchema)({
     op: "unknown",
   });
+
   if (Result.isSuccess(unknown))
     throw new Error("Unknown model operation accepted");
   expect(unknown.failure.message).toContain('["op"]');
@@ -259,6 +282,7 @@ test("profile rendering retains captured legacy JSON bytes after package-root no
     worktreeDirectory: "/fixture/crew",
     mesijCommand: "/fixture/bin/mesij",
   };
+
   const explicit = {
     ...options,
     namespace: "ship",
@@ -275,6 +299,7 @@ test("profile rendering retains captured legacy JSON bytes after package-root no
       ],
     }),
   };
+
   for (const [input, role, hash] of [
     [
       options,
@@ -289,9 +314,11 @@ test("profile rendering retains captured legacy JSON bytes after package-root no
   ] as const) {
     const config = await renderProfile(input, role);
     const bytes = JSON.stringify(config, null, 2) + "\n";
+
     const normalized = bytes
       .split(join(import.meta.dir, "..") + "/")
       .join("@PACKAGE_ROOT@/");
+
     expect(createHash("sha256").update(normalized).digest("hex")).toBe(hash);
   }
 });
@@ -303,6 +330,7 @@ test("team diagnostics retain dependent custom paths and profile errors stay saf
       { id: "shaw", name: "Other", role: "", permissionProfile: "coding" },
     ],
   };
+
   expect(() => decodeSettings(teamSchema, invalid)).toThrow(
     "Agent IDs must match assigned names",
   );
@@ -310,12 +338,14 @@ test("team diagnostics retain dependent custom paths and profile errors stay saf
   expect(() =>
     profileTeam(Schema.decodeUnknownSync(teamSchema)(rawTeam), "x".repeat(64)),
   ).toThrow();
+
   const options = {
     directory: "/captain",
     projectDirectory: "/project",
     worktreeDirectory: "/crew",
     mesijCommand: "/bin/mesij",
   };
+
   await expect(
     renderProfile(
       {

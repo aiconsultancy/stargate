@@ -14,12 +14,15 @@ export function readBody(
     req.on("data", (chunk: Buffer) => {
       if (failed) return;
       size += chunk.length;
+
       if (size > maxBytes) {
         failed = true;
         reject(new BodyTooLargeError(`request body exceeds ${maxBytes} bytes`));
         req.resume();
+
         return;
       }
+
       chunks.push(chunk);
     });
     req.on("end", () => {
@@ -38,8 +41,10 @@ export function sendJson(
 ): void {
   if (res.headersSent) {
     res.end();
+
     return;
   }
+
   const text = body === undefined ? "" : JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -53,8 +58,10 @@ export function close(server: Server): Promise<void> {
   return new Promise((resolve) => {
     if (!server.listening) {
       resolve();
+
       return;
     }
+
     server.close(() => resolve());
     server.closeAllConnections?.();
   });

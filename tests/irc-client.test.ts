@@ -12,6 +12,7 @@ import { type IrcMessage, utf8Bytes } from "../src/irc/protocol";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -20,6 +21,7 @@ const password = "s3cret-password-value";
 
 function logger() {
   const lines: string[] = [];
+
   const log = pino(
     { level: "trace" },
     new Writable({
@@ -29,6 +31,7 @@ function logger() {
       },
     }),
   );
+
   return { log, lines };
 }
 
@@ -39,6 +42,7 @@ function start(
   invites: string[] = [],
 ) {
   const { log, lines } = logger();
+
   const client = new IrcClient(
     {
       host: "127.0.0.1",
@@ -68,12 +72,14 @@ function start(
       },
     },
   );
+
   const controller = new AbortController();
   const running = client.run(controller.signal);
   cleanup.push(async () => {
     controller.abort();
     await running;
   });
+
   return { client, controller, running, lines };
 }
 
@@ -82,7 +88,9 @@ function server(options: ConstructorParameters<typeof FakeIrcServer>[0] = {}) {
     accounts: { galactica: password },
     ...options,
   }).start();
+
   cleanup.push(() => fake.stop());
+
   return fake;
 }
 
@@ -94,9 +102,11 @@ test("irc client: CAP, SASL PLAIN, registration and allowed joins only", async (
   await until(() => client.inChannel("#galactica"), 2000, "join");
   const sent = fake.received("galactica");
   expect(sent[0]).toBe("CAP LS 302");
+
   const requested = lineOf(sent, "CAP")
     .filter((m) => m.params[0] === "REQ")
     .map((m) => m.params[1]);
+
   expect(requested).toEqual(
     expect.arrayContaining([
       "sasl",
@@ -161,9 +171,11 @@ test("irc client: disconnect rejects a written send awaiting its labeled respons
   await client.waitReady(2000);
   await until(() => client.inChannel("#galactica"), 2000, "join");
   fake.mute("galactica");
+
   const outcome = client
     .privmsg("#galactica", "awaiting confirmation")
     .catch((error: unknown) => error);
+
   await until(
     () => lineOf(fake.received("galactica"), "PRIVMSG").length === 1,
     2000,
@@ -177,6 +189,7 @@ test("irc client: disconnect rejects an unwritten unlabelled queued send", async
   const fake = server({
     caps: ["sasl=PLAIN", "account-tag", "message-tags", "server-time"],
   });
+
   const { client, controller, running } = start(fake);
   await client.waitReady(2000);
   await until(() => client.inChannel("#galactica"), 2000, "join");
@@ -184,14 +197,17 @@ test("irc client: disconnect rejects an unwritten unlabelled queued send", async
   // Hold token refill, not real timers or the socket lifecycle.
   const frozen = Date.now();
   const now = spyOn(Date, "now").mockReturnValue(frozen);
+
   try {
     expect(client.join("#galactica")).toBe(true);
     expect(client.join("#galactica")).toBe(true);
     const text = "unwritten queued send at disconnect";
+
     const outcome: {
       state: "pending" | "resolved" | "rejected";
       error?: unknown;
     } = { state: "pending" };
+
     void client.privmsg("#galactica", text, {}, undefined, "low").then(
       () => {
         outcome.state = "resolved";
@@ -201,17 +217,21 @@ test("irc client: disconnect rejects an unwritten unlabelled queued send", async
         outcome.error = error;
       },
     );
+
     const background = Reflect.get(client, "background") as {
       lines: string[];
     }[];
+
     expect(background).toHaveLength(1);
     expect(
       lineOf(background[0]?.lines ?? [], "PRIVMSG").map(({ params }) => params),
     ).toEqual([["#galactica", text]]);
+
     const written = () =>
       lineOf(fake.received("galactica"), "PRIVMSG").some(
         ({ params }) => params[1] === text,
       );
+
     expect(written()).toBe(false);
     controller.abort();
     fake.drop("galactica");
@@ -233,6 +253,7 @@ test("irc client: unlabeled servers resolve on write; throttle spaces lines", as
   const fake = server({
     caps: ["sasl=PLAIN", "account-tag", "message-tags", "server-time"],
   });
+
   const { client } = start(fake);
   await client.waitReady(2000);
   await until(() => client.inChannel("#galactica"), 2000, "join");
@@ -269,9 +290,11 @@ test("irc echoes keep the wire root separate from the answered request", async (
         ...(labeled ? ["labeled-response"] : []),
       ],
     });
+
     const { client } = start(fake);
     await client.waitReady(2000);
     await until(() => client.inChannel("#galactica"), 2000, "join");
+
     const delivery = new IrcDelivery(
       client,
       2000,
@@ -280,6 +303,7 @@ test("irc echoes keep the wire root separate from the answered request", async (
       undefined,
       (request) => (request === "thread-request" ? "root" : undefined),
     );
+
     await delivery.post("#galactica", "thread-request", "thread answer");
     await until(() => client.sent("m1"), 2000, "thread echo");
     expect(client.anchor("m1")).toBe("root");
@@ -366,6 +390,7 @@ test("irc client: answers PING, replays history after reconnect, QUITs on abort"
 
 test("irc client: silence past the timeout reconnects", async () => {
   const fake = server();
+
   const { client } = start(fake, {
     timing: {
       pingMs: 100,
@@ -374,6 +399,7 @@ test("irc client: silence past the timeout reconnects", async () => {
       reconnectMaxMs: 50,
     },
   });
+
   await client.waitReady(2000);
   fake.mute("galactica");
   await until(
@@ -391,6 +417,7 @@ test("irc client: silence past the timeout reconnects", async () => {
 
 test("irc client: a stalled registration reconnects; abort ends the loop", async () => {
   let accepted = 0;
+
   const silentServer = Bun.listen({
     hostname: "127.0.0.1",
     port: 0,
@@ -401,8 +428,10 @@ test("irc client: a stalled registration reconnects; abort ends the loop", async
       data() {},
     },
   });
+
   cleanup.push(() => silentServer.stop(true));
   const { log } = logger();
+
   const client = new IrcClient({
     host: "127.0.0.1",
     port: silentServer.port,
@@ -414,6 +443,7 @@ test("irc client: a stalled registration reconnects; abort ends the loop", async
     log,
     timing: { registerMs: 100, reconnectMinMs: 10, reconnectMaxMs: 20 },
   });
+
   const controller = new AbortController();
   const running = client.run(controller.signal);
   await until(() => accepted >= 2, 3000, "second attempt");
@@ -430,6 +460,7 @@ test("irc client: JOIN lines stay within 512 bytes for many long channels", asyn
     { length: 20 },
     (_, i) => `#${String(i).padStart(2, "0")}${"c".repeat(47)}`,
   );
+
   const fake = server();
   const { client } = start(fake, { channels });
   await client.waitReady(2000);
@@ -438,9 +469,11 @@ test("irc client: JOIN lines stay within 512 bytes for many long channels", asyn
     3000,
     "every channel joined",
   );
+
   const joins = fake
     .received("galactica")
     .filter((line) => line.startsWith("JOIN "));
+
   for (const line of joins)
     expect(utf8Bytes(line) + 2).toBeLessThanOrEqual(512);
   expect(joins.flatMap((line) => line.slice(5).split(",")).sort()).toEqual(
@@ -470,7 +503,7 @@ test("irc client: direct messages go only to a nick proven to hold the account",
   const { client } = start(fake, {}, received);
   await client.waitReady(2000);
   await until(() => client.inChannel("#galactica"), 2000, "join");
-  // alice writes from the nick "ally": a binding alice ↔ ally is learned.
+  // Alice writes from the nick "ally": a binding alice ↔ ally is learned.
   fake.say({ nick: "ally", account: "alice" }, "galactica", "hi");
   await until(() => received.length === 1, 2000, "direct message");
   expect(await client.verifiedNick("alice")).toBe("ally");
@@ -483,7 +516,7 @@ test("irc client: direct messages go only to a nick proven to hold the account",
   fake.setUser("alice", "alice");
   expect(await client.verifiedNick("alice")).toBe("alice");
   // Events drop both directions of a binding: after the holder quits and
-  // another account takes the nick, the old account has no binding left.
+  // Another account takes the nick, the old account has no binding left.
   fake.say({ nick: "bobby", account: "bob" }, "#galactica", "hello");
   await until(() => received.length === 2, 2000, "channel message");
   expect(client.boundNick("bob")).toBe("bobby");
@@ -500,6 +533,7 @@ test("irc client: direct messages go only to a nick proven to hold the account",
 test("irc delivery: a queued direct line is dropped if its recipient quits first", async () => {
   const fake = server();
   const received: IrcMessage[] = [];
+
   const { client } = start(
     fake,
     {
@@ -513,26 +547,29 @@ test("irc delivery: a queued direct line is dropped if its recipient quits first
     },
     received,
   );
+
   await client.waitReady(2000);
   await until(() => client.inChannel("#galactica"), 2000, "join");
   fake.say({ nick: "jackie", account: "jack" }, "galactica", "status?");
   await until(() => received.length === 1, 2000, "direct message");
   // Let the token bucket refill: WHOIS takes the only token, so the
-  // reply line waits in the send queue for the next interval.
+  // Reply line waits in the send queue for the next interval.
   await delay(700);
   const delivery = new IrcDelivery(client, 2000);
   const posting = delivery.post("jack", "m1", "Private answer.");
+
   const outcome = posting.then(
     () => "sent",
     (error: unknown) => String(error),
   );
+
   await until(
     () => fake.received("galactica").includes("WHOIS jackie"),
     2000,
     "whois",
   );
   await until(() => client.boundNick("jack") === "jackie", 2000, "verified");
-  // jack quits while the line is queued; mallory takes the nick at once.
+  // Jack quits while the line is queued; mallory takes the nick at once.
   fake.sendTo("galactica", ":jackie!u@h QUIT :gone");
   fake.setUser("jackie", "mallory");
   expect(await outcome).toContain("recipient");
@@ -548,6 +585,7 @@ test("irc client: crew join only channels the captain also has, per CASEMAPPING"
   // The fake server announces CASEMAPPING=ascii: #ship{1} is not #ship[1].
   const fake = server();
   const invites: string[] = [];
+
   const { client } = start(
     fake,
     {
@@ -557,6 +595,7 @@ test("irc client: crew join only channels the captain also has, per CASEMAPPING"
     [],
     invites,
   );
+
   await client.waitReady(2000);
   await until(() => client.inChannel("#galactica"), 2000, "ship channel");
   expect(client.channel("#ship{1}")).toBeUndefined();

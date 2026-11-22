@@ -64,8 +64,10 @@ export class IrcStatus {
       .join("")
       .trim();
     this.timing = { ...defaults };
+
     for (const key of Object.keys(defaults) as (keyof StatusTiming)[]) {
       const value = timing[key];
+
       if (value !== undefined && Number.isFinite(value) && value >= 1) {
         this.timing[key] = Math.min(Math.floor(value), 2_147_483_647);
       }
@@ -92,8 +94,10 @@ export class IrcStatus {
   disconnected(): void {
     if (this.closing) {
       this.stop();
+
       return;
     }
+
     this.online = false;
     this.generation++;
     this.revision++;
@@ -102,17 +106,22 @@ export class IrcStatus {
 
   begin(): () => void {
     if (this.closing || this.stopped) return () => {};
+
     this.active++;
     this.wake();
     let finished = false;
+
     return () => {
       if (finished) return;
       finished = true;
       this.active--;
+
       if (this.active === 0) {
         this.revision++;
+
         if (this.dirty) this.clearPending = true;
       }
+
       this.wake();
     };
   }
@@ -122,12 +131,14 @@ export class IrcStatus {
     if (this.shutdownPromise !== undefined) return this.shutdownPromise;
     this.closing = true;
     this.revision++;
+
     if (this.dirty) this.clearPending = true;
     this.shutdownPromise = new Promise<void>((resolve) => {
       this.finishShutdown = resolve;
     });
     this.shutdownTimer = setTimeout(() => this.stop(), this.timing.shutdownMs);
     this.wake();
+
     return this.shutdownPromise;
   }
 
@@ -138,11 +149,15 @@ export class IrcStatus {
 
   private wake(delay = 0): void {
     this.cancelWake();
+
     if (this.stopped) return;
+
     if (this.closing && !this.clearPending && !this.inFlight) {
       this.stop();
+
       return;
     }
+
     if (!this.online || this.inFlight) return;
     this.timer = setTimeout(
       () => {
@@ -156,46 +171,60 @@ export class IrcStatus {
   private pump(): void {
     if (this.stopped || !this.online || this.inFlight) return;
     const clear = this.clearPending;
+
     if (!clear && (this.closing || this.active === 0)) return;
     const value = clear ? undefined : this.busyValue();
+
     if (!clear && value === undefined) return;
     const now = Date.now();
+
     while (
       this.attempts.length > 0 &&
       (this.attempts[0] ?? now) + this.timing.windowMs <= now
     ) {
       this.attempts.shift();
     }
+
     // Reserve the last SET attempt for clearing, including missing-key deletes.
     const capacity = this.timing.limit - (clear ? 0 : 1);
+
     if (capacity === 0) return;
+
     let due = Math.max(
       this.backoffUntil,
       clear ? 0 : this.lastNonclearAt + this.timing.intervalMs,
     );
+
     if (this.attempts.length >= capacity) {
       const oldest = this.attempts[this.attempts.length - capacity];
+
       if (oldest !== undefined) {
         due = Math.max(due, oldest + this.timing.windowMs);
       }
     }
+
     if (due > now) {
       this.wake(due - now);
+
       return;
     }
+
     const attempt: Attempt = {
       generation: this.generation,
       revision: this.revision,
       value,
     };
+
     this.inFlight = attempt;
     this.attempts.push(now);
+
     if (!clear) {
       // A lost ACK can still mean a write. Keep cleanup until a clear is ACKed.
       this.dirty = true;
       this.lastNonclearAt = now;
       this.phrase++;
     }
+
     void this.send(attempt);
   }
 
@@ -216,28 +245,37 @@ export class IrcStatus {
 
   private async send(attempt: Attempt): Promise<void> {
     let result: StatusResult;
+
     try {
       result = await this.publish(attempt.value, () => this.valid(attempt));
     } catch {
       result = { kind: "unavailable" };
     }
+
     this.inFlight = undefined;
+
     if (this.stopped) return;
     // The transport may queue a write. Charging through its reply is conservative
-    // for both the rolling quota and spacing between actual nonclear writes.
+    // For both the rolling quota and spacing between actual nonclear writes.
     const settledAt = Date.now();
     this.attempts[this.attempts.length - 1] = settledAt;
+
     if (attempt.value !== undefined) this.lastNonclearAt = settledAt;
+
     if (result.kind === "rate-limited") {
       const retry = Number.isFinite(result.retryAfterMs)
         ? Math.max(this.timing.retryMs, result.retryAfterMs)
         : this.timing.retryMs;
+
       this.backoffUntil = Math.max(this.backoffUntil, settledAt + retry);
     }
+
     if (attempt.generation !== this.generation) {
       this.wake();
+
       return;
     }
+
     if (result.kind === "ok") {
       if (attempt.value === undefined) {
         this.clearPending = false;
@@ -249,6 +287,7 @@ export class IrcStatus {
         settledAt + this.timing.retryMs,
       );
     }
+
     this.wake();
   }
 
@@ -257,11 +296,14 @@ export class IrcStatus {
     const budget = this.maxValueBytes - Buffer.byteLength(suffix);
     let name = "";
     let bytes = 0;
+
     for (const character of this.name) {
       bytes += Buffer.byteLength(character);
+
       if (bytes > budget) break;
       name += character;
     }
+
     return name.trim() ? waitingPhrase(name.trimEnd(), this.phrase) : undefined;
   }
 
@@ -270,6 +312,7 @@ export class IrcStatus {
     this.online = false;
     this.generation++;
     this.cancelWake();
+
     if (this.shutdownTimer !== undefined) clearTimeout(this.shutdownTimer);
     this.shutdownTimer = undefined;
     this.finishShutdown?.();

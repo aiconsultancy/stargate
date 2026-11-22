@@ -12,7 +12,9 @@ function backend(url: string, headersEnv: Record<string, string> = {}) {
     directory: "/workspace",
     headersEnv,
   });
+
   if (config.type !== "opencode") throw new Error("Invalid fixture");
+
   return new OpenCodeBackend(config);
 }
 
@@ -23,6 +25,7 @@ test("SDK pairing uses existing authentication and only POST /api/pair; no redem
     auth: string | null;
     body: string;
   }[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -33,14 +36,18 @@ test("SDK pairing uses existing authentication and only POST /api/pair; no redem
         auth: request.headers.get("authorization"),
         body: await request.text(),
       });
+
       return Response.json({ code: "fixture-code", expires_in: 47 });
     },
   });
+
   process.env[fixtureAuthEnv] = "Bearer fixture-auth";
+
   try {
     const adapter = backend(server.url.href, {
       authorization: fixtureAuthEnv,
     });
+
     expect(await adapter.pair(new AbortController().signal)).toEqual({
       code: "fixture-code",
       expiresIn: 47,
@@ -62,6 +69,7 @@ test("SDK pairing uses existing authentication and only POST /api/pair; no redem
 
 test("pairing accepts code and expiry bounds while discarding unknown response fields", async () => {
   const code = "A".repeat(512);
+
   const cases = [
     {
       body: { code: "_", expires_in: 1, extra: "ignored" },
@@ -72,13 +80,16 @@ test("pairing accepts code and expiry bounds while discarding unknown response f
       expected: { code, expiresIn: 86_400 },
     },
   ];
+
   for (const { body, expected } of cases) {
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       fetch: () => Response.json(body),
     });
+
     const adapter = backend(server.url.href);
+
     try {
       expect(await adapter.pair(new AbortController().signal)).toEqual(
         expected,
@@ -106,11 +117,13 @@ test("pairing failures and invalid codes are sanitized, with no retry or redirec
     { status: 302, body: null },
   ]) {
     const paths: string[] = [];
+
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       fetch(request) {
         paths.push(new URL(request.url).pathname);
+
         return result.status === 302
           ? new Response(null, {
               status: 302,
@@ -119,6 +132,7 @@ test("pairing failures and invalid codes are sanitized, with no retry or redirec
           : Response.json(result.body, { status: result.status });
       },
     });
+
     try {
       await expect(
         backend(server.url.href).pair(new AbortController().signal),
@@ -134,15 +148,18 @@ test("pairing AbortSignal stops the underlying SDK request without retry", async
   const received = Promise.withResolvers<void>();
   const response = Promise.withResolvers<Response>();
   let requests = 0;
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch() {
       requests++;
       received.resolve();
+
       return response.promise;
     },
   });
+
   try {
     const controller = new AbortController();
     const run = backend(server.url.href).pair(controller.signal);

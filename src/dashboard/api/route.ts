@@ -25,6 +25,7 @@ export interface ApiRoute<Caller = unknown> {
 }
 
 const positive = Schema.Int.check(Schema.isGreaterThan(0));
+
 const descriptor = settingsStruct({
   owner: Schema.String.check(
     Schema.isPattern(/^notify\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/),
@@ -45,6 +46,7 @@ const descriptor = settingsStruct({
 export function apiRoutes(routes: readonly ApiRoute[]) {
   const owners = new Set<string>();
   const paths = new Set<string>();
+
   return routes.map((route) => {
     const parsed = Schema.decodeUnknownSync(descriptor)({
       owner: route.owner,
@@ -52,11 +54,14 @@ export function apiRoutes(routes: readonly ApiRoute[]) {
       path: route.path,
       limits: route.limits,
     });
+
     const key = `${parsed.method} ${parsed.path}`;
+
     if (owners.has(parsed.owner) || paths.has(key))
       throw new Error("Duplicate API route owner or method/path");
     owners.add(parsed.owner);
     paths.add(key);
+
     return Object.freeze({
       ...parsed,
       limits: Object.freeze(parsed.limits),

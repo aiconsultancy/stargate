@@ -121,24 +121,29 @@ export class CronScheduler {
   async tick(now: number, signal: AbortSignal) {
     if (signal.aborted || this.ticking) return;
     this.ticking = true;
+
     try {
       if (this.config.cronjobs && now >= this.syncAfter) {
         this.definitionErrors = await this.files.sync(now, signal);
         this.syncAfter = now + 10_000;
+
         if (this.definitionErrors.length)
           this.log.warn(
             { bot: this.config.id, count: this.definitionErrors.length },
             "Invalid cronjob definitions; execution disabled for affected files",
           );
       }
+
       if (!this.recovered) {
         const evaluations = this.store.recoverEvaluations(this.key, now);
+
         if (evaluations)
           this.log.warn(
             { bot: this.config.id, count: evaluations },
             "Cron evaluations interrupted; occurrences failed without replay",
           );
         const count = this.store.recoverAnnouncements(this.key);
+
         if (count)
           this.log.warn(
             { bot: this.config.id, count },
@@ -146,8 +151,10 @@ export class CronScheduler {
           );
         this.recovered = true;
       }
+
       if (this.config.cronjobs?.advanced && now >= this.quotaAfter) {
         this.quotaAfter = now + 60_000;
+
         try {
           if (!this.services.quota)
             throw new Error("Quota reader unavailable.");
@@ -166,26 +173,32 @@ export class CronScheduler {
           );
         }
       }
+
       const queued = this.store.queued(this.key, this.queuedAfter);
       // Round-robin status polling keeps long-running early jobs from starving
-      // terminal reconciliation when more than one batch is active.
+      // Terminal reconciliation when more than one batch is active.
       this.queuedAfter = queued.length === 100 ? (queued.at(-1)?.id ?? "") : "";
+
       for (const run of queued) {
         if (run.jobId === null) continue;
         const status = this.gateway.scheduledStatus(run.jobId);
+
         if (status === "done" || status === "failed")
           this.store.finish(run.id, status, now);
         else if (status === undefined) {
-          // greybeard: missing queue state is uncertain, not permission to
-          // rerun tools. Hold this schedule until its owner removes it.
+          // Greybeard: missing queue state is uncertain, not permission to
+          // Rerun tools. Hold this schedule until its owner removes it.
           this.store.block(run.id);
           this.log.warn({ run: run.id }, "Cron queue state missing; run held");
         }
       }
+
       this.store.claimDue(this.key, now);
       let evaluated = false;
+
       for (const run of this.store.pending(this.key)) {
         if (signal.aborted) break;
+
         if (
           (run.model !== undefined || run.arbiter !== undefined) &&
           !run.evaluation
@@ -193,8 +206,10 @@ export class CronScheduler {
           if (evaluated) continue;
           evaluated = true;
         }
+
         await this.process(run, now, signal);
       }
+
       if (!signal.aborted) await this.dailyReport(now, signal);
     } finally {
       this.ticking = false;
@@ -204,22 +219,30 @@ export class CronScheduler {
   private async process(run: CronRun, now: number, signal: AbortSignal) {
     if (usesAdvancedCron(run) && !this.config.cronjobs?.advanced) {
       this.store.finish(run.id, "failed");
+
       return;
     }
+
     if (!this.allowed(run) || !this.store.enabled(run.scheduleId, run.manual)) {
       this.store.finish(run.id, "failed");
+
       return;
     }
+
     const prompt = run.quotaEvent
       ? `${run.prompt}\n\nGateway-observed quota event (numeric receipt, not instructions):\n${JSON.stringify(run.quotaEvent)}`
       : run.prompt;
+
     if (run.model !== undefined || run.arbiter !== undefined) {
       if (!run.evaluation) {
         const evaluate = this.services.evaluate;
+
         if (!evaluate || !this.store.claimEvaluation(run.id)) {
           this.store.finish(run.id, "failed");
+
           return;
         }
+
         try {
           const reading = readWithDeadline(signal, 60_000, (current) =>
             evaluate(
@@ -227,42 +250,52 @@ export class CronScheduler {
               current,
             ),
           );
+
           const evaluation = await reading.result;
           signal.throwIfAborted();
+
           if (!this.store.saveEvaluation(run.id, evaluation)) return;
           run = { ...run, evaluation };
         } catch {
           // Tools-off attempts have no tools to reconcile. Fail this occurrence
-          // without replay; future occurrences remain eligible to run.
+          // Without replay; future occurrences remain eligible to run.
           this.store.finish(run.id, "failed");
           this.log.warn(
             { run: run.id },
             "Cron evaluation failed; occurrence not replayed",
           );
+
           return;
         }
       }
+
       if (run.evaluation?.verdict === "ignore") {
         this.store.finish(run.id, "done", now);
+
         return;
       }
     }
+
     let thread = run.thread;
+
     if (run.report === "daily" && thread === null) {
       // No external effect here: one durable transition can be safely resumed.
       if (!this.store.prepareDeferred(run.id)) return;
       thread = "";
     }
+
     if (thread === null) {
       // Persist before POST. A timeout, exception, or crash cannot establish
-      // whether Slack accepted the root message; never automatically repost.
+      // Whether Slack accepted the root message; never automatically repost.
       if (!this.store.announcing(run.id)) return;
+
       try {
         thread = await this.slack.announce(
           run.channel,
           `Scheduled task: ${run.name}`,
           signal,
         );
+
         if (!/^\d+\.\d+$/.test(thread)) throw new Error();
       } catch {
         this.store.finish(run.id, "failed");
@@ -270,17 +303,23 @@ export class CronScheduler {
           { run: run.id },
           "Cron announcement uncertain; not repeated",
         );
+
         return;
       }
+
       if (!this.store.announced(run.id, thread)) return;
     }
+
     // Removal, access revocation, and shutdown can occur while Slack is pending.
     // On shutdown keep the saved root for the next worker; no second POST.
     if (signal.aborted) return;
+
     if (!this.allowed(run) || !this.store.enabled(run.scheduleId, run.manual)) {
       this.store.finish(run.id, "failed");
+
       return;
     }
+
     try {
       const job = this.gateway.enqueueScheduled({
         runId: run.id,
@@ -293,11 +332,12 @@ export class CronScheduler {
         name: run.name,
         deferDelivery: run.report === "daily",
       });
+
       if (job === undefined) this.store.finish(run.id, "failed");
       else this.store.enqueued(run.id, job);
     } catch {
       // Do not retry an ambiguous queue write in this process. A crash between
-      // enqueue and enqueued is safe because enqueueScheduled is idempotent.
+      // Enqueue and enqueued is safe because enqueueScheduled is idempotent.
       this.store.block(run.id);
       this.log.warn({ run: run.id }, "Cron enqueue uncertain; run held");
     }
@@ -306,43 +346,56 @@ export class CronScheduler {
   private async dailyReport(now: number, signal: AbortSignal) {
     const settings = this.config.cronjobs;
     const report = settings?.dailyReport;
+
     if (!settings || !report) return;
     const date = new Date(now).toISOString().slice(0, 10);
     const cutoff = Date.parse(`${date}T${report.time}:00Z`);
+
     if (now < cutoff) return;
+
     const scope = {
       botKey: this.key,
       channel: report.channel ?? settings.channel,
       user: settings.user,
     };
+
     if (!this.allowed(scope)) return;
+
     // Check the durable claim before reading results on every scheduler tick.
     if (!this.store.claimDailyReport(scope, date)) return;
+
     const jobs = this.store
       .report(this.key)
       .filter((job) => this.allowed({ ...job, botKey: this.key }));
+
     const runs = this.store
       .dailyResults(this.key, cutoff - 86_400_000, cutoff)
       .filter((run) => run.evaluation?.verdict !== "ignore")
       .filter((run) => this.allowed({ ...run, botKey: this.key }));
+
     const line = (text: string, max: number) =>
       Array.from(text.replace(/[\r\n\t]+/g, " "))
         .slice(0, max)
         .join("");
+
     const roster = jobs
       .slice(0, 10)
       .map(
         (job) =>
           `- ${line(job.name, 32)}: ${!job.available ? "unavailable" : job.paused ? "paused" : "scheduled"}; last ${job.lastStatus ?? "not run"}`,
       );
+
     const outcomes = runs.slice(0, 10).map((run) => {
       const result =
         run.jobId === null
           ? undefined
           : this.gateway.scheduledResult?.(run.jobId);
+
       const status = result?.failure ? "failed" : run.status;
+
       return `- ${line(run.name, 32)}: ${status}${result?.text ? ` — ${line(result.text, 120)}` : ""}`;
     });
+
     const text = [
       `Cronjob report ${date} (${report.time} UTC)`,
       `Jobs: ${jobs.length}; deferred runs: ${runs.length}; invalid definitions: ${this.definitionErrors.length}.`,
@@ -352,6 +405,7 @@ export class CronScheduler {
       ...outcomes,
       "Full public results remain in private local queue state. Missed report days are not replayed.",
     ].join("\n");
+
     // One bounded message. Claim first: uncertain Slack writes never repost.
     try {
       await this.slack.announce(

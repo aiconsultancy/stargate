@@ -131,6 +131,7 @@ test("fixed config entry preserves every exported name and value/type kind", asy
   const root = resolve(import.meta.dir, "..");
   const file = join(root, "src/config.ts");
   const config = join(root, ".config-export-contract.json");
+
   const contents = JSON.stringify({
     compilerOptions: {
       strict: true,
@@ -142,6 +143,7 @@ test("fixed config entry preserves every exported name and value/type kind", asy
     },
     files: [file],
   });
+
   const api = new API({
     cwd: root,
     fs: {
@@ -149,21 +151,28 @@ test("fixed config entry preserves every exported name and value/type kind", asy
       readFile: (path) => (path === config ? contents : undefined),
     },
   });
+
   try {
     const snapshot = await api.updateSnapshot({ openProjects: [config] });
+
     try {
       const project = snapshot.getProject(config);
+
       if (!project) throw new Error("Missing config export project");
       const source = await project.program.getSourceFile(file);
+
       if (!source) throw new Error("Missing fixed config entry");
       const module = await project.checker.getSymbolAtLocation(source);
+
       if (!module) throw new Error("Missing fixed config module symbol");
       const actual = [];
+
       for (const symbol of await project.checker.getExportsOfModule(module)) {
         const target =
           symbol.flags & SymbolFlags.Alias
             ? await project.checker.getAliasedSymbol(symbol)
             : symbol;
+
         if (await project.checker.isUnknownSymbol(target))
           throw new Error(`Unresolved config export: ${symbol.name}`);
         const value = Object.hasOwn(fixedConfig, symbol.name);
@@ -173,6 +182,7 @@ test("fixed config entry preserves every exported name and value/type kind", asy
           kind: value ? (type ? "type+value" : "value") : "type",
         });
       }
+
       actual.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       expect(actual).toEqual(approvedExports);
       expect(Object.keys(fixedConfig).sort()).toEqual(
@@ -193,9 +203,11 @@ test("launcher-style explicit config.ts import loads config and resolves secrets
   const { loadConfig, secret }: typeof import("../src/config") = await import(
     new URL("../src/config.ts", import.meta.url).href
   );
+
   expect(loadConfig).toBe(fixedConfig.loadConfig);
   expect(secret).toBe(fixedConfig.secret);
   const directory = await mkdtemp(join(tmpdir(), "stargate-config-contract-"));
+
   try {
     const path = join(directory, "stargate.json");
     await writeFile(

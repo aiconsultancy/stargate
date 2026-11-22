@@ -48,9 +48,11 @@ function inlineLine(line: string) {
 export function plainText(markdown: string): string {
   const out: string[] = [];
   let fence: string | undefined;
+
   for (const raw of markdown.replace(/\r\n?/g, "\n").split("\n")) {
     const line = cleanText(raw);
     const marker = fenceMarker.exec(line)?.[1];
+
     if (fence !== undefined) {
       if (
         marker &&
@@ -62,14 +64,18 @@ export function plainText(markdown: string): string {
       else out.push(line);
       continue;
     }
+
     if (marker) {
       fence = marker;
       continue;
     }
+
     if (rule.test(line) || tableSeparator.test(line)) continue;
+
     let text = line
       .replace(/^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/, "$1")
       .replace(/^(\s*)[*+]\s+/, "$1- ");
+
     // `| a | b |` table rows read as `a | b`.
     if (/^\s*\|.*\|\s*$/.test(text))
       text = text
@@ -78,6 +84,7 @@ export function plainText(markdown: string): string {
         .replace(/\s*\|$/, "");
     out.push(inlineLine(text));
   }
+
   return out.join("\n");
 }
 
@@ -90,25 +97,33 @@ export function plainText(markdown: string): string {
 export function ircLines(text: string, budget: number): string[] {
   if (budget < 16) throw new Error("IRC line budget too small");
   const lines: string[] = [];
+
   for (const line of text.split("\n")) {
     let rest = line.trimEnd();
+
     while (rest.trim() && utf8Bytes(rest) > budget) {
       let bytes = 0;
       let end = 0;
       let space = -1;
+
       for (const char of rest) {
         const size = utf8Bytes(char);
+
         if (bytes + size > budget) break;
         bytes += size;
         end += char.length;
+
         if (char === " " && bytes > budget / 2) space = end - 1;
       }
+
       const cut = space > 0 ? space : end;
       lines.push(rest.slice(0, cut).trimEnd());
       rest = rest.slice(cut).replace(/^ +/, "");
     }
+
     if (rest.trim()) lines.push(rest);
   }
+
   return lines;
 }
 
@@ -121,21 +136,28 @@ export function ircParts(line: string, budget: number): string[] {
   if (budget < 16) throw new Error("IRC line budget too small");
   const parts: string[] = [];
   let rest = line;
+
   while (utf8Bytes(rest) > budget) {
     let bytes = 0;
     let end = 0;
     let space = -1;
+
     for (const char of rest) {
       const size = utf8Bytes(char);
+
       if (bytes + size > budget) break;
       bytes += size;
       end += char.length;
+
       if (char === " " && bytes > budget / 2) space = end;
     }
+
     const cut = space > 0 ? space : end;
     parts.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }
+
   if (rest) parts.push(rest);
+
   return parts;
 }

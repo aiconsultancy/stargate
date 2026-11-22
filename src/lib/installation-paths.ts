@@ -7,6 +7,7 @@ export { default as packageManifest } from "../../package.json";
 export const installationDirectory = fileURLToPath(
   new URL("../..", import.meta.url),
 );
+
 export const packageJsonPath = join(installationDirectory, "package.json");
 export const templatesDirectory = join(installationDirectory, "templates");
 export const assetsDirectory = join(installationDirectory, "assets");

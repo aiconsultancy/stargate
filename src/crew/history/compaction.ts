@@ -9,12 +9,14 @@ type CompactionType =
   | "session.compaction.started"
   | "session.compaction.ended"
   | "session.compaction.failed";
+
 type CompactionEvent =
   | {
       type: CompactionType;
       data: { sessionID: string; inputID?: string | undefined };
     }
   | { type: "server.connected"; data: unknown };
+
 export interface CompactionEvents {
   subscribe(options?: {
     types?: readonly CompactionType[];
@@ -49,16 +51,21 @@ export async function compactAndWait(
 ) {
   signal.throwIfAborted();
   const controller = new AbortController();
+
   const combined = AbortSignal.any([
     signal,
     controller.signal,
     AbortSignal.timeout(120_000),
   ]);
+
   const id = `msg_${randomUUID().replaceAll("-", "")}`;
   const connected = Promise.withResolvers<void>();
+
   if (!waitForConnection) connected.resolve();
+
   const observed = (async () => {
     let started = false;
+
     for await (const event of events.subscribe({
       types: [
         "session.compaction.started",
@@ -71,7 +78,9 @@ export async function compactAndWait(
         connected.resolve();
         continue;
       }
+
       if (event.data.sessionID !== sessionID) continue;
+
       if (event.type === "session.compaction.started") {
         started = event.data.inputID === id;
       } else if (
@@ -81,11 +90,13 @@ export async function compactAndWait(
         throw new CrewError("Compaction was not confirmed; model unchanged.");
       } else if (event.type === "session.compaction.ended" && started) return;
     }
+
     throw new CrewError("Compaction was not confirmed; model unchanged.");
   })().catch((error) => {
     connected.reject(error);
     throw error;
   });
+
   try {
     await Promise.all([
       observed,

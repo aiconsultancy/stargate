@@ -17,12 +17,15 @@ import {
 } from "../src/maintenance/nightly/update/plugin-digest";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-plugin-digest-"));
+
 afterAll(() => rm(base, { recursive: true, force: true }));
+
 let count = 0;
 
 /** A release tree: a plugin that imports one shared module, and a gateway. */
 async function release(files: Record<string, string> = {}) {
   const root = join(base, `release-${count++}`);
+
   const tree: Record<string, string> = {
     "package.json":
       '{ "name": "stargate", "exports": { ".": "./src/crew/plugin.ts" } }\n',
@@ -40,10 +43,12 @@ async function release(files: Record<string, string> = {}) {
     "README.md": "readme\n",
     ...files,
   };
+
   for (const [path, text] of Object.entries(tree)) {
     await mkdir(dirname(join(root, path)), { recursive: true });
     await writeFile(join(root, path), text);
   }
+
   return root;
 }
 
@@ -67,6 +72,7 @@ test("gateway source, tests and documentation do not change the digest", async (
 
 test("everything that the plugin can load changes the digest", async () => {
   const digest = await pluginDigest(await release());
+
   for (const change of [
     {
       "src/crew/plugin.ts":
@@ -121,6 +127,7 @@ test("an import that cannot be resolved from the source has no digest", async ()
   const plugin = (body: string) => ({
     "src/crew/plugin.ts": `import { shared } from "../shared";\n${body}\nexport const plugin = shared;\n`,
   });
+
   for (const files of [
     // Computed: the module that runs is not known from the source.
     plugin('const path = "./lazy";\nexport const load = () => import(path);'),
@@ -141,10 +148,12 @@ test("an import that cannot be resolved from the source has no digest", async ()
       files,
       undefined,
     ]);
+
   // Literal forms are followed; the words in text and comments are not code.
   const literal = plugin(
     'export const a = () => import("./lazy");\nexport const b = () => require("./lazy");\n// import(anything) and require(anything)\nexport const text = "Tasks require approval before import.";',
   );
+
   const digest = await pluginDigest(await release(literal));
   expect(digest).toMatch(/^v1:/);
   expect(
@@ -163,6 +172,7 @@ test("the digest follows the file that Bun runs", async () => {
     "src/shared.ts": 'export const shared = "ts";\n',
     "src/shared.tsx": 'export const shared = "tsx one";\n',
   };
+
   const digest = await pluginDigest(await release(both));
   expect(digest).toMatch(/^v1:/);
   expect(
@@ -179,12 +189,14 @@ test("the digest follows the file that Bun runs", async () => {
       await release({ ...both, "src/shared.ts": "export const shared = 0;\n" }),
     ),
   ).toBe(digest);
+
   // A directory import runs its index file.
   const index = {
     "src/crew/plugin.ts":
       'import { part } from "./parts";\nexport const plugin = part;\n',
     "src/crew/parts/index.ts": "export const part = 1;\n",
   };
+
   expect(await pluginDigest(await release(index))).not.toBe(
     await pluginDigest(
       await release({
@@ -193,6 +205,7 @@ test("the digest follows the file that Bun runs", async () => {
       }),
     ),
   );
+
   // A path alias from tsconfig.json to a file of the tree is followed too.
   const alias = {
     "tsconfig.json":
@@ -201,6 +214,7 @@ test("the digest follows the file that Bun runs", async () => {
       'import { lib } from "@lib/value";\nexport const plugin = lib;\n',
     "src/lib/value.ts": "export const lib = 1;\n",
   };
+
   const aliased = await pluginDigest(await release(alias));
   expect(aliased).toMatch(/^v1:/);
   expect(
@@ -231,6 +245,7 @@ test("every executable file of the closure is scanned, or there is no digest", a
         'module.exports = require("./deep.ts");\n',
       "src/crew/deep.ts": `export const value = ${value};\n`,
     });
+
     const digest = await pluginDigest(await release(tree(1)));
     expect([extension, digest]).toEqual([
       extension,
@@ -248,6 +263,7 @@ test("every executable file of the closure is scanned, or there is no digest", a
       ),
     ).toBeUndefined();
   }
+
   // The other module formats are scanned too.
   for (const extension of ["mjs", "mts", "js", "jsx", "tsx"]) {
     const tree = (value: number) => ({
@@ -256,6 +272,7 @@ test("every executable file of the closure is scanned, or there is no digest", a
         'import { value } from "./deep";\nexport const part = value;\n',
       "src/crew/deep.ts": `export const value = ${value};\n`,
     });
+
     const digest = await pluginDigest(await release(tree(1)));
     expect([extension, digest]).toEqual([
       extension,
@@ -263,15 +280,18 @@ test("every executable file of the closure is scanned, or there is no digest", a
     ]);
     expect(await pluginDigest(await release(tree(2)))).not.toBe(digest);
   }
+
   // Data is hashed and has no imports.
   const data = (value: number) => ({
     "src/crew/plugin.ts":
       'import settings from "./settings.json";\nexport const plugin = settings;\n',
     "src/crew/settings.json": `{ "value": ${value} }\n`,
   });
+
   const digest = await pluginDigest(await release(data(1)));
   expect(digest).toMatch(/^v1:/);
   expect(await pluginDigest(await release(data(2)))).not.toBe(digest);
+
   // A format that Bun can run and this scanner cannot read is unknown.
   for (const name of ["part.wasm", "part.node", "part.html", "part.sh"])
     expect([
@@ -289,17 +309,20 @@ test("the recorded digest is computed here, never taken from the archive", async
   const root = await release({
     [pluginDigestFile]: `v1:${"0".repeat(64)}\n`,
   });
+
   const digest = await writePluginDigest(root);
   expect(digest).toBe(await pluginDigest(root));
   expect(await readPluginDigest(root)).toBe(digest);
   expect(await readFile(join(root, pluginDigestFile), "utf8")).toBe(
     `${digest}\n`,
   );
+
   // Unknown: no file is left, also not the one from the archive.
   const unknown = await release({
     "package.json": '{ "name": "stargate" }\n',
     [pluginDigestFile]: `v1:${"0".repeat(64)}\n`,
   });
+
   expect(await writePluginDigest(unknown)).toBeUndefined();
   expect(await readPluginDigest(unknown)).toBeUndefined();
   // A damaged record is unknown.

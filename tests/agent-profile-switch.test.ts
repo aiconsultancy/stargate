@@ -20,6 +20,7 @@ import {
 } from "../src/ops/agent-profile-switch";
 
 const directories: string[] = [];
+
 afterEach(async () => {
   for (const directory of directories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
@@ -34,6 +35,7 @@ async function fixture() {
   const name = "worker-subagent";
   const agents = join(configDirectory, "agents");
   await mkdir(agents);
+
   for (const [profile, variant] of [
     ["before", "low"],
     ["after", "high"],
@@ -59,6 +61,7 @@ async function fixture() {
       `---\nmode: subagent\nmodel: ${route.model}\n---\nTest child\n`,
     );
   }
+
   await symlink("before", selector);
   await symlink(
     `../agent-profiles/current/${name}.md`,
@@ -67,6 +70,7 @@ async function fixture() {
   await writeFile(join(agents, "custom.md"), "Unrelated real agent\n");
   const calls: { method: string; path: string; selected: string }[] = [];
   const warnings: string[] = [];
+
   const state = {
     busy: false,
     pending: false,
@@ -79,11 +83,14 @@ async function fixture() {
     failAgents: false,
     malformedAgents: false,
   };
+
   let now = 0;
+
   const api: ProfileApi = async (method, path) => {
     const selected = await readlink(selector);
     calls.push({ method, path, selected });
     const endpoint = path.split("?")[0];
+
     switch (endpoint) {
       case "/api/model":
         return {
@@ -108,12 +115,16 @@ async function fixture() {
         if (state.failRollback || (state.failReload && selected === "after")) {
           throw new Error("Reload unavailable");
         }
+
         state.pending = false; // OpenCode reload, not helper request cancellation.
+
         return null;
       case "/api/agent": {
         if (state.failAgents) throw new Error("Agent API unavailable");
+
         if (state.malformedAgents) return { data: "invalid" };
         const stale = state.staleReads-- > 0;
+
         return {
           data: [
             {
@@ -128,10 +139,12 @@ async function fixture() {
           ],
         };
       }
+
       default:
         throw new Error(`Unexpected API call: ${method} ${path}`);
     }
   };
+
   const options = {
     configDirectory,
     directory: "/requested",
@@ -145,6 +158,7 @@ async function fixture() {
       now += ms;
     },
   };
+
   return {
     options,
     state,
@@ -184,9 +198,11 @@ test("disabled placeholders preserve stable managed links and custom agents", as
   const f = await fixture();
   const placeholder = "inactive-subagent.md";
   const content = "---\nmode: subagent\ndisabled: true\n---\nInactive child\n";
+
   for (const profile of ["before", "after"]) {
     await writeFile(join(f.root, profile, placeholder), content);
   }
+
   const target = `../agent-profiles/current/${placeholder}`;
   await symlink(target, join(f.agents, placeholder));
   await symlink(target, join(f.agents, "alias-subagent.md"));
@@ -298,12 +314,14 @@ test("CLI documents idle default and rejects contradictory flags without service
   const script = fileURLToPath(
     new URL("../src/ops/agent-profile-switch.ts", import.meta.url),
   );
+
   const run = (args: string[]) =>
     Bun.spawn([process.execPath, script, ...args], {
       stdout: "pipe",
       stderr: "pipe",
       env: {},
     });
+
   const help = run(["--help"]);
   const usage = await new Response(help.stdout).text();
   expect(usage).toContain(
@@ -419,6 +437,7 @@ test("invalid installed definitions fail closed without API or selector mutation
   ]) {
     const f = await fixture();
     const folder = join(f.root, "after");
+
     switch (invalid) {
       case "manifest":
         await writeFile(join(folder, "routes.json"), '{"version":2}');
@@ -446,9 +465,11 @@ test("invalid installed definitions fail closed without API or selector mutation
         );
         break;
     }
+
     await expect(switchAgentProfile(f.options)).rejects.toThrow();
     expect(await readlink(f.selector)).toBe("before");
     expect(f.calls).toEqual([]);
+
     if (invalid === "collision") {
       expect(await readFile(join(f.agents, "worker-subagent.md"), "utf8")).toBe(
         "Keep this real agent\n",
@@ -459,10 +480,12 @@ test("invalid installed definitions fail closed without API or selector mutation
 
 test("location-specific model mismatch blocks before mutation", async () => {
   const f = await fixture();
+
   const api: ProfileApi = async (method, path, signal) =>
     path.startsWith("/api/model?")
       ? { data: [] }
       : f.options.api(method, path, signal);
+
   await expect(switchAgentProfile({ ...f.options, api })).rejects.toThrow(
     /unavailable/,
   );
@@ -475,10 +498,13 @@ test("second strict readiness check catches work admitted during validation", as
   f.state.busy = false;
   f.state.pending = false;
   let checks = 0;
+
   const api: ProfileApi = async (method, path, signal) => {
     if (path === "/api/session/active" && ++checks === 2) f.state.busy = true;
+
     return f.options.api(method, path, signal);
   };
+
   await expect(
     switchAgentProfile({ ...f.options, api, requireIdle: true }),
   ).rejects.toThrow(/active sessions/);
@@ -512,10 +538,12 @@ test("transport discovers only once, authenticates, and never redirects or expos
   let status = 200;
   let body = '{"data":[]}';
   const requests: { url: string; options: RequestInit }[] = [];
+
   const api = createProfileApi(
     undefined,
     async () => {
       discoveries++;
+
       return {
         url: "http://localhost:4096",
         auth: {
@@ -527,9 +555,11 @@ test("transport discovers only once, authenticates, and never redirects or expos
     },
     async (url, options) => {
       requests.push({ url: url.href, options });
+
       return new Response(body, { status });
     },
   );
+
   const signal = new AbortController().signal;
   expect(await api("get", "/api/model", signal)).toEqual({ data: [] });
   body = "";
@@ -543,6 +573,7 @@ test("transport discovers only once, authenticates, and never redirects or expos
     requests.every((request) => request.options.redirect === "error"),
   ).toBe(true);
   body = "synthetic-private-response";
+
   for (status of [200, 503]) {
     await expect(api("get", "/api/agent", signal)).rejects.toThrow(
       "OpenCode API failed: get /api/agent. Check the registered service; response details withheld.",
@@ -552,14 +583,17 @@ test("transport discovers only once, authenticates, and never redirects or expos
 
 test("missing service fails closed without starting a process or making requests", async () => {
   let requested = false;
+
   const api = createProfileApi(
     undefined,
     async () => undefined,
     async () => {
       requested = true;
+
       return new Response("{}");
     },
   );
+
   await expect(
     api("get", "/api/model", new AbortController().signal),
   ).rejects.toThrow(/Check the registered service/);
@@ -570,10 +604,12 @@ test("version 1 manifests and model IDs containing slashes switch without fallba
   const f = await fixture();
   await unlink(join(f.agents, "worker-subagent.md"));
   await unlink(join(f.root, "after", "worker-subagent.md"));
+
   const routes = Array.from({ length: 5 }, (_, i) => ({
     name: `worker-${i}`,
     model: "test/family/model#high",
   }));
+
   await writeFile(
     join(f.root, "after", "routes.json"),
     JSON.stringify({
@@ -582,6 +618,7 @@ test("version 1 manifests and model IDs containing slashes switch without fallba
       routes,
     }),
   );
+
   for (const route of routes) {
     await writeFile(
       join(f.root, "after", `${route.name}.md`),
@@ -592,6 +629,7 @@ test("version 1 manifests and model IDs containing slashes switch without fallba
       join(f.agents, `${route.name}.md`),
     );
   }
+
   const api: ProfileApi = async (method, path, signal) => {
     if (path.startsWith("/api/model"))
       return {
@@ -605,6 +643,7 @@ test("version 1 manifests and model IDs containing slashes switch without fallba
           },
         ],
       };
+
     if (path.startsWith("/api/agent"))
       return {
         data: routes.map((route) => ({
@@ -617,8 +656,10 @@ test("version 1 manifests and model IDs containing slashes switch without fallba
           },
         })),
       };
+
     return f.options.api(method, path, signal);
   };
+
   await switchAgentProfile({ ...f.options, api });
   expect(await readlink(f.selector)).toBe("after");
 });

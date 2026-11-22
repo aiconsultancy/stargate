@@ -10,6 +10,7 @@ import { type Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const stores: Store[] = [];
+
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
 });
@@ -23,6 +24,7 @@ function fixture(channel = "C123") {
   const writes: { text: string; stopJob?: number }[] = [];
   let prompts = 0;
   let stopped = false;
+
   const backend: AgentBackend = {
     async createSession() {
       return "session";
@@ -34,12 +36,16 @@ function fixture(channel = "C123") {
       await Promise.resolve();
       started.resolve(signal);
       const aborted = Promise.withResolvers<never>();
+
       const abort = () => {
         stopped = true;
         aborted.reject(signal.reason);
       };
+
       signal.addEventListener("abort", abort, { once: true });
+
       if (signal.aborted) abort();
+
       try {
         return await Promise.race([finish.promise, aborted.promise]);
       } finally {
@@ -48,9 +54,11 @@ function fixture(channel = "C123") {
     },
     async close() {},
   };
+
   const slack: TransportDelivery = {
     async post(_channel, _thread, text, stopJob) {
       writes.push({ text, ...(stopJob === undefined ? {} : { stopJob }) });
+
       return "2.000";
     },
     async update(_channel, _ts, text, stopJob) {
@@ -58,6 +66,7 @@ function fixture(channel = "C123") {
     },
     async remove() {},
   };
+
   const gateway = new Gateway(
     config,
     identity,
@@ -66,13 +75,19 @@ function fixture(channel = "C123") {
     slack,
     pino({ enabled: false }),
   );
+
   gateway.accept({ ...event(), event: { ...event().event, channel } });
+
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!job) throw new Error("Missing job");
+
     return job;
   };
+
   const job = next();
+
   const payload = () => ({
     type: "block_actions",
     api_app_id: "A123",
@@ -90,6 +105,7 @@ function fixture(channel = "C123") {
       { type: "button", action_id: "stargate_stop", value: String(job.id) },
     ],
   });
+
   return {
     store,
     config,
@@ -153,12 +169,15 @@ test("maintenance notice uses the persisted requester-only Stop target", async (
       impact: "Brief disconnect",
       rollback: "Restore release",
     });
+
     return new Promise<string>((_resolve, reject) => {
       const abort = () => reject(new Error("Stopped"));
       signal.addEventListener("abort", abort, { once: true });
+
       if (signal.aborted) abort();
     });
   };
+
   const work = f.gateway.process(f.job, new AbortController().signal);
   await delivered.promise;
   expect(f.store.previews(f.job.id)).toEqual([{ part: 0, ts: "2.000" }]);
@@ -178,8 +197,10 @@ test("requester Stop uses one durable cancelled box instead of a generic timeout
   f.slack.failure = async (_channel, _thread, cause, ts) => {
     failures.push(cause);
     expect(ts).toBe("2.000");
+
     return "2.000";
   };
+
   const work = f.gateway.process(f.job, new AbortController().signal);
   await f.started;
   expect(f.gateway.cancel(f.payload())).toBe(true);
@@ -206,8 +227,10 @@ test("maintenance monitoring failure stops work without reporting a requester St
   });
   f.slack.failure = async (_channel, _thread, cause) => {
     failures.push(cause);
+
     return "2.000";
   };
+
   const work = f.gateway.process(f.job, new AbortController().signal);
   const signal = await f.started;
   read.reject(new Error("Private monitor transport error"));
@@ -235,6 +258,7 @@ test("Stop rejects other humans, bots, installations, channels, threads, and pre
   const work = f.gateway.process(f.job, new AbortController().signal);
   const signal = await f.started;
   const original = f.payload();
+
   const invalid = [
     { ...original, user: { id: "UOTHER" } },
     { ...original, user: { id: "UBOT" } },
@@ -262,6 +286,7 @@ test("Stop rejects other humans, bots, installations, channels, threads, and pre
     {},
     null,
   ];
+
   try {
     for (const payload of invalid)
       expect(f.gateway.cancel(payload)).toBe(false);
@@ -296,6 +321,7 @@ test("Stop is bound to the current bot/backend namespace", () => {
   const f = fixture();
   f.store.running(f.job.id);
   f.store.savePreview(f.job.id, 0, "2.000");
+
   const other = new Gateway(
     bot("another"),
     identity,
@@ -304,10 +330,13 @@ test("Stop is bound to the current bot/backend namespace", () => {
     f.slack,
     pino({ enabled: false }),
   );
+
   expect(other.cancel(f.payload())).toBe(false);
   const changed = bot();
+
   if (changed.backend.type !== "opencode") throw new Error("Invalid fixture");
   changed.backend.directory = "/another";
+
   const backend = new Gateway(
     changed,
     identity,
@@ -316,6 +345,7 @@ test("Stop is bound to the current bot/backend namespace", () => {
     f.slack,
     pino({ enabled: false }),
   );
+
   expect(backend.cancel(f.payload())).toBe(false);
 });
 
@@ -326,8 +356,10 @@ test("accepted Stop wins over a backend answer that races with cancellation", as
     onText?.("Partial answer");
     await Promise.resolve();
     started.resolve();
+
     return f.finish.promise;
   };
+
   const work = f.gateway.process(f.job, new AbortController().signal);
   await started.promise;
   expect(f.gateway.cancel(f.payload())).toBe(true);
@@ -371,10 +403,12 @@ test("completed response wins over a late Stop while Slack delivery is pending",
     delivering.resolve();
     await release.promise;
   };
+
   const work = f.gateway.process(f.job, new AbortController().signal);
   await f.started;
   f.finish.resolve("Completed answer");
   await delivering.promise;
+
   try {
     expect(f.gateway.cancel(f.payload())).toBe(false);
     expect(f.next().response).toBe(JSON.stringify(["Completed answer"]));
@@ -397,11 +431,13 @@ test("accepted Stop survives restart and failed delivery without replay", async 
   f.slack.update = async () => {
     throw new Error("Slack unavailable");
   };
+
   await f.gateway.process(f.next(), new AbortController().signal);
   expect(f.next().status).toBe("responding");
   f.slack.update = async (_channel, _ts, text) => {
     f.writes.push({ text });
   };
+
   await f.gateway.process(f.next(), new AbortController().signal);
   expect(f.writes.at(-1)?.text).toContain("stop request");
   expect(f.prompts()).toBe(0);

@@ -4,7 +4,9 @@ export const cancellationNotice =
   "Stargate received your stop request. Work may have run; existing effects may remain. The request was not repeated. Check agent state before trying again.";
 
 export class AttachmentInputUnavailable extends Error {}
+
 export class PromptNotSubmitted extends Error {}
+
 export class PendingBackendQuestion extends PromptNotSubmitted {}
 
 /**
@@ -29,14 +31,19 @@ export const backendFailureKinds = [
   "crash",
   "provider",
 ] as const;
+
 export type BackendFailureKind = (typeof backendFailureKinds)[number];
 
 /** The category of a provider HTTP status that reports a failure. */
 export function statusKind(status: number): BackendFailureKind {
   if (status === 429 || status === 402) return "quota";
+
   if (status === 401 || status === 403) return "auth";
+
   if (status === 404) return "model";
+
   if (status === 408 || status === 504) return "timeout";
+
   return "provider";
 }
 
@@ -91,14 +98,19 @@ export function connectionFailure(
   error: unknown,
 ): "unreached" | "lost" | undefined {
   let current = error;
+
   for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
     const code: unknown = Reflect.get(current, "code");
+
     if (typeof code === "string") {
       if (unreachedCodes.has(code)) return "unreached";
+
       if (code === "ECONNRESET") return "lost";
     }
+
     current = current.cause;
   }
+
   return undefined;
 }
 
@@ -134,9 +146,12 @@ export function providerFailure(
   | { kind: BackendFailureKind; status: number | undefined; ran: boolean }
   | undefined {
   const match = providerPattern.exec(cause);
+
   if (!match) return undefined;
   const kind = backendFailureKinds.find((item) => item === match[1]);
+
   if (!kind) return undefined;
+
   return {
     kind,
     status: match[2] === "0" ? undefined : Number(match[2]),
@@ -185,9 +200,11 @@ const provider: Record<
 
 function describe(cause: RequestFailure): { title: string; text: string } {
   const parsed = providerFailure(cause);
+
   // A stored cause that is neither fixed nor a valid provider cause.
   if (!parsed) return failures[cause as FixedFailure] ?? failures.backend;
   const status = parsed.status ? ` (HTTP ${parsed.status})` : "";
+
   return {
     title: provider[parsed.kind].title,
     text: `${provider[parsed.kind].text(status)} ${
@@ -248,11 +265,13 @@ export function failureText(cause: RequestFailure): string {
 
 export function failureContent(cause: RequestFailure) {
   const { title, text } = describe(cause);
+
   const plain = (text: string) => ({
     type: "plain_text" as const,
     text,
     emoji: false,
   });
+
   return {
     text: slackContent(`Request status — ${title}\n\n${text}`, "plain").text,
     blocks: [

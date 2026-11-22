@@ -45,6 +45,7 @@ function shipDetail({
       contexts: member.contexts.map(({ git, ...context }) => {
         if (!git) return { ...context, git };
         const { checkedAt: _checkedAt, ...state } = git;
+
         return { ...context, git: state };
       }),
     })),
@@ -53,6 +54,7 @@ function shipDetail({
 
 const clean = (text: string, limit: number) =>
   redactCredentials(text, limit).replace(/\s+/g, " ").trim();
+
 const sentence = (text: string) => `${text.slice(0, 199)}.`;
 
 function availability(ship: V1Ship, at: number): V1Event {
@@ -69,12 +71,14 @@ function availability(ship: V1Ship, at: number): V1Event {
     },
   };
 }
+
 function quoted(prefix: string, text: string, suffix = "") {
   return `${prefix}“${clean(text, 197 - prefix.length - suffix.length) || "Task"}”${suffix}.`;
 }
 
 function outcomes({ recent, lastOutcome }: V1CrewContext) {
   const tasks = new Map<string, V1Task>();
+
   for (const task of [...recent].reverse().concat(lastOutcome ?? [])) {
     if (
       task.status === "completed" ||
@@ -84,6 +88,7 @@ function outcomes({ recent, lastOutcome }: V1CrewContext) {
     )
       tasks.set(task.id, task);
   }
+
   return tasks;
 }
 
@@ -100,6 +105,7 @@ function contextEvents(
   const { current } = next;
   const old = previous.current;
   const priorOutcomes = outcomes(previous);
+
   for (const [id, outcome] of outcomes(next)) {
     if (priorOutcomes.get(id)?.status === outcome.status) continue;
     emit(
@@ -114,6 +120,7 @@ function contextEvents(
       },
     );
   }
+
   if (current && next.activity === "running" && current.id !== old?.id)
     emit("dispatch", quoted(`${name} started `, current.summary));
   else if (current && old?.id === current.id && old.phase !== current.phase) {
@@ -128,6 +135,7 @@ function contextEvents(
       ),
     );
   }
+
   if (next.queuedCount > previous.queuedCount) {
     const previousIds = new Set(previous.queued.map((task) => task.id));
     const added = next.queued.find((task) => !previousIds.has(task.id));
@@ -142,10 +150,13 @@ function contextEvents(
 
   const branch = next.git?.branch ?? null;
   const priorGit = previous.git;
+
   const gitReadable =
     priorGit && !priorGit.error && next.git && !next.git.error;
+
   const changed = gitReadable && branch !== priorGit.branch;
   const pr = next.pullRequest;
+
   const appeared =
     pr &&
     gitReadable &&
@@ -155,6 +166,7 @@ function contextEvents(
         next.git?.repository === priorGit.repository)) &&
     (pr.number !== previous.pullRequest?.number ||
       pr.url !== previous.pullRequest.url);
+
   if (appeared) {
     emit(
       "git",
@@ -181,19 +193,25 @@ export function diffEvents(
 ): V1Event[] {
   if (!prev) return [];
   const events: V1Event[] = [];
+
   if (!isDeepStrictEqual(fleetSummary(prev.fleet), fleetSummary(next.fleet))) {
     events.push({ type: "fleet", data: next.fleet });
     const prior = new Map(prev.fleet.ships.map((ship) => [ship.id, ship]));
+
     for (const ship of next.fleet.ships) {
       const previous = prior.get(ship.id);
+
       if (previous && previous.available !== ship.available)
         events.push(availability(ship, now));
     }
   }
+
   for (const id of Object.keys(next.ships).sort()) {
     const ship = next.ships[id];
+
     if (!ship) continue;
     const previous = Object.hasOwn(prev.ships, id) ? prev.ships[id] : undefined;
+
     if (!previous || !isDeepStrictEqual(shipDetail(previous), shipDetail(ship)))
       events.push({ type: "ship", data: ship });
     else if (
@@ -204,7 +222,9 @@ export function diffEvents(
         type: "ship-sampled",
         data: { id, detailUpdatedAt: ship.detailUpdatedAt },
       });
+
     if (!previous) continue;
+
     const activity = (
       member: string | null,
       kind: V1ActivityEvent["kind"],
@@ -215,17 +235,23 @@ export function diffEvents(
         type: "activity",
         data: { ship: id, member, kind, text, at: now, ...extra },
       });
+
     const oldMembers = new Map(
       previous.crewMembers.map((member) => [member.id, member]),
     );
+
     for (const member of ship.crewMembers) {
       const prior = oldMembers.get(member.id);
+
       if (!prior) continue;
+
       const contexts = new Map(
         prior.contexts.map((context) => [context.project, context]),
       );
+
       for (const context of member.contexts) {
         const old = contexts.get(context.project);
+
         if (old)
           contextEvents(
             old,
@@ -236,5 +262,6 @@ export function diffEvents(
       }
     }
   }
+
   return events;
 }

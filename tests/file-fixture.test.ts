@@ -7,6 +7,7 @@ import { ordinaryFileDirectory, publishedFileDirectory } from "./file-fixture";
 test("hidden release temp keeps ordinary files visible and publisher scratch private", async () => {
   const base = await ordinaryFileDirectory("stargate-file-fixture-");
   const previous = process.env["TMPDIR"];
+
   try {
     const hidden = join(base, ".staging-test", "tmp");
     await mkdir(hidden, { recursive: true, mode: 0o700 });
@@ -15,6 +16,7 @@ test("hidden release temp keeps ordinary files visible and publisher scratch pri
     const published = await publishedFileDirectory("published-");
     expect(dirname(ordinary)).toBe(base);
     expect(dirname(published)).toBe(join(hidden, "opencode"));
+
     for (const directory of [ordinary, published, dirname(published)])
       expect((await stat(directory)).mode & 0o777).toBe(0o700);
     const proof = join(ordinary, "proof.txt");
@@ -37,6 +39,7 @@ test("hidden release temp keeps ordinary files visible and publisher scratch pri
 test("publisher fixtures refuse a nonprivate temp before creating scratch", async () => {
   const base = await ordinaryFileDirectory("stargate-file-fixture-");
   const previous = process.env["TMPDIR"];
+
   try {
     const wide = join(base, "wide");
     await mkdir(wide);

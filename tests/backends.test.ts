@@ -24,6 +24,7 @@ import type { TurnProgress, TurnStage } from "../src/shared/turn-progress";
 test("OpenCode V2 creates, queues, waits and reads paginated replies", async () => {
   const requests: { path: string; body: unknown }[] = [];
   let inputId = "";
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -34,15 +35,20 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
         path: url.pathname,
         body: body ? JSON.parse(body) : null,
       });
+
       if (url.pathname === "/api/session")
         return Response.json({ data: { id: "session-1" } });
+
       if (url.pathname.endsWith("/prompt")) {
         const input: { id: string } = JSON.parse(body);
         inputId = input.id;
+
         return Response.json({ data: { id: inputId } });
       }
+
       if (url.pathname.endsWith("/wait"))
         return new Response(null, { status: 204 });
+
       if (url.pathname.endsWith("/message")) {
         if (url.searchParams.has("cursor"))
           return Response.json({
@@ -56,6 +62,7 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
             ],
             cursor: {},
           });
+
         return Response.json({
           data: [
             {
@@ -75,23 +82,28 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
           cursor: { next: "page2" },
         });
       }
+
       return new Response(null, { status: 404 });
     },
   });
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;
+
     const session = await backend.createSession({
       key: "thread",
       title: "Slack",
       signal,
     });
+
     expect(session).toBe("session-1");
     expect(await backend.prompt(session, "hello", signal)).toBe(
       "first\n\nsecond",
@@ -124,17 +136,22 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
 test("OpenCode sends only a compact Slack source line before the raw instruction", async () => {
   let inputId = "";
   let prompt: Record<string, unknown> = {};
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const path = new URL(request.url).pathname;
+
       if (path.endsWith("/prompt")) {
         prompt = await request.json();
         inputId = String(prompt["id"]);
+
         return Response.json({ data: { id: inputId } });
       }
+
       if (path.endsWith("/wait")) return new Response(null, { status: 204 });
+
       if (path.endsWith("/message"))
         return Response.json({
           data: [
@@ -147,22 +164,27 @@ test("OpenCode sends only a compact Slack source line before the raw instruction
           ],
           cursor: {},
         });
+
       return new Response(null, { status: 404 });
     },
   });
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
+
     const source = {
       channel: "C123",
       thread: "1.000",
       message: "3.000",
       user: "U123",
     };
+
     const raw = "Can we resume this?";
     expect(
       await new OpenCodeBackend(config).prompt(
@@ -202,35 +224,44 @@ test("OpenCode placed-input failure explicitly interrupts server-side execution"
   let interrupted = false;
   let admissions = 0;
   let inputId = "";
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const path = new URL(request.url).pathname;
+
       if (path.endsWith("/prompt")) {
         admissions++;
         const input: { id: string } = await request.json();
         inputId = input.id;
+
         return Response.json({ data: { id: inputId } });
       }
+
       if (path.endsWith("/message"))
         return Response.json({
           data: [{ id: inputId, type: "user" }],
           cursor: {},
         });
+
       if (new URL(request.url).pathname.endsWith("/interrupt")) {
         interrupted = true;
+
         return Response.json({ success: true });
       }
+
       return Response.json({ message: "unavailable" }, { status: 503 });
     },
   });
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     await expect(
       new OpenCodeBackend(config).prompt(
@@ -248,20 +279,24 @@ test("OpenCode placed-input failure explicitly interrupts server-side execution"
 
 test("OpenCode uncertain admission does not interrupt unrelated native work", async () => {
   let interrupts = 0;
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     fetch(request) {
       if (new URL(request.url).pathname.endsWith("/interrupt")) interrupts++;
+
       return Response.json({ message: "unavailable" }, { status: 503 });
     },
   });
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     await expect(
       new OpenCodeBackend(config).prompt(
@@ -284,28 +319,36 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
       let prompts = 0;
       const cancelled: string[] = [];
       let interrupts = 0;
+
       const server = Bun.serve({
         port: 0,
         hostname: "127.0.0.1",
         async fetch(request) {
           const path = new URL(request.url).pathname;
+
           if (path.endsWith("/prompt")) {
             prompts++;
             const body: { id?: string } = await request.json();
             input = body.id;
+
             if (aborted) controller.abort();
+
             return Response.json(
               { message: "Lost admission response" },
               { status: 503 },
             );
           }
+
           if (request.method === "DELETE" && path.includes("/inbox/")) {
             cancelled.push(path.split("/").at(-1) ?? "");
+
             return new Response(null, { status: 204 });
           }
+
           if (path.endsWith("/message")) {
             if (placement === "unreadable")
               return new Response(null, { status: 503 });
+
             return Response.json({
               data:
                 placement === "placed" && input
@@ -314,19 +357,24 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
               cursor: {},
             });
           }
+
           if (path.endsWith("/interrupt")) {
             interrupts++;
+
             return Response.json({ success: true });
           }
+
           return new Response(null, { status: 404 });
         },
       });
+
       try {
         const config = Schema.decodeUnknownSync(backendSchema)({
           type: "opencode",
           url: server.url.href,
           directory: "/workspace",
         });
+
         if (config.type !== "opencode") throw new Error("Invalid fixture");
         await expect(
           new OpenCodeBackend(config).prompt(
@@ -335,6 +383,7 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
             controller.signal,
           ),
         ).rejects.toThrow();
+
         if (!input) throw new Error("Admission had no client input ID");
         expect(input).toMatch(/^msg_/);
         expect(prompts).toBe(1);
@@ -349,20 +398,24 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
 
 test("OpenCode cancellation before admission makes no native requests", async () => {
   let requests = 0;
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     fetch() {
       requests++;
+
       return new Response(null, { status: 503 });
     },
   });
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     const controller = new AbortController();
     controller.abort();
@@ -416,6 +469,7 @@ function openCodeStreamFixture(
   let inputId = "";
   let admissions = 0;
   let eventConnections = 0;
+
   const form = {
     id: "form_earlier",
     sessionID: "session-current",
@@ -425,6 +479,7 @@ function openCodeStreamFixture(
       tool: { messageID: "old-answer", id: "call_earlier" },
     },
   };
+
   const forms = pendingQuestion
     ? [
         ...Array.from({ length: pendingQuestion.unrelated ?? 0 }, (_, i) => ({
@@ -443,6 +498,7 @@ function openCodeStreamFixture(
         form,
       ]
     : [];
+
   const currentForm = {
     ...form,
     id: "form_current",
@@ -459,6 +515,7 @@ function openCodeStreamFixture(
       tool: { messageID: "answer-current", id: "call_current" },
     },
   };
+
   const questionMessage = {
     id: "answer-current",
     type: "assistant",
@@ -473,7 +530,9 @@ function openCodeStreamFixture(
       },
     ],
   };
+
   const encoder = new TextEncoder();
+
   const emit = (type: string, data: Record<string, unknown>) => {
     if (!stream) throw new Error("Fixture SSE connection is not open");
     stream.enqueue(
@@ -488,22 +547,29 @@ function openCodeStreamFixture(
       ),
     );
   };
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const path = new URL(request.url).pathname;
+
       if (path.endsWith("/form")) {
         formListing.resolve();
         await pendingQuestion?.waitForList;
+
         return Response.json({ data: forms });
       }
+
       if (path.endsWith("/form/form_current"))
         return Response.json({ data: currentForm });
+
       if (path.endsWith("/message/answer-current"))
         return Response.json({ data: questionMessage });
       const detail = forms.find(({ id }) => path.endsWith(`/form/${id}`));
+
       if (detail) return Response.json({ data: detail });
+
       if (path.endsWith("/message/settled-answer"))
         return Response.json({
           data: {
@@ -513,10 +579,12 @@ function openCodeStreamFixture(
             content: [],
           },
         });
+
       if (path === "/api/session/active")
         return Response.json({
           data: pendingQuestion?.active ? { "session-current": true } : {},
         });
+
       if (
         path.endsWith("/message/old-answer") &&
         pendingQuestion &&
@@ -538,12 +606,14 @@ function openCodeStreamFixture(
             ],
           },
         });
+
       if (path === "/api/event") {
         return new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
               stream = controller;
               emit("server.connected", {});
+
               if (++eventConnections > 1) reconnected.resolve();
             },
             cancel() {
@@ -554,21 +624,27 @@ function openCodeStreamFixture(
           { headers: { "content-type": "text/event-stream" } },
         );
       }
+
       if (path.endsWith("/prompt")) {
         if (!stream) throw new Error("Prompt preceded event connection");
         admissions++;
         const input: { id: string } = await request.json();
         inputId = input.id;
+
         return Response.json({ data: { id: inputId } });
       }
+
       if (path.endsWith("/wait")) {
         waiting.resolve();
         await finish.promise;
+
         return new Response(null, { status: 204 });
       }
+
       if (path.endsWith("/message")) {
         historyReads++;
         checked.resolve();
+
         return Response.json({
           data: [
             ...(crewWake
@@ -621,34 +697,45 @@ function openCodeStreamFixture(
           cursor: {},
         });
       }
+
       if (path.endsWith("/inbox") && request.method === "GET") {
         if (deliverDuringCheck) placed = true;
         checked.resolve();
+
         if (++inboxReads === 2) checkedAgain.resolve();
+
         return Response.json({
           data: placed ? [] : [{ id: inputId, type: "user" }],
         });
       }
+
       if (path.endsWith("/interrupt")) {
         interrupts++;
         interrupted.resolve();
+
         return Response.json({ success: true });
       }
+
       if (path.endsWith(`/inbox/${inputId}`) && request.method === "DELETE") {
         cancelled = true;
         withdrawals.push(inputId);
+
         return new Response(null, { status: 204 });
       }
+
       return new Response(null, { status: 404 });
     },
   });
+
   const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
     headersEnv,
   });
+
   if (config.type !== "opencode") throw new Error("Invalid fixture");
+
   return {
     backend: new OpenCodeBackend(config),
     waiting: waiting.promise,
@@ -688,29 +775,36 @@ test("OpenCode wait disables only HTTP idleness and preserves its request", asyn
   const previous = process.env[headerEnv];
   process.env[headerEnv] = "fixture-value";
   const nativeFetch = globalThis.fetch;
+
   const requests: {
     path: string;
     init: BunFetchRequestInit | undefined;
   }[] = [];
+
   const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
     Object.assign(
       (url: URL | RequestInfo, init?: BunFetchRequestInit) => {
         requests.push({ path: new URL(String(url)).pathname, init });
+
         return nativeFetch(url, init);
       },
       { preconnect: nativeFetch.preconnect },
     ),
   );
+
   const fixture = openCodeStreamFixture(false, false, undefined, {
     "x-fixture": headerEnv,
   });
+
   const controller = new AbortController();
+
   const pending = fixture.backend.prompt(
     "session-current",
     "hello",
     controller.signal,
     () => {},
   );
+
   try {
     await fixture.waiting;
     const wait = requests.find((request) => request.path.endsWith("/wait"));
@@ -738,6 +832,7 @@ test("OpenCode wait disables only HTTP idleness and preserves its request", asyn
     await pending.catch(() => {});
     await fixture.close();
     fetchSpy.mockRestore();
+
     if (previous === undefined) delete process.env[headerEnv];
     else process.env[headerEnv] = previous;
   }
@@ -753,15 +848,18 @@ for (const origin of [
     const received = Promise.withResolvers<void>();
     const snapshots: string[] = [];
     const stop = new AbortController();
+
     const result = f.backend.prompt(
       "session-current",
       "Public B",
       stop.signal,
       (text) => {
         snapshots.push(text);
+
         if (text.includes("OWN B")) received.resolve();
       },
     );
+
     try {
       await f.waiting;
       f.emit("session.text.delta", {
@@ -796,14 +894,17 @@ test("conversation eval: native steer batch has no public preview, final text or
     originInputID: "msg_sourceA",
     batched: true,
   });
+
   const stop = new AbortController();
   const snapshots: string[] = [];
+
   const result = f.backend.prompt(
     "session-current",
     "Public B",
     stop.signal,
     (text) => snapshots.push(text),
   );
+
   try {
     await f.waiting;
     f.emit("session.text.delta", {
@@ -829,21 +930,26 @@ test("OpenCode streams only current-session visible text before canonical histor
   const received = Promise.withResolvers<void>();
   const snapshots: string[] = [];
   const controller = new AbortController();
+
   const result = fixture.backend.prompt(
     "session-current",
     "Review this PR",
     controller.signal,
     (text) => {
       snapshots.push(text);
+
       if (text === "First block.\nCorrected second block.") received.resolve();
     },
   );
+
   try {
     await fixture.waiting;
+
     const current = {
       sessionID: "session-current",
       assistantMessageID: "answer-current",
     };
+
     fixture.emit("session.text.delta", {
       ...current,
       sessionID: "session-other",
@@ -915,6 +1021,7 @@ test("OpenCode finds a running IRC question after unrelated and settled forms wi
     {},
     { active: true, unrelated: 16, stale: 16 },
   );
+
   try {
     await expect(
       fixture.backend.prompt(
@@ -946,7 +1053,9 @@ test("OpenCode submits a new request if pending form metadata has no running que
       running: false,
     },
   );
+
   const controller = new AbortController();
+
   const result = fixture.backend.prompt(
     "session-current",
     "New IRC request",
@@ -956,6 +1065,7 @@ test("OpenCode submits a new request if pending form metadata has no running que
     undefined,
     humanIrcSource,
   );
+
   try {
     await fixture.waiting;
     fixture.finish();
@@ -970,6 +1080,7 @@ test("OpenCode submits a new request if pending form metadata has no running que
 
 test("OpenCode marks cancellation during an IRC form check as pre-submission", async () => {
   const list = Promise.withResolvers<void>();
+
   const fixture = openCodeStreamFixture(
     false,
     false,
@@ -980,7 +1091,9 @@ test("OpenCode marks cancellation during an IRC form check as pre-submission", a
       waitForList: list.promise,
     },
   );
+
   const controller = new AbortController();
+
   const result = fixture.backend.prompt(
     "session-current",
     "New IRC request",
@@ -990,6 +1103,7 @@ test("OpenCode marks cancellation during an IRC form check as pre-submission", a
     undefined,
     humanIrcSource,
   );
+
   try {
     await fixture.formListing;
     controller.abort();
@@ -1015,14 +1129,18 @@ test("OpenCode reports metadata for the exact inbox item and its own assistant",
       active: false,
     },
   );
+
   const controller = new AbortController();
   const observed: TurnProgress[] = [];
+
   const stages = new Map<
     TurnStage,
     ReturnType<typeof Promise.withResolvers<void>>
   >();
+
   for (const stage of ["queued", "reasoning", "tool"] as const)
     stages.set(stage, Promise.withResolvers<void>());
+
   const result = fixture.backend.prompt(
     "session-current",
     "Public request",
@@ -1036,6 +1154,7 @@ test("OpenCode reports metadata for the exact inbox item and its own assistant",
       stages.get(progress.stage)?.resolve();
     },
   );
+
   try {
     await fixture.waiting;
     const sessionID = "session-current";
@@ -1096,6 +1215,7 @@ test("OpenCode rechecks uncertain ownership on a later tool event", async () => 
   const fixture = openCodeStreamFixture(true);
   const controller = new AbortController();
   const toolReported = Promise.withResolvers<void>();
+
   const result = fixture.backend.prompt(
     "session-current",
     "New IRC request",
@@ -1108,12 +1228,15 @@ test("OpenCode rechecks uncertain ownership on a later tool event", async () => 
       if (stage === "tool") toolReported.resolve();
     },
   );
+
   try {
     await fixture.waiting;
+
     const owner = {
       sessionID: "session-current",
       assistantMessageID: "answer-current",
     };
+
     fixture.emit("session.reasoning.started", { ...owner, ordinal: 0 });
     await fixture.checkedAgain;
     // Both initial reads saw a queued input. Let the later event recheck it.
@@ -1141,6 +1264,7 @@ test("OpenCode event disconnect retains authoritative final history", async () =
   const received = Promise.withResolvers<void>();
   const controller = new AbortController();
   const snapshots: string[] = [];
+
   const result = fixture.backend.prompt(
     "session-current",
     "hello",
@@ -1150,6 +1274,7 @@ test("OpenCode event disconnect retains authoritative final history", async () =
       received.resolve();
     },
   );
+
   try {
     await fixture.waiting;
     fixture.emit("session.text.delta", {
@@ -1178,6 +1303,7 @@ test.each(["eof", "error"] as const)(
     const queued = Promise.withResolvers<void>();
     const reasoning = Promise.withResolvers<void>();
     const connectionStates: boolean[] = [];
+
     const result = fixture.backend.prompt(
       "session-current",
       "New IRC request",
@@ -1188,11 +1314,14 @@ test.each(["eof", "error"] as const)(
       humanIrcSource,
       ({ stage, disconnected }) => {
         if (stage === "queued") connectionStates.push(!!disconnected);
+
         if (stage === "queued") queued.resolve();
+
         if (stage === "reasoning") reasoning.resolve();
       },
       true,
     );
+
     try {
       await fixture.waiting;
       fixture.emit("session.inbox.enqueued", {
@@ -1228,15 +1357,18 @@ test.each([false, true])(
     const received = Promise.withResolvers<void>();
     const snapshots: string[] = [];
     const controller = new AbortController();
+
     const pending = fixture.backend.prompt(
       "session-current",
       "Queued follow-up",
       controller.signal,
       (text) => {
         snapshots.push(text);
+
         if (text.includes("OWN ANSWER")) received.resolve();
       },
     );
+
     try {
       await fixture.waiting;
       fixture.emit("session.text.delta", {
@@ -1255,6 +1387,7 @@ test.each([false, true])(
         sessionID: "session-current",
       });
       await fixture.checked;
+
       if (!race) expect(fixture.historyReads()).toBe(0);
       fixture.place();
       fixture.emit("session.text.delta", {
@@ -1283,12 +1416,14 @@ for (const reason of [
   test(`OpenCode ${reason.name} closes the event subscription and interrupts owned execution`, async () => {
     const fixture = openCodeStreamFixture();
     const controller = new AbortController();
+
     const result = fixture.backend.prompt(
       "session-current",
       "hello",
       controller.signal,
       () => {},
     );
+
     try {
       await fixture.waiting;
       // Deliver Stop/deadline only after the wait is admitted; no clock race.
@@ -1310,12 +1445,14 @@ for (const reason of [
   test(`OpenCode queued ${reason.name} withdraws only its own input`, async () => {
     const fixture = openCodeStreamFixture(true);
     const controller = new AbortController();
+
     const pending = fixture.backend.prompt(
       "session-current",
       "follow-up",
       controller.signal,
       () => {},
     );
+
     try {
       await fixture.waiting;
       controller.abort(reason);
@@ -1338,6 +1475,7 @@ test("Pi partial text excludes thinking and tools and tolerates missing or malfo
     entries: [],
     docs,
   });
+
   expect(piPartialText(view({}))).toBe("");
   expect(piPartialText(view({ "pi.live": {} }))).toBe("");
   expect(
@@ -1375,6 +1513,7 @@ test("Pi live text decoding strips unknown keys and requires finite inputs", () 
     entries: [],
     docs: { "pi.live": live },
   });
+
   const generation = {
     message: {
       content: [
@@ -1385,10 +1524,12 @@ test("Pi live text decoding strips unknown keys and requires finite inputs", () 
     },
     extra: true,
   };
+
   for (const run of [{ inputs: [1.5, 0] }, { inputs: [], extra: true }])
     expect(piPartialText(view({ run, generation, extra: true }))).toBe(
       "Visible",
     );
+
   for (const live of [
     { run: null, generation },
     { run: { inputs: [Number.POSITIVE_INFINITY] }, generation },
@@ -1398,33 +1539,42 @@ test("Pi live text decoding strips unknown keys and requires finite inputs", () 
     { generation: { message: { content: [{ text: "missing type" }] } } },
   ])
     expect(piPartialText(view(live)), JSON.stringify(live)).toBe("");
+
   // Non-object live state is outside the SDK type; pass it without a cast.
   const untyped = (live: unknown): string =>
     Reflect.apply(piPartialText, undefined, [
       { conversation: { id: 1 }, entries: [], docs: { "pi.live": live } },
     ]);
+
   expect(untyped({ generation })).toBe("Visible");
+
   for (const live of [[], null, "Visible", 1, true])
     expect(untyped(live), JSON.stringify(live)).toBe("");
 });
 
 test("Pi conversation IDs accept decimal digits as safe integers", async () => {
   const opened: number[] = [];
+
   const harness = {
     async conversation(id: number) {
       opened.push(id);
+
       return undefined;
     },
   };
+
   const backend: PiDurableBackend = Reflect.construct(PiDurableBackend, [
     harness,
     {},
   ]);
+
   const signal = new AbortController().signal;
+
   for (const id of ["0", "7", "007", String(Number.MAX_SAFE_INTEGER)])
     await expect(backend.prompt(id, "hello", signal)).rejects.toThrow(
       "Pi conversation not found",
     );
+
   for (const id of [
     "9007199254740992",
     "9".repeat(400),
@@ -1444,6 +1594,7 @@ test("Pi conversation IDs accept decimal digits as safe integers", async () => {
 
 test("Pi ignores historical observer advances before attachment resolves", async () => {
   const id = 1 as ConversationId;
+
   const assistant = (entryId: number, text: string): EntryRecord => ({
     id: entryId as EntryId,
     conversationId: id,
@@ -1468,16 +1619,20 @@ test("Pi ignores historical observer advances before attachment resolves", async
       },
     ],
   });
+
   const historical = assistant(10, "OLD HISTORY");
   const beforeResolution = assistant(11, "PRE-RESOLUTION HISTORY");
   const current = assistant(13, "NEW ANSWER");
+
   const view = (entries: readonly EntryRecord[]): ConversationView => ({
     conversation: { id },
     entries,
     docs: {},
   });
+
   let observer: Observer<ConversationView> | undefined;
   let detached = false;
+
   const advance = (value: ConversationView) => {
     if (!observer) throw new Error("Observer not attached");
     observer.advance(
@@ -1485,6 +1640,7 @@ test("Pi ignores historical observer advances before attachment resolves", async
       BACKGROUND_CONTEXT,
     );
   };
+
   const harness = {
     async observeConversation(
       _id: ConversationId,
@@ -1493,6 +1649,7 @@ test("Pi ignores historical observer advances before attachment resolves", async
       observer = attached;
       // Durable permits publication before the attachment promise resolves.
       advance(view([historical, beforeResolution]));
+
       return {
         value: view([historical]),
         detach() {
@@ -1504,6 +1661,7 @@ test("Pi ignores historical observer advances before attachment resolves", async
       return {
         async submit() {
           advance(view([historical, beforeResolution, current]));
+
           return {
             id: 1,
             async status() {
@@ -1525,11 +1683,13 @@ test("Pi ignores historical observer advances before attachment resolves", async
       };
     },
   };
+
   // Inject the harness without opening storage or contacting a provider.
   const backend: PiDurableBackend = Reflect.construct(PiDurableBackend, [
     harness,
     {},
   ]);
+
   const snapshots: string[] = [];
   expect(
     await backend.prompt("1", "hello", new AbortController().signal, (text) => {
@@ -1542,6 +1702,7 @@ test("Pi ignores historical observer advances before attachment resolves", async
 
 test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
   const id = 1 as ConversationId;
+
   const assistant = (number: number, text: string): EntryRecord => ({
     id: number as EntryId,
     conversationId: id,
@@ -1572,10 +1733,12 @@ test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
       },
     ],
   });
+
   const old = assistant(10, "BEFORE ATTACHMENT");
   const prior = assistant(11, "PRIOR TURN COMMITTED");
   const own = assistant(13, "OWN ANSWER");
   const next = assistant(15, "LATER NATIVE TURN");
+
   const terminal = {
     id: 1,
     conversationId: id,
@@ -1585,9 +1748,11 @@ test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
       ? { status: "done", answer: own.id }
       : { status: "unanswered", reason: "model_error" }),
   };
+
   const partial = Promise.withResolvers<void>();
   let completed = false;
   let observer: Observer<ConversationView> | undefined;
+
   const view = (
     entries: readonly EntryRecord[],
     input: number,
@@ -1602,17 +1767,20 @@ test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
       },
     },
   });
+
   const advance = (value: ConversationView) =>
     observer?.advance(
       { kind: "value", value, ops: [], retired: false },
       BACKGROUND_CONTEXT,
     );
+
   const harness = {
     async observeConversation(
       _id: ConversationId,
       attached: Observer<ConversationView>,
     ) {
       observer = attached;
+
       return { value: view([old], 99, "PRIOR LIVE"), detach() {} };
     },
     async conversation() {
@@ -1620,6 +1788,7 @@ test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
         async submit() {
           advance(view([old], 99, "PRIOR TURN LIVE"));
           advance(view([old, prior], 99, "PRIOR TURN COMPLETING"));
+
           return {
             id: 1,
             async status() {
@@ -1644,6 +1813,7 @@ test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
                   "NEXT LIVE",
                 ),
               );
+
               return terminal;
             },
           };
@@ -1654,25 +1824,31 @@ test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
       };
     },
   };
+
   const backend: PiDurableBackend = Reflect.construct(PiDurableBackend, [
     harness,
     {},
   ]);
+
   const snapshots: string[] = [];
+
   const pending = backend.prompt(
     "1",
     "follow-up",
     new AbortController().signal,
     (text) => {
       snapshots.push(text);
+
       if (text === "OWN PARTIAL") partial.resolve();
     },
   );
+
   if (outcome === "done") expect(await pending).toBe("OWN ANSWER");
   else {
     await expect(pending).rejects.toThrow("Pi input did not complete");
     expect(snapshots).toEqual(["OWN PARTIAL"]);
   }
+
   expect(snapshots.join("\n")).not.toMatch(/PRIOR|BEFORE|LATER|NEXT/);
 });
 
@@ -1680,17 +1856,22 @@ test("real Pi Durable harness persists sessions under Bun SQLite", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-"));
   const previous = process.env["OPENAI_API_KEY"];
   process.env["OPENAI_API_KEY"] = "local-test-not-sent";
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "pi-durable",
       directory,
       model: "openai/gpt-5",
     });
+
     if (config.type !== "pi-durable") throw new Error("Invalid fixture");
+
     const backend = await PiDurableBackend.open(config, {
       dataDirectory: directory,
     });
+
     let session: string;
+
     try {
       session = await backend.createSession({
         key: "thread",
@@ -1701,9 +1882,11 @@ test("real Pi Durable harness persists sessions under Bun SQLite", async () => {
     } finally {
       await backend.close();
     }
+
     const reopened = await PiDurableBackend.open(config, {
       dataDirectory: directory,
     });
+
     try {
       await reopened.interrupt(session, new AbortController().signal);
     } finally {
@@ -1720,12 +1903,14 @@ test("live progress reports the exact waiting form and its closure, without retr
   const f = openCodeStreamFixture();
   const stop = new AbortController();
   const stages: TurnProgress[] = [];
+
   const wanted = new Map(
     ["retry", "waiting", "clarified"].map((stage) => [
       stage,
       Promise.withResolvers<void>(),
     ]),
   );
+
   const result = f.backend.prompt(
     "session-current",
     "work",
@@ -1740,6 +1925,7 @@ test("live progress reports the exact waiting form and its closure, without retr
     },
     true,
   );
+
   try {
     await f.waiting;
     const sessionID = "session-current";

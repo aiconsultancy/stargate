@@ -8,6 +8,7 @@ const activityProgress = settingsStruct({
   revision: Schema.Int,
   done: Schema.Boolean,
 });
+
 export type ActivityProgress = typeof activityProgress.Type;
 
 export class ActivityRecords {
@@ -19,6 +20,7 @@ export class ActivityRecords {
         "SELECT activity FROM jobs WHERE id=?",
       )
       .get(id)?.activity;
+
     return raw
       ? Schema.decodeUnknownSync(activityProgress)(JSON.parse(raw))
       : undefined;

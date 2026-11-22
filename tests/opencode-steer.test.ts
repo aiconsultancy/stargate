@@ -10,9 +10,11 @@ import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
 const sessionID = "ses_captain";
 const original = "msg_original";
 
@@ -27,17 +29,20 @@ function fixture() {
   let pendingDelivery = false;
   let local = true;
   let promptID = original;
+
   let synthetic:
     | {
         readonly id: string;
         readonly text: string;
-        readonly metadata: { readonly [key: string]: unknown };
+        readonly metadata: Readonly<Record<string, unknown>>;
       }
     | undefined;
+
   let pendingSynthetic: typeof synthetic;
   const writes: Record<string, unknown>[] = [];
   const submitted = Promise.withResolvers<void>();
   const finished = Promise.withResolvers<void>();
+
   const messages = () => [
     ...(idle
       ? [
@@ -78,27 +83,34 @@ function fixture() {
       text: "Original request",
     },
   ];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const path = new URL(request.url).pathname;
+
       if (path === `/api/session/${sessionID}/form`)
         return Response.json({
           data: form ? [{ id: "frm_1", sessionID }] : [],
         });
+
       if (path.endsWith("/form/frm_1"))
         return Response.json({ data: { state: { status: "pending" } } });
+
       if (path === `/api/session/${sessionID}/permission`)
         return Response.json({
           data: permission ? [{ id: "perm_1", sessionID }] : [],
         });
+
       if (path === `/api/session/${sessionID}/inbox`)
         return Response.json({ data: queued ? [{ id: promptID }] : [] });
+
       if (path === "/api/session/active")
         return Response.json({
           data: idle ? {} : { [sessionID]: { type: "running" } },
         });
+
       if (path === `/api/session/${sessionID}`)
         return Response.json({
           data: {
@@ -108,16 +120,20 @@ function fixture() {
             time: { busy: 1, ...(idle ? { idle: 9 } : {}) },
           },
         });
+
       if (path === `/api/session/${sessionID}/message`)
         return Response.json({ data: messages(), cursor: {} });
+
       if (path.startsWith(`/api/session/${sessionID}/message/`)) {
         const message = messages().find(
           (item) => item.id === path.split("/").at(-1),
         );
+
         return message
           ? Response.json({ data: message })
           : new Response(null, { status: 404 });
       }
+
       if (path === `/api/session/${sessionID}/synthetic`) {
         const body = (await request.json()) as Record<string, unknown>;
         writes.push(body);
@@ -128,6 +144,7 @@ function fixture() {
             metadata: Schema.Record(Schema.String, Schema.Unknown),
           }),
         )(body);
+
         if (!failWrite && !pendingDelivery)
           synthetic = Schema.decodeUnknownSync(
             Schema.Struct({
@@ -136,8 +153,10 @@ function fixture() {
               metadata: Schema.Record(Schema.String, Schema.Unknown),
             }),
           )(body);
+
         if (failWrite || loseReceipt)
           return new Response(null, { status: 500 });
+
         return Response.json({
           data: {
             ...body,
@@ -148,28 +167,37 @@ function fixture() {
           },
         });
       }
+
       if (path === `/api/session/${sessionID}/prompt`) {
         const body = (await request.json()) as { id: string };
         promptID = body.id;
         submitted.resolve();
+
         return Response.json({ data: { id: body.id, sessionID } });
       }
+
       if (path === `/api/experimental/session/${sessionID}/wait`) {
         await finished.promise;
+
         return new Response(null, { status: 204 });
       }
+
       return new Response(null, { status: 404 });
     },
   });
+
   cleanup.push(() => server.stop(true));
+
   const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
     sessionID,
   });
+
   if (config.type !== "opencode") throw new Error("Expected OpenCode");
   const backend = new OpenCodeBackend(config);
+
   const input: SteerInput = {
     sessionID,
     inputID: original,
@@ -185,6 +213,7 @@ function fixture() {
     },
     allowed: () => local,
   };
+
   return {
     backend,
     config,
@@ -204,13 +233,21 @@ function fixture() {
         | "local",
     ) {
       if (value === "idle") idle = true;
+
       if (value === "foreign") foreign = true;
+
       if (value === "queued") queued = true;
+
       if (value === "form") form = true;
+
       if (value === "permission") permission = true;
+
       if (value === "failWrite") failWrite = true;
+
       if (value === "loseReceipt") loseReceipt = true;
+
       if (value === "pendingDelivery") pendingDelivery = true;
+
       if (value === "local") local = false;
     },
     finish() {
@@ -239,11 +276,13 @@ test("OpenCode steers through the supported synthetic API with original-input at
     },
   });
   f.finish();
+
   const transcript = await f.backend.transcript(
     sessionID,
     original,
     AbortSignal.timeout(3000),
   );
+
   expect(transcript.entries).toEqual([
     {
       id: "msg_final",
@@ -298,6 +337,7 @@ test("native inbox acceptance alone does not claim the running turn received a f
 for (const delayed of [false, true])
   test(`real OpenCode synthetic boundary keeps final gateway answer and link on original thread, delayed=${delayed}`, async () => {
     const f = fixture();
+
     if (delayed) f.set("pendingDelivery");
     const config = bot();
     config.backend = f.config;
@@ -306,6 +346,7 @@ for (const delayed of [false, true])
     const store = openStore(":memory:");
     cleanup.push(() => store.close());
     const posts: { thread: string; text: string }[] = [];
+
     // Keep optional maintenance/activity RPCs outside this native input fixture.
     const backend = {
       sessionID,
@@ -316,6 +357,7 @@ for (const delayed of [false, true])
       reconcileSteer: f.backend.reconcileSteer.bind(f.backend),
       close: async () => {},
     };
+
     const gateway = new Gateway(
       config,
       identity,
@@ -328,8 +370,10 @@ for (const delayed of [false, true])
       },
       pino({ enabled: false }),
     );
+
     gateway.accept(event());
     const job = store.ready(gateway.key, Date.now(), 1, true)[0];
+
     if (!job) throw new Error("Missing original job");
     const process = gateway.process(job, AbortSignal.timeout(5000));
     await f.submitted.promise;
@@ -341,9 +385,11 @@ for (const delayed of [false, true])
     await gateway.pollFollowUps(AbortSignal.timeout(3000));
     f.finish();
     await process;
+
     const answers = posts.filter((post) =>
       post.text.includes("Revised scope complete"),
     );
+
     expect(answers).toHaveLength(1);
     expect(answers[0]).toEqual({
       thread: "1.000",

@@ -21,6 +21,7 @@ import {
 import type { CrewMember } from "../team";
 
 type PiConfig = Extract<BackendConfig, { type: "pi-durable" }>;
+
 export interface PiWorkerBackend extends AgentBackend {
   waitForIdle?(sessionID: string, signal: AbortSignal): Promise<void>;
   notify?(
@@ -55,6 +56,7 @@ export interface PiWorkerBackend extends AgentBackend {
     },
   ): Promise<string>;
 }
+
 export type PiWorkerFactory = ((
   config: PiConfig,
   context: BackendContext,
@@ -67,9 +69,11 @@ export type PiWorkerFactory = ((
     signal: AbortSignal,
   ) => Promise<string | undefined>;
 };
+
 const nativeFactory: PiWorkerFactory = Object.assign(
   async (config: PiConfig, context: BackendContext) => {
     const { PiDurableBackend } = await import("../../backends/pi/pi-durable");
+
     return PiDurableBackend.open(config, context);
   },
   {
@@ -80,6 +84,7 @@ const nativeFactory: PiWorkerFactory = Object.assign(
       signal: AbortSignal,
     ) {
       const { PiDurableBackend } = await import("../../backends/pi/pi-durable");
+
       return PiDurableBackend.recover(
         context,
         conversationID,
@@ -89,16 +94,21 @@ const nativeFactory: PiWorkerFactory = Object.assign(
     },
   },
 );
+
 type Execution = {
   taskID: string;
   controller: AbortController;
   done: Promise<void>;
 };
+
 // All location plugins in this process observe the same in-flight execution.
 const executions = new Map<string, Execution>();
 const notifications = new Set<string>();
+
 type Pooled = { backend: Promise<PiWorkerBackend>; owners: Set<PiCrewWorkers> };
+
 const pool = new Map<string, Pooled>();
+
 // A replacement harness waits until the previous one for this database closes.
 const closing = new Map<string, Promise<void>>();
 
@@ -128,6 +138,7 @@ export class PiCrewWorkers {
       callback,
     ) => {
       const timer = setTimeout(callback, 1000);
+
       return () => clearTimeout(timer);
     },
     private readonly binding?: (member: CrewMember) => PiCrewBinding,
@@ -144,40 +155,53 @@ export class PiCrewWorkers {
   ): Promise<PiWorkerBackend> {
     if (this.closed) throw new CrewError("Pi crew runtime is closing.");
     const definition = member.backend;
+
     if (!definition) throw new CrewError("Worker is not a Pi worker.");
     let backend = this.backends.get(member.id);
+
     if (!backend) {
       backend = (async () => {
         const hash = createHash("sha256").update(member.id).digest("hex");
+
         const dataDirectory = join(
           await realpath(resolve(this.stateDirectory)),
           "pi",
           hash,
         );
+
         for (
           let previous = closing.get(dataDirectory);
           previous;
           previous = closing.get(dataDirectory)
         )
           await previous.catch(() => {});
+
         // No await between this check and registering pool ownership.
         if (this.closed) throw new CrewError("Pi crew runtime is closing.");
         const pooled = pool.get(dataDirectory);
+
         if (pooled) {
           pooled.owners.add(this);
           this.leases.add(dataDirectory);
+
           return pooled.backend;
         }
+
         const owners = new Set([this]);
+
         const current = () => {
           const owner = owners.values().next().value;
           const binding = owner?.binding?.(member);
+
           if (!binding) throw new CrewError("Pi crew binding unavailable.");
+
           return binding;
         };
+
         const opening = (async () => {
           await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
           await chmod(dataDirectory, 0o700);
+
           const instructions = this.captainDirectory
             ? await readFile(
                 piDefinitionPath(this.captainDirectory, member),
@@ -199,6 +223,7 @@ export class PiCrewWorkers {
                 );
               })
             : member.instructions;
+
           return this.factory(
             {
               ...definition,
@@ -221,6 +246,7 @@ export class PiCrewWorkers {
                       owns: (id: string) => {
                         const owner = owners.values().next().value;
                         const peer = owner?.state.peer(member.id);
+
                         return (
                           !!peer &&
                           owner?.state.piPeer(peer.sessionID)
@@ -247,6 +273,7 @@ export class PiCrewWorkers {
             },
           );
         })();
+
         pool.set(dataDirectory, { backend: opening, owners });
         this.leases.add(dataDirectory);
         // A failed open is not cached; the next caller opens again.
@@ -254,6 +281,7 @@ export class PiCrewWorkers {
           if (pool.get(dataDirectory)?.backend === opening)
             pool.delete(dataDirectory);
         });
+
         return opening;
       })();
       const opened = backend;
@@ -263,6 +291,7 @@ export class PiCrewWorkers {
       });
       this.backends.set(member.id, backend);
     }
+
     return backend;
   }
 
@@ -274,23 +303,28 @@ export class PiCrewWorkers {
   ) {
     signal.throwIfAborted();
     const saved = this.state.piPeer(peer.sessionID);
+
     if (saved?.conversationID) return;
+
     if (saved || peer.status === "ready")
       throw new CrewError(
         "Pi conversation creation is unconfirmed. Inspect private Pi state; automatic recreation is disabled.",
       );
     const backend = await this.backend(member, directory);
     signal.throwIfAborted();
+
     if (!this.state.reservePiPeer(peer.sessionID))
       throw new CrewError(
         "Pi conversation creation is already reserved; retry ensure to inspect it.",
       );
+
     try {
       const conversationID = await backend.createSession({
         key: peer.sessionID,
         title: member.name ?? member.id,
         signal,
       });
+
       this.state.readyPiPeer(peer.sessionID, conversationID);
     } catch {
       throw new CrewError(
@@ -306,6 +340,7 @@ export class PiCrewWorkers {
     ) {
       this.state.uncertain(task.id);
     }
+
     return this.state.task(task.id) ?? task;
   }
 
@@ -317,12 +352,15 @@ export class PiCrewWorkers {
     signal: AbortSignal,
   ): Promise<CrewTask> {
     if (this.closed) return task;
+
     const recovery = this.recoverReceipt(
       task,
       member,
       AbortSignal.any([signal, this.recoveryController.signal]),
     );
+
     this.recoveries.add(recovery);
+
     try {
       return await recovery;
     } finally {
@@ -337,6 +375,7 @@ export class PiCrewWorkers {
   ): Promise<CrewTask> {
     signal.throwIfAborted();
     const current = this.state.task(task.id) ?? task;
+
     if (
       this.closed ||
       current.crewID !== member.id ||
@@ -347,31 +386,39 @@ export class PiCrewWorkers {
       return current;
     const expected = this.reconcile(current);
     const conversationID = this.state.piTaskConversation(expected.id);
+
     if (!conversationID || !this.factory.recover) return expected;
+
     try {
       const hash = createHash("sha256").update(member.id).digest("hex");
+
       const dataDirectory = join(
         await realpath(resolve(this.stateDirectory)),
         "pi",
         hash,
       );
+
       signal.throwIfAborted();
+
       const answer = await this.factory.recover(
         { dataDirectory },
         conversationID,
         expected.inputID,
         signal,
       );
+
       signal.throwIfAborted();
+
       if (answer !== undefined)
         return this.state.recoverResult(
           expected,
-          answer.trim().slice(0, 64000) ||
+          answer.trim().slice(0, 64_000) ||
             "Worker finished without a text result.",
         );
     } catch {
       // Missing/unreadable native receipts remain unresolved, not failed or done.
     }
+
     return this.closed ? expected : (this.state.task(task.id) ?? expected);
   }
 
@@ -384,13 +431,16 @@ export class PiCrewWorkers {
     if (executions.has(this.key(peer)) || notifications.has(this.key(peer)))
       return false;
     const conversationID = this.state.piPeer(peer.sessionID)?.conversationID;
+
     if (!conversationID) return false;
+
     try {
       const backend = await this.backend(member, directory);
       await backend.waitForIdle?.(
         conversationID,
         AbortSignal.any([signal, AbortSignal.timeout(100)]),
       );
+
       return (
         !executions.has(this.key(peer)) && !notifications.has(this.key(peer))
       );
@@ -409,12 +459,16 @@ export class PiCrewWorkers {
     signal: AbortSignal,
   ): Promise<string> {
     const conversationID = this.state.piPeer(peer.sessionID)?.conversationID;
+
     if (!conversationID) return "unavailable";
     const backend = await this.backend(member, directory);
+
     if (!backend.notify) return "unsupported";
     notifications.add(this.key(peer));
+
     try {
       await backend.notify(conversationID, id, text, delivery, signal);
+
       return "accepted";
     } catch {
       return "uncertain";
@@ -443,16 +497,20 @@ export class PiCrewWorkers {
       callerSignal,
       this.recoveryController.signal,
     ]);
+
     const operation = (async () => {
       signal.throwIfAborted();
+
       if (this.closed || !member.backend)
         throw new CrewError("Pi history unavailable or cancelled.");
       const hash = createHash("sha256").update(member.id).digest("hex");
+
       const dataDirectory = join(
         await realpath(resolve(this.stateDirectory)),
         "pi",
         hash,
       );
+
       for (
         let previous = closing.get(dataDirectory);
         previous;
@@ -460,28 +518,37 @@ export class PiCrewWorkers {
       )
         await previous.catch(() => {});
       signal.throwIfAborted();
+
       if (this.closed)
         throw new CrewError("Pi history unavailable or cancelled.");
       const pooled = pool.get(dataDirectory);
+
       if (pooled) {
         pooled.owners.add(this);
         this.leases.add(dataDirectory);
         const backend = await pooled.backend;
         signal.throwIfAborted();
+
         if (!backend.history)
           throw new CrewError("Pi history unavailable or cancelled.");
+
         return read(backend.history, signal);
       }
+
       const { readPiHistory } = await import("../../backends/pi/pi-history");
       signal.throwIfAborted();
+
       return readPiHistory(dataDirectory, signal, (history) =>
         read(history, signal),
       );
     })();
+
     this.historyReads.add(operation);
+
     try {
       const result = await operation;
       signal.throwIfAborted();
+
       return result;
     } catch {
       throw new CrewError("Pi history unavailable or cancelled.");
@@ -510,13 +577,16 @@ export class PiCrewWorkers {
     )
       throw new CrewError("Pi worker is busy or closing.");
     const conversationID = this.state.piPeer(peer.sessionID)?.conversationID;
+
     if (!conversationID)
       throw new CrewError("Pi worker has no confirmed conversation.");
+
     const execution: Execution = {
       taskID: task.id,
       controller: new AbortController(),
       done: Promise.resolve(),
     };
+
     executions.set(this.key(peer), execution);
     this.owned.add(execution);
     this.state.running(task.id);
@@ -525,19 +595,23 @@ export class PiCrewWorkers {
         execution.controller.signal,
         AbortSignal.timeout(300_000),
       ]);
+
       let pendingProgress: string | undefined;
       let cancelProgress: (() => void) | undefined;
       let observing = true;
+
       const flushProgress = () => {
         if (pendingProgress === undefined) return;
+
         try {
           this.state.activity.progress(task.id, pendingProgress);
           pendingProgress = undefined;
         } catch {
           // Status is best effort. Never fail execution or expose raw SQLite
-          // errors; the next active timer may retry the bounded latest snapshot.
+          // Errors; the next active timer may retry the bounded latest snapshot.
         }
       };
+
       const stopProgress = () => {
         observing = false;
         cancelProgress?.();
@@ -546,9 +620,11 @@ export class PiCrewWorkers {
         flushProgress();
         pendingProgress = undefined;
       };
+
       const scheduleProgress = () => {
         cancelProgress = this.scheduleProgress(() => {
           cancelProgress = undefined;
+
           if (
             !observing ||
             signal.aborted ||
@@ -560,23 +636,30 @@ export class PiCrewWorkers {
           scheduleProgress();
         });
       };
+
       const onText: TextSink = (text) => {
         if (!observing || signal.aborted || this.closed) return;
         // Bound and redact before buffering, not just at the SQLite boundary.
-        pendingProgress = redactCredentials(text, 64000).slice(-400);
+        pendingProgress = redactCredentials(text, 64_000).slice(-400);
+
         if (cancelProgress) return;
         flushProgress();
         scheduleProgress();
       };
+
       signal.addEventListener("abort", stopProgress, { once: true });
+
       try {
         const backend = await this.backend(member, directory);
         signal.throwIfAborted();
         const isReport = this.state.reporting.isReport(task.id);
+
         if (isReport && !backend.promptReport)
           throw new CrewError("Pi backend cannot enforce read-only reporting.");
+
         if (!isReport)
           this.state.savePiTaskConversation(task.id, conversationID);
+
         const answer =
           isReport && backend.promptReport
             ? await backend.promptReport(conversationID, text, signal, onText, {
@@ -592,12 +675,13 @@ export class PiCrewWorkers {
                 "final",
                 task.inputID,
               );
+
         signal.throwIfAborted();
         stopProgress();
         this.state.complete(
           task.id,
           peer.sessionID,
-          answer.trim().slice(0, 64000) ||
+          answer.trim().slice(0, 64_000) ||
             "Worker finished without a text result.",
         );
       } catch {
@@ -616,6 +700,7 @@ export class PiCrewWorkers {
 
   async interrupt(peer: Peer) {
     const execution = executions.get(this.key(peer));
+
     if (execution) {
       execution.controller.abort();
       await execution.done;
@@ -626,24 +711,29 @@ export class PiCrewWorkers {
     this.closed = true;
     this.recoveryController.abort();
     const running = [...this.owned];
+
     for (const execution of running) execution.controller.abort();
     // Readers own native handles through their complete cleanup, even when an
-    // opener ignores cancellation. Crew state may close only after this drain.
+    // Opener ignores cancellation. Crew state may close only after this drain.
     await Promise.allSettled([...this.recoveries, ...this.historyReads]);
     await Promise.all(running.map(({ done }) => done));
     await Promise.allSettled(
       [...this.leases].map(async (key) => {
         const entry = pool.get(key);
+
         if (!entry) return;
         entry.owners.delete(this);
+
         // Other plugin instances still own this harness.
         if (entry.owners.size) return;
         pool.delete(key);
+
         const closed = (async () => {
           await (await entry.backend).close();
         })().finally(() => {
           if (closing.get(key) === closed) closing.delete(key);
         });
+
         closing.set(key, closed);
         await closed;
       }),

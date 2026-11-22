@@ -10,10 +10,13 @@ import {
 import { type TarEntry, tarball } from "./tar";
 
 const root = "stargate-v1.0.0";
+
 const check = (entries: TarEntry[], withRoot = root) =>
   validateArchive(readArchive(tarball(entries)), withRoot);
+
 const loose = (entries: TarEntry[]) =>
   validateArchive(readArchive(tarball(entries)));
+
 const base: TarEntry[] = [
   { path: `${root}/`, type: "5" },
   { path: `${root}/src/`, type: "5" },
@@ -31,6 +34,7 @@ describe("release archive validation", () => {
         pax: { path: `${root}/${"long-name-".repeat(15)}.ts` },
       },
     ]);
+
     expect(entries.map((entry) => entry.type)).toEqual([
       "directory",
       "directory",
@@ -113,8 +117,9 @@ describe("release archive validation", () => {
     expect(
       check([{ ...base[0], global: comment } as TarEntry, ...base.slice(1)]),
     ).toHaveLength(3);
+
     for (const global of [
-      // tar applies a global linkpath/path to every later entry.
+      // Tar applies a global linkpath/path to every later entry.
       { linkpath: "/tmp/opencode/outside" },
       { path: "../escape" },
       { comment: "not a commit" },
@@ -193,6 +198,7 @@ describe("release archive validation", () => {
 });
 
 const extracted = await mkdtemp(join(tmpdir(), "stargate-extract-"));
+
 afterAll(() => rm(extracted, { recursive: true, force: true }));
 
 describe("post-extraction check", () => {
@@ -202,11 +208,13 @@ describe("post-extraction check", () => {
       { path: `${root}/entry`, type: "2", link: "src/main.ts" },
     ]),
   );
+
   const tree = async (name: string) => {
     const dir = join(extracted, name);
     await mkdir(join(dir, root, "src"), { recursive: true });
     await writeFile(join(dir, root, "src", "main.ts"), "export {};\n");
     await symlink("src/main.ts", join(dir, root, "entry"));
+
     return dir;
   };
 
@@ -238,7 +246,7 @@ describe("post-extraction check", () => {
 
   test("rejects a chain of links that resolves outside the root", async () => {
     // Each link looks contained on its own: back -> .. is the root, and
-    // escape -> deep/back/../../outside normalises to root/outside.
+    // Escape -> deep/back/../../outside normalises to root/outside.
     const chain = readArchive(
       tarball([
         { path: `${root}/`, type: "5" },
@@ -247,6 +255,7 @@ describe("post-extraction check", () => {
         { path: `${root}/escape`, type: "2", link: "deep/back/../../outside" },
       ]),
     );
+
     expect(validateArchive(chain, root)).toHaveLength(4);
     const dir = join(extracted, "chain");
     await mkdir(join(dir, root, "deep"), { recursive: true });
@@ -266,6 +275,7 @@ describe("post-extraction check", () => {
         { path: `${root}/missing`, type: "2", link: "nowhere" },
       ]),
     );
+
     const dir = join(extracted, "dangling");
     await mkdir(join(dir, root), { recursive: true });
     await symlink("nowhere", join(dir, root, "missing"));

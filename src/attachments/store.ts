@@ -26,6 +26,7 @@ export class AttachmentRecords {
         "SELECT input_files FROM jobs WHERE id=?",
       )
       .get(id);
+
     return row?.input_files
       ? // Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
         Schema.decodeUnknownSync(
@@ -47,6 +48,7 @@ export class AttachmentRecords {
         "SELECT output_files FROM jobs WHERE id=?",
       )
       .get(id);
+
     return row?.output_files
       ? (JSON.parse(row.output_files) as AttachmentDelivery[])
       : [];

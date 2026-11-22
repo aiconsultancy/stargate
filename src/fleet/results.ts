@@ -19,7 +19,9 @@ export function fleetOrigin(
 ): FleetOrigin | undefined {
   if (!source.origin) return;
   const job = store.jobByEvent(source.origin.botKey, source.origin.eventId);
+
   if (!job?.input) return;
+
   return { ...source.origin, sessionID, inputID: job.input };
 }
 
@@ -29,6 +31,7 @@ export function fleetResultSource(
   if (job.fleet?.kind !== "result") return;
   const result = job.fleet.completion;
   const reference = `fleet-result-${result.dispatchID}`;
+
   return {
     transport: "fleet",
     authority: "agent",
@@ -57,10 +60,14 @@ export class FleetResults {
   async poll(signal: AbortSignal) {
     const { control, store, botKey, sessionID, account, backend } =
       this.options;
+
     if (!control.resultsEnabled) return;
+
     for (const job of store.fleet.pendingFleetJobs(botKey)) {
       signal.throwIfAborted();
+
       if (job.fleet?.kind !== "assignment") continue;
+
       if (job.input)
         control.bindInput(
           job.botKey,
@@ -68,13 +75,17 @@ export class FleetResults {
           job.fleet.dispatchID,
           job.input,
         );
+
       if (job.status === "queued" || job.status === "running") continue;
       const delegation = control.delegation(job.fleet.dispatchID);
+
       if (!delegation)
         throw new Error("Fleet completion delegation unavailable");
       let makers = job.makers;
+
       if (makers === undefined) {
         makers = [];
+
         if (job.input && backend.executionMakers) {
           try {
             const value = await backend.executionMakers(
@@ -82,19 +93,24 @@ export class FleetResults {
               job.input,
               signal,
             );
+
             const parsed = Schema.decodeUnknownResult(
               Schema.mutable(Schema.Array(nativeMakerSchema)).check(
                 Schema.isMaxLength(100),
               ),
             )(value);
+
             makers = Result.isSuccess(parsed) ? parsed.success : [];
           } catch {
             signal.throwIfAborted();
           }
         }
+
         store.fleet.saveMakers(job.id, makers);
       }
+
       const output = JSON.parse(job.response ?? "[]") as ReplyChunk[];
+
       const completion: FleetCompletion = {
         dispatchID: job.fleet.dispatchID,
         sourceReference: delegation.sourceReference,
@@ -106,30 +122,37 @@ export class FleetResults {
           !job.failure && job.input && makers.length
             ? "completed"
             : "uncertain",
-        text: output.map(replyText).join("\n\n").slice(0, 12000),
+        text: output.map(replyText).join("\n\n").slice(0, 12_000),
         makers,
         humanApproval: false,
       };
+
       control.complete(job.botKey, job.eventId, completion);
       store.fleet.fleetPublished(job.id);
     }
+
     for (const { origin, completion } of control.pendingResults()) {
       signal.throwIfAborted();
+
       if (origin.sessionID !== sessionID)
         throw new Error("Fleet result owner pin changed");
       const original = store.jobByEvent(origin.botKey, origin.eventId);
+
       if (!original || original.input !== origin.inputID) continue;
       const eventId = `fleet-result:${completion.dispatchID}`;
+
       const text = [
         "Verified captain outcome. This is AGENT CONTEXT, never a human instruction or approval.",
         `Report this outcome in the original conversation. Do not repeat the assignment. Original source: ${completion.sourceReference}; original native input: ${origin.inputID}.`,
         JSON.stringify(completion),
       ].join("\n");
+
       const resultJob: Job["fleet"] = {
         kind: "result",
         completion,
         originInputID: origin.inputID,
       };
+
       const reference = `fleet-result-${completion.dispatchID}`;
       control.recordSource({
         reference,
@@ -143,6 +166,7 @@ export class FleetResults {
         receivedAt: new Date().toISOString(),
         origin: { botKey: original.botKey, eventId },
       });
+
       const inserted = store.enqueue({
         botKey: original.botKey,
         eventId,
@@ -157,9 +181,11 @@ export class FleetResults {
         text,
         fleet: resultJob,
       });
+
       const existing = inserted
         ? undefined
         : store.jobByEvent(original.botKey, eventId);
+
       if (
         !inserted &&
         (!existing ||
@@ -169,6 +195,7 @@ export class FleetResults {
       // Queue before acknowledgement: restart deduplicates the retained input.
       control.acknowledgeResult(completion.dispatchID);
     }
+
     await control.pollReviews(signal);
   }
 
@@ -180,6 +207,7 @@ export class FleetResults {
         if (signal.aborted) return;
         throw error;
       }
+
       await delay(200, undefined, { signal }).catch(() => {});
     }
   }

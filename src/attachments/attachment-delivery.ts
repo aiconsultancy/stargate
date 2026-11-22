@@ -73,6 +73,7 @@ function links(
 ): LinkTransport | undefined {
   if (!transport?.upload || !transport.link) return;
   const { upload, link } = transport;
+
   return {
     upload: upload.bind(transport),
     link: link.bind(transport),
@@ -92,6 +93,7 @@ function uploads(
   )
     return;
   const { reserveUpload, putUpload, completeUpload, sharedIn } = transport;
+
   return {
     reserveUpload: reserveUpload.bind(transport),
     putUpload: putUpload.bind(transport),
@@ -113,6 +115,7 @@ export function agentFilesLocal(backend: BackendConfig) {
 /** Only scratch descendants may bypass hidden ancestor segments. */
 function scratchRoot(path: string) {
   const root = opencodeScratchDirectory();
+
   return path.startsWith(`${root}/`) ? root : undefined;
 }
 
@@ -151,10 +154,12 @@ export async function deliverAttachments(
   shutdown: AbortSignal,
 ) {
   const files = context.store.attachments(job.id);
+
   if (!files.length) return;
   const save = () => context.store.saveAttachments(job.id, files);
   const linked = links(context.transport);
   const transport = linked ? undefined : uploads(context.transport);
+
   if (
     !context.local ||
     files.length > maxAttachments ||
@@ -165,6 +170,7 @@ export async function deliverAttachments(
   } else {
     for (const file of files) {
       if (file.phase || file.prepared) continue;
+
       try {
         file.prepared = await inspectAttachment(
           file,
@@ -174,8 +180,10 @@ export async function deliverAttachments(
       } catch {
         file.phase = "unavailable";
       }
+
       save();
     }
+
     if (
       files.reduce((sum, file) => sum + (file.prepared?.size ?? 0), 0) >
       maxAttachmentTotalBytes
@@ -185,15 +193,20 @@ export async function deliverAttachments(
       save();
     }
   }
+
   for (const file of files) {
     shutdown.throwIfAborted();
+
     if (!context.allowed())
       throw new Error("Attachment delivery access denied");
+
     if (file.phase === "shared") continue;
+
     if (file.phase === "completing" && linked?.publishOnce) {
       file.phase = "unavailable";
       save();
     }
+
     if (file.prepared && !file.title) {
       file.title =
         [...(file.caption || file.prepared.name)]
@@ -212,7 +225,9 @@ export async function deliverAttachments(
           .trim() || file.prepared.name;
       save();
     }
+
     const signal = AbortSignal.any([shutdown, AbortSignal.timeout(30_000)]);
+
     if (file.phase === "completing" && file.fileID && transport) {
       if (
         await transport.sharedIn(file.fileID, job.channel, job.thread, signal)
@@ -221,15 +236,18 @@ export async function deliverAttachments(
         save();
         continue;
       }
+
       // Completion is one-shot. Absence of a share is not proof it never ran.
       file.phase = "unavailable";
       save();
     }
+
     if (file.phase === "uploading" && !file.fileID) {
       // The last upload attempt had no certain outcome: never repeat it.
       file.phase = "unavailable";
       save();
     }
+
     if (
       file.phase === "unavailable" ||
       !file.prepared ||
@@ -238,6 +256,7 @@ export async function deliverAttachments(
       if (!file.noticeSent) {
         if (!context.allowed())
           throw new Error("Attachment delivery access denied");
+
         if (!files.some((item) => item.noticeSent))
           await context.notify(
             "An attachment is unavailable or its upload is unconfirmed. The agent work was not rerun.",
@@ -245,12 +264,15 @@ export async function deliverAttachments(
         file.noticeSent = true;
         save();
       }
+
       continue;
     }
+
     if (linked) {
       // Record the hosted URL first: a retry posts it, never re-uploads.
       if (!file.fileID) {
         let content: Attachment;
+
         try {
           content = await readPreparedAttachment(
             file.prepared,
@@ -262,8 +284,10 @@ export async function deliverAttachments(
           save();
           throw new Error("Published attachment changed or became unavailable");
         }
+
         file.phase = "uploading";
         save();
+
         try {
           file.fileID = await linked.upload(content, signal);
         } catch (error) {
@@ -271,17 +295,22 @@ export async function deliverAttachments(
             delete file.phase;
             save();
           }
+
           throw error;
         }
+
         file.phase = "uploaded";
         save();
       }
+
       if (!context.allowed())
         throw new Error("Attachment delivery access denied");
+
       if (linked.publishOnce) {
         file.phase = "completing";
         save();
       }
+
       await linked.link(
         job.channel,
         job.thread,
@@ -294,9 +323,12 @@ export async function deliverAttachments(
       save();
       continue;
     }
+
     if (!transport) continue;
+
     if (file.phase !== "uploaded") {
       let content: Attachment;
+
       try {
         content = await readPreparedAttachment(
           file.prepared,
@@ -308,12 +340,14 @@ export async function deliverAttachments(
         save();
         throw new Error("Published attachment changed or became unavailable");
       }
+
       // A retry may abandon an unshared reservation, never complete both IDs.
       const reserved = await transport.reserveUpload(
         content.name,
         content.data.byteLength,
         signal,
       );
+
       file.fileID = reserved.fileID;
       file.phase = "reserved";
       save();
@@ -321,7 +355,9 @@ export async function deliverAttachments(
       file.phase = "uploaded";
       save();
     }
+
     if (!file.fileID) throw new Error("Attachment upload identity missing");
+
     if (!context.allowed())
       throw new Error("Attachment delivery access denied");
     file.phase = "completing";

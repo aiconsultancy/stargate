@@ -16,6 +16,7 @@ import { bot, identity } from "./fixtures";
 
 const signal = new AbortController().signal;
 const closers: (() => void)[] = [];
+
 afterEach(() => {
   for (const close of closers.splice(0)) close();
 });
@@ -43,21 +44,27 @@ function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
   const calls = { roots: 0, describe: 0, entries: [] as string[] };
   let crewRoots: HistorySession[] | Error = [];
   const leaked: HistorySession[] = [];
+
   let crewStatus: CrewStatus = {
     total: 2,
     truncated: false,
     members: [member("chief", true), member("twiki", false)],
   };
+
   const history: SessionHistory = {
     async roots() {
       calls.roots++;
+
       if (crewRoots instanceof Error) throw crewRoots;
+
       return crewRoots;
     },
     async describe(ids) {
       calls.describe++;
+
       return ids.flatMap((id) => {
         const found = known.get(id);
+
         return found ? [found] : [];
       });
     },
@@ -70,9 +77,11 @@ function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
     },
     async entries({ sessionID }) {
       calls.entries.push(sessionID);
+
       return { entries: [] };
     },
   };
+
   const backend: AgentBackend = {
     sessionID: options.pinned,
     history,
@@ -91,8 +100,10 @@ function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
           },
         }),
   };
+
   let clock = 1_000_000;
   const ship: DashboardShip = { bot: config, identity, key, backend };
+
   const map = (thread: string, sessionID: string, owner = key) => {
     const conversation = conversationKey(owner, "C123", thread);
     store.enqueue({
@@ -106,6 +117,7 @@ function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
     });
     store.saveSession(conversation, sessionID);
   };
+
   return {
     store,
     cronStore,
@@ -143,6 +155,7 @@ function member(id: string, busy: boolean) {
     updatedAt: null,
     finishedAt: null,
   };
+
   return {
     id,
     name: id,
@@ -167,13 +180,16 @@ describe("dashboard source", () => {
       const finish = Promise.withResolvers<CrewStatus>();
       ship.backend.crewStatus = async (_input, reading) => {
         started.resolve(reading);
+
         return finish.promise;
       };
+
       const aliasStatus = mock(async () => ({
         members: [],
         total: 0,
         truncated: false,
       }));
+
       const alias = {
         ...ship,
         bot: { ...ship.bot, id: "unused" },
@@ -185,12 +201,14 @@ describe("dashboard source", () => {
         },
         backend: { ...ship.backend, crewStatus: aliasStatus },
       } satisfies DashboardShip;
+
       const ships = [ship, alias];
       const source = dashboardSource(ships, store, cronStore);
       const read = source.fleetWithCrew(signal, new Set([ship.bot.id]));
       const reading = await started.promise;
       ships.pop();
       source.retireFleetBackend(alias.backend);
+
       if (healthy)
         finish.resolve({
           members: [member("pilot", false)],
@@ -201,6 +219,7 @@ describe("dashboard source", () => {
       const [result] = (await read).ships;
       expect(reading.aborted).toBe(false);
       expect(aliasStatus).not.toHaveBeenCalled();
+
       if (healthy) expect(result?.summary.crew?.total).toBe(1);
       else expect(result?.error).toBe("Crew status unavailable.");
     },
@@ -208,9 +227,11 @@ describe("dashboard source", () => {
 
   test("truncated crew summaries use exact aggregates or explicitly report a partial busy count", async () => {
     const f = fixture();
+
     const members = Array.from({ length: 20 }, (_, index) =>
       member(`worker${index}`, false),
     );
+
     f.setCrewStatus({ total: 36, truncated: true, members, busy: 1 });
     expect((await f.source.fleet(signal)).ships[0]?.crew).toEqual({
       total: 36,
@@ -306,6 +327,7 @@ describe("dashboard source", () => {
       "ses_other_child",
       session("ses_other_child", { parentID: "ses_other_bot" }),
     );
+
     const read = (sessionID: string) =>
       f.source.entries(
         "helper",
@@ -321,6 +343,7 @@ describe("dashboard source", () => {
       "ses_grand",
     ])
       expect(await read(id)).toEqual({ entries: [] });
+
     for (const id of [
       "ses_foreign",
       "ses_foreign_child",
@@ -377,6 +400,7 @@ describe("dashboard source", () => {
   test("a parent chain beyond the depth limit or with a cycle is refused", async () => {
     const f = fixture({ pinned: "ses_captain" });
     let parent = "ses_captain";
+
     for (let depth = 1; depth <= 9; depth++) {
       f.known.set(
         `ses_d${depth}`,
@@ -384,14 +408,17 @@ describe("dashboard source", () => {
       );
       parent = `ses_d${depth}`;
     }
+
     f.known.set("ses_a", session("ses_a", { parentID: "ses_b" }));
     f.known.set("ses_b", session("ses_b", { parentID: "ses_a" }));
+
     const read = (sessionID: string) =>
       f.source.entries(
         "helper",
         { sessionID, limit: 30, order: "desc", detail: "summary" },
         signal,
       );
+
     expect(await read("ses_d7")).toEqual({ entries: [] });
     expect(await read("ses_d9")).toBeUndefined();
     expect(await read("ses_a")).toBeUndefined();
@@ -399,12 +426,14 @@ describe("dashboard source", () => {
 
   test("unreadable crew roots deny crew sessions and are not cached", async () => {
     const f = fixture({ pinned: "ses_captain" });
+
     const read = () =>
       f.source.entries(
         "helper",
         { sessionID: "ses_chief", limit: 30, order: "desc", detail: "summary" },
         signal,
       );
+
     f.setCrewRoots(new Error("private RPC detail"));
     expect(await read()).toBeUndefined();
     const ship = await f.source.ship("helper", signal);
@@ -424,10 +453,12 @@ describe("dashboard source", () => {
   test("older conversation roots are bounded and flagged", async () => {
     const f = fixture({ pinned: "ses_captain" });
     f.known.set("ses_captain", session("ses_captain"));
+
     for (let index = 0; index < 55; index++) {
       f.known.set(`ses_${index}`, session(`ses_${index}`));
       f.map(`${index}.000`, `ses_${index}`);
     }
+
     const ship = await f.source.ship("helper", signal);
     expect(ship?.sessions).toHaveLength(50);
     expect(ship?.sessions[0]?.id).toBe("ses_captain");
@@ -454,6 +485,7 @@ describe("dashboard store accessors", () => {
       now,
     );
     const [run] = cronStore.claimDue("bot", now + 60_000);
+
     if (!run) throw new Error("Expected due run");
     cronStore.finish(run.id, "failed", now + 61_000);
     expect(cronStore.recentRuns("bot")).toEqual([

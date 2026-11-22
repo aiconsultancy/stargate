@@ -14,6 +14,7 @@ import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 const signal = () => new AbortController().signal;
+
 function snapshot(
   revision = 1,
   status: ActivitySnapshot["status"] = "collecting",
@@ -36,6 +37,7 @@ function snapshot(
     truncated: false,
   };
 }
+
 function fixture(
   watch: ActivityWatch,
   settings: CrewActivitySettings = { detail: "summary", reporter: "twiki" },
@@ -45,16 +47,19 @@ function fixture(
   const store = openStore(":memory:");
   let starts = 0;
   let allowed = true;
+
   const views: {
     channel: string;
     thread: string;
     ts?: string;
     view: ActivityView;
   }[] = [];
+
   const written = [
     Promise.withResolvers<void>(),
     Promise.withResolvers<void>(),
   ];
+
   const backend: AgentBackend = {
     async createSession() {
       return "captain";
@@ -65,18 +70,22 @@ function fixture(
     async startActivity(_session, requestID) {
       expect(requestID).toStartWith("slack-job-");
       starts++;
+
       return watch;
     },
     async close() {},
   };
+
   const slack: TransportDelivery = {
     async post() {},
     async activity(channel, thread, view, ts) {
       views.push({ channel, thread, view, ...(ts ? { ts } : {}) });
       written[views.length - 1]?.resolve();
+
       return "report-message";
     },
   };
+
   const gateway = new Gateway(
     config,
     identity,
@@ -85,11 +94,14 @@ function fixture(
     slack,
     pino({ enabled: false }),
   );
+
   gateway.accept(event());
   const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
   if (!job) throw new Error("No fixture job");
   const pending = Promise.withResolvers<void>();
   const waiting = Promise.withResolvers<void>();
+
   const delivery = new ActivityDelivery(
     backend,
     slack,
@@ -101,6 +113,7 @@ function fixture(
       store: store.activityRecords,
       wait: async (_ms, stop) => {
         waiting.resolve();
+
         if (stop.aborted) throw new Error("aborted");
         await Promise.race([
           pending.promise,
@@ -113,6 +126,7 @@ function fixture(
       },
     },
   );
+
   return {
     backend,
     slack,
@@ -150,6 +164,7 @@ test("activity is opt-in and disabled mode starts no capture or inference", asyn
     },
     { detail: "off", reporter: "twiki" },
   );
+
   try {
     expect(
       await f.delivery.start(f.job, "captain", signal(), signal()),
@@ -165,6 +180,7 @@ test("restart and terminal late refresh reuse persisted capture and Slack timest
   let current = snapshot();
   let cancels = 0;
   let finishes = 0;
+
   const watch: ActivityWatch = {
     id: "report-1",
     async read() {
@@ -172,13 +188,16 @@ test("restart and terminal late refresh reuse persisted capture and Slack timest
     },
     async finish() {
       finishes++;
+
       return current;
     },
     async cancel() {
       cancels++;
     },
   };
+
   const f = fixture(watch);
+
   const create = () =>
     new ActivityDelivery(
       f.backend,
@@ -188,6 +207,7 @@ test("restart and terminal late refresh reuse persisted capture and Slack timest
       pino({ enabled: false }),
       { store: f.store.activityRecords },
     );
+
   try {
     await f.delivery.start(f.job, "captain", signal(), signal());
     await f.waiting;
@@ -201,8 +221,10 @@ test("restart and terminal late refresh reuse persisted capture and Slack timest
     f.backend.resumeActivity = (session, capture) => {
       expect(session).toBe("captain");
       expect(capture).toBe("report-1");
+
       return watch;
     };
+
     current = snapshot(2, "complete");
     const resumed = create();
     await resumed.resume(f.job, "captain", signal());
@@ -220,12 +242,15 @@ test("restart and terminal late refresh reuse persisted capture and Slack timest
     };
     const published = Promise.withResolvers<void>();
     const publish = f.slack.activity;
+
     if (!publish) throw new Error("Missing activity writer");
     f.slack.activity = async (...args) => {
       const ts = await publish(...args);
       published.resolve();
+
       return ts;
     };
+
     const late = create();
     await late.resume(f.job, "captain", signal());
     await published.promise;
@@ -250,7 +275,9 @@ test("missing saved capture stops retries without opening a new capture", async 
     },
     async cancel() {},
   };
+
   const f = fixture(watch);
+
   try {
     f.store.activityRecords.saveActivity(f.job.id, {
       capture: "missing",
@@ -258,13 +285,17 @@ test("missing saved capture stops retries without opening a new capture", async 
       done: false,
     });
     const saved = Promise.withResolvers<void>();
+
     const save = f.store.activityRecords.saveActivity.bind(
       f.store.activityRecords,
     );
+
     f.store.activityRecords.saveActivity = (id, progress) => {
       save(id, progress);
+
       if (progress.done) saved.resolve();
     };
+
     f.backend.resumeActivity = () => watch;
     await f.delivery.resume(f.job, "captain", signal());
     await saved.promise;
@@ -279,6 +310,7 @@ test("missing saved capture stops retries without opening a new capture", async 
 
 test("a saved Stop never starts a summary if native cancellation was unconfirmed", async () => {
   let finishes = 0;
+
   const f = fixture({
     id: "report-1",
     async read() {
@@ -290,6 +322,7 @@ test("a saved Stop never starts a summary if native cancellation was unconfirmed
     },
     async cancel() {},
   });
+
   try {
     f.store.activityRecords.saveActivity(f.job.id, {
       capture: "report-1",
@@ -303,6 +336,7 @@ test("a saved Stop never starts a summary if native cancellation was unconfirmed
       },
       async finish() {
         finishes++;
+
         return snapshot(3, "complete");
       },
       async cancel() {},
@@ -326,6 +360,7 @@ test("finish wakes the poll interval and updates the original thread", async () 
   const final = Promise.withResolvers<void>();
   let finished = 0;
   let cancelled = 0;
+
   const f = fixture(
     {
       async read() {
@@ -334,6 +369,7 @@ test("finish wakes the poll interval and updates the original thread", async () 
       async finish() {
         finished++;
         final.resolve();
+
         return {
           ...snapshot(2, "complete"),
           summary: "Chief verified formatting.",
@@ -345,6 +381,7 @@ test("finish wakes the poll interval and updates the original thread", async () 
     },
     { detail: "detailed", reporter: "twiki" },
   );
+
   try {
     const handle = await f.delivery.start(f.job, "captain", signal(), signal());
     first.resolve(snapshot());
@@ -375,18 +412,22 @@ test("finish interrupts an outstanding read and uses a separate finalization sig
   const blocked = Promise.withResolvers<ActivitySnapshot>();
   const final = Promise.withResolvers<void>();
   let reading: AbortSignal | undefined;
+
   const f = fixture({
     async read(stop) {
       reading = stop;
+
       return blocked.promise;
     },
     async finish(stop) {
       expect(stop.aborted).toBe(false);
       final.resolve();
+
       return snapshot(2, "complete");
     },
     async cancel() {},
   });
+
   try {
     const handle = await f.delivery.start(f.job, "captain", signal(), signal());
     handle?.finish();
@@ -401,6 +442,7 @@ test("finish interrupts an outstanding read and uses a separate finalization sig
 
 test("access revocation cancels reporting before another Slack update", async () => {
   const cancelled = Promise.withResolvers<void>();
+
   const f = fixture({
     async read() {
       return snapshot();
@@ -412,6 +454,7 @@ test("access revocation cancels reporting before another Slack update", async ()
       cancelled.resolve();
     },
   });
+
   try {
     await f.delivery.start(f.job, "captain", signal(), signal());
     await f.waiting;
@@ -435,16 +478,19 @@ test("captain answer delivery does not wait for reporting or replay on retry", a
   let posts = 0;
   let cancel = 0;
   const answers: string[] = [];
+
   const backend: AgentBackend = {
     async createSession() {
       return "captain";
     },
     async prompt() {
       turns++;
+
       return "Final answer";
     },
     async startActivity() {
       captures++;
+
       return {
         read: () => blocked.promise,
         finish: () => blocked.promise,
@@ -455,6 +501,7 @@ test("captain answer delivery does not wait for reporting or replay on retry", a
     },
     async close() {},
   };
+
   const gateway = new Gateway(
     config,
     identity,
@@ -471,12 +518,15 @@ test("captain answer delivery does not wait for reporting or replay on retry", a
     },
     pino({ enabled: false }),
   );
+
   try {
     gateway.accept(event());
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!job) throw new Error("No job");
     await gateway.process(job, signal());
     const retry = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!retry) throw new Error("No pending answer delivery");
     await gateway.process(retry, signal());
     expect(answers).toEqual(["Final answer"]);
@@ -495,6 +545,7 @@ test("reporting transport failure cannot turn a successful answer into an error"
   config.crewActivity.detail = "summary";
   const store = openStore(":memory:");
   const answers: string[] = [];
+
   const backend: AgentBackend = {
     async createSession() {
       return "captain";
@@ -507,6 +558,7 @@ test("reporting transport failure cannot turn a successful answer into an error"
     },
     async close() {},
   };
+
   const gateway = new Gateway(
     config,
     identity,
@@ -522,9 +574,11 @@ test("reporting transport failure cannot turn a successful answer into an error"
     },
     pino({ enabled: false }),
   );
+
   try {
     gateway.accept(event());
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!job) throw new Error("No job");
     await gateway.process(job, signal());
     expect(answers).toEqual(["Still answered"]);
@@ -536,9 +590,11 @@ test("reporting transport failure cannot turn a successful answer into an error"
 
 test("empty captures and summary-only status never create an activity box", async () => {
   const read = Promise.withResolvers<void>();
+
   const f = fixture({
     async read() {
       read.resolve();
+
       return { ...snapshot(), entries: [], summary: "Collecting activity" };
     },
     async finish() {
@@ -550,6 +606,7 @@ test("empty captures and summary-only status never create an activity box", asyn
     },
     async cancel() {},
   });
+
   try {
     const handle = await f.delivery.start(f.job, "captain", signal(), signal());
     await read.promise;
@@ -567,6 +624,7 @@ test("empty captures and summary-only status never create an activity box", asyn
 test("explicit Stop cancels capture and terminalizes an existing activity box", async () => {
   const cancelled = Promise.withResolvers<void>();
   const request = new AbortController();
+
   const f = fixture({
     async read() {
       return snapshot();
@@ -578,6 +636,7 @@ test("explicit Stop cancels capture and terminalizes an existing activity box", 
       cancelled.resolve();
     },
   });
+
   try {
     const handle = await f.delivery.start(
       f.job,
@@ -585,6 +644,7 @@ test("explicit Stop cancels capture and terminalizes an existing activity box", 
       request.signal,
       signal(),
     );
+
     await f.waiting;
     expect(f.views[0]?.view.status).toBe("collecting");
     handle?.cancel();
@@ -601,9 +661,11 @@ test("explicit Stop cancels capture and terminalizes an existing activity box", 
 
 test("a report read failure terminalizes the visible activity box", async () => {
   let reads = 0;
+
   const f = fixture({
     async read() {
       if (reads++) throw new Error("PRIVATE transport error");
+
       return snapshot();
     },
     async finish() {
@@ -611,6 +673,7 @@ test("a report read failure terminalizes the visible activity box", async () => 
     },
     async cancel() {},
   });
+
   try {
     await f.delivery.start(f.job, "captain", signal(), signal());
     await f.waiting;
@@ -629,6 +692,7 @@ test("a report read failure terminalizes the visible activity box", async () => 
 test("finalization grace bounds a stuck report and marks the existing box unavailable", async () => {
   const blocked = Promise.withResolvers<ActivitySnapshot>();
   let cancelled = 0;
+
   const f = fixture(
     {
       async read() {
@@ -644,6 +708,7 @@ test("finalization grace bounds a stuck report and marks the existing box unavai
     { detail: "summary", reporter: "twiki" },
     { finalizeTimeoutMs: 10 },
   );
+
   try {
     const handle = await f.delivery.start(f.job, "captain", signal(), signal());
     await f.waiting;
@@ -662,20 +727,25 @@ test("finalization grace bounds a stuck report and marks the existing box unavai
 for (const outcome of ["complete", "failure"] as const) {
   test(`retained activity handle cannot restart timers after ${outcome}`, async () => {
     const calls: string[] = [];
+
     const f = fixture({
       async read() {
         calls.push("read");
+
         if (outcome === "failure") throw new Error("Read failed");
+
         return snapshot(2, "complete");
       },
       async finish() {
         calls.push("finish");
+
         return snapshot(2, "complete");
       },
       async cancel() {
         calls.push("cancel");
       },
     });
+
     try {
       const handle = await f.delivery.start(
         f.job,
@@ -683,19 +753,23 @@ for (const outcome of ["complete", "failure"] as const) {
         signal(),
         signal(),
       );
+
       expect(handle).toBeDefined();
       // Drain terminal/failure cleanup before exercising the retained handle.
       await f.delivery.close();
       const before = [...calls];
+
       const unexpectedTimer = Object.assign(
         () => {
           throw new Error("Settled activity must not create timers");
         },
         { __promisify__: setTimeout.__promisify__ },
       );
+
       const timer = spyOn(globalThis, "setTimeout").mockImplementation(
         unexpectedTimer,
       );
+
       try {
         expect(() => {
           handle?.finish();
@@ -723,21 +797,26 @@ test("retained handle stays inert while failed activity cleanup is still drainin
   let reads = 0;
   let finishes = 0;
   let cancels = 0;
+
   const f = fixture({
     async read(signal) {
       readSignal = signal;
+
       if (!reads++) return snapshot();
+
       return read.promise;
     },
     async finish() {
       finishes++;
       cleaning.resolve();
+
       return release.promise;
     },
     async cancel() {
       cancels++;
     },
   });
+
   try {
     const handle = await f.delivery.start(f.job, "captain", signal(), signal());
     expect(handle).toBeDefined();
@@ -745,15 +824,18 @@ test("retained handle stays inert while failed activity cleanup is still drainin
     f.tick();
     read.reject(new Error("Read failed"));
     await cleaning.promise;
+
     const unexpectedTimer = Object.assign(
       () => {
         throw new Error("Activity cleanup must not create grace timers");
       },
       { __promisify__: setTimeout.__promisify__ },
     );
+
     const timer = spyOn(globalThis, "setTimeout").mockImplementation(
       unexpectedTimer,
     );
+
     try {
       expect(() => {
         handle?.finish();
@@ -768,6 +850,7 @@ test("retained handle stays inert while failed activity cleanup is still drainin
     } finally {
       timer.mockRestore();
     }
+
     release.resolve(snapshot(2, "complete"));
     await f.written[1]?.promise;
     expect(f.views[1]?.view.status).toBe("unavailable");

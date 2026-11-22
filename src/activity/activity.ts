@@ -13,6 +13,7 @@ export const crewActivitySchema = settingsStruct({
     Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
   ),
 });
+
 export type CrewActivitySettings = typeof crewActivitySchema.Type;
 
 export const activityEntrySchema = settingsStruct({
@@ -27,6 +28,7 @@ export const activityEntrySchema = settingsStruct({
   kind: Schema.Literals(["assignment", "update", "message", "result", "note"]),
   text: Schema.String.check(Schema.isMaxCodePoints(1500)),
 });
+
 export const activitySnapshotSchema = settingsStruct({
   id: Schema.String.check(
     Schema.isMinCodePoints(1),
@@ -51,7 +53,9 @@ export const activitySnapshotSchema = settingsStruct({
   ),
   truncated: Schema.Boolean,
 });
+
 export type ActivitySnapshot = typeof activitySnapshotSchema.Type;
+
 export type ActivityView = ActivitySnapshot & {
   detail: "summary" | "detailed";
 };

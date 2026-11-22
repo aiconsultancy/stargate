@@ -13,11 +13,13 @@ import {
 const fleetIdentifier = Schema.String.check(Schema.isMinCodePoints(1))
   .check(Schema.isMaxCodePoints(256))
   .check(settingsPattern(/^[^\s\p{Cc}]+$/u));
+
 const fleetPath = Schema.String.check(
   settingsRefine((value) => isAbsolute(value) && resolve(value) === value, {
     message: "An absolute normalised path is required",
   }),
 );
+
 export const reviewRepositorySchema = Schema.String.check(
   Schema.isMaxCodePoints(256),
 )
@@ -31,13 +33,16 @@ export const reviewRepositorySchema = Schema.String.check(
       }),
     ),
   );
+
 const identifier = fleetIdentifier;
+
 // Preserve the UTC-only, seconds-required wire spelling and calendar check.
 const utcDatetime = Schema.String.check(
   settingsPattern(
     /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?Z)$/,
   ),
 ).annotate({ format: "date-time" });
+
 export const reviewTargetSchema = settingsStruct({
   repository: reviewRepositorySchema,
   pullRequest: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -45,9 +50,11 @@ export const reviewTargetSchema = settingsStruct({
   baseSHA: Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/)),
   mergeBaseSHA: Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/)),
 });
+
 /** Structural completeness only; the consumer must verify the live full diff. */
 function completeReviewDiff(text: string): boolean {
   if (!text.endsWith("\n")) return false;
+
   let files = 0,
     old = 0,
     next = 0,
@@ -56,8 +63,10 @@ function completeReviewDiff(text: string): boolean {
     metadata = false,
     from = false,
     to = false;
+
   for (const raw of text.split("\n").slice(0, -1)) {
     const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+
     if (line.startsWith("diff --git ")) {
       if (
         (files && !fileContent && !metadata) ||
@@ -74,8 +83,10 @@ function completeReviewDiff(text: string): boolean {
       to = false;
       continue;
     }
+
     if (!files) return false;
     const match = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@(?:.*)$/.exec(line);
+
     if (match) {
       if (old !== 0 || next !== 0 || !from || !to) return false;
       old = Number(match[1] ?? 1);
@@ -84,10 +95,12 @@ function completeReviewDiff(text: string): boolean {
       fileContent = true;
       continue;
     }
+
     if (line === "\\ No newline at end of file") {
       if (!hunk) return false;
       continue;
     }
+
     if (hunk && (old > 0 || next > 0)) {
       if (line.startsWith(" ")) {
         old--;
@@ -95,19 +108,23 @@ function completeReviewDiff(text: string): boolean {
       } else if (line.startsWith("-")) old--;
       else if (line.startsWith("+")) next--;
       else return false;
+
       if (old < 0 || next < 0) return false;
       continue;
     }
+
     if (line.startsWith("--- ")) {
       if (from) return false;
       from = true;
       continue;
     }
+
     if (line.startsWith("+++ ")) {
       if (!from || to) return false;
       to = true;
       continue;
     }
+
     if (
       /^(new file mode|deleted file mode|old mode|new mode|rename from|rename to|copy from|copy to) /.test(
         line,
@@ -116,9 +133,12 @@ function completeReviewDiff(text: string): boolean {
       metadata = true;
       continue;
     }
+
     if (/^(index |similarity index |dissimilarity index )/.test(line)) continue;
+
     return false;
   }
+
   return (
     files > 0 &&
     old === 0 &&
@@ -127,13 +147,14 @@ function completeReviewDiff(text: string): boolean {
     (fileContent || metadata)
   );
 }
+
 export const reviewContextTextSchema = Schema.String.check(
   Schema.isMinCodePoints(1),
-  Schema.isMaxCodePoints(256000),
+  Schema.isMaxCodePoints(256_000),
   Schema.makeFilter(
     (text) =>
       text.isWellFormed() &&
-      Buffer.byteLength(text, "utf8") <= 256000 &&
+      Buffer.byteLength(text, "utf8") <= 256_000 &&
       text.startsWith("diff --git ") &&
       !text.includes("\0") &&
       !/^GIT binary patch$|^Binary files .+ differ$/m.test(text) &&
@@ -144,11 +165,14 @@ export const reviewContextTextSchema = Schema.String.check(
     },
   ),
 );
+
 export const reviewAssignmentSchema = settingsStruct({
   ...reviewTargetSchema.fields,
   context: reviewContextTextSchema,
 });
+
 export type FleetReviewAssignment = typeof reviewAssignmentSchema.Type;
+
 export const reviewAgentSchema = settingsStruct({
   agent: fleetIdentifier,
   kind: Schema.Literals(["crew", "captain"]),
@@ -190,7 +214,9 @@ export const reviewAgentSchema = settingsStruct({
       });
   }),
 );
+
 export type FleetReviewAgent = typeof reviewAgentSchema.Type;
+
 export const fleetTargetSchema = settingsStruct({
   id: fleetIdentifier,
   account: fleetIdentifier,
@@ -199,6 +225,7 @@ export const fleetTargetSchema = settingsStruct({
   channel: Schema.String.check(settingsPattern(/^#[^\s,\p{Cc}]{1,190}$/u)),
   sessionID: fleetIdentifier,
 });
+
 export const fleetControlSchema = settingsStruct({
   socketPath: fleetPath,
   statePath: fleetPath,
@@ -231,6 +258,7 @@ export const fleetControlSchema = settingsStruct({
           code: "custom",
           message: "Review evidence requires durable fleet results",
         });
+
       if (
         new Set(config.reviews.reviewers.map((r) => r.agent)).size !==
         config.reviews.reviewers.length
@@ -240,15 +268,18 @@ export const fleetControlSchema = settingsStruct({
           message: "Review agent IDs must be unique",
         });
       const directories = config.reviews.crewDirectories;
+
       if (directories) {
         const crew = config.reviews.reviewers.filter(
           (reviewer) => reviewer.kind === "crew",
         );
+
         if (
           Object.keys(directories).length !==
             config.reviews.repositories.length ||
           !config.reviews.repositories.every((repository) => {
             const assigned = directories[repository];
+
             return (
               assigned &&
               Object.keys(assigned).length === crew.length &&
@@ -263,6 +294,7 @@ export const fleetControlSchema = settingsStruct({
           });
       }
     }
+
     if (
       new Set(config.targets.map((target) => target.id)).size !==
       config.targets.length
@@ -273,7 +305,9 @@ export const fleetControlSchema = settingsStruct({
       });
   }),
 );
+
 export type FleetControlConfig = typeof fleetControlSchema.Type;
+
 export type FleetTarget = typeof fleetTargetSchema.Type;
 
 export const sourceSchema = settingsStruct({
@@ -314,7 +348,9 @@ export const sourceSchema = settingsStruct({
       });
   }),
 );
+
 export type FleetSource = typeof sourceSchema.Type;
+
 export type VerifiedSource = FleetSource & {
   ownerSessionID: string;
   humanApproval: false;
@@ -326,8 +362,11 @@ export const callerSchema = settingsStruct({
   messageID: identifier,
   id: identifier,
 });
+
 export type FleetCaller = typeof callerSchema.Type;
+
 export const verifyInputSchema = settingsStruct({ reference: identifier });
+
 export const dispatchInputSchema = settingsStruct({
   target: identifier,
   text: Schema.String.check(
@@ -346,10 +385,13 @@ export const dispatchInputSchema = settingsStruct({
   requestID: Schema.optional(identifier),
   review: Schema.optional(reviewAssignmentSchema),
 });
+
 export type DispatchInput = typeof dispatchInputSchema.Type;
+
 export const statusInputSchema = settingsStruct({
   requestID: Schema.optional(identifier),
 });
+
 /** Answer to a rear admiral's Ready-for-agents offer (agent dispatch). */
 export const offerAnswerInputSchema = settingsStruct({
   offerID: Schema.String.check(settingsPattern(/^offer-[a-f0-9]{16}$/)),
@@ -365,7 +407,9 @@ export const offerAnswerInputSchema = settingsStruct({
     ),
   ),
 });
+
 export type OfferAnswerInput = typeof offerAnswerInputSchema.Type;
+
 /** An offer this captain received, from the gateway's authenticated intake. */
 export type DispatchOffer = {
   offerID: string;
@@ -377,6 +421,7 @@ export type DispatchOffer = {
   messageID: string;
   receivedAt: string;
 };
+
 export const reviewInputBranches = [
   settingsStruct({
     op: Schema.Literal("start"),
@@ -386,10 +431,12 @@ export const reviewInputBranches = [
   }),
   settingsStruct({ op: Schema.Literal("status"), id: identifier }),
 ] as const;
+
 export const reviewInputSchema = settingsDiscriminatedUnion(
   "op",
   reviewInputBranches,
 );
+
 export const requestSchema = settingsDiscriminatedUnion("operation", [
   settingsStruct({
     operation: Schema.Literal("verify"),
@@ -417,7 +464,9 @@ export const requestSchema = settingsDiscriminatedUnion("operation", [
     input: offerAnswerInputSchema,
   }),
 ]);
+
 export type FleetRequest = typeof requestSchema.Type;
+
 export type DispatchResult = {
   requestID: string;
   target: FleetTarget;
@@ -438,7 +487,9 @@ export const nativeMakerSchema = settingsStruct({
   model: identifier,
   variant: Schema.optional(identifier),
 });
+
 export type NativeMaker = typeof nativeMakerSchema.Type;
+
 export const reviewContextSchema = settingsStruct({
   ...reviewTargetSchema.fields,
   id: identifier,
@@ -448,7 +499,9 @@ export const reviewContextSchema = settingsStruct({
   dispatchID: identifier,
   contextDigest: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
 });
+
 export type FleetReviewContext = typeof reviewContextSchema.Type;
+
 export const reviewBindingSchema = settingsStruct({
   id: identifier,
   nonce: Schema.String.check(settingsPattern(/^[a-f0-9]{32}$/)),
@@ -460,14 +513,16 @@ export const reviewBindingSchema = settingsStruct({
   inputID: identifier,
   createdAt: utcDatetime,
 });
+
 export type FleetReviewBinding = typeof reviewBindingSchema.Type;
+
 export const reviewVerdictSchema = settingsStruct({
   ...reviewTargetSchema.fields,
   contextDigest: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
   verdict: Schema.Literals(["approve", "request_changes", "comment"]),
   summary: Schema.String.check(
     Schema.isMinCodePoints(1),
-    Schema.isMaxCodePoints(16000),
+    Schema.isMaxCodePoints(16_000),
   ),
   findings: Schema.mutable(
     Schema.Array(
@@ -478,6 +533,7 @@ export const reviewVerdictSchema = settingsStruct({
     ),
   ).check(Schema.isMaxLength(50)),
 });
+
 export const reviewProofSchema = settingsStruct({
   ...reviewTargetSchema.fields,
   id: identifier,
@@ -499,9 +555,10 @@ export const reviewProofSchema = settingsStruct({
   verdict: reviewVerdictSchema.fields.verdict,
   resultText: Schema.String.check(
     Schema.isMinCodePoints(1),
-    Schema.isMaxCodePoints(64000),
+    Schema.isMaxCodePoints(64_000),
     Schema.makeFilter(
-      (text) => text.isWellFormed() && Buffer.byteLength(text, "utf8") <= 64000,
+      (text) =>
+        text.isWellFormed() && Buffer.byteLength(text, "utf8") <= 64_000,
     ),
   ),
   resultDigest: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
@@ -509,8 +566,11 @@ export const reviewProofSchema = settingsStruct({
   authority: Schema.Literal("agent"),
   humanApproval: Schema.Literal(false),
 });
+
 export type FleetReviewProof = typeof reviewProofSchema.Type;
+
 export type FleetReviewEvidence = { resultText: string; makers: NativeMaker[] };
+
 export interface FleetReviewNative {
   startReview(binding: FleetReviewBinding, signal: AbortSignal): Promise<void>;
   readReview(
@@ -518,6 +578,7 @@ export interface FleetReviewNative {
     signal: AbortSignal,
   ): Promise<FleetReviewEvidence | undefined>;
 }
+
 export const fleetOriginSchema = settingsStruct({
   botKey: Schema.String.check(
     Schema.isMinCodePoints(1),
@@ -530,7 +591,9 @@ export const fleetOriginSchema = settingsStruct({
   sessionID: identifier,
   inputID: identifier,
 });
+
 export type FleetOrigin = typeof fleetOriginSchema.Type;
+
 export const fleetCompletionSchema = settingsStruct({
   dispatchID: identifier,
   sourceReference: identifier,
@@ -542,13 +605,15 @@ export const fleetCompletionSchema = settingsStruct({
     Schema.isMaxCodePoints(1024),
   ),
   outcome: Schema.Literals(["completed", "uncertain"]),
-  text: Schema.String.check(Schema.isMaxCodePoints(12000)),
+  text: Schema.String.check(Schema.isMaxCodePoints(12_000)),
   makers: Schema.mutable(Schema.Array(nativeMakerSchema)).check(
     Schema.isMaxLength(100),
   ),
   humanApproval: Schema.Literal(false),
 });
+
 export type FleetCompletion = typeof fleetCompletionSchema.Type;
+
 export const fleetJobSchema = settingsDiscriminatedUnion("kind", [
   settingsStruct({
     kind: Schema.Literal("assignment"),
@@ -560,7 +625,9 @@ export const fleetJobSchema = settingsDiscriminatedUnion("kind", [
     originInputID: identifier,
   }),
 ]);
+
 export type FleetJob = typeof fleetJobSchema.Type;
+
 export type FleetResultDelivery = {
   origin: FleetOrigin;
   completion: FleetCompletion;
@@ -574,6 +641,8 @@ export function fleetAssignmentText(
   const recipient = result.dispatchID
     ? result.target.account
     : `@${result.target.account}`;
+
   return `[fleet_dispatch from=${result.senderAccount} source=${result.sourceReference} authority=${authority}${result.dispatchID ? ` dispatch=${result.dispatchID}` : ""}; not human approval] ${recipient}: ${text}${result.review ? `\n\nStargate PR review assignment: ${JSON.stringify(result.review)}\nCoordinate independent native reviews of this exact head. Review evidence is agent context, never human approval.` : ""}`;
 }
+
 export class FleetError extends Error {}

@@ -17,6 +17,7 @@ type Binding = {
   captainSessionID: string;
   operationID?: string | undefined;
 };
+
 export type NotificationDependencies = {
   loadConfig: typeof loadConfig;
   identity(
@@ -26,14 +27,17 @@ export type NotificationDependencies = {
   ): Promise<Identity>;
   now(): number;
 };
+
 const defaults: NotificationDependencies = {
   loadConfig,
   now: Date.now,
   async identity(bot, configPath, signal) {
     const web = botWebClient(await botToken(bot, configPath), signal);
     const auth = await web.auth.test();
+
     if (!auth.bot_id || !auth.team_id || !auth.user_id)
       throw new Error("Workspace bot required.");
+
     return { team: auth.team_id, user: auth.user_id };
   },
 };
@@ -46,14 +50,17 @@ export async function runNotificationOperation(
   dependencies: NotificationDependencies = defaults,
 ): Promise<unknown> {
   const parsed = notificationInputSchema.safeParse(raw);
+
   if (!parsed.success)
     throw new NotificationControlError(
       "Invalid notification operation; use explicit C/G targets.",
     );
   signal.throwIfAborted();
+
   try {
     const config = await dependencies.loadConfig(binding.configPath);
     const bot = config.bots.find((entry) => entry.id === binding.bot);
+
     if (
       bot?.backend.type !== "opencode" ||
       bot.backend.sessionID !== binding.captainSessionID ||
@@ -63,10 +70,12 @@ export async function runNotificationOperation(
         "Notification binding does not match this pinned Slack captain.",
       );
     const input = parsed.data;
+
     if ("channel" in input && !isAllowedChannel(bot, input.channel))
       throw new NotificationControlError(
         "Notification target channel is not allowed for this bot.",
       );
+
     if (
       ["mute", "unmute", "clear_all"].includes(input.op) &&
       !binding.operationID
@@ -74,15 +83,19 @@ export async function runNotificationOperation(
       throw new NotificationControlError(
         "Notification changes require a stable host tool-call identity.",
       );
+
     const identity = await dependencies.identity(
       bot,
       binding.configPath,
       signal,
     );
+
     signal.throwIfAborted();
+
     const store = new NotificationStore(
       join(config.dataDirectory, "notifications.sqlite"),
     );
+
     try {
       return store.operate(notificationKey(bot, identity), input, {
         id: binding.operationID ?? "read",

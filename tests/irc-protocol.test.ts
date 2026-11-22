@@ -14,6 +14,7 @@ test("irc parse: tags, escapes, source, middle and trailing params", () => {
   const message = parseMessage(
     "@time=2026-11-12T10:00:00.000Z;account=jack;msgid=abc;+draft/reply=x\\sy\\:z\\\\;flag :jack!~u@host PRIVMSG #galactica :galactica: hi  there",
   );
+
   expect(message?.command).toBe("PRIVMSG");
   expect(message?.source).toBe("jack!~u@host");
   expect(message?.params).toEqual(["#galactica", "galactica: hi  there"]);
@@ -51,9 +52,11 @@ test("irc format: escapes tags, refuses injected lines and parameters", () => {
     formatMessage("PRIVMSG", ["#c", "y"], { "bad key": "v" }),
   ).toThrow();
   expect(() => formatMessage("bad", [])).toThrow();
+
   const round = parseMessage(
     formatMessage("TAGMSG", ["#c"], { "+draft/react": "👀", label: "x\ny" }),
   );
+
   expect(round?.tags.get("+draft/react")).toBe("👀");
   expect(round?.tags.get("label")).toBe("x\ny");
   expect(tagBytes({})).toBe(0);
@@ -96,6 +99,7 @@ test("irc plain text: markdown becomes readable lines", () => {
       "evil\u0001CTCP\u0003",
     ].join("\n"),
   );
+
   expect(text.split("\n")).toEqual([
     "Status",
     "",
@@ -118,18 +122,22 @@ test("irc lines: byte budget, whitespace breaks, UTF-8 boundaries", () => {
   const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
   const lines = ircLines(words, 50);
   expect(lines.length).toBeGreaterThan(1);
+
   for (const line of lines) {
     expect(utf8Bytes(line)).toBeLessThanOrEqual(50);
     expect(line.startsWith(" ")).toBe(false);
   }
+
   expect(lines.join(" ")).toBe(words);
   // Multi-byte characters are never split, even without spaces.
   const emoji = "🚀".repeat(30);
   const split = ircLines(emoji, 18);
+
   for (const line of split) {
     expect(utf8Bytes(line)).toBeLessThanOrEqual(18);
     expect(line).toBe("🚀".repeat(Array.from(line).length));
   }
+
   expect(split.join("")).toBe(emoji);
   const mixed = `${"é".repeat(20)}x`;
   expect(ircLines(mixed, 17).join("")).toBe(mixed);

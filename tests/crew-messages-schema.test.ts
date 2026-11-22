@@ -40,10 +40,11 @@ test("mail and DM keep trim, code-point bounds, defaults and meaningful paths", 
     op: "inbox",
     limit: 20,
   });
-  const text = "😀".repeat(64000);
+  const text = "😀".repeat(64_000);
   expect(
     Schema.decodeUnknownSync(mailInputSchema)({ ...send, text: ` ${text} ` }),
   ).toHaveProperty("text", text);
+
   for (const raw of [
     { ...send, text: `${text}x` },
     { ...send, text: "  " },
@@ -55,10 +56,13 @@ test("mail and DM keep trim, code-point bounds, defaults and meaningful paths", 
     expect(
       Result.isFailure(Schema.decodeUnknownResult(mailInputSchema)(raw)),
     ).toBe(true);
+
   const missing = await messageOpenCodeInput(mailInputBranches)[
     "~standard"
   ].validate({ op: "send", text: "note" });
+
   expect(missing).toHaveProperty("issues");
+
   if (!missing.issues) throw new Error("Missing recipient accepted");
   expect(missing.issues).toContainEqual(
     expect.objectContaining({ path: ["to"] }),
@@ -71,12 +75,14 @@ test("OpenCode DM decodes defaults; mail/history flatten fields without top-leve
     "required",
     ["op", "to", "text", "delivery"],
   );
+
   const input = {
     project: "stargate",
     text: " note ",
     to: "captain",
     op: "send",
   };
+
   expect(await dm.validate(input)).toEqual({
     value: {
       op: "send",
@@ -113,6 +119,7 @@ test("OpenCode DM decodes defaults; mail/history flatten fields without top-leve
   expect(await history.validate({ op: "search", query })).toEqual({
     value: { op: "search", query },
   });
+
   for (const schema of [mail, dm, history]) {
     expect(schema.jsonSchema.input({ target: "draft-2020-12" })).toHaveProperty(
       "type",
@@ -128,6 +135,7 @@ test("OpenCode DM decodes defaults; mail/history flatten fields without top-leve
 test("OpenCode mail/history retain discriminator paths without losing project diagnostics", async () => {
   for (const branches of [mailInputBranches, historyInputBranches]) {
     const schema = messageOpenCodeInput(branches)["~standard"];
+
     for (const input of [
       {},
       { op: undefined },
@@ -136,12 +144,15 @@ test("OpenCode mail/history retain discriminator paths without losing project di
       { op: "unknown" },
     ]) {
       const parsed = await schema.validate(input);
+
       if (!parsed.issues) throw new Error("Invalid operation accepted");
       expect(parsed.issues).toContainEqual(
         expect.objectContaining({ path: ["op"] }),
       );
     }
+
     const parsed = await schema.validate({ op: "unknown", project: "/bad" });
+
     if (!parsed.issues)
       throw new Error("Invalid project and operation accepted");
     expect(parsed.issues).toEqual(
@@ -158,10 +169,13 @@ test("Pi mail/DM advertise explicit operations and preserve required-default coe
     { authorize() {}, async run() {} },
     async () => ({}),
   );
+
   for (const name of ["stargate_mail", "stargate_dm"]) {
     const tool = extension.tools?.find((tool) => tool.name === name);
+
     if (!tool) throw new Error(`Missing tool ${name}`);
     expect(tool.replay).toBe("unsafe");
+
     const parse = (
       args: Parameters<typeof validateToolArguments>[1]["arguments"],
     ): unknown =>
@@ -171,6 +185,7 @@ test("Pi mail/DM advertise explicit operations and preserve required-default coe
         name,
         arguments: args,
       });
+
     if (name === "stargate_mail") {
       expect(tool.parameters).toHaveProperty("oneOf");
       expect(() => parse({ op: "inbox" })).toThrow();
@@ -198,6 +213,7 @@ test("Pi mail/DM advertise explicit operations and preserve required-default coe
         delivery: "steer",
       });
     }
+
     expect(() => parse({ op: "append", text: "not journal" })).toThrow();
   }
 });
@@ -210,7 +226,9 @@ const item = {
   text: " note ",
   created: 0,
 } satisfies (typeof outboxPageSchema.Type.items)[number];
+
 const outbox = { items: [item], latest: 1 };
+
 const snapshot = {
   id: "capture",
   revision: 0,
@@ -236,6 +254,7 @@ test("native RPC codecs retain strict input/output encoding and structured mutab
   ] as const) {
     expect(Schema.decodeUnknownSync(schema)(value)).toEqual(value);
     expect(Schema.encodeUnknownSync(schema)(value)).toEqual(value);
+
     for (const result of [
       Schema.decodeUnknownResult(schema)(invalid),
       Schema.encodeUnknownResult(schema)(invalid),
@@ -248,6 +267,7 @@ test("native RPC codecs retain strict input/output encoding and structured mutab
       ).toBe(true);
     }
   }
+
   for (const method of [
     ...Object.values(CrewIrc.methods),
     CrewReporting.methods.start,
@@ -258,6 +278,7 @@ test("native RPC codecs retain strict input/output encoding and structured mutab
     expect(Schema.isSchema(method.input)).toBe(true);
     expect(Schema.isSchema(method.output)).toBe(true);
   }
+
   expect(
     await CrewIrc.methods.bind.input["~standard"].validate({
       sessionID: "ses_fixture",
@@ -274,9 +295,11 @@ test("native RPC codecs retain strict input/output encoding and structured mutab
   ).toEqual({
     value: { sessionID: "captain", id: "capture", passive: undefined },
   });
+
   const entries = Schema.decodeUnknownSync(activitySnapshotSchema)(
     snapshot,
   ).entries;
+
   entries.push({ id: 1, member: "captain", kind: "note", text: "next" });
   expect(entries).toHaveLength(2);
 });
@@ -284,6 +307,7 @@ test("native RPC codecs retain strict input/output encoding and structured mutab
 test("installed Promise RPC preserves structured values; actual consumers reject malformed outputs", async () => {
   let invalid = false;
   const requests: string[] = [];
+
   const inputs = new Map<string, Schema.Codec<unknown, unknown>>([
     ["bind", CrewIrc.methods.bind.input],
     ["outbox", CrewIrc.methods.outbox.input],
@@ -292,6 +316,7 @@ test("installed Promise RPC preserves structured values; actual consumers reject
     ["finish", CrewReporting.methods.finish.input],
     ["cancel", CrewReporting.methods.cancel.input],
   ]);
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -305,12 +330,15 @@ test("installed Promise RPC preserves structured values; actual consumers reject
       const body = await request.json();
       expect(body).toHaveProperty("input");
       const codec = inputs.get(path.split("/").at(-1) ?? "");
+
       if (!codec) throw new Error("Unexpected local fixture method");
       // Installed registration decodes recognized native codecs with defaults.
       // Return controlled errors; never leak a decoder exception through Bun.
       const decoded = Schema.decodeUnknownResult(codec)(body.input);
+
       if (Result.isFailure(decoded))
         return new Response("Invalid RPC input", { status: 400 });
+
       const output = path.endsWith("/bind")
         ? { bound: true }
         : path.endsWith("/outbox")
@@ -318,6 +346,7 @@ test("installed Promise RPC preserves structured values; actual consumers reject
           : path.endsWith("/cancel")
             ? true
             : snapshot;
+
       return Response.json({
         output:
           invalid && path.endsWith("/outbox")
@@ -334,15 +363,18 @@ test("installed Promise RPC preserves structured values; actual consumers reject
       });
     },
   });
+
   try {
     const client = OpenCode.make({
       baseUrl: server.url.href,
       headers: { authorization: "Bearer fixture-only" },
     });
+
     const options = {
       location: { directory: "/captain" },
       signal: new AbortController().signal,
     };
+
     const irc = client.rpc(CrewIrc);
     expect(
       await irc.bind({ sessionID: "ses_fixture", crewID: "worker" }, options),
@@ -380,22 +412,26 @@ test("installed Promise RPC preserves structured values; actual consumers reject
       ),
     ).rejects.toBeDefined();
     invalid = true;
+
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/captain",
       headersEnv: { authorization: "STARGATE_MESSAGES_TEST_AUTH" },
     });
+
     if (config.type !== "opencode")
       throw new Error("Invalid fixture configuration");
     const env = { STARGATE_MESSAGES_TEST_AUTH: "Bearer fixture-only" };
     const link = crewLink(config, env);
+
     if (!link) throw new Error("Missing IRC link");
     await expect(link.outbox({ limit: 1 }, options.signal)).rejects.toThrow(
       "Crew stargate_dm outbox unavailable",
     );
     const previous = process.env["STARGATE_MESSAGES_TEST_AUTH"];
     process.env["STARGATE_MESSAGES_TEST_AUTH"] = "Bearer fixture-only";
+
     try {
       const backend = new OpenCodeBackend(config);
       await expect(
@@ -406,6 +442,7 @@ test("installed Promise RPC preserves structured values; actual consumers reject
         delete process.env["STARGATE_MESSAGES_TEST_AUTH"];
       else process.env["STARGATE_MESSAGES_TEST_AUTH"] = previous;
     }
+
     expect(requests).toHaveLength(10);
   } finally {
     await server.stop(true);
@@ -417,6 +454,7 @@ test("waiting separates immediate zero, off and the integer ceiling", () => {
     expect(Schema.decodeUnknownSync(waitingInputSchema)({ seconds })).toEqual({
       seconds,
     });
+
   for (const seconds of [-1, 3601, 1.5, null, false, "0"])
     expect(
       Result.isFailure(

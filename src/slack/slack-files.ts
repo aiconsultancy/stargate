@@ -18,14 +18,17 @@ export type SlackFilesFetch = (
   url: string | URL,
   init?: RequestInit,
 ) => Promise<Response>;
+
 export type SlackUpload = { fileID: string; url: string };
 
 const fileID = Schema.String.check(settingsPattern(/^F[A-Z0-9]+$/));
 const channelID = Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/));
+
 const timestamp = Schema.String.check(
   Schema.isMaxCodePoints(64),
   settingsPattern(/^\d+\.\d+$/),
 );
+
 const displayTitle = Schema.String.check(
   Schema.isMinCodePoints(1),
   Schema.isMaxCodePoints(255),
@@ -35,7 +38,9 @@ const displayTitle = Schema.String.check(
     ),
   ),
 );
+
 const filename = displayTitle.check(settingsPattern(/^[^\\/]+$/));
+
 const mime = Schema.String.check(settingsPattern(/^[\w.+-]+\/[\w.+-]+$/)).pipe(
   Schema.decodeTo(
     Schema.String,
@@ -45,10 +50,12 @@ const mime = Schema.String.check(settingsPattern(/^[\w.+-]+\/[\w.+-]+$/)).pipe(
     }),
   ),
 );
+
 const size = Schema.Int.check(
   Schema.isGreaterThan(0),
   Schema.isLessThanOrEqualTo(maxAttachmentBytes),
 );
+
 const share = Schema.Struct({
   ts: Schema.optional(timestamp),
   thread_ts: Schema.optional(timestamp),
@@ -57,10 +64,12 @@ const share = Schema.Struct({
     (value) => value.ts !== undefined || value.thread_ts !== undefined,
   ),
 );
+
 const shares = settingsStruct({
   public: Schema.optional(settingsRecord(Schema.String, Schema.Array(share))),
   private: Schema.optional(settingsRecord(Schema.String, Schema.Array(share))),
 });
+
 const slackFile = Schema.Struct({
   id: fileID,
   name: filename,
@@ -99,6 +108,7 @@ const slackFile = Schema.Struct({
 /** Only a finished, untruncated transcript replaces a provider request. */
 function slackTranscript(file: typeof slackFile.Type) {
   const preview = file.transcription?.preview;
+
   return file.transcription?.status === "complete" &&
     preview &&
     preview.has_more !== true &&
@@ -106,19 +116,23 @@ function slackTranscript(file: typeof slackFile.Type) {
     ? preview.content
     : undefined;
 }
+
 const downloadResponse = Schema.Struct({
   ok: Schema.Literal(true),
   file: slackFile,
 });
+
 const shareResponse = Schema.Struct({
   ok: Schema.Literal(true),
   file: Schema.Struct({ id: fileID, shares }),
 });
+
 const uploadResponse = Schema.Struct({
   ok: Schema.Literal(true),
   file_id: fileID,
   upload_url: Schema.String.check(Schema.isMaxCodePoints(8192)),
 });
+
 const completeResponse = Schema.Struct({
   ok: Schema.Literal(true),
   files: Schema.Array(Schema.Struct({ id: fileID })).check(
@@ -128,6 +142,7 @@ const completeResponse = Schema.Struct({
 
 function slackFileURL(value: string): string {
   const url = new URL(value);
+
   if (
     url.origin !== "https://files.slack.com" ||
     url.username ||
@@ -135,6 +150,7 @@ function slackFileURL(value: string): string {
     url.hash
   )
     throw new Error("Invalid Slack file origin");
+
   return url.href;
 }
 
@@ -160,33 +176,43 @@ async function readBounded(
   signal: AbortSignal,
 ): Promise<Uint8Array> {
   const reader = response.body?.getReader();
+
   if (!reader) throw new Error("Missing Slack file body");
   let cancelling: Promise<void> | undefined;
+
   const abort = () => {
     cancelling = reader.cancel().catch(() => {});
   };
+
   signal.addEventListener("abort", abort, { once: true });
+
   try {
     const data = new Uint8Array(length);
     let used = 0;
+
     for (;;) {
       signal.throwIfAborted();
       const chunk = await reader.read();
       signal.throwIfAborted();
+
       if (chunk.done) break;
+
       if (used + chunk.value.byteLength > length)
         throw new Error("Slack file exceeds declared size");
       data.set(chunk.value, used);
       used += chunk.value.byteLength;
     }
+
     if (used !== length) throw new Error("Slack file size mismatch");
     const start = new TextDecoder().decode(data.subarray(0, 512));
+
     if (
       /^\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b|<script\b)/i.test(
         start,
       )
     )
       throw new Error("Slack returned an HTML page");
+
     return data;
   } finally {
     signal.removeEventListener("abort", abort);
@@ -208,10 +234,12 @@ export class SlackFiles {
     run: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
     const stop = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
+
     try {
       stop.throwIfAborted();
       const result = await run(stop);
       stop.throwIfAborted();
+
       return result;
     } catch {
       // SDK/transport exceptions can contain bearer headers and signed URLs.
@@ -233,12 +261,16 @@ export class SlackFiles {
       )(ids);
       const files: Attachment[] = [];
       let total = 0;
+
       for (const id of ids) {
         stop.throwIfAborted();
+
         const { file } = Schema.decodeUnknownSync(downloadResponse)(
           await this.web(stop).files.info({ file: id }),
         );
+
         const snippet = file.mode === "snippet";
+
         if (
           file.id !== id ||
           !hasChannel(file, channel) ||
@@ -249,21 +281,26 @@ export class SlackFiles {
           throw new Error(
             "Slack file metadata does not match the accepted request",
           );
+
         const url = slackFileURL(
           file.url_private_download ?? file.url_private ?? "",
         );
+
         const response = await this.request(url, {
           headers: { authorization: `Bearer ${this.botToken}` },
           redirect: "error",
           signal: stop,
         });
+
         try {
           if (response.status !== 200) throw new Error("Slack download failed");
+
           const contentType = response.headers
             .get("content-type")
             ?.split(";", 1)[0]
             ?.trim()
             .toLowerCase();
+
           if (
             !contentType ||
             isHTML(contentType) ||
@@ -274,12 +311,14 @@ export class SlackFiles {
           )
             throw new Error("Slack file MIME mismatch");
           const declared = response.headers.get("content-length");
+
           if (
             declared !== null &&
             (!/^\d+$/.test(declared) || Number(declared) !== file.size)
           )
             throw new Error("Slack file length mismatch");
           const data = await readBounded(response, file.size, stop);
+
           // Slack sends pasted text as force-download. Keep the verified text
           // MIME, and refuse mislabeled binary data before it reaches an agent.
           if (
@@ -310,7 +349,9 @@ export class SlackFiles {
           await response.body?.cancel().catch(() => {});
         }
       }
+
       checkAttachments(files);
+
       return files;
     });
   }
@@ -323,12 +364,14 @@ export class SlackFiles {
     return this.safe(signal, async (stop) => {
       Schema.decodeUnknownSync(filename)(name);
       Schema.decodeUnknownSync(size)(length);
+
       const result = Schema.decodeUnknownSync(uploadResponse)(
         await this.web(stop).files.getUploadURLExternal({
           filename: name,
           length,
         }),
       );
+
       return { fileID: result.file_id, url: slackFileURL(result.upload_url) };
     });
   }
@@ -341,6 +384,7 @@ export class SlackFiles {
     return this.safe(signal, async (stop) => {
       const target = slackFileURL(url);
       Schema.decodeUnknownSync(size)(data.byteLength);
+
       const response = await this.request(target, {
         method: "POST",
         body: new Uint8Array(data),
@@ -348,6 +392,7 @@ export class SlackFiles {
         redirect: "error",
         signal: stop,
       });
+
       try {
         if (response.status !== 200) throw new Error("Slack upload failed");
       } finally {
@@ -368,6 +413,7 @@ export class SlackFiles {
       Schema.decodeUnknownSync(timestamp)(thread);
       Schema.decodeUnknownSync(fileID)(id);
       Schema.decodeUnknownSync(displayTitle)(title);
+
       // Never retry completion here: a lost response has an uncertain outcome.
       const result = Schema.decodeUnknownSync(completeResponse)(
         await this.web(stop).files.completeUploadExternal({
@@ -376,6 +422,7 @@ export class SlackFiles {
           files: [{ id, title }],
         }),
       );
+
       if (result.files[0]?.id !== id)
         throw new Error("Slack upload completion identity changed");
     });
@@ -391,10 +438,13 @@ export class SlackFiles {
       Schema.decodeUnknownSync(fileID)(id);
       Schema.decodeUnknownSync(channelID)(channel);
       Schema.decodeUnknownSync(timestamp)(thread);
+
       const result = Schema.decodeUnknownSync(shareResponse)(
         await this.web(stop).files.info({ file: id }),
       );
+
       if (result.file.id !== id) throw new Error("Slack file identity changed");
+
       return [result.file.shares.public, result.file.shares.private].some(
         (group) =>
           group?.[channel]?.some(

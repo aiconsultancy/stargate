@@ -13,7 +13,9 @@ import { settingsPattern, settingsUUID } from "../config/settings-schema";
 import { botDisplayName } from "../shared/waiting";
 
 type PairingView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
+
 type SlackAck = (payload?: Record<string, unknown>) => Promise<void>;
+
 type PairingApi = {
   open(triggerId: string, view: PairingView): Promise<void>;
   update(viewId: string, hash: string, view: PairingView): Promise<void>;
@@ -23,8 +25,10 @@ const id = Schema.String.check(
   Schema.isMinCodePoints(1),
   Schema.isMaxCodePoints(255),
 );
+
 const userId = Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/));
 const channelId = Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/));
+
 const commandSchema = Schema.Struct({
   command: Schema.Literal("/stargate"),
   text: Schema.Literal("pair"),
@@ -37,6 +41,7 @@ const commandSchema = Schema.Struct({
   is_bot: Schema.optional(Schema.Literal(false)),
   bot_id: Schema.optional(Schema.Never),
 });
+
 const actionSchema = Schema.Struct({
   type: Schema.Literal("block_actions"),
   api_app_id: id,
@@ -72,12 +77,15 @@ const plain = (text: string) => ({
   text,
   emoji: false,
 });
+
 const section = (text: string) => ({
   type: "section" as const,
   text: plain(text),
 });
+
 const warning =
   "This grants full server access for 30 days, not read-only or conversation-only access. Anyone with a URL can pair once before it expires. Generate only for your own trusted device. Slack receives the secret in this private modal.";
+
 function notice(text: string): PairingView {
   return {
     type: "modal",
@@ -132,12 +140,15 @@ export class PairingUI {
 
   async command(body: unknown, ack: SlackAck) {
     let acknowledged = false;
+
     const once: SlackAck = async (payload) => {
       acknowledged = true;
       await ack(payload);
     };
+
     try {
       const parsed = Schema.decodeUnknownResult(commandSchema)(body);
+
       if (
         Result.isFailure(parsed) ||
         parsed.success.user_name === "slackbot" ||
@@ -152,19 +163,25 @@ export class PairingUI {
           response_type: "ephemeral",
           text: "Pairing unavailable. Use /stargate pair with an authorized operator and channel.",
         });
+
         return;
       }
+
       const now = this.monotonicNow();
+
       for (const [nonce, entry] of this.pending) {
         if (entry.expires <= now) this.pending.delete(nonce);
       }
+
       if (this.pending.size >= 128) {
         await once({
           response_type: "ephemeral",
           text: "Too many pairing confirmations. Wait five minutes and try again.",
         });
+
         return;
       }
+
       const data = parsed.success;
       const nonce = randomUUID();
       this.pending.set(nonce, {
@@ -196,6 +213,7 @@ export class PairingUI {
       });
     } catch {
       this.log.error("Could not open pairing confirmation");
+
       if (!acknowledged)
         await once({
           response_type: "ephemeral",
@@ -210,6 +228,7 @@ export class PairingUI {
     const parsed = Schema.decodeUnknownResult(actionSchema)(body);
     const data = Result.isSuccess(parsed) ? parsed.success : undefined;
     const pending = data && this.pending.get(data.view.private_metadata);
+
     const owned =
       data &&
       pending &&
@@ -219,6 +238,7 @@ export class PairingUI {
       (!data.channel || data.channel.id === pending.channel) &&
       data.api_app_id === this.config.slack.appId &&
       data.team.id === this.identity.team;
+
     const valid =
       owned &&
       pending.expires > this.monotonicNow() &&
@@ -228,16 +248,21 @@ export class PairingUI {
         data.api_app_id,
         data.team.id,
       );
+
     if (owned) pending.used = true;
+
     try {
       await ack();
     } catch {
       this.log.error("Could not acknowledge pairing action");
+
       return;
     }
+
     // Invalid envelopes cannot select a modal. Duplicate actions do nothing,
-    // preserving any already-delivered code instead of overwriting it.
+    // Preserving any already-delivered code instead of overwriting it.
     if (!owned || !data || !pending) return;
+
     try {
       if (!valid || pending.expires <= this.monotonicNow()) {
         await this.api.update(
@@ -247,10 +272,13 @@ export class PairingUI {
             "Pairing confirmation expired or access was removed. Close this modal and use /stargate pair again if authorized.",
           ),
         );
+
         return;
       }
+
       const signal = AbortSignal.any([this.signal, this.deadline()]);
       signal.throwIfAborted();
+
       // Recheck after ACK; never trust Slack to select a backend or URL.
       if (
         !this.allowed(
@@ -265,6 +293,7 @@ export class PairingUI {
       const started = this.monotonicNow();
       const result = await this.backend.pair(signal);
       signal.throwIfAborted();
+
       if (
         !this.allowed(
           data.user.id,
@@ -274,17 +303,21 @@ export class PairingUI {
         )
       )
         return;
+
       // Wall-clock corrections must not change local expiry decisions.
       // Count request time conservatively; only the server can redeem a code.
       const remaining =
         result.expiresIn * 1000 - (this.monotonicNow() - started);
+
       if (remaining <= 0) throw new Error("Pairing expired");
       const expires = this.wallNow() + remaining;
+
       const urls =
         this.config.pairing?.urls.map(
           (origin) =>
             `${origin}/auth/connect/${encodeURIComponent(result.code)}`,
         ) ?? [];
+
       await this.api.update(data.view.id, data.view.hash, {
         ...notice(warning),
         blocks: [
@@ -301,7 +334,9 @@ export class PairingUI {
       });
     } catch {
       this.log.error("Pairing request failed; not retried");
+
       if (this.signal.aborted) return;
+
       try {
         await this.api.update(
           data.view.id,

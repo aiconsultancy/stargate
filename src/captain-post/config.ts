@@ -51,4 +51,5 @@ export const captainPostSchema = settingsStruct({
     .check(Schema.isLessThanOrEqualTo(600))
     .pipe(settingsDefault(30)),
 });
+
 export type CaptainPostConfig = typeof captainPostSchema.Type;

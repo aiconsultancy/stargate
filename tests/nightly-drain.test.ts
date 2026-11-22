@@ -6,6 +6,7 @@ test("drain observes idle only after notices, then proceeds without waiting for 
   let now = 1000;
   let notified = false;
   let polls = 0;
+
   const outcome = await waitForMaintenanceDrain({
     deadlineAt: 61_000,
     pollMs: 5000,
@@ -21,10 +22,12 @@ test("drain observes idle only after notices, then proceeds without waiting for 
     },
     observe: async () => {
       polls++;
+
       return { idle: true };
     },
     describe: async () => [],
   });
+
   expect(outcome).toEqual({ outcome: "idle", stragglers: [] });
   expect(polls).toBe(2);
   expect(now).toBe(6000);
@@ -32,9 +35,11 @@ test("drain observes idle only after notices, then proceeds without waiting for 
 
 test("drain reaches its deadline, names stragglers and permits the restart", async () => {
   let now = 0;
+
   const stragglers = [
     { taskID: "task_running", sessionID: "ses_worker", reason: "busy-crew" },
   ];
+
   const outcome = await waitForMaintenanceDrain({
     deadlineAt: 600_000,
     pollMs: 30_000,
@@ -50,6 +55,7 @@ test("drain reaches its deadline, names stragglers and permits the restart", asy
     observe: async () => ({ idle: false, reason: "busy-crew" }),
     describe: async () => stragglers,
   });
+
   expect(now).toBe(600_000);
   expect(outcome).toEqual({ outcome: "deadline", stragglers });
 });
@@ -72,6 +78,7 @@ test("drain includes other installation targets and respects cancellation", asyn
       },
       observe: async () => {
         observed++;
+
         return { idle: false, reason: "busy-opencode" };
       },
       describe: async () => [],

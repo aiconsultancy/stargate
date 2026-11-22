@@ -32,6 +32,7 @@ test("panel snapshot validates question settings without replacing or ordering t
     timeoutMs: 300_000,
     enabled: true,
   };
+
   const snapshot = {
     delayMs: null,
     waitingFingerprint: "waiting",
@@ -40,6 +41,7 @@ test("panel snapshot validates question settings without replacing or ordering t
     mutes: "[]",
     mutesFingerprint: "mutes",
   };
+
   const decode = Schema.decodeUnknownSync(configSnapshotSchema);
   const decoded = decode(snapshot);
   expect(decoded.questions).toBe(questions);
@@ -58,11 +60,13 @@ test("Teams codec preserves defaults, stripping, UTC calendar and UUID dialect",
   expect(decoded.text).toBe("");
   expect(Object.hasOwn(decoded, "extra")).toBe(false);
   expect(() => decode({ ...original, text: null })).toThrow();
+
   for (const timestamp of [
     "2024-02-29T23:59:59Z",
     "2000-02-29T00:00:00.000001Z",
   ])
     expect(decode({ ...original, timestamp }).timestamp).toBe(timestamp);
+
   for (const timestamp of [
     "1900-02-29T00:00:00Z",
     "2024-02-30T00:00:00Z",
@@ -71,6 +75,7 @@ test("Teams codec preserves defaults, stripping, UTC calendar and UUID dialect",
     "2024-01-01T00:00:00z",
   ])
     expect(() => decode({ ...original, timestamp })).toThrow();
+
   for (const aadObjectId of [
     "00000000-0000-0000-0000-000000000000",
     "ffffffff-ffff-ffff-ffff-ffffffffffff",
@@ -101,6 +106,7 @@ test("question codecs retain inverted bounds, strict nested keys and Unicode uni
     title: "Choose a route",
     fields: [{ key: "q0", type: "string", custom: true }],
   };
+
   const decode = Schema.decodeUnknownSync(nativeQuestionSchema);
   const decoded = decode(question);
   expect(
@@ -109,6 +115,7 @@ test("question codecs retain inverted bounds, strict nested keys and Unicode uni
   expect(() =>
     questionAnswer(decoded, JSON.stringify({ q0: "😀".repeat(2000) })),
   ).toThrow();
+
   const inverted = decode({
     ...question,
     fields: [
@@ -122,6 +129,7 @@ test("question codecs retain inverted bounds, strict nested keys and Unicode uni
       },
     ],
   });
+
   expect(inverted.fields[0]).toMatchObject({ minItems: 5, maxItems: 1 });
   expect(() =>
     decode({

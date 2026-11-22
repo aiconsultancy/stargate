@@ -62,6 +62,7 @@ import { nightlyStoreFixture } from "./fixtures/database-reuse";
 import { tarball } from "./tar";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-run-"));
+
 afterAll(async () => {
   void api.stop(true);
   await rm(base, { recursive: true, force: true });
@@ -69,6 +70,7 @@ afterAll(async () => {
 
 // ---- Release archive built from a tiny repository ----------------------
 const repo = join(base, "repo");
+
 // The release has a crew plugin, so staging records its digest.
 const releaseFiles = {
   "package.json":
@@ -76,10 +78,12 @@ const releaseFiles = {
   "src/main.ts": "export {};\n",
   "src/crew/plugin.ts": "export const plugin = 2;\n",
 };
+
 for (const [path, text] of Object.entries(releaseFiles)) {
   await mkdir(dirname(join(repo, path)), { recursive: true });
   await writeFile(join(repo, path), text);
 }
+
 const git = (...args: string[]) =>
   execFileSync("git", ["-C", repo, ...args], {
     encoding: "utf8",
@@ -91,10 +95,15 @@ const git = (...args: string[]) =>
       GIT_COMMITTER_EMAIL: "t@example.com",
     },
   }).trim();
+
 execFileSync("git", ["init", "-q", "-b", "main", repo]);
+
 git("add", ".");
+
 git("commit", "-q", "-m", "feat: release");
+
 const commit = git("rev-parse", "HEAD");
+
 git(
   "archive",
   "--format=tar.gz",
@@ -103,18 +112,25 @@ git(
   join(base, "a.tgz"),
   "HEAD",
 );
+
 const archive = new Uint8Array(await readFile(join(base, "a.tgz")));
+
 const sha = (data: Uint8Array) =>
   createHash("sha256").update(data).digest("hex");
+
 const checksum = `${sha(archive)}  stargate-v0.2.0.tar.gz\n`;
+
 const proxyAsset = tarball([
   { path: "cli-proxy-api", data: "proxy-8.0.60", mode: 0o755 },
 ]);
 
 const now = Date.parse("2026-11-12T00:05:00Z");
+
 const hoursAgo = (hours: number) =>
   new Date(now - hours * 3_600_000).toISOString();
+
 let apiPort = 0;
+
 const api = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -122,6 +138,7 @@ const api = Bun.serve({
     const url = new URL(request.url);
     const root = `http://127.0.0.1:${apiPort}`;
     const stargate = "/repos/aiconsultancy/stargate";
+
     const asset = (id: number, name: string, size: number, extra = {}) => ({
       id,
       name,
@@ -132,6 +149,7 @@ const api = Bun.serve({
       uploader: { login: "github-actions[bot]" },
       ...extra,
     });
+
     const stargateRelease = () => ({
       id: 1,
       tag_name: "v0.2.0",
@@ -144,6 +162,7 @@ const api = Bun.serve({
         asset(2, "stargate-v0.2.0.tar.gz.sha256", checksum.length),
       ],
     });
+
     switch (url.pathname) {
       case `${stargate}/releases`:
         return Response.json([stargateRelease()]);
@@ -192,6 +211,7 @@ const api = Bun.serve({
       case "/v1/models":
         if (request.headers.get("authorization") !== "Bearer proxy-key")
           return new Response("no", { status: 401 });
+
         return fixture.proxyDown(fixture)
           ? new Response("down", { status: 503 })
           : Response.json({
@@ -200,22 +220,28 @@ const api = Bun.serve({
       case "/v1/responses": {
         const body = (await request.json()) as { model: string };
         fixture.probes.push(`responses:${body.model}`);
+
         return fixture.probeOK(body.model)
           ? Response.json({ status: "incomplete", output: [] })
           : new Response("no", { status: 500 });
       }
+
       case "/v1/messages": {
         const body = (await request.json()) as { model: string };
         fixture.probes.push(`messages:${body.model}`);
+
         return request.headers.get("anthropic-version")
           ? Response.json({ content: [{ type: "text", text: "OK" }] })
           : new Response("bad", { status: 400 });
       }
     }
+
     return new Response("missing", { status: 404 });
   },
 });
+
 apiPort = api.port ?? 0;
+
 const url = `http://127.0.0.1:${apiPort}`;
 
 // ---- Per-test installation ---------------------------------------------
@@ -241,6 +267,7 @@ type Fixture = {
   abortWhen: (command: string) => boolean;
   onCommand: (command: string) => Promise<void>;
 };
+
 const fixture: Fixture = {
   dir: "",
   time: now,
@@ -298,6 +325,7 @@ async function install(
   await adoptRelease(root, old, "0.1.0");
   const captain = join(dir, "captain");
   await mkdir(join(captain, ".opencode"), { recursive: true });
+
   const profile = {
     model: "openai-proxy/gpt-6.1-sol",
     plugins: [
@@ -316,14 +344,17 @@ async function install(
       },
     ],
   };
+
   await writeFile(
     join(captain, ".opencode", "opencode.json"),
     `${JSON.stringify(profile, null, 2)}\n`,
   );
+
   const team = {
     captain: { id: "adama", model: "openai-proxy/gpt-6.1-sol#high" },
     crew: [{ id: "chief", role: "r", permissionProfile: "coding" }],
   };
+
   // A dotfiles-style symlinked team file: the link must survive (L2).
   await mkdir(join(dir, "dotfiles"));
   await writeFile(
@@ -340,6 +371,7 @@ async function install(
   await symlink(join(cpa, "8.0.54", "cliproxyapi"), join(dir, "cpa-current"));
   const prefix = join(dir, "prefix");
   await writeNpm(prefix, "@opencode/cli", "2.2.7");
+
   const raw = {
     dataDirectory: join(dir, "data"),
     bots: [
@@ -395,10 +427,12 @@ async function install(
       ...overrides,
     },
   };
+
   const path = join(dir, "stargate.json");
   await writeFile(path, `${JSON.stringify(raw, null, 2)}\n`);
   const config = Schema.decodeUnknownSync(configSchema)(raw);
   await mkdir(config.dataDirectory, { recursive: true });
+
   if (savedStore) {
     await copyFile(
       nightlyStoreFixture,
@@ -409,28 +443,37 @@ async function install(
     store.saveSession('["k","C123","1.0"]', "ses_captain");
     store.close();
   }
+
   return { config, path };
 }
 
 const ok = (stdout = ""): CommandResult => ({ code: 0, stdout, stderr: "" });
+
 const runner: CommandRunner = {
   async run(command, options) {
     fixture.commands.push([...command]);
     const text = command.join(" ");
     await fixture.onCommand(text);
+
     if (fixture.abortWhen(text)) fixture.controller.abort();
     const [first, ...rest] = command;
+
     if (first === "tar" || first === "git")
       return processRunner.run(command, options);
+
     if (first === "bun") return ok();
+
     if (first === "npm") {
       const prefix = rest[rest.indexOf("--prefix") + 1] ?? "";
+
       for (const spec of rest.filter((arg) => /^@?[^-].*@\d/.test(arg))) {
         const at = spec.lastIndexOf("@");
         await writeNpm(prefix, spec.slice(0, at), spec.slice(at + 1));
       }
+
       return ok();
     }
+
     if (first?.endsWith("/bin/opencode2")) {
       const manifest = JSON.parse(
         await readFile(
@@ -441,29 +484,39 @@ const runner: CommandRunner = {
           "utf8",
         ),
       );
+
       return ok(
         manifest.version === fixture.badCliVersion
           ? "crashed\n"
           : `opencode v${manifest.version}\n`,
       );
     }
+
     if (first === "systemctl") {
       const [, action, unit] = rest;
+
       if (unit === "opencode2.service" && action === "restart")
         fixture.openCodeRestarts++;
+
       if (unit !== "stargate.service") return ok();
+
       if (action === "is-active") return ok(`${fixture.gateway}\n`);
+
       if (action === "stop") {
         if (fixture.stopFails) return { code: 1, stdout: "", stderr: "" };
         fixture.gateway = "inactive";
       }
+
       if (action === "restart" || action === "start") {
         fixture.gateway = "active";
+
         const current = await linkedRelease(
           join(fixture.dir, "stargate"),
           "current",
         );
+
         const version = current?.metadata.version ?? null;
+
         if (fixture.readyVersions.has(version))
           await writeFile(
             join(fixture.dir, "data", "ready.json"),
@@ -478,8 +531,10 @@ const runner: CommandRunner = {
             }),
           );
       }
+
       return ok();
     }
+
     return { code: 127, stdout: "", stderr: "" };
   },
 };
@@ -496,6 +551,7 @@ const opencode: OpenCodeControl = {
   },
   switchModel: async (id, model) => {
     fixture.sessions.set(id, model);
+
     if (fixture.abortWhen("switchModel")) fixture.controller.abort();
   },
   catalog: async () => [
@@ -521,6 +577,7 @@ const invocation = {
   STARGATE_RELEASE_TOKEN: "release-token",
   INVOCATION_ID: "0123456789abcdef0123456789abcdef",
 };
+
 const deps = (extra: Partial<Dependencies> = {}): Dependencies => ({
   runner,
   clock: {
@@ -575,6 +632,7 @@ const run = (
     { config, configPath: path, mode, signal: fixture.controller.signal },
     deps(extra),
   );
+
 const commands = (prefix: string) =>
   fixture.commands.filter((command) => command.join(" ").startsWith(prefix));
 
@@ -583,8 +641,10 @@ test("enabled drain waits for a running captain, then restarts and records compl
     drain: { enabled: true, deadlineMinutes: 1 },
     components: { stargate: true },
   });
+
   fixture.active = ["ses_captain"];
   let waited = false;
+
   const { report } = await run(config, path, "run", {
     drainDirectory: join(fixture.dir, "drain-control"),
     clock: {
@@ -597,6 +657,7 @@ test("enabled drain waits for a running captain, then restarts and records compl
       },
     },
   });
+
   expect(waited).toBe(true);
   expect(report.outcome).toBe("completed");
   expect(report.drain).toMatchObject({
@@ -611,10 +672,13 @@ test("enabled drain proceeds at its deadline and reports the running session", a
     drain: { enabled: true, deadlineMinutes: 1 },
     components: { stargate: true },
   });
+
   fixture.active = ["ses_captain"];
+
   const { report } = await run(config, path, "run", {
     drainDirectory: join(fixture.dir, "drain-control"),
   });
+
   expect(report.outcome).toBe("completed");
   expect(report.drain).toMatchObject({
     outcome: "deadline",
@@ -628,6 +692,7 @@ test("enabled drain proceeds at its deadline and reports the running session", a
 
 test("cleanup-only maintenance records results without stopping services", async () => {
   const { config, path } = await install();
+
   if (!config.maintenance) throw new Error("fixture maintenance missing");
   config.maintenance.components = {
     stargate: false,
@@ -660,6 +725,7 @@ test("cleanup-only maintenance records results without stopping services", async
 
 test("cleanup fails closed when the shared OpenCode server has activity", async () => {
   const { config, path } = await install();
+
   if (!config.maintenance) throw new Error("fixture maintenance missing");
   config.maintenance.components = {
     stargate: false,
@@ -684,6 +750,7 @@ test("cleanup fails closed when the shared OpenCode server has activity", async 
 
 test("cleanup checkpoints intent and result privately before one final notice", async () => {
   const { config, path } = await install();
+
   if (!config.maintenance) throw new Error("fixture maintenance missing");
   config.maintenance.components = {
     stargate: false,
@@ -698,6 +765,7 @@ test("cleanup checkpoints intent and result privately before one final notice", 
     repositories: [],
     protectedPaths: [],
   };
+
   const result = await run(config, path, "run", {
     cleanup: async (input) => {
       const item = {
@@ -708,15 +776,18 @@ test("cleanup checkpoints intent and result privately before one final notice", 
         newestMtime: now - 864_000_000,
         reason: "stale" as const,
       };
+
       await input.beforeItem?.(item);
       await input.record?.(item);
       const directory = join(config.dataDirectory, "maintenance", "reports");
       const files = await readdir(directory);
+
       const checkpoint = reportSchema.parse(
         JSON.parse(
           await readFile(join(directory, files[0] ?? "missing"), "utf8"),
         ),
       );
+
       expect(checkpoint.cleanup?.items).toEqual([item]);
       expect(
         await readdir(
@@ -725,9 +796,11 @@ test("cleanup checkpoints intent and result privately before one final notice", 
       ).toEqual([]);
       const removed = { ...item, status: "removed" as const };
       await input.record?.(removed);
+
       return { items: [removed], freedBytes: 42, plannedBytes: 0 };
     },
   });
+
   expect(result.report.cleanup?.freedBytes).toBe(42);
   expect(result.report.outcome).toBe("completed");
   expect(
@@ -735,6 +808,7 @@ test("cleanup checkpoints intent and result privately before one final notice", 
   ).toHaveLength(1);
   expect(result.report.restarts).toEqual([]);
 });
+
 const live = async () => ({
   release: await readlink(join(fixture.dir, "stargate", "current")),
   proxy: await readlink(join(fixture.dir, "cpa-current")),
@@ -750,6 +824,7 @@ const live = async () => ({
   gateway: fixture.gateway,
   journal: await readJournalFile(join(fixture.dir, "data")),
 });
+
 const statusOf = (
   report: { components: { id: string; status: string }[] },
   id: string,
@@ -805,24 +880,30 @@ describe("nightly maintenance run", () => {
 
   test("a queued crew assignment does not defer the run; the report names it", async () => {
     const { config, path } = await install();
+
     const state = await CrewState.open(
       join(fixture.dir, "captain", ".local", "stargate-crew"),
       "ship",
       "fingerprint",
     );
+
     let id = "";
+
     try {
       const chief = state.reservePeer("chief");
+
       // Galactica: four cancelled rows and one queued by an earlier captain.
       const rows = Array.from({ length: 5 }, (_, i) =>
         state.enqueue(chief, "ses_e49d787old", `private task text ${i}`),
       );
+
       for (const row of rows.slice(0, 4))
         state.cancelQueued(row.id, "ses_e49d787old");
       id = rows[4]?.id ?? "";
     } finally {
       state.close();
     }
+
     const note = {
       kind: "queued-crew-task" as const,
       taskID: id,
@@ -832,6 +913,7 @@ describe("nightly maintenance run", () => {
       report: false,
       action: `Ask the captain to run stargate_crew status ${id}`,
     };
+
     const planned = await run(config, path, "plan");
     expect(planned.report.notes).toEqual([note]);
     const { report, reportPath } = await run(config, path);
@@ -840,15 +922,18 @@ describe("nightly maintenance run", () => {
     const text = await readFile(reportPath ?? "", "utf8");
     expect(text).not.toContain("private task text");
     expect(reportSchema.parse(JSON.parse(text)).notes).toEqual([note]);
+
     const [notice] = await readdir(
       join(fixture.dir, "data/maintenance/outbox"),
     );
+
     const summary = JSON.parse(
       await readFile(
         join(fixture.dir, "data/maintenance/outbox", notice ?? ""),
         "utf8",
       ),
     ).text as string;
+
     expect(summary).toContain(
       `crew task ${id} for chief is queued (from an earlier captain session): ask the captain to run stargate_crew status ${id}`,
     );
@@ -891,6 +976,7 @@ describe("nightly maintenance run", () => {
   test("updates every component at one idle boundary with one OpenCode restart", async () => {
     const { config, path } = await install();
     const bot = config.bots[0];
+
     if (!bot) throw new Error("bot");
     const identity = { team: "T1", user: "U1" };
     const key = botKey(bot, identity);
@@ -918,10 +1004,12 @@ describe("nightly maintenance run", () => {
     expect(
       await readFile(join(fixture.dir, "dotfiles", "team.json"), "utf8"),
     ).toContain("gpt-6.2-sol#high");
+
     // H4: stargate.json is not rewritten, so the bot key and Slack mappings stay.
     const after = Schema.decodeUnknownSync(configSchema)(
       JSON.parse(await readFile(path, "utf8")),
     ).bots[0];
+
     if (!after) throw new Error("bot");
     expect(botKey(after, identity)).toBe(key);
     expect(fixture.probes).toEqual([
@@ -954,12 +1042,14 @@ describe("nightly maintenance run", () => {
     expect(text).not.toContain("release-token");
     expect(text).not.toContain("proxy-key");
     const outbox = await readdir(join(fixture.dir, "data/maintenance/outbox"));
+
     const notice = JSON.parse(
       await readFile(
         join(fixture.dir, "data/maintenance/outbox", outbox[0] ?? ""),
         "utf8",
       ),
     );
+
     expect(notice.text).toContain("stargate: updated 0.1.0 → 0.2.0");
   });
 
@@ -995,17 +1085,19 @@ describe("nightly maintenance run", () => {
     fixture.readyVersions = new Set(["0.1.0"]);
     const cron = join(config.dataDirectory, "cron.sqlite");
     new CronStore(cron).close();
+
     const sql = (text: string) => {
       const db = new Database(cron);
       db.exec(text);
       db.close();
     };
+
     sql(
       `INSERT INTO cron_schedules (id,botKey,channel,user,name,expression,timezone,prompt,nextAt,createdAt)
        VALUES ('s1','k','C1','U1','n','15 * * * *','UTC','p',${now + 86_400_000},0)`,
     );
     // A schedule that came due while the gateway was stopped starts as soon
-    // as the gateway is back, before readiness is decided.
+    // As the gateway is back, before readiness is decided.
     let started = false;
     fixture.onCommand = async (command) => {
       if (command === "systemctl --user restart stargate.service" && !started) {
@@ -1015,11 +1107,14 @@ describe("nightly maintenance run", () => {
         );
       }
     };
+
     const gatewayRestarts = () =>
       commands("systemctl --user restart stargate.service").length;
+
     const { report, attention } = await run(config, path, "run", {
       env: invocation,
     });
+
     expect(report.reason).toBe("readiness-failed");
     expect(attention).toBe(true);
     // Only the forward start: no rollback restart of OpenCode or the gateway.
@@ -1032,17 +1127,21 @@ describe("nightly maintenance run", () => {
         reason: "busy-cron",
       }),
     );
+
     const kept = JSON.parse(
       (await readJournalFile(config.dataDirectory)) ?? "{}",
     );
+
     expect(kept.gateway).toEqual({ restartPending: true });
     expect(kept.openCode).toEqual({ restarted: true, restartPending: true });
+
     // The timer's ExecStopPost finishes its own journal, but ingress is open.
     const after = await recoverInterruptedRun(
       config,
       deps({ env: invocation }),
       { afterRun: true },
     );
+
     expect(after.ok).toBe(false);
     expect(gatewayRestarts()).toBe(1);
     expect(fixture.openCodeRestarts).toBe(1);
@@ -1066,12 +1165,14 @@ describe("nightly maintenance run", () => {
     expect(attention).toBe(true);
     expect(report.reason).toBe("readiness-failed");
     expect(await readJournalFile(config.dataDirectory)).toContain('"gateway"');
+
     const alert = JSON.parse(
       await readFile(
         join(config.dataDirectory, "maintenance", "ALERT.json"),
         "utf8",
       ),
     );
+
     expect(alert).toMatchObject({
       schema: "stargate.maintenance.alert.v1",
       journal: true,
@@ -1105,8 +1206,10 @@ describe("nightly maintenance run", () => {
       restarts = f.commands.filter(
         (c) => c.join(" ") === "systemctl --user restart cpa.service",
       ).length;
+
       return restarts === 1;
     };
+
     result = await run(second.config, second.path);
     expect(
       result.report.components.find((c) => c.id === "cliproxyapi"),
@@ -1172,6 +1275,7 @@ describe("nightly maintenance run", () => {
       command.startsWith("systemctl --user restart opencode2.service");
     await run(config, path, "run", { undoOnExit: false, env: invocation });
     const journal = await readJournalFile(config.dataDirectory);
+
     for (const entry of [
       '"gateway"',
       '"release"',
@@ -1185,13 +1289,16 @@ describe("nightly maintenance run", () => {
     fixture.onCommand = async (command) => {
       if (command.startsWith("npm")) during.push(fixture.gateway);
     };
+
     fixture.commands = [];
+
     // The timer's ExecStopPost finishes the journal of the run that ended.
     const recovered = await recoverInterruptedRun(
       config,
       deps({ env: invocation }),
       { afterRun: true },
     );
+
     expect(recovered.ok).toBe(true);
     expect(during).toEqual(["inactive"]);
     expect(commands("systemctl --user start stargate.service")).toEqual([]);
@@ -1247,11 +1354,13 @@ describe("nightly maintenance run", () => {
       recursive: true,
       mode: 0o700,
     });
+
     const journalPath = join(
       second.config.dataDirectory,
       "maintenance",
       "journal.json",
     );
+
     await writeFile(journalPath, "{ truncated", { mode: 0o600 });
     fixture.commands = [];
     const result = await run(second.config, second.path);
@@ -1299,6 +1408,7 @@ describe("nightly maintenance run", () => {
     opencode.sessionModel = async (id, signal) => {
       reads++;
       const model = await original(id, signal);
+
       // After the switch, read-back reports the old model once.
       if (
         fixture.commands.some((c) =>
@@ -1311,8 +1421,10 @@ describe("nightly maintenance run", () => {
           id: "gpt-6.1-sol",
           variant: "high",
         };
+
       return model;
     };
+
     try {
       const { report } = await run(config, path);
       expect(report.components.find((c) => c.id === "models")).toMatchObject({
@@ -1340,6 +1452,7 @@ describe("nightly maintenance run", () => {
         models: false,
       },
     });
+
     fixture.updateNotices = [
       { sessionID: "ses_captain", status: "queued" },
       { sessionID: "ses_pi", status: "mail" },
@@ -1353,6 +1466,7 @@ describe("nightly maintenance run", () => {
 
   test("global catalog opt-in plans additions without probing or writing, and default stays off", async () => {
     const globalConfigFile = join(base, `catalog-${crypto.randomUUID()}.json`);
+
     const { config, path } = await install({
       components: {
         stargate: false,
@@ -1362,6 +1476,7 @@ describe("nightly maintenance run", () => {
       },
       models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
     });
+
     const original = `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }], limit: { context: 1234 } } } } } }, null, 2)}\n`;
     await writeFile(globalConfigFile, original);
     const planned = await run(config, path, "plan");
@@ -1374,6 +1489,7 @@ describe("nightly maintenance run", () => {
     );
     expect(await readFile(globalConfigFile, "utf8")).toBe(original);
     expect(fixture.probes).toEqual([]);
+
     if (!config.maintenance?.models) throw new Error("Missing models");
     config.maintenance.models.updateGlobalCatalog = false;
     const disabled = await run(config, path, "plan");
@@ -1400,6 +1516,7 @@ describe("nightly maintenance run", () => {
       const original = `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }], limit: { context: 1234 } } } } } }, null, 2)}\n`;
       await writeFile(target, original);
       await symlink(target, globalConfigFile);
+
       const { config, path } = await install({
         components: {
           stargate: false,
@@ -1409,6 +1526,7 @@ describe("nightly maintenance run", () => {
         },
         models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
       });
+
       const beforeCatalog = opencode.catalog;
       const beforeSwitch = opencode.switchModel;
       let sawAdditionAtRestart = false;
@@ -1416,6 +1534,7 @@ describe("nightly maintenance run", () => {
         const added = JSON.parse(await readFile(target, "utf8")).providers[
           "openai-proxy"
         ].models["gpt-6.2-sol"];
+
         return [
           { providerID: "openai-proxy", id: "gpt-6.1-sol", variants: ["high"] },
           ...(succeeds && added && fixture.openCodeRestarts
@@ -1429,16 +1548,19 @@ describe("nightly maintenance run", () => {
             : []),
         ];
       };
+
       fixture.onCommand = async (command) => {
         if (command.includes("restart opencode2.service"))
           sawAdditionAtRestart ||= (await readFile(target, "utf8")).includes(
             "gpt-6.2-sol",
           );
       };
+
       opencode.switchModel = async (id, model, signal) => {
         if (model.id === "gpt-6.2-sol") expect(succeeds).toBe(true);
         await beforeSwitch(id, model, signal);
       };
+
       try {
         const { report } = await run(config, path);
         expect(sawAdditionAtRestart).toBe(true);
@@ -1448,6 +1570,7 @@ describe("nightly maintenance run", () => {
           succeeds ? "updated" : "rolled-back",
         );
         const after = await readFile(target, "utf8");
+
         if (succeeds) {
           const models = JSON.parse(after).providers["openai-proxy"].models;
           expect(models["gpt-6.2-sol"]).toEqual(models["gpt-6.1-sol"]);
@@ -1475,8 +1598,10 @@ describe("nightly maintenance run", () => {
       base,
       `edited-catalog-${crypto.randomUUID()}.json`,
     );
+
     const original = `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }] } } } } }, null, 2)}\n`;
     await writeFile(globalConfigFile, original);
+
     const { config, path } = await install({
       components: {
         stargate: false,
@@ -1486,14 +1611,17 @@ describe("nightly maintenance run", () => {
       },
       models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
     });
+
     const edited = original.replace(
       '"id": "high"',
       '"id": "high", "settings": { "reasoningEffort": "high" }',
     );
+
     fixture.onCommand = async (command) => {
       if (command.includes("stop stargate.service"))
         await writeFile(globalConfigFile, edited);
     };
+
     const { report } = await run(config, path);
     expect(await readFile(globalConfigFile, "utf8")).toBe(edited);
     expect(
@@ -1507,10 +1635,12 @@ describe("nightly maintenance run", () => {
       base,
       `proxy-catalog-${crypto.randomUUID()}.json`,
     );
+
     await writeFile(
       globalConfigFile,
       `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }] } } } } }, null, 2)}\n`,
     );
+
     const { config, path } = await install({
       components: {
         stargate: false,
@@ -1520,6 +1650,7 @@ describe("nightly maintenance run", () => {
       },
       models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
     });
+
     fixture.proxyModelIDs = () =>
       fixture.commands.some((command) =>
         command.join(" ").includes("restart cpa.service"),
@@ -1538,8 +1669,10 @@ describe("nightly maintenance run", () => {
       base,
       `failed-catalog-${crypto.randomUUID()}.json`,
     );
+
     const original = `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }] }, "gpt-6-mystery": {} } } } }, null, 2)}\n`;
     await writeFile(globalConfigFile, original);
+
     const { config, path } = await install({
       components: {
         stargate: false,
@@ -1549,6 +1682,7 @@ describe("nightly maintenance run", () => {
       },
       models: { updateGlobalCatalog: true, globalConfigFile, teamFiles: [] },
     });
+
     fixture.proxyModelIDs = () => [
       "gpt-6.2-sol",
       "gpt-7-mystery",
@@ -1571,10 +1705,13 @@ describe("nightly maintenance run", () => {
 
   test("new child agents must load from the selected profile", async () => {
     const profiles = join(base, `profiles-${crypto.randomUUID()}`);
+
     const agent = (model: string, disabled = false) =>
       `---\ndescription: Work (${model})\nmode: subagent\nmodel: ${model}\n${disabled ? "disabled: true\n" : ""}---\n\nTask.\n`;
+
     const routes = (name: string, model: string) =>
       `${JSON.stringify({ version: 1, profile: "x", routes: [1, 2, 3, 4, 5].map(() => ({ name, model })) }, null, 2)}\n`;
+
     for (const folder of ["01-blended", "02-codex"]) {
       await mkdir(join(profiles, folder), { recursive: true });
       await writeFile(join(profiles, folder, "PROFILE"), "Profile\n");
@@ -1583,6 +1720,7 @@ describe("nightly maintenance run", () => {
         '{"missing":[]}\n',
       );
     }
+
     await writeFile(
       join(profiles, "01-blended", "routes.json"),
       routes("sol-6-1-high-subagent", "openai-proxy/gpt-6.1-sol#high"),
@@ -1621,6 +1759,7 @@ describe("nightly maintenance run", () => {
       globalConfigFile,
       `${JSON.stringify({ providers: { "openai-proxy": { models: { "gpt-6.1-sol": { variants: [{ id: "high" }, { id: "xhigh" }] } } } } }, null, 2)}\n`,
     );
+
     const { config, path } = await install({
       components: {
         stargate: false,
@@ -1635,9 +1774,10 @@ describe("nightly maintenance run", () => {
         teamFiles: [],
       },
     });
+
     // Only the selected profile's route must load. The unselected profile's
-    // renamed agent (sol-6-2-xhigh) is not in the live catalog and is not
-    // required.
+    // Renamed agent (sol-6-2-xhigh) is not in the live catalog and is not
+    // Required.
     fixture.agents = [
       {
         id: "sol-6-2-high-subagent",
@@ -1692,6 +1832,7 @@ describe("nightly maintenance run", () => {
       `---\ndescription: (${model})\nmode: subagent\nmodel: ${model}\n---\n\nTask.\n`,
     );
     await symlink("01-blended", join(profiles, "current"));
+
     const { config, path } = await install({
       components: {
         stargate: false,
@@ -1701,6 +1842,7 @@ describe("nightly maintenance run", () => {
       },
       models: { agentProfiles: profiles, teamFiles: [] },
     });
+
     fixture.agents = [];
     const { report } = await run(config, path);
     expect(report.components.find((c) => c.id === "models")).toMatchObject({
@@ -1737,6 +1879,7 @@ describe("nightly maintenance run", () => {
         models: false,
       },
     });
+
     await mkdir(join(config.dataDirectory, "maintenance"), { recursive: true });
     await writeFile(
       join(config.dataDirectory, "maintenance", "state.json"),
@@ -1780,6 +1923,7 @@ describe("nightly maintenance run", () => {
       });
       store.close();
     };
+
     const { report } = await run(config, path);
     expect(report).toMatchObject({
       outcome: "deferred",
@@ -1810,6 +1954,7 @@ describe("nightly maintenance run", () => {
   test("hundreds of Slack-thread sessions neither block nor get switched", async () => {
     const { config, path } = await install();
     const store = openStore(join(config.dataDirectory, "stargate.sqlite"));
+
     for (let i = 0; i < 200; i++) {
       store.saveSession(`["k","C123","t${i}.0"]`, `ses_thread${i}`);
       fixture.sessions.set(`ses_thread${i}`, {
@@ -1818,6 +1963,7 @@ describe("nightly maintenance run", () => {
         variant: "high",
       });
     }
+
     store.close();
     const { report } = await run(config, path);
     expect(report.outcome).toBe("completed");
@@ -1831,11 +1977,13 @@ describe("nightly maintenance run", () => {
   test("catalog verification stops within the reserved live phase before switching sessions", async () => {
     let time = 0;
     let calls = 0;
+
     const control = {
       ...opencode,
       catalog: async () => {
         calls++;
         time += 10_000;
+
         return [
           { providerID: "openai-proxy", id: "gpt-6.2-sol", variants: [] },
         ];
@@ -1844,8 +1992,10 @@ describe("nightly maintenance run", () => {
         throw new Error("Must not switch after catalog timeout");
       },
     } satisfies OpenCodeControl;
+
     const data = await mkdtemp(join(base, "catalog-cap-"));
     const journal = Journal.create(data, crypto.randomUUID());
+
     const result = await applyLiveModels(
       {
         upgrades: new Map(),
@@ -1870,6 +2020,7 @@ describe("nightly maintenance run", () => {
       AbortSignal.timeout(5000),
       { now: () => time, until: 300_000 },
     );
+
     expect(result.ok).toBe(false);
     expect(time).toBeLessThanOrEqual(300_000);
     expect(calls).toBeLessThanOrEqual(30);
@@ -1882,8 +2033,10 @@ describe("nightly maintenance run", () => {
       from: { providerID: "openai-proxy", id: "gpt-6.1-sol" },
       to: { providerID: "openai-proxy", id: "gpt-6.2-sol" },
     }));
+
     const models = new Map(sessions.map((s) => [s.session.id, s.from]));
     let time = 0;
+
     const control = {
       ...opencode,
       sessionModel: async (id: string) => models.get(id) ?? null,
@@ -1892,8 +2045,10 @@ describe("nightly maintenance run", () => {
         models.set(id, model);
       },
     } satisfies OpenCodeControl;
+
     const data = await mkdtemp(join(base, "cap-"));
     const journal = Journal.create(data, crypto.randomUUID());
+
     const result = await applyLiveModels(
       {
         upgrades: new Map(),
@@ -1908,6 +2063,7 @@ describe("nightly maintenance run", () => {
       AbortSignal.timeout(5000),
       { now: () => time, until: 5 * 60_000 },
     );
+
     expect(result.ok).toBe(true);
     expect(result.skipped.map((s) => s.id)).toEqual(
       sessions.slice(5).map((s) => s.session.id),
@@ -1939,6 +2095,7 @@ describe("nightly maintenance run", () => {
         models: false,
       },
     });
+
     fixture.gateway = "activating";
     await run(config, path);
     expect(commands("systemctl --user stop stargate.service")).toHaveLength(1);
@@ -1953,6 +2110,7 @@ describe("nightly maintenance run", () => {
         models: false,
       },
     });
+
     await mkdir(join(config.dataDirectory, "maintenance"), { recursive: true });
     await writeFile(
       join(config.dataDirectory, "maintenance", "reports"),
@@ -1973,6 +2131,7 @@ describe("nightly maintenance run", () => {
   test("model probes use each provider's protocol and fail closed", async () => {
     const { config } = await install();
     const proxy = config.maintenance?.proxy;
+
     if (!proxy) throw new Error("proxy");
     const signal = AbortSignal.timeout(5000);
     expect(await probeModel(proxy, "claude-opus-5-6", signal)).toBe(true);
@@ -2003,6 +2162,7 @@ describe("nightly maintenance run", () => {
     await expect(run(config, path)).rejects.toThrow(
       "Outside the maintenance window",
     );
+
     if (config.maintenance) config.maintenance.enabled = false;
     await expect(run(config, path)).rejects.toThrow("disabled");
   });
@@ -2014,18 +2174,22 @@ const writeJournal = async (config: Config, journal: unknown) => {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, "journal.json");
   await writeFile(path, JSON.stringify(journal), { mode: 0o600 });
+
   return path;
 };
+
 const v2 = (fields: Record<string, unknown>) => ({
   schema: "stargate.maintenance.journal.v2",
   runID: crypto.randomUUID(),
   ...fields,
 });
+
 const teamPath = () => join(fixture.dir, "team.json");
 
 /** Only a Stargate release is due. */
 async function stargateOnly(overrides: Record<string, unknown> = {}) {
   const installed = await install(overrides);
+
   if (!installed.config.maintenance) throw new Error("no maintenance");
   installed.config.maintenance.components = {
     stargate: true,
@@ -2033,11 +2197,14 @@ async function stargateOnly(overrides: Record<string, unknown> = {}) {
     agentClis: false,
     models: false,
   };
+
   return installed;
 }
+
 /** The running release records a crew plugin: the release's, or another. */
 async function runningPlugin(plugin = releaseFiles["src/crew/plugin.ts"]) {
   const old = join(fixture.dir, "stargate", "releases", "old");
+
   for (const [path, text] of Object.entries({
     ...releaseFiles,
     "src/crew/plugin.ts": plugin,
@@ -2045,8 +2212,10 @@ async function runningPlugin(plugin = releaseFiles["src/crew/plugin.ts"]) {
     await mkdir(dirname(join(old, path)), { recursive: true });
     await writeFile(join(old, path), text);
   }
+
   expect(await writePluginDigest(old)).toMatch(/^v1:/);
 }
+
 const queueJob = (config: Config) => {
   const store = openStore(join(config.dataDirectory, "stargate.sqlite"));
   store.enqueue({
@@ -2060,6 +2229,7 @@ const queueJob = (config: Config) => {
   });
   store.close();
 };
+
 const stepNames = (report: { steps: { name: string }[] }) =>
   report.steps.map((step) => step.name);
 
@@ -2069,11 +2239,13 @@ describe("gateway-only update", () => {
     await runningPlugin();
     // Stargate's own captain session runs, and OpenCode cannot be asked.
     fixture.active = ["ses_captain"];
+
     const { report, attention } = await run(config, path, "run", {
       connect: async () => {
         throw new Error("OpenCode must not be consulted");
       },
     });
+
     expect(attention).toBe(false);
     expect(report.outcome).toBe("completed");
     expect(statusOf(report, "stargate")).toBe("updated");
@@ -2116,6 +2288,7 @@ describe("gateway-only update", () => {
   test("a changed or unknown crew plugin takes the full path", async () => {
     for (const plugin of ["export const plugin = 1;\n", undefined]) {
       const { config, path } = await stargateOnly();
+
       // Undefined: the running release has no recorded digest.
       if (plugin) await runningPlugin(plugin);
       await updateState(config.dataDirectory, (state) => {
@@ -2176,7 +2349,7 @@ describe("gateway-only update", () => {
       "updated",
     );
     // As a kill leaves it after the switch: the release is not committed
-    // and the gateway is stopped. No OpenCode entry exists.
+    // And the gateway is stopped. No OpenCode entry exists.
     await writeJournal(
       config,
       v2({
@@ -2212,6 +2385,7 @@ describe("gateway-only update", () => {
     await runningPlugin();
     // OpenCode loaded its plugin two gateway-only updates ago.
     const root = join(fixture.dir, "stargate");
+
     for (const [name, version] of [
       ["loaded", "0.0.1"],
       ["unused", "0.0.2"],
@@ -2229,9 +2403,11 @@ describe("gateway-only update", () => {
         ).replace('"0.1.0"', `"${version}"`),
       );
     }
+
     await updateState(config.dataDirectory, (state) => {
       state.openCodeRelease = "loaded";
     });
+
     if (config.maintenance?.stargate) config.maintenance.stargate.keep = 2;
     const { report } = await run(config, path);
     expect(statusOf(report, "stargate")).toBe("updated");
@@ -2245,6 +2421,7 @@ describe("gateway-only update", () => {
 
 describe("operator update", () => {
   const noon = Date.parse("2026-11-12T12:00:00Z");
+
   const update = (
     config: Config,
     path: string,
@@ -2265,6 +2442,7 @@ describe("operator update", () => {
       },
       deps(extra),
     );
+
   const reports = (config: Config) =>
     readdir(join(config.dataDirectory, "maintenance", "reports")).catch(
       () => [],
@@ -2273,6 +2451,7 @@ describe("operator update", () => {
   test("updates the Stargate release now: no window, no idle gate, no cool-off, nothing else", async () => {
     // Every component is configured; tonight's run would update them all.
     const { config, path } = await install();
+
     if (!config.maintenance?.stargate) throw new Error("no maintenance");
     config.maintenance.enabled = false;
     config.maintenance.stargate.coolOffHours = 24;
@@ -2328,9 +2507,11 @@ describe("operator update", () => {
   test("--plan changes nothing", async () => {
     const { config, path } = await install();
     fixture.time = noon;
+
     const { report, reportPath } = await update(config, path, "0.2.0", {
       mode: "plan",
     });
+
     expect(reportPath).toBeUndefined();
     expect(report.components).toMatchObject([
       { id: "stargate", candidate: "0.2.0", status: "planned" },
@@ -2349,6 +2530,7 @@ describe("operator update", () => {
   test("refuses a downgrade, the current version and an unknown version", async () => {
     const { config, path } = await install();
     fixture.time = noon;
+
     for (const [version, expected] of [
       ["0.0.9", { status: "skipped", reason: "version-mismatch" }],
       ["0.1.0", { status: "unchanged" }],
@@ -2359,6 +2541,7 @@ describe("operator update", () => {
         { id: "stargate", ...expected },
       ]);
     }
+
     await expect(update(config, path, "v0.2")).rejects.toThrow(UpdateRefused);
     expect(commands("systemctl")).toEqual([]);
     expect((await live()).release).toBe("releases/old");
@@ -2366,6 +2549,7 @@ describe("operator update", () => {
 
   test("a release that cannot be verified is not installed", async () => {
     const { config, path } = await install();
+
     if (!config.maintenance?.stargate) throw new Error("no maintenance");
     // The tree comparison is required but no checkout is configured.
     config.maintenance.stargate.requireTreeCheck = true;
@@ -2402,11 +2586,14 @@ describe("operator update", () => {
   test("a leftover journal is refused; recover is the operator's step", async () => {
     const { config, path } = await install();
     fixture.time = noon;
+
     const journalPath = await writeJournal(
       config,
       v2({ gateway: { restartPending: true } }),
     );
+
     const before = await readFile(journalPath, "utf8");
+
     for (const mode of ["plan", "run"] as const)
       await expect(update(config, path, "0.2.0", { mode })).rejects.toThrow(
         "stargate maintenance recover",
@@ -2438,6 +2625,7 @@ describe("operator update", () => {
   test("a killed update is undone by its ExecStopPost, also on a busy host; a killed nightly run is not", async () => {
     for (const operator of [true, false]) {
       const { config, path } = await install();
+
       if (!config.maintenance) throw new Error("no maintenance");
       config.maintenance.components = {
         stargate: true,
@@ -2446,10 +2634,11 @@ describe("operator update", () => {
         models: false,
       };
       fixture.active = [];
+
       if (operator) await update(config, path, "0.2.0");
       else await run(config, path);
       // As a kill leaves it right after the gateway started on the new
-      // release: the switch is not committed.
+      // Release: the switch is not committed.
       const runID = crypto.randomUUID();
       await writeJournal(config, {
         ...v2({
@@ -2475,11 +2664,13 @@ describe("operator update", () => {
       await rm(alert, { force: true });
       fixture.active = ["ses_captain"];
       queueJob(config);
+
       const after = await recoverInterruptedRun(
         config,
         deps({ env: invocation }),
         { afterRun: true },
       );
+
       if (operator) {
         // The operator accepted the interruption: no idle check.
         expect(after.ok).toBe(true);
@@ -2519,9 +2710,11 @@ describe("operator update", () => {
       executable: "/opt/bun",
       path: "/opt:/usr/local/bin:/usr/bin:/bin",
     };
+
     /** The installed Stargate that runs the command: a verified release. */
     const installed = async (config: Config, name = "caller") => {
       const root = config.maintenance?.stargate?.root;
+
       if (!root) throw new Error("no release root");
       const directory = join(root, "releases", name);
       await mkdir(join(directory, "src"), { recursive: true });
@@ -2539,8 +2732,10 @@ describe("operator update", () => {
           tree: "equal",
         }),
       );
+
       return join(directory, "src", "main.ts");
     };
+
     const command = async (
       config: Config,
       path: string,
@@ -2550,6 +2745,7 @@ describe("operator update", () => {
       const launched: string[][] = [];
       const printed: string[] = [];
       const entrypoint = overrides.entrypoint ?? (await installed(config));
+
       const code = await maintenanceUpdate(
         config,
         { configPath: path, ...options },
@@ -2558,6 +2754,7 @@ describe("operator update", () => {
           launcher: {
             async run(argv) {
               launched.push([...argv]);
+
               return { code: 0, stdout: "", stderr: "" };
             },
           },
@@ -2567,16 +2764,19 @@ describe("operator update", () => {
           signal: fixture.controller.signal,
         },
       );
+
       return { code, launched, text: printed.join("\n"), entrypoint };
     };
 
     test("--now starts a transient unit after the read-only checks and returns", async () => {
       const { config, path } = await install();
       fixture.time = noon;
+
       const { code, launched, text, entrypoint } = await command(config, path, {
         version: "0.2.0",
         now: true,
       });
+
       expect(code).toBe(0);
       const name = `stargate-update-0-2-0-${noon / 1000}`;
       expect(launched).toEqual([
@@ -2632,6 +2832,7 @@ describe("operator update", () => {
     test("only an installed, verified release makes the update; a checkout is refused", async () => {
       const { config, path } = await install();
       const root = config.maintenance?.stargate?.root;
+
       if (!root) throw new Error("no release root");
       fixture.time = noon;
       await runningPlugin();
@@ -2655,6 +2856,7 @@ describe("operator update", () => {
         join(root, "releases", "linked"),
       );
       await mkdir(join(root, "releases", "bare", "src"), { recursive: true });
+
       for (const entrypoint of [
         // This checkout: the tests' own code.
         join(import.meta.dir, "..", "src", "main.ts"),
@@ -2676,12 +2878,15 @@ describe("operator update", () => {
             },
             { entrypoint },
           );
+
           await expect(attempt).rejects.toThrow(UpdateRefused);
           await expect(attempt).rejects.toThrow("Run the installed stargate");
         }
+
       // Nothing ran: no unit, no stage, no switch.
       expect(fixture.commands).toEqual([]);
       expect((await live()).release).toBe("releases/old");
+
       // The plan is read-only and works from anywhere.
       const plan = await command(
         config,
@@ -2689,6 +2894,7 @@ describe("operator update", () => {
         { version: "0.2.0", plan: true },
         { entrypoint: outside },
       );
+
       expect(plan.code).toBe(0);
       expect(plan.launched).toEqual([]);
     });
@@ -2720,6 +2926,7 @@ describe("operator update", () => {
     test("a refused update starts no unit", async () => {
       const { config, path } = await install();
       fixture.time = noon;
+
       for (const [version, message] of [
         ["0.0.9", "older than the current release 0.1.0"],
         ["0.3.0", "no published release 0.3.0"],
@@ -2728,9 +2935,11 @@ describe("operator update", () => {
           version,
           now: true,
         });
+
         expect([code, launched]).toEqual([1, []]);
         expect(text).toContain(message);
       }
+
       await updateState(config.dataDirectory, (state) => {
         state.failedReleases["0.2.0"] = {
           reason: "readiness-failed",
@@ -2740,13 +2949,16 @@ describe("operator update", () => {
       const bad = await command(config, path, { version: "0.2.0", now: true });
       expect([bad.code, bad.launched]).toEqual([1, []]);
       expect(bad.text).toContain("--retry-failed");
+
       const retry = await command(config, path, {
         version: "0.2.0",
         now: true,
         retryFailed: true,
       });
+
       expect(retry.code).toBe(0);
       expect(retry.launched[0]?.at(-1)).toBe("--retry-failed");
+
       for (const options of [
         { version: "0.2.0" },
         { version: "0.2.0", plan: true, now: true },
@@ -2762,10 +2974,12 @@ describe("operator update", () => {
     test("--plan says what would happen and which services restart", async () => {
       const { config, path } = await install();
       fixture.time = noon;
+
       const first = await command(config, path, {
         version: "0.2.0",
         plan: true,
       });
+
       expect([first.code, first.launched]).toEqual([0, []]);
       expect(first.text).toContain("Stargate 0.1.0 → 0.2.0");
       expect(first.text).toContain("Restart: decided after staging.");
@@ -2776,6 +2990,7 @@ describe("operator update", () => {
     test("--plan names the restart once the release is staged", async () => {
       for (const same of [true, false]) {
         const { config, path } = await install();
+
         if (same) await runningPlugin();
         fixture.time = noon;
         // Staged and verified, then rolled back: not the current release.
@@ -2783,11 +2998,13 @@ describe("operator update", () => {
         const failed = await update(config, path, "0.2.0");
         expect(statusOf(failed.report, "stargate")).toBe("rolled-back");
         fixture.commands = [];
+
         const { code, text } = await command(config, path, {
           version: "0.2.0",
           plan: true,
           retryFailed: true,
         });
+
         expect(code).toBe(0);
         expect(text).toContain(
           same
@@ -2802,22 +3019,26 @@ describe("operator update", () => {
       const { config, path } = await install();
       await runningPlugin();
       fixture.time = noon;
+
       const { code, launched, text } = await command(config, path, {
         version: "0.2.0",
         now: true,
         foreground: true,
       });
+
       expect([code, launched]).toEqual([0, []]);
       expect(text).toContain(
         "Operator update of Stargate, outside the window and without the idle gate: completed.",
       );
       expect(text).toContain("stargate: updated 0.1.0 → 0.2.0");
       expect((await live()).release).toBe("releases/0.2.0");
+
       // Staged now: the plan knows which services a switch restarts.
       const again = await command(config, path, {
         version: "0.2.0",
         plan: true,
       });
+
       expect(again.text).toContain("is the current release");
     });
 
@@ -2826,8 +3047,10 @@ describe("operator update", () => {
       await runningPlugin();
       fixture.time = noon;
       const root = config.maintenance?.stargate?.root;
+
       if (!root) throw new Error("no release root");
       const entrypoint = await installed(config, "0.0.1");
+
       for (const version of ["0.0.1", "0.0.2", "0.0.3", "0.0.4"]) {
         const main = await installed(config, version);
         const metadata = join(dirname(dirname(main)), ".stargate-release.json");
@@ -2839,8 +3062,10 @@ describe("operator update", () => {
           }),
         );
       }
+
       let atKill: { releases: string[]; journal: string | null } | undefined;
       const clear = Journal.prototype.clear;
+
       const stop = spyOn(Journal.prototype, "clear").mockImplementation(
         async function (this: Journal, key) {
           if (key === "gateway") {
@@ -2850,9 +3075,11 @@ describe("operator update", () => {
             };
             throw new Error("simulated kill after pruning");
           }
+
           return clear.call(this, key);
         },
       );
+
       try {
         await maintenanceUpdate(
           config,
@@ -2869,6 +3096,7 @@ describe("operator update", () => {
       } finally {
         stop.mockRestore();
       }
+
       expect(atKill?.releases).toContain("0.0.1");
       expect(atKill?.releases).toContain("old");
       expect(atKill?.releases).toContain("0.2.0");
@@ -2880,11 +3108,13 @@ describe("operator update", () => {
       });
       // ExecStopPost still has code to run, and can finish this journal.
       expect(await readFile(entrypoint, "utf8")).toBe("");
+
       const recovered = await recoverInterruptedRun(
         config,
         deps({ env: invocation }),
         { afterRun: true },
       );
+
       expect(recovered.ok).toBe(true);
       expect(await readJournalFile(config.dataDirectory)).toBeNull();
     });
@@ -2894,10 +3124,12 @@ describe("operator update", () => {
 describe("journal recovery", () => {
   test("a journal that names anything outside the configuration is refused", async () => {
     const cutoff = "2026-10-01T00:00:00.000Z";
+
     const v1 = {
       schema: "stargate.maintenance.journal.v1",
       runID: crypto.randomUUID(),
     };
+
     for (const journal of [
       v2({ gateway: { restartPending: true }, exec: ["touch", "/x"] }),
       v2({
@@ -2992,9 +3224,11 @@ describe("journal recovery", () => {
     const runID = crypto.randomUUID();
     const journal = Journal.create(config.dataDirectory, runID);
     await journal.set("files", {});
+
     const changes = new FileChanges(
       backupDirectory(config.dataDirectory, runID),
     );
+
     const before = await readFile(teamPath(), "utf8");
     await changes.write(teamPath(), "maintenance\n");
     // The operator edits the file after maintenance wrote it.
@@ -3032,9 +3266,11 @@ describe("journal recovery", () => {
     const profiles = join(home, "agent-profiles");
     await mkdir(join(profiles, "01-blended"), { recursive: true });
     await mkdir(join(home, "agents"));
+
     const { config } = await install({
       models: { agentProfiles: profiles, teamFiles: [] },
     });
+
     const runID = crypto.randomUUID();
     const journal = Journal.create(config.dataDirectory, runID);
     await journal.set("files", {});
@@ -3064,20 +3300,25 @@ describe("journal recovery", () => {
       "maintenance\n",
     );
     await journal.set("openCode", { restarted: true, restartPending: false });
+
     // The first pass restores the file, then dies in the OpenCode restart.
     const dying: CommandRunner = {
       async run(command, options) {
         if (command.join(" ").includes("opencode2.service"))
           throw new Error("killed");
+
         return runner.run(command, options);
       },
     };
+
     await expect(
       recoverInterruptedRun(config, deps({ runner: dying })),
     ).rejects.toThrow("killed");
+
     const left = JSON.parse(
       (await readJournalFile(config.dataDirectory)) ?? "{}",
     );
+
     expect(left.files).toBeUndefined();
     expect(left.openCode).toEqual({ restarted: true, restartPending: true });
     fixture.openCodeRestarts = 0;
@@ -3088,6 +3329,7 @@ describe("journal recovery", () => {
 
   test("a gateway serving another release than current is restarted", async () => {
     const { config } = await install();
+
     const ready = (version: string) =>
       writeFile(
         join(config.dataDirectory, "ready.json"),
@@ -3098,6 +3340,7 @@ describe("journal recovery", () => {
           version,
         }),
       );
+
     // Active and alive, but still the release that was undone.
     await ready("0.2.0");
     await writeJournal(config, v2({ gateway: { restartPending: false } }));
@@ -3126,6 +3369,7 @@ describe("journal recovery", () => {
 
   test("a leftover journal waits for idle; after-run only finishes its own run", async () => {
     const { config, path } = await install();
+
     const journalPath = await writeJournal(
       config,
       v2({
@@ -3133,11 +3377,14 @@ describe("journal recovery", () => {
         openCode: { restarted: true, restartPending: true },
       }),
     );
+
     const before = await readFile(journalPath, "utf8");
     fixture.active = ["ses_captain"];
+
     const { report, attention } = await run(config, path, "run", {
       env: invocation,
     });
+
     expect(report).toMatchObject({
       outcome: "deferred",
       reason: "busy-opencode",
@@ -3149,12 +3396,14 @@ describe("journal recovery", () => {
     expect(attention).toBe(true);
     expect(await readFile(journalPath, "utf8")).toBe(before);
     expect(commands("systemctl --user restart")).toEqual([]);
+
     // ExecStopPost of the deferred run leaves the older journal alone.
     const after = await recoverInterruptedRun(
       config,
       deps({ env: invocation }),
       { afterRun: true },
     );
+
     expect(after.ok).toBe(true);
     expect(await readFile(journalPath, "utf8")).toBe(before);
     expect(commands("systemctl --user restart")).toEqual([]);
@@ -3173,6 +3422,7 @@ describe("journal recovery", () => {
     let calls = 0;
     // Idle at the run's first gate; a session starts during the undo.
     opencode.active = async () => (++calls >= 2 ? ["ses_captain"] : []);
+
     try {
       const { report, attention } = await run(config, path);
       expect(report).toMatchObject({
@@ -3183,11 +3433,14 @@ describe("journal recovery", () => {
     } finally {
       opencode.active = original;
     }
+
     expect(fixture.openCodeRestarts).toBe(0);
     expect(commands("systemctl --user restart stargate.service")).toEqual([]);
+
     const left = JSON.parse(
       (await readJournalFile(config.dataDirectory)) ?? "{}",
     );
+
     expect(left.openCode).toEqual({ restarted: true, restartPending: true });
     expect(left.gateway).toEqual({ restartPending: true });
   });
@@ -3195,11 +3448,14 @@ describe("journal recovery", () => {
   test("recover refuses while a run holds the lock", async () => {
     const { config } = await install();
     await writeJournal(config, v2({ gateway: { restartPending: true } }));
+
     const held = new Database(
       join(config.dataDirectory, "maintenance", "run.sqlite"),
       { create: true },
     );
+
     held.exec("BEGIN EXCLUSIVE;");
+
     try {
       const result = await recoverInterruptedRun(config, deps());
       expect(result).toMatchObject({ ok: false });
@@ -3212,6 +3468,7 @@ describe("journal recovery", () => {
 
   test("a stopped gateway is started before a leftover journal waits for idle", async () => {
     const { config, path } = await install();
+
     const journalPath = await writeJournal(
       config,
       v2({
@@ -3219,12 +3476,13 @@ describe("journal recovery", () => {
         openCode: { restarted: true, restartPending: true },
       }),
     );
+
     fixture.gateway = "inactive";
     fixture.active = ["ses_captain"];
     const { report } = await run(config, path);
     expect(report.outcome).toBe("deferred");
     // Starting a stopped gateway interrupts nothing; Slack works again
-    // while the undo waits for the next idle boundary.
+    // While the undo waits for the next idle boundary.
     expect(fixture.gateway).toBe("active");
     expect(commands("systemctl --user start stargate.service")).toHaveLength(1);
     expect(await readFile(journalPath, "utf8")).toContain('"gateway"');
@@ -3235,11 +3493,13 @@ describe("journal recovery", () => {
     await writeJournal(config, v2({ gateway: { restartPending: false } }));
     const cron = join(config.dataDirectory, "cron.sqlite");
     new CronStore(cron).close();
+
     const sql = (text: string) => {
       const db = new Database(cron);
       db.exec(text);
       db.close();
     };
+
     // Due before the gateway stopped; only a running gateway advances it.
     sql(
       `INSERT INTO cron_schedules (id,botKey,channel,user,name,expression,timezone,prompt,nextAt,createdAt)
@@ -3250,6 +3510,7 @@ describe("journal recovery", () => {
       if (command === "systemctl --user start stargate.service")
         sql(`UPDATE cron_schedules SET nextAt=${now + 86_400_000}`);
     };
+
     const { report } = await run(config, path);
     expect(report.steps).toContainEqual(
       expect.objectContaining({ name: "recover-previous-run", status: "ok" }),
@@ -3268,8 +3529,8 @@ describe("journal recovery", () => {
       teamPath(),
       "maintenance\n",
     );
-    // last-run.json names this journal's run, but a later invocation exited
-    // before writing its own (disabled, outside the window, lock busy).
+    // Last-run.json names this journal's run, but a later invocation exited
+    // Before writing its own (disabled, outside the window, lock busy).
     await writeFile(
       join(config.dataDirectory, "maintenance", "last-run.json"),
       JSON.stringify({
@@ -3279,16 +3540,20 @@ describe("journal recovery", () => {
       { mode: 0o600 },
     );
     fixture.gateway = "inactive";
+
     for (const env of [invocation, { STARGATE_RELEASE_TOKEN: "x" }]) {
       fixture.commands = [];
+
       const result = await recoverInterruptedRun(config, deps({ env }), {
         afterRun: true,
       });
+
       expect(result.ok).toBe(true);
       expect(await readFile(teamPath(), "utf8")).toBe("maintenance\n");
       expect(await readJournalFile(config.dataDirectory)).toContain('"files"');
       expect(commands("systemctl --user restart")).toEqual([]);
     }
+
     expect(fixture.gateway).toBe("active");
   });
 
@@ -3305,13 +3570,16 @@ describe("journal recovery", () => {
         if (first) throw new Error("killed");
         first = key;
       }
+
       return original.call(this, key);
     };
+
     try {
       await run(config, path, "run", { undoOnExit: false });
     } finally {
       Journal.prototype.clear = original;
     }
+
     expect(first).toBe("release");
     expect((await recoverInterruptedRun(config, deps())).ok).toBe(true);
     const state = await live();
@@ -3339,9 +3607,11 @@ describe("journal recovery", () => {
     expect(await readJournalFile(config.dataDirectory)).toContain('"files"');
     const accepted = await acceptCurrent(config, "files", true);
     expect(accepted.ok).toBe(true);
+
     const left = JSON.parse(
       (await readJournalFile(config.dataDirectory)) ?? "{}",
     );
+
     expect(left.files).toBeUndefined();
     expect(left.openCode).toBeDefined();
     expect(await readFile(teamPath(), "utf8")).toBe("operator\n");
@@ -3359,9 +3629,11 @@ describe("journal recovery", () => {
     expect(await readFile(path, "utf8")).toBe('{"schema":"unknown"}');
     expect((await acceptCurrent(config, "journal", true)).ok).toBe(true);
     expect(await readJournalFile(config.dataDirectory)).toBeNull();
+
     const kept = (
       await readdir(join(config.dataDirectory, "maintenance"))
     ).filter((name) => name.startsWith("journal.accepted-"));
+
     expect(kept).toHaveLength(1);
     expect(
       await readFile(
@@ -3390,7 +3662,7 @@ describe("journal recovery", () => {
     await writeJournal(config, v2({ gateway: { restartPending: false } }));
     overdueSchedule(config);
     // Between restarts (RestartSec) the unit is `activating`; it never
-    // wrote a ready record, so nothing advances the overdue schedule.
+    // Wrote a ready record, so nothing advances the overdue schedule.
     fixture.gateway = "activating";
     // Once recovery restarts it and it is ready, it runs the schedule.
     fixture.onCommand = async (command) => {
@@ -3400,6 +3672,7 @@ describe("journal recovery", () => {
         db.close();
       }
     };
+
     const { report } = await run(config, path);
     expect(report.steps).toContainEqual(
       expect.objectContaining({ name: "recover-previous-run", status: "ok" }),
@@ -3420,13 +3693,16 @@ describe("journal recovery", () => {
         version: "0.1.0",
       }),
     );
+
     const silent: CommandRunner = {
       async run(command, options) {
         if (command.join(" ") === "systemctl --user is-active stargate.service")
           return { code: 1, stdout: "", stderr: "" };
+
         return runner.run(command, options);
       },
     };
+
     const { report } = await run(config, path, "run", { runner: silent });
     expect(report).toMatchObject({ outcome: "deferred", reason: "busy-cron" });
   });
@@ -3436,15 +3712,19 @@ describe("journal recovery", () => {
     const runID = crypto.randomUUID();
     const journal = Journal.create(config.dataDirectory, runID);
     await journal.set("files", {});
+
     const changes = new FileChanges(
       backupDirectory(config.dataDirectory, runID),
     );
+
     const captain = join(fixture.dir, "captain", ".opencode", "opencode.json");
+
     // Still a valid profile: crew discovery must keep finding it.
     const upgraded = (await readFile(captain, "utf8")).replaceAll(
       "gpt-6.1-sol",
       "gpt-6.2-sol",
     );
+
     await changes.write(teamPath(), "maintenance team\n");
     await changes.write(captain, upgraded);
     // The older write was changed by someone else; the newer one was not.

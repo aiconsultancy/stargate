@@ -22,6 +22,7 @@ import {
 } from "../src/cron/job-files";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
+
 const basic = `---
 name: daily-report
 description: Prepare the daily report
@@ -30,12 +31,16 @@ schedule: '0 9 * * *' # YAML comments are accepted
 # Report
 
 Read supporting files and prepare the report.`;
+
 const roots: string[] = [];
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "cronjob-files-"));
   roots.push(root);
+
   return root;
 }
+
 afterEach(async () => {
   for (const root of roots.splice(0))
     await rm(root, { recursive: true, force: true });
@@ -52,6 +57,7 @@ describe("cronjob files", () => {
       report: "immediate",
       prompt: "# Report\n\nRead supporting files and prepare the report.",
     });
+
     const full = parseCronjob(
       basic.replace(
         "---\n# Report",
@@ -60,6 +66,7 @@ describe("cronjob files", () => {
       "daily-report",
       now,
     );
+
     expect(full.skills).toEqual(["local-doc-search", "report"]);
     expect(full.enabled).toBe(false);
     expect(full.slack).toEqual({ channel: "C123ABC", user: "U123ABC" });
@@ -76,11 +83,13 @@ describe("cronjob files", () => {
     expect(parseCronjob(renderCronjob(legacy), legacy.name, now).report).toBe(
       "immediate",
     );
+
     const daily = parseCronjob(
       basic.replace("---\n# Report", "report: daily\n---\n# Report"),
       definition.name,
       now,
     );
+
     expect(daily.report).toBe("daily");
     expect(parseCronjob(renderCronjob(daily), daily.name, now)).toEqual(daily);
     expect(() =>
@@ -115,6 +124,7 @@ describe("cronjob files", () => {
         "Invalid cronjob name",
       );
     }
+
     expect(cronjobNameSchema.safeParse("a".repeat(64)).success).toBe(true);
     expect(() => parseCronjob(basic, "different-name", now)).toThrow(
       "mismatch",
@@ -139,6 +149,7 @@ describe("cronjob files", () => {
         ),
       ).toThrow();
     }
+
     for (const schedule of [
       "@daily",
       "0 0 9 * * *",
@@ -202,10 +213,12 @@ describe("cronjob files", () => {
 
   test("validates writes before creating directories", async () => {
     const root = join(await fixture(), "absent");
+
     const definition: CronjobDefinition = {
       ...parseCronjob(basic, "daily-report", now),
       schedule: "@daily",
     };
+
     await expect(writeCronjob(root, definition, now)).rejects.toThrow();
     expect(await listCronjobNames(root)).toEqual([]);
     await expect(lstat(root)).rejects.toThrow();
@@ -232,6 +245,7 @@ describe("cronjob files", () => {
     const alias = join(parent, "alias");
     await symlink(real, alias);
     const definition = parseCronjob(basic, "daily-report", now);
+
     for (const root of [alias, join(alias, "nested")]) {
       await expect(listCronjobNames(root)).rejects.toThrow("Unsafe");
       await expect(writeCronjob(root, definition, now)).rejects.toThrow(
@@ -241,6 +255,7 @@ describe("cronjob files", () => {
         "Unsafe",
       );
     }
+
     const root = join(parent, "jobs");
     await mkdir(root);
     const job = join(root, definition.name);

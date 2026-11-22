@@ -3,20 +3,24 @@ import { controlInteractions } from "../src/slack/interactions";
 
 test("configuration buttons use the existing interaction path without consuming Stop or cron", async () => {
   const calls: string[] = [];
+
   const handler = {
     async command() {},
     async interactive() {
       calls.push("cron");
     },
   };
+
   const controls = controlInteractions(
     handler,
     handler,
     (body) => {
       if (body === "stop") {
         calls.push("stop");
+
         return true;
       }
+
       return false;
     },
     undefined,
@@ -24,12 +28,15 @@ test("configuration buttons use the existing interaction path without consuming 
       if (body !== "panel") return false;
       calls.push("panel");
       await ack();
+
       return true;
     },
   );
+
   const ack = async () => {
     calls.push("ack");
   };
+
   await controls.interactive("panel", ack);
   await controls.interactive("stop", ack);
   await controls.interactive("other", ack);
@@ -38,6 +45,7 @@ test("configuration buttons use the existing interaction path without consuming 
 
 test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay private", async () => {
   const calls: string[] = [];
+
   const interaction = (name: string) => ({
     async command() {
       calls.push(`${name}-command`);
@@ -46,19 +54,24 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
       calls.push(`${name}-interactive`);
     },
   });
+
   const controls = controlInteractions(
     interaction("cron"),
     interaction("pair"),
     (body) => {
       const stop = body === "stop";
+
       if (stop) calls.push("stop");
+
       return stop;
     },
     interaction("crew"),
   );
+
   const ack = async () => {
     calls.push("ack");
   };
+
   await controls.command({ command: "/stargate", text: "pair" }, ack);
   await controls.command({ command: "/cron", text: "list" }, ack);
   await controls.command({ command: "/stargate", text: "crew" }, ack);
@@ -84,6 +97,7 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
     "cron-interactive",
   ]);
   const acks: (Record<string, unknown> | undefined)[] = [];
+
   for (const command of [
     "/pair",
     "/stargate-other",
@@ -94,9 +108,12 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
       acks.push(payload);
     });
   }
+
   expect(acks).toHaveLength(4);
+
   for (const payload of acks)
     expect(payload).toMatchObject({ response_type: "ephemeral" });
+
   for (const text of [
     "pair extra",
     "pairing",
@@ -109,5 +126,6 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
       expect(payload).toMatchObject({ response_type: "ephemeral" });
     });
   }
+
   expect(calls).toHaveLength(10);
 });

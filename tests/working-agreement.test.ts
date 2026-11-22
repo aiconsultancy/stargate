@@ -10,6 +10,7 @@ import {
 test("agreement changes produce one path-only notice per member/session and survive read failure", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-agreement-"));
   const path = join(directory, "WAYS_OF_WORKING.md");
+
   try {
     await writeFile(path, "PRIVATE RULE VERSION ONE");
     const notice = workingAgreementNotice(path);
@@ -44,8 +45,10 @@ test("agreement changes produce one path-only notice per member/session and surv
 test("OpenCode request hook advises reread only on change for an authorized current member", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-agreement-hook-"));
   const path = join(directory, "WAYS_OF_WORKING.md");
+
   try {
     await writeFile(path, "DO NOT INLINE ORIGINAL RULES");
+
     const hook = workingAgreementContext(path, async (caller) => {
       if (
         caller.sessionID !== "root-a" ||
@@ -53,11 +56,13 @@ test("OpenCode request hook advises reread only on change for an authorized curr
       )
         throw new Error("Not this member");
     });
+
     const request = () => ({
       sessionID: "root-a",
       agent: "ship-captain-adama",
       system: [] as { type: "text"; text: string }[],
     });
+
     const initial = request();
     await hook(initial);
     expect(initial.system).toEqual([]);

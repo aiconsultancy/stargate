@@ -9,6 +9,7 @@ import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -18,6 +19,7 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
   cleanup.push(() => fake.stop());
   const store = openStore(":memory:");
   cleanup.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "ship",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
@@ -33,18 +35,23 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
       sessionID: "ses_captain",
     },
   });
+
   const log = pino({ enabled: false });
+
   const ship = await IrcShip.create(config, store, log, {
     env: { IRC_PASSWORD: "fixture" },
     timing: { intervalMs: 5, burst: 50, reconnectMinMs: 20 },
     readyMs: 2000,
   });
+
   const captain = ship.registrations[0];
+
   if (!captain) throw new Error("Missing captain");
   const finish = Promise.withResolvers<string>();
   const prompts: string[] = [];
   let latestAnswer = "";
   const steers: SteerInput[] = [];
+
   const backend: AgentBackend = {
     sessionID: "ses_captain",
     createSession: async () => "ses_captain",
@@ -54,11 +61,13 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
       latestAnswer = await (prompts.length === 1
         ? finish.promise
         : "Other request done");
+
       return latestAnswer;
     },
     async transcript(_s, after) {
       if (after === undefined) return { cursor: "", entries: [] };
       const input = `msg_input_${prompts.length}`;
+
       return {
         cursor: `msg_answer_${prompts.length}`,
         input,
@@ -75,11 +84,14 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
     async steer(input) {
       expect(input.allowed()).toBe(true);
       steers.push(input);
+
       return { status: "accepted" };
     },
     async close() {},
   };
+
   const controller = new AbortController();
+
   const gateway = new Gateway(
     captain.settings,
     captain.identity,
@@ -91,6 +103,7 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
     undefined,
     captain.transport,
   );
+
   const worker = gateway.work(controller.signal);
   ship.start(() => true);
   cleanup.push(async () => {
@@ -100,18 +113,22 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
     await ship.close();
   });
   await until(() => captain.client.inChannel("#ship"), 5000, "joined");
+
   const root = fake.say(
     { nick: "jack", account: "jack" },
     "#ship",
     "captain: original",
   );
+
   await until(() => prompts.length === 1, 5000, "original running");
+
   const followup = fake.say(
     { nick: "jack", account: "jack" },
     "#ship",
     "captain: revised scope",
     { "+draft/reply": root },
   );
+
   await until(() => steers.length === 1, 5000, "follow-up steered");
   expect(steers[0]?.context.source).toMatchObject({
     thread: followup,
@@ -144,9 +161,11 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
     5000,
     "queue notice",
   );
+
   const notice = lineOf(fake.received("captain"), "PRIVMSG").find((message) =>
     message.params[1]?.includes("Queued behind another request."),
   );
+
   expect(notice?.tags.get("+draft/reply")).toBe("different-root");
   finish.resolve("Original request done");
   await until(
@@ -163,11 +182,13 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
   );
   expect(steers).toHaveLength(1);
   expect(prompts).toHaveLength(2);
+
   const answer = lineOf(fake.received("captain"), "PRIVMSG").filter(
     (message) =>
       message.params[1]?.includes("Original request done") ||
       message.params[1]?.includes(followup),
   );
+
   expect(answer.length).toBeGreaterThan(0);
   expect(
     answer.every((message) => message.tags.get("+draft/reply") === root),

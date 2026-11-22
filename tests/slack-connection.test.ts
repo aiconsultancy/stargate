@@ -11,18 +11,22 @@ function fixture(failures: number, silent = false) {
   let attempts = 0;
   let failUntil = failures;
   const sockets: EventEmitter[] = [];
+
   const socket = new SlackSocket(
     () => {
       const events = new EventEmitter();
       sockets.push(events);
+
       return Object.assign(events, {
         async start() {
           attempts++;
+
           if (attempts <= failUntil)
             throw Object.assign(
               new Error("private request must not be logged"),
               { code: "EAI_AGAIN" },
             );
+
           if (!silent) events.emit("connected");
         },
         async disconnect() {
@@ -33,6 +37,7 @@ function fixture(failures: number, silent = false) {
     log,
     timing,
   );
+
   return {
     socket,
     sockets,
@@ -58,6 +63,7 @@ test("a later disconnect reconnects, and close cancels further attempts", async 
   await f.socket.start();
   f.sockets[0]?.emit("disconnected");
   expect(f.socket.state).not.toBe("connected");
+
   for (let i = 0; i < 100 && f.attempts() < 2; i++) await Bun.sleep(1);
   expect(f.attempts()).toBe(2);
   expect(f.socket.state).toBe("connected");
@@ -102,11 +108,14 @@ test("an exhausted later outage rejects supervision for the service manager", as
 
 test("auth.test also retries wrapped boot-time DNS failures", async () => {
   let attempts = 0;
+
   const slack = new SlackConnection("fixture-app", "fixture-bot", log, {
     fetch: async () => {
       attempts++;
+
       if (attempts <= 2)
         throw Object.assign(new Error("fixture DNS"), { code: "EAI_AGAIN" });
+
       return Response.json({
         ok: true,
         team_id: "T1",
@@ -115,6 +124,7 @@ test("auth.test also retries wrapped boot-time DNS failures", async () => {
       });
     },
   });
+
   try {
     expect(await slack.identity()).toEqual({ team: "T1", user: "U1" });
     expect(attempts).toBe(3);

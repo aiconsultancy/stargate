@@ -6,6 +6,7 @@ import { createBackend } from "../src/backends/factory";
 
 test("custom module receives the unchanged options and context signature", async () => {
   const root = await mkdtemp(join(tmpdir(), "backend-factory-"));
+
   try {
     const module = join(root, "adapter.ts");
     await writeFile(
@@ -20,10 +21,12 @@ export async function createBackend(options, context) {
 }
 `,
     );
+
     const backend = await createBackend(
       { type: "module", module, options: { answer: "custom answer" } },
       { dataDirectory: root },
     );
+
     const signal = new AbortController().signal;
     expect(
       await backend.createSession({ key: "thread", title: "Test", signal }),
@@ -50,6 +53,7 @@ test.each([
   ],
 ])("custom module rejects %s", async (_name, source, message) => {
   const root = await mkdtemp(join(tmpdir(), "backend-factory-"));
+
   try {
     const module = join(root, "invalid.ts");
     await writeFile(module, source);

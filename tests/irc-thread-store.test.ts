@@ -10,6 +10,7 @@ test("IRC reply parent migrates, survives reopen and stays scoped to the registr
   const directory = await mkdtemp(join(tmpdir(), "stargate-thread-store-"));
   const path = join(directory, "store.sqlite");
   let store: Store | undefined;
+
   try {
     const legacy = new Database(path);
     legacy.exec(`CREATE TABLE jobs (
@@ -22,6 +23,7 @@ test("IRC reply parent migrates, survives reopen and stays scoped to the registr
       VALUES ('old','bot','old','#ship','old','jack','old');`);
     legacy.close();
     store = openStore(path);
+
     const input = {
       eventId: "#ship:request",
       botKey: "bot",
@@ -32,6 +34,7 @@ test("IRC reply parent migrates, survives reopen and stays scoped to the registr
       text: "check",
       replyParent: "root;with\\slash",
     };
+
     store.enqueue(input);
     store.close();
     store = openStore(path);
@@ -51,6 +54,7 @@ test("IRC reply parent migrates, survives reopen and stays scoped to the registr
 
 test("IRC reply parent follows both transcript outbox paths and Stop keeps the request", () => {
   const store = openStore(":memory:");
+
   try {
     store.enqueue({
       eventId: "#ship:request",
@@ -63,6 +67,7 @@ test("IRC reply parent follows both transcript outbox paths and Stop keeps the r
       replyParent: "root",
     });
     const request = store.ready("bot", Date.now(), 1)[0];
+
     if (!request) throw new Error("missing request");
     expect(store.cancelTurn("bot", "channel", "root")).toBeUndefined();
     expect(store.cancelTurn("bot", "channel", "request")).toBe(request.id);
@@ -79,6 +84,7 @@ test("IRC reply parent follows both transcript outbox paths and Stop keeps the r
     ).toBe(1);
     const ordinary = store.ready("bot", Date.now(), 1)[0];
     expect(ordinary).toMatchObject({ thread: "request", replyParent: "root" });
+
     if (!ordinary) throw new Error("missing continuation");
     store.finish(ordinary.id);
     const from = store.captainCursor("bot", "captain");

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Invariant: every changed path either selects at least one test file,
-// is itself a test file, or is named in the untrusted notice.
+// Is itself a test file, or is named in the untrusted notice.
 // Explicit opt-in to the old local full-suite fallback; CI remains the full gate.
 const UNTRUSTED_MODE = process.env["STARGATE_UNTRUSTED_TESTS"] ?? "defer";
 const testFile = /\.test\.ts$/;
@@ -100,16 +100,20 @@ function git(args: string[], env = process.env): string {
     encoding: "utf8",
     timeout: 30_000,
   });
+
   if (result.status !== 0) throw new Error("Git comparison failed");
+
   return result.stdout;
 }
 
 async function snapshot(root: string, env: NodeJS.ProcessEnv) {
   await mkdir(root);
   git(["checkout-index", "--all", `--prefix=${root}/`], env);
+
   for (const directory of ["src", "tests", "scripts", "perf"])
     await mkdir(join(root, directory), { recursive: true });
   const modules = join(process.cwd(), "node_modules");
+
   if (await Bun.file(join(modules, "typescript/package.json")).exists())
     await symlink(modules, join(root, "node_modules"));
 }
@@ -125,72 +129,94 @@ async function affected(existing: Set<string>) {
     "-z",
     "HEAD",
   ]).split("\0");
+
   const changes: { status: string; path: string }[] = [];
+
   for (let index = 0; index < fields.length - 1; index += 2) {
     const status = fields[index];
     const path = fields[index + 1];
+
     if (!path || !status || !["A", "M", "D", "T"].includes(status))
       throw new Error("Unsupported index comparison");
     changes.push({ status, path });
   }
+
   const selected = new Set<string>();
   const graphTests = new Set<string>();
   const mappedTests = new Set<string>();
   const untrusted: string[] = [];
+
   if (!changes.length) return { selected, graphTests, mappedTests, untrusted };
 
   const root = mkdtempSync(join(tmpdir(), "stargate-affected-"));
   let terminationStatus: number | undefined;
+
   const terminate = (status: number) => {
     // Let in-flight filesystem operations and Git children settle before rm.
     terminationStatus ??= status;
   };
+
   const term = () => terminate(143);
   const interrupt = () => terminate(130);
   process.on("SIGTERM", term);
   process.on("SIGINT", interrupt);
+
   try {
     // Both snapshots use the hook's Git namespace. Only HEAD gets a private
-    // index; never clear the original Git environment before reading the index.
+    // Index; never clear the original Git environment before reading the index.
     const headEnv = {
       ...process.env,
       GIT_INDEX_FILE: join(root, "head-index"),
     };
+
     git(["read-tree", "HEAD"], headEnv);
     await snapshot(join(root, "head"), headEnv);
+
     if (terminationStatus !== undefined)
       return { selected, graphTests, mappedTests, untrusted };
     await snapshot(join(root, "index"), process.env);
+
     if (terminationStatus !== undefined)
       return { selected, graphTests, mappedTests, untrusted };
+
     const { buildGraph, importClosure } =
       await import("../../tests/architecture-graph");
+
     const directories = ["src", "tests", "scripts", "perf"];
     const before = await buildGraph(join(root, "head"), directories);
+
     const deleted = new Set(
       changes.filter(({ status }) => status === "D").map(({ path }) => path),
     );
+
     const after = await buildGraph(join(root, "index"), directories, deleted);
+
     for (const test of existing)
       if (!after.has(test)) throw new Error("Test outside the scanned graph");
+
     const closures = [...existing].map((test) => ({
       test,
       before: importClosure(before, test),
       after: importClosure(after, test),
     }));
+
     for (const { status, path } of changes) {
       const isTest = testFile.test(path);
       const mappings = readers.filter((reader) => reader.path.test(path));
+
       const mapped = [...existing].filter((test) =>
         mappings.some((reader) => reader.tests.test(test)),
       );
+
       // Global package/tool/workflow inputs remain untrusted even if imported.
       const graphAllowed =
         status !== "T" && /^(src|tests|scripts|perf)\//.test(path);
+
       const reached = graphAllowed
         ? closures.filter(({ before, after }) => {
             // Architecture readers inspect all source paths without importing them.
             const scanner = "tests/architecture-graph.ts";
+
             return (
               (status !== "A" && before.includes(path)) ||
               (status !== "D" && after.includes(path)) ||
@@ -199,17 +225,23 @@ async function affected(existing: Set<string>) {
             );
           })
         : [];
+
       // Attribute coverage per path. Another changed file selecting tests must
-      // not hide an orphan script, module, helper, or data file in the same commit.
+      // Not hide an orphan script, module, helper, or data file in the same commit.
       if (!isTest && (status === "T" || (!reached.length && !mapped.length)))
         untrusted.push(path);
+
       for (const { test } of reached) graphTests.add(test);
+
       for (const test of mapped) mappedTests.add(test);
+
       if (isTest && status !== "D") {
         graphTests.add(path);
       }
     }
+
     for (const test of [...graphTests, ...mappedTests]) selected.add(test);
+
     return { selected, graphTests, mappedTests, untrusted: untrusted.sort() };
   } finally {
     try {
@@ -217,6 +249,7 @@ async function affected(existing: Set<string>) {
     } finally {
       process.off("SIGTERM", term);
       process.off("SIGINT", interrupt);
+
       if (terminationStatus !== undefined) process.exit(terminationStatus);
     }
   }
@@ -225,15 +258,19 @@ async function affected(existing: Set<string>) {
 const env = { ...process.env };
 let tests: string[] | undefined;
 let total: number | undefined;
+
 try {
   for (const name of git(["rev-parse", "--local-env-vars"]).split(/\s+/))
     if (name) delete env[name];
+
   const existing = new Set(
     git(["ls-files", "--cached", "-z"])
       .split("\0")
       .filter((path) => testFile.test(path)),
   );
+
   total = existing.size;
+
   if (!["full", "defer"].includes(UNTRUSTED_MODE))
     throw new Error("Invalid STARGATE_UNTRUSTED_TESTS mode");
   const result = await affected(existing);
@@ -243,6 +280,7 @@ try {
     `affected-tests: ${full ? total : tests?.length} test files selected of ${total} ` +
       `(graph=${result.graphTests.size}, mapped=${result.mappedTests.size}, untrusted-mode=${UNTRUSTED_MODE})`,
   );
+
   if (result.untrusted.length)
     console.log(
       `Untrusted paths: ${JSON.stringify(result.untrusted)}. ` +
@@ -260,10 +298,11 @@ try {
 }
 
 // Apply the bound only to a successfully computed selected set. Explicit
-// untrusted full runs and computation-error full fallbacks remain unchanged.
+// Untrusted full runs and computation-error full fallbacks remain unchanged.
 const limitText = process.env["STARGATE_AFFECTED_TEST_LIMIT"] ?? "20";
 const limit = Number(limitText);
 const force = process.env["STARGATE_FORCE_AFFECTED_TESTS"] ?? "0";
+
 if (
   !/^(0|[1-9]\d*)$/.test(limitText) ||
   !Number.isSafeInteger(limit) ||
@@ -294,5 +333,6 @@ if (
       stdio: "inherit",
     },
   );
+
   process.exitCode = result.status ?? 1;
 }

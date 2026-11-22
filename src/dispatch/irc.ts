@@ -41,10 +41,12 @@ const joinWaitMs = 10_000;
 function fitBytes(text: string, bytes: number) {
   if (Buffer.byteLength(text) <= bytes) return text;
   let out = "";
+
   for (const character of text) {
     if (Buffer.byteLength(out + character) > bytes - 3) break;
     out += character;
   }
+
   return `${out}…`;
 }
 
@@ -67,17 +69,22 @@ export class IrcDispatchMessenger implements DispatchMessenger {
   private async ready(signal: AbortSignal) {
     signal.throwIfAborted();
     await this.client.waitReady(joinWaitMs, signal);
+
     if (this.client.inChannel(this.channel)) {
       this.joinWaitExpired = false;
+
       return;
     }
+
     // The first poll races the channel JOIN after (re)connecting. Wait for it
-    // once; a channel that stays unjoined then fails fast until it is joined.
+    // Once; a channel that stays unjoined then fails fast until it is joined.
     if (!this.joinWaitExpired)
       for (let waited = 0; waited < joinWaitMs; waited += 100) {
         await delay(100, undefined, { signal });
+
         if (this.client.inChannel(this.channel)) return;
       }
+
     this.joinWaitExpired = true;
     throw new Error("Agent dispatch channel is not joined");
   }
@@ -93,6 +100,7 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     } catch (error) {
       if (error instanceof IrcUnavailable || !this.client.registered)
         throw error;
+
       return undefined;
     }
   }
@@ -100,7 +108,9 @@ export class IrcDispatchMessenger implements DispatchMessenger {
   private tags(marker: DispatchMarker, replyTo?: string) {
     if (!this.client.hasCap("message-tags")) return {};
     const value = formatDispatchMarker(marker);
+
     if (!parseDispatchMarker(value)) return {};
+
     return {
       [dispatchTag]: value,
       ...(replyTo && validMsgid(replyTo) ? { "+draft/reply": replyTo } : {}),
@@ -114,10 +124,13 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     build: (maxTitle: number) => string,
   ) {
     const budget = this.client.budget(command, this.channel, tags);
+
     for (const maxTitle of [120, 80, 48, 24, 12]) {
       const text = build(maxTitle);
+
       if (Buffer.byteLength(text) <= budget) return text;
     }
+
     return fitBytes(build(12), budget);
   }
 
@@ -133,9 +146,11 @@ export class IrcDispatchMessenger implements DispatchMessenger {
         replyTo && validMsgid(replyTo) && this.client.hasCap("message-tags")
           ? { "+draft/reply": replyTo }
           : {};
+
       const text = this.fit("NOTICE", tags, (max) =>
         dispatchText.title(issue, max),
       );
+
       await this.client.send(
         "NOTICE",
         [this.channel, text],
@@ -165,8 +180,9 @@ export class IrcDispatchMessenger implements DispatchMessenger {
   async assigned(captain: CaptainRef, issue: IssueLabel, signal: AbortSignal) {
     this.carried(issue);
     await this.ready(signal);
+
     // Without message-tags the notice would go out untagged, so the
-    // captain's gateway could not tell it from an ordinary peer message.
+    // Captain's gateway could not tell it from an ordinary peer message.
     // Holding it (by throwing) retries it once the server supports tags.
     if (!this.client.hasCap("message-tags")) {
       if (!this.warnedTags)
@@ -176,15 +192,20 @@ export class IrcDispatchMessenger implements DispatchMessenger {
       this.warnedTags = true;
       throw new Error("IRC message-tags unavailable");
     }
+
     const nick = await this.nick(captain);
+
     if (!nick) return false;
     const tags = this.tags({ kind: "assigned", issue: issue.identifier });
+
     const text = fitBytes(
       dispatchText.assigned(nick, issue.identifier),
       this.client.budget("PRIVMSG", this.channel, tags),
     );
+
     await this.client.privmsg(this.channel, text, tags, this.allowed);
     await this.title(issue, undefined);
+
     return true;
   }
 
@@ -195,8 +216,9 @@ export class IrcDispatchMessenger implements DispatchMessenger {
   ) {
     this.carried(offer.issue);
     await this.ready(signal);
+
     // Without both, no answer could ever be matched to this offer. Holding
-    // the offer (by throwing) keeps captains and rounds for a working server.
+    // The offer (by throwing) keeps captains and rounds for a working server.
     if (
       !this.client.hasCap("message-tags") ||
       !this.client.hasCap("echo-message")
@@ -208,13 +230,17 @@ export class IrcDispatchMessenger implements DispatchMessenger {
       this.warnedTags = true;
       throw new Error("IRC message-tags or echo-message unavailable");
     }
+
     const nick = await this.nick(captain);
+
     if (!nick) return;
+
     const tags = this.tags({
       kind: "offer",
       offerID: offer.id,
       issue: offer.issue.identifier,
     });
+
     const text = fitBytes(
       dispatchText.offer(
         nick,
@@ -224,6 +250,7 @@ export class IrcDispatchMessenger implements DispatchMessenger {
       ),
       this.client.budget("PRIVMSG", this.channel, tags),
     );
+
     // Answers reply to this PRIVMSG: the title NOTICE never carries the ID.
     const messageID = await this.client.publish(
       this.channel,
@@ -231,23 +258,29 @@ export class IrcDispatchMessenger implements DispatchMessenger {
       tags,
       this.allowed,
     );
+
     await this.title(offer.issue, messageID);
+
     return { messageID };
   }
 
   async announce(event: DispatchEvent, signal: AbortSignal) {
     await this.ready(signal);
+
     const marker: DispatchMarker | undefined =
       event.kind === "gave-up"
         ? { kind: "gave-up", issue: event.issue }
         : event.offerID
           ? { kind: event.kind, offerID: event.offerID }
           : undefined;
+
     const tags = marker ? this.tags(marker, event.replyTo) : {};
+
     const text = fitBytes(
       event.text,
       this.client.budget("NOTICE", this.channel, tags),
     );
+
     await this.client.send("NOTICE", [this.channel, text], tags, this.allowed);
   }
 }
@@ -265,14 +298,19 @@ export function ircDispatchAnswer(
 ): DispatchAnswerInput | undefined {
   if (!["NOTICE", "PRIVMSG", "TAGMSG"].includes(message.command)) return;
   const marker = parseDispatchMarker(message.tags.get(dispatchTag));
+
   if (!marker || (marker.kind !== "accept" && marker.kind !== "decline"))
     return;
   const account = message.tags.get("account");
+
   if (!account || account === "*") return;
+
   if (caseFold(message.params[0] ?? "") !== caseFold(channel)) return;
   const reply = message.tags.get("+draft/reply") ?? message.tags.get("+reply");
+
   if (!validMsgid(reply)) return;
   const time = Date.parse(message.tags.get("time") ?? "");
+
   return {
     account,
     offerID: marker.offerID,
@@ -286,6 +324,7 @@ export function ircDispatchAnswer(
 export function isDispatchRequest(message: IrcMessage) {
   if (message.command !== "PRIVMSG") return false;
   const marker = parseDispatchMarker(message.tags.get(dispatchTag));
+
   return marker?.kind === "offer" || marker?.kind === "assigned";
 }
 
@@ -302,8 +341,10 @@ export function isRearAdmiral(
   caseFold: (value: string) => string,
 ) {
   const policy = config.fleetPolicy;
+
   if (policy?.role !== "captain") return false;
   const key = caseFold(account);
+
   return (
     policy.agentAccounts.some((agent) => caseFold(agent) === key) &&
     !!config.fleetControl?.targets.some(
@@ -327,10 +368,13 @@ export function dispatchRequestTurn(
   if (message.command !== "PRIVMSG") return;
   const marker = parseDispatchMarker(message.tags.get(dispatchTag));
   const address = /^@[^\s:,]+[:,] ?/.exec(admittedText)?.[0] ?? "";
+
   if (marker?.kind === "assigned")
     return `${address}${dispatchTurnText(marker.issue)}`;
+
   if (marker?.kind === "offer")
     return `${address}${dispatchTurnText(marker.issue, marker.offerID)}`;
+
   return;
 }
 
@@ -339,7 +383,9 @@ export function ircDispatchOffer(message: IrcMessage) {
   if (message.command !== "PRIVMSG") return;
   const marker = parseDispatchMarker(message.tags.get(dispatchTag));
   const messageID = message.tags.get("msgid");
+
   if (marker?.kind !== "offer" || !validMsgid(messageID)) return;
+
   return { offerID: marker.offerID, messageID };
 }
 
@@ -354,8 +400,10 @@ export async function sendDispatchAnswer(
 ) {
   signal.throwIfAborted();
   await client.waitReady(10_000, signal);
+
   if (!client.hasCap("message-tags"))
     throw new Error("IRC message tags unavailable");
+
   const tags = {
     "+draft/reply": offer.messageID,
     [dispatchTag]: formatDispatchMarker({
@@ -363,10 +411,12 @@ export async function sendDispatchAnswer(
       offerID: offer.offerID,
     }),
   };
+
   const text = fitBytes(
     dispatchText.answer(answer, offer.offerID, reason),
     client.budget("NOTICE", offer.channel, tags),
   );
+
   signal.throwIfAborted();
   await client.send("NOTICE", [offer.channel, text], tags, allowed);
 }

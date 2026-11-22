@@ -7,11 +7,13 @@ test("OpenCode and Pi crew definitions include the two short coordination rules"
     new URL("../templates/agents/crew.md", import.meta.url),
     "utf8",
   );
+
   const pi = piMemberDefinition(
     { id: "chief", role: "Engineer", permissionProfile: "coding" },
     "/work/chief",
     "/work/captain",
   );
+
   for (const text of [template, pi]) {
     expect(text).toContain(
       "Child agents use their own standard tools, never Stargate tools or prefixed names; do not nest children.",

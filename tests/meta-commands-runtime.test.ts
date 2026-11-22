@@ -20,15 +20,19 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-meta-runtime-"));
   const controller = new AbortController();
   let running: Promise<void> | undefined;
+
   try {
     const config = bot();
     config.configPanelEnabled = true;
+
     if (config.backend.type !== "opencode") throw new Error("Invalid fixture");
     config.backend.directory = dataDirectory;
     config.backend.agent = "captain";
+
     const preferences = new NotificationStore(
       join(dataDirectory, "notifications.sqlite"),
     );
+
     try {
       preferences.operate(
         notificationKey(config, identity),
@@ -52,12 +56,15 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
     } finally {
       preferences.close();
     }
+
     const started =
       Promise.withResolvers<(body: unknown) => boolean | Promise<boolean>>();
+
     const posts: string[] = [];
     const updates: { ts: string; text: string; content: unknown }[] = [];
     let interactions: SlackInteractions | undefined;
     const backendCalls: string[] = [];
+
     const dependencies: RuntimeDependencies = {
       slack: () =>
         ({
@@ -71,10 +78,12 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
           async close() {},
           async post(_channel, _thread, text) {
             posts.push(text);
+
             return "9.000";
           },
           async update(_channel, ts, text, _stop, content) {
             updates.push({ ts, text, content });
+
             return true;
           },
           async userInfo(user) {
@@ -113,6 +122,7 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
         },
         async quota() {
           backendCalls.push("quota");
+
           return {
             status: "not-configured",
             observedAt: 1,
@@ -123,6 +133,7 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
         async close() {},
       }),
     };
+
     running = Effect.runPromise(
       serve(
         { dataDirectory, bots: [config] },
@@ -143,6 +154,7 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
     expect(posts[1]).toContain("unknown");
     expect(backendCalls).toEqual(["quota"]);
     await accept(event("<@UBOT> /config", "3.000"));
+
     const content = z
       .object({
         blocks: z.array(
@@ -161,9 +173,11 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
         ),
       })
       .parse(updates.at(-1)?.content);
+
     const button = content.blocks
       .flatMap((block) => block.elements ?? [])
       .find((item) => item.text.text === "3s");
+
     if (!button || !interactions) throw new Error("Panel binding unavailable");
     let acks = 0;
     await interactions.interactive(

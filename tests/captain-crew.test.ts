@@ -19,6 +19,7 @@ const legacy = "ses_rootLegacy";
 /** Fake native roots, workers and Mesij; no OpenCode, provider or Slack. */
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-captain-crew-"));
+
   const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [
@@ -26,6 +27,7 @@ async function fixture() {
       { id: "helper", role: "Reviewer", permissionProfile: "coding" },
     ],
   });
+
   const options: CrewOptions = {
     namespace: "captain-singleton",
     stateDirectory: join(directory, "state"),
@@ -38,12 +40,15 @@ async function fixture() {
     team,
     mesijCommand: "/unused",
   };
+
   const synthetic: { sessionID: string; metadata?: unknown }[] = [];
   const prompts: { sessionID: string; metadata?: unknown }[] = [];
   let engine: CrewEngine | undefined;
+
   const sessions: CrewSessions = {
     async get({ sessionID }) {
       const peer = engine?.state.peerBySession(sessionID);
+
       if (peer)
         return {
           id: sessionID,
@@ -53,8 +58,10 @@ async function fixture() {
             stargateCrew: { namespace: options.namespace, crewID: peer.crewID },
           },
         };
+
       // Every ses_root* session is a real native captain root.
       if (!sessionID.startsWith("ses_root")) throw new Error("Unknown session");
+
       return {
         id: sessionID,
         agent: "captain",
@@ -66,6 +73,7 @@ async function fixture() {
     },
     async prompt(input) {
       prompts.push(input);
+
       return { id: input.id ?? "", sessionID: input.sessionID };
     },
     async synthetic(input) {
@@ -79,14 +87,17 @@ async function fixture() {
       throw new Error("Unexpected native interruption");
     },
   };
+
   const events: MesijMessage[] = [];
   const keys = new Map<string, MesijMessage>();
+
   const mailer: Pick<MesijClient, "register" | "send" | "inbox"> = {
     async register() {
       return { id: "0".repeat(32), sequence: 0 };
     },
     async send(input) {
       let event = keys.get(input.key);
+
       if (!event) {
         event = {
           id: (events.length + 1).toString(16).padStart(32, "0"),
@@ -101,6 +112,7 @@ async function fixture() {
         keys.set(input.key, event);
         events.push(event);
       }
+
       return { id: event.id, sequence: event.sequence };
     },
     async inbox(input) {
@@ -112,6 +124,7 @@ async function fixture() {
         .slice(0, input.limit ?? 100);
     },
   };
+
   const open = async (captainSessionID?: string) => {
     await engine?.close();
     engine = await CrewEngine.open(
@@ -119,13 +132,16 @@ async function fixture() {
       sessions,
       mailer,
     );
+
     return engine;
   };
+
   const current = await open();
   const peer = current.state.reservePeer("worker");
   current.state.readyPeer("worker");
   const helper = current.state.reservePeer("helper");
   current.state.readyPeer("helper");
+
   const caller = (sessionID: string, agent: string, id = "call") =>
     ({
       sessionID,
@@ -133,9 +149,11 @@ async function fixture() {
       id,
       signal: new AbortController().signal,
     }) satisfies CrewCaller;
+
   return {
     get engine() {
       if (!engine) throw new Error("Engine closed");
+
       return engine;
     },
     open,
@@ -156,6 +174,7 @@ async function fixture() {
 
 test("a pinned team keeps one captain: earlier roots are history, not authority or wake targets", async () => {
   const f = await fixture();
+
   try {
     // Before the pin: an earlier root mailed the worker and owns a task.
     await f.engine.mail(
@@ -163,10 +182,12 @@ test("a pinned team keeps one captain: earlier roots are history, not authority 
       f.captain(legacy),
     );
     const task = f.engine.state.reserveTask(f.peer, legacy, "Legacy work");
+
     if (!task) throw new Error("Missing legacy task");
     f.engine.state.running(task.id);
 
     await f.open(canonical);
+
     // Every captain tool, including recovery and history, authenticates the pin.
     for (const attempt of [
       () => f.engine.run({ op: "roster" }, f.captain(legacy)),
@@ -188,6 +209,7 @@ test("a pinned team keeps one captain: earlier roots are history, not authority 
     // A captain-alias reply to the earlier root's mail wakes the pin only.
     const question = (await f.engine.mail({ op: "inbox" }, f.worker()))
       .messages?.[0];
+
     if (!question) throw new Error("Missing legacy question");
     expect(
       await f.engine.dm(
@@ -244,9 +266,11 @@ test("a pinned team keeps one captain: earlier roots are history, not authority 
 
 test("quota tool authorizes captain/assigned worker, accepts no controls and starts no work", async () => {
   const f = await fixture();
+
   try {
     await f.open(canonical);
     const task = f.engine.state.reserveTask(f.peer, canonical, "Existing work");
+
     if (!task) throw new Error("Missing task");
     f.engine.state.running(task.id);
     expect(await f.engine.quota({}, f.captain(canonical))).toMatchObject({
@@ -274,6 +298,7 @@ test("quota tool authorizes captain/assigned worker, accepts no controls and sta
 
 test("the pin keeps queued FIFO work, cancels it, and admits it with its raw origin", async () => {
   const f = await fixture();
+
   try {
     const first = f.engine.state.enqueue(f.peer, legacy, "First queued");
     const second = f.engine.state.enqueue(f.peer, legacy, "Second queued");
@@ -315,11 +340,14 @@ test("the pin keeps queued FIFO work, cancels it, and admits it with its raw ori
 
 test("reconciliation and abandonment keep the raw stored captain identity", async () => {
   const f = await fixture();
+
   try {
     const task = f.engine.state.reserveTask(f.peer, legacy, "Legacy work");
+
     if (!task) throw new Error("Missing legacy task");
     f.engine.state.uncertain(task.id);
     await f.open(canonical);
+
     const reconcile = (originCaptainID: string) =>
       f.engine.run(
         {
@@ -337,6 +365,7 @@ test("reconciliation and abandonment keep the raw stored captain identity", asyn
         },
         f.captain(canonical),
       );
+
     await expect(reconcile(canonical)).rejects.toThrow(
       "Expected ownership is stale",
     );
@@ -373,12 +402,14 @@ test("reconciliation and abandonment keep the raw stored captain identity", asyn
 
 test("lineage needs stored captain evidence; workers and unknown sessions are never aliased", async () => {
   const f = await fixture();
+
   try {
     const forged = f.engine.state.reserveTask(
       f.helper,
       f.peer.sessionID,
       "Worker-origin row",
     );
+
     if (!forged) throw new Error("Missing forged task");
     await f.open(canonical);
     const { state } = f.engine;
@@ -397,8 +428,10 @@ test("lineage needs stored captain evidence; workers and unknown sessions are ne
 
 test("pinned journals write new lineage facts under the pin and read earlier roots", async () => {
   const f = await fixture();
+
   try {
     const task = f.engine.state.reserveTask(f.peer, legacy, "Legacy work");
+
     if (!task) throw new Error("Missing legacy task");
     await f.open(canonical);
     f.engine.state.running(task.id);
@@ -416,8 +449,10 @@ test("pinned journals write new lineage facts under the pin and read earlier roo
 
 test("unpinned teams keep per-root ownership and wake the originating root", async () => {
   const f = await fixture();
+
   try {
     const task = f.engine.state.reserveTask(f.peer, legacy, "Root work");
+
     if (!task) throw new Error("Missing task");
     f.engine.state.running(task.id);
     expect(f.engine.state.captainLineage(legacy)).toBe(false);

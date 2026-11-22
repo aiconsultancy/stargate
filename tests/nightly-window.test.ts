@@ -17,6 +17,7 @@ const london = {
   jitterMinutes: 15,
   reserveMinutes: 10,
 };
+
 const day = (text: string) => Temporal.PlainDate.from(text);
 const iso = (ms: number) => new Date(ms).toISOString();
 
@@ -25,12 +26,15 @@ describe("stable jitter", () => {
     const values = ["galactica", "pegasus", "a", "b", "c", "d"].map((id) =>
       stableJitter(id, 15),
     );
+
     expect(stableJitter("galactica", 15)).toBe(values[0] ?? -1);
+
     for (const value of values) {
       expect(Number.isInteger(value)).toBe(true);
       expect(value).toBeGreaterThanOrEqual(0);
       expect(value).toBeLessThanOrEqual(15);
     }
+
     expect(new Set(values).size).toBeGreaterThan(1);
     expect(stableJitter("galactica", 0)).toBe(0);
   });
@@ -53,12 +57,14 @@ describe("Europe/London window", () => {
     const night = occurrence(day("2026-03-29"), london, 0);
     expect(iso(night.opens)).toBe("2026-03-29T00:00:00.000Z");
     expect(iso(night.closes)).toBe("2026-03-29T01:00:00.000Z");
+
     // A window that starts inside the gap has no time at all that night.
     const gap = occurrence(
       day("2026-03-29"),
       { ...london, start: "01:00", end: "02:00" },
       5,
     );
+
     expect(gap.closes - gap.opens).toBe(0);
     expect(gap.start).toBe(gap.closes);
     expect(gap.deadline).toBe(gap.opens);
@@ -69,11 +75,13 @@ describe("Europe/London window", () => {
     const night = occurrence(day("2026-10-25"), london, 0);
     expect(iso(night.opens)).toBe("2026-10-24T23:00:00.000Z");
     expect(iso(night.closes)).toBe("2026-10-25T00:00:00.000Z");
+
     const long = occurrence(
       day("2026-10-25"),
       { ...london, start: "01:00", end: "02:00" },
       0,
     );
+
     expect(iso(long.opens)).toBe("2026-10-25T00:00:00.000Z");
     expect((long.closes - long.opens) / 60_000).toBe(120);
   });
@@ -135,6 +143,7 @@ describe("maintenance configuration", () => {
       { services: { openCodeRestart: ["systemctl", "bad\narg"] } },
       { unknown: true },
     ];
+
     for (const value of bad)
       expect(
         Result.isSuccess(Schema.decodeUnknownResult(maintenanceSchema)(value)),

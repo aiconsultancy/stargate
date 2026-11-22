@@ -19,11 +19,14 @@ const SCRIPT = join(
   import.meta.dir,
   "../scripts/refresh-architecture-baseline.ts",
 );
+
 const BASELINE = "tests/architecture-baseline.json";
 const POLICY = "tests/architecture-policy.json";
 const EXCEPTION = "private:src/feature/entry.ts -> src/other/private.ts";
+
 const REVIEW_REQUIRED =
   "Not checked: that bodies are moved, not new, or that packages were already used by the closure. Put this proof in the PR for the reviewer to verify.";
+
 const temporary: string[] = [];
 
 afterEach(async () => {
@@ -40,7 +43,9 @@ function git(root: string, ...args: string[]) {
     encoding: "utf8",
     timeout: 30_000,
   });
+
   if (result.status !== 0) throw new Error(result.stderr);
+
   return result.stdout.trim();
 }
 
@@ -103,6 +108,7 @@ async function fixture(
 ) {
   const root = await mkdtemp(join(tmpdir(), "stargate-architecture-refresh-"));
   temporary.push(root);
+
   const policy: ArchitecturePolicy = {
     slices: {
       feature: {
@@ -119,6 +125,7 @@ async function fixture(
       },
     },
   };
+
   await files(root, {
     "src/main.ts": 'import "./feature/entry";\n',
     "src/feature/entry.ts": 'import "./leaf"; import "../other/private";\n',
@@ -141,6 +148,7 @@ async function fixture(
   git(root, "config", "commit.gpgsign", "false");
   git(root, "add", ".");
   git(root, "-c", "core.hooksPath=/dev/null", "commit", "-m", "fixture");
+
   return { root, base: git(root, "rev-parse", "HEAD"), original, policy };
 }
 
@@ -185,6 +193,7 @@ async function closureFixture(
   });
   await json(value.root, POLICY, value.policy);
   await formatter(value.root);
+
   return value;
 }
 
@@ -217,6 +226,7 @@ async function refusesClosureChange(
   expect(result.stderr).toContain(error);
   expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
   await noStagingFiles(root);
+
   return result;
 }
 
@@ -230,6 +240,7 @@ describe("architecture baseline refresh", () => {
             'import "./entry";\n' + "// original oversized file\n".repeat(1000),
         },
       );
+
       await files(root, {
         "src/feature/leaf.ts":
           'import "./entry";\n' +
@@ -255,6 +266,7 @@ describe("architecture baseline refresh", () => {
       });
       expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
       const noFlag = run(root, base, "--write");
+
       if (pruned.length) {
         expect(noFlag.status).not.toBe(0);
         expect(noFlag.stderr).toContain("stale:large-file:src/feature/leaf.ts");
@@ -263,6 +275,7 @@ describe("architecture baseline refresh", () => {
       } else {
         expect(noFlag.status).toBe(0);
       }
+
       const written = run(root, base, "--write", "--prune-stale");
       expect(written.status).toBe(0);
       expect(JSON.parse(written.stdout)).toMatchObject({
@@ -282,6 +295,7 @@ describe("architecture baseline refresh", () => {
     const { root, base, original } = await fixture((value) => {
       value.largeFiles.push("src/no-longer-present.ts");
     });
+
     await formatter(root);
     const before = await readFile(join(root, BASELINE), "utf8");
     const noFlag = run(root, base, "--write");
@@ -323,15 +337,18 @@ describe("architecture baseline refresh", () => {
       ],
     };
     await json(root, POLICY, policy);
+
     for (const flags of [[], ["--prune-stale"]]) {
       const result = run(root, base, "--write", ...flags);
       expect(result.status).toBe(0);
+
       if (flags.length)
         expect(JSON.parse(result.stdout)).toMatchObject({
           prunedLargeFiles: [],
         });
       expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
     }
+
     await noStagingFiles(root);
   });
 
@@ -343,6 +360,7 @@ describe("architecture baseline refresh", () => {
     });
     await formatter(root);
     const before = await readFile(join(root, BASELINE), "utf8");
+
     for (const flags of [[], ["--prune-stale"]]) {
       const result = run(root, base, "--write", ...flags);
       expect(result.status).not.toBe(0);
@@ -352,6 +370,7 @@ describe("architecture baseline refresh", () => {
       expect(result.stdout).toBe("");
       expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
     }
+
     await noStagingFiles(root);
   });
 
@@ -365,6 +384,7 @@ describe("architecture baseline refresh", () => {
     await json(root, BASELINE, original);
     await formatter(root);
     const before = await readFile(join(root, BASELINE), "utf8");
+
     for (const flags of [[], ["--prune-stale"]]) {
       const result = run(root, base, "--write", ...flags);
       expect(result.status).not.toBe(0);
@@ -373,6 +393,7 @@ describe("architecture baseline refresh", () => {
       );
       expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
     }
+
     await noStagingFiles(root);
   });
 
@@ -380,15 +401,18 @@ describe("architecture baseline refresh", () => {
     const { root, base, original } = await fixture((value) => {
       value.largeFiles.push("src/feature/leaf.ts");
     });
+
     original.largeFiles = original.largeFiles.filter(
       (file) => file !== "src/feature/leaf.ts",
     );
     await json(root, BASELINE, original);
     await formatter(root);
     expect(run(root, base, "--write").status).toBe(0);
+
     const next = JSON.parse(
       await readFile(join(root, BASELINE), "utf8"),
     ) as Baseline;
+
     expect(next.largeFiles).toEqual(original.largeFiles);
     expect(next.largeFiles).not.toContain("src/feature/leaf.ts");
     await noStagingFiles(root);
@@ -450,9 +474,11 @@ describe("architecture baseline refresh", () => {
     await json(root, BASELINE, { ...original, exceptions: [] });
     await formatter(root);
     expect(run(root, base, "--write").status).toBe(0);
+
     const next = JSON.parse(
       await readFile(join(root, BASELINE), "utf8"),
     ) as Baseline;
+
     expect(next.exceptions).toEqual([]);
     expect(next.largeFiles).toEqual(original.largeFiles);
   });
@@ -551,22 +577,28 @@ describe("architecture baseline refresh", () => {
   ] as const) {
     test(`rejects ${scenario} exceptions without changing the baseline`, async () => {
       const { root, base, original } = await fixture();
+
       if (scenario === "unauthorized")
         original.exceptions.push("unapproved:permission");
+
       if (scenario === "new") original.exceptions = [];
+
       if (scenario === "duplicate") original.exceptions.push(EXCEPTION);
+
       if (scenario === "stale")
         await files(root, { "src/feature/entry.ts": 'import "./leaf";\n' });
       await json(root, BASELINE, original);
       const before = await readFile(join(root, BASELINE), "utf8");
       const result = run(root, base, "--write");
       expect(result.status).not.toBe(0);
+
       const error =
         scenario === "unauthorized"
           ? "unauthorized-exception:"
           : scenario === "duplicate"
             ? "duplicate-exception"
             : `${scenario}:`;
+
       expect(result.stderr).toContain(error);
       expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
       await noStagingFiles(root);
@@ -582,32 +614,39 @@ describe("architecture baseline refresh", () => {
     test(`rejects ${scenario} growth against base permissions, not edited working caps`, async () => {
       const { root, base, original, policy } = await fixture((value) => {
         if (scenario === "largest-cycle") value.largestCycle = 1;
+
         if (scenario === "crew-closure")
           value.crewPlugin.members = ["src/main.ts"];
       });
+
       if (scenario === "root") {
         await files(root, { "src/new.ts": "export {};\n" });
         policy.slices["feature"]?.files.push("src/new.ts");
         await json(root, POLICY, policy);
         original.rootFiles.push("src/new.ts");
       }
+
       if (scenario === "cycle") {
         await files(root, {
           "src/feature/leaf.ts": 'import "./entry"; import "./leaf";\n',
         });
         original.cyclicEdges.push("src/feature/leaf.ts -> src/feature/leaf.ts");
       }
+
       if (scenario === "largest-cycle") original.largestCycle = 10;
+
       if (scenario === "crew-closure")
         original.crewPlugin.members = baseline().crewPlugin.members;
       await json(root, BASELINE, original);
       const before = await readFile(join(root, BASELINE), "utf8");
+
       for (const flags of [[], ["--prune-stale"]]) {
         const result = run(root, base, "--write", ...flags);
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain(`${scenario}:`);
         expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
       }
+
       await noStagingFiles(root);
     });
   }
@@ -620,6 +659,7 @@ describe("architecture baseline refresh", () => {
     test(`formatter ${scenario} leaves exact baseline bytes untouched`, async () => {
       const { root, base } = await fixture();
       const before = await readFile(join(root, BASELINE), "utf8");
+
       const bodies = {
         failure:
           'process.stderr.write("fixture formatter failed"); process.exit(7);',
@@ -627,11 +667,14 @@ describe("architecture baseline refresh", () => {
           "const value = JSON.parse(input); value.sourceFiles++; process.stdout.write(JSON.stringify(value));",
         "invalid-json": 'process.stdout.write("not JSON");',
       };
+
       await formatter(root, bodies[scenario]);
       const result = run(root, base, "--write");
       expect(result.status).not.toBe(0);
+
       if (scenario === "failure")
         expect(result.stderr).toContain("oxfmt failed (7)");
+
       if (scenario === "semantic-change")
         expect(result.stderr).toContain("Formatter changed baseline data");
       expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
@@ -679,6 +722,7 @@ describe("architecture baseline refresh", () => {
 
   test("rejects unknown, nightly-only, repeated and incomplete options", async () => {
     const { root, base } = await fixture();
+
     for (const args of [
       ["--unknown"],
       ["--allow-net1772-swaps"],
@@ -695,9 +739,11 @@ describe("architecture baseline refresh", () => {
 
   test("writes optional preview receipts only outside the measured checkout", async () => {
     const { root, base } = await fixture();
+
     const outside = await mkdtemp(
       join(tmpdir(), "stargate-architecture-receipt-"),
     );
+
     temporary.push(outside);
     const output = join(outside, "receipt.json");
     const before = await readFile(join(root, BASELINE), "utf8");
@@ -726,6 +772,7 @@ describe("named architecture closure additions", () => {
       join(import.meta.dir, "architecture.test.ts"),
       "utf8",
     );
+
     expect(source).toContain(
       "--allow-closure-addition is only for files holding only code the closure already loaded",
     );
@@ -742,16 +789,19 @@ describe("named architecture closure additions", () => {
         );
       },
     );
+
     // Four base members become four different members. No count cap grows.
     expect(original.crewPlugin.members).toHaveLength(4);
     await files(root, {
       "src/feature/entry.ts": 'import "./new"; import "../other/private";\n',
     });
+
     const result = await refusesClosureChange(
       root,
       base,
       "closure-addition:unnamed:src/feature/new.ts",
     );
+
     expect(result.stderr).toContain("--allow-closure-addition");
     expect(result.stderr).toContain("only code the closure already loaded");
     expect(result.stderr).toContain("with a decision recorded for this change");
@@ -765,12 +815,14 @@ describe("named architecture closure additions", () => {
     // Four live base members plus one new member still fit the stale cap of five.
     expect(original.crewPlugin.members).toHaveLength(5);
     expect(original.crewPlugin.members).toContain("src/removed.ts");
+
     const result = await refusesClosureChange(
       root,
       base,
       "closure-addition:unnamed:src/feature/new.ts",
       "--prune-stale",
     );
+
     expect(result.stderr).toContain("--allow-closure-addition");
   });
 
@@ -778,6 +830,7 @@ describe("named architecture closure additions", () => {
     const { root, base, original } = await closureFixture({
       "new.ts": 'import "node:crypto"; import "./leaf"; import "./entry";\n',
     });
+
     // Reach the addition from main so its old local dependencies stay acyclic.
     await files(root, {
       "src/main.ts": 'import "./feature/entry"; import "./feature/new";\n',
@@ -788,13 +841,16 @@ describe("named architecture closure additions", () => {
     temporary.push(outside);
     const output = join(outside, "receipt.json");
     const before = await readFile(join(root, BASELINE), "utf8");
+
     const closureAdditions = [
       closureAddition("src/feature/new.ts", [
         "src/feature/entry.ts",
         "src/feature/leaf.ts",
       ]),
     ];
+
     const closureRemovals = ["src/removed.ts"];
+
     for (const write of [false, true]) {
       const result = run(
         root,
@@ -805,6 +861,7 @@ describe("named architecture closure additions", () => {
         output,
         ...(write ? ["--write"] : []),
       );
+
       expect(result.status).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual({
         root,
@@ -828,10 +885,12 @@ describe("named architecture closure additions", () => {
         closureReviewRequired: REVIEW_REQUIRED,
         errors: [],
       });
+
       if (!write)
         expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
       await noStagingFiles(root);
     }
+
     expect(JSON.parse(await readFile(join(root, BASELINE), "utf8"))).toEqual({
       ...original,
       sourceFiles: 5,
@@ -859,11 +918,13 @@ describe("named architecture closure additions", () => {
       "second.ts":
         'import { Schema } from "effect"; export function newlyWritten() { return Schema.String; }\n',
     });
+
     await symlink(
       join(import.meta.dir, "../node_modules/effect"),
       join(root, "node_modules/effect"),
       "dir",
     );
+
     const result = run(
       root,
       base,
@@ -873,6 +934,7 @@ describe("named architecture closure additions", () => {
       "--allow-closure-addition",
       "src/feature/new.ts",
     );
+
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       crewClosure: 6,
@@ -892,6 +954,7 @@ describe("named architecture closure additions", () => {
     await files(root, {
       "src/feature/entry.ts": 'import "./new"; import "../other/private";\n',
     });
+
     const result = run(
       root,
       base,
@@ -899,6 +962,7 @@ describe("named architecture closure additions", () => {
       "--allow-closure-addition",
       "src/feature/new.ts",
     );
+
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       crewClosure: 4,
@@ -906,9 +970,11 @@ describe("named architecture closure additions", () => {
       closureRemovals: ["src/feature/leaf.ts", "src/removed.ts"],
       errors: [],
     });
+
     const next = JSON.parse(
       await readFile(join(root, BASELINE), "utf8"),
     ) as Baseline;
+
     expect(next.crewPlugin.members).toEqual([
       "src/feature/entry.ts",
       "src/feature/new.ts",
@@ -922,12 +988,14 @@ describe("named architecture closure additions", () => {
     const { root, base, policy } = await closureFixture();
     const identity = "src/feature/logical-new.ts";
     const feature = policy.slices["feature"];
+
     if (!feature) throw new Error("Missing fixture feature slice");
     feature.files = feature.files.map((file) =>
       file === "src/feature/new.ts" ? identity : file,
     );
     policy.aliases = { [identity]: [identity, "src/feature/new.ts"] };
     await json(root, POLICY, policy);
+
     const result = run(
       root,
       base,
@@ -935,13 +1003,16 @@ describe("named architecture closure additions", () => {
       "--allow-closure-addition",
       "src/feature/new.ts",
     );
+
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       closureAdditions: [closureAddition("src/feature/new.ts", [], identity)],
     });
+
     const next = JSON.parse(
       await readFile(join(root, BASELINE), "utf8"),
     ) as Baseline;
+
     expect(next.crewPlugin.members).toContain(identity);
     expect(next.crewPlugin.members).not.toContain("src/feature/new.ts");
     await noStagingFiles(root);
@@ -967,9 +1038,11 @@ describe("named architecture closure additions", () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).not.toHaveProperty("closureAdditions");
     expect(JSON.parse(result.stdout)).not.toHaveProperty("closureRemovals");
+
     const next = JSON.parse(
       await readFile(join(root, BASELINE), "utf8"),
     ) as Baseline;
+
     expect(next.crewPlugin.members).toContain("src/feature/leaf.ts");
     expect(next.crewPlugin.members).not.toContain("src/feature/moved-leaf.ts");
     await noStagingFiles(root);
@@ -980,6 +1053,7 @@ describe("named architecture closure additions", () => {
       "new.ts": 'import "node:crypto";\n',
       "second.ts": 'import "node:crypto";\n',
     });
+
     const result = await refusesClosureChange(
       root,
       base,
@@ -987,6 +1061,7 @@ describe("named architecture closure additions", () => {
       "--allow-closure-addition",
       "src/feature/new.ts",
     );
+
     expect(result.stderr).toContain("--allow-closure-addition");
   });
 
@@ -1054,6 +1129,7 @@ describe("named architecture closure additions", () => {
         "new.ts": 'import "./second";\n',
         "second.ts": 'import "node:crypto";\n',
       });
+
       await refusesClosureChange(
         root,
         base,
@@ -1072,6 +1148,7 @@ describe("named architecture closure additions", () => {
       const { root, base } = await closureFixture({
         "new.ts": `const target = "node:crypto"; ${loader}(target);\n`,
       });
+
       await refusesClosureChange(
         root,
         base,
@@ -1086,6 +1163,7 @@ describe("named architecture closure additions", () => {
     const { root, base } = await closureFixture({
       "new.ts": 'import "stargate-fixture-package-does-not-exist";\n',
     });
+
     await refusesClosureChange(
       root,
       base,
@@ -1099,6 +1177,7 @@ describe("named architecture closure additions", () => {
     const { root, base } = await closureFixture({
       "new.ts": 'import "./data.json";\n',
     });
+
     await json(root, "src/feature/data.json", { value: 1 });
     await refusesClosureChange(
       root,
@@ -1112,15 +1191,18 @@ describe("named architecture closure additions", () => {
   for (const guard of ["root", "cycle", "size-permission"] as const) {
     test(`naming an addition does not waive the ${guard} guard`, async () => {
       const { root, base, original, policy } = await closureFixture();
+
       if (guard === "root") {
         await files(root, { "src/new-root.ts": "export {};\n" });
         policy.slices["feature"]?.files.push("src/new-root.ts");
         await json(root, POLICY, policy);
       }
+
       if (guard === "cycle")
         await files(root, {
           "src/feature/leaf.ts": 'import "./entry"; import "./leaf";\n',
         });
+
       if (guard === "size-permission") {
         original.largeFiles.push("src/feature/new.ts");
         await json(root, BASELINE, original);
@@ -1129,12 +1211,14 @@ describe("named architecture closure additions", () => {
             'import "node:crypto";\n' + "// size probe\n".repeat(1001),
         });
       }
+
       const error =
         guard === "root"
           ? "root:src/new-root.ts"
           : guard === "cycle"
             ? "cycle:src/feature/leaf.ts -> src/feature/leaf.ts"
             : "unauthorized-large-file:src/feature/new.ts";
+
       await refusesClosureChange(
         root,
         base,

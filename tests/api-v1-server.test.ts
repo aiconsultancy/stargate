@@ -42,6 +42,7 @@ const member: V1CrewMember = {
   contexts: [],
   subagents: [],
 };
+
 const ship: V1ShipDetail = {
   id: "explorer",
   name: "Explorer",
@@ -62,18 +63,22 @@ const ship: V1ShipDetail = {
   features: [],
   crewMembers: [member],
 };
+
 const { crewMembers: _crew, ...summary } = ship;
+
 const overview = {
   apiVersion: 1,
-  generatedAt: 123456789,
+  generatedAt: 123_456_789,
   name: "Example",
   admiral: null,
   ships: [summary],
   longestIdle: null,
 } as const satisfies Omit<V1Fleet, "host" | "gateway">;
+
 const features = [
   { key: "api", label: "Fleet API", enabled: true, defaultEnabled: false },
 ];
+
 const source: ApiV1Source = {
   fleet: async () => overview,
   ship: async (id) => (id === ship.id ? ship : undefined),
@@ -81,11 +86,13 @@ const source: ApiV1Source = {
     id === ship.id && name === member.id ? { ship: id, member } : undefined,
   gatewayFeatures: () => features,
 };
+
 const versionLookup = async () => "2.3.2";
+
 const gateway = {
   version: "1.2.3",
   opencodeVersion: versionLookup,
-  startedAt: 123456000,
+  startedAt: 123_456_000,
 };
 
 function reservePort() {
@@ -110,6 +117,7 @@ async function startFixture(
   const reservation = reservePort();
   const listen = `127.0.0.1:${reservation.port}`;
   await reservation.stop(true);
+
   try {
     const server = await startApiV1Server({
       config: { listen, ...options.config },
@@ -123,13 +131,18 @@ async function startFixture(
       ...(options.timing ? { timing: options.timing } : {}),
       signal: shutdown.signal,
     });
+
     const token = await apiToken(dataDirectory);
+
     function get(path: string, init: RequestInit = {}) {
       const headers = new Headers(init.headers);
+
       if (!headers.has("Authorization"))
         headers.set("Authorization", `Bearer ${token}`);
+
       return fetch(new URL(path, server.url), { ...init, headers });
     }
+
     return {
       get,
       url: server.url,
@@ -151,18 +164,23 @@ test("HTTP fleet returns cached host metrics when enrichment exceeds the request
   const server = await startFixture({ fleetReadMs: 150 });
   const held = Promise.withResolvers<never>();
   const entered = Promise.withResolvers<void>();
+
   try {
     const first = await server.get("/api/v1/fleet");
     expect(first.status).toBe(200);
     const before = (await first.json()) as V1Fleet;
+
     const stall = spyOn(fs, "statfs").mockImplementation(() => {
       entered.resolve();
+
       return held.promise;
     });
+
     try {
       const response = server.get("/api/v1/fleet", {
         signal: AbortSignal.timeout(650),
       });
+
       await Promise.race([entered.promise, response]);
       expect(stall).toHaveBeenCalled();
       const fallback = await response;
@@ -184,15 +202,18 @@ test("HTTP fleet fallback answers before the host request deadline with default 
   // No fleetReadMs: the route must derive its deadline from the host's.
   const server = await startFixture({ timing: { requestMs: 600 } });
   const held = Promise.withResolvers<never>();
+
   try {
     const first = await server.get("/api/v1/fleet");
     expect(first.status).toBe(200);
     const before = (await first.json()) as V1Fleet;
     const stall = spyOn(fs, "statfs").mockImplementation(() => held.promise);
+
     try {
       const fallback = await server.get("/api/v1/fleet", {
-        signal: AbortSignal.timeout(2_000),
+        signal: AbortSignal.timeout(2000),
       });
+
       expect(fallback.status).toBe(200);
       expect((await fallback.json()) as V1Fleet).toMatchObject({
         host: before.host,
@@ -211,6 +232,7 @@ test("peer allowlist applies before CORS or authentication and ignores forwarded
   const server = await startFixture({
     config: { allowedNetworks: ["100.64.0.0/10", "::1/128"] },
   });
+
   try {
     for (const method of ["OPTIONS", "GET", "POST"]) {
       const response = await server.get("/api/v1/fleet", {
@@ -221,6 +243,7 @@ test("peer allowlist applies before CORS or authentication and ignores forwarded
           "CF-Connecting-IP": "100.101.102.103",
         },
       });
+
       expect(response.status).toBe(403);
       expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
       expect(await response.text()).toBe("");
@@ -233,9 +256,11 @@ test("peer allowlist applies before CORS or authentication and ignores forwarded
 
 test("preflight validates origin without a bearer token and limits methods and headers", async () => {
   const server = await startFixture();
+
   try {
     const url = new URL("/api/v1/events", server.url);
     const origin = "subspace://space-1";
+
     const response = await fetch(url, {
       method: "OPTIONS",
       headers: {
@@ -244,6 +269,7 @@ test("preflight validates origin without a bearer token and limits methods and h
         "Access-Control-Request-Headers": "authorization,last-event-id",
       },
     });
+
     expect(response.status).toBe(204);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe(origin);
     expect(response.headers.get("Access-Control-Allow-Methods")).toBe("GET");
@@ -254,6 +280,7 @@ test("preflight validates origin without a bearer token and limits methods and h
     expect(response.headers.get("Vary")).toBe("Origin");
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(await response.text()).toBe("");
+
     for (const init of [
       {},
       { headers: { Origin: "https://subspace.fake.example" } },
@@ -264,10 +291,12 @@ test("preflight validates origin without a bearer token and limits methods and h
       expect(denied.status).toBe(403);
       expect(denied.headers.get("Access-Control-Allow-Origin")).toBeNull();
     }
+
     const deniedMethod = await fetch(url, {
       method: "POST",
       headers: { Origin: origin },
     });
+
     expect(deniedMethod.status).toBe(405);
     expect(deniedMethod.headers.get("Allow")).toBe("GET, HEAD, OPTIONS");
     expect(deniedMethod.headers.get("Access-Control-Allow-Origin")).toBe(
@@ -281,10 +310,12 @@ test("preflight validates origin without a bearer token and limits methods and h
 test("an explicit WebView2 Space origin receives CORS headers", async () => {
   const origin = "https://subspace.fleet-console";
   const server = await startFixture({ config: { corsOrigins: [origin] } });
+
   try {
     const response = await server.get("/api/v1/fleet", {
       headers: { Origin: origin },
     });
+
     expect(response.status).toBe(200);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe(origin);
   } finally {
@@ -295,6 +326,7 @@ test("an explicit WebView2 Space origin receives CORS headers", async () => {
 test("host metrics use a label for a data directory on a different filesystem", async () => {
   // /dev is mounted separately on Linux (devtmpfs/tmpfs) and macOS (devfs).
   const metrics = startHostMetrics("/dev/fd");
+
   try {
     expect(metrics.snapshot().disks).toEqual([]);
     const pending = metrics.read();
@@ -309,6 +341,7 @@ test("host metrics use a label for a data directory on a different filesystem", 
 
 test("bearer authentication challenges and throttles failures without locking out valid tokens", async () => {
   const server = await startFixture();
+
   try {
     const origin = "subspace://space-1";
     const route = "/api/v1/fleet";
@@ -320,15 +353,19 @@ test("bearer authentication challenges and throttles failures without locking ou
     expect(missing.headers.get("Content-Type")).toContain("application/json");
 
     const authorization = `Bearer ${"a".repeat(43)}`;
+
     for (let index = 0; index < 4; index++) {
       const wrong = await server.get(route, {
         headers: { Authorization: authorization },
       });
+
       expect(wrong.status).toBe(401);
     }
+
     const throttled = await server.get(route, {
       headers: { Authorization: authorization },
     });
+
     expect(throttled.status).toBe(429);
     expect(Number(throttled.headers.get("Retry-After"))).toBeGreaterThan(0);
     const right = await server.get(route, { headers: { Origin: origin } });
@@ -363,9 +400,11 @@ test("routes return source data, handle encoded IDs and HEAD, and contain source
     ...source,
     ship: async (id: string, signal: AbortSignal) => {
       if (id === "fail") throw new Error("private source error");
+
       return source.ship(id, signal);
     },
   };
+
   const server = await startFixture({
     config: {
       fleetName: "Example fleet",
@@ -373,10 +412,12 @@ test("routes return source data, handle encoded IDs and HEAD, and contain source
     },
     source: fakes,
   });
+
   try {
     const fleet = await server.get("/api/v1/fleet", {
       headers: { Origin: "https://console.example.com" },
     });
+
     expect(fleet.headers.get("Access-Control-Allow-Origin")).toBe(
       "https://console.example.com",
     );
@@ -389,6 +430,7 @@ test("routes return source data, handle encoded IDs and HEAD, and contain source
     const detail = await server.get("/api/v1/ships/%65xplorer", {
       headers: { Origin: "subspace://space" },
     });
+
     expect(detail.status).toBe(200);
     expect(detail.headers.get("Access-Control-Allow-Origin")).toBeNull();
     expect(await detail.json()).toEqual(ship);
@@ -398,6 +440,7 @@ test("routes return source data, handle encoded IDs and HEAD, and contain source
     const head = await server.get("/api/v1/ships/explorer", { method: "HEAD" });
     expect(head.status).toBe(200);
     expect(await head.text()).toBe("");
+
     for (const path of [
       "/api/v1/ships/unknown",
       "/api/v1/ships/explorer/crew/unknown",
@@ -407,6 +450,7 @@ test("routes return source data, handle encoded IDs and HEAD, and contain source
     ]) {
       expect((await server.get(path)).status).toBe(404);
     }
+
     expect(
       (await server.get("/api/v1/ships/unknown", { method: "HEAD" })).status,
     ).toBe(404);
@@ -421,20 +465,26 @@ test("routes return source data, handle encoded IDs and HEAD, and contain source
 
 test("disconnected HTTP clients cancel source reads", async () => {
   const entered = Promise.withResolvers<AbortSignal>();
+
   const fakes = {
     ...source,
     ship: async (_id: string, signal: AbortSignal) => {
       entered.resolve(signal);
       await wait(3000, undefined, { signal });
+
       return ship;
     },
   };
+
   const server = await startFixture({ source: fakes });
+
   try {
     const client = new AbortController();
+
     const response = server.get("/api/v1/ships/explorer", {
       signal: client.signal,
     });
+
     const signal = await entered.promise;
     const aborted = Promise.withResolvers<void>();
     signal.addEventListener("abort", () => aborted.resolve(), { once: true });
@@ -449,28 +499,37 @@ test("disconnected HTTP clients cancel source reads", async () => {
 
 test("HTTP detail deadlines release the handlers but retain capacity for uncooperative reads", async () => {
   const held = Promise.withResolvers<void>();
+
   const readingShip = mock(async () => {
     await held.promise;
+
     return ship;
   });
+
   const readingCrew = mock(async () => {
     await held.promise;
+
     return { ship: ship.id, member };
   });
+
   const server = await startFixture({
     source: { ...source, ship: readingShip, crew: readingCrew },
     timing: { requestMs: 160 },
   });
+
   const shipPath = "/api/v1/ships/explorer";
   const crewPath = `${shipPath}/crew/engineer`;
+
   const get = (path: string) =>
     server.get(path, { signal: AbortSignal.timeout(1000) });
+
   try {
     const results = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
         get(index % 2 ? crewPath : shipPath),
       ),
     );
+
     expect(results.map(({ status }) => status)).toEqual(Array(8).fill(500));
     expect((await get(shipPath)).status).toBe(503);
     expect((await get(crewPath)).status).toBe(503);
@@ -499,10 +558,13 @@ test.each([
     const retry = Promise.withResolvers<void>();
     let gate: Promise<void> | undefined = held.promise;
     const reads = mock(async () => gate);
+
     const read = async <T>(value: T) => {
       await reads();
+
       return value;
     };
+
     const server = await startFixture({
       source: {
         ...source,
@@ -513,7 +575,9 @@ test.each([
       timing: { requestMs: 160 },
       fleetReadMs: 40,
     });
+
     const clock = spyOn(performance, "now").mockReturnValue(0);
+
     try {
       const batch = () =>
         Promise.all(
@@ -521,6 +585,7 @@ test.each([
             server.get(paths.at(index % paths.length) ?? paths[0]),
           ),
         );
+
       expect((await batch()).map(({ status }) => status)).toEqual(
         Array(8).fill(500),
       );
@@ -533,10 +598,12 @@ test.each([
         Array(8).fill(500),
       );
       gate = undefined;
+
       for (const now of [864, 1296, 1728]) {
         clock.mockReturnValue(now);
         expect((await server.get(paths[0])).status).toBe(503);
       }
+
       expect(reads).toHaveBeenCalledTimes(16);
       held.resolve();
       expect((await server.get(paths[0])).status).toBe(200);
@@ -552,6 +619,7 @@ test.each([
 test("bind errors fail startup with Fleet API context", async () => {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-bind-"));
   const reservation = reservePort();
+
   try {
     await expect(
       startApiV1Server({
@@ -572,6 +640,7 @@ test("bind errors fail startup with Fleet API context", async () => {
 test("Unix Fleet uses the private socket and operator bearer, not TCP peer CIDRs", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-unix-"));
   let server: Awaited<ReturnType<typeof startApiV1Server>> | undefined;
+
   try {
     server = await startApiV1Server({
       config: { listen: "unix", allowedNetworks: ["10.0.0.0/8"] },
@@ -584,6 +653,7 @@ test("Unix Fleet uses the private socket and operator bearer, not TCP peer CIDRs
     const token = await apiToken(directory);
     const socketPath = join(directory, "api.sock");
     expect((await lstat(socketPath)).mode & 0o777).toBe(0o600);
+
     const get = (authorization?: string) =>
       new Promise<number>((resolve, reject) => {
         const client = request(
@@ -597,9 +667,11 @@ test("Unix Fleet uses the private socket and operator bearer, not TCP peer CIDRs
             resolve(response.statusCode ?? 0);
           },
         );
+
         client.once("error", reject);
         client.end();
       });
+
     expect(await get()).toBe(401);
     expect(await get(`Bearer ${token}`)).toBe(200);
   } finally {
@@ -612,11 +684,14 @@ test("Fleet abort observes cleanup rejection and retains explicit stop error", a
   const host = await startFixture({ config: { listen: "unix" } });
   const moved = `${host.dataDirectory}.moved`;
   const unhandled: unknown[] = [];
+
   const onUnhandled = (error: unknown) => {
     unhandled.push(error);
   };
+
   let directoryMoved = false;
   process.on("unhandledRejection", onUnhandled);
+
   try {
     await rename(host.dataDirectory, moved);
     directoryMoved = true;
@@ -636,10 +711,12 @@ test("Fleet abort observes cleanup rejection and retains explicit stop error", a
   } finally {
     await host.stop().catch(() => {});
     process.off("unhandledRejection", onUnhandled);
+
     if (directoryMoved) {
       await rm(host.dataDirectory, { force: true });
       await rename(moved, host.dataDirectory);
     }
+
     await rm(host.dataDirectory, { recursive: true, force: true });
   }
 });
@@ -651,40 +728,50 @@ async function nextFrame(
 ) {
   const decoder = new TextDecoder();
   let text = "";
+
   while (!text.includes(marker) || !text.endsWith("\n\n")) {
     const chunk = await reader.read();
+
     if (chunk.done)
       throw new Error("Event stream closed before the expected frame");
     text += decoder.decode(chunk.value, { stream: true });
   }
+
   return text;
 }
 
 test("HTTP event streams send initial frames with CORS, cap clients and clean up", async () => {
   const fleet = mock(source.fleet);
   const server = await startFixture({ source: { ...source, fleet } });
+
   try {
     const route = "/api/v1/events";
     const head = await server.get(route, { method: "HEAD" });
     expect(head.status).toBe(200);
     expect(head.headers.get("Content-Type")).toBe("text/event-stream");
     expect(fleet).toHaveBeenCalledTimes(0);
+
     const readers = await Promise.all(
       Array.from({ length: 8 }, async () => {
         const response = await server.get(route, {
           headers: { Origin: "subspace://space" },
         });
+
         expect(response.status).toBe(200);
         expect(response.headers.get("Content-Type")).toBe("text/event-stream");
         expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
           "subspace://space",
         );
         expect(response.headers.get("Cache-Control")).toBe("no-store");
+
         if (!response.body) throw new Error("Missing event stream");
+
         return response.body.getReader();
       }),
     );
+
     const first = readers[0];
+
     if (!first) throw new Error("Missing first event stream");
     const initial = await nextFrame(first, "ship");
     const [fleetFrame, shipFrame] = initial.split("\n\n");
@@ -705,11 +792,14 @@ test("HTTP event streams send initial frames with CORS, cap clients and clean up
 
     await Promise.all(readers.map((reader) => reader.cancel()));
     let reconnected: Response | undefined;
+
     for (let attempt = 0; attempt < 50; attempt++) {
       reconnected = await server.get(route);
+
       if (reconnected.status !== 503) break;
       await Bun.sleep(10);
     }
+
     expect(reconnected?.status).toBe(200);
     server.shutdown.abort();
     await reconnected?.body?.cancel().catch(() => {});
@@ -726,8 +816,9 @@ const host: V1Host = {
   cpu: { cores: 4, usage: 0.3, load: [0.1, 0.2, 0.3] },
   memory: { totalBytes: 4096, availableBytes: 1024 },
   disks: [],
-  sampledAt: 123456789,
+  sampledAt: 123_456_789,
 };
+
 const activity: V1Event = {
   type: "activity",
   data: {
@@ -735,7 +826,7 @@ const activity: V1Event = {
     member: "engineer",
     kind: "dispatch",
     text: "Engineer started\nwork",
-    at: 123456789,
+    at: 123_456_789,
   },
 };
 
@@ -761,14 +852,18 @@ test("host frames use the fresh sample and keep it while the next disk read stal
   const cached = { ...host, sampledAt: host.sampledAt + 100 };
   const held = Promise.withResolvers<V1Host>();
   let latest = host;
+
   const readHost = mock(async () => {
     if (readHost.mock.calls.length === 1) {
       await Bun.sleep(1);
       latest = cached;
+
       return latest;
     }
+
     return held.promise;
   });
+
   const streams = createEventStreams(
     {
       ...source,
@@ -780,13 +875,17 @@ test("host frames use the fresh sample and keep it while the next disk read stal
     },
     { pollMs: 10, hostMs: 15, heartbeatMs: 20 },
   );
+
   try {
     const reader = streams.open(AbortSignal.timeout(400))?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
+
     for (let i = 0; i < 3; i++) {
       const frame = await nextFrame(reader, "host");
       expect(frame).toContain(`"sampledAt":${cached.sampledAt}`);
     }
+
     expect(readHost).toHaveBeenCalledTimes(2);
   } finally {
     streams.stop();
@@ -800,14 +899,15 @@ test("host samples stay in the order they were taken when the wall clock steps b
   const clock = spyOn(Date, "now");
   const enrichment = Promise.withResolvers<V1Fleet>();
   let streams: ReturnType<typeof createEventStreams> | undefined;
+
   try {
     clock.mockReturnValue(2_000_000);
     const older = await metrics.read();
     await Bun.sleep(5);
-    clock.mockReturnValue(1_000_000); // the wall clock steps back
+    clock.mockReturnValue(1_000_000); // The wall clock steps back
     await metrics.read();
     const newer = metrics.snapshot();
-    clock.mockRestore(); // the stream itself runs on the real clock
+    clock.mockRestore(); // The stream itself runs on the real clock
     expect(newer.sampledAt).toBeLessThan(older.sampledAt);
     streams = createEventStreams(
       {
@@ -822,12 +922,13 @@ test("host samples stay in the order they were taken when the wall clock steps b
       { pollMs: 1000, hostMs: 15, heartbeatMs: 1000 },
     );
     const reader = streams.open(AbortSignal.timeout(750))?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     expect(await nextFrame(reader, "host")).toContain(
       `"sampledAt":${newer.sampledAt}`,
     );
     // Delayed enrichment carries the sample taken first, although its
-    // wall-clock time is later: the stream must keep the newer sample.
+    // Wall-clock time is later: the stream must keep the newer sample.
     const enriched = fallbackFleet(overview);
     enrichment.resolve({
       ...enriched,
@@ -848,9 +949,11 @@ test("host samples stay in the order they were taken when the wall clock steps b
 test("delayed gateway enrichment keeps the newest host sample in the stream", async () => {
   const latest = { ...host, sampledAt: host.sampledAt + 100 };
   const enrichment = Promise.withResolvers<V1Fleet>();
+
   const readHost = mock(async () =>
     readHost.mock.calls.length === 2 ? host : latest,
   );
+
   const streams = createEventStreams(
     {
       ...source,
@@ -862,8 +965,10 @@ test("delayed gateway enrichment keeps the newest host sample in the stream", as
     },
     { pollMs: 1000, hostMs: 15, heartbeatMs: 1000 },
   );
+
   try {
     const reader = streams.open(AbortSignal.timeout(750))?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     expect(await nextFrame(reader, "host")).toContain(
       `"sampledAt":${latest.sampledAt}`,
@@ -873,11 +978,13 @@ test("delayed gateway enrichment keeps the newest host sample in the stream", as
       ...enriched,
       gateway: { ...enriched.gateway, opencodeVersion: "2.3.2" },
     });
+
     const fleetFrame = await nextFrame(
       reader,
       "fleet",
       '"opencodeVersion":"2.3.2"',
     );
+
     expect(fleetFrame).toContain(`"sampledAt":${latest.sampledAt}`);
     expect(await nextFrame(reader, "host")).toContain(
       `"sampledAt":${latest.sampledAt}`,
@@ -896,14 +1003,19 @@ test.each(["overview", "enrichment", "ship"])(
     const second = Promise.withResolvers<never>();
     const retried = Promise.withResolvers<void>();
     const recovered = kind === "enrichment" ? "2.3.2" : "Recovered sample";
+
     const attempt = mock(async <T>(value: T) => {
       if (attempt.mock.calls.length === 1) return first.promise;
+
       if (attempt.mock.calls.length === 2) {
         retried.resolve();
+
         return second.promise;
       }
+
       return value;
     });
+
     const streams = createEventStreams(
       {
         ...source,
@@ -915,6 +1027,7 @@ test.each(["overview", "enrichment", "ship"])(
           kind === "ship" ? attempt({ ...ship, name: recovered }) : ship,
         completeFleet: async (fleet) => {
           const next = fallbackFleet(fleet);
+
           return kind === "enrichment"
             ? attempt({
                 ...next,
@@ -929,8 +1042,10 @@ test.each(["overview", "enrichment", "ship"])(
       },
       { pollMs: 10, hostMs: 1000, heartbeatMs: 15, readMs: 25 },
     );
+
     try {
       const reader = streams.open(AbortSignal.timeout(700))?.getReader();
+
       if (!reader) throw new Error("Cannot open event stream");
       await Promise.race([
         retried.promise,
@@ -958,6 +1073,7 @@ test("an availability transition supersedes an older healthy detail read", async
   const started = Promise.withResolvers<AbortSignal>();
   const offline = { ...summary, available: false, error: "Crew unavailable." };
   let available = true;
+
   const streams = createEventStreams(
     {
       ...source,
@@ -965,8 +1081,10 @@ test("an availability transition supersedes an older healthy detail read", async
         capture?.(ship.id, async (signal) => {
           if (!available) return { ...offline, crewMembers: [] };
           started.resolve(signal);
+
           return held.promise;
         });
+
         return { ...overview, ships: [available ? summary : offline] };
       },
       diff: diffEvents,
@@ -977,8 +1095,10 @@ test("an availability transition supersedes an older healthy detail read", async
     },
     { pollMs: 20, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
   );
+
   try {
     const reader = streams.open(AbortSignal.timeout(750))?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     await nextFrame(reader, "fleet");
     const reading = await started.promise;
@@ -1001,6 +1121,7 @@ test("a joining client gets stale retained detail as soon as the captain is unav
   const offline = { ...summary, available: false, error: "Crew unavailable." };
   const detailUpdatedAt = 123;
   let available = true;
+
   const streams = createEventStreams(
     {
       ...source,
@@ -1011,6 +1132,7 @@ test("a joining client gets stale retained detail as soon as the captain is unav
       ship: async () => {
         if (available) return { ...ship, detailUpdatedAt };
         started.resolve();
+
         return held.promise;
       },
       diff: diffEvents,
@@ -1022,15 +1144,19 @@ test("a joining client gets stale retained detail as soon as the captain is unav
     },
     { pollMs: 20, hostMs: 1000, heartbeatMs: 1000, readMs: 1000 },
   );
+
   const signal = AbortSignal.timeout(600);
+
   try {
     const reader = streams.open(signal)?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     await nextFrame(reader, "ship");
     available = false;
     expect(await nextFrame(reader, "fleet")).toContain('"available":false');
     await started.promise;
     const late = streams.open(signal)?.getReader();
+
     if (!late) throw new Error("Cannot join event stream");
     const snapshot = await nextFrame(late, "ship");
     const [fleetFrame, shipFrame] = snapshot.split("\n\n");
@@ -1047,7 +1173,7 @@ test("a joining client gets stale retained detail as soon as the captain is unav
     enrichment.resolve({
       ...enriched,
       gateway: { ...enriched.gateway, opencodeVersion: "2.3.2" },
-      host: { ...host, sampledAt: 987654321 },
+      host: { ...host, sampledAt: 987_654_321 },
     });
     const updated = await nextFrame(late, "fleet");
     expect(updated).toContain('"opencodeVersion":"2.3.2"');
@@ -1065,6 +1191,7 @@ test("availability recovery waits for fresh detail while an older read drains", 
   const started = Promise.withResolvers<void>();
   const offline = { ...summary, available: false };
   let available = false;
+
   const streams = createEventStreams(
     {
       ...source,
@@ -1075,6 +1202,7 @@ test("availability recovery waits for fresh detail while an older read drains", 
       ship: async () => {
         if (available) return ship;
         started.resolve();
+
         return held.promise;
       },
       diff: diffEvents,
@@ -1085,8 +1213,10 @@ test("availability recovery waits for fresh detail while an older read drains", 
     },
     { pollMs: 10, hostMs: 1000, heartbeatMs: 30, readMs: 500 },
   );
+
   try {
     const reader = streams.open(AbortSignal.timeout(500))?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     expect(await nextFrame(reader, "fleet")).toContain('"available":false');
     await started.promise;
@@ -1105,6 +1235,7 @@ test("a replacement backend can publish detail while its predecessor still holds
   const held = Promise.withResolvers<V1ShipDetail>();
   const started = Promise.withResolvers<AbortSignal>();
   let backend = "original";
+
   const streams = createEventStreams(
     {
       ...source,
@@ -1112,6 +1243,7 @@ test("a replacement backend can publish detail while its predecessor still holds
       ship: async (_id, signal) => {
         if (backend === "replacement") return { ...ship, name: "Replacement" };
         started.resolve(signal);
+
         return held.promise;
       },
       diff: diffEvents,
@@ -1122,15 +1254,18 @@ test("a replacement backend can publish detail while its predecessor still holds
     },
     { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
   );
+
   try {
     const signal = AbortSignal.timeout(500);
     const reader = streams.open(signal)?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     await nextFrame(reader, "fleet");
     const original = await started.promise;
     backend = "replacement";
     expect((await reader.read()).done).toBe(true);
     const reconnected = streams.open(signal)?.getReader();
+
     if (!reconnected) throw new Error("Cannot reopen event stream");
     await nextFrame(reconnected, "fleet");
     expect(await nextFrame(reconnected, "ship")).toContain(
@@ -1148,15 +1283,18 @@ test("an identity change replaces an overview that ignores cancellation", async 
   const started = Promise.withResolvers<AbortSignal>();
   let backend = "original";
   let reads = 0;
+
   const streams = createEventStreams(
     {
       ...source,
       shipIdentities: () => new Map([[ship.id, backend]]),
       fleet: async (signal) => {
         if (++reads === 1) return overview;
+
         if (backend !== "original")
           return { ...overview, name: "After reload" };
         started.resolve(signal);
+
         return held.promise;
       },
       diff: diffEvents,
@@ -1167,8 +1305,10 @@ test("an identity change replaces an overview that ignores cancellation", async 
     },
     { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
   );
+
   try {
     const reader = streams.open(new AbortController().signal)?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     await nextFrame(reader, "ship");
     const reading = await started.promise;
@@ -1181,6 +1321,7 @@ test("an identity change replaces an overview that ignores cancellation", async 
     ).toBe(true);
     expect(reading.aborted).toBe(true);
     const reconnected = streams.open(AbortSignal.timeout(150))?.getReader();
+
     if (!reconnected) throw new Error("Cannot reopen event stream");
     expect(await nextFrame(reconnected, "fleet")).toContain(
       '"name":"After reload"',
@@ -1198,14 +1339,17 @@ test("a reload discards an in-flight overview even if the original roster return
   const started = Promise.withResolvers<void>();
   let roster = original;
   let reads = 0;
+
   const streams = createEventStreams(
     {
       ...source,
       shipIdentities: () => roster,
       fleet: async () => {
         if (++reads === 1) return overview;
+
         if (reads > 2) return { ...overview, name: "After reload" };
         started.resolve();
+
         return held.promise;
       },
       diff: diffEvents,
@@ -1216,14 +1360,18 @@ test("a reload discards an in-flight overview even if the original roster return
     },
     { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
   );
+
   const signal = AbortSignal.timeout(750);
+
   try {
     const reader = streams.open(signal)?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     await nextFrame(reader, "ship");
     await started.promise;
     roster = removed;
     const reconnected = streams.open(signal)?.getReader();
+
     if (!reconnected) throw new Error("Cannot reopen event stream");
     roster = original;
     expect(streams.open(signal)).toBeDefined();
@@ -1239,11 +1387,13 @@ test("a reload discards an in-flight overview even if the original roster return
 
 test("a failed overview is marked stale and expires from connection snapshots", async () => {
   let failing = false;
+
   const streams = createEventStreams(
     {
       ...source,
       fleet: async () => {
         if (failing) throw new Error("Overview offline");
+
         return overview;
       },
       diff: diffEvents,
@@ -1254,23 +1404,29 @@ test("a failed overview is marked stale and expires from connection snapshots", 
     },
     { pollMs: 15, hostMs: 1000, heartbeatMs: 10, readMs: 60 },
   );
+
   try {
     const reader = streams.open(AbortSignal.timeout(650))?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     expect(await nextFrame(reader, "fleet")).not.toContain("overviewStale");
     await nextFrame(reader, "ship");
     failing = true;
     expect(await nextFrame(reader, "fleet")).toContain('"overviewStale":true');
+
     const closed = async () => {
       while (!(await reader.read()).done) {
         // Drain queued frames before observing the stream close.
       }
+
       return true;
     };
+
     expect(
       await Promise.race([closed(), Bun.sleep(350).then(() => false)]),
     ).toBe(true);
     const late = streams.open(AbortSignal.timeout(500))?.getReader();
+
     if (!late) throw new Error("Cannot reopen event stream");
     const first = await late.read();
     expect(new TextDecoder().decode(first.value)).toStartWith(
@@ -1291,6 +1447,7 @@ test("a slow ship does not delay the overview or other ship details, and retaine
   const held = Promise.withResolvers<AbortSignal>();
   const recover = Promise.withResolvers<V1ShipDetail>();
   const timing = { pollMs: 25, hostMs: 1000, heartbeatMs: 1000, readMs: 160 };
+
   const streams = createEventStreams(
     {
       fleet: async () => ({
@@ -1300,10 +1457,13 @@ test("a slow ship does not delay the overview or other ship details, and retaine
       }),
       ship: async (id, signal) => {
         if (id === ship.id) return { ...ship, name: fleetName };
+
         if (++surveyed === 2) {
           held.resolve(signal);
+
           return recover.promise;
         }
+
         return slow;
       },
       diff: diffEvents,
@@ -1314,12 +1474,16 @@ test("a slow ship does not delay the overview or other ship details, and retaine
     },
     timing,
   );
+
   const shutdown = new AbortController();
   const timeout = setTimeout(() => shutdown.abort(), 650);
+
   try {
     const reader = streams.open(shutdown.signal)?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     let initial = await nextFrame(reader, "ship");
+
     while (
       !initial.includes('event: ship\ndata: {"id":"survey"') ||
       !initial.includes('event: ship\ndata: {"id":"explorer"')
@@ -1328,6 +1492,7 @@ test("a slow ship does not delay the overview or other ship details, and retaine
     fleetName = "Updated fleet";
     const signal = await held.promise;
     let update = await nextFrame(reader, "fleet");
+
     if (!update.includes("event: ship"))
       update += await nextFrame(reader, "ship");
     expect(update).toContain('"name":"Updated fleet"');
@@ -1349,12 +1514,15 @@ test("a slow ship does not delay the overview or other ship details, and retaine
     expect(stale).toContain('"id":"survey"');
     expect(stale).toContain('"detailStale":true');
     expect(signal.aborted).toBe(true);
+
     const freshTimestamp = /"id":"survey".*?"detailUpdatedAt":(\d+)/.exec(
       initial,
     )?.[1];
+
     expect(freshTimestamp).toBeDefined();
     expect(stale).toContain(`"detailUpdatedAt":${freshTimestamp}`);
     const late = streams.open(shutdown.signal)?.getReader();
+
     if (!late) throw new Error("Cannot join event stream");
     expect(await nextFrame(late, "ship")).toContain('"detailStale":true');
     await late.cancel();
@@ -1384,11 +1552,15 @@ test("unchanged ship details publish each successful sample time", async () => {
     },
     { pollMs: 20, hostMs: 1000, heartbeatMs: 1000 },
   );
+
   try {
     const reader = streams.open(AbortSignal.timeout(500))?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
+
     const timestamp = (frame: string) =>
       Number(/"detailUpdatedAt":(\d+)/.exec(frame)?.[1]);
+
     const first = timestamp(await nextFrame(reader, "ship"));
     const update = await nextFrame(reader, "ship-sampled");
     expect(timestamp(update)).toBeGreaterThan(first);
@@ -1400,9 +1572,11 @@ test("unchanged ship details publish each successful sample time", async () => {
 
 test("event poller shares reads, diffs each ship against its prior detail and stops with the last client", async () => {
   const fleet = mock(source.fleet);
+
   const diff = mock<ApiV1Diff>((previous, next) =>
     previous?.ships[ship.id] && next.ships[ship.id] ? [activity] : [],
   );
+
   const streams = createEventStreams(
     {
       ...source,
@@ -1415,11 +1589,14 @@ test("event poller shares reads, diffs each ship against its prior detail and st
     },
     { pollMs: 25, hostMs: 50, heartbeatMs: 65 },
   );
+
   const signal = new AbortController().signal;
+
   try {
     expect(fleet).toHaveBeenCalledTimes(0);
     const left = streams.open(signal)?.getReader();
     const right = streams.open(signal)?.getReader();
+
     if (!left || !right) throw new Error("Cannot open event streams");
     const initial = await nextFrame(left, "ship");
     expect(await nextFrame(right, "ship")).toBe(initial);
@@ -1444,6 +1621,7 @@ test("event poller shares reads, diffs each ship against its prior detail and st
     expect(fleet).toHaveBeenCalledTimes(count);
     diff.mockClear();
     const next = streams.open(signal)?.getReader();
+
     if (!next) throw new Error("Cannot reopen event stream");
     await nextFrame(next, "ship");
     expect(diff).toHaveBeenCalledTimes(0);
@@ -1456,11 +1634,13 @@ test("event poller shares reads, diffs each ship against its prior detail and st
 
 test("stopping event streams aborts the shared snapshot after the last client disconnects", async () => {
   const entered = Promise.withResolvers<AbortSignal>();
+
   const streams = createEventStreams({
     ...source,
     fleet: async (signal) => {
       entered.resolve(signal);
       await wait(500, undefined, { signal });
+
       return overview;
     },
     diff: () => [],
@@ -1469,6 +1649,7 @@ test("stopping event streams aborts the shared snapshot after the last client di
     completeFleet,
     fallbackFleet,
   });
+
   try {
     const stream = streams.open(new AbortController().signal);
     const signal = await entered.promise;
@@ -1487,13 +1668,16 @@ test.each(["overview", "ship", "enrichment"] as const)(
   async (kind) => {
     const entered = Promise.withResolvers<void>();
     const held = Promise.withResolvers<void>();
+
     const read = mock(async <T>(value: T) => {
       if (read.mock.calls.length === 1) {
         entered.resolve();
         await held.promise;
       }
+
       return value;
     });
+
     const streams = createEventStreams(
       {
         ...source,
@@ -1501,6 +1685,7 @@ test.each(["overview", "ship", "enrichment"] as const)(
         ship: async () => (kind === "ship" ? read(ship) : ship),
         completeFleet: async (snapshot) => {
           const next = fallbackFleet(snapshot);
+
           return kind === "enrichment"
             ? read({
                 ...next,
@@ -1515,16 +1700,22 @@ test.each(["overview", "ship", "enrichment"] as const)(
       },
       { pollMs: 250, hostMs: 1000, heartbeatMs: 1000, readMs: 500 },
     );
+
     const signal = AbortSignal.timeout(175);
+
     try {
       const first = streams.open(signal);
+
       if (!first) throw new Error("Cannot open event stream");
       await entered.promise;
       await first.cancel();
       const next = streams.open(signal)?.getReader();
+
       if (!next) throw new Error("Cannot reopen event stream");
+
       if (kind !== "overview") await nextFrame(next, "fleet");
       held.resolve();
+
       if (kind === "ship")
         expect(await nextFrame(next, "ship")).toContain('"id":"explorer"');
       else if (kind === "enrichment")
@@ -1544,15 +1735,19 @@ test("timed-out enrichment keeps its slot while current overviews publish across
   const held = Promise.withResolvers<V1Fleet>();
   const started = Promise.withResolvers<void>();
   let name: string = overview.name;
+
   const read = mock(async (value: typeof overview) => {
     started.resolve();
+
     if (read.mock.calls.length === 1) return held.promise;
     const next = fallbackFleet(value);
+
     return {
       ...next,
       gateway: { ...next.gateway, opencodeVersion: "2.3.2" },
     };
   });
+
   const streams = createEventStreams(
     {
       ...source,
@@ -1565,8 +1760,10 @@ test("timed-out enrichment keeps its slot while current overviews publish across
     },
     { pollMs: 10, hostMs: 1000, heartbeatMs: 1000, readMs: 25 },
   );
+
   try {
     const stream = streams.open(AbortSignal.timeout(500))?.getReader();
+
     if (!stream) throw new Error("Cannot open event stream");
     await started.promise;
     expect(await nextFrame(stream, "fleet")).toContain(`"name":"${name}"`);
@@ -1575,6 +1772,7 @@ test("timed-out enrichment keeps its slot while current overviews publish across
     await stream.cancel();
     name = "Reconnected fleet";
     const reader = streams.open(AbortSignal.timeout(500))?.getReader();
+
     if (!reader) throw new Error("Cannot reopen event stream");
     expect(await nextFrame(reader, "fleet")).toContain(`"name":"${name}"`);
     name = "Later fleet update";
@@ -1595,17 +1793,22 @@ test("a hung overview publishes keepalives before its first sample and cached da
   const deadline = Promise.withResolvers<void>();
   const later = Promise.withResolvers<typeof overview>();
   const hung = Promise.withResolvers<void>();
+
   const fleet = mock(async (signal: AbortSignal) => {
     if (fleet.mock.calls.length === 1) {
       signal.addEventListener("abort", () => deadline.resolve(), {
         once: true,
       });
+
       return first.promise;
     }
+
     if (fleet.mock.calls.length === 2) return overview;
     hung.resolve();
+
     return later.promise;
   });
+
   const streams = createEventStreams(
     {
       ...source,
@@ -1618,8 +1821,10 @@ test("a hung overview publishes keepalives before its first sample and cached da
     },
     { pollMs: 10, hostMs: 1000, heartbeatMs: 15, readMs: 25 },
   );
+
   try {
     const reader = streams.open(AbortSignal.timeout(500))?.getReader();
+
     if (!reader) throw new Error("Cannot open event stream");
     expect(await nextFrame(reader, "heartbeat")).not.toContain("event: fleet");
     expect(fleet).toHaveBeenCalledTimes(1);
@@ -1632,6 +1837,7 @@ test("a hung overview publishes keepalives before its first sample and cached da
     await hung.promise;
     await reader.cancel();
     const next = streams.open(AbortSignal.timeout(500))?.getReader();
+
     if (!next) throw new Error("Cannot reopen event stream");
     expect(await nextFrame(next, "fleet")).toContain(
       `"name":"${overview.name}"`,
@@ -1648,13 +1854,17 @@ test("a hung overview publishes keepalives before its first sample and cached da
 test("a reconnect publishes stale detail while an expired read still holds its ship slot", async () => {
   const held = Promise.withResolvers<V1ShipDetail>();
   const entered = Promise.withResolvers<AbortSignal>();
+
   const read = mock(async (_id: string, signal: AbortSignal) => {
     if (read.mock.calls.length === 2) {
       entered.resolve(signal);
+
       return held.promise;
     }
+
     return ship;
   });
+
   const streams = createEventStreams(
     {
       ...source,
@@ -1667,17 +1877,21 @@ test("a reconnect publishes stale detail while an expired read still holds its s
     },
     { pollMs: 15, hostMs: 1000, heartbeatMs: 1000, readMs: 40 },
   );
+
   try {
     const first = streams.open(AbortSignal.timeout(500))?.getReader();
+
     if (!first) throw new Error("Cannot open event stream");
     const initial = await nextFrame(first, "ship");
     const signal = await entered.promise;
     await first.cancel();
+
     if (!signal.aborted)
       await new Promise<void>((resolve) =>
         signal.addEventListener("abort", () => resolve(), { once: true }),
       );
     const next = streams.open(AbortSignal.timeout(500))?.getReader();
+
     if (!next) throw new Error("Cannot reopen event stream");
     const stale = await nextFrame(next, "ship");
     expect(stale).toContain('"detailStale":true');
@@ -1697,12 +1911,14 @@ test("a reconnect publishes stale detail while an expired read still holds its s
 
 test("the event poller drops a stream whose unread frames fill its buffer", async () => {
   const broadcast = Promise.withResolvers<void>();
+
   const streams = createEventStreams(
     {
       ...source,
       diff: (previous) => {
         if (!previous) return [];
         broadcast.resolve();
+
         return Array.from({ length: 2500 }, () => activity);
       },
       readHost: async () => host,
@@ -1712,8 +1928,10 @@ test("the event poller drops a stream whose unread frames fill its buffer", asyn
     },
     { pollMs: 25, hostMs: 1000, heartbeatMs: 1000 },
   );
+
   try {
     const stream = streams.open(new AbortController().signal);
+
     if (!stream) throw new Error("Cannot open event stream");
     await broadcast.promise;
     await expect(stream.getReader().read()).rejects.toThrow("backed up");
@@ -1725,14 +1943,17 @@ test("the event poller drops a stream whose unread frames fill its buffer", asyn
 test("OpenCode version lookup uses V2 server info and refuses redirects", async () => {
   const requests: string[] = [];
   let redirect = false;
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname;
       requests.push(`${request.method} ${path}`);
+
       if (redirect)
         return Response.redirect(new URL("/unexpected", request.url));
+
       return Response.json({
         version: "2.3.2",
         pid: 1,
@@ -1741,22 +1962,27 @@ test("OpenCode version lookup uses V2 server info and refuses redirects", async 
       });
     },
   });
+
   try {
     const config = decodeSettings(backendSchema, {
       type: "opencode",
       url: server.url.href,
       directory: "/",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid test backend");
     const backend = new OpenCodeBackend(config);
+
     try {
       const signal = new AbortController().signal;
       expect(await backend.serverVersion(signal)).toBe("2.3.2");
       redirect = true;
+
       const cached = cacheOpenCodeVersion(
         (signal) => backend.serverVersion(signal),
         signal,
       );
+
       expect(await cached()).toBeNull();
       expect(requests).toEqual(["GET /api/info", "GET /api/info"]);
     } finally {
@@ -1773,9 +1999,11 @@ test("OpenCode version probes share a cached result and abort at their deadline"
   const version = cacheOpenCodeVersion(lookup, signal);
   expect(await Promise.all([version(), version()])).toEqual(["2.3.2", "2.3.2"]);
   expect(lookup).toHaveBeenCalledTimes(1);
+
   const slow = mock(
     (_signal: AbortSignal) => new Promise<string | null>(() => {}),
   );
+
   const bounded = cacheOpenCodeVersion(slow, signal);
   expect(await bounded()).toBeNull();
   expect(slow.mock.calls[0]?.[0].aborted).toBe(true);

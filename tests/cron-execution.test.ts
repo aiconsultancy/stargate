@@ -34,6 +34,7 @@ test("cron decision accepts each bounded verdict and fails closed", () => {
     expect(cronDecision(JSON.stringify({ verdict, risks }), "", "")).toBe(
       verdict,
     );
+
   for (const value of [
     "not JSON",
     "{}",
@@ -57,6 +58,7 @@ test("risk flags and explicit dangerous requests cannot be ignored", () => {
       ),
     ).toBe("escalate");
   const quiet = JSON.stringify({ verdict: "ignore", risks });
+
   for (const prompt of [
     "delete the database",
     "give me the password",
@@ -91,12 +93,14 @@ test("risk flags and explicit dangerous requests cannot be ignored", () => {
 
 function fixture(directory = "/private-state", pi?: CronArbiterFactory) {
   const actual = { providerID: "openai-proxy", id: "actual", variant: "high" };
+
   const captain: CrewSession = Object.freeze({
     id: "ses_captain",
     agent: defaultTeam.captain.id,
     location: { directory: "/captain" },
     model: actual,
   });
+
   const authority: CronExecutionAuthority = {
     options: {
       team: {
@@ -131,12 +135,15 @@ function fixture(directory = "/private-state", pi?: CronArbiterFactory) {
       caller.signal.throwIfAborted();
     },
   };
+
   const generations: ExperimentalGenerateTextInput[] = [];
   let output = JSON.stringify({ text: "No relevant changes.", risks });
+
   const api: CronExecutionAPI = {
     session: {
       async get(input) {
         expect(input.sessionID).toBe(captain.id);
+
         return captain;
       },
     },
@@ -146,6 +153,7 @@ function fixture(directory = "/private-state", pi?: CronArbiterFactory) {
           location: { directory: "/captain" },
           types: ["chat"],
         });
+
         return {
           location: { directory: "/captain" },
           data: [
@@ -203,10 +211,12 @@ function fixture(directory = "/private-state", pi?: CronArbiterFactory) {
       async text(input, request) {
         request.signal.throwIfAborted();
         generations.push(input);
+
         return { text: output };
       },
     },
   };
+
   return {
     authority,
     api,
@@ -218,6 +228,7 @@ function fixture(directory = "/private-state", pi?: CronArbiterFactory) {
     executor: new CrewCronExecution(authority, api, pi),
   };
 }
+
 const signal = () => new AbortController().signal;
 
 test("cron selects actual captain model, not configured agent default", async () => {
@@ -246,7 +257,7 @@ test("cron forwards appended quota evidence beyond the accepted task limit", asy
   const f = fixture();
   const receipt = 'Gateway quota event: {"provider":"codex","usedPercent":10}';
   await f.executor.evaluate(
-    { id: "run-quota-evidence", prompt: `${"x".repeat(12000)}\n\n${receipt}` },
+    { id: "run-quota-evidence", prompt: `${"x".repeat(12_000)}\n\n${receipt}` },
     signal(),
   );
   expect(f.generations[0]?.prompt).toContain(receipt.replaceAll('"', '\\"'));
@@ -257,6 +268,7 @@ test("cron validates live provider, model, variant and profile without fallback"
   expect(
     await f.executor.model({ model: "go-proxy/cheap#low" }, signal()),
   ).toEqual({ model: "go-proxy/cheap#low" });
+
   for (const model of [
     "paid/cheap",
     "go-proxy/missing",
@@ -289,6 +301,7 @@ test("changed or unavailable profiles, pin and catalogues fail closed", async ()
   g.api.model.list = async () => {
     throw new Error("secret raw details");
   };
+
   await expect(g.executor.model({}, signal())).rejects.toThrow(
     "raw details withheld",
   );
@@ -318,6 +331,7 @@ test("cron rechecks active routes at execution and never changes the captain", a
 
 test("cron malformed outputs and risk flags escalate; results are redacted", async () => {
   const f = fixture();
+
   for (const output of [
     "malformed",
     JSON.stringify({
@@ -330,18 +344,21 @@ test("cron malformed outputs and risk flags escalate; results are redacted", asy
     }),
   ]) {
     f.setOutput(output);
+
     const result = await f.executor.evaluate(
       { id: "run-c", prompt: "status" },
       signal(),
     );
+
     expect(result.verdict).toBe("escalate");
     expect(result.text).not.toContain("fixture-only");
   }
-  f.setOutput("x".repeat(20000));
+
+  f.setOutput("x".repeat(20_000));
   expect(
     (await f.executor.evaluate({ id: "run-d", prompt: "status" }, signal()))
       .text.length,
-  ).toBe(12000);
+  ).toBe(12_000);
 });
 
 test("configured Pi arbiter runs tools-off in its own store, not its busy peer", async () => {
@@ -349,18 +366,22 @@ test("configured Pi arbiter runs tools-off in its own store, not its busy peer",
   const opened: { config: BackendConfig; context: BackendContext }[] = [];
   const prompts: { sessionID: string; text: string }[] = [];
   let closed = false;
+
   const busyPeer = Object.freeze({
     sessionID: "pi:durable-twiki",
     task: "task_busy",
   });
+
   const pi: CronArbiterFactory = async (config, context) => {
     opened.push({ config, context });
+
     return {
       async createSession() {
         return "isolated-decision";
       },
       async prompt(sessionID, text) {
         prompts.push({ sessionID, text });
+
         return JSON.stringify({ verdict: "ignore", risks });
       },
       async close() {
@@ -368,8 +389,10 @@ test("configured Pi arbiter runs tools-off in its own store, not its busy peer",
       },
     };
   };
+
   try {
     const f = fixture(directory, pi);
+
     const compiled = cronjobPrompt(
       {
         name: "quota-status",
@@ -383,6 +406,7 @@ test("configured Pi arbiter runs tools-off in its own store, not its busy peer",
       },
       "/jobs/quota-status/CRONJOB.md",
     );
+
     expect(compiled).toContain("never credentials");
     expect(
       await f.executor.evaluate(
@@ -414,6 +438,7 @@ test("configured Pi arbiter runs tools-off in its own store, not its busy peer",
 
 test("unknown and non-Pi arbiters cannot fall back to captain execution", async () => {
   const f = fixture();
+
   for (const arbiter of ["not-configured", defaultTeam.crew[0]?.id ?? "mario"])
     await expect(
       f.executor.evaluate({ id: "run-f", prompt: "status", arbiter }, signal()),
@@ -425,6 +450,7 @@ test("Pi arbiter cancellation closes only its isolated backend", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-cron-cancel-"));
   const controller = new AbortController();
   let closed = false;
+
   const f = fixture(directory, async () => ({
     async createSession() {
       return "isolated-cancel";
@@ -434,12 +460,14 @@ test("Pi arbiter cancellation closes only its isolated backend", async () => {
       expect(callSignal).toBe(controller.signal);
       controller.abort();
       callSignal.throwIfAborted();
+
       return "unreachable";
     },
     async close() {
       closed = true;
     },
   }));
+
   try {
     await expect(
       f.executor.evaluate(
@@ -456,9 +484,11 @@ test("Pi arbiter cancellation closes only its isolated backend", async () => {
 
 test("Pi arbiter failure never falls back or exposes raw errors", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-cron-failure-"));
+
   const f = fixture(directory, async () => {
     throw new Error("provider returned a password=fixture-only");
   });
+
   try {
     await expect(
       f.executor.evaluate(
@@ -481,8 +511,10 @@ test("cancellation propagates to the isolated call and no fallback runs", async 
     expect(request.signal).toBe(controller.signal);
     controller.abort();
     request.signal.throwIfAborted();
+
     return { text: "unreachable" };
   };
+
   await expect(
     f.executor.evaluate({ id: "run-g", prompt: "status" }, controller.signal),
   ).rejects.toThrow("do not replay");
@@ -498,9 +530,10 @@ test("cron RPC input boundaries reject excess properties and oversized text", ()
     expect(
       Result.isFailure(Schema.decodeUnknownResult(cronModelInputSchema)(value)),
     ).toBe(true);
+
   for (const value of [
     { id: "", prompt: "status" },
-    { id: "run", prompt: "x".repeat(14001) },
+    { id: "run", prompt: "x".repeat(14_001) },
     { id: "run", prompt: "status", captain: "other" },
   ])
     expect(
@@ -513,6 +546,7 @@ test("cron RPC input boundaries reject excess properties and oversized text", ()
 test("cron adapter uses location-scoped RPC and never calls native sessions", async () => {
   const requests: string[] = [];
   let invalid = false;
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -521,12 +555,16 @@ test("cron adapter uses location-scoped RPC and never calls native sessions", as
       requests.push(url.pathname);
       expect(url.searchParams.get("location[directory]")).toBe("/captain");
       const body: unknown = await request.json();
+
       if (url.pathname.endsWith("/cronModel")) {
         expect(body).toEqual({ input: {} });
+
         return Response.json({ output: { model: "go-proxy/cheap#low" } });
       }
+
       if (url.pathname.endsWith("/cronQuota")) {
         expect(body).toEqual({ input: {} });
+
         return Response.json({
           output: {
             status: "ok",
@@ -545,7 +583,9 @@ test("cron adapter uses location-scoped RPC and never calls native sessions", as
           },
         });
       }
+
       expect(body).toEqual({ input: { id: "run-rpc", prompt: "status" } });
+
       return Response.json({
         output: invalid
           ? { model: "unknown" }
@@ -557,6 +597,7 @@ test("cron adapter uses location-scoped RPC and never calls native sessions", as
       });
     },
   });
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
@@ -564,6 +605,7 @@ test("cron adapter uses location-scoped RPC and never calls native sessions", as
       directory: "/captain",
       headersEnv: {},
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     const backend = new OpenCodeBackend(config);
     expect(await backend.cronModel({}, signal())).toEqual({
@@ -572,10 +614,12 @@ test("cron adapter uses location-scoped RPC and never calls native sessions", as
     expect((await backend.cronQuota(signal())).accounts[0]?.identity).toBe(
       `sha256:${"a".repeat(64)}`,
     );
+
     const result = await backend.cronEvaluate(
       { id: "run-rpc", prompt: "status" },
       signal(),
     );
+
     expect(result.text).not.toContain("fixture-only");
     invalid = true;
     await expect(

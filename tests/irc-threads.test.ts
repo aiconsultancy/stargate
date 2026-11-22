@@ -16,9 +16,11 @@ import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
 const caps = [
   "sasl=PLAIN",
   "account-tag",
@@ -37,11 +39,13 @@ async function setup(
     accounts: { galactica: "fixture-password" },
     caps: offered,
   }).start();
+
   cleanup.push(() => fake.stop());
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-threads-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
@@ -58,13 +62,17 @@ async function setup(
       sessionID: "ses_captain",
     },
   });
+
   const log = pino({ level: "silent" });
+
   const ship = await IrcShip.create(config, store, log, {
     env: { STARGATE_IRC_PASSWORD: "fixture-password" },
     timing: { reconnectMinMs: 20, intervalMs: 5, burst: 50 },
     readyMs: 2000,
   });
+
   const prompts: { text: string; context?: PromptSourceContext }[] = [];
+
   const backend: AgentBackend = {
     sessionID: "ses_captain",
     async createSession() {
@@ -72,13 +80,17 @@ async function setup(
     },
     async prompt(_s, text, _signal, _onText, _onInput, _files, context) {
       prompts.push({ text, ...(context ? { context } : {}) });
+
       return answer;
     },
     async close() {},
   };
+
   const captain = ship.registrations[0];
+
   if (!captain) throw new Error("captain missing");
   const controller = new AbortController();
+
   const worker = new Gateway(
     captain.settings,
     captain.identity,
@@ -90,6 +102,7 @@ async function setup(
     undefined,
     captain.transport,
   ).work(controller.signal);
+
   ship.start(() => true);
   cleanup.push(async () => {
     controller.abort();
@@ -101,6 +114,7 @@ async function setup(
     5000,
     "thread fixture joined",
   );
+
   const delivered = (count = 1) =>
     until(
       () =>
@@ -111,20 +125,24 @@ async function setup(
       5000,
       "thread reply delivered",
     );
+
   return { fake, captain, prompts, delivered };
 }
 
 test("IRC thread: escaped parent reaches source and every fallback line", async () => {
   const { fake, prompts, delivered } = await setup();
   const root = "root;with\\slash=equals";
+
   const request = fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "galactica: thread status",
     { "+draft/reply": root },
   );
+
   await delivered();
   const context = prompts[0]?.context;
+
   if (!context) throw new Error("missing source");
   expect(context.source.message).toBe(request);
   expect(context.source.thread).toBe(request);
@@ -148,6 +166,7 @@ test("IRC thread: every multiline BATCH opener carries the same root", async () 
     [...caps, "draft/multiline=max-bytes=4096,max-lines=2"],
     "One\nTwo\nThree\nFour\nFive",
   );
+
   fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
@@ -185,6 +204,7 @@ test("IRC thread: a reply to our threaded answer flattens to its known root", as
   await delivered();
   expect(prompts[0]?.text).toBe("Continue please");
   const context = prompts[0]?.context;
+
   if (!context) throw new Error("missing source");
   expect(sourceLine(context)).toContain(";r=thread-root");
   expect(
@@ -226,6 +246,7 @@ test("IRC thread: no message-tags capability keeps plain authenticated replies",
     "account-tag",
     "server-time",
   ]);
+
   fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
@@ -253,11 +274,13 @@ test("IRC thread: threaded DMs stay flat while ordinary DMs keep request tags", 
     "+draft/reply": "dm-root",
   });
   await delivered();
+
   const request = fake.say(
     { nick: "jack", account: "jack" },
     "galactica",
     "ordinary private message",
   );
+
   await delivered(2);
   const lines = lineOf(fake.received("galactica"), "PRIVMSG");
   expect(lines).toHaveLength(6);

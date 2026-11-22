@@ -11,6 +11,7 @@ import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -20,11 +21,13 @@ const env = {
   STARGATE_IRC_GALACTICA_CHIEF: "chief-pass",
   STARGATE_IRC_GALACTICA_TYROL: "tyrol-pass",
 };
+
 const backend = {
   type: "opencode",
   url: "http://localhost:4096",
   directory: "/workspace",
 };
+
 const crew = {
   chief: {
     id: "chief",
@@ -41,7 +44,9 @@ const crew = {
     backend: { ...backend, agent: "galactica-crew-tyrol" },
   },
 };
+
 type CrewName = keyof typeof crew;
+
 const transcription = {
   provider: {
     type: "azure-openai",
@@ -82,6 +87,7 @@ async function setup(members: CrewName[], { start = true } = {}) {
     },
     inviteOnly: ["#galactica"],
   }).start();
+
   cleanup.push(() => fake.stop());
   // The founder is never refused: grant the captain up front.
   fake.invited.add("galactica:#galactica");
@@ -89,6 +95,7 @@ async function setup(members: CrewName[], { start = true } = {}) {
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const ship = await IrcShip.create(
     shipConfig(fake.port, members),
     store,
@@ -106,13 +113,18 @@ async function setup(members: CrewName[], { start = true } = {}) {
       readyMs: 2000,
     },
   );
+
   cleanup.push(() => ship.close());
+
   if (start) {
     ship.start(() => true);
     await joined(ship);
   }
+
   const [captain] = ship.registrations;
+
   if (!captain) throw new Error("missing captain");
+
   return {
     fake,
     store,
@@ -126,6 +138,7 @@ async function setup(members: CrewName[], { start = true } = {}) {
     /** The runtime's check: nothing queued, running or awaiting delivery. */
     idle: (key: string) => {
       const counts = store.queueCounts(key);
+
       return counts.queued + counts.running + counts.responding === 0;
     },
     /** True once `registration` stored the channel message `msgid`. */
@@ -149,7 +162,9 @@ function joined(ship: IrcShip) {
 
 function member(ship: IrcShip, index: number) {
   const registration = ship.registrations[index];
+
   if (!registration) throw new Error(`missing registration ${index}`);
+
   return registration;
 }
 
@@ -175,6 +190,7 @@ test("irc reload: denies and text mentions apply to intake at once; earlier tran
 
   const transport = captain.transport;
   const settings = captain.settings;
+
   const reload = await ship.prepareReload(
     config(
       ["chief"],
@@ -183,6 +199,7 @@ test("irc reload: denies and text mentions apply to intake at once; earlier tran
     ),
     env,
   );
+
   expect(reload.added).toEqual([]);
   expect(reload.removed).toEqual([]);
   // Staged only: nothing changes before the commit.
@@ -234,10 +251,12 @@ test("irc reload: added crew connect at commit, join on the captain's invite and
   const { fake, ship, captain, config, idle, admitted, say } = await setup([
     "chief",
   ]);
+
   const chief = member(ship, 1);
   const reload = await ship.prepareReload(config(["chief", "tyrol"]), env);
   expect(reload.removed).toEqual([]);
   const [tyrol] = reload.added;
+
   if (!tyrol) throw new Error("missing added crew");
   expect(tyrol.id).toBe("galactica-irc-tyrol");
   // Prepare connects nothing and changes nothing.
@@ -255,7 +274,7 @@ test("irc reload: added crew connect at commit, join on the captain's invite and
   ).toContainEqual(["galactica-tyrol", "#galactica"]);
 
   // One per agent × three agents. Tyrol's own ship turn counts, so the
-  // third ship message to the captain exceeds the cap.
+  // Third ship message to the captain exceeds the cap.
   const toTyrol = say("galactica-chief", "galactica-tyrol: check the flake");
   await until(() => admitted(tyrol, toTyrol), 5000, "tyrol admitted");
   const ship1 = say("galactica-chief", "galactica: one");
@@ -303,6 +322,7 @@ test("irc reload: removing an idle crew member QUITs only that connection", asyn
     "chief",
     "tyrol",
   ]);
+
   const chief = member(ship, 1);
   const tyrol = member(ship, 2);
   const reload = await ship.prepareReload(config(["chief"]), env);
@@ -329,16 +349,19 @@ test("irc reload: removing an idle crew member QUITs only that connection", asyn
 test("irc reload: removing a busy crew member is refused before any change", async () => {
   const { fake, store, ship, captain, config, idle, admitted, say } =
     await setup(["chief", "tyrol"]);
+
   const chief = member(ship, 1);
   const tyrol = member(ship, 2);
   const work = say("jack", "galactica-tyrol: run the checks");
   await until(() => admitted(tyrol, work), 5000, "tyrol work queued");
 
   const transport = captain.transport;
+
   const reload = await ship.prepareReload(
     config(["chief"], { deniedAccounts: ["jack"] }),
     env,
   );
+
   expect(() => reload.commit(idle)).toThrow(
     "IRC crew busy: galactica-irc-tyrol; reload not applied",
   );
@@ -355,6 +378,7 @@ test("irc reload: removing a busy crew member is refused before any change", asy
 
   // Once the work has finished, the same plan commits.
   const job = store.queuedJob(tyrol.key, `#galactica:${work}`);
+
   if (!job) throw new Error("missing job");
   store.running(job.id);
   store.respond(job.id, []);
@@ -369,11 +393,14 @@ test("irc reload: before start nothing connects; stale plans and a closed ship a
   const { fake, ship, config, idle } = await setup(["chief"], {
     start: false,
   });
+
   const first = await ship.prepareReload(config(["chief", "tyrol"]), env);
+
   const second = await ship.prepareReload(
     config(["chief"], { deniedAccounts: ["kara"] }),
     env,
   );
+
   first.commit(idle);
   expect(() => second.commit(idle)).toThrow(
     "IRC reload plan is stale; prepare it again",

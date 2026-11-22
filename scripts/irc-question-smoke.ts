@@ -15,18 +15,24 @@ import { FakeIrcServer } from "../tests/irc-fixture";
 
 const binary = process.argv[2];
 const loseBeforeWrite = process.argv.includes("--drop-answer");
+
 if (!binary) throw new Error("Pass the OpenCode 2.2.7 binary path");
+
 const home = await mkdtemp(join(tmpdir(), "stargate-question-"));
 let modelCalls = 0;
+
 const model = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   async fetch(req) {
     const body = await req.json();
+
     const answered = body.messages.some(
       (m: { role: string }) => m.role === "tool",
     );
+
     modelCalls++;
+
     const question = {
       questions: [
         {
@@ -39,6 +45,7 @@ const model = Bun.serve({
         },
       ],
     };
+
     const delta = answered
       ? { content: "Recorded." }
       : {
@@ -54,6 +61,7 @@ const model = Bun.serve({
             },
           ],
         };
+
     const chunk = (value: object, reason: string | null) =>
       "data: " +
       JSON.stringify({
@@ -64,6 +72,7 @@ const model = Bun.serve({
         choices: [{ index: 0, delta: value, finish_reason: reason }],
       }) +
       "\n\n";
+
     return new Response(
       chunk({ role: "assistant" }, null) +
         chunk(delta, null) +
@@ -73,15 +82,21 @@ const model = Bun.serve({
     );
   },
 });
+
 const socket = Bun.listen({
   hostname: "127.0.0.1",
   port: 0,
   socket: { data() {} },
 });
+
 const port = socket.port;
+
 socket.stop(true);
+
 const config = join(home, "config/opencode");
+
 await mkdir(config, { recursive: true });
+
 await writeFile(
   join(config, "opencode.json"),
   JSON.stringify({
@@ -102,8 +117,10 @@ await writeFile(
     ],
   }),
 );
+
 process.env["IRC_SMOKE_AUTH"] =
   "Basic " + Buffer.from("opencode:fixture").toString("base64");
+
 const engine = Bun.spawn(
   [binary, "serve", "--hostname", "127.0.0.1", "--port", String(port)],
   {
@@ -121,6 +138,7 @@ const engine = Bun.spawn(
     stderr: "inherit",
   },
 );
+
 const client = OpenCode.make({
   baseUrl: "http://127.0.0.1:" + port,
   headers: {
@@ -128,23 +146,29 @@ const client = OpenCode.make({
       "Basic " + Buffer.from("opencode:fixture").toString("base64"),
   },
 });
+
 async function wait<T>(get: () => Promise<T | undefined>, label: string) {
   for (let i = 0; i < 160; i++) {
     const value = await get();
+
     if (value) return value;
     await Bun.sleep(150);
   }
+
   throw new Error(
     "Timed out waiting for " + label + "; provider calls " + modelCalls,
   );
 }
+
 try {
   await wait(() => client.session.active().catch(() => undefined), "engine");
+
   const session = await client.session.create({
     location: { directory: home },
     agent: "build",
     model: { providerID: "fixture", id: "fixture" },
   });
+
   const sessionID = session.id;
   const input = SessionMessage.ID.create();
   await client.session.synthetic({
@@ -155,10 +179,12 @@ try {
     delivery: "queue",
     resume: true,
   });
+
   const form = await wait(
     async () => (await client.session.form.list({ sessionID }))[0],
     "native form",
   );
+
   const exact = await client.session.form.get({ sessionID, formID: form.id });
   console.log(
     "Pre-start native form",
@@ -171,6 +197,7 @@ try {
   let promptPosts = 0;
   let answerPosts = 0;
   let discardPrompt = false;
+
   const traced = OpenCode.make({
     baseUrl: "http://127.0.0.1:" + port,
     headers: {
@@ -180,24 +207,32 @@ try {
     fetch: Object.assign(
       async (url: RequestInfo | URL, init?: RequestInit) => {
         const path = new URL(url instanceof Request ? url.url : url).pathname;
+
         if (path.endsWith("/prompt")) {
           promptPosts++;
+
           if (discardPrompt) throw new Error("fixture submission disconnected");
         }
+
         if (path.endsWith("/reply")) {
           answerPosts++;
+
           if (loseBeforeWrite)
             throw new Error("Fixture disconnected before native delivery");
           const response = await fetch(url, init);
+
           if (process.argv.includes("--lose-answer-ack") && response.ok)
             throw new Error("Fixture lost the native answer ACK");
+
           return response;
         }
+
         return fetch(url, init);
       },
       { preconnect: fetch.preconnect },
     ),
   });
+
   const backend = new OpenCodeBackend(
     {
       type: "opencode",
@@ -209,9 +244,11 @@ try {
     },
     traced,
   );
+
   const queued = new AbortController();
   const stages: string[] = [];
   let queuedID = "";
+
   const run = backend
     .prompt(
       sessionID,
@@ -226,6 +263,7 @@ try {
       (v) => stages.push(v.stage),
     )
     .catch(() => undefined);
+
   try {
     await wait(async () => stages.includes("queued"), "same-ID queued event");
     assert.ok(
@@ -237,6 +275,7 @@ try {
     queued.abort();
     await run;
   }
+
   assert.ok(
     !(await client.session.inbox.list({ sessionID })).some(
       (v) => v.id === queuedID,
@@ -264,6 +303,7 @@ try {
   );
   const irc = new FakeIrcServer({ accounts: { captain: "fixture" } });
   irc.start();
+
   const opts = Schema.decodeUnknownSync(ircSchema)({
     id: "captain",
     account: "captain",
@@ -291,9 +331,12 @@ try {
       sessionID,
     },
   });
+
   const log = pino({ level: "silent" });
+
   async function startGateway() {
     const store = openStore(join(home, "stargate.sqlite"));
+
     const ship = await IrcShip.create(opts, store, log, {
       env: { IRC_FIXTURE: "fixture" },
       timing: {
@@ -303,8 +346,10 @@ try {
         turnStatusMs: 200,
       },
     });
+
     const reg = ship.registrations[0];
     assert.ok(reg);
+
     const gw = new Gateway(
       reg.settings,
       reg.identity,
@@ -316,10 +361,12 @@ try {
       undefined,
       reg.transport,
     );
+
     reg.operatorQuestion = gw.operatorQuestion.bind(gw);
     const lifetime = new AbortController();
     const work = gw.work(lifetime.signal);
     ship.start(() => true);
+
     return {
       reg,
       close: async () => {
@@ -330,12 +377,17 @@ try {
       },
     };
   }
+
   let gateway = await startGateway();
+
   const say = (account: string, text: string) =>
     irc.say({ nick: account, account }, "captain", text);
+
   const lines = () => irc.received("captain");
+
   const seen = (needle: string) =>
     wait(async () => lines().find((l) => l.includes(needle)), needle);
+
   try {
     irc.setUser("operator", "operator");
     await wait(async () => gateway.reg.client.inChannel("#ship"), "IRC ready");
@@ -387,6 +439,7 @@ try {
     say("other", "answer " + token + " 2");
     say("operator", "answer " + token + " 1");
     say("operator", "answer " + token + " 2");
+
     if (loseBeforeWrite) {
       await seen("Answer delivery is unconfirmed.");
       await gateway.close();
@@ -413,10 +466,12 @@ try {
           ? "OpenCode reports the question was answered."
           : "OpenCode accepted your answer.",
       );
+
       const final = await client.session.form.get({
         sessionID,
         formID: form.id,
       });
+
       assert.equal(promptPosts, 2);
       assert.equal(answerPosts, 1);
       assert.deepEqual(final.state, {
@@ -434,6 +489,7 @@ try {
         "PASS: pre-start native question answered from IRC on the original synthetic input.",
       );
     }
+
     assert.ok(
       !lines().some(
         (l) =>

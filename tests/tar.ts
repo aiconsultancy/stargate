@@ -43,8 +43,10 @@ function header(
   block.write(link.slice(0, 100), 157);
   block.write(magic, 257, "latin1");
   let sum = 0;
+
   for (const byte of block) sum += byte;
   block.write(`${octal(sum, 6)}\0 `, 148);
+
   return block;
 }
 
@@ -57,7 +59,9 @@ function paxBody(records: Record<string, string>) {
       .map(([key, value]) => {
         const body = ` ${key}=${value}\n`;
         let length = body.length + 1;
+
         while (`${length}${body}`.length !== length) length++;
+
         return `${length}${body}`;
       })
       .join(""),
@@ -66,17 +70,21 @@ function paxBody(records: Record<string, string>) {
 
 export function tarball(entries: TarEntry[], corrupt = false) {
   const blocks: Buffer[] = [];
+
   for (const entry of entries) {
     if (entry.global) {
       const body = paxBody(entry.global);
       blocks.push(header("pax_global_header", "g", body.length), pad(body));
     }
+
     if (entry.pax) {
       const body = paxBody(entry.pax);
       blocks.push(header("PaxHeader", "x", body.length), pad(body));
     }
+
     const type = entry.type ?? "0";
     const data = Buffer.from(type === "0" ? (entry.data ?? "") : "");
+
     const block = header(
       entry.path,
       type,
@@ -85,17 +93,22 @@ export function tarball(entries: TarEntry[], corrupt = false) {
       entry.mode,
       entry.magic,
     );
+
     if (entry.gnuSparse) {
       block[482] = 1;
       block.fill(" ", 148, 156);
       let sum = 0;
+
       for (const byte of block) sum += byte;
       block.write(`${octal(sum, 6)}\0 `, 148);
     }
+
     if (corrupt) block[0] = (block[0] ?? 0) ^ 1;
     blocks.push(block, pad(data));
   }
+
   blocks.push(Buffer.alloc(1024));
+
   return new Uint8Array(
     gzipSync(Buffer.concat(blocks)),
   ) as Uint8Array<ArrayBuffer>;

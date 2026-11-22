@@ -19,12 +19,14 @@ const source: Source = {
   audience: "internal",
   topics: ["release.*"],
 };
+
 const input: NotificationInput = {
   schema: 1,
   topic: "release.desktop",
   occurredAt: "2026-11-19T02:00:00Z",
   payload: { title: "Ready" },
 };
+
 const destination: Destination = {
   transport: "slack",
   registrationId: "pegasus",
@@ -42,6 +44,7 @@ test("rejects impossible calendar dates instead of normalizing them", () => {
     occurredAt: "2026-02-30T12:00:00Z",
     payload: { title: "Ready" },
   });
+
   expect(Result.isFailure(decoded)).toBe(true);
 });
 
@@ -50,6 +53,7 @@ test("calendar, precision and zone boundaries normalize to UTC milliseconds", ()
     "2024-02-29T02:00:00.100Z",
   );
   expect(utcMillis("2000-02-29t02:00:00z")).toBe("2000-02-29T02:00:00.000Z");
+
   for (const value of [
     "1900-02-29T00:00:00Z",
     "2024-13-01T00:00:00Z",
@@ -67,6 +71,7 @@ test("calendar, precision and zone boundaries normalize to UTC milliseconds", ()
 
 test("rejects unknown envelope and nested fields and bounds code points", () => {
   const decode = Schema.decodeUnknownResult(NotificationInput);
+
   for (const extra of [
     { signature: "supplied" },
     { source: "other" },
@@ -78,6 +83,7 @@ test("rejects unknown envelope and nested fields and bounds code points", () => 
       decode({ ...input, payload: { ...input.payload, command: "run" } }),
     ),
   ).toBe(true);
+
   for (const payload of [
     { title: "😀".repeat(201) },
     { title: "ok", body: "😀".repeat(2801) },
@@ -92,6 +98,7 @@ test("rejects unknown envelope and nested fields and bounds code points", () => 
       }),
     ),
   ).toBe(true);
+
   for (const tags of [
     Object.fromEntries(Array.from({ length: 17 }, (_, n) => [`k${n}`, "v"])),
     { ["k".repeat(65)]: "v" },
@@ -105,6 +112,7 @@ test("rejects unknown envelope and nested fields and bounds code points", () => 
 
 test("HTTPS URLs reject userinfo, whitespace and controls without fetching", () => {
   const decode = Schema.decodeUnknownResult(NotificationInput);
+
   for (const url of [
     "http://example.org",
     "https://user:pass@example.org",
@@ -131,6 +139,7 @@ test("signature deduplicates equivalent occurrences, not next events or sources"
     ...input,
     tags: { z: "last", A: "first", a: "middle" },
   });
+
   expect(first).toBe(
     "v1:f00f2453223945157b71841e40e4424603569a60d3a8f80c2ee2f666805f1872",
   );
@@ -164,11 +173,13 @@ test("matching uses final-star and AND tags, deduplicates physical aliases", () 
   expect(topicMatches("release.*", "release")).toBe(false);
   expect(topicMatches("release.*", "release.desktop.stable")).toBe(true);
   expect(topicMatches("release.desktop", "release.desktop.stable")).toBe(false);
+
   const destinations = {
     primary: destination,
     alias: { ...destination },
     other: { ...destination, channel: "CTWO" },
   };
+
   expect(
     resolveSubscriptions(
       source,
@@ -217,7 +228,7 @@ test("matching uses final-star and AND tags, deduplicates physical aliases", () 
 test("numeric limits are positive finite and attempts cannot outlive leases", () => {
   for (const admissionQueue of [0, -1, Infinity, NaN, 1.5])
     expect(() => notificationLimits({ admissionQueue })).toThrow();
-  expect(() => notificationLimits({ attemptTimeoutMs: 60000 })).toThrow();
+  expect(() => notificationLimits({ attemptTimeoutMs: 60_000 })).toThrow();
   expect(() => notificationLimits({ concurrency: 5 })).toThrow();
   expect(() => notificationLimits({ sendAttempts: 4 })).toThrow();
 });

@@ -16,6 +16,7 @@ import { SlackConnection } from "../src/slack/slack";
 import { bot } from "./fixtures";
 
 export const producerToken = "fixture-notification-producer-credential-0001";
+
 export function notificationConfig(enabled = false) {
   return {
     adapters: {
@@ -39,12 +40,14 @@ export function notificationConfig(enabled = false) {
     subscriptions: [{ topic: "release.*", to: ["log"] }],
   };
 }
+
 export const envelope = (title = "Released") => ({
   schema: 1,
   topic: "release.desktop",
   occurredAt: "2026-11-19T02:00:00Z",
   payload: { title },
 });
+
 export function runtimeConfig(dataDirectory: string, enabled = true): Config {
   return Schema.decodeUnknownSync(configSchema)({
     dataDirectory,
@@ -53,9 +56,11 @@ export function runtimeConfig(dataDirectory: string, enabled = true): Config {
     notify: notificationConfig(enabled),
   });
 }
+
 export async function temporary() {
   return mkdtemp(join(tmpdir(), "notify-integration-"));
 }
+
 export function unixRequest(
   socketPath: string,
   path = "/v1/notifications/local",
@@ -94,23 +99,28 @@ export function unixRequest(
         );
       },
     );
+
     req.on("error", reject);
     req.end(options.body ?? JSON.stringify(envelope()));
   });
 }
+
 export async function until(check: () => boolean | Promise<boolean>) {
   const deadline = performance.now() + 5000;
+
   while (!(await check())) {
     if (performance.now() >= deadline)
       throw new Error("Notification fixture deadline");
     await delay(5);
   }
 }
+
 export function runtimeDependencies(
   slackUrl: string,
   options: { fail?: boolean; never?: boolean; grace?: number } = {},
 ) {
   const calls: string[] = [];
+
   const dependencies: RuntimeDependencies = {
     slack: (bot) => {
       const real = new SlackConnection(
@@ -119,6 +129,7 @@ export function runtimeDependencies(
         pino({ enabled: false }),
         { slackApiUrl: slackUrl },
       );
+
       return {
         identity: async () => ({
           team: "T123",
@@ -130,15 +141,18 @@ export function runtimeDependencies(
         close: async () => {},
         post: async () => {
           calls.push("post");
+
           return "1.000";
         },
         announce: async () => {
           calls.push("announce");
+
           return "1.000";
         },
         notification: options.never
           ? async () => {
               console.log("attempt-started");
+
               return new Promise<never>(() => {});
             }
           : real.notification.bind(real),
@@ -153,10 +167,12 @@ export function runtimeDependencies(
     backend: async () => ({
       createSession: async () => {
         calls.push("createSession");
+
         return "session";
       },
       prompt: async () => {
         calls.push("prompt");
+
         return "Answer";
       },
       close: async () => {},
@@ -166,6 +182,7 @@ export function runtimeDependencies(
       ...(options.grace ? { shutdownGraceMs: options.grace } : {}),
     },
   };
+
   return { dependencies, calls };
 }
 
@@ -175,24 +192,29 @@ if (
     process.argv[3] === "start-shared-credentials")
 ) {
   const directory = process.argv[2];
+
   if (!directory) throw new Error("Missing fixture directory");
   const originalFetch = globalThis.fetch;
   let authCalls = 0;
   let correctAuthorization = false;
   let unexpectedRequest = false;
   const shared = process.argv[3] === "start-shared-credentials";
+
   const expectedApp = shared
     ? `xapp-${"b".repeat(40)}`
     : "xapp-companion-fixture";
+
   const expectedBot = shared
     ? `xoxb-${"a".repeat(40)}`
     : "xoxb-companion-fixture";
+
   const initiallyAbsent = [
     "APP_TOKEN",
     "BOT_TOKEN",
     "NOTIFY_CI",
     ...(shared ? ["DECLARED_HEADER"] : []),
   ].every((name) => process.env[name] === undefined);
+
   // Exercise start and its real Slack factory. Refuse auth locally, before
   // Socket Mode or backend creation, without making any network request.
   globalThis.fetch = Object.assign(
@@ -201,17 +223,20 @@ if (
       init?: Parameters<typeof fetch>[1],
     ) => {
       const url = input instanceof Request ? input.url : String(input);
+
       if (url === "https://slack.com/api/auth.test") {
         authCalls++;
         correctAuthorization =
           new Headers(init?.headers).get("Authorization") ===
           `Bearer ${expectedBot}`;
       } else unexpectedRequest = true;
+
       return Response.json({ ok: false, error: "invalid_auth" });
     },
     { preconnect: originalFetch.preconnect },
   );
   let refused = false;
+
   try {
     await start(join(directory, "stargate.json"));
   } catch {
@@ -219,6 +244,7 @@ if (
   } finally {
     globalThis.fetch = originalFetch;
   }
+
   console.log(
     JSON.stringify({
       initiallyAbsent,
@@ -240,21 +266,26 @@ if (
   );
 } else if (import.meta.main) {
   const directory = process.argv[2];
+
   if (!directory) throw new Error("Missing fixture directory");
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const config = runtimeConfig(directory);
   const controller = new AbortController();
+
   const f = runtimeDependencies("http://127.0.0.1:1/", {
     never: true,
     grace: 700,
   });
+
   process.on("SIGTERM", () => {
     console.log("shutdown-requested");
     controller.abort();
   });
+
   const running = Effect.runPromise(
     serve(config, pino({ enabled: false }), controller.signal, f.dependencies),
   );
+
   await until(async () =>
     readFile(join(directory, "ready.json")).then(
       () => true,

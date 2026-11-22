@@ -64,6 +64,7 @@ test("IRC delivery retains the root on every retry unit, including unbatched pla
   const wire = new Wire();
   wire.limits = { maxBytes: 4096, maxLines: 2 };
   const store = openStore(":memory:");
+
   try {
     const progress = {
       plan: (unit: { job: number; part: number }, plan: string) =>
@@ -73,6 +74,7 @@ test("IRC delivery retains the root on every retry unit, including unbatched pla
       done: (unit: { job: number; part: number }, done: number) =>
         store.deliveredUnits(unit.job, unit.part, done),
     };
+
     const delivery = new IrcDelivery(
       wire,
       100,
@@ -81,6 +83,7 @@ test("IRC delivery retains the root on every retry unit, including unbatched pla
       undefined,
       () => "root",
     );
+
     wire.failAfter = 1;
     await expect(
       delivery.post(
@@ -133,6 +136,7 @@ test("IRC file links use the persisted root, while main-room and capless lines s
   const wire = new Wire();
   const filehost = () => new URL("http://127.0.0.1:8000/uploads");
   const files = new Filehost(filehost, { account: "bot", password: "fixture" });
+
   const delivery = new IrcDelivery(
     wire,
     100,
@@ -141,7 +145,9 @@ test("IRC file links use the persisted root, while main-room and capless lines s
     undefined,
     (request) => (request === "thread" ? "root" : undefined),
   );
+
   const link = delivery.files?.link;
+
   if (!link) throw new Error("missing link transport");
   await link(
     "#ship",

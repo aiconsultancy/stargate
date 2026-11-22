@@ -9,6 +9,7 @@ export function cleanupProtection(
   crews: Crew[],
 ) {
   const m = config.maintenance;
+
   return [
     resolve(dirname(configPath)),
     resolve(config.dataDirectory),

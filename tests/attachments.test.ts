@@ -18,6 +18,7 @@ import {
 import { ordinaryFileDirectory } from "./file-fixture";
 
 const cleanup: string[] = [];
+
 afterEach(async () => {
   for (const directory of cleanup.splice(0))
     await rm(directory, { recursive: true, force: true });
@@ -26,6 +27,7 @@ afterEach(async () => {
 async function directory() {
   const path = await ordinaryFileDirectory("stargate-attachments-");
   cleanup.push(path);
+
   return path;
 }
 
@@ -36,9 +38,11 @@ const png = Uint8Array.from(
   ),
   (character) => character.charCodeAt(0),
 );
+
 const pdf = new TextEncoder().encode(
   "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n",
 );
+
 const sha256 = (bytes: Uint8Array) =>
   createHash("sha256").update(bytes).digest("hex");
 
@@ -51,8 +55,10 @@ test("prepared metadata keeps code-point bounds, MIME spelling and strict fields
     caption: "😀".repeat(1000),
     path: "/report.png",
   };
+
   const decode = Schema.decodeUnknownResult(preparedAttachmentSchema);
   const parsed = decode(input);
+
   if (Result.isFailure(parsed))
     throw new Error("Valid prepared metadata rejected");
   expect(parsed.success).toEqual(input);
@@ -64,6 +70,7 @@ test("prepared metadata keeps code-point bounds, MIME spelling and strict fields
     "size",
     "sha256",
   ]);
+
   for (const invalid of [
     { ...input, name: `${input.name}😀` },
     { ...input, caption: `${input.caption}😀` },
@@ -81,6 +88,7 @@ async function rejection(work: Promise<unknown>) {
   } catch (error) {
     return error;
   }
+
   throw new Error("Expected attachment rejection");
 }
 
@@ -88,6 +96,7 @@ async function unavailable(work: Promise<unknown>, reason: string) {
   const error = await rejection(work);
   expect(error).toBeInstanceOf(AttachmentUnavailable);
   expect(error).toMatchObject({ reason, message: "Attachment unavailable" });
+
   return error;
 }
 
@@ -175,6 +184,7 @@ test("plain, bare and code local references are hidden but never published", () 
       "Escaped \\![no](file:///home/me/escaped.png).",
     ].join("\n"),
   );
+
   expect(parsed.files).toEqual([]);
   expect(parsed.text).not.toContain("/home/me");
   expect(parsed.text).toContain("See the source and file:///…");
@@ -182,6 +192,7 @@ test("plain, bare and code local references are hidden but never published", () 
   expect(parsed.text).toContain(
     "Remote ![chart](https://example.com/chart.png) stays.",
   );
+
   // Odd characters cannot cut a hidden path short, in prose or in code.
   for (const sample of [
     "bare file:///home/me/a)b/private.txt end",
@@ -189,10 +200,12 @@ test("plain, bare and code local references are hidden but never published", () 
     "`<file:///home/me/open angle/private.png`",
   ])
     expect(parseAttachments(sample).text).not.toContain("private");
+
   // An unclosed fence remains code to the end of the answer.
   const unclosed = parseAttachments(
     "```\n![late](file:///home/me/late.png)\nstill code",
   );
+
   expect(unclosed.files).toEqual([]);
   expect(unclosed.text).not.toContain("/home/me");
   // Unmatched backticks are literal, so the marker after them is active.
@@ -206,6 +219,7 @@ test("plain, bare and code local references are hidden but never published", () 
 test("streamed previews withhold partial local markers and never expose a path", () => {
   const answer =
     "Done! See [1] and ![Screen shot](file:///tmp/opencode/secret%20dir/shot.png) plus [link](https://example.com/x) and `file:///tmp/opencode/code.txt`.";
+
   for (let end = 0; end <= answer.length; end++) {
     const preview = parseAttachments(answer.slice(0, end), false);
     expect(preview.text).not.toContain("/tmp/opencode");
@@ -215,6 +229,7 @@ test("streamed previews withhold partial local markers and never expose a path",
       answer.startsWith(preview.text) || preview.text.includes("Screen shot"),
     ).toBe(true);
   }
+
   expect(parseAttachments("Wow![", false).text).toBe("Wow");
   expect(parseAttachments("Wow![", true).text).toBe("Wow![");
   expect(parseAttachments("Wow! It works", false).text).toBe("Wow! It works");
@@ -234,12 +249,15 @@ test("real PNG and PDF files inspect, then reread with their recorded identity",
   const report = join(root, "report.pdf");
   await writeFile(image, png);
   await writeFile(report, pdf);
+
   const parsed = parseAttachments(
     `![Login](${pathToFileURL(image).href}) ![](${pathToFileURL(report).href})`,
   );
+
   const prepared = await Promise.all(
     parsed.files.map((file) => inspectAttachment(file)),
   );
+
   expect(prepared).toEqual([
     {
       path: image,
@@ -260,6 +278,7 @@ test("real PNG and PDF files inspect, then reread with their recorded identity",
   ]);
   checkPreparedAttachments(prepared);
   const [first, second] = prepared;
+
   if (!first || !second) throw new Error("Missing prepared fixtures");
   expect(
     await readPreparedAttachment(JSON.parse(JSON.stringify(first))),
@@ -287,6 +306,7 @@ test("symlinks, FIFOs, directories, empty and oversized files are refused", asyn
   const large = join(root, "large.pdf");
   await writeFile(large, "");
   await truncate(large, maxAttachmentBytes + 1);
+
   const cases: [string, string][] = [
     [link, "denied"],
     [join(root, "linkdir", "inside.png"), "denied"],
@@ -296,11 +316,13 @@ test("symlinks, FIFOs, directories, empty and oversized files are refused", asyn
     [large, "size"],
     [join(root, "missing.png"), "missing"],
   ];
+
   for (const [path, reason] of cases) {
     const error = await unavailable(
       inspectAttachment({ path, caption: "x" }),
       reason,
     );
+
     expect(String(error)).not.toContain(root);
     expect(JSON.stringify(error)).not.toContain(root);
   }
@@ -308,6 +330,7 @@ test("symlinks, FIFOs, directories, empty and oversized files are refused", asyn
 
 test("credential and machine-state paths are denied before any filesystem access", async () => {
   const root = await directory();
+
   for (const name of [
     "id_ed25519",
     "server.key",
@@ -329,6 +352,7 @@ test("credential and machine-state paths are denied before any filesystem access
       "denied",
     );
   }
+
   for (const path of [
     join(root, ".ssh", "notes.png"),
     join(root, ".env"),
@@ -339,6 +363,7 @@ test("credential and machine-state paths are denied before any filesystem access
     "/run/user/1000/bus",
   ])
     await unavailable(inspectAttachment({ path, caption: "" }), "denied");
+
   for (const path of ["relative.png", "/tmp/opencode/../x.png", "/tmp//x.png"])
     await unavailable(inspectAttachment({ path, caption: "" }), "invalid");
   // Ordinary operator screenshot locations stay publishable.

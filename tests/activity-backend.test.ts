@@ -6,7 +6,9 @@ import { backendSchema } from "../src/config";
 test("activity RPC pins the captain, capture and configured OpenCode location", async () => {
   const requests: { path: string; location: string | null; body: unknown }[] =
     [];
+
   let wrongCapture = false;
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -17,6 +19,7 @@ test("activity RPC pins the captain, capture and configured OpenCode location", 
         location: url.searchParams.get("location[directory]"),
         body: await request.json(),
       });
+
       const output = url.pathname.endsWith("/cancel")
         ? true
         : {
@@ -28,24 +31,29 @@ test("activity RPC pins the captain, capture and configured OpenCode location", 
             entries: [],
             truncated: false,
           };
+
       return Response.json({ output });
     },
   });
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/captain",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid backend fixture");
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;
+
     const watch = await backend.startActivity(
       "ses_captain",
       "slack-job-42",
       "twiki",
       signal,
     );
+
     await watch.read(signal);
     await watch.finish(signal);
     await watch.cancel(signal);
@@ -64,6 +72,7 @@ test("activity RPC pins the captain, capture and configured OpenCode location", 
         reporter: "twiki",
       },
     });
+
     for (const request of requests.slice(1))
       expect(request.body).toEqual({
         input: { sessionID: "ses_captain", id: "capture-one" },
@@ -82,7 +91,9 @@ test("crew status uses authenticated location RPC only, with no captain session 
     auth: string | null;
     body: unknown;
   }[] = [];
+
   let invalid = false;
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -94,6 +105,7 @@ test("crew status uses authenticated location RPC only, with no captain session 
         auth: request.headers.get("authorization"),
         body: await request.json(),
       });
+
       return Response.json({
         output: invalid
           ? { rawSessionID: "private-SDK-data" }
@@ -101,7 +113,9 @@ test("crew status uses authenticated location RPC only, with no captain session 
       });
     },
   });
+
   process.env["STARGATE_CREW_TEST_AUTH"] = "Bearer fixture-only";
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
@@ -109,6 +123,7 @@ test("crew status uses authenticated location RPC only, with no captain session 
       directory: "/captain",
       headersEnv: { authorization: "STARGATE_CREW_TEST_AUTH" },
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;

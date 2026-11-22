@@ -12,13 +12,16 @@ import { type Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const stores: Store[] = [];
+
 afterEach(() => {
   setSystemTime();
+
   for (const store of stores.splice(0)) store.close();
 });
 
 function fixture(enabled = true, drain?: DrainControl) {
   const config = bot();
+
   if (config.backend.type !== "opencode")
     throw new Error("Expected OpenCode config");
   config.backend.sessionID = "ses_captain";
@@ -30,6 +33,7 @@ function fixture(enabled = true, drain?: DrainControl) {
   const reactions: string[] = [];
   let result: SteerResult = { status: "accepted" };
   let duringWrite: (() => void) | undefined;
+
   const backend: AgentBackend = {
     sessionID: "ses_captain",
     async createSession() {
@@ -41,12 +45,15 @@ function fixture(enabled = true, drain?: DrainControl) {
     async steer(input) {
       expect(store.followUps(gateway.key)[0]?.state).toBe("writing");
       duringWrite?.();
+
       if (!input.allowed()) return { status: "refused" };
       writes.push(input.id);
+
       return result;
     },
     async close() {},
   };
+
   const slack: TransportDelivery = {
     async post(_channel, thread, text) {
       posts.push({ thread, text });
@@ -55,6 +62,7 @@ function fixture(enabled = true, drain?: DrainControl) {
       reactions.push(message);
     },
   };
+
   const gateway = new Gateway(
     config,
     identity,
@@ -70,25 +78,33 @@ function fixture(enabled = true, drain?: DrainControl) {
     undefined,
     drain,
   );
+
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
+
     if (!job) throw new Error("Expected queued request");
+
     return job;
   };
+
   const start = () => {
     expect(gateway.accept(event())).toBe(true);
     const job = next();
     expect(store.running(job.id, job.text)).toBe(true);
     store.saveInput(gateway.key, job.id, "msg_original", "ses_captain");
+
     return job;
   };
+
   const follow = (thread = "1.000", ts = "2.000") => {
     const request = event("<@UBOT> use the revised scope", ts);
+
     return {
       ...request,
       event: { ...request.event, type: "message", thread_ts: thread },
     };
   };
+
   return {
     config,
     store,
@@ -239,8 +255,10 @@ test("uncertain receipt later reconciles read-only with bounded retries and one 
   let reads = 0;
   f.backend.reconcileSteer = async () => {
     reads++;
+
     return { status: "accepted" };
   };
+
   f.gateway.accept(f.follow());
   await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
   await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
@@ -261,20 +279,26 @@ test("failed uncertainty notices cannot bypass native reconciliation backoff or 
   f.slack.post = async () => {
     throw new Error("Notification unavailable");
   };
+
   let reads = 0;
   f.backend.reconcileSteer = async () => {
     reads++;
+
     return { status: "uncertain" };
   };
+
   f.gateway.accept(f.follow());
   await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
+
   for (let i = 0; i < 12; i++)
     await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
   expect(reads).toBe(0);
+
   for (let i = 0; i < 12; i++) {
     setSystemTime(new Date(Date.now() + 120_000));
     await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
   }
+
   expect(reads).toBe(7);
   expect(f.writes).toHaveLength(1);
   expect(f.store.queueCounts(f.gateway.key).queued).toBe(0);
@@ -292,8 +316,10 @@ test("restart catch-up keeps accepted follow-up references on the original sourc
   f.backend.prompt = async () => {
     throw new Error("Catch-up must not prompt");
   };
+
   f.backend.transcript = async (_session, after) => {
     expect(after).toBe("msg_original");
+
     return {
       cursor: "msg_final",
       input: "msg_original",
@@ -307,6 +333,7 @@ test("restart catch-up keeps accepted follow-up references on the original sourc
       ],
     };
   };
+
   const restarted = new Gateway(
     f.config,
     identity,
@@ -315,6 +342,7 @@ test("restart catch-up keeps accepted follow-up references on the original sourc
     f.slack,
     pino({ enabled: false }),
   );
+
   try {
     restarted.settle("ses_captain");
     await restarted.catchUp(AbortSignal.timeout(1000));
@@ -332,6 +360,7 @@ test("restart catch-up keeps accepted follow-up references on the original sourc
 test("stale or prompt-pending source ownership queues without calling native steer", async () => {
   for (const pending of [false, true]) {
     const f = fixture();
+
     if (pending) {
       f.gateway.accept(event());
       const owner = f.next();
@@ -342,6 +371,7 @@ test("stale or prompt-pending source ownership queues without calling native ste
       f.gateway.accept(f.follow());
       f.store.respond(owner.id, ["Already finished"]);
     }
+
     await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
     expect(f.writes).toEqual([]);
     expect(f.store.queueCounts(f.gateway.key).queued).toBe(1);
@@ -353,13 +383,16 @@ test("writing receipt recovery reads evidence only, without resubmitting or queu
   f.start();
   f.gateway.accept(f.follow());
   const receipt = f.store.followUps(f.gateway.key)[0];
+
   if (!receipt) throw new Error("Missing receipt");
   expect(f.store.claimFollowUp(receipt)).toBe(true);
   let reads = 0;
   f.backend.reconcileSteer = async () => {
     reads++;
+
     return { status: "accepted" };
   };
+
   await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
   expect(reads).toBe(1);
   expect(f.writes).toEqual([]);
@@ -371,6 +404,7 @@ test("accepted-event receipt and deterministic native identity survive SQLite re
   const directory = mkdtempSync(join(tmpdir(), "stargate-followup-"));
   const path = join(directory, "store.sqlite");
   let store = openStore(path);
+
   try {
     const input = {
       botKey: "bot",
@@ -381,14 +415,17 @@ test("accepted-event receipt and deterministic native identity survive SQLite re
       user: "U123",
       text: "Original",
     };
+
     store.enqueue(input);
     const owner = store.ready("bot", Date.now(), 1)[0];
+
     if (!owner) throw new Error("Missing owner");
     store.running(owner.id);
     store.saveInput("bot", owner.id, "msg_original");
     const followup = { ...input, eventId: "C123:2.000", text: "Revised scope" };
     expect(store.admitFollowUp(followup, "ses_captain")).toBe(true);
     const receipt = store.followUps("bot")[0];
+
     if (!receipt) throw new Error("Missing receipt");
     store.claimFollowUp(receipt);
     store.close();

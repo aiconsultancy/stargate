@@ -18,17 +18,20 @@ const questionSettingsSchema = Schema.Struct({
   timeoutMs: Schema.Literals([300_000, 900_000, 3_600_000]),
   answer: Schema.Literals(["requester", "allowed"]),
 });
+
 export const decodeQuestionSettings = Schema.decodeUnknownSync(
   questionSettingsSchema,
   {
     onExcessProperty: "error",
   },
 );
+
 export type QuestionSettings = {
   enabled: boolean;
   timeoutMs: number;
   answer: "requester" | "allowed";
 };
+
 const defaults: QuestionSettings = {
   enabled: false,
   timeoutMs: 900_000,
@@ -37,6 +40,7 @@ const defaults: QuestionSettings = {
 
 export function questionSettingsPath(directory: string, agent: string): string {
   const id = createHash("sha256").update(agent).digest("hex");
+
   return join(directory, ".local", "stargate-questions", `${id}.json`);
 }
 
@@ -46,6 +50,7 @@ const missing = (error: unknown) =>
 /** Distinguish a missing file from a broken link or invalid state directory. */
 async function questionSettingsAbsent(directory: string, path: string) {
   if (!(await stat(directory)).isDirectory()) return false;
+
   for (const parent of [join(directory, ".local"), dirname(path)]) {
     try {
       if (!(await lstat(parent)).isDirectory()) return false;
@@ -53,6 +58,7 @@ async function questionSettingsAbsent(directory: string, path: string) {
       return missing(error);
     }
   }
+
   return lstat(path).then(() => false, missing);
 }
 
@@ -62,9 +68,11 @@ export async function resolveQuestionSettings(
   enableWhenMissing = false,
 ): Promise<QuestionSettings> {
   const backend = bot.backend;
+
   if (backend.type === "opencode" && backend.agent) {
     try {
       const path = questionSettingsPath(backend.directory, backend.agent);
+
       const file = await open(
         path,
         constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
@@ -77,10 +85,13 @@ export async function resolveQuestionSettings(
           return undefined;
         throw error;
       });
+
       if (!file) return { ...defaults, enabled: true };
+
       try {
         const before = await file.stat({ bigint: true });
         const uid = process.getuid?.();
+
         if (
           !before.isFile() ||
           before.size > 4096n ||
@@ -91,16 +102,20 @@ export async function resolveQuestionSettings(
           throw new Error("Private question settings required");
         const bytes = Buffer.alloc(4097);
         const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+
         if (bytesRead > 4096) throw new Error("Question settings too large");
         const after = await file.stat({ bigint: true });
         const current = await lstat(path, { bigint: true });
+
         const identity = (info: typeof before) =>
           `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+
         if (
           identity(before) !== identity(after) ||
           identity(after) !== identity(current)
         )
           throw new Error("Question settings changed during read");
+
         return decodeQuestionSettings(
           JSON.parse(bytes.subarray(0, bytesRead).toString("utf8")),
         );
@@ -111,6 +126,7 @@ export async function resolveQuestionSettings(
       // Do not log persisted content or filesystem errors.
     }
   }
+
   return { ...defaults };
 }
 
@@ -126,6 +142,7 @@ export async function saveQuestionSettings(
   const path = questionSettingsPath(directory, agent);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
+
   try {
     await writeFile(temporary, `${JSON.stringify(decoded)}\n`, {
       flag: "wx",

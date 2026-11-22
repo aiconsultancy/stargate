@@ -25,17 +25,23 @@ const destination: Destination = {
   channel: "C123",
   audience: "internal",
 };
+
 test("Unix HTTP acknowledges committed SQLite; response loss and restart keep duplicate identity", async () => {
   const directory = await temporary();
   const path = join(directory, "notify.sqlite");
+
   const config = Schema.decodeUnknownSync(notifySchema)(
     notificationConfig(true),
   );
+
   let accepted: { signature: string; duplicate: boolean } | undefined;
+
   for (let n = 0; n < 2; n++) {
     const token =
       n === 0 ? producerToken : "rotated-notification-producer-credential-0002";
+
     const scope = Effect.runSync(Scope.make());
+
     const core = await Effect.runPromise(
       makeNotifications({
         path,
@@ -44,27 +50,32 @@ test("Unix HTTP acknowledges committed SQLite; response loss and restart keep du
         sink: { allowed: () => true, send: async () => ({ state: "unknown" }) },
       }).pipe(Scope.provide(scope)),
     );
+
     const producer = notificationRoutes(
       config,
       { NOTIFY_CI: token },
       "operator-token",
       core,
     );
+
     const server = await startApiServer({
       listen: { unix: join(directory, "api.sock") },
       routes: producer.routes,
       signal: new AbortController().signal,
       fleet: async () => Response.json({ fleet: true }),
     });
+
     try {
       const response = await unixRequest(
         join(directory, "api.sock"),
         undefined,
         { token },
       );
+
       expect(response.status).toBe(202);
       const body = JSON.parse(response.body);
       expect(body.duplicate).toBe(n === 1);
+
       if (accepted) expect(body.signature).toBe(accepted.signature);
       accepted = body;
       const disk = new Database(path, { readonly: true });
@@ -93,13 +104,17 @@ test("Unix HTTP acknowledges committed SQLite; response loss and restart keep du
 test("lost original HTTP response replays as duplicate after restart without another admission", async () => {
   const directory = await temporary();
   const path = join(directory, "notify.sqlite");
+
   const config = Schema.decodeUnknownSync(notifySchema)(
     notificationConfig(true),
   );
+
   const committed = Promise.withResolvers<void>();
   let signature = "";
+
   for (let n = 0; n < 2; n++) {
     const scope = Effect.runSync(Scope.make());
+
     const core = await Effect.runPromise(
       makeNotifications({
         path,
@@ -108,35 +123,43 @@ test("lost original HTTP response replays as duplicate after restart without ano
         sink: { allowed: () => true, send: async () => ({ state: "unknown" }) },
       }).pipe(Scope.provide(scope)),
     );
+
     const producer = notificationRoutes(
       config,
       { NOTIFY_CI: producerToken },
       "operator-token",
       core,
     );
+
     const routes = producer.routes.map((route) => ({
       ...route,
       async handle(input: Request, caller: unknown, signal: AbortSignal) {
         const result = await route.handle(input, caller, signal);
+
         if (n === 0 && result.status === 202) {
           committed.resolve();
           await new Promise<void>((resolve) => {
             signal.addEventListener("abort", () => resolve(), { once: true });
+
             if (signal.aborted) resolve();
           });
         }
+
         return result;
       },
     }));
+
     const server = await startApiServer({
       listen: { unix: join(directory, "api.sock") },
       routes,
       signal: new AbortController().signal,
       fleet: async () => Response.json({ fleet: true }),
     });
+
     try {
       if (n === 0) {
         const requestLost = Promise.withResolvers<void>();
+
         const req = request(
           {
             socketPath: join(directory, "api.sock"),
@@ -149,6 +172,7 @@ test("lost original HTTP response replays as duplicate after restart without ano
           },
           () => requestLost.reject(new Error("Unexpected response")),
         );
+
         req.on("error", () => requestLost.resolve());
         req.end(JSON.stringify(envelope()));
         await committed.promise;
@@ -186,11 +210,14 @@ test("lost original HTTP response replays as duplicate after restart without ano
 test("full real outbox maps to 503 without partial admission; duplicate still succeeds", async () => {
   const directory = await temporary();
   const path = join(directory, "notify.sqlite");
+
   const config = Schema.decodeUnknownSync(notifySchema)(
     notificationConfig(true),
   );
+
   const scope = Effect.runSync(Scope.make());
   const started = Promise.withResolvers<void>();
+
   const core = await Effect.runPromise(
     makeNotifications({
       path,
@@ -203,31 +230,38 @@ test("full real outbox maps to 503 without partial admission; duplicate still su
           started.resolve();
           await new Promise<void>((resolve) => {
             signal.addEventListener("abort", () => resolve(), { once: true });
+
             if (signal.aborted) resolve();
           });
+
           return { state: "unknown" };
         },
       },
     }).pipe(Scope.provide(scope)),
   );
+
   const producer = notificationRoutes(
     config,
     { NOTIFY_CI: producerToken },
     "operator-token",
     core,
   );
+
   const server = await startApiServer({
     listen: { unix: join(directory, "api.sock") },
     routes: producer.routes,
     signal: new AbortController().signal,
     fleet: async () => Response.json({ fleet: true }),
   });
+
   try {
     expect((await unixRequest(join(directory, "api.sock"))).status).toBe(202);
     await started.promise;
+
     const failed = await unixRequest(join(directory, "api.sock"), undefined, {
       body: JSON.stringify(envelope("Different event")),
     });
+
     expect(failed.status).toBe(503);
     expect(failed.headers["retry-after"]).toBe("1");
     expect(JSON.parse(failed.body).code).toBe("store_unavailable");
@@ -257,6 +291,7 @@ test("real host rejects credentials, Origin, media, identity claims and topic; s
   const directory = await temporary();
   const raw = notificationConfig(true);
   const otherToken = "other-notification-producer-credential-0002";
+
   const config = Schema.decodeUnknownSync(notifySchema)({
     ...raw,
     adapters: {
@@ -275,7 +310,9 @@ test("real host rejects credentials, Origin, media, identity claims and topic; s
       },
     },
   });
+
   const scope = Effect.runSync(Scope.make());
+
   const core = await Effect.runPromise(
     makeNotifications({
       path: join(directory, "notify.sqlite"),
@@ -284,6 +321,7 @@ test("real host rejects credentials, Origin, media, identity claims and topic; s
       sink: { allowed: () => true, send: async () => ({ state: "unknown" }) },
     }).pipe(Scope.provide(scope)),
   );
+
   const producer = notificationRoutes(
     config,
     { NOTIFY_CI: producerToken, OTHER_CI: otherToken },
@@ -291,12 +329,14 @@ test("real host rejects credentials, Origin, media, identity claims and topic; s
     core,
     () => 1000,
   );
+
   const server = await startApiServer({
     listen: { unix: join(directory, "api.sock") },
     routes: producer.routes,
     signal: new AbortController().signal,
     fleet: async () => Response.json({ fleet: true }),
   });
+
   try {
     expect(
       (
@@ -334,6 +374,7 @@ test("real host rejects credentials, Origin, media, identity claims and topic; s
         )
       ).status,
     ).toBe(202);
+
     for (const [options, status] of [
       [{ token: "operator-token" }, 401],
       [{ token: "x" }, 401],
@@ -360,13 +401,16 @@ test("real host rejects credentials, Origin, media, identity claims and topic; s
         undefined,
         options,
       );
+
       expect(response.status).toBe(status);
       expect(response.headers["access-control-allow-origin"]).toBeUndefined();
       expect(response.body).not.toContain(producerToken);
       expect(response.body).not.toContain("claimed");
     }
+
     let response = await unixRequest(join(directory, "api.sock"));
     expect(response.status).toBe(202);
+
     for (let n = 0; n < 60; n++)
       response = await unixRequest(join(directory, "api.sock"));
     expect(response.status).toBe(429);

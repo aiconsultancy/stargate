@@ -32,6 +32,7 @@ import { settingsIssues } from "../config/settings-schema";
 export function buildManifest(name = "Stargate") {
   if (!name.trim() || name.length > 80)
     throw new Error("App name must be 1–80 characters.");
+
   return {
     display_information: { name, description: "AI assistant for Slack" },
     features: {
@@ -105,16 +106,19 @@ Messages from bots are never allowed. Backend permissions are separate.`;
 
 function validBot(input: unknown): BotConfig {
   const parsed = Schema.decodeUnknownResult(botSchema)(input);
+
   if (Result.isFailure(parsed))
     throw new Error(
       "Invalid bot configuration. Check IDs, backend options, and nonempty user/channel allowlists.",
     );
+
   if (
     parsed.success.backend.type === "pi-durable" &&
     !/^(openai|anthropic)\/.+$/.test(parsed.success.backend.model)
   ) {
     throw new Error("Pi model must be openai/modelId or anthropic/modelId.");
   }
+
   return parsed.success;
 }
 
@@ -133,18 +137,21 @@ export async function checkCredentials(
   agentDispatch?: AgentDispatchConfig,
 ): Promise<NodeJS.ProcessEnv> {
   let companion: NodeJS.ProcessEnv = {};
+
   try {
     companion = parseEnv(await readFile(`${path}.env`, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT")
       throw new Error("Cannot read credential companion.");
   }
+
   const env = { ...companion, ...environment };
   await checkProducerCredentials(
     notify,
     env,
     resolve(dirname(resolve(path)), dataDirectory),
   );
+
   // Presence only: values are never printed or sent anywhere.
   for (const registration of irc) {
     for (const name of [
@@ -157,16 +164,20 @@ export async function checkCredentials(
         throw new Error(
           "Missing IRC password environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
         );
+
     const pemFiles = new Set(
       [registration, ...registration.crew].flatMap((member) =>
         member.clientPemFile ? [member.clientPemFile] : [],
       ),
     );
+
     for (const path of pemFiles) await clientPem(path);
     const ca = registration.server.caFile;
+
     if (ca && !(await lstat(ca).catch(() => undefined))?.isFile())
       throw new Error("IRC caFile is not a readable file.");
   }
+
   if (agentDispatch?.enabled)
     for (const name of [
       agentDispatch.api.tokenEnv,
@@ -176,6 +187,7 @@ export async function checkCredentials(
         throw new Error(
           "Missing agent dispatch API environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
         );
+
   for (const bot of bots) {
     if (
       !/^xapp-[A-Za-z0-9-]+$/.test(env[bot.slack.appTokenEnv] ?? "") ||
@@ -186,6 +198,7 @@ export async function checkCredentials(
       );
     }
   }
+
   return env;
 }
 
@@ -195,27 +208,34 @@ export async function readConfiguration(
 ) {
   const invalid =
     "Cannot read a valid configuration. Check path, JSON, bot IDs, and allowlists.";
+
   let input: unknown;
+
   try {
     if (!(await lstat(path)).isFile()) throw new Error("Not a regular file");
     input = JSON.parse(await readFile(path, "utf8"));
   } catch {
     throw new Error(invalid);
   }
+
   const parsed = Schema.decodeUnknownResult(
     notificationReload ? reloadConfigSchema : configSchema,
   )(input);
+
   if (Result.isSuccess(parsed)) return parsed.success;
+
   const apiIssues = settingsIssues(parsed.failure.issue).issues.flatMap(
     ({ path, message }) =>
       path?.[0] === "api" ? [`${path.join(".")}: ${message}`] : [],
   );
+
   throw new Error(apiIssues.length ? apiIssues.join("\n") : invalid);
 }
 
 async function atomicWrite(path: string, contents: string) {
   const temporary = `${path}.${randomUUID()}.tmp`;
   const file = await open(temporary, "wx", 0o600);
+
   try {
     await file.writeFile(contents);
     await file.sync();
@@ -230,6 +250,7 @@ async function atomicWrite(path: string, contents: string) {
 async function exists(path: string) {
   try {
     await lstat(path);
+
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
@@ -243,6 +264,7 @@ export async function addBot(
   tokens?: { app: string; bot: string },
 ) {
   const bot = validBot(input);
+
   if (
     tokens &&
     (!/^xapp-[A-Za-z0-9-]+$/.test(tokens.app) ||
@@ -252,9 +274,11 @@ export async function addBot(
       "Invalid Slack token prefixes or characters; expected xapp- and xoxb-.",
     );
   }
+
   path = resolve(path);
   await mkdir(dirname(path), { recursive: true });
   let lock: FileHandle;
+
   try {
     lock = await open(`${path}.lock`, "wx", 0o600);
   } catch {
@@ -262,33 +286,41 @@ export async function addBot(
       "Configuration is locked or not writable. Retry after the other writer finishes.",
     );
   }
+
   try {
     const previous = (await exists(path))
       ? await readConfiguration(path)
       : { bots: [], dataDirectory: ".stargate" };
+
     const next = Schema.decodeUnknownResult(configSchema)({
       ...previous,
       bots: [...previous.bots, bot],
     });
+
     if (Result.isFailure(next))
       throw new Error(
         "Cannot add bot: duplicate identity/token reference or invalid configuration.",
       );
+
     // Env names must be unique across both token kinds, too.
     const names = next.success.bots.flatMap((entry) => [
       entry.slack.appTokenEnv,
       entry.slack.botTokenEnv,
     ]);
+
     if (new Set(names).size !== names.length)
       throw new Error("Token environment references must be unique.");
+
     if (tokens) {
       const envPath = `${path}.env`;
       let contents = "";
+
       if (await exists(envPath)) {
         if (!(await lstat(envPath)).isFile())
           throw new Error("Credential companion must be a regular file.");
         contents = await readFile(envPath, "utf8");
       }
+
       for (const name of [bot.slack.appTokenEnv, bot.slack.botTokenEnv]) {
         if (
           new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=`, "m").test(contents)
@@ -298,11 +330,13 @@ export async function addBot(
           );
         }
       }
+
       await atomicWrite(
         envPath,
         `${contents}${contents.endsWith("\n") || !contents ? "" : "\n"}${bot.slack.appTokenEnv}=${tokens.app}\n${bot.slack.botTokenEnv}=${tokens.bot}\n`,
       );
     }
+
     await atomicWrite(path, `${JSON.stringify(next.success, null, 2)}\n`);
   } finally {
     await lock.close();
@@ -316,17 +350,21 @@ export async function setupWizard(configPath: string) {
       "Wizard requires a terminal. Use bot add flags for scripted setup.",
     );
   let hidden = false;
+
   const output = new Writable({
     write(chunk, _encoding, callback) {
       if (!hidden) process.stdout.write(chunk);
       callback();
     },
   });
+
   const rl = createInterface({ input: process.stdin, output, terminal: true });
   const ask = async (prompt: string) => (await rl.question(prompt)).trim();
+
   const askSecret = async (prompt: string) => {
     process.stdout.write(prompt);
     hidden = true;
+
     try {
       return await ask("");
     } finally {
@@ -334,29 +372,36 @@ export async function setupWizard(configPath: string) {
       process.stdout.write("\n");
     }
   };
+
   try {
     const id = await ask("Bot ID (lowercase letters, numbers, _ or -): ");
+
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id))
       throw new Error("Invalid bot ID.");
     console.log(slackInstructions);
     console.log(manifestUrl(id));
+
     if (
       (await ask("Open Slack setup in your browser? [Y/n]: ")).toLowerCase() !==
       "n"
     ) {
       const opener = process.platform === "darwin" ? "open" : "xdg-open";
+
       if (Bun.which(opener)) {
         const browser = spawn(opener, [manifestUrl(id)], {
           stdio: "ignore",
           detached: true,
         });
+
         browser.on("error", () =>
           console.log("Open the printed Slack link manually."),
         );
         browser.unref();
       } else console.log("Open the printed Slack link manually.");
     }
+
     const appId = await ask("Slack App ID: ");
+
     const users = (
       await ask(
         "Allowed human user IDs (comma-separated, or * for all workspace humans): ",
@@ -364,6 +409,7 @@ export async function setupWizard(configPath: string) {
     )
       .split(",")
       .map((v) => v.trim());
+
     const channels = (
       await ask(
         "Allowed channel/DM IDs (comma-separated, or * for all accessible channels/DMs): ",
@@ -371,36 +417,46 @@ export async function setupWizard(configPath: string) {
     )
       .split(",")
       .map((v) => v.trim());
+
     const deniedUsers = (
       await ask("Denied human user IDs (comma-separated, blank for none): ")
     )
       .split(",")
       .map((v) => v.trim())
       .filter(Boolean);
+
     const deniedChannels = (
       await ask("Denied channel/DM IDs (comma-separated, blank for none): ")
     )
       .split(",")
       .map((v) => v.trim())
       .filter(Boolean);
+
     const type = await ask("Backend (opencode or pi-durable): ");
+
     const directory = resolve(
       (await ask("Backend working directory: ")) || ".",
     );
+
     let backend: unknown;
+
     if (type === "opencode") {
       const url =
         (await ask("OpenCode URL [http://localhost:4096]: ")) ||
         "http://localhost:4096";
+
       const providerID = await ask(
         "Optional model provider (blank for server default): ",
       );
+
       const model = providerID
         ? { providerID, id: await ask("Model ID: ") }
         : undefined;
+
       const sessionID = await ask(
         "Existing durable session ID (blank for separate thread sessions): ",
       );
+
       backend = {
         type,
         directory,
@@ -424,6 +480,7 @@ export async function setupWizard(configPath: string) {
       );
     } else throw new Error("Unknown backend.");
     const prefix = `STARGATE_${id.toUpperCase().replaceAll("-", "_")}`;
+
     const bot = validBot({
       id,
       slack: {
@@ -434,6 +491,7 @@ export async function setupWizard(configPath: string) {
       access: { users, channels, deniedUsers, deniedChannels },
       backend,
     });
+
     const app = await askSecret("App token (xapp-..., hidden): ");
     const token = await askSecret("Bot token (xoxb-..., hidden): ");
     await addBot(configPath, bot, { app, bot: token });

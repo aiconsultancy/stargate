@@ -31,14 +31,15 @@ import baseline from "./architecture-baseline.json";
 import policy from "./architecture-policy.json";
 
 // Stable IDs and approved physical aliases live in the policy, not the future
-// layout table. A move changes physical paths, not IDs or exception permissions.
+// Layout table. A move changes physical paths, not IDs or exception permissions.
 // Delete resolved exceptions and refresh lowered inventories in the same edit.
 // Root/cycle lists only shrink; lower the closure cap by recording its members.
 // Do not regenerate the baseline to accept new violations. Provenance and
-// module/edge totals are informational; guarded inventories must be current.
+// Module/edge totals are informational; guarded inventories must be current.
 test("source architecture introduces no new structural or boundary violations", async () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const physical = await buildGraph(root);
+
   for (const entry of [
     "src/main.ts",
     "src/config.ts",
@@ -47,10 +48,12 @@ test("source architecture introduces no new structural or boundary violations", 
   ])
     expect(physical.has(entry)).toBe(true);
   const source = normalizeGraph(physical, policy);
+
   const violations = [
     ...boundaryViolations(source, policy),
     ...(await documentationViolations(root, await architectureDocuments(root))),
   ];
+
   const roots = await sourceRootFiles(root);
   expect([
     ...graphRegressions(source, baseline, roots),
@@ -64,6 +67,7 @@ test("source architecture introduces no new structural or boundary violations", 
 });
 
 const temporary: string[] = [];
+
 afterEach(async () => {
   await Promise.all(
     temporary.splice(0).map((path) =>
@@ -120,6 +124,7 @@ function policyGraph(edges: Record<string, string[]>): SourceGraph {
   const files = Object.values(fixturePolicy().slices).flatMap(
     (slice) => slice.files,
   );
+
   return graph({
     ...Object.fromEntries(files.map((file) => [file, []])),
     ...edges,
@@ -169,14 +174,17 @@ describe("stable module identities", () => {
       "src/shared/session-history.ts",
     ]);
     const physical = await buildGraph(root);
+
     const movedPath = (path: string) =>
       (policy.aliases as Record<string, string[]>)[path]?.at(-1) ?? path;
+
     const moved = new Map(
       [...physical].map(([path, imports]) => [
         movedPath(path),
         new Set([...imports].map(movedPath)),
       ]),
     );
+
     const original = normalizeGraph(physical, policy);
     const normalized = normalizeGraph(moved, policy);
     expect(normalized).toEqual(original);
@@ -185,7 +193,7 @@ describe("stable module identities", () => {
     );
     expect(cyclicEdges(normalized)).toEqual(cyclicEdges(original));
     // Two current consuming owners do not justify a lib promotion. Keep only
-    // this exact legacy dependency until source work can remove it.
+    // This exact legacy dependency until source work can remove it.
     expect(boundaryViolations(normalized, policy)).toContain(
       "shared-dependency:src/slack-format.ts -> src/markdown-chunks.ts",
     );
@@ -196,6 +204,7 @@ describe("stable module identities", () => {
 
   test("pure approved file moves preserve cycle and private-edge exception IDs", async () => {
     const policy = movablePolicy();
+
     const recorded: GraphBaseline = {
       rootFiles: ["src/alpha.ts", "src/private.ts", "src/second-private.ts"],
       cyclicEdges: [
@@ -208,12 +217,15 @@ describe("stable module identities", () => {
         members: ["src/alpha.ts", "src/private.ts"],
       },
     };
+
     const exceptions = ["private:src/alpha.ts -> src/private.ts"];
+
     const root = await fixture({
       "src/alpha.ts": 'import "./private";',
       "src/private.ts": 'import "./alpha";',
       "src/second-private.ts": "",
     });
+
     const original = normalizeGraph(await buildGraph(root), policy);
     expect(cyclicEdges(original)).toEqual(recorded.cyclicEdges);
     expect(boundaryViolations(original, policy)).toEqual(exceptions);
@@ -278,6 +290,7 @@ describe("stable module identities", () => {
       normalizeGraph(graph({ "src/unapproved/private.ts": [] }), policy),
     ).toThrow("unknown source path");
     const ambiguous = movablePolicy();
+
     if (!ambiguous.aliases) throw new Error("Missing fixture aliases");
     ambiguous.aliases["src/private.ts"] = [
       "src/private.ts",
@@ -290,12 +303,15 @@ describe("stable module identities", () => {
 
   test("root limits use physical paths, not the normalized module IDs", () => {
     const policy = movablePolicy();
+
     if (!policy.aliases) throw new Error("Missing fixture aliases");
     policy.aliases["src/alpha.ts"] = ["src/alpha.ts", "src/renamed-root.ts"];
+
     const normalized = normalizeGraph(
       graph({ "src/renamed-root.ts": [] }),
       policy,
     );
+
     expect(normalized.has("src/alpha.ts")).toBe(true);
     expect(
       graphRegressions(
@@ -314,11 +330,13 @@ describe("source size gate", () => {
   for (const ending of ["\n", "\r\n"])
     test(`counts non-blank lines with ${JSON.stringify(ending)}`, async () => {
       const root = await fixture({ "src/alpha/entry.ts": "" });
+
       for (const count of [999, 1000, 1001]) {
         for (const finalTerminator of [false, true]) {
           const source = Array.from({ length: count }, () => "// counted").join(
             ending,
           );
+
           await writeFile(
             join(root, "src/alpha/entry.ts"),
             source + (finalTerminator ? ending : ""),
@@ -338,6 +356,7 @@ describe("source size gate", () => {
     const root = await fixture({
       "src/alpha/entry.ts": "// counted\n".repeat(1001),
     });
+
     expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([
       "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 non-blank lines > 1000",
     ]);
@@ -348,12 +367,15 @@ describe("source size gate", () => {
       "src/alpha/entry.ts": "",
       "tests/large.test.ts": "// not source\n".repeat(1001),
     });
+
     for (const ending of ["\n", "\r\n"]) {
       const blanks = ["", " ", "\t", "\f", "\r", " \t\f\r"];
+
       const padding = Array.from(
         { length: 500 },
         (_, index) => blanks[index % blanks.length] + ending,
       ).join("");
+
       await writeFile(
         join(root, "src/alpha/entry.ts"),
         padding + ("// counted" + ending).repeat(1000),
@@ -367,6 +389,7 @@ describe("source size gate", () => {
         "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 non-blank lines > 1000",
       ]);
     }
+
     await writeFile(join(root, "src/alpha/entry.ts"), "");
     expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([]);
     expect(
@@ -377,9 +400,11 @@ describe("source size gate", () => {
   test("blank lines inside template literals do not count", async () => {
     const template =
       "export const text = `\n" + " \t\n".repeat(500) + "value`;\n";
+
     const root = await fixture({
       "src/alpha/entry.ts": template + "// counted\n".repeat(998),
     });
+
     expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([]);
     await writeFile(
       join(root, "src/alpha/entry.ts"),
@@ -394,6 +419,7 @@ describe("source size gate", () => {
     const root = await fixture({
       "src/alpha/entry.ts": "// counted\n".repeat(1001),
     });
+
     const allowed = ["src/alpha/entry.ts"];
     expect(await sizeRegressions(root, fixturePolicy(), allowed)).toEqual([]);
     expect(
@@ -435,9 +461,11 @@ describe("source size gate", () => {
         "src/gateway.ts": ["src/gateway.ts", "src/gateway/gateway.ts"],
       },
     };
+
     const root = await fixture({
       "src/gateway.ts": "// counted\n".repeat(1001),
     });
+
     const allowed = ["src/gateway.ts"];
     expect(await sizeRegressions(root, policy, allowed)).toEqual([]);
     await mkdir(join(root, "src/gateway"));
@@ -478,13 +506,16 @@ describe("architecture policy mechanics", () => {
   test("each source file has exactly one explicit owner and valid public declarations", () => {
     const policy = fixturePolicy();
     const alpha = policy.slices["alpha"];
+
     if (!alpha) throw new Error("Missing fixture owner");
     alpha.files.push("src/beta/private.ts");
     alpha.public.push("src/not-owned.ts");
+
     const failures = boundaryViolations(
       policyGraph({ "src/unknown.ts": [] }),
       policy,
     );
+
     expect(failures).toContain("membership:duplicate:src/beta/private.ts");
     expect(failures).toContain("membership:missing:src/unknown.ts");
     expect(failures).toContain(
@@ -499,6 +530,7 @@ describe("architecture policy mechanics", () => {
       }),
       fixturePolicy(),
     );
+
     expect(violations).toContain(
       "private:src/alpha/entry.ts -> src/beta/private.ts",
     );
@@ -525,6 +557,7 @@ describe("architecture policy mechanics", () => {
       }),
       fixturePolicy(),
     );
+
     expect(failures).toContain("direction:src/alpha/entry.ts -> src/main.ts");
     expect(failures).toContain(
       "neighbour:src/alpha/entry.ts -> src/gamma/entry.ts",
@@ -538,9 +571,11 @@ describe("architecture policy mechanics", () => {
     const policy = fixturePolicy();
     const alpha = policy.slices["alpha"];
     const app = policy.slices["app"];
+
     if (!alpha || !app) throw new Error("Missing fixture owner");
     alpha.contracts = ["src/alpha/entry.ts"];
     app.layer = "config";
+
     const failures = boundaryViolations(
       policyGraph({
         "src/alpha/entry.ts": ["src/alpha/second.ts"],
@@ -548,6 +583,7 @@ describe("architecture policy mechanics", () => {
       }),
       policy,
     );
+
     expect(failures).toContain(
       "direction:src/alpha/entry.ts -> src/alpha/second.ts",
     );
@@ -565,7 +601,9 @@ describe("architecture policy mechanics", () => {
       }),
       fixturePolicy(),
     );
+
     expect(one).toContain("rule-three:underused:src/lib/helper.ts");
+
     const three = boundaryViolations(
       policyGraph({
         "src/alpha/entry.ts": ["src/lib/helper.ts", "src/beta/private.ts"],
@@ -574,6 +612,7 @@ describe("architecture policy mechanics", () => {
       }),
       fixturePolicy(),
     );
+
     expect(three.filter((id) => id.startsWith("rule-three:"))).toEqual([
       "rule-three:extract:src/beta/private.ts",
     ]);
@@ -599,12 +638,14 @@ describe("architecture policy mechanics", () => {
       public: ["src/shared/model.ts"],
       neighbours: ["lib"],
     };
+
     const current = policyGraph({
       "src/alpha/entry.ts": ["src/lib/helper.ts"],
       "src/lib/helper.ts": ["src/lib/helper.ts"],
       "src/shared/model.ts": ["src/lib/helper.ts"],
       "tests/consumer.test.ts": ["src/lib/helper.ts"],
     });
+
     expect(boundaryViolations(current, policy)).toContain(
       "rule-three:underused:src/lib/helper.ts",
     );
@@ -613,8 +654,10 @@ describe("architecture policy mechanics", () => {
   test("retained stores/services are explicit; shared code cannot import slices", () => {
     const policy = fixturePolicy();
     const beta = policy.slices["beta"];
+
     if (!beta) throw new Error("Missing fixture owner");
     beta.retained = { "src/beta/private.ts": "store" };
+
     const failures = boundaryViolations(
       policyGraph({
         "src/alpha/entry.ts": ["src/beta/private.ts"],
@@ -624,6 +667,7 @@ describe("architecture policy mechanics", () => {
       }),
       policy,
     );
+
     expect(failures).not.toContain("rule-three:extract:src/beta/private.ts");
     expect(failures).toContain(
       "shared-dependency:src/lib/helper.ts -> src/alpha/entry.ts",
@@ -632,6 +676,7 @@ describe("architecture policy mechanics", () => {
 
   test("documentation checks current paths, including code, but not local target examples or external URLs", async () => {
     const root = await fixture({ "src/existing.ts": "" });
+
     const violations = await documentationViolations(root, {
       "docs/design.md": [
         "Current `./src/existing` and `src/**/*.ts`.",
@@ -647,6 +692,7 @@ describe("architecture policy mechanics", () => {
         "https://example.com/repo/src/external.ts",
       ].join("\n"),
     });
+
     expect(violations).toEqual([
       "source-path:docs/design.md:src/also-missing.ts",
       "source-path:docs/design.md:src/fenced-missing.ts",
@@ -658,11 +704,13 @@ describe("architecture policy mechanics", () => {
 async function fixture(files: Record<string, string>) {
   const root = await mkdtemp(join(tmpdir(), "stargate-architecture-"));
   temporary.push(root);
+
   for (const [name, source] of Object.entries(files)) {
     const path = join(root, name);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, source);
   }
+
   return root;
 }
 
@@ -711,6 +759,7 @@ describe("architecture graph mechanics", () => {
       "src/escaped.ts": "",
       "src/template-expression.ts": "",
     });
+
     const result = await buildGraph(root);
     expect([...(result.get("src/entry.ts") ?? [])].sort()).toEqual([
       "src/directory/index.ts",
@@ -729,11 +778,13 @@ describe("architecture graph mechanics", () => {
 
   test("rejects unresolved local imports rather than dropping their edges", async () => {
     const root = await fixture({ "src/main.ts": 'import "./missing";' });
+
     // Bun 1.4.4's rejects matcher blocks native parser filesystem callbacks.
     // Await the result before passing it to a synchronous matcher.
     const error: unknown = await buildGraph(root).catch(
       (error: unknown) => error,
     );
+
     expect(error).toBeInstanceOf(Error);
     expect(String(error)).toContain("./missing");
   });
@@ -746,15 +797,18 @@ describe("architecture graph mechanics", () => {
       "src/main.ts": 'import type { Value } from "#feature";',
       "src/feature.ts": "export type Value = string;",
     });
+
     const result = await buildGraph(root);
     expect([...(result.get("src/main.ts") ?? [])]).toEqual(["src/feature.ts"]);
   });
 
   test("rejects path traversal outside the repository", async () => {
     const root = await fixture({ "src/main.ts": 'import "../../outside.ts";' });
+
     const error: unknown = await buildGraph(root).catch(
       (error: unknown) => error,
     );
+
     expect(error).toBeInstanceOf(Error);
     expect(String(error)).toContain("outside repository");
   });
@@ -764,6 +818,7 @@ describe("architecture graph mechanics", () => {
       "src/main.ts": 'import "./alias";',
       "src/real/index.ts": "",
     });
+
     await symlink(join(root, "src/real"), join(root, "src/alias"));
     await expect(buildGraph(root)).rejects.toThrow("symbolic link");
     await rm(join(root, "src/alias"));
@@ -776,9 +831,11 @@ describe("architecture graph mechanics", () => {
       "src/main.ts": 'import "./folder.ts";',
       "src/folder/index.ts": "",
     });
+
     const error: unknown = await buildGraph(root).catch(
       (error: unknown) => error,
     );
+
     expect(String(error)).toContain("unresolved local import ./folder.ts");
   });
 
@@ -786,9 +843,11 @@ describe("architecture graph mechanics", () => {
     const root = await fixture({
       "src/main.ts": 'import "/outside/module.ts";',
     });
+
     const error: unknown = await buildGraph(root).catch(
       (error: unknown) => error,
     );
+
     expect(String(error)).toContain("absolute source import");
   });
 
@@ -825,6 +884,7 @@ describe("architecture graph mechanics", () => {
         "src/a/z.ts -> src/a/x.ts",
       ],
     };
+
     const current = graph({
       "src/a/x.ts": ["src/a/y.ts", "src/a/z.ts"],
       "src/a/y.ts": ["src/a/z.ts"],
@@ -832,6 +892,7 @@ describe("architecture graph mechanics", () => {
       "src/b/x.ts": ["src/b/y.ts"],
       "src/b/y.ts": ["src/b/x.ts"],
     });
+
     expect(graphRegressions(current, baseline)).toEqual([
       "cycle:src/a/x.ts -> src/a/z.ts",
       "cycle:src/b/x.ts -> src/b/y.ts",
@@ -873,6 +934,7 @@ describe("architecture graph mechanics", () => {
       "src/dynamic.ts": ["src/leaf.ts"],
       "src/leaf.ts": [],
     });
+
     expect(importClosure(current, "src/crew/plugin.ts")).toEqual([
       "src/crew/plugin.ts",
       "src/dynamic.ts",

@@ -6,9 +6,11 @@ import { backendSchema } from "../src/config";
 import { CrewQuestionGateway } from "../src/irc/crew-question-gateway";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
 const session = "ses_questions";
 const input = "msg_original";
 const assistant = "msg_question";
@@ -43,11 +45,13 @@ function fixture(
     ],
     state: { status: "pending" },
   };
+
   const workerIdentity = {
     agent: "worker",
     location: { directory: "/workspace" },
     metadata: { stargateCrew: { namespace: "fixture", crewID: "crew" } },
   };
+
   const tool = {
     type: "tool",
     id: "call_question",
@@ -56,6 +60,7 @@ function fixture(
     state: { status: "running", input: { questions: [] }, metadata: {} },
     time: { created: 2, ran: 3 },
   };
+
   const message = {
     id: assistant,
     type: "assistant",
@@ -64,6 +69,7 @@ function fixture(
     time: { created: 2 },
     content: [tool],
   };
+
   let origin = input;
   let queued = false;
   let idle = false;
@@ -73,16 +79,19 @@ function fixture(
   let formFailure = 0;
   let missingSession = false;
   const writes: { method: string; path: string; body: unknown }[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const path = new URL(request.url).pathname;
+
       if (missingSession)
         return Response.json(
           { _tag: "SessionNotFoundError", sessionID: session, message: "gone" },
           { status: 404 },
         );
+
       if (
         path === `/api/session/${session}/form/${formID}` &&
         request.method === "GET"
@@ -94,10 +103,13 @@ function fixture(
               : { _tag: "ServiceUnavailableError", message: "Unavailable" },
             { status: formFailure },
           );
+
         return Response.json({ data: form });
       }
+
       if (path === `/api/session/${session}/form`)
         return Response.json({ data: [form] });
+
       if (
         (path.endsWith(`/${formID}/reply`) && request.method === "POST") ||
         (path.endsWith(`/${formID}`) && request.method === "DELETE")
@@ -107,13 +119,17 @@ function fixture(
           path,
           body: request.method === "POST" ? await request.json() : null,
         });
+
         if (failWrite) return new Response(null, { status: 409 });
         form.state.status =
           request.method === "DELETE" ? "cancelled" : "answered";
+
         return new Response(null, { status: 204 });
       }
+
       if (path === `/api/session/${session}/message/${assistant}`)
         return Response.json({ data: message });
+
       if (path === `/api/session/${session}/message/${input}`)
         return Response.json({
           data: {
@@ -124,8 +140,10 @@ function fixture(
             time: { created: 1 },
           },
         });
+
       if (path === `/api/session/${session}/message`) {
         historyReads++;
+
         return Response.json({
           data: [
             ...(laterInput
@@ -150,12 +168,15 @@ function fixture(
           cursor: {},
         });
       }
+
       if (path === `/api/session/${session}/inbox`)
         return Response.json({ data: queued ? [{ id: input }] : [] });
+
       if (path === "/api/session/active")
         return Response.json({
           data: idle ? {} : { [session]: { status: "busy" } },
         });
+
       if (path === `/api/session/${session}`)
         return Response.json({
           data: {
@@ -170,21 +191,27 @@ function fixture(
             },
           },
         });
+
       return new Response(null, { status: 404 });
     },
   });
+
   const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: injected ? "http://127.0.0.1:1" : server.url.href,
     directory: "/workspace",
     sessionID: session,
   });
+
   if (config.type !== "opencode") throw new Error("Invalid native fixture");
+
   const backend = new OpenCodeBackend(
     config,
     injected ? OpenCode.make({ baseUrl: server.url.href }) : undefined,
   );
+
   cleanup.push(() => server.stop(true));
+
   return {
     backend,
     gateway: new CrewQuestionGateway(
@@ -226,6 +253,7 @@ function fixture(
 
 test("crew gateway checks the worker identity, delivered input and form before requesting permission to write", async () => {
   const f = fixture();
+
   const owner = {
     captain: "ses_captain",
     session,
@@ -236,14 +264,18 @@ test("crew gateway checks the worker identity, delivered input and form before r
     namespace: "fixture",
     directory: "/workspace",
   };
+
   const work = { id: "read", owner, action: { kind: "list" as const } };
   const signal = AbortSignal.timeout(3000);
   let confirms = 0;
   let permitted = false;
+
   const confirm = async () => {
     confirms++;
+
     return permitted;
   };
+
   for (const change of [
     { captain: "ses_wrong" },
     { session: "ses_captain" },
@@ -260,10 +292,12 @@ test("crew gateway checks the worker identity, delivered input and form before r
       ),
     ).toEqual({ status: "mismatch" });
   }
+
   const result = await f.gateway.execute(work, confirm, signal);
   expect(result.status).toBe("ok");
   expect(result.forms).toHaveLength(1);
   const q = (await f.list())[0];
+
   if (!q) throw new Error("Missing question");
   const identity = { form: formID, fingerprint: q.fingerprint };
   expect(
@@ -273,10 +307,12 @@ test("crew gateway checks the worker identity, delivered input and form before r
       signal,
     ),
   ).toEqual({ status: "ok" });
+
   const write = {
     ...work,
     action: { kind: "write" as const, ...identity, answer: { q0: "wait" } },
   };
+
   expect(
     await f.gateway.execute(
       { ...write, owner: { ...owner, input: "wrong" } },
@@ -333,6 +369,7 @@ test("crew gateway checks the worker identity, delivered input and form before r
 test("OpenCode boundary corpus: question origin is strict at both object levels", async () => {
   const f = fixture();
   const origin = f.form.metadata;
+
   for (const [metadata, accepted] of [
     [origin, true],
     [{ ...origin, extra: true }, false],
@@ -351,6 +388,7 @@ test("OpenCode boundary corpus: question origin is strict at both object levels"
     });
     const questions = await f.list();
     expect(questions).toHaveLength(accepted ? 1 : 0);
+
     if (accepted) expect(questions[0]).toMatchObject({ inputID: input });
   }
 });
@@ -361,6 +399,7 @@ test("native questions bind exact form, running tool and delivered input, never 
   const questions = await f.list();
   expect(questions).toHaveLength(1);
   const q = questions[0];
+
   if (!q || "unsupported" in q) throw new Error("Missing native question");
   expect(q).toMatchObject({
     id: formID,
@@ -396,6 +435,7 @@ test("native questions bind exact form, running tool and delivered input, never 
 test("native cancellation uses form cancel, with no prompt or permission endpoint", async () => {
   const f = fixture();
   const q = (await f.list())[0];
+
   if (!q || "unsupported" in q) throw new Error("Missing question");
   await f.backend.replyQuestion(q, null, AbortSignal.timeout(3000));
   expect(f.writes).toEqual([
@@ -421,6 +461,7 @@ for (const change of [
 ] as const) {
   test(`native question rejects ${change} instead of guessing ownership or an answer`, async () => {
     const f = fixture();
+
     switch (change) {
       case "session":
         f.form.sessionID = "ses_other";
@@ -453,7 +494,9 @@ for (const change of [
         f.form.title = "Supply your API key";
         break;
     }
+
     const pending = await f.list();
+
     if (["hidden", "default", "sensitive"].includes(change)) {
       expect(pending).toHaveLength(1);
       expect(pending[0]).toMatchObject({ unsupported: true, inputID: input });
@@ -467,6 +510,7 @@ for (const change of [
 test("native form mutation or already-completed race cannot reuse an earlier question", async () => {
   const f = fixture();
   const q = (await f.list())[0];
+
   if (!q || "unsupported" in q) throw new Error("Missing question");
   f.form.title = "Different question";
   expect(
@@ -505,9 +549,11 @@ test("recovery release requires native idle, delivered input and no queued copy"
 test("repeated native checks reuse immutable ancestry but still reject a queued original input", async () => {
   const f = fixture();
   const q = (await f.list())[0];
+
   if (!q || "unsupported" in q) throw new Error("Missing question");
   const initial = f.historyReads;
   expect(initial).toBeGreaterThan(0);
+
   for (let i = 0; i < 5; i++) {
     expect(await f.list()).toHaveLength(1);
     expect(
@@ -520,6 +566,7 @@ test("repeated native checks reuse immutable ancestry but still reject a queued 
       ),
     ).toBe(true);
   }
+
   expect(f.historyReads).toBe(initial);
   f.queued(true);
   expect(await f.list()).toEqual([]);
@@ -584,6 +631,7 @@ test("crew form adapter uses its verified injected client, not fallback service 
   const f = fixture(true);
   const questions = await f.list();
   const question = questions[0];
+
   if (!question || "unsupported" in question)
     throw new Error("Missing owned question");
   await f.backend.replyQuestion(
@@ -602,6 +650,7 @@ test("crew form adapter uses its verified injected client, not fallback service 
 
 test("only standalone synthetic input can be claimed outside its original thread", async () => {
   const signal = AbortSignal.timeout(5000);
+
   for (const source of [
     fixture(),
     fixture(false, "synthetic", { taskID: "owned" }),
@@ -609,8 +658,10 @@ test("only standalone synthetic input can be claimed outside its original thread
     expect(await source.backend.pinnedBackgroundQuestions(signal)).toEqual([]);
     expect(source.writes).toEqual([]);
   }
+
   const standalone = fixture(false, "synthetic");
   const [q] = await standalone.backend.pinnedBackgroundQuestions(signal);
+
   if (!q) throw new Error("Missing synthetic question");
   await expect(
     standalone.backend.replyQuestion(q, { q0: "wait" }, signal, () => false),

@@ -7,6 +7,7 @@ import {
 } from "../src/maintenance/nightly/update/cooloff";
 
 const now = Date.parse("2026-11-12T00:10:00Z");
+
 const hoursAgo = (hours: number) =>
   new Date(now - hours * 3_600_000).toISOString();
 
@@ -38,10 +39,13 @@ const server = Bun.serve({
   port: 0,
   fetch(request) {
     const url = new URL(request.url);
+
     if (url.pathname === "/@opencode%2Fcli") return Response.json(packument);
+
     return new Response("missing", { status: 404 });
   },
 });
+
 afterAll(() => server.stop(true));
 
 describe("supply-chain cool-off", () => {
@@ -86,6 +90,7 @@ describe("supply-chain cool-off", () => {
       assets: [],
       ...extra,
     });
+
     const releases = [
       release("v8.0.60", 1),
       release("v8.0.59", 30, { draft: true }),
@@ -96,6 +101,7 @@ describe("supply-chain cool-off", () => {
       release("nightly", 100),
       release("v8.0.54", 400),
     ];
+
     expect(selectGitHubRelease(releases, now, 24)?.version).toBe("8.0.55");
     expect(selectGitHubRelease(releases, now, 0)?.version).toBe("8.0.60");
     expect(selectGitHubRelease([], now, 0)).toBeNull();
@@ -110,6 +116,7 @@ describe("supply-chain cool-off", () => {
       created_at: hoursAgo(created),
       updated_at: hoursAgo(updated),
     });
+
     const release = (tag: string, assets: unknown[]) => ({
       id: 1,
       tag_name: tag,
@@ -119,12 +126,14 @@ describe("supply-chain cool-off", () => {
       author: { login: "github-actions[bot]" },
       assets,
     });
+
     const releases = [
       release("v8.0.60", [asset(100, 2)]),
       release("v8.0.59", [asset(1, 1)]),
       release("v8.0.58", [{ ...asset(100, 100), updated_at: undefined }]),
       release("v8.0.57", [asset(90, 90)]),
     ];
+
     expect(selectGitHubRelease(releases, now, 24)?.version).toBe("8.0.57");
   });
 });

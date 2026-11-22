@@ -24,12 +24,14 @@ import { openStore } from "../src/app/open-store";
 import { bot, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
 // Shapes copied from the live workspace (IDs replaced), not invented.
 const defiant: PeerSender = { user: "UDEFIANT", bot: "BDEFIANT" };
+
 const directory: Record<string, unknown> = {
   UDEFIANT: {
     ok: true,
@@ -91,6 +93,7 @@ const directory: Record<string, unknown> = {
 function lookup() {
   const calls: string[] = [];
   let fail = false;
+
   return {
     calls,
     fail(value: boolean) {
@@ -98,7 +101,9 @@ function lookup() {
     },
     async lookup(user: string) {
       calls.push(user);
+
       if (fail) throw new Error("users.info PRIVATE_SLACK_ERROR");
+
       return directory[user] ?? { ok: false, error: "user_not_found" };
     },
   };
@@ -135,6 +140,7 @@ test("captain names: the -captain suffix in any Slack name form", () => {
     ["solkar_captain"],
   ])
     expect(isCaptainName(names)).toBe(true);
+
   for (const names of [
     ["captain"],
     ["defiantcaptain"],
@@ -148,12 +154,13 @@ test("captain names: the -captain suffix in any Slack name form", () => {
 
 test("the directory admits only a live same-workspace captain bot bound to its bot ID", async () => {
   const f = lookup();
-  let now = 1_000;
+  let now = 1000;
   const peers = new PeerDirectory(f.lookup, "T123", () => now);
   const signal = new AbortController().signal;
   expect(await peers.verify(defiant, signal)).toBe(true);
   // The message's bot ID must be the one Slack binds to that user.
   expect(await peers.verify({ ...defiant, bot: "BOTHER" }, signal)).toBe(false);
+
   for (const sender of [
     { user: "UHELPER", bot: "BHELPER" },
     { user: "UFOREIGN", bot: "BFOREIGN" },
@@ -187,10 +194,12 @@ test("a failed lookup admits nothing and is not cached", async () => {
 
 test("routing admits a verified captain only with the setting, and never the own bot", () => {
   const off = bot();
+
   const on = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     access: { ...bot().access, users: ["*"], peerCaptains: true },
   });
+
   const request = message("<@UBOT> handoff ticket", "1.000", defiant);
   expect(routeEvent(request, on, identity, defiant)).toMatchObject({
     user: "UDEFIANT",
@@ -211,14 +220,17 @@ test("routing admits a verified captain only with the setting, and never the own
   expect(
     routeEvent(message("<@UBOT> hi", "2.000", own), on, identity, own),
   ).toBeUndefined();
+
   // People are unchanged and carry no sender kind.
   const human = routeEvent(
     message("<@UBOT> hi", "3.000", { user: "U123" }),
     on,
     identity,
   );
+
   expect(human?.user).toBe("U123");
   expect(human && "sender" in human).toBe(false);
+
   // Edits and legacy bot_message posts stay rejected.
   for (const subtype of ["message_changed", "bot_message"])
     expect(
@@ -237,6 +249,7 @@ test("deny lists and allow lists still apply to a verified captain", () => {
       ...bot(),
       access: { ...bot().access, peerCaptains: true, ...access },
     });
+
   const request = message("<@UBOT> handoff", "1.000", defiant);
   expect(
     routeEvent(
@@ -287,11 +300,14 @@ test("botSender reads only well-formed IDs, never text", () => {
 function gatewayFixture(peerCaptains = true, pinned = true) {
   const store = openStore(":memory:");
   cleanup.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     access: { users: ["*"], channels: ["*"], peerCaptains },
   });
+
   const logged: string[] = [];
+
   const log = pino(
     { level: "trace" },
     new Writable({
@@ -301,7 +317,9 @@ function gatewayFixture(peerCaptains = true, pinned = true) {
       },
     }),
   );
+
   const prompts: { text: string; context?: PromptSourceContext }[] = [];
+
   const backend: AgentBackend = {
     ...(pinned ? { sessionID: "captain" } : {}),
     async createSession() {
@@ -309,17 +327,22 @@ function gatewayFixture(peerCaptains = true, pinned = true) {
     },
     async prompt(_session, text, _signal, _onText, _onInput, _files, context) {
       prompts.push({ text, ...(context ? { context } : {}) });
+
       return "[[stargate:silent]]";
     },
     async close() {},
   };
+
   const posts: string[] = [];
+
   const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       posts.push(text);
     },
   };
+
   const directoryLookup = lookup();
+
   const gateway = new Gateway(
     config,
     identity,
@@ -330,8 +353,10 @@ function gatewayFixture(peerCaptains = true, pinned = true) {
     undefined,
     new PeerDirectory(directoryLookup.lookup, "T123"),
   );
+
   cleanup.push(() => gateway.close());
   const signal = new AbortController().signal;
+
   const drain = async () => {
     for (
       let jobs = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20);
@@ -340,6 +365,7 @@ function gatewayFixture(peerCaptains = true, pinned = true) {
     )
       for (const job of jobs) await gateway.process(job, signal);
   };
+
   return {
     store,
     gateway,
@@ -405,28 +431,36 @@ test("an unpinned bot names the peer sender in the prompt text", async () => {
 
 test("the OpenCode source line carries k=captain only for a peer captain", async () => {
   const lines: string[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const url = new URL(request.url);
+
       if (url.pathname.endsWith("/prompt")) {
         const body = (await request.json()) as { id: string; text: string };
         lines.push(body.text.split("\n")[0] ?? "");
+
         return new Response("PRIVATE stop", { status: 500 });
       }
+
       return new Response(null, { status: 404 });
     },
   });
+
   cleanup.push(() => server.stop(true));
+
   const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
   });
+
   if (config.type !== "opencode") throw new Error("Invalid fixture");
   const backend = new OpenCodeBackend(config);
   const source = { channel: "C1", thread: "1.0", message: "2.0", user: "U9" };
+
   for (const context of [
     { source },
     { source: { ...source, sender: "captain" as const } },
@@ -455,6 +489,7 @@ test("loop cap: a peer captain gets five turns per thread per hour; people are n
   expect(
     await f.gateway.receive(message("<@UBOT> start", ts(0), defiant)),
   ).toBe(true);
+
   for (let i = 1; i < peerTurnsPerHour; i++)
     expect(
       await f.gateway.receive(message(`reply ${i}`, ts(i), defiant, ts(0))),
@@ -483,6 +518,7 @@ test("loop cap: a peer captain gets five turns per thread per hour; people are n
   await old.gateway.receive(
     message("<@UBOT> start", `${past}.000100`, defiant),
   );
+
   for (let i = 1; i < peerTurnsPerHour + 3; i++)
     old.store.enqueue({
       eventId: `C123:${past + i}.000100`,
@@ -529,6 +565,7 @@ test("the cap uses Slack message time, so host clock skew cannot disable it", as
   const base = Math.floor(Date.now() / 1000) - 2 * 3600;
   const ts = (offset: number) => `${base + offset}.000100`;
   await f.gateway.receive(message("<@UBOT> start", ts(0), defiant));
+
   for (let i = 1; i < peerTurnsPerHour; i++)
     await f.gateway.receive(message(`reply ${i}`, ts(i), defiant, ts(0)));
   expect(
@@ -553,6 +590,7 @@ test("Slack intake does not ACK when intake closes during the async check", asyn
     },
     async () => {
       open = false;
+
       return false;
     },
     pino({ enabled: false }),
@@ -565,10 +603,12 @@ test("Slack intake does not ACK when intake closes during the async check", asyn
 test("intake that closes during the lookup stores nothing", async () => {
   const f = gatewayFixture();
   let open = true;
+
   const pending = f.gateway.receive(
     message("<@UBOT> hi", "1.000", defiant),
     () => open,
   );
+
   open = false;
   expect(await pending).toBe(false);
   expect(f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 5)).toEqual([]);
@@ -587,6 +627,7 @@ test("Slack intake waits for the async check before ACK", async () => {
     async () => {
       await Bun.sleep(5);
       order.push("stored");
+
       return true;
     },
     pino({ enabled: false }),

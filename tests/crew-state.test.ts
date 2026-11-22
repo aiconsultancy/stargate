@@ -10,6 +10,7 @@ const diskIntegrationTimeoutMs = 30_000;
 
 test("worker locations observe a gateway poll only for the same daemon and pinned captain", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-crew-state-"));
+
   const options = [
     directory,
     "custom",
@@ -17,9 +18,11 @@ test("worker locations observe a gateway poll only for the same daemon and pinne
     undefined,
     false,
   ] as const;
+
   const captain = await CrewState.open(...options, "ses_captain");
   const worker = await CrewState.open(...options, "ses_captain");
   const anotherPin = await CrewState.open(...options, "ses_other");
+
   try {
     expect(worker.hasCrewQuestionConsumer(5000, 1000)).toBe(false);
     captain.noteCrewQuestionConsumer(5000);
@@ -28,11 +31,13 @@ test("worker locations observe a gateway poll only for the same daemon and pinne
     expect(worker.hasCrewQuestionConsumer(6000, 1000)).toBe(false);
     expect(anotherPin.hasCrewQuestionConsumer(5000, 1000)).toBe(false);
     const previousDaemon = new Database(captain.path);
+
     try {
       previousDaemon.exec("UPDATE crew_question_consumer SET daemonPID=0");
     } finally {
       previousDaemon.close();
     }
+
     expect(worker.hasCrewQuestionConsumer(5000, 1000)).toBe(false);
   } finally {
     anotherPin.close();
@@ -45,10 +50,12 @@ test("worker locations observe a gateway poll only for the same daemon and pinne
 test("legacy state upgrades identity without replacing peers, results or cursors", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-crew-state-"));
   const namespace = "legacy";
+
   const path = join(
     directory,
     `crew-${createHash("sha256").update(namespace).digest("hex")}.sqlite`,
   );
+
   const legacy = new Database(path);
   legacy.exec(`
     CREATE TABLE identity (value TEXT PRIMARY KEY);
@@ -74,16 +81,19 @@ test("legacy state upgrades identity without replacing peers, results or cursors
     INSERT INTO mail_cursors VALUES ('ses_bowser','task_legacy',42);
   `);
   legacy.close();
+
   try {
     await expect(
       CrewState.open(directory, namespace, "new-fingerprint"),
     ).rejects.toThrow("configuration changed");
+
     const state = await CrewState.open(
       directory,
       namespace,
       "new-fingerprint",
       "old-fingerprint",
     );
+
     try {
       expect(state.peer("mario")?.sessionID).toBe("ses_legacy");
       expect(state.task("task_legacy")?.result).toBe("saved result");
@@ -91,6 +101,7 @@ test("legacy state upgrades identity without replacing peers, results or cursors
     } finally {
       state.close();
     }
+
     const inspect = new Database(path);
     expect(
       inspect.query<{ value: string }, []>("SELECT value FROM identity").get()
@@ -111,6 +122,7 @@ test(
     const directory = await mkdtemp(join(tmpdir(), "stargate-crew-state-"));
     const state = await CrewState.open(directory, "custom", "identity-v2");
     const second = await CrewState.open(directory, "custom", "identity-v2");
+
     try {
       const peer = state.reservePeer("builder");
       const token = state.reserveControl(peer.crewID);
@@ -121,11 +133,13 @@ test(
       state.releaseControl(peer.crewID, "wrong-token");
       expect(second.reserveTask(peer, "captain")).toBeNull();
       state.releaseControl(peer.crewID, token);
+
       for (let index = 1; index < pendingTaskLimit; index++)
         state.enqueue(peer, "captain", String(index));
       expect(() => second.enqueue(peer, "captain", "overflow")).toThrow("100");
       const immediate = second.reserveTask(peer, "captain", "Priority read");
       expect(immediate).not.toBeNull();
+
       if (!immediate) throw new Error("Missing priority task");
       expect(state.task(queued.id)?.status).toBe("queued");
       state.complete(immediate.id, peer.sessionID, "Read complete");

@@ -56,6 +56,7 @@ export class BackgroundCases {
         owner,
         "Q" + randomBytes(5).toString("hex"),
       );
+
     return this.db
       .query<BackgroundCase, [string, string, string]>(
         "SELECT * FROM background_questions WHERE ship=? AND session=? AND form=?",
@@ -64,6 +65,7 @@ export class BackgroundCases {
   }
   find(ship: string, value: string, answering: boolean) {
     const column = answering ? "token" : "reference";
+
     return this.db
       .query<BackgroundCase, [string, string]>(
         `SELECT * FROM background_questions WHERE ship=? AND ${column}=? COLLATE NOCASE`,
@@ -79,6 +81,7 @@ export class BackgroundCases {
   }
   show(ref: string) {
     const now = Date.now();
+
     return this.db
       .query<{ token: string }, [number, string, number, number, string]>(
         `UPDATE background_questions SET

@@ -27,6 +27,7 @@ export function crewPermissions(
       })),
     ];
   }
+
   const rules: Rule[] = [
     { action: "*", resource: "*", effect: "deny" },
     ...["read", "glob", "grep", "skill", "webfetch", "websearch"].map(
@@ -37,6 +38,7 @@ export function crewPermissions(
     allow("stargate_mail"),
     allow("stargate_history"),
   ];
+
   rules.push(allow("stargate_model", profile === "captain" ? "*" : "get"));
   // Specialisms guide assignments, not host-tool access in this trusted profile.
   rules.push(
@@ -47,8 +49,10 @@ export function crewPermissions(
     allow("execute"),
   );
   rules.push(allow("linear_*"));
+
   for (const resource of ["*.env", "*.env.*", "*.key", "*.pem"]) {
     rules.push({ action: "read", resource, effect: "deny" });
   }
+
   return rules;
 }

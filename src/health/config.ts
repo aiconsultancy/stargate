@@ -13,17 +13,19 @@ const absolutePath = Schema.String.check(Schema.isMinCodePoints(1))
       message: "Invalid input",
     }),
   );
+
 export const healthConfigSchema = settingsStruct({
   starfleetSnapshotFile: Schema.optional(absolutePath),
   opencodeDataDirectory: Schema.optional(absolutePath),
   crewWorktreesDirectory: Schema.optional(absolutePath),
   stalledAfterSeconds: Schema.Finite.check(Schema.isInt())
     .check(Schema.isGreaterThanOrEqualTo(60))
-    .check(Schema.isLessThanOrEqualTo(86400))
+    .check(Schema.isLessThanOrEqualTo(86_400))
     .pipe(settingsDefault(1800)),
   snapshotMaxAgeSeconds: Schema.Finite.check(Schema.isInt())
     .check(Schema.isGreaterThanOrEqualTo(60))
-    .check(Schema.isLessThanOrEqualTo(86400))
+    .check(Schema.isLessThanOrEqualTo(86_400))
     .pipe(settingsDefault(900)),
 });
+
 export type HealthConfig = typeof healthConfigSchema.Type;

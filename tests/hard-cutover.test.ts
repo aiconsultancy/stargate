@@ -30,6 +30,7 @@ import { botKey, conversationKey } from "../src/gateway/routing";
 import { bot, identity } from "./fixtures";
 
 const roots: string[] = [];
+
 function expectSameEntries(actual: string[], expected: string[]) {
   expect(actual.toSorted()).toEqual(expected.toSorted());
 }
@@ -39,31 +40,41 @@ afterEach(async () => {
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
 });
+
 async function directory() {
   const root = await mkdtemp(join(tmpdir(), "stargate-cutover-"));
   roots.push(root);
   await chmod(root, 0o700);
+
   return root;
 }
+
 const prompt =
   "Keep /pogo and pogo_crew in this historical prompt. Do not replay.";
+
 async function fixture(version: "0.14" | "0.20") {
   const root = await directory();
+
   const source = join(root, "snapshot"),
     destination = join(root, "converted");
+
   await mkdir(source, { mode: 0o700 });
   await writeFile(
     join(source, ".stargate-offline-snapshot"),
     "pogo-to-stargate-v1\n",
   );
   const before = bot("pogo"); // A registration ID is not the product name.
+
   if (before.backend.type !== "opencode") throw new Error("Fixture backend");
   before.backend.directory = "/srv/pogo/captain";
   const after = structuredClone(before);
+
   if (after.backend.type !== "opencode") throw new Error("Fixture backend");
   after.backend.directory = "/srv/stargate/captain";
+
   const oldKey = botKey(before, identity),
     newKey = botKey(after, identity);
+
   const conversation = conversationKey(oldKey, "C123", "1.000");
   const db = new Database(join(source, "pogo.sqlite"));
   db.exec(`CREATE TABLE sessions(conversation TEXT PRIMARY KEY,session_id TEXT,cursor TEXT);
@@ -77,6 +88,7 @@ async function fixture(version: "0.14" | "0.20") {
     "ses_NATIVE",
     "msg_CURSOR",
   );
+
   const attachments = JSON.stringify([
     {
       path: "/srv/pogo/files/a.txt",
@@ -86,6 +98,7 @@ async function fixture(version: "0.14" | "0.20") {
       fileID: "FNATIVE",
     },
   ]);
+
   db.query("INSERT INTO jobs VALUES (1,?,?,?,?,?,2,3,12345,?)").run(
     oldKey,
     conversation,
@@ -106,12 +119,14 @@ async function fixture(version: "0.14" | "0.20") {
   db.exec(
     "INSERT INTO previews VALUES (1,0,'1.001'); INSERT INTO delivery_units VALUES (1,0,'{\"text\":\"pogo\"}',1)",
   );
+
   if (version === "0.20") {
     db.exec(
       "CREATE TABLE irc_pogo_dm(id TEXT PRIMARY KEY,sent INTEGER); CREATE TABLE irc_pogo_dm_cursor(botKey TEXT PRIMARY KEY,sequence INTEGER); INSERT INTO irc_pogo_dm VALUES ('RECEIPT',123)",
     );
     db.query("INSERT INTO irc_pogo_dm_cursor VALUES (?,41)").run(oldKey);
   }
+
   db.close();
   const cron = new Database(join(source, "cron.sqlite"));
   cron.exec(
@@ -132,6 +147,7 @@ async function fixture(version: "0.14" | "0.20") {
   crew.exec(
     "CREATE TABLE identity(value TEXT PRIMARY KEY); CREATE TABLE peers(crewID TEXT,sessionID TEXT); CREATE TABLE tasks(id TEXT,status TEXT,workerSessionID TEXT); CREATE TABLE journal(text TEXT); CREATE TABLE irc_dm_outbox(id TEXT,text TEXT,sequence INTEGER)",
   );
+
   const crewIdentity =
     version === "0.14"
       ? ["ship", "/srv/pogo/project", "/srv/pogo/captain", "/srv/pogo/crew"]
@@ -148,6 +164,7 @@ async function fixture(version: "0.14" | "0.20") {
             },
           ],
         };
+
   crew
     .query("INSERT INTO identity VALUES (?)")
     .run(JSON.stringify(crewIdentity));
@@ -159,16 +176,19 @@ async function fixture(version: "0.14" | "0.20") {
   crew.close();
   const native = new Database(join(source, "native.sqlite"));
   native.exec("CREATE TABLE session(id TEXT PRIMARY KEY,data TEXT)");
+
   const oldNative = JSON.stringify({
     id: "ses_WORKER",
     metadata: { pogoCrew: { namespace: "ship", crewID: "chief" } },
     text: prompt,
   });
+
   const newNative = JSON.stringify({
     id: "ses_WORKER",
     metadata: { stargateCrew: { namespace: "ship", crewID: "chief" } },
     text: prompt,
   });
+
   native.query("INSERT INTO session VALUES ('ses_WORKER',?)").run(oldNative);
   native.close();
   await writeFile(
@@ -183,6 +203,7 @@ async function fixture(version: "0.14" | "0.20") {
     join(source, sha256(oldKey), "pi.sqlite"),
     "native bytes untouched",
   );
+
   const plan: MigrationPlan = {
     schema: "stargate.cutover.v1",
     source,
@@ -229,6 +250,7 @@ async function fixture(version: "0.14" | "0.20") {
       },
     ],
   };
+
   return { plan, source, destination, oldKey, newKey, conversation, version };
 }
 
@@ -272,14 +294,17 @@ describe("one-time Stargate cutover", () => {
       );
       const entries = await readdir(f.source, { recursive: true });
       const original = await readFile(join(f.source, "pogo.sqlite"));
+
       const source =
         mode === "source ancestor" ? join(alias, "snapshot") : f.source;
+
       const destination =
         mode === "source ancestor"
           ? join(f.source, "converted")
           : mode === "missing destination ancestors"
             ? join(alias, "missing", "deeper", "converted")
             : join(alias, "converted");
+
       const error: unknown = await migrateSnapshot({
         ...f.plan,
         source,
@@ -288,6 +313,7 @@ describe("one-time Stargate cutover", () => {
         () => undefined,
         (error: unknown) => error,
       );
+
       expectSameEntries(await readdir(f.source, { recursive: true }), entries);
       expect(await readFile(join(f.source, "pogo.sqlite"))).toEqual(original);
       expect(error).toBeInstanceOf(Error);
@@ -300,12 +326,14 @@ describe("one-time Stargate cutover", () => {
       pogoCrew: { namespace: "ship", crewID: "chief" },
       other: { model: "leave this alone" },
     };
+
     const permissions = [
       { action: "*", resource: "*", effect: "deny" as const },
       { action: "pogo_crew", resource: "*", effect: "allow" as const },
       { action: "rpc", resource: "pogo.crew.irc", effect: "ask" as const },
       { action: "read", resource: "/srv/pogo/secret", effect: "deny" as const },
     ];
+
     expect(
       cutoverSessionFields(
         {
@@ -335,15 +363,19 @@ describe("one-time Stargate cutover", () => {
 
   test("key planner requires old normalization and preserves Slack/IRC identities", () => {
     const before = bot();
+
     if (before.backend.type !== "opencode") throw new Error("Fixture backend");
     before.backend.directory = "/srv/pogo/captain";
     before.backend.headersEnv = { authorization: "POGO_RPC" };
     const after = structuredClone(before);
+
     if (after.backend.type !== "opencode") throw new Error("Fixture backend");
     after.backend.directory = "/srv/stargate/captain";
     after.backend.headersEnv = { authorization: "STARGATE_RPC" };
+
     const oldKey = botKey(before, identity),
       newKey = botKey(after, identity);
+
     expect(cutoverBotKey(oldKey, before.backend, after.backend)).toEqual({
       from: oldKey,
       to: newKey,
@@ -363,6 +395,7 @@ describe("one-time Stargate cutover", () => {
     expect(cutoverBotKey(oldIrc, before.backend, after.backend).to).toBe(
       newIrc,
     );
+
     const options = {
       namespace: "ship",
       projectDirectory: "/project",
@@ -372,6 +405,7 @@ describe("one-time Stargate cutover", () => {
       ),
       team: defaultTeam,
     };
+
     const fingerprint: unknown = JSON.parse(crewFingerprint(options));
     expect(fingerprint).toMatchObject({
       namespace: "ship",
@@ -381,9 +415,12 @@ describe("one-time Stargate cutover", () => {
 
   test("Mesij identity surgery preserves inbox/receipt/idempotency and repairs mail digests", async () => {
     const f = await fixture("0.20");
+
     const oldActor = `pogo:${"a".repeat(64)}:chief`,
       newActor = `stargate:${"a".repeat(64)}:chief`;
+
     const text = JSON.stringify({ namespace: "ship", text: prompt });
+
     const fingerprint = (actor: string) =>
       sha256(
         JSON.stringify([
@@ -395,6 +432,7 @@ describe("one-time Stargate cutover", () => {
           null,
         ]),
       );
+
     const crew = new Database(join(f.source, "crew.sqlite"));
     crew.exec(
       "CREATE TABLE mail_intents(key TEXT PRIMARY KEY,fingerprint TEXT,receiptID TEXT,sender TEXT,recipient TEXT)",
@@ -415,11 +453,13 @@ describe("one-time Stargate cutover", () => {
       CREATE TABLE projection_errors(event_id TEXT,project_id TEXT,reason TEXT);
       CREATE TRIGGER events_immutable_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'events are immutable'); END;
       CREATE TRIGGER idempotency_keys_immutable_update BEFORE UPDATE ON idempotency_keys BEGIN SELECT RAISE(ABORT,'idempotency keys are immutable'); END;`);
+
     const payload = JSON.stringify({
       message: text,
       mentions: [oldActor, `@${oldActor}`],
       arbitrary: prompt,
     });
+
     db.query(
       "INSERT INTO events VALUES (41,'receipt','project',?,'ses_WORKER','ses_NATIVE','','message.posted',?,'/srv/pogo/crew','branch','sha','host','user','ip','intent','2026-01-01')",
     ).run(oldActor, payload);
@@ -445,9 +485,11 @@ describe("one-time Stargate cutover", () => {
       ],
     });
     const result = new Database(join(f.destination, "mesij.sqlite"));
+
     const event = result
       .query<{ actor: string; payload: string }, []>("SELECT * FROM events")
       .get();
+
     expect(event).toMatchObject({
       sequence: 41,
       id: "receipt",
@@ -484,9 +526,11 @@ describe("one-time Stargate cutover", () => {
       "immutable",
     );
     result.close();
+
     const repaired = new Database(join(f.destination, "crew.sqlite"), {
       readonly: true,
     });
+
     expect(
       repaired.query("SELECT fingerprint,receiptID FROM mail_intents").get(),
     ).toEqual({ fingerprint: fingerprint(newActor), receiptID: "receipt" });
@@ -498,9 +542,11 @@ describe("one-time Stargate cutover", () => {
     async (version) => {
       const f = await fixture(version);
       await migrateSnapshot(f.plan);
+
       const db = new Database(join(f.destination, "stargate.sqlite"), {
         readonly: true,
       });
+
       expect(db.query("SELECT * FROM jobs").get()).toMatchObject({
         id: 1,
         botKey: f.newKey,
@@ -510,7 +556,7 @@ describe("one-time Stargate cutover", () => {
         response: '["reply mentioning pogo"]',
         sent: 2,
         attempts: 3,
-        retry_at: 12345,
+        retry_at: 12_345,
       });
       expect(db.query("SELECT * FROM sessions").get()).toMatchObject({
         session_id: "ses_NATIVE",
@@ -523,8 +569,9 @@ describe("one-time Stargate cutover", () => {
         response: null,
         sent: 0,
         attempts: 0,
-        retry_at: 45678,
+        retry_at: 45_678,
       });
+
       const files: unknown = JSON.parse(
         String(
           db
@@ -534,6 +581,7 @@ describe("one-time Stargate cutover", () => {
             .get()?.output_files,
         ),
       );
+
       expect(files).toEqual([
         {
           path: "/srv/stargate/files/a.txt",
@@ -549,6 +597,7 @@ describe("one-time Stargate cutover", () => {
         plan: '{"text":"pogo"}',
         done: 1,
       });
+
       if (version === "0.20") {
         expect(db.query("SELECT * FROM irc_stargate_dm").get()).toEqual({
           id: "RECEIPT",
@@ -559,10 +608,13 @@ describe("one-time Stargate cutover", () => {
           sequence: 41,
         });
       }
+
       db.close();
+
       const crew = new Database(join(f.destination, "crew.sqlite"), {
         readonly: true,
       });
+
       expect(
         String(
           crew.query<{ value: string }, []>("SELECT value FROM identity").get()
@@ -589,18 +641,22 @@ describe("one-time Stargate cutover", () => {
         sequence: 41,
       });
       crew.close();
+
       const cron = new Database(join(f.destination, "cron.sqlite"), {
         readonly: true,
       });
+
       expect(cron.query("SELECT * FROM cron_schedules").get()).toMatchObject({
         botKey: f.newKey,
         source: "/srv/stargate/cronjobs/job/CRONJOB.md",
         prompt,
         nextAt: 300,
       });
+
       const run = cron
         .query<{ snapshot: string }, []>("SELECT * FROM cron_runs")
         .get();
+
       expect(run).toMatchObject({ status: "queued", jobId: 1 });
       expect(JSON.parse(String(run?.snapshot))).toEqual({
         botKey: f.newKey,
@@ -608,9 +664,11 @@ describe("one-time Stargate cutover", () => {
         prompt,
       });
       cron.close();
+
       const native = new Database(join(f.destination, "native.sqlite"), {
         readonly: true,
       });
+
       expect(
         JSON.parse(
           String(
@@ -639,9 +697,11 @@ describe("one-time Stargate cutover", () => {
       expect(
         await stat(join(f.destination, ".stargate-cutover-complete.json")),
       ).toBeDefined();
+
       const original = new Database(join(f.source, "pogo.sqlite"), {
         readonly: true,
       });
+
       expect(
         original.query("SELECT botKey,conversation FROM jobs").get(),
       ).toEqual({ botKey: f.oldKey, conversation: f.conversation });
@@ -661,9 +721,11 @@ describe("one-time Stargate cutover", () => {
         join(f.destination, ".stargate-cutover-complete.json"),
       ).exists(),
     ).toBe(false);
+
     const source = new Database(join(f.source, "pogo.sqlite"), {
       readonly: true,
     });
+
     expect(
       source
         .query("SELECT name FROM sqlite_master WHERE name='irc_pogo_dm'")
@@ -701,6 +763,7 @@ describe("one-time Stargate cutover", () => {
       { from: "/srv/pogo", to: "/srv/stargate" },
       { from: "/srv/pogo/crew", to: "/work/crew" },
     ];
+
     expect(migratedPath("/srv/pogo/crew/a", paths)).toBe("/work/crew/a");
     expect(migratedPath("/srv/pogostick/a", paths)).toBe("/srv/pogostick/a");
     expect(migratedPath(prompt, paths)).toBe(prompt);

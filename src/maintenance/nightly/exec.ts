@@ -6,6 +6,7 @@ import { isLocalhost } from "../../lib/loopback";
  * installers and SDKs can echo tokens or private paths.
  */
 export type CommandResult = { code: number; stdout: string; stderr: string };
+
 export type CommandOptions = {
   cwd?: string;
   timeoutMs: number;
@@ -13,6 +14,7 @@ export type CommandOptions = {
   /** False: the child gets only `env` (for untrusted release code). */
   inheritEnv?: boolean;
 };
+
 export interface CommandRunner {
   run(
     command: readonly string[],
@@ -26,9 +28,11 @@ async function capped(stream: ReadableStream<Uint8Array> | null) {
   if (!stream) return "";
   const decoder = new TextDecoder();
   let text = "";
+
   for await (const chunk of stream) {
     if (text.length < limit) text += decoder.decode(chunk, { stream: true });
   }
+
   return text.slice(0, limit);
 }
 
@@ -47,11 +51,13 @@ export const processRunner: CommandRunner = {
         timeout: options.timeoutMs,
         killSignal: "SIGTERM",
       });
+
       const [stdout, stderr, code] = await Promise.all([
         capped(child.stdout),
         capped(child.stderr),
         child.exited,
       ]);
+
       return { code, stdout, stderr };
     } catch {
       // Missing executable: a failure like any other, without raw details.
@@ -111,6 +117,7 @@ export const reasons = [
   "external-change",
   "unknown",
 ] as const;
+
 export type Reason = (typeof reasons)[number];
 
 export function reasonOf(error: unknown): Reason {
@@ -125,7 +132,9 @@ export async function must(
   reason: Reason = "command-failed",
 ) {
   const result = await runner.run(command, options);
+
   if (result.code !== 0) throw new StepError(reason);
+
   return result;
 }
 
@@ -148,13 +157,17 @@ const loopback = (url: URL) =>
  */
 export async function request(url: string, options: RequestOptions = {}) {
   const { timeoutMs = 30_000 } = options;
+
   const signal = options.signal
     ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
     : AbortSignal.timeout(timeoutMs);
+
   let target = new URL(url);
   let headers = { ...options.headers };
+
   for (let hop = 0; hop < 6; hop++) {
     let response: Response;
+
     try {
       response = await fetch(target, {
         method: options.method ?? "GET",
@@ -166,19 +179,25 @@ export async function request(url: string, options: RequestOptions = {}) {
     } catch {
       throw new StepError("network");
     }
+
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get("location");
+
     if ((options.method ?? "GET") !== "GET" || !location)
       throw new StepError("network");
     const next = new URL(location, target);
+
     if (next.protocol !== "https:" && !loopback(next))
       throw new StepError("network");
+
     if (next.origin !== target.origin) {
       const { authorization: _a, "x-api-key": _k, ...rest } = headers;
       headers = rest;
     }
+
     target = next;
   }
+
   throw new StepError("network");
 }
 
@@ -188,6 +207,7 @@ export async function fetchJSON(
   init: RequestOptions = {},
 ): Promise<unknown> {
   const response = await fetchOK(url, init);
+
   try {
     return await response.json();
   } catch {
@@ -197,7 +217,10 @@ export async function fetchJSON(
 
 export async function fetchOK(url: string, init: RequestOptions = {}) {
   const response = await request(url, init);
+
   if (response.status === 404) throw new StepError("not-found");
+
   if (!response.ok) throw new StepError("network");
+
   return response;
 }

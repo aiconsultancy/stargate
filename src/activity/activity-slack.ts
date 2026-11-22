@@ -11,6 +11,7 @@ const statuses = {
 
 function bounded(text: string, max: number) {
   if (text.length <= max) return text;
+
   return `${text.slice(0, max - 2).replace(/[\uD800-\uDBFF]$/, "")}…`;
 }
 
@@ -25,6 +26,7 @@ function plain(text: string, max = 3000) {
 /** Crew/model text is always literal, never Slack markup or notification syntax. */
 export function activityContent(view: ActivityView) {
   const status = statuses[view.status];
+
   const facts = view.entries
     .slice(-5)
     .map(
@@ -32,12 +34,14 @@ export function activityContent(view: ActivityView) {
         `${entry.member}${entry.taskID ? ` (${entry.taskID})` : ""}: ${bounded(entry.text.replace(/\s+/g, " "), 350)}`,
     )
     .join("\n");
+
   const summary = bounded(
     view.summaryCurrent && view.summary
       ? view.summary
       : [facts, view.summary || `${status}.`].filter(Boolean).join("\n\n"),
     3000,
   );
+
   const details =
     view.detail === "detailed"
       ? view.entries
@@ -49,8 +53,10 @@ export function activityContent(view: ActivityView) {
             ),
           )
       : [];
+
   const context = `${status}.${view.truncated ? " Activity shortened; some details are omitted." : ""}`;
-  // greybeard: bounded accessible fallback, not a second rich-text renderer.
+
+  // Greybeard: bounded accessible fallback, not a second rich-text renderer.
   // 6500 characters remain below Slack's 40000 limit after entity escaping.
   const fallback = bounded(
     [
@@ -61,6 +67,7 @@ export function activityContent(view: ActivityView) {
     ].join("\n\n"),
     6500,
   );
+
   return {
     text: slackContent(fallback, "plain").text,
     blocks: [

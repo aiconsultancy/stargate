@@ -9,7 +9,9 @@ import type { CrewCaller } from "../execution/engine";
 import { CrewError } from "../execution/state";
 
 type Owner = { sessionID: string; id: string };
+
 type Permit = { status: "window-elapsed"; windowMs: number };
+
 type Turn = Owner & {
   seenAt: number;
   stop: AbortController;
@@ -19,14 +21,17 @@ type Turn = Owner & {
     release: (result: Permit) => void;
   };
 };
+
 interface Authority {
   options: { team: { captain: { id: string } } };
   captain(caller: CrewCaller): Promise<void>;
 }
+
 type Options = {
   now?: () => number;
   wait?: (ms: number, signal: AbortSignal) => Promise<void>;
 };
+
 const leaseMs = 10_000;
 
 /** Turn-scoped, fail-closed gate; never persists permission across restarts. */
@@ -51,9 +56,11 @@ export class CrewMaintenance {
       signal,
     });
     signal.throwIfAborted();
+
     for (const turn of this.turns.values()) {
       if (this.now() - turn.seenAt > leaseMs) this.close(turn);
     }
+
     if (this.turns.has(owner.sessionID) || this.turns.size >= 32)
       throw new CrewError("A maintenance gateway turn is already registered.");
     this.turns.set(owner.sessionID, {
@@ -61,19 +68,23 @@ export class CrewMaintenance {
       seenAt: this.now(),
       stop: new AbortController(),
     });
+
     return true;
   }
 
   private owned(owner: Owner) {
     const turn = this.turns.get(owner.sessionID);
+
     if (!turn || turn.id !== owner.id)
       throw new CrewError("Maintenance gateway ownership unavailable.");
+
     if (this.now() - turn.seenAt > leaseMs) {
       this.close(owner);
       throw new CrewError(
         "Maintenance gateway disconnected; no permission granted.",
       );
     }
+
     return turn;
   }
 
@@ -81,7 +92,9 @@ export class CrewMaintenance {
     const turn = this.owned(owner);
     turn.seenAt = this.now();
     const pending = turn.pending;
+
     if (!pending) return null;
+
     if (
       pending.deliveredAt !== undefined &&
       this.now() - pending.deliveredAt >= maintenanceWindowMs
@@ -91,45 +104,55 @@ export class CrewMaintenance {
         windowMs: maintenanceWindowMs,
       });
       delete turn.pending;
+
       return null;
     }
+
     return pending.notice;
   }
 
   delivered(owner: Owner & { noticeID: string }) {
     const pending = this.owned(owner).pending;
+
     if (!pending || pending.notice.id !== owner.noticeID)
       throw new CrewError(
         "Maintenance notice changed; delivery not confirmed.",
       );
     pending.deliveredAt ??= this.now();
+
     return true;
   }
 
   async run(raw: unknown, caller: CrewCaller): Promise<Permit> {
     const parsed = maintenancePlanSchema.safeParse(raw);
+
     if (!parsed.success) throw new CrewError("Invalid maintenance plan.");
     await this.authority.captain(caller);
     caller.signal.throwIfAborted();
     const turn = this.turns.get(caller.sessionID);
+
     if (!turn)
       throw new CrewError(
         "No live maintenance gateway. Ask the user for explicit approval; do not use a shell sleep.",
       );
     this.owned(turn);
+
     if (turn.pending)
       throw new CrewError("Another maintenance notice is pending.");
     const permit = Promise.withResolvers<Permit>();
     const stop = new AbortController();
+
     const signal = AbortSignal.any([
       caller.signal,
       turn.stop.signal,
       stop.signal,
     ]);
+
     turn.pending = {
       notice: { ...parsed.data, id: randomUUID() },
       release: permit.resolve,
     };
+
     const connected = (async () => {
       while (true) {
         await this.wait(1000, signal);
@@ -137,9 +160,11 @@ export class CrewMaintenance {
         this.owned(turn);
       }
     })();
+
     try {
       const result = await Promise.race([permit.promise, connected]);
       signal.throwIfAborted();
+
       return result;
     } finally {
       stop.abort();
@@ -149,10 +174,13 @@ export class CrewMaintenance {
 
   close(owner: Owner) {
     const turn = this.turns.get(owner.sessionID);
+
     if (!turn) return true;
+
     if (turn.id !== owner.id) throw new CrewError("Maintenance turn changed.");
     turn.stop.abort();
     this.turns.delete(owner.sessionID);
+
     return true;
   }
 

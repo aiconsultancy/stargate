@@ -18,17 +18,21 @@ const q: NativeQuestion = {
     { key: "q0", type: "string", options: [{ label: "Blue", value: "blue" }] },
   ],
 };
+
 test("background question retains its case across expiry, ownership changes and an ambiguous write", async () => {
   const dir = await mkdtemp(join(tmpdir(), "stargate-background-"));
   const path = join(dir, "gateway.sqlite");
   let store = openStore(path);
   let now = Date.now();
   const clock = spyOn(Date, "now").mockImplementation(() => now);
+
   let pending = true,
     online = false,
     engineOnline = true,
     replies = 0;
+
   const sent: string[] = [];
+
   const route = {
     account: "operator",
     ready: () => online,
@@ -36,6 +40,7 @@ test("background question retains its case across expiry, ownership changes and 
       if (allowed()) sent.push(text);
     },
   };
+
   const backend: AgentBackend = {
     sessionID: q.sessionID,
     close: async () => {},
@@ -47,15 +52,18 @@ test("background question retains its case across expiry, ownership changes and 
     },
     pinnedBackgroundQuestions: async () => {
       if (!engineOnline) throw new Error("disconnected");
+
       return pending ? [q] : [];
     },
     backgroundOutcome: async () => {
       if (!engineOnline) throw new Error("disconnected");
+
       return pending ? undefined : "answered";
     },
     replyQuestion: async (question, answer, _signal, claim) => {
       expect(question.id).toBe(q.id);
       expect(answer).toEqual({ q0: "blue" });
+
       if (!claim?.()) throw new Error("route changed");
       replies++;
       pending = false;
@@ -63,6 +71,7 @@ test("background question retains its case across expiry, ownership changes and 
       throw new Error("lost acknowledgement");
     },
   };
+
   const open = () =>
     new Questions(
       "ship",
@@ -77,17 +86,23 @@ test("background question retains its case across expiry, ownership changes and 
       () => true,
       () => {},
     );
+
   let bridge = open();
   const signal = new AbortController().signal;
+
   const poll = async () => {
     bridge.reconcileBackground();
     await bridge.poll(signal);
   };
+
   const reference = () => {
     const ref = sent.at(-1)?.match(/Q[0-9a-f]{10}/)?.[0];
+
     if (!ref) throw new Error("Missing reference");
+
     return ref;
   };
+
   try {
     await poll();
     expect(sent).toHaveLength(0);

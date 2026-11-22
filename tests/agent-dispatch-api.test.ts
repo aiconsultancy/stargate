@@ -47,6 +47,7 @@ function expectNoSecrets(lines: readonly string[]) {
 function warnings(lines: readonly string[]) {
   return lines.flatMap((line) => {
     const entry: { level?: number; msg?: string } = JSON.parse(line);
+
     return entry.level === 40 && entry.msg ? [entry.msg] : [];
   });
 }
@@ -72,12 +73,14 @@ test("the client sends the bearer and zero-trust headers, reads the wire shapes 
   ]);
   expect([...(await api.fleetProjects(FLEET, signal))]).toEqual([PROJECT]);
   const since = "2026-11-21T08:00:00.000Z";
+
   const assigned = await api.assignedIssues(
     [CAPTAIN_A, CAPTAIN_B],
     since,
     undefined,
     signal,
   );
+
   expect(assigned.next).toBeUndefined();
   expect(
     assigned.items.map((issue) => [
@@ -103,8 +106,10 @@ test("the client sends the bearer and zero-trust headers, reads the wire shapes 
 
   const requests = f.http.requests.map((request) => {
     const url = new URL(`https://subspace.example.test${request.path}`);
+
     return `${request.method} ${url.pathname}`;
   });
+
   expect(requests).toEqual([
     "GET /api/v1/me",
     "GET /api/v1/fleets/example-fleet",
@@ -117,13 +122,16 @@ test("the client sends the bearer and zero-trust headers, reads the wire shapes 
     "PATCH /api/v1/issues/i2",
     "POST /api/v1/issues/i1/comments",
   ]);
+
   const query = (index: number) =>
     new URL(`https://subspace.example.test${f.http.requests[index]?.path}`)
       .searchParams;
+
   expect(query(4).getAll("assignee")).toEqual([CAPTAIN_A, CAPTAIN_B]);
   expect(query(4).get("updatedSince")).toBe(since);
   expect(query(5).get("readyForAgents")).toBe("true");
   expect(query(5).get("assignee")).toBe("none");
+
   for (const request of f.http.requests) {
     expect(request.headers.get("authorization")).toBe(`Bearer ${TOKEN}`);
     expect(request.headers.get("x-access-id")).toBe(ACCESS);
@@ -138,8 +146,10 @@ test("an issue listing longer than one call's page budget returns a cursor to go
   const f = await fixture({ http: true });
   const api = client(f);
   f.http.pageSize = 2;
+
   for (let n = 0; n < 120; n++)
     f.api.add({ id: `i${n}`, identifier: `PRJ-${n}`, assigneeId: CAPTAIN_A });
+
   // 50 pages of 2 per call; the API's cursor continues the listing.
   const first = await api.assignedIssues(
     [CAPTAIN_A],
@@ -147,19 +157,23 @@ test("an issue listing longer than one call's page budget returns a cursor to go
     undefined,
     signal,
   );
+
   expect(first.items).toHaveLength(100);
   expect(first.next).toBe("100");
+
   const rest = await api.assignedIssues(
     [CAPTAIN_A],
     undefined,
     first.next,
     signal,
   );
+
   expect(rest.items).toHaveLength(20);
   expect(rest.next).toBeUndefined();
   expect(
     new Set([...first.items, ...rest.items].map((issue) => issue.id)).size,
   ).toBe(120);
+
   // Membership needs whole listings, which read past the issue budget.
   for (let n = 0; n < 120; n++) f.api.fleetProjectIDs.add(`project-${n}`);
   expect((await api.fleetProjects(FLEET, signal)).size).toBe(121);
@@ -168,6 +182,7 @@ test("an issue listing longer than one call's page budget returns a cursor to go
 test("a first start longer than one poll's page budget initialises over several polls and sends nothing", async () => {
   const f = await fixture({ http: true });
   f.http.pageSize = 1;
+
   for (let n = 0; n < 60; n++)
     f.api.add({ id: `i${n}`, identifier: `PRJ-${n}`, assigneeId: CAPTAIN_A });
   await f.dispatcher.step(signal);
@@ -175,6 +190,7 @@ test("a first start longer than one poll's page budget initialises over several 
   f.clock.advance(2 * MINUTE);
   await f.dispatcher.step(signal);
   expect(f.ledger.initialised).toBe(true);
+
   for (let n = 0; n < 60; n++)
     expect(f.ledger.notified(`i${n}`, CAPTAIN_A)).toBe(true);
   expect(f.chat.lines).toEqual([]);
@@ -190,20 +206,24 @@ test("a first start longer than one poll's page budget initialises over several 
 
 test("a missing token or header variable fails before any request is made", async () => {
   const f = await fixture({ http: true });
+
   for (const env of [{ A: ACCESS }, { T: TOKEN }, { T: "  ", A: ACCESS }]) {
     const error = await client(f, env)
       .me(signal)
       .catch((caught: unknown) => caught);
+
     expect(error).toBeInstanceOf(DispatchApiError);
     expect(String(error)).not.toContain(TOKEN);
     expect(String(error)).not.toContain(ACCESS);
   }
+
   expect(f.http.requests).toEqual([]);
 });
 
 test("every API failure is a status-only error that names no credential", async () => {
   const f = await fixture({ http: true });
   const api = client(f);
+
   const cases: [FetchFailure | 401 | 403, number | undefined][] = [
     ["refused", undefined],
     ["timeout", undefined],
@@ -212,17 +232,23 @@ test("every API failure is a status-only error that names no credential", async 
     [401, 401],
     [403, 403],
   ];
+
   for (const [failure, status] of cases) {
     f.http.failures.clear();
     f.http.credentialStatus = undefined;
+
     if (typeof failure === "number") f.http.credentialStatus = failure;
     else f.http.failures.set("fleet", failure);
+
     const error = await api
       .fleet("example-fleet", signal)
       .catch((caught: unknown) => caught);
+
     expect(error).toBeInstanceOf(DispatchApiError);
+
     if (!(error instanceof DispatchApiError)) throw new Error("unexpected");
     expect(error.status).toBe(status);
+
     for (const text of [error.message, JSON.stringify(error), String(error)]) {
       expect(text).not.toContain(TOKEN);
       expect(text).not.toContain(ACCESS);
@@ -232,6 +258,7 @@ test("every API failure is a status-only error that names no credential", async 
 
 test("the caller's abort cancels a request with an abort, not an API error", async () => {
   const f = await fixture({ http: true });
+
   const api = new SubspaceApi({
     baseUrl: "https://subspace.example.test",
     tokenEnv: "T",
@@ -240,6 +267,7 @@ test("the caller's abort cancels a request with an abort, not an API error", asy
     fetch: f.http.fetch,
     timeoutMs: 60_000,
   });
+
   f.http.failures.set("me", "timeout");
   const controller = new AbortController();
   const pending = api.me(controller.signal).catch((caught: unknown) => caught);
@@ -255,15 +283,19 @@ test("an older API's issues decode with readyForAgents unknown, in lists and sin
   f.api.legacy = true;
   f.api.add({ id: "i1", identifier: "PRJ-1", assigneeId: CAPTAIN_A });
   f.api.add({ id: "i2", identifier: "PRJ-2" });
+
   const [assigned] = (
     await api.assignedIssues([CAPTAIN_A], undefined, undefined, signal)
   ).items;
+
   const [listed] = (await api.readyIssues(undefined, signal)).items;
   const single = await api.issue("i2", signal);
+
   for (const issue of [assigned, listed, single]) {
     expect(issue).toBeDefined();
     expect(issue?.readyForAgents).toBeUndefined();
   }
+
   expect(single?.identifier).toBe("PRJ-2");
 });
 
@@ -293,33 +325,41 @@ const reads: RouteKind[] = [
   "ready",
   "issue",
 ];
+
 for (const mode of ["refused", "timeout", "5xx", "malformed"] as const)
   test(`API ${mode} during each kind of poll: no crash, no duplicate notice, ledger intact, recovers`, async () => {
     for (const route of reads) {
       const { log, lines } = capturedLog();
       const f = await fixture({ http: true, log });
       f.api.add({ id: "i0", identifier: "PRJ-0", assigneeId: CAPTAIN_A });
+
       if (route === "me") {
         // Identity is confirmed once per process, before anything else.
         f.http.failures.set("me", mode);
+
         for (let poll = 0; poll < 2; poll++) {
           await f.dispatcher.step(signal);
           f.clock.advance(2 * MINUTE);
         }
+
         expect(f.ledger.initialised).toBe(false);
         expect(f.chat.lines).toEqual([]);
         f.http.failures.clear();
       }
+
       await f.dispatcher.step(signal);
       expect(f.ledger.initialised).toBe(true);
       f.clock.advance(2 * MINUTE);
       f.api.add({ id: "i1", identifier: "PRJ-1", assigneeId: CAPTAIN_B });
       f.api.add({ id: "i2", identifier: "PRJ-2", readyForAgents: true });
+
       if (route !== "me") f.http.failures.set(route, mode);
+
       for (let poll = 0; poll < 2; poll++) {
         await f.dispatcher.step(signal);
         f.clock.advance(2 * MINUTE);
       }
+
       const during = f.chat.transcript();
       expect(new Set(during).size).toBe(during.length);
       f.http.failures.clear();
@@ -396,6 +436,7 @@ async function giveUpFixture(log: ReturnType<typeof capturedLog>["log"]) {
   f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
   await f.dispatcher.step(signal);
   f.clock.advance(5 * MINUTE);
+
   return f;
 }
 
@@ -415,10 +456,12 @@ for (const write of ["comment", "clear"] as const)
       f.http.failures.set(write, mode);
       await f.dispatcher.tick(signal);
       f.http.failures.clear();
+
       for (let poll = 0; poll < 2; poll++) {
         f.clock.advance(2 * MINUTE);
         await f.dispatcher.step(signal);
       }
+
       expect(f.api.comments).toHaveLength(1);
       expect(f.api.issues.get("i1")?.readyForAgents).toBe(false);
       expect(f.chat.statuses()).toEqual(["timeout", "gave-up"]);
@@ -436,15 +479,18 @@ for (const status of [401, 403] as const)
     const controller = new AbortController();
     const waits: number[] = [];
     let advance = (_ms: number) => {};
+
     const f = await fixture({
       http: true,
       log,
       wait: async (ms) => {
         waits.push(ms);
         advance(ms);
+
         if (waits.length === 3) controller.abort();
       },
     });
+
     advance = (ms) => f.clock.advance(ms);
     f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
     f.http.credentialStatus = status;
@@ -454,9 +500,11 @@ for (const status of [401, 403] as const)
     expect(f.http.requests.map((request) => request.path)).toEqual(
       Array(3).fill("/api/v1/fleets/example-fleet"),
     );
+
     const refused = lines.filter((line) =>
       line.includes("refused the rear admiral's credential"),
     );
+
     expect(refused).toHaveLength(1);
     expect(JSON.parse(refused[0] ?? "{}")).toMatchObject({ level: 40, status });
     expectNoSecrets(lines);
@@ -474,19 +522,23 @@ for (const variant of ["field missing", "filter refused"] as const)
     f.api.legacy = true;
     f.http.rejectReadyFilter = variant === "filter refused";
     f.api.add({ id: "i1", identifier: "PRJ-1" });
+
     for (let poll = 0; poll < 4; poll++) {
       await f.dispatcher.step(signal);
       f.clock.advance(2 * MINUTE);
     }
+
     f.api.change("i1", { assigneeId: CAPTAIN_A });
     await f.dispatcher.step(signal);
     expect(f.dispatcher.readyForAgentsAvailable).toBe(false);
     expect(f.chat.transcript()).toEqual([
       "assigned PRJ-1 -> example-captain-a",
     ]);
+
     const notice = lines.filter((line) =>
       line.includes("round robin offers of ready issues are unavailable"),
     );
+
     expect(notice).toHaveLength(1);
     // Once detected, the ready list is not asked for again.
     expect(

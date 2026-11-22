@@ -6,13 +6,17 @@ import type { CrewMember } from "./team";
 export function managedPrompt(text: string) {
   const start = "<!-- STARGATE:START -->";
   const end = "<!-- STARGATE:END -->";
+
   if (text.includes(start) || text.includes(end)) {
     throw new Error("Instructions contain reserved managed-prompt markers.");
   }
+
   const frontmatter =
     text.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0] ?? "";
+
   const body = text.slice(frontmatter.length).trim();
   const block = `${start}\n${body}\n${end}\n`;
+
   return frontmatter
     ? `${frontmatter}${frontmatter.endsWith("\n") ? "\n" : "\n\n"}${block}`
     : block;
@@ -21,13 +25,16 @@ export function managedPrompt(text: string) {
 /** Small local file: compare content, not timestamps. Never publish its text. */
 export function workingAgreementNotice(path: string) {
   const seen = new Map<string, string>();
+
   return async (key: string): Promise<string | undefined> => {
     try {
       const hash = createHash("sha256")
         .update(await readFile(path))
         .digest("hex");
+
       const previous = seen.get(key);
       seen.set(key, hash);
+
       return previous && previous !== hash
         ? `Shared working agreement changed: ${JSON.stringify(path)}. Reread this file before continuing.`
         : undefined;
@@ -47,6 +54,7 @@ export function workingAgreementContext(
   }) => Promise<void>,
 ) {
   const notice = workingAgreementNotice(path);
+
   return async (event: {
     sessionID: string;
     agent: string;
@@ -61,7 +69,9 @@ export function workingAgreementContext(
     } catch {
       return;
     }
+
     const changed = await notice(`${event.agent}:${event.sessionID}`);
+
     if (changed) event.system.push({ type: "text", text: changed });
   };
 }

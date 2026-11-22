@@ -28,6 +28,7 @@ test("Claude quotas preserve used semantics, unknowns and inactive model scopes"
     email: "private@example.com",
     access_token: "secret",
   });
+
   expect(windows).toContainEqual({
     window: "weekly",
     scope: "subscription",
@@ -65,22 +66,28 @@ test("collector blocks redirects, oversized data, key symlinks and caller cancel
   let followed = false;
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<Response>();
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       requests++;
+
       if (new URL(request.url).pathname === "/unexpected") followed = true;
+
       if (mode === "redirect")
         return new Response(null, {
           status: 302,
           headers: { location: "/unexpected" },
         });
+
       if (mode === "large") return new Response("x".repeat(1024 * 1024 + 1));
       started.resolve();
+
       return release.promise;
     },
   });
+
   const read = (
     managementKeyFile = key,
     signal = new AbortController().signal,
@@ -89,6 +96,7 @@ test("collector blocks redirects, oversized data, key symlinks and caller cancel
       { baseURL: server.url.origin, managementKeyFile },
       () => now,
     ).read(signal);
+
   try {
     expect(await read()).toMatchObject({ status: "unavailable", accounts: [] });
     expect(followed).toBe(false);
@@ -120,14 +128,14 @@ test("Codex reports actual window duration, review scope, and over-limit remaini
         primary_window: {
           used_percent: 29,
           reset_at: Date.parse(reset) / 1000,
-          limit_window_seconds: 604800,
+          limit_window_seconds: 604_800,
         },
       },
       code_review_rate_limit: {
         secondary_window: {
           used_percent: 110,
           reset_at: null,
-          limit_window_seconds: 18000,
+          limit_window_seconds: 18_000,
         },
       },
     }),
@@ -169,6 +177,7 @@ test("quota configuration permits loopback only and never accepts inline credent
       ),
     ).toBe(false);
   }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(quotaConfigSchema)({
@@ -189,6 +198,7 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
   const calls: { path: string; body: unknown }[] = [];
   let failure = false;
   let clock = now;
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -197,8 +207,10 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
         "Bearer fixture-management-key",
       );
       const path = new URL(request.url).pathname;
+
       if (path === "/v8/management/credentials") {
         calls.push({ path, body: null });
+
         return Response.json({
           files: [
             {
@@ -215,9 +227,11 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
           ],
         });
       }
+
       const body = await request.json();
       calls.push({ path, body });
       const codex = body.auth_index === "private-codex";
+
       return Response.json({
         status_code: failure && codex ? 401 : 200,
         body: JSON.stringify(
@@ -229,7 +243,7 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
                     primary_window: {
                       used_percent: 29,
                       reset_at: Date.parse(reset) / 1000,
-                      limit_window_seconds: 604800,
+                      limit_window_seconds: 604_800,
                     },
                   },
                 }
@@ -238,11 +252,13 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
       });
     },
   });
+
   try {
     const reader = new QuotaReader(
       { baseURL: server.url.origin, managementKeyFile },
       () => clock,
     );
+
     const first = await reader.read(new AbortController().signal);
     expect(first.status).toBe("ok");
     expect(first.accounts.map((a) => a.account)).toEqual([
@@ -274,7 +290,7 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
     });
     expect(calls).toHaveLength(3);
     failure = true;
-    clock += 60000;
+    clock += 60_000;
     const partial = await reader.read(new AbortController().signal);
     expect(partial.status).toBe("partial");
     expect(partial.accounts[1]).toMatchObject({
@@ -284,7 +300,7 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
     });
     expect(JSON.stringify(partial)).not.toContain("secret");
     await chmod(managementKeyFile, 0o644);
-    clock += 60000;
+    clock += 60_000;
     expect(await reader.read(new AbortController().signal)).toMatchObject({
       status: "unavailable",
       accounts: [],
@@ -292,6 +308,7 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
     expect(calls).toHaveLength(6);
     // A reserved Claude login never becomes the crew login by list position.
     await chmod(managementKeyFile, 0o600);
+
     const selected = await new QuotaReader(
       {
         baseURL: server.url.origin,
@@ -300,6 +317,7 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
       },
       () => clock,
     ).read(new AbortController().signal);
+
     expect(
       selected.accounts.find((row) => row.provider === "claude"),
     ).toMatchObject({
@@ -310,11 +328,13 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
     expect(calls.slice(6)).toHaveLength(2);
     expect(calls[7]?.body).toMatchObject({ auth_index: "private-codex" });
     expect(JSON.stringify(selected)).not.toContain("crew@example");
+
     const claudeOnly = await new QuotaReader(
       { baseURL: server.url.origin, managementKeyFile },
       () => clock,
       ["claude"],
     ).read(new AbortController().signal);
+
     expect(claudeOnly.status).toBe("ok");
     expect(claudeOnly.accounts.map(({ account }) => account)).toEqual([
       "claude-1",

@@ -17,6 +17,7 @@ const exec = promisify(execFile);
 export function serviceName(name = "stargate") {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name))
     throw new Error("Invalid service name.");
+
   return `${name}.service`;
 }
 
@@ -28,6 +29,7 @@ export function quote(value: string, command = false) {
     )
   )
     throw new Error("Service paths cannot contain control characters.");
+
   return `"${value
     .replaceAll("\\", "\\\\")
     .replaceAll('"', '\\"')
@@ -43,6 +45,7 @@ export function buildUnit(
   for (const path of [configPath, executable, entrypoint]) {
     if (!isAbsolute(path)) throw new Error("Service paths must be absolute.");
   }
+
   return `${marker}
 [Unit]
 Description=Stargate Slack assistant
@@ -71,6 +74,7 @@ export async function manageService(
     throw new Error("User services require Linux with systemd.");
   const unit = serviceName(name);
   const path = join(homedir(), ".config/systemd/user", unit);
+
   const systemctl = async (...args: string[]) => {
     try {
       return await exec("systemctl", ["--user", ...args]);
@@ -80,10 +84,12 @@ export async function manageService(
       );
     }
   };
+
   if (action === "install") {
     await mkdir(dirname(path), { recursive: true });
     const contents = buildUnit(resolve(configPath));
     let file: FileHandle;
+
     try {
       file = await open(path, "wx", 0o600);
     } catch {
@@ -91,34 +97,43 @@ export async function manageService(
         "Service file exists or cannot be created. Refusing to overwrite it.",
       );
     }
+
     try {
       await file.writeFile(contents);
     } finally {
       await file.close();
     }
+
     await systemctl("daemon-reload");
     console.log(
       `Installed ${unit}. Start: systemctl --user start ${unit}\nEnable at login: systemctl --user enable ${unit}`,
     );
+
     return;
   }
+
   if (action === "uninstall") {
     let content: string;
+
     try {
       content = await readFile(path, "utf8");
     } catch {
       throw new Error("Cannot read installed service.");
     }
+
     if (!content.startsWith(`${marker}\n`))
       throw new Error("Refusing to remove an unrelated service.");
     await systemctl("disable", "--now", unit);
     await unlink(path);
     await systemctl("daemon-reload");
     console.log(`Removed ${unit}.`);
+
     return;
   }
+
   if (!["start", "stop", "status"].includes(action))
     throw new Error("Unknown service command.");
+
   // `show` succeeds for an inactive service, unlike `status`.
   const result =
     action === "status"
@@ -129,5 +144,6 @@ export async function manageService(
           "--no-pager",
         )
       : await systemctl(action, unit);
+
   if (result.stdout) console.log(result.stdout.trimEnd());
 }

@@ -48,6 +48,7 @@ test("failures use one accessible collapsed box with a safe cause and next actio
     expect(content.text).toContain(failureText(cause));
     expect(content.text).toMatch(/Check|try again/);
   }
+
   expect(failureContent("timeout").text).toContain("time limit");
   expect(failureContent("cancelled").text).toContain("stop request");
   expect(failureContent("context").text).toContain("No agent turn was started");
@@ -79,9 +80,11 @@ test("failure delivery replaces a preview and retries durable cause without reru
   let store = openStore(path);
   let turns = 0;
   let sessions = 0;
+
   const backend: AgentBackend = {
     async createSession() {
       sessions++;
+
       return "captain";
     },
     async prompt() {
@@ -90,18 +93,23 @@ test("failure delivery replaces a preview and retries durable cause without reru
     },
     async close() {},
   };
+
   const writes: { cause: RequestFailure; ts?: string }[] = [];
   let fail = true;
+
   const slack: TransportDelivery = {
     async post() {
       throw new Error("must use failure hook");
     },
     async failure(_channel, _thread, cause, ts) {
       writes.push({ cause, ...(ts ? { ts } : {}) });
+
       if (fail) throw new Error("Slack unavailable");
+
       return "preview";
     },
   };
+
   const gateway = new Gateway(
     bot(),
     identity,
@@ -110,11 +118,15 @@ test("failure delivery replaces a preview and retries durable cause without reru
     slack,
     pino({ enabled: false }),
   );
+
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!job) throw new Error("Missing job");
+
     return job;
   };
+
   try {
     gateway.accept(event());
     store.savePreview(next().id, 0, "preview");
@@ -125,6 +137,7 @@ test("failure delivery replaces a preview and retries durable cause without reru
     // Reopen SQLite and the gateway: no in-memory failure state is required.
     store.close();
     store = openStore(path);
+
     const retry = new Gateway(
       bot(),
       identity,
@@ -133,6 +146,7 @@ test("failure delivery replaces a preview and retries durable cause without reru
       slack,
       pino({ enabled: false }),
     );
+
     await retry.process(next(), new AbortController().signal);
     await retry.close();
     expect(writes).toEqual([
@@ -155,13 +169,16 @@ test("timeout, shutdown, and context failures have distinct durable causes and p
     config.turnTimeoutMs = 1;
     const shutdown = new AbortController();
     let turns = 0;
+
     const backend: AgentBackend = {
       async createSession() {
         if (cause === "context") throw new ThreadContextUnavailable();
+
         return "captain";
       },
       async prompt(_session, _text, signal) {
         turns++;
+
         if (cause === "interrupted") shutdown.abort();
         await new Promise<void>((_resolve, reject) => {
           if (signal.aborted) reject(signal.reason);
@@ -170,11 +187,14 @@ test("timeout, shutdown, and context failures have distinct durable causes and p
               once: true,
             });
         });
+
         return "unreachable";
       },
       async close() {},
     };
+
     const texts: string[] = [];
+
     const gateway = new Gateway(
       config,
       identity,
@@ -187,15 +207,19 @@ test("timeout, shutdown, and context failures have distinct durable causes and p
       },
       pino({ enabled: false }),
     );
+
     try {
       gateway.accept(event());
       const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
       if (!job) throw new Error("Missing job");
       await gateway.process(job, shutdown.signal);
       expect(store.failure(job.id)).toBe(cause);
+
       if (cause === "interrupted") {
         const pending = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
         expect(pending?.failure).toBe("interrupted");
+
         if (pending)
           await gateway.process(pending, new AbortController().signal);
         expect(texts[0]).toContain("Stargate stopped");
@@ -210,12 +234,14 @@ test("timeout, shutdown, and context failures have distinct durable causes and p
 
 test("native Slack failure hook edits a preview without a Stop button, and reports missing previews", async () => {
   const calls: { path: string; fields: URLSearchParams }[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const fields = new URLSearchParams(await request.text());
       calls.push({ path: new URL(request.url).pathname, fields });
+
       return Response.json(
         fields.get("ts") === "missing"
           ? { ok: false, error: "message_not_found" }
@@ -223,12 +249,14 @@ test("native Slack failure hook edits a preview without a Stop button, and repor
       );
     },
   });
+
   const slack = new SlackConnection(
     "local-app-token",
     "local-bot-token",
     pino({ enabled: false }),
     { slackApiUrl: server.url.href },
   );
+
   try {
     await slack.failure("C123", "1.000", "timeout", "preview");
     expect(await slack.failure("C123", "1.000", "timeout", "missing")).toBe(
@@ -240,6 +268,7 @@ test("native Slack failure hook edits a preview without a Stop button, and repor
       "/chat.update",
       "/chat.postMessage",
     ]);
+
     for (const { fields } of calls) {
       expect(JSON.parse(fields.get("blocks") ?? "null")).toEqual(
         failureContent("timeout").blocks,
@@ -248,6 +277,7 @@ test("native Slack failure hook edits a preview without a Stop button, and repor
       expect(fields.get("parse")).toBe("none");
       expect(fields.get("blocks")).not.toContain("stargate_stop");
     }
+
     expect(calls[2]?.fields.get("thread_ts")).toBe("1.000");
   } finally {
     await server.stop(true);
@@ -292,6 +322,7 @@ test("each backend failure category has one specific line and an honest work sta
       "The model provider failed (HTTP 503). Try again later. Work may have run; it was not repeated. Check agent state before trying again.",
     ],
   ];
+
   for (const [failure, title, text] of cases) {
     expect(failureText(failure.failure)).toBe(text);
     expect(failureContent(failure.failure).blocks[0]?.subtitle.text).toBe(
@@ -303,6 +334,7 @@ test("each backend failure category has one specific line and an honest work sta
       ran: failure.ran,
     });
   }
+
   // No status seen: the line has no number.
   expect(
     failureText(new BackendFailure("quota", { ran: true }).failure),
@@ -313,11 +345,13 @@ test("a provider cause carries a category, a status and a flag, never text", () 
   expect(new BackendFailure("quota", { status: 429, ran: false }).failure).toBe(
     "provider:quota:429:idle",
   );
+
   // An impossible status is dropped, not stored.
   for (const status of [0, 42, 600, 429.5, Number.NaN])
     expect(new BackendFailure("provider", { status, ran: true }).failure).toBe(
       "provider:provider:0:ran",
     );
+
   for (const text of [
     "provider:quota:429:idle:extra",
     "provider:quota:4290:idle",
@@ -352,14 +386,17 @@ test("the gateway reports the category in the card and in the log, never provide
     "https://user:pass@proxy.example/v1?key=secret",
     "claude-fable-5-2 are in cooldown",
   ];
+
   const store = openStore(":memory:");
   const lines: string[] = [];
   const cards: RequestFailure[] = [];
   const posts: string[] = [];
+
   const failure = Object.assign(
     new BackendFailure("quota", { status: 429, ran: false }),
     { body: secrets.join(" "), stack: secrets.join("\n") },
   );
+
   const gateway = new Gateway(
     bot(),
     identity,
@@ -383,9 +420,11 @@ test("the gateway reports the category in the card and in the log, never provide
     },
     pino({ level: "warn" }, { write: (line: string) => lines.push(line) }),
   );
+
   try {
     expect(gateway.accept(event())).toBe(true);
     const [job] = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1);
+
     if (!job) throw new Error("Expected a job");
     await gateway.process(job, new AbortController().signal);
     expect(cards).toEqual(["provider:quota:429:idle"]);
@@ -398,12 +437,14 @@ test("the gateway reports the category in the card and in the log, never provide
     expect(logged).toContain('"status":429');
     expect(logged).toContain('"backend":"opencode"');
     expect(logged).toContain('"ran":false');
+
     const visible = [
       logged,
       ...posts,
       ...cards.map((cause) => JSON.stringify(failureContent(cause))),
       JSON.stringify(store.transcript.replies(gateway.key, job.conversation)),
     ].join("\n");
+
     for (const secret of secrets) expect(visible).not.toContain(secret);
     expect(containsCredential(visible)).toBe(false);
   } finally {
@@ -414,6 +455,7 @@ test("the gateway reports the category in the card and in the log, never provide
 test("a failure without a category keeps the generic card and names no status", async () => {
   const store = openStore(":memory:");
   const lines: string[] = [];
+
   const gateway = new Gateway(
     bot(),
     identity,
@@ -430,9 +472,11 @@ test("a failure without a category keeps the generic card and names no status", 
     { async post() {} },
     pino({ level: "warn" }, { write: (line: string) => lines.push(line) }),
   );
+
   try {
     gateway.accept(event());
     const [job] = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1);
+
     if (!job) throw new Error("Expected a job");
     await gateway.process(job, new AbortController().signal);
     expect(store.failure(job.id)).toBe("backend");

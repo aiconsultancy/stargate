@@ -14,6 +14,7 @@ import {
 } from "../src/app/config-reload";
 
 const cleanup: string[] = [];
+
 afterEach(async () => {
   await Promise.all(
     cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })),
@@ -25,12 +26,14 @@ const backend = {
   url: "http://localhost:4096",
   directory: "/project",
 };
+
 const secrets = {
   STARGATE_RELOAD_ONE_APP: "xapp-secret-one-app",
   STARGATE_RELOAD_ONE_BOT: "xoxb-secret-one-bot",
   STARGATE_RELOAD_IRC: "irc-secret-captain",
   STARGATE_RELOAD_CHIEF: "irc-secret-chief",
 };
+
 const secretValues = [
   ...Object.values(secrets),
   "xoxb-secret-rotated",
@@ -39,6 +42,7 @@ const secretValues = [
 
 function slackBot(id = "one", overrides: Record<string, unknown> = {}) {
   const name = `STARGATE_RELOAD_${id.toUpperCase()}`;
+
   return {
     id,
     slack: {
@@ -51,6 +55,7 @@ function slackBot(id = "one", overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
 const chief = {
   id: "chief",
   account: "galactica-chief",
@@ -58,6 +63,7 @@ const chief = {
   channels: ["#galactica"],
   backend,
 };
+
 const helo = {
   id: "helo",
   account: "galactica-helo",
@@ -65,6 +71,7 @@ const helo = {
   channels: ["#galactica"],
   backend,
 };
+
 function ship(overrides: Record<string, unknown> = {}) {
   return {
     id: "galactica",
@@ -77,20 +84,24 @@ function ship(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
 function configuration(overrides: Record<string, unknown> = {}) {
   return { bots: [slackBot()], irc: [ship()], ...overrides };
 }
+
 function candidate(
   input: Record<string, unknown>,
   environment: NodeJS.ProcessEnv = { ...secrets },
 ): ReloadCandidate {
   return { config: Schema.decodeUnknownSync(configSchema)(input), environment };
 }
+
 function envText(values: Record<string, string>) {
   return Object.entries(values)
     .map(([name, value]) => `${name}=${value}\n`)
     .join("");
 }
+
 async function files(
   config: Record<string, unknown> = configuration(),
   environment: Record<string, string> = secrets,
@@ -98,26 +109,33 @@ async function files(
   const directory = await mkdtemp(join(tmpdir(), "stargate-reload-"));
   cleanup.push(directory);
   const path = join(directory, "stargate.json");
+
   const write = {
     config: (value: Record<string, unknown>) =>
       writeFile(path, JSON.stringify(value)),
     env: (values: Record<string, string>) =>
       writeFile(`${path}.env`, envText(values)),
   };
+
   await write.config(config);
   await write.env(environment);
+
   return { directory, path, write };
 }
+
 function logger() {
   const lines: string[] = [];
+
   return {
     lines,
     log: pino({ level: "info" }, { write: (line: string) => lines.push(line) }),
   };
 }
+
 function expectNoSecrets(text: string) {
   for (const value of secretValues) expect(text).not.toContain(value);
 }
+
 function liveChange() {
   return configuration({
     bots: [
@@ -136,6 +154,7 @@ test("reload candidate: config check rules, absolute data directory, no process.
   const { directory, path, write } = await files(
     configuration({ dataDirectory: "state" }),
   );
+
   const base: NodeJS.ProcessEnv = { STARGATE_RELOAD_MARKER: "kept" };
   const before = { ...process.env };
   const loaded = await readReloadCandidate(path, base);
@@ -146,10 +165,12 @@ test("reload candidate: config check rules, absolute data directory, no process.
   expect(loaded.environment["STARGATE_RELOAD_MARKER"]).toBe("kept");
   expect(base).toEqual({ STARGATE_RELOAD_MARKER: "kept" });
   expect(process.env).toEqual(before);
+
   // The base environment wins over the companion, as at startup.
   const override = await readReloadCandidate(path, {
     STARGATE_RELOAD_ONE_BOT: "xoxb-from-environment",
   });
+
   expect(override.environment["STARGATE_RELOAD_ONE_BOT"]).toBe(
     "xoxb-from-environment",
   );
@@ -197,6 +218,7 @@ test("restart policy: access, transcription and crew membership are live; ids or
       STARGATE_RELOAD_TWO_BOT: "xoxb-two",
     },
   );
+
   const next = candidate(
     configuration({
       bots: [
@@ -238,11 +260,13 @@ test("restart policy: access, transcription and crew membership are live; ids or
       STARGATE_RELOAD_HELO: "irc-secret-helo",
     },
   );
+
   expect(restartRequired(current, next)).toEqual([]);
 });
 
 test("restart policy: reconnect and other fields are listed by path, without values", () => {
   const current = candidate(configuration());
+
   const next = candidate(
     configuration({
       dataDirectory: "elsewhere",
@@ -276,6 +300,7 @@ test("restart policy: reconnect and other fields are listed by path, without val
       STARGATE_RELOAD_ROTATED_BOT: "xoxb-secret-rotated",
     },
   );
+
   const paths = restartRequired(current, next);
   expect(paths).toEqual([
     "bots[one].backend.url",
@@ -303,11 +328,13 @@ test("reload applies a valid live change; current advances only after apply reso
   const { path, write } = await files();
   const { lines, log } = logger();
   const initial = await readReloadCandidate(path, {});
+
   const reload = new ConfigReload(
     initial,
     () => readReloadCandidate(path, {}),
     log,
   );
+
   const gate = Promise.withResolvers<void>();
   const applied: ReloadCandidate[] = [];
   reload.listen(async (next) => {
@@ -338,11 +365,13 @@ test("reload keeps the running config for invalid files, restart-only keys and c
   const { lines, log } = logger();
   const before = { ...process.env };
   const initial = await readReloadCandidate(path, {});
+
   const reload = new ConfigReload(
     initial,
     () => readReloadCandidate(path, {}),
     log,
   );
+
   const applied: ReloadCandidate[] = [];
   reload.listen(async (next) => {
     applied.push(next);
@@ -405,11 +434,13 @@ test("reload keeps the running config for invalid files, restart-only keys and c
 test("reload adds a crew member only once its new credential is present", async () => {
   const { path, write } = await files();
   const { lines, log } = logger();
+
   const reload = new ConfigReload(
     await readReloadCandidate(path, {}),
     () => readReloadCandidate(path, {}),
     log,
   );
+
   const applied: ReloadCandidate[] = [];
   reload.listen(async (next) => {
     applied.push(next);
@@ -434,6 +465,7 @@ test("reload adds a crew member only once its new credential is present", async 
 test("reload serializes requests and is unavailable without a listener or after close", async () => {
   const { log } = logger();
   const initial = candidate(configuration());
+
   const changes = [
     candidate(liveChange()),
     candidate(
@@ -444,12 +476,15 @@ test("reload serializes requests and is unavailable without a listener or after 
       }),
     ),
   ];
+
   let reads = 0;
+
   const reload = new ConfigReload(
     initial,
     async () => changes[reads++ % changes.length] as ReloadCandidate,
     log,
   );
+
   expect(await reload.request()).toMatchObject({ status: "unavailable" });
   expect(reload.current).toBe(initial);
 
@@ -457,6 +492,7 @@ test("reload serializes requests and is unavailable without a listener or after 
   let overlap = false;
   const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
   const applied: ReloadCandidate[] = [];
+
   const stop = reload.listen(async (next) => {
     overlap ||= active > 0;
     active++;
@@ -464,6 +500,7 @@ test("reload serializes requests and is unavailable without a listener or after 
     await gates[applied.length - 1]?.promise;
     active--;
   });
+
   reads = 0;
   const first = reload.request();
   const second = reload.request();
@@ -533,6 +570,7 @@ test("runtime rejections and unknown failures keep the current config and leak n
     },
     log,
   );
+
   raw.listen(async () => {});
   expect((await raw.request()).status).toBe("invalid");
   expect(raw.current).toBe(initial);
