@@ -21,6 +21,7 @@ import {
   importClosure,
   normalizeGraph,
   sourceRootFiles,
+  staleGraphBaseline,
   sizeRegressions,
   type GraphBaseline,
   type ArchitecturePolicy,
@@ -31,9 +32,10 @@ import policy from "./architecture-policy.json";
 
 // Stable IDs and approved physical aliases live in the policy, not the future
 // layout table. A move changes physical paths, not IDs or exception permissions.
-// Delete resolved exception IDs in the same edit. Root/cycle lists only shrink;
-// lower the closure cap by recording its remaining members. Do not regenerate
-// the baseline to accept new violations. Its sourceCommit records measurement.
+// Delete resolved exceptions and refresh lowered inventories in the same edit.
+// Root/cycle lists only shrink; lower the closure cap by recording its members.
+// Do not regenerate the baseline to accept new violations. Provenance and
+// module/edge totals are informational; guarded inventories must be current.
 test("source architecture introduces no new structural or boundary violations", async () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const physical = await buildGraph(root);
@@ -49,11 +51,16 @@ test("source architecture introduces no new structural or boundary violations", 
     ...boundaryViolations(source, policy),
     ...(await documentationViolations(root, await architectureDocuments(root))),
   ];
+  const roots = await sourceRootFiles(root);
   expect([
-    ...graphRegressions(source, baseline, await sourceRootFiles(root)),
+    ...graphRegressions(source, baseline, roots),
     ...exceptionRegressions(violations, baseline.exceptions),
     ...(await sizeRegressions(root, policy, baseline.largeFiles)),
   ]).toEqual([]);
+  expect(
+    staleGraphBaseline(source, baseline, roots),
+    'Architecture baseline is stale. Refresh and commit the lowered baseline in this PR: mise run architecture-refresh -- --base "$(git merge-base origin/main HEAD)" --write. Do not raise caps or add permissions to accept a regression.',
+  ).toEqual([]);
 });
 
 const temporary: string[] = [];

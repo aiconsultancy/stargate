@@ -58,6 +58,9 @@ Use `mise run architecture-refresh -- --base "$(git merge-base origin/main HEAD)
 to preview the working-tree architecture inventory. Add `--write` to save it.
 The tool cannot approve new exceptions or increase base caps. See
 [development](docs/development.md#architecture-inventory-refresh).
+Guarded inventories must be current. Refresh and commit a lowered baseline
+in the same PR as the structural change. Module/edge totals and provenance
+are informational. Do not raise limits or add exceptions to pass a regression.
 
 ## Code boundaries
 

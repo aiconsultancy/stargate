@@ -152,6 +152,30 @@ Only `exceptions` are pruned; normal inventory refresh and guards stay intact.
 Use optional `--output PATH` for a JSON receipt outside the checkout, including
 in preview mode. Unknown and repeated options are errors.
 
+### Strict baseline freshness
+
+The architecture guard rejects stale-high inventories as well as growth.
+Keep `largestCycle`, `cycleComponents`, `cyclicEdges`, `crewPlugin.members`
+and physical `rootFiles` current in the same PR as the structural change.
+Component/member order does not matter; identities do. A dependency replacement
+can need a refresh even if its closure count stays the same. Single-file
+self-loops count as cyclic components.
+
+`sourceFiles`, `sourceEdges`, `sourceCommit` and `measurementStatus` remain
+informational. Their changes do not require a baseline edit. Existing policy,
+exception and source-size checks keep their behavior.
+
+For stale inventories, run the exact refresh command printed by the test.
+Inspect and commit the lowered JSON with the source change. No environment
+or baseline opt-out is provided.
+
+This closes removed allowances immediately but costs parallel delivery speed.
+Two PRs that lower the same baseline key can conflict on the baseline file.
+After rebasing, refresh against incoming main and retest. Do not restore an
+older whole JSON file. Adopt this rule only after open structural PRs finish.
+The earlier move wave deliberately deferred baseline edits to one refresh PR
+to avoid these conflicts.
+
 ## Dependency updates
 
 Dependabot checks Bun dependencies and pinned GitHub Actions daily.
