@@ -6,7 +6,7 @@ import {
   notificationInputSchema,
 } from "./notification-store";
 import { notificationKey } from "./notifications";
-import { type Identity, isAllowedChannel } from "../../gateway/routing";
+import { type Identity, isAllowedChannel } from "../../shared/registration";
 
 export class NotificationControlError extends Error {}
 

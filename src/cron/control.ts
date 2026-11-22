@@ -13,7 +13,7 @@ import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../gateway/routing";
+} from "../shared/registration";
 import { legacySetting } from "../config/settings-legacy";
 
 const destination = {

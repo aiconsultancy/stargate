@@ -31,7 +31,7 @@ import {
 } from "../attachments/attachments";
 import { botToken, botWebClient } from "../slack/bot-web";
 import { type BotConfig, loadConfig } from "../config";
-import { isAllowedChannel } from "../gateway/routing";
+import { isAllowedChannel } from "../shared/registration";
 import {
   settingsCheck,
   settingsDefault,

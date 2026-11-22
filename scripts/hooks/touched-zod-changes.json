@@ -11,8 +11,8 @@
   },
   {
     "path": "src/maintenance/nightly/run.ts",
-    "issue": "NET-1787",
-    "reason": "Move the two-method Clock type to drain and preserve its run re-export; schemas unchanged."
+    "issue": "NET-1812",
+    "reason": "Redirect registration helpers to shared; Zod declarations unchanged."
   },
   {
     "path": "src/ops/agent-profile-switch.ts",
@@ -23,5 +23,15 @@
     "path": "src/notifications/preferences/notifications.ts",
     "issue": "NET-1787",
     "reason": "Use the two consumed Slack identity fields locally; Zod schemas unchanged."
+  },
+  {
+    "path": "src/cron/control.ts",
+    "issue": "NET-1812",
+    "reason": "Redirect registration helpers to shared; Zod declarations unchanged."
+  },
+  {
+    "path": "src/cron/ui.ts",
+    "issue": "NET-1812",
+    "reason": "Redirect registration helpers to shared; Zod declarations unchanged."
   }
 ]

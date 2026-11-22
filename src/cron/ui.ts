@@ -11,7 +11,7 @@ import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../gateway/routing";
+} from "../shared/registration";
 
 export type SlackAck = (payload?: Record<string, unknown>) => Promise<void>;
 export type CronView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;

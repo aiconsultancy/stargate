@@ -19,7 +19,7 @@ import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../gateway/routing";
+} from "../shared/registration";
 import type { JobStatus } from "../gateway/store";
 
 export { type CronInput, validateCronInput } from "./input";

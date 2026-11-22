@@ -14,7 +14,7 @@ import { dashboardCrewSummary } from "../../dashboard-projection";
 import type { DashboardFleetSource } from "../../dashboard-source";
 import { abortable, runAbortable } from "../../../lib/effect";
 import { isLoopbackHost } from "../../../lib/loopback";
-import { backendFingerprint } from "../../../gateway/routing";
+import { backendFingerprint } from "../../../shared/registration";
 import {
   HISTORY_PAGE,
   type HistorySession,

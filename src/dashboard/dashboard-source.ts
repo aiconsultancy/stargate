@@ -21,7 +21,7 @@ import {
 } from "./dashboard-projection";
 import type { IrcRegistration } from "../irc/ship";
 import { createReadSlot, readWithDeadline } from "../lib/read-deadline";
-import { backendFingerprint, type Identity } from "../gateway/routing";
+import { backendFingerprint, type Identity } from "../shared/registration";
 import {
   HISTORY_PAGE,
   type HistorySession,

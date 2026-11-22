@@ -3,7 +3,7 @@ import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../../gateway/routing";
+} from "../../shared/registration";
 import type { NotifyConfig } from "./config";
 import { audienceAllowed, Destination, physicalKey } from "./model";
 import type { DeliveryDestination } from "./sink";

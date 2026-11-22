@@ -26,7 +26,7 @@ import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../gateway/routing";
+} from "../shared/registration";
 import { settingsPattern, settingsRecord } from "../config/settings-schema";
 import type { ConfigPanelRecord, MetaRecords } from "./store";
 import { resolveWaiting, saveWaitingDelay } from "../gateway/waiting";
