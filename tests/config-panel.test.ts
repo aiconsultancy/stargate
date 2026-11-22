@@ -271,7 +271,7 @@ async function fixture(options: MetaOptions = {}) {
     isHuman: async () => true,
     ...options,
   };
-  let meta = new MetaCommands(store, slack, metaOptions);
+  let meta = new MetaCommands(store.meta, slack, metaOptions);
   const waiting = new CrewWaiting({
     options: {
       captainDirectory: directory,
@@ -364,7 +364,7 @@ async function fixture(options: MetaOptions = {}) {
     reopen() {
       store.close();
       store = new Store(join(directory, "gateway.sqlite"));
-      meta = new MetaCommands(store, slack, metaOptions);
+      meta = new MetaCommands(store.meta, slack, metaOptions);
     },
   };
 }
@@ -802,7 +802,7 @@ test("a pending button claim survives restart without applying or replaying", as
   await f.publish();
   const raw = f.press();
   const [nonce, revision] = firstAction(raw).value.split(":");
-  f.store.claimMeta({
+  f.store.meta.claimMeta({
     registration: notificationKey(f.config, identity),
     message: `panel:${nonce}:${revision}:${firstAction(raw).action_ts}`,
     channel: "C123",
@@ -908,7 +908,7 @@ test("panel audit retains actor, time and old/new waiting values only", async ()
   await f.click(raw);
   const [nonce, revision] = firstAction(raw).value.split(":");
   expect(
-    f.store.metaReceipt(
+    f.store.meta.metaReceipt(
       notificationKey(f.config, identity),
       `panel:${nonce}:${revision}:${firstAction(raw).action_ts}`,
     ),
@@ -978,8 +978,8 @@ test("binding invalidation after durable apply retains the outcome without updat
   await f.publish();
   const raw = f.press();
   let open = true;
-  const apply = f.store.applyConfigPanel.bind(f.store);
-  f.store.applyConfigPanel = (...args) => {
+  const apply = f.store.meta.applyConfigPanel.bind(f.store.meta);
+  f.store.meta.applyConfigPanel = (...args) => {
     apply(...args);
     open = false;
   };

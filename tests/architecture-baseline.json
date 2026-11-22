@@ -17,8 +17,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 252,
-  "sourceEdges": 1093,
+  "sourceFiles": 254,
+  "sourceEdges": 1096,
   "rootFiles": [
     "src/backend.ts",
     "src/config.ts",
@@ -285,7 +285,6 @@
     "direction:src/mentions.ts -> src/settings-schema.ts",
     "direction:src/meta-commands.ts -> src/gateway/ports.ts",
     "direction:src/meta-commands.ts -> src/routing.ts",
-    "direction:src/meta-commands.ts -> src/store.ts",
     "direction:src/meta-commands.ts -> src/waiting.ts",
     "direction:src/nightly/cli.ts -> src/runtime.ts",
     "direction:src/nightly/idle.ts -> src/store.ts",
