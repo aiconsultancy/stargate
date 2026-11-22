@@ -437,23 +437,29 @@ test("Pi progress storage failures do not stop work or escape timer callbacks", 
   }
 });
 
-test("Pi recovery leaves legacy tasks without native conversation binding unresolved", async () => {
-  const f = await fixture();
-  try {
-    expect(f.state.piTaskConversation(f.task.id)).toBeUndefined();
-    expect(
-      await f.workers.recover(
-        f.task,
-        f.member,
-        f.directory,
-        new AbortController().signal,
-      ),
-    ).toMatchObject({ status: "uncertain", result: null, released: 0 });
-    expect(f.state.piTaskConversation(f.task.id)).toBeUndefined();
-  } finally {
-    await f.close();
-  }
-});
+// Real SQLite setup and recovery writes need headroom on loaded hosts.
+const legacyPiRecoveryTimeoutMs = 30_000;
+test(
+  "Pi recovery leaves legacy tasks without native conversation binding unresolved",
+  async () => {
+    const f = await fixture();
+    try {
+      expect(f.state.piTaskConversation(f.task.id)).toBeUndefined();
+      expect(
+        await f.workers.recover(
+          f.task,
+          f.member,
+          f.directory,
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "uncertain", result: null, released: 0 });
+      expect(f.state.piTaskConversation(f.task.id)).toBeUndefined();
+    } finally {
+      await f.close();
+    }
+  },
+  legacyPiRecoveryTimeoutMs,
+);
 
 test("Pi recovery fails closed for unsupported, missing and unreadable receipts without opening runtime", async () => {
   const f = await fixture();
