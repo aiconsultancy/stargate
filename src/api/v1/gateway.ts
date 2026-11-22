@@ -1,4 +1,4 @@
-import packageManifest from "../../../package.json";
+import { packageManifest } from "../../lib/installation-paths";
 import { packageDirectory, runningVersion } from "../../nightly/ready";
 
 const releaseTag = /^v(\d+\.\d+\.\d+)$/;

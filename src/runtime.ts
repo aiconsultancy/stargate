@@ -60,6 +60,7 @@ import type { SlackDelivery } from "./gateway/ports";
 import { createHealthReader } from "./health";
 import { controlInteractions } from "./interactions";
 import { type IrcRegistration, IrcShip, ircKey } from "./irc/ship";
+import { templatesDirectory } from "./lib/installation-paths";
 import { DrainRuntime } from "./maintenance-drain";
 import { discoverCrews } from "./nightly/crews";
 import { MaintenanceOutbox } from "./nightly/outbox";
@@ -1131,7 +1132,7 @@ export function serve(
               groupAccess: config.dashboardSocket?.groupAccess ?? false,
               source: dashboardSource(ships, store, cronStore),
               html: await Bun.file(
-                new URL("../templates/dashboard/index.html", import.meta.url),
+                join(templatesDirectory, "dashboard", "index.html"),
               ).text(),
               signal: viewers.signal,
               log,

@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { assetsDirectory } from "./lib/installation-paths";
 
 // Fixed package assets only. No configuration or request can select a file.
 const png = (name: string) =>
-  `data:image/png;base64,${readFileSync(new URL(`../assets/icons/${name}`, import.meta.url)).toString("base64")}`;
+  `data:image/png;base64,${readFileSync(join(assetsDirectory, "icons", name)).toString("base64")}`;
 
 const artwork = {
   "{{stargate-logo-dark}}": png("stargate-dark-64.png"),

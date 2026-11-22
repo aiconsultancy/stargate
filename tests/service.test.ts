@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { buildUnit, serviceName } from "../src/service";
+
+test("unit defaults to the installed gateway entrypoint", () => {
+  const entrypoint = fileURLToPath(new URL("../src/main.ts", import.meta.url));
+  expect(buildUnit("/work/stargate.json", "/usr/bin/bun")).toContain(
+    `ExecStart="/usr/bin/bun" "${entrypoint}" start --config "/work/stargate.json"`,
+  );
+});
 
 test("unit uses private user service configuration and absolute commands", () => {
   const unit = buildUnit(

@@ -8,7 +8,6 @@ import {
   symlink,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Result, Schema } from "effect";
 import {
   managedPrompt,
@@ -23,6 +22,10 @@ import {
   teamSchema,
 } from "./crew/team";
 import { ircCrewInstructions, ircInstructions } from "./irc/routing";
+import {
+  installationDirectory,
+  templatesDirectory,
+} from "./lib/installation-paths";
 import { textMentionInstructions } from "./mentions";
 import {
   nightlyInstructions,
@@ -40,7 +43,6 @@ import {
 } from "./settings-schema";
 import { voiceInstructions } from "./transcription";
 
-const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const absolute = Schema.String.check(
   settingsRefine(isAbsolute, { message: "Invalid input" }),
   settingsRefine((path) => !/[\r\n\0]/.test(path), {
@@ -151,7 +153,7 @@ export async function renderProfile(input: Options, role: string) {
   const profile = captain ? "captain" : member?.permissionProfile;
   if (!profile) throw new Error("Missing team permission profile.");
   const config = await Bun.file(
-    join(packageDirectory, "templates", "opencode.json"),
+    join(templatesDirectory, "opencode.json"),
   ).json();
   // The template is project-owned; untrusted inputs are validated above.
   const parsed = Schema.decodeUnknownSync(templateSchema)(config);
@@ -174,7 +176,7 @@ export async function renderProfile(input: Options, role: string) {
     providers,
     skills: [
       join(options.projectDirectory, ".agents", "opco", "skills"),
-      join(packageDirectory, "templates", "skills"),
+      join(templatesDirectory, "skills"),
     ],
     default_agent: agent.agent ?? role,
     agents: {
@@ -185,7 +187,7 @@ export async function renderProfile(input: Options, role: string) {
     },
     plugins: [
       {
-        package: packageDirectory,
+        package: installationDirectory,
         options: {
           namespace: options.namespace,
           ...(options.cron ? { cron: options.cron } : {}),
@@ -362,10 +364,7 @@ export async function initializeProfile(input: Options) {
   await writeProfileFile(
     join(options.directory, "WAYS_OF_WORKING.md"),
     (
-      await readFile(
-        join(packageDirectory, "templates", "ways-of-working.md"),
-        "utf8",
-      )
+      await readFile(join(templatesDirectory, "ways-of-working.md"), "utf8")
     ).replace("{{roster}}", roster),
     true,
   );
@@ -376,7 +375,7 @@ export async function initializeProfile(input: Options) {
     true,
   );
   const shipInstructions = await readFile(
-    join(packageDirectory, "templates", "ship-instructions.md"),
+    join(templatesDirectory, "ship-instructions.md"),
     "utf8",
   );
   await excludeGenerated(
@@ -493,12 +492,7 @@ export async function initializeProfile(input: Options) {
       }
     }
     const template = await readFile(
-      join(
-        packageDirectory,
-        "templates",
-        "agents",
-        `${captain ? "captain" : "crew"}.md`,
-      ),
+      join(templatesDirectory, "agents", `${captain ? "captain" : "crew"}.md`),
       "utf8",
     );
     const substitutions: Record<string, string> = {

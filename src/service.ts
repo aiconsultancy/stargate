@@ -8,8 +8,8 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { mainEntrypoint } from "./lib/installation-paths";
 
 const marker = "# Managed by Stargate CLI";
 const exec = promisify(execFile);
@@ -38,7 +38,7 @@ export function quote(value: string, command = false) {
 export function buildUnit(
   configPath: string,
   executable = process.execPath,
-  entrypoint = fileURLToPath(new URL("./main.ts", import.meta.url)),
+  entrypoint = mainEntrypoint,
 ) {
   for (const path of [configPath, executable, entrypoint]) {
     if (!isAbsolute(path)) throw new Error("Service paths must be absolute.");
