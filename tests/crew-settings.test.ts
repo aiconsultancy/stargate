@@ -4,14 +4,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
-import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
+import { crewOpenCodeInput } from "../src/crew/input/crew-tool-input";
 import { crewInputSchema, crewOptionsSchema } from "../src/crew/engine";
 import { canExpandCrew, crewFingerprint } from "../src/crew/identity";
 import {
   modelInputSchema,
   modelToolInputSchema,
 } from "../src/crew/controls/models";
-import { projectsSchema } from "../src/crew/project-options";
+import { projectsSchema } from "../src/crew/input/project-options";
 import { inspectInputSchema } from "../src/crew/reconciliation";
 import { CrewState } from "../src/crew/state";
 import { profileTeam, teamSchema } from "../src/crew/team";

@@ -6,11 +6,11 @@ import type { BackendContext } from "../src/backends/backend";
 import {
   crewOpenCodeInput,
   crewPiParameters,
-} from "../src/crew/crew-tool-input";
+} from "../src/crew/input/crew-tool-input";
 import { crewInputSchema, crewOptionsSchema } from "../src/crew/engine";
 import { crewMessageMetadataKey } from "../src/crew/message-protocol";
 import { piCrewExtension } from "../src/crew/pi-extension";
-import { projectsSchema } from "../src/crew/project-options";
+import { projectsSchema } from "../src/crew/input/project-options";
 import { CrewRecovery, recoveryRequestSchema } from "../src/crew/recovery-rpc";
 import {
   MissingTaskResult,

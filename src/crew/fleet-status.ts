@@ -4,7 +4,7 @@ import { z } from "zod";
 import { crewStatusSchema } from "../shared/crew-status";
 import { exactStruct } from "../shared/session-history";
 import { legacySetting } from "../config/settings-legacy";
-import { effectProjectKeySchema } from "./project-options";
+import { effectProjectKeySchema } from "./input/project-options";
 import { agentIDSchema } from "./team";
 
 const directory = Schema.String.check(

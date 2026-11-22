@@ -2,6 +2,18 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "aliases": {
+    "src/crew/tool-input.ts": [
+      "src/crew/tool-input.ts",
+      "src/crew/input/tool-input.ts"
+    ],
+    "src/crew/project-options.ts": [
+      "src/crew/project-options.ts",
+      "src/crew/input/project-options.ts"
+    ],
+    "src/crew/crew-tool-input.ts": [
+      "src/crew/crew-tool-input.ts",
+      "src/crew/input/crew-tool-input.ts"
+    ],
     "src/crew/waiting.ts": [
       "src/crew/waiting.ts",
       "src/crew/controls/waiting.ts"

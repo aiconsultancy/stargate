@@ -19,7 +19,7 @@ import {
   piDurableBackendSchema,
   teamsSchema,
 } from "../src/config";
-import { objectToolInput } from "../src/crew/tool-input";
+import { objectToolInput } from "../src/crew/input/tool-input";
 import { cronOperationSchema } from "../src/cron/control";
 import { cronjobsSchema } from "../src/cron/job-config";
 import { fleetControlSchema } from "../src/fleet/protocol";

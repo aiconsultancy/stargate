@@ -14,7 +14,7 @@ import type { Plugin as EffectPlugin } from "@opencode/plugin/effect";
 import { Agent, Session, SessionMessage } from "@opencode/schema";
 import { Tool } from "@opencode/schema/tool";
 import { Effect, Exit, Result, Schema, Scope } from "effect";
-import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
+import { crewOpenCodeInput } from "../src/crew/input/crew-tool-input";
 import {
   CrewEngine,
   type CrewOptions,
@@ -30,7 +30,7 @@ import {
   effectProjectToolInput,
   projectKeySchema,
   projectsSchema,
-} from "../src/crew/project-options";
+} from "../src/crew/input/project-options";
 import { CrewProjects } from "../src/crew/workspace/projects";
 import { teamSchema } from "../src/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
