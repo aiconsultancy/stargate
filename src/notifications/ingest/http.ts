@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { Effect, Result, Schema } from "effect";
-import type { ApiRoute } from "../../dashboard/api/route";
 import {
   equalCredential,
   type NotifyConfig,
@@ -8,6 +7,27 @@ import {
 } from "./config";
 import { NotificationInput, Source } from "./model";
 import type { NotificationCore } from "./notifications";
+
+type NotificationRoute = {
+  readonly owner: string;
+  readonly method: "POST";
+  readonly path: string;
+  readonly limits: {
+    readonly maxBodyBytes: number;
+    readonly timeoutMs: number;
+    readonly maxConcurrent: number;
+  };
+  authorize(
+    headers: Headers,
+  ):
+    | { readonly allowed: true; readonly caller: unknown }
+    | { readonly allowed: false; readonly response: Response };
+  handle(
+    request: Request,
+    caller: unknown,
+    signal: AbortSignal,
+  ): Promise<Response>;
+};
 
 function failure(status: number, code: string, retry = 1) {
   return Response.json(
@@ -35,7 +55,7 @@ export function notificationRoutes(
 ) {
   const credentials = producerCredentials(config, environment, operatorToken);
   let open = true;
-  const routes: ApiRoute[] = [];
+  const routes: NotificationRoute[] = [];
   for (const [name, adapter] of Object.entries(config.adapters)) {
     if (!adapter.enabled) continue;
     const sources = credentials

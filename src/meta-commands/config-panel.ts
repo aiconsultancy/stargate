@@ -3,7 +3,6 @@ import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { Result, Schema } from "effect";
 import type { BotConfig } from "../config";
-import type { NotificationPage } from "../notifications/preferences/notification-store";
 import {
   decodeQuestionSettings,
   type QuestionSettings,
@@ -17,6 +16,20 @@ import {
 } from "../config/settings-schema";
 import type { SlackPanelContent } from "../shared/slack-format";
 import { resolveWaiting, waitingSettingsPath } from "../gateway/waiting";
+
+export type MutePage = {
+  settings: {
+    target:
+      | { scope: "channel"; channel: string }
+      | { scope: "thread"; channel: string; thread_ts: string };
+    setting: {
+      state: "absent" | "active" | "expired";
+      mute_until: string | null;
+    };
+  }[];
+  cursor: string | null;
+  counts: { channel: number; thread: number };
+};
 
 export const configActionPrefix = "stargate_config_";
 export const configPanelStale =
@@ -149,7 +162,7 @@ async function settingsFingerprint(
 
 export async function readConfigSnapshot(
   bot: BotConfig,
-  page: NotificationPage | undefined,
+  page: MutePage | undefined,
 ): Promise<ConfigPanelSnapshot> {
   const before = await settingsFingerprint(bot, waitingSettingsPath);
   const questionsBefore = await settingsFingerprint(bot, questionSettingsPath);
