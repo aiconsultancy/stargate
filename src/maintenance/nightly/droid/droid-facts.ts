@@ -1,29 +1,29 @@
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import type { Config } from "../../config";
-import { discoverCrews } from "./crews";
-import type { CommandRunner } from "./exec";
-import { proxyModels } from "./update/host";
-import { queuedCrewTasks } from "./schedule/idle";
-import { Journal, journalEntries } from "./journal";
-import { maintenanceDirectory } from "./paths";
-import { readReady, readyProcessAlive } from "./update/ready";
-import { linkedRelease } from "./update/release";
+import type { Config } from "../../../config";
+import { discoverCrews } from "../crews";
+import type { CommandRunner } from "../exec";
+import { proxyModels } from "../update/host";
+import { queuedCrewTasks } from "../schedule/idle";
+import { Journal, journalEntries } from "../journal";
+import { maintenanceDirectory } from "../paths";
+import { readReady, readyProcessAlive } from "../update/ready";
+import { linkedRelease } from "../update/release";
 import {
   alertSchemaID,
   listReports,
   type Report,
   reportSchema,
-} from "./reports/report";
-import { readState } from "./state";
-import { compareVersions } from "./update/versions";
+} from "../reports/report";
+import { readState } from "../state";
+import { compareVersions } from "../update/versions";
 import {
   defaultInstallID,
   nextWindow,
   previousWindow,
   stableJitter,
-} from "./schedule/window";
+} from "../schedule/window";
 
 /**
  * Read-only facts for the maintenance droid. Everything here is collected by

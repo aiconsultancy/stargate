@@ -21,13 +21,13 @@ import {
   type DroidDependencies,
   droidDirectory,
   runDroid,
-} from "../src/maintenance/nightly/droid";
+} from "../src/maintenance/nightly/droid/droid";
 import type {
   DroidAgent,
   DroidTools,
-} from "../src/maintenance/nightly/droid-agent";
-import { openPiDroid } from "../src/maintenance/nightly/droid-agent";
-import { digestReport } from "../src/maintenance/nightly/droid-facts";
+} from "../src/maintenance/nightly/droid/droid-agent";
+import { openPiDroid } from "../src/maintenance/nightly/droid/droid-agent";
+import { digestReport } from "../src/maintenance/nightly/droid/droid-facts";
 import type {
   CommandResult,
   CommandRunner,
