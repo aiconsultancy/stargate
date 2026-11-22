@@ -764,7 +764,6 @@ describe("affected-tests hook", () => {
     "SIG%s during snapshot creation cleans its private index and exits %s",
     async (signal, status) => {
       const root = await scenario();
-      let snapshot: string | undefined;
       try {
         const realGit = Bun.which("git");
         if (!realGit) throw new Error("Git unavailable");
@@ -772,17 +771,22 @@ describe("affected-tests hook", () => {
         git(root, "add", "src/leaf.ts");
         await writeFile(
           join(root, "bin/git"),
-          `#!/bin/sh\n${JSON.stringify(realGit)} "$@" || exit $?\nif [ "$1" = checkout-index ]; then\n  printf '%s' "$GIT_INDEX_FILE" > "$PWD/snapshot-index"\n  kill -${signal} "$PPID"\nfi\n`,
+          `#!/bin/sh\n${JSON.stringify(realGit)} "$@" || exit $?\nif [ "$1" = checkout-index ] && [ ! -e "$PWD/snapshot-index" ]; then\n  case "$GIT_INDEX_FILE" in\n    "$TMPDIR"/stargate-affected-*/head-index)\n      [ -f "$GIT_INDEX_FILE" ] || exit 1\n      printf '%s' "$GIT_INDEX_FILE" > "$PWD/snapshot-index"\n      kill -${signal} "$PPID"\n      ;;\n  esac\nfi\n`,
         );
         await chmod(join(root, "bin/git"), 0o755);
-        const result = run(root);
+        const snapshots = await mkdtemp(join(root, "snapshots-"));
+        const result = run(root, { TMPDIR: snapshots });
         const index = await readFile(join(root, "snapshot-index"), "utf8");
-        snapshot = dirname(index);
+        expect(index.endsWith("/head-index")).toBe(true);
+        const snapshot = dirname(index);
+        expect(dirname(snapshot)).toBe(snapshots);
+        expect(snapshot.startsWith(join(snapshots, "stargate-affected-"))).toBe(
+          true,
+        );
         expect(result.status).toBe(status);
         expect(existsSync(snapshot)).toBe(false);
         expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
       } finally {
-        if (snapshot) await rm(snapshot, { recursive: true, force: true });
         await rm(root, { recursive: true, force: true });
       }
     },
