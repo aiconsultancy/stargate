@@ -12,7 +12,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { inspectArchive, verifyExtracted } from "./archive";
-import type { MaintenanceConfig } from "./config";
+import type { MaintenanceConfig } from "../config";
 import {
   type GitHubRelease,
   githubReleases,
@@ -21,8 +21,8 @@ import {
   selectGitHubRelease,
   selectNpmVersion,
 } from "./cooloff";
-import { type CommandRunner, fetchOK, must, request, StepError } from "./exec";
-import { replaceLink } from "./files";
+import { type CommandRunner, fetchOK, must, request, StepError } from "../exec";
+import { replaceLink } from "../files";
 import { sha256File, writeBody } from "./release";
 import { compareVersions, parseVersion } from "./versions";
 

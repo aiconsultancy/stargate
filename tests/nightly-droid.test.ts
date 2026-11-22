@@ -32,7 +32,7 @@ import type {
   CommandResult,
   CommandRunner,
 } from "../src/maintenance/nightly/exec";
-import type { OpenCodeControl } from "../src/maintenance/nightly/opencode";
+import type { OpenCodeControl } from "../src/maintenance/nightly/update/opencode";
 import {
   type Report,
   writeAlert,

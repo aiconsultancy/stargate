@@ -4,7 +4,7 @@ import { Schema } from "effect";
 import {
   catalogRefs,
   upgradeGlobalCatalog,
-} from "../src/maintenance/nightly/catalog";
+} from "../src/maintenance/nightly/update/catalog";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 const text = json({

@@ -1,7 +1,7 @@
 import { lstat, readdir, readlink, realpath } from "node:fs/promises";
 import { join, posix, relative, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { StepError } from "./exec";
+import { StepError } from "../exec";
 
 /**
  * Release archives are validated from their own headers before `tar` sees

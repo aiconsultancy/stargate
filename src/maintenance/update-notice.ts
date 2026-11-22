@@ -4,7 +4,7 @@ import { Predicate, Schema } from "effect";
 import { z } from "zod";
 import { redactCredentials } from "../lib/credentials";
 import { metaCommandSyntax } from "../meta-commands/meta-command-syntax";
-import { compareVersions, parseVersion } from "./nightly/versions";
+import { compareVersions, parseVersion } from "./nightly/update/versions";
 
 const digest = (value: unknown) =>
   createHash("sha256")

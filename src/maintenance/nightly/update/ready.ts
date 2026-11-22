@@ -1,7 +1,7 @@
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { installationDirectory } from "../../lib/installation-paths";
+import { installationDirectory } from "../../../lib/installation-paths";
 import { readMetadata } from "./release";
 
 /**

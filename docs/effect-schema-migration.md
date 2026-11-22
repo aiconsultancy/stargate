@@ -95,7 +95,7 @@ and NET1771 syntax import retarget, the respective PRs can add these entries:
 ```json
 [
   {
-    "path": "src/maintenance/nightly/ready.ts",
+    "path": "src/maintenance/nightly/update/ready.ts",
     "issue": "NET-1769",
     "reason": "Centralize the installation root."
   },
@@ -163,7 +163,7 @@ that owns their production boundary, rather than a separate test-only PR.
     `quota.ts`, `quota-watch.ts`, `health.ts`, `health-host.ts`,
     `notification-store.ts` and `notifications.ts`. Include report/UI consumers.
 16. Maintenance records and readiness. Migrate `maintenance.ts`,
-    `maintenance/nightly/state.ts`, `maintenance/nightly/ready.ts`, `maintenance/nightly/journal.ts`,
+    `maintenance/nightly/state.ts`, `maintenance/nightly/update/ready.ts`, `maintenance/nightly/journal.ts`,
     `maintenance/nightly/reports/report.ts` and remaining maintenance configuration/record schemas.
 17. Maintenance execution and migration scripts. Migrate the remaining
     `maintenance/nightly/` validators and `scripts/bootstrap-stargate.ts` and

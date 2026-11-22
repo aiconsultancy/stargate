@@ -68,12 +68,12 @@ import { templatesDirectory } from "../lib/installation-paths";
 import { DrainRuntime } from "../maintenance/maintenance-drain";
 import { discoverCrews } from "../maintenance/nightly/crews";
 import { MaintenanceOutbox } from "../maintenance/nightly/reports/outbox";
-import type { Ready } from "../maintenance/nightly/ready";
+import type { Ready } from "../maintenance/nightly/update/ready";
 import {
   packageDirectory,
   runningVersion,
   writeReady,
-} from "../maintenance/nightly/ready";
+} from "../maintenance/nightly/update/ready";
 import { NotificationStore } from "../notifications/preferences/notification-store";
 import { notificationKey } from "../notifications/preferences/notifications";
 import {

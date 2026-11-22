@@ -25,8 +25,8 @@ import {
   must,
   request,
   StepError,
-} from "./exec";
-import { replaceLink } from "./files";
+} from "../exec";
+import { replaceLink } from "../files";
 import { writePluginDigest } from "./plugin-digest";
 import { compareVersions, normalizeVersion, parseVersion } from "./versions";
 

@@ -11,7 +11,7 @@ import {
   stageRelease,
   switchCurrent,
   verifyOrigin,
-} from "../src/maintenance/nightly/release";
+} from "../src/maintenance/nightly/update/release";
 import { loadEnvironment } from "../src/app/runtime";
 
 export async function bootstrapRelease(

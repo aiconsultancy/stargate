@@ -2,7 +2,7 @@ import { packageManifest } from "../../../lib/installation-paths";
 import {
   packageDirectory,
   runningVersion,
-} from "../../../maintenance/nightly/ready";
+} from "../../../maintenance/nightly/update/ready";
 
 const releaseTag = /^v(\d+\.\d+\.\d+)$/;
 

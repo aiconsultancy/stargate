@@ -12,7 +12,7 @@ import {
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import type { Config } from "../../config";
-import { globalCatalogPath } from "./catalog";
+import { globalCatalogPath } from "./update/catalog";
 import { discoverCrews } from "./crews";
 import { type CommandRunner, type Reason, StepError } from "./exec";
 import { atomicWrite, readOptional, replaceLink } from "./files";
@@ -21,14 +21,14 @@ import {
   agentCliVerify,
   binaryPath,
   proxyModels,
-} from "./host";
+} from "./update/host";
 import type { IdleResult, IdleScope } from "./schedule/idle";
-import { agentFile, managedFolder } from "./models";
-import type { OpenCodeControl } from "./opencode";
+import { agentFile, managedFolder } from "./update/models";
+import type { OpenCodeControl } from "./update/opencode";
 import { maintenanceDirectory } from "./paths";
-import { readReady, readyProcessAlive, waitReady } from "./ready";
-import { linkedRelease, readMetadata, restoreCurrent } from "./release";
-import { formatRef, type ModelRef, parseVersion } from "./versions";
+import { readReady, readyProcessAlive, waitReady } from "./update/ready";
+import { linkedRelease, readMetadata, restoreCurrent } from "./update/release";
+import { formatRef, type ModelRef, parseVersion } from "./update/versions";
 
 /**
  * Undo journal. Every live change is recorded here *before* it happens and

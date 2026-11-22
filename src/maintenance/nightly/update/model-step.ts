@@ -4,11 +4,11 @@ import {
   globalCatalogPath,
   upgradeGlobalCatalog,
 } from "./catalog";
-import type { MaintenanceConfig } from "./config";
-import type { Crew } from "./crews";
-import { reasonOf } from "./exec";
+import type { MaintenanceConfig } from "../config";
+import type { Crew } from "../crews";
+import { reasonOf } from "../exec";
 import { probeModel, proxyModels } from "./host";
-import type { Journal } from "./journal";
+import type { Journal } from "../journal";
 import {
   chooseUpgrades,
   modelRefs,
@@ -21,7 +21,7 @@ import {
   upgradeTeamFile,
 } from "./models";
 import { type OpenCodeControl, openCodeCallMs } from "./opencode";
-import type { ModelChange } from "./reports/report";
+import type { ModelChange } from "../reports/report";
 import { formatRef, type ModelRef, parseModel } from "./versions";
 
 export type Session = {

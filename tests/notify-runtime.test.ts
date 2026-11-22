@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import pino from "pino";
 import { ConfigReload, readReloadCandidate } from "../src/app/config-reload";
-import { readReady } from "../src/maintenance/nightly/ready";
+import { readReady } from "../src/maintenance/nightly/update/ready";
 import { NotifyStore } from "../src/notifications/ingest/store";
 import { lockInstance, serve } from "../src/app/runtime";
 import { SlackConnection } from "../src/slack/slack";

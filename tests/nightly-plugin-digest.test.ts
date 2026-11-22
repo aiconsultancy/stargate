@@ -14,7 +14,7 @@ import {
   pluginDigestFile,
   readPluginDigest,
   writePluginDigest,
-} from "../src/maintenance/nightly/plugin-digest";
+} from "../src/maintenance/nightly/update/plugin-digest";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-plugin-digest-"));
 afterAll(() => rm(base, { recursive: true, force: true }));

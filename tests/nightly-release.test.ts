@@ -34,7 +34,7 @@ import {
   readReady,
   waitReady,
   writeReady,
-} from "../src/maintenance/nightly/ready";
+} from "../src/maintenance/nightly/update/ready";
 import {
   adoptRelease,
   githubHeaders,
@@ -47,7 +47,7 @@ import {
   type StargateReleaseConfig,
   stageRelease,
   switchCurrent,
-} from "../src/maintenance/nightly/release";
+} from "../src/maintenance/nightly/update/release";
 import { tarball } from "./tar";
 
 let directory: string;

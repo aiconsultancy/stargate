@@ -4,12 +4,12 @@ import { z } from "zod";
 import type { Config } from "../../config";
 import { discoverCrews } from "./crews";
 import type { CommandRunner } from "./exec";
-import { proxyModels } from "./host";
+import { proxyModels } from "./update/host";
 import { queuedCrewTasks } from "./schedule/idle";
 import { Journal, journalEntries } from "./journal";
 import { maintenanceDirectory } from "./paths";
-import { readReady, readyProcessAlive } from "./ready";
-import { linkedRelease } from "./release";
+import { readReady, readyProcessAlive } from "./update/ready";
+import { linkedRelease } from "./update/release";
 import {
   alertSchemaID,
   listReports,
@@ -17,7 +17,7 @@ import {
   reportSchema,
 } from "./reports/report";
 import { readState } from "./state";
-import { compareVersions } from "./versions";
+import { compareVersions } from "./update/versions";
 import {
   defaultInstallID,
   nextWindow,
