@@ -5,7 +5,7 @@ import type {
   ActivityWatch,
   CrewActivitySettings,
 } from "./activity";
-import type { AgentBackend } from "../backend";
+import type { AgentBackend } from "../backends/backend";
 import type { TransportDelivery } from "../gateway/ports";
 import type { Job } from "../gateway/store";
 import type { ActivityRecords } from "./store";

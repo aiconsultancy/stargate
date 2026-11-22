@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import type { AgentBackend, BackendContext } from "../backend";
+import type { AgentBackend, BackendContext } from "./backend";
 import type { BackendConfig } from "../config";
 import { OpenCodeBackend } from "./opencode/opencode";
 import { PiDurableBackend } from "./pi/pi-durable";

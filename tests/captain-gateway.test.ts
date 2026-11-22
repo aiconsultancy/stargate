@@ -13,7 +13,7 @@ import {
   type PromptSourceContext,
   type Transcript,
   TranscriptUnavailable,
-} from "../src/backend";
+} from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";

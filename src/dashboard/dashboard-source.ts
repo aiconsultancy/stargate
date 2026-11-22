@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AgentBackend } from "../backend";
+import type { AgentBackend } from "../backends/backend";
 import {
   type BotConfig,
   effectiveIrcConfig,

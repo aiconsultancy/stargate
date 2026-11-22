@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { z } from "zod";
-import { latestInput, TranscriptUnavailable } from "../src/backend";
+import { latestInput, TranscriptUnavailable } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, loadConfig } from "../src/config";
 import { botKey, conversationKey } from "../src/gateway/routing";

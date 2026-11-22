@@ -7,7 +7,10 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend, PromptSourceContext } from "../src/backend";
+import type {
+  AgentBackend,
+  PromptSourceContext,
+} from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import { IrcClient } from "../src/irc/client";

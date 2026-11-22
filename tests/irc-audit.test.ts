@@ -6,7 +6,7 @@ import { Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { configSchema, ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import { auditLine } from "../src/irc/audit";

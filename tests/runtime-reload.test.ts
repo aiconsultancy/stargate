@@ -8,7 +8,7 @@ import { Effect, Schema } from "effect";
 import pino from "pino";
 import { z } from "zod";
 import { apiToken } from "../src/dashboard/api/v1/token";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { type Config, configSchema, ircSchema } from "../src/config";
 import { ConfigReload, readReloadCandidate } from "../src/app/config-reload";
 import type { CrewStatus } from "../src/shared/crew-status";

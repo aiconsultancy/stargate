@@ -5,7 +5,7 @@
 
 import type { ActivityView } from "../activity/activity";
 import type { AttachmentTransport } from "../attachments/attachment-delivery";
-import type { PromptSourceContext } from "../backend";
+import type { PromptSourceContext } from "../backends/backend";
 import type { QuestionPort } from "../questions/questions";
 import type { ReactionName } from "../shared/reactions";
 import type { RequestFailure } from "../shared/request-failure";

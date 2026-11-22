@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
-import { type PromptSourceContext, sourceLine } from "../backend";
+import { type PromptSourceContext, sourceLine } from "../backends/backend";
 import { operatorControl } from "../questions/background-questions";
 import {
   type BackendConfig,

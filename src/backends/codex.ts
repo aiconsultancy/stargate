@@ -26,7 +26,7 @@ import {
   type PromptSourceContext,
   sourceLine,
   type TextSink,
-} from "../backend";
+} from "./backend";
 import { type BackendConfig, secret } from "../config";
 import {
   AttachmentInputUnavailable,

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { Schema } from "effect";
 import pino from "pino";
-import type { SteerInput } from "../src/backend";
+import type { SteerInput } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { crewMessageMetadataKey } from "../src/crew/message-protocol";

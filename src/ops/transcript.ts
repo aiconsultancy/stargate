@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, open } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentBackend } from "../backend";
+import type { AgentBackend } from "../backends/backend";
 import { createBackend } from "../backends/factory";
 import { loadConfig } from "../config";
 import { transcriptReply } from "../gateway/gateway";

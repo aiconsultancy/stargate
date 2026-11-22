@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend, PromptSourceContext } from "../src/backend";
+import type {
+  AgentBackend,
+  PromptSourceContext,
+} from "../src/backends/backend";
 import { type IrcConfig, ircSchema } from "../src/config";
 import { ircDashboardShip } from "../src/dashboard/dashboard-source";
 import { Gateway } from "../src/gateway/gateway";

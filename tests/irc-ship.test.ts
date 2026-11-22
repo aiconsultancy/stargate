@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Effect, Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend, PromptSourceContext } from "../src/backend";
+import type {
+  AgentBackend,
+  PromptSourceContext,
+} from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import { utf8Bytes } from "../src/irc/protocol";

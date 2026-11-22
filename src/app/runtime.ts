@@ -20,7 +20,7 @@ import { diffEvents } from "../dashboard/api/v1/diff";
 import { gatewayVersion } from "../dashboard/api/v1/gateway";
 import { createApiV1Source } from "../dashboard/api/v1/projection";
 import { startApiV1Server } from "../dashboard/api/v1/server";
-import type { AgentBackend, BackendContext } from "../backend";
+import type { AgentBackend, BackendContext } from "../backends/backend";
 import { createBackend } from "../backends/factory";
 import { OpenCodeBackend } from "../backends/opencode/opencode";
 import {

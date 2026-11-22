@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Attachment } from "../attachments/attachments";
-import type { AgentBackend, BackendContext, TextSink } from "../backend";
+import type {
+  AgentBackend,
+  BackendContext,
+  TextSink,
+} from "../backends/backend";
 import type { BackendConfig } from "../config";
 import { redactCredentials } from "../lib/credentials";
 import type { SessionHistory } from "../shared/session-history";

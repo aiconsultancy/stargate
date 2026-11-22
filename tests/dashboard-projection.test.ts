@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import type { CrewStatus } from "../src/shared/crew-status";
 import { CronStore } from "../src/cron/store";
 import type { DashboardTransport } from "../src/dashboard/dashboard-model";

@@ -1,30 +1,30 @@
-import type { ActivityWatch } from "./activity/activity";
-import type { Attachment } from "./attachments/attachments";
-import type { FleetCrewStatus } from "./crew/fleet-status";
-import type { PiCrewBinding } from "./crew/pi-extension";
-import type { CrewStatus, CrewStatusInput } from "./shared/crew-status";
-import type { CronAdvanced, CronEvaluation } from "./cron/advanced";
+import type { ActivityWatch } from "../activity/activity";
+import type { Attachment } from "../attachments/attachments";
+import type { FleetCrewStatus } from "../crew/fleet-status";
+import type { PiCrewBinding } from "../crew/pi-extension";
+import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
+import type { CronAdvanced, CronEvaluation } from "../cron/advanced";
 import type {
   FleetReviewBinding,
   FleetReviewEvidence,
   NativeMaker,
-} from "./fleet/protocol";
-import { validMsgid } from "./irc/protocol";
-import type { MaintenanceWatch } from "./maintenance/maintenance";
-import type { MaintenanceDrain } from "./maintenance/maintenance-drain";
+} from "../fleet/protocol";
+import { validMsgid } from "../irc/protocol";
+import type { MaintenanceWatch } from "../maintenance/maintenance";
+import type { MaintenanceDrain } from "../maintenance/maintenance-drain";
 import type {
   NativeQuestion,
   PendingQuestion,
   QuestionAnswer,
-} from "./questions/questions";
-import type { QuotaObservation, QuotaSnapshot } from "./quota/quota";
-import type { InboundReaction } from "./shared/reactions";
-import type { SessionHistory } from "./shared/session-history";
-import type { TurnProgress } from "./shared/turn-progress";
+} from "../questions/questions";
+import type { QuotaObservation, QuotaSnapshot } from "../quota/quota";
+import type { InboundReaction } from "../shared/reactions";
+import type { SessionHistory } from "../shared/session-history";
+import type { TurnProgress } from "../shared/turn-progress";
 import type {
   UpdateReceipt,
   UpdateSnapshot,
-} from "./maintenance/update-notice";
+} from "../maintenance/update-notice";
 
 /** Compact source identity; IRC optionally adds `;r=<encoded thread root>`. */
 export function sourceLine({ source }: PromptSourceContext) {

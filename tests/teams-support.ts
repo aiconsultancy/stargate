@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
-import type { AgentBackend, PendingPermission } from "../src/backend";
+import type { AgentBackend, PendingPermission } from "../src/backends/backend";
 import { teamsSchema } from "../src/config";
 import { Store } from "../src/gateway/store";
 import {

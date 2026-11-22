@@ -1,6 +1,6 @@
 import { Result, Schema } from "effect";
 import type { Logger } from "pino";
-import type { AgentBackend } from "../backend";
+import type { AgentBackend } from "../backends/backend";
 import type { BotConfig } from "../config";
 import { redactCredentials } from "../lib/credentials";
 import {

@@ -19,12 +19,7 @@
   ],
   "sourceFiles": 259,
   "sourceEdges": 1104,
-  "rootFiles": [
-    "src/backend.ts",
-    "src/config.ts",
-    "src/main.ts",
-    "src/markdown-chunks.ts"
-  ],
+  "rootFiles": ["src/config.ts", "src/main.ts", "src/markdown-chunks.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
   "cyclicEdges": [],

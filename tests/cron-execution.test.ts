@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExperimentalGenerateTextInput } from "@opencode/client";
 import { Result, Schema } from "effect";
-import type { BackendContext } from "../src/backend";
+import type { BackendContext } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { type BackendConfig, backendSchema } from "../src/config";
 import {

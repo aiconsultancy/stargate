@@ -6,7 +6,7 @@ import { Schema } from "effect";
 import pino from "pino";
 import type { AttachmentTransport } from "../src/attachments/attachment-delivery";
 import type { Attachment } from "../src/attachments/attachments";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";

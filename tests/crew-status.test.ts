@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import {
   CrewEngine,
   type CrewOptions,

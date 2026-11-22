@@ -3,7 +3,10 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend, PromptSourceContext } from "../src/backend";
+import type {
+  AgentBackend,
+  PromptSourceContext,
+} from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { FleetLedger } from "../src/fleet/ledger";
 import { fleetOrigin } from "../src/fleet/results";

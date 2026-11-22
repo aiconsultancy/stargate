@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
-import type { AgentBackend, Transcript } from "../src/backend";
+import type { AgentBackend, Transcript } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { type ReplyChunk, slackContent } from "../src/shared/slack-format";

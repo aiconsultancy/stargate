@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import type { AgentBackend, SteerResult } from "../src/backend";
+import type { AgentBackend, SteerResult } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { DrainControl } from "../src/maintenance/maintenance-drain";

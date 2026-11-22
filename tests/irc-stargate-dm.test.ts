@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import type { OutboxPage } from "../src/crew/irc-rpc";
 import { Gateway } from "../src/gateway/gateway";

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { CronScheduler } from "../src/cron/index";
 import { CronStore } from "../src/cron/store";
 import { Gateway } from "../src/gateway/gateway";

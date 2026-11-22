@@ -4,7 +4,7 @@ import { chmodSync } from "node:fs";
 import type { Server } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { Result, Schema } from "effect";
-import type { AgentBackend, PendingPermission } from "../backend";
+import type { AgentBackend, PendingPermission } from "../backends/backend";
 import type { TeamsConfig } from "../config";
 import type { FleetSource } from "../fleet/protocol";
 import { fleetResultSource } from "../fleet/results";
