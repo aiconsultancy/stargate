@@ -80,7 +80,7 @@ async function fixture(
   store.captainCursor(original.botKey, "ses_captain");
   store.baselineCaptain(original.botKey, "ses_captain", "msg_baseline");
   store.saveInput(original.botKey, job.id, "msg_original", "ses_captain");
-  if (source) store.recordQuestionSource(original);
+  if (source) store.questions.recordQuestionSource(original);
   const published: string[] = [];
   const publicationAttempts: string[] = [];
   const decisions: unknown[] = [];
@@ -214,7 +214,7 @@ async function fixture(
       await bridge.poll(AbortSignal.timeout(3000));
     },
     offer() {
-      const offer = store.questionOffers(original.botKey)[0];
+      const offer = store.questions.questionOffers(original.botKey)[0];
       if (!offer) throw new Error("Missing offer");
       return offer;
     },
@@ -223,7 +223,8 @@ async function fixture(
       overrides: Partial<NonNullable<ReturnType<typeof questionControl>>> = {},
     ) {
       const token =
-        store.questionOffers(original.botKey)[0]?.token ?? "0".repeat(32);
+        store.questions.questionOffers(original.botKey)[0]?.token ??
+        "0".repeat(32);
       await bridge.answer(
         {
           ...original,
@@ -303,9 +304,9 @@ test("durable question publication and answer are source-bound and one-shot", as
   await f.answer();
   expect(f.decisions).toEqual([{ q0: "wait" }]);
   expect(f.published[1]).toContain("no tool permission");
-  expect(f.store.questionByToken(original.botKey, f.offer().token)?.state).toBe(
-    "attempted",
-  );
+  expect(
+    f.store.questions.questionByToken(original.botKey, f.offer().token)?.state,
+  ).toBe("attempted");
 });
 
 test("a filtered native list never closes a still-live offer or loses its restored answer", async () => {
@@ -314,7 +315,7 @@ test("a filtered native list never closes a still-live offer or loses its restor
   const token = f.offer().token;
   f.filter(true);
   await f.poll();
-  expect(f.store.questionByToken(original.botKey, token)?.state).toBe(
+  expect(f.store.questions.questionByToken(original.botKey, token)?.state).toBe(
     "offered",
   );
   f.filter(false);
@@ -343,9 +344,9 @@ test("native success survives a failed confirmation and retries only its notice 
   f.failPublish(true);
   await f.answer();
   expect(f.decisions).toHaveLength(1);
-  expect(f.store.questionByToken(original.botKey, token)?.outcome).toBe(
-    "answered",
-  );
+  expect(
+    f.store.questions.questionByToken(original.botKey, token)?.outcome,
+  ).toBe("answered");
   f.restart();
   f.failPublish(false);
   await f.poll();
@@ -387,7 +388,7 @@ test("an unavailable first session cannot starve another native question", async
   f.store.running(job.id);
   f.store.saveInput(original.botKey, job.id, "msg_earlier", "aaa_broken");
   f.store.saveSession(earlier.conversation, "aaa_broken");
-  f.store.recordQuestionSource(earlier);
+  f.store.questions.recordQuestionSource(earlier);
   const pending = f.backend.pendingQuestions;
   f.backend.pendingQuestions = async (session, signal) => {
     if (session === "aaa_broken") throw new Error("Native session unavailable");
@@ -510,7 +511,7 @@ test("unknown native reply outcome remains consumed across restart, never replay
   await f.poll();
   await f.answer({}, { token });
   expect(f.decisions).toHaveLength(1);
-  expect(f.store.questionByToken(original.botKey, token)?.state).toBe(
+  expect(f.store.questions.questionByToken(original.botKey, token)?.state).toBe(
     "attempted",
   );
 });
@@ -694,9 +695,9 @@ test("cancelled transport work cannot submit or consume a question answer", asyn
     ),
   ).rejects.toThrow();
   expect(f.decisions).toEqual([]);
-  expect(f.store.questionByToken(original.botKey, offer.token)?.state).toBe(
-    "offered",
-  );
+  expect(
+    f.store.questions.questionByToken(original.botKey, offer.token)?.state,
+  ).toBe("offered");
 });
 
 test("restart retains only exact verified pending native input, blocks new prompts and releases for catch-up", async () => {
@@ -816,8 +817,10 @@ for (const postForm of [false, true]) {
       await until(
         () =>
           postForm
-            ? f.store.questionOffers(original.botKey)[0]?.state === "closed"
-            : f.store.questionOffers(original.botKey)[0]?.recovering === 1,
+            ? f.store.questions.questionOffers(original.botKey)[0]?.state ===
+              "closed"
+            : f.store.questions.questionOffers(original.botKey)[0]
+                ?.recovering === 1,
         2000,
         "persisted form recovery active",
       );
@@ -909,16 +912,18 @@ test("retention removes settled historical proofs together but preserves active 
   await f.answer();
   const future = Date.now() + 31 * 86_400_000;
   f.store.pruneIrcHistory(original.botKey, future);
-  expect(f.store.questionByToken(original.botKey, token)?.outcome).toBe(
-    "uncertain",
-  );
+  expect(
+    f.store.questions.questionByToken(original.botKey, token)?.outcome,
+  ).toBe("uncertain");
   expect(
     f.store.ircThreadRoot(original.botKey, "#ship", "published-question"),
   ).toBe("m1");
   f.store.respond(f.jobID, []);
   f.store.finish(f.jobID);
   f.store.pruneIrcHistory(original.botKey, future + 3_600_001);
-  expect(f.store.questionByToken(original.botKey, token)).toBeUndefined();
+  expect(
+    f.store.questions.questionByToken(original.botKey, token),
+  ).toBeUndefined();
   expect(
     f.store.ircThreadRoot(original.botKey, "#ship", "published-question"),
   ).toBeUndefined();
@@ -927,7 +932,7 @@ test("retention removes settled historical proofs together but preserves active 
   );
   const job = f.store.jobByInput(original.botKey, "msg_original");
   if (!job) throw new Error("Missing job");
-  expect(f.store.ownsQuestionSource(job)).toBe(false);
+  expect(f.store.questions.ownsQuestionSource(job)).toBe(false);
   f.restart();
   await f.poll();
   expect(f.decisions).toHaveLength(1);
@@ -947,7 +952,7 @@ test("a session consuming the poll deadline rotates behind other sessions next t
   f.store.running(job.id);
   f.store.saveInput(original.botKey, job.id, "msg_hang", "aaa_hang");
   f.store.saveSession(earlier.conversation, "aaa_hang");
-  f.store.recordQuestionSource(earlier);
+  f.store.questions.recordQuestionSource(earlier);
   const pending = f.backend.pendingQuestions;
   f.backend.pendingQuestions = async (session, signal) => {
     if (session !== "aaa_hang") return (await pending?.(session, signal)) ?? [];
@@ -992,7 +997,7 @@ for (const outcome of ["success", "timeout"] as const) {
     await entered.promise;
     f.complete();
     await f.poll();
-    const during = f.store.questionByToken(original.botKey, token);
+    const during = f.store.questions.questionByToken(original.botKey, token);
     expect(during?.state).toBe("attempted");
     expect(during?.outcome).toBeNull();
     expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("running");
@@ -1000,7 +1005,7 @@ for (const outcome of ["success", "timeout"] as const) {
     if (outcome === "timeout") operation.abort();
     response.resolve();
     await answer;
-    const completed = f.store.questionByToken(original.botKey, token);
+    const completed = f.store.questions.questionByToken(original.botKey, token);
     expect(completed?.outcome).toBe(
       outcome === "success" ? "answered" : "uncertain",
     );
@@ -1049,10 +1054,10 @@ test("cancelled-owner notices retire without native re-querying or lost attempt 
   await f.poll();
   await f.poll();
   expect(checks).toBe(0);
-  expect(f.store.questionOffers(original.botKey)).toEqual([]);
-  expect(f.store.questionByToken(original.botKey, token)?.outcome).toBe(
-    "uncertain",
-  );
+  expect(f.store.questions.questionOffers(original.botKey)).toEqual([]);
+  expect(
+    f.store.questions.questionByToken(original.botKey, token)?.outcome,
+  ).toBe("uncertain");
   expect(f.decisions).toHaveLength(1);
 });
 
@@ -1120,7 +1125,7 @@ test("complete question-state capability is required before gateway activates qu
     },
   );
   await gateway.pollQuestions(AbortSignal.timeout(3000));
-  expect(f.store.questionOffers(original.botKey)).toEqual([]);
+  expect(f.store.questions.questionOffers(original.botKey)).toEqual([]);
 });
 
 test("retention is indexed and batch-bounded, and never runs on human intake", async () => {
@@ -1169,7 +1174,9 @@ test("cancelled recovered waiter preserves unknown native work until real settle
   f.store.cancelTurn(original.botKey, original.conversation, original.thread);
   await f.poll();
   expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("running");
-  expect(f.store.questionByToken(original.botKey, token)?.recovering).toBe(1);
+  expect(
+    f.store.questions.questionByToken(original.botKey, token)?.recovering,
+  ).toBe(1);
   expect(f.decisions).toEqual([]);
   f.complete();
   await f.poll();
@@ -1199,7 +1206,7 @@ for (const mode of ["in-flight", "read-error"] as const) {
     await f.poll();
     f.restart();
     await f.bridge.recover(AbortSignal.timeout(3000));
-    const secondOffer = f.store
+    const secondOffer = f.store.questions
       .questionOffers(original.botKey)
       .find((o) => o.formID === second.id);
     if (!secondOffer) throw new Error("Missing second offer");
@@ -1226,7 +1233,8 @@ for (const mode of ["in-flight", "read-error"] as const) {
       await expect(f.poll()).rejects.toThrow("session unavailable");
     else await f.poll();
     expect(
-      f.store.questionByToken(original.botKey, secondOffer.token)?.recovering,
+      f.store.questions.questionByToken(original.botKey, secondOffer.token)
+        ?.recovering,
     ).toBe(1);
     if (decision !== undefined) {
       response.resolve();
@@ -1240,9 +1248,10 @@ for (const mode of ["in-flight", "read-error"] as const) {
       clock.mockRestore();
     }
     expect(
-      f.store.questionByToken(original.botKey, secondOffer.token)?.recovering,
+      f.store.questions.questionByToken(original.botKey, secondOffer.token)
+        ?.recovering,
     ).toBe(0);
-    expect(f.store.questionOffers(original.botKey)).toEqual([]);
+    expect(f.store.questions.questionOffers(original.botKey)).toEqual([]);
     expect(f.decisions).toHaveLength(mode === "in-flight" ? 1 : 0);
   });
 }
@@ -1386,9 +1395,9 @@ for (const cancelled of [false, true]) {
         if (phase === "settlement-read-error")
           await expect(f.poll()).rejects.toThrow("session unavailable");
         else await f.poll();
-        expect(f.store.questionOffers(original.botKey)[0]?.state).toBe(
-          "closed",
-        );
+        expect(
+          f.store.questions.questionOffers(original.botKey)[0]?.state,
+        ).toBe("closed");
       }
       f.restart();
       const retained = await f.bridge.recover(AbortSignal.timeout(3000));
@@ -1401,7 +1410,7 @@ for (const cancelled of [false, true]) {
       f.backend.questionInputSettled = settled;
       f.complete();
       await f.poll();
-      expect(f.store.questionOffers(original.botKey)).toEqual([]);
+      expect(f.store.questions.questionOffers(original.botKey)).toEqual([]);
       expect(f.store.jobStatus(original.botKey, f.jobID)).toBe(
         cancelled ? "responding" : "done",
       );
@@ -1504,10 +1513,12 @@ for (const failure of ["read-error", "timeout"] as const) {
       expect(prompts).toBe(0);
       expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("running");
       expect(
-        f.store.questionByToken(original.botKey, established.token)?.recovering,
+        f.store.questions.questionByToken(original.botKey, established.token)
+          ?.recovering,
       ).toBe(1);
       expect(
-        f.store.questionByToken(original.botKey, "d".repeat(32))?.recovering,
+        f.store.questions.questionByToken(original.botKey, "d".repeat(32))
+          ?.recovering,
       ).toBe(0);
       expect(f.decisions).toEqual([]);
     } finally {
@@ -1569,7 +1580,7 @@ for (const cleanup of ["ttl", "empty-list"] as const) {
     if (!job) throw new Error("Missing new job");
     f.store.running(job.id);
     f.store.saveInput(original.botKey, job.id, "msg_next", "ses_captain");
-    f.store.recordQuestionSource(next);
+    f.store.questions.recordQuestionSource(next);
     const q = { ...question(), id: "frm_next", inputID: "msg_next" };
     f.backend.pendingQuestions = async () => [q];
     f.backend.questionBelongsToInput = async () => true;
@@ -1584,7 +1595,7 @@ for (const cleanup of ["ttl", "empty-list"] as const) {
       clock?.mockRestore();
     }
     expect(
-      f.store
+      f.store.questions
         .questionOffers(original.botKey)
         .some((o) => o.formID === "frm_next" && o.notified === 1),
     ).toBe(true);
@@ -1610,10 +1621,10 @@ test("denied outcome notices retire without publication or repeated inactive nat
   await f.poll();
   expect(reads).toBe(0);
   expect(f.published).toHaveLength(1);
-  expect(f.store.questionOffers(original.botKey)).toEqual([]);
-  expect(f.store.questionByToken(original.botKey, token)?.outcome).toBe(
-    "answered",
-  );
+  expect(f.store.questions.questionOffers(original.botKey)).toEqual([]);
+  expect(
+    f.store.questions.questionByToken(original.botKey, token)?.outcome,
+  ).toBe("answered");
   expect(f.decisions).toHaveLength(1);
 });
 
@@ -1788,7 +1799,9 @@ test("connection readiness cannot discard a new pending recovery hold or permane
   await f.answer();
   expect(f.decisions).toEqual([{ q0: "wait" }]);
   expect(f.published).toHaveLength(1);
-  expect(f.store.questionOffers(original.botKey)[0]?.outcomeNotified).toBe(0);
+  expect(
+    f.store.questions.questionOffers(original.botKey)[0]?.outcomeNotified,
+  ).toBe(0);
   f.reconnect();
   await f.poll();
   expect(f.published[1]).toContain("decision recorded");
@@ -1802,9 +1815,9 @@ for (const closed of [false, true]) {
     await f.answer();
     const token = f.offer().token;
     if (closed) await f.poll();
-    expect(f.store.questionByToken(original.botKey, token)?.state).toBe(
-      closed ? "closed" : "attempted",
-    );
+    expect(
+      f.store.questions.questionByToken(original.botKey, token)?.state,
+    ).toBe(closed ? "closed" : "attempted");
     f.restart();
     const retained = await f.bridge.recover(AbortSignal.timeout(3000));
     expect(retained).toEqual(["msg_original"]);
@@ -1962,7 +1975,7 @@ for (const botReply of [false, true]) {
     f.store.running(job.id);
     f.store.started(job.id);
     f.store.saveInput(registration.key, job.id, "msg_original", "ses_captain");
-    f.store.recordQuestionSource(input);
+    f.store.questions.recordQuestionSource(input);
     f.store.offerQuestion({
       token: "f".repeat(32),
       botKey: registration.key,
@@ -2024,7 +2037,9 @@ for (const botReply of [false, true]) {
     const worker = gateway.work(stop.signal);
     try {
       await until(
-        () => f.store.questionOffers(registration.key)[0]?.recovering === 1,
+        () =>
+          f.store.questions.questionOffers(registration.key)[0]?.recovering ===
+          1,
         3000,
         "unjoined real IRC transport retained native hold",
       );
@@ -2093,7 +2108,7 @@ test("configurable question bridge stays off and admits only configured answer p
   const f = await fixture(true, settings);
   await f.poll();
   expect(f.published).toHaveLength(0);
-  expect(f.store.questionOffers(original.botKey)).toHaveLength(0);
+  expect(f.store.questions.questionOffers(original.botKey)).toHaveLength(0);
   settings.enabled = true;
   await f.poll();
   expect(f.published).toHaveLength(1);
@@ -2157,9 +2172,9 @@ test("uncertain timeout cancellation is consumed, not replayed on another poll",
     await f.poll();
     await f.poll();
     expect(f.decisions).toEqual([null]);
-    expect(f.store.questionByToken(original.botKey, token)?.outcome).toBe(
-      "uncertain",
-    );
+    expect(
+      f.store.questions.questionByToken(original.botKey, token)?.outcome,
+    ).toBe("uncertain");
     expect(f.published.join("\n")).toContain("outcome is uncertain");
   } finally {
     clock.mockRestore();
@@ -2181,7 +2196,7 @@ test("disabled controls still release a recovered waiter when its native form se
   f.complete();
   await f.poll();
   expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("done");
-  expect(f.store.questionOffers(original.botKey)).toEqual([]);
+  expect(f.store.questions.questionOffers(original.botKey)).toEqual([]);
   expect(f.decisions).toEqual([]);
   expect(f.settled).toEqual(["ses_captain"]);
 });

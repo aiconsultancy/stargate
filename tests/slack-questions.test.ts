@@ -94,7 +94,9 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
           return "2.000";
         },
         async update(_channel, _ts, _text, _stop, content) {
-          expect(store.slackQuestion(token)?.revision).toBeGreaterThan(0);
+          expect(
+            store.questions.slackQuestion(token)?.revision,
+          ).toBeGreaterThan(0);
           if (failUpdate) throw new Error("Slack unavailable");
           updates.push(content as SlackPanelContent);
           return true;
@@ -202,7 +204,7 @@ test("renders literal single-choice buttons with trusted indexed values and nati
 test("binds actual publication and maps indices after controls restart, ACK before I/O", async () => {
   const f = fixture();
   await f.publish();
-  expect(f.store.slackQuestion(token)?.ts).toBe("2.000");
+  expect(f.store.questions.slackQuestion(token)?.ts).toBe("2.000");
   f.restart();
   expect(await f.click(press())).toBe(true);
   expect(f.answers).toEqual([{ answer: '{"q0":"native_go"}', user: "U123" }]);
@@ -261,7 +263,7 @@ test("checkbox change never answers; Submit reads state and ignores labels", asy
   selected.value = `${token}:0:9`;
   await f.click(submit);
   expect(f.answers).toEqual([]);
-  expect(f.store.slackQuestion(token)?.revision).toBe(0);
+  expect(f.store.questions.slackQuestion(token)?.revision).toBe(0);
   selected.value = `${token}:0:1`;
   await f.click(submit);
   expect(f.answers).toEqual([
@@ -297,7 +299,7 @@ test("refuses forged routing, source message, bot user, stale and disabled offer
   f.config.access.deniedUsers.push("U123");
   await f.click(original);
   f.config.access.deniedUsers.pop();
-  f.store.closeQuestion(token);
+  f.store.questions.closeQuestion(token);
   await f.click(original);
   expect(f.answers).toEqual([]);
 });
@@ -378,15 +380,17 @@ test("sequential fields persist progress, survive restart and submit the complet
   await f.publish();
   await f.click(press());
   expect(f.answers).toEqual([]);
-  expect(JSON.parse(f.store.slackQuestion(token)?.progress ?? "null")).toEqual({
+  expect(
+    JSON.parse(f.store.questions.slackQuestion(token)?.progress ?? "null"),
+  ).toEqual({
     q0: "native_go",
   });
-  expect(f.store.slackQuestion(token)?.revision).toBe(1);
+  expect(f.store.questions.slackQuestion(token)?.revision).toBe(1);
   expect(f.updates.at(-1)?.text).toContain("Locations");
   expect(JSON.stringify(f.updates)).toContain(`${token}:1:1`);
   f.restart();
   await f.click(press());
-  expect(f.store.slackQuestion(token)?.revision).toBe(1);
+  expect(f.store.questions.slackQuestion(token)?.revision).toBe(1);
   expect(f.answers).toEqual([]);
   const submit = {
     ...press("stargate_question_submit", `${token}:1`),
@@ -422,7 +426,7 @@ test("failed repaint retains accepted progress and stale event retry only refres
   await f.publish();
   f.failUpdate(true);
   await f.click(press());
-  expect(f.store.slackQuestion(token)?.revision).toBe(1);
+  expect(f.store.questions.slackQuestion(token)?.revision).toBe(1);
   expect(f.answers).toEqual([]);
   f.failUpdate(false);
   f.restart();
@@ -451,7 +455,7 @@ test("interrupted final submission needs an explicit saved-answer submission, ne
   await f.publish();
   f.failSubmit(true);
   await f.click(press());
-  expect(f.store.slackQuestion(token)?.revision).toBe(1);
+  expect(f.store.questions.slackQuestion(token)?.revision).toBe(1);
   expect(f.answers).toEqual([]);
   f.failSubmit(false);
   f.restart();
@@ -475,7 +479,7 @@ test("all eight native fields advance under one offer and preserve their field k
     await f.click(
       press(`stargate_question_pick_${revision}_0`, `${token}:${revision}:0`),
     );
-    expect(f.store.slackQuestion(token)?.revision).toBe(revision + 1);
+    expect(f.store.questions.slackQuestion(token)?.revision).toBe(revision + 1);
     expect(f.answers).toHaveLength(revision === 7 ? 1 : 0);
   }
   expect(JSON.parse(f.answers[0]?.answer ?? "null")).toEqual({
@@ -493,7 +497,7 @@ test("all eight native fields advance under one offer and preserve their field k
 test("expired offers and policy lost during directory I/O cannot submit", async () => {
   const native = question();
   const expired = fixture(native, Date.now() - 1);
-  expired.store.saveSlackQuestion(token, "2.000", native);
+  expired.store.questions.saveSlackQuestion(token, "2.000", native);
   await expired.click(press());
   expect(expired.answers).toEqual([]);
   const f = fixture();

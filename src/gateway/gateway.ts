@@ -535,7 +535,7 @@ export class Gateway {
       !input.fleet &&
       !input.slackReaction
     )
-      this.store.recordQuestionSource(input);
+      this.store.questions.recordQuestionSource(input);
     return accepted;
   }
 
