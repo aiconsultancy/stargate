@@ -21,6 +21,8 @@ import type { PiWorkerBackend, PiWorkerFactory } from "../src/crew/pi-worker";
 import { defaultTeam, teamSchema } from "../src/crew/team";
 import { Store } from "../src/gateway/store";
 
+const diskIntegrationTimeoutMs = 30_000;
+
 async function fixture(safeReports = true) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-reporting-"));
   const team = Schema.decodeUnknownSync(teamSchema)({
@@ -475,82 +477,86 @@ test("active capture read renews its lease beyond five minutes", async () => {
   }
 });
 
-test("captures assignments, validated messages, urgency, results, and configured names only", async () => {
-  const f = await fixture();
-  try {
-    const historical = await f.dispatch("Earlier turn", "luigi");
-    const capture = await f.start();
-    expect(await f.start()).toEqual(capture);
-    const task = await f.dispatch(
-      "Inspect API_KEY=assignment-secret xoxb-111-secret",
-    );
-    await f.engine.mail(
-      {
-        op: "send",
-        taskID: task.id,
-        to: "captain",
-        text: "Found issue Bearer message-secret",
-        key: "one",
-      },
-      {
-        sessionID: task.workerSessionID,
-        agent: task.crewID,
-        signal: f.caller().signal,
-        id: "urgent-call",
-      },
-    );
-    await f.engine.run(
-      { op: "urgent", taskID: task.id, to: "captain", text: "Urgent issue" },
-      {
-        sessionID: task.workerSessionID,
-        agent: task.crewID,
-        signal: f.caller().signal,
-        id: "actual-urgent-call",
-      },
-    );
-    await f.complete(historical.id, "Historical result must stay absent");
-    await f.complete(task.id, "Result sk-provider-secret");
-    const snapshot = await f.read(capture.id);
-    expect(
-      Result.isSuccess(
-        Schema.decodeUnknownResult(activitySnapshotSchema)(snapshot),
-      ),
-    ).toBe(true);
-    expect(snapshot.entries.map(({ kind }) => kind)).toEqual([
-      "assignment",
-      "update",
-      "message",
-      "message",
-      "result",
-      "result",
-    ]);
-    expect(
-      snapshot.entries
-        .filter(({ taskID }) => taskID === task.id)
-        .every(({ member }) => member === "Chief"),
-    ).toBe(true);
-    const visible = JSON.stringify(snapshot);
-    expect(visible).toContain("Chief → Bowser");
-    for (const secret of [
-      "assignment-secret",
-      "message-secret",
-      "provider-secret",
-    ])
-      expect(visible).not.toContain(secret);
-    const db = new Database(f.engine.state.path, { readonly: true });
+test(
+  "captures assignments, validated messages, urgency, results, and configured names only",
+  async () => {
+    const f = await fixture();
     try {
-      const persisted = JSON.stringify(
-        db.query("SELECT * FROM activity_entries").all(),
+      const historical = await f.dispatch("Earlier turn", "luigi");
+      const capture = await f.start();
+      expect(await f.start()).toEqual(capture);
+      const task = await f.dispatch(
+        "Inspect API_KEY=assignment-secret xoxb-111-secret",
       );
-      expect(persisted).not.toContain("assignment-secret");
-      expect(persisted).not.toContain("message-secret");
+      await f.engine.mail(
+        {
+          op: "send",
+          taskID: task.id,
+          to: "captain",
+          text: "Found issue Bearer message-secret",
+          key: "one",
+        },
+        {
+          sessionID: task.workerSessionID,
+          agent: task.crewID,
+          signal: f.caller().signal,
+          id: "urgent-call",
+        },
+      );
+      await f.engine.run(
+        { op: "urgent", taskID: task.id, to: "captain", text: "Urgent issue" },
+        {
+          sessionID: task.workerSessionID,
+          agent: task.crewID,
+          signal: f.caller().signal,
+          id: "actual-urgent-call",
+        },
+      );
+      await f.complete(historical.id, "Historical result must stay absent");
+      await f.complete(task.id, "Result sk-provider-secret");
+      const snapshot = await f.read(capture.id);
+      expect(
+        Result.isSuccess(
+          Schema.decodeUnknownResult(activitySnapshotSchema)(snapshot),
+        ),
+      ).toBe(true);
+      expect(snapshot.entries.map(({ kind }) => kind)).toEqual([
+        "assignment",
+        "update",
+        "message",
+        "message",
+        "result",
+        "result",
+      ]);
+      expect(
+        snapshot.entries
+          .filter(({ taskID }) => taskID === task.id)
+          .every(({ member }) => member === "Chief"),
+      ).toBe(true);
+      const visible = JSON.stringify(snapshot);
+      expect(visible).toContain("Chief → Bowser");
+      for (const secret of [
+        "assignment-secret",
+        "message-secret",
+        "provider-secret",
+      ])
+        expect(visible).not.toContain(secret);
+      const db = new Database(f.engine.state.path, { readonly: true });
+      try {
+        const persisted = JSON.stringify(
+          db.query("SELECT * FROM activity_entries").all(),
+        );
+        expect(persisted).not.toContain("assignment-secret");
+        expect(persisted).not.toContain("message-secret");
+      } finally {
+        db.close();
+      }
     } finally {
-      db.close();
+      await f.close();
     }
-  } finally {
-    await f.close();
-  }
-});
+  },
+  diskIntegrationTimeoutMs,
+);
 
 test("exact capture ownership rejects other captains, workers, child sessions, and locations", async () => {
   const f = await fixture();
@@ -599,43 +605,48 @@ test("exact capture ownership rejects other captains, workers, child sessions, a
   }
 });
 
-test("busy reporter is skipped; facts remain visible and unrelated maintenance continues", async () => {
-  const f = await fixture();
-  try {
-    const maintenanceStarted = f.started();
-    const maintenance = await f.dispatch(
-      "Unrelated maintenance",
-      "twiki",
-      "captain-b",
-    );
-    await maintenanceStarted;
-    const capture = await f.start();
-    const task = await f.dispatch("Build feature");
-    await f.complete(task.id, "Feature ready");
-    await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
-    let final = await f.read(capture.id);
-    for (
-      let attempt = 0;
-      attempt < 10 && final.status === "summarizing";
-      attempt++
-    )
-      final = await f.read(capture.id);
-    expect(final.status).toBe("complete");
-    expect(final.summary).toContain("Summary skipped");
-    expect(JSON.stringify(final.entries)).toContain("Feature ready");
-    expect(f.engine.state.reporting.reportTaskID(capture.id)).toBeUndefined();
-    expect(f.turns[0]?.signal.aborted).toBe(false);
-    f.turns[0]?.resolve("Maintenance done");
-    await f.engine.run(
-      { op: "wait", taskID: maintenance.id },
-      f.caller("captain-b"),
-    );
-    for (let index = 0; index < 3; index++) await f.read(capture.id);
-    expect(f.turns).toHaveLength(1);
-  } finally {
-    await f.close();
-  }
-});
+// Allow durable fixture setup and report/task writes on a shared test host.
+test(
+  "busy reporter is skipped; facts remain visible and unrelated maintenance continues",
+  async () => {
+    const f = await fixture();
+    try {
+      const maintenanceStarted = f.started();
+      const maintenance = await f.dispatch(
+        "Unrelated maintenance",
+        "twiki",
+        "captain-b",
+      );
+      await maintenanceStarted;
+      const capture = await f.start();
+      const task = await f.dispatch("Build feature");
+      await f.complete(task.id, "Feature ready");
+      await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+      let final = await f.read(capture.id);
+      for (
+        let attempt = 0;
+        attempt < 10 && final.status === "summarizing";
+        attempt++
+      )
+        final = await f.read(capture.id);
+      expect(final.status).toBe("complete");
+      expect(final.summary).toContain("Summary skipped");
+      expect(JSON.stringify(final.entries)).toContain("Feature ready");
+      expect(f.engine.state.reporting.reportTaskID(capture.id)).toBeUndefined();
+      expect(f.turns[0]?.signal.aborted).toBe(false);
+      f.turns[0]?.resolve("Maintenance done");
+      await f.engine.run(
+        { op: "wait", taskID: maintenance.id },
+        f.caller("captain-b"),
+      );
+      for (let index = 0; index < 3; index++) await f.read(capture.id);
+      expect(f.turns).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  },
+  diskIntegrationTimeoutMs,
+);
 
 test("finish waits only linked tasks; later turns and other captains cannot enter summary", async () => {
   const f = await fixture();

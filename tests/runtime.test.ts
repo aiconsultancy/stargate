@@ -27,6 +27,7 @@ import { scopedUpdate } from "../src/maintenance/update-notice";
 import { bot, event, identity } from "./fixtures";
 
 const silent = pino({ level: "silent" });
+const diskIntegrationTimeoutMs = 30_000;
 
 test("ready update notices are opt-in, persistent across restarts and included in readiness", async () => {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-update-ready-"));
@@ -613,68 +614,74 @@ test("a failed Slack connection starts no queued turn", async () => {
   }
 });
 
-test("shutdown closes every intake and stops every worker together", async () => {
-  const dataDirectory = await directory();
-  try {
-    const helper = bot();
-    const other = Schema.decodeUnknownSync(botSchema)({
-      ...bot("other"),
-      slack: {
-        appId: "A999",
-        appTokenEnv: "OTHER_APP_TOKEN",
-        botTokenEnv: "OTHER_BOT_TOKEN",
-      },
-    });
-    const path = join(dataDirectory, "stargate.sqlite");
-    const busy = Promise.withResolvers<void>();
-    let late: { key: string; id: number } | undefined;
-    let draining: boolean[] = [];
-    const f = harness(
-      (bot, signal) =>
-        new Promise((_resolve, reject) => {
-          if (bot !== "other") return reject(new Error("unexpected turn"));
-          busy.resolve();
-          signal.addEventListener(
-            "abort",
-            () => {
-              void (async () => {
-                // First aborted-work observation: every intake already closed.
-                draining = ["helper", "other"].map((id) => f.intake(id).open());
-                // Work becomes ready for the first bot while this one drains.
-                late = seed(path, helper);
-                await Bun.sleep(400);
-                reject(new Error("stopped"));
-              })();
-            },
-            { once: true },
-          );
-        }),
-    );
-    seed(path, other, "UOTHER");
-    const controller = new AbortController();
-    const running = Effect.runPromise(
-      serve(
-        { dataDirectory, bots: [helper, other] },
-        silent,
-        controller.signal,
-        f.dependencies,
-      ),
-    );
-    await busy.promise;
-    controller.abort();
-    await running;
-    expect(draining).toEqual([false, false]);
-    expect(f.events.filter((event) => event.includes("intake"))).toEqual([]);
-    expect(f.events.filter((event) => event === "backend closed")).toHaveLength(
-      2,
-    );
-    expect(f.calls).toEqual(["other createSession", "other prompt"]);
-    if (!late) throw new Error("Late job was not seeded");
-    expect(status(path, late.key, late.id)).toBe("queued");
-  } finally {
-    await rm(dataDirectory, { recursive: true, force: true });
-  }
-});
+test(
+  "shutdown closes every intake and stops every worker together",
+  async () => {
+    const dataDirectory = await directory();
+    try {
+      const helper = bot();
+      const other = Schema.decodeUnknownSync(botSchema)({
+        ...bot("other"),
+        slack: {
+          appId: "A999",
+          appTokenEnv: "OTHER_APP_TOKEN",
+          botTokenEnv: "OTHER_BOT_TOKEN",
+        },
+      });
+      const path = join(dataDirectory, "stargate.sqlite");
+      const busy = Promise.withResolvers<void>();
+      let late: { key: string; id: number } | undefined;
+      let draining: boolean[] = [];
+      const f = harness(
+        (bot, signal) =>
+          new Promise((_resolve, reject) => {
+            if (bot !== "other") return reject(new Error("unexpected turn"));
+            busy.resolve();
+            signal.addEventListener(
+              "abort",
+              () => {
+                void (async () => {
+                  // First aborted-work observation: every intake already closed.
+                  draining = ["helper", "other"].map((id) =>
+                    f.intake(id).open(),
+                  );
+                  // Work becomes ready for the first bot while this one drains.
+                  late = seed(path, helper);
+                  await Bun.sleep(400);
+                  reject(new Error("stopped"));
+                })();
+              },
+              { once: true },
+            );
+          }),
+      );
+      seed(path, other, "UOTHER");
+      const controller = new AbortController();
+      const running = Effect.runPromise(
+        serve(
+          { dataDirectory, bots: [helper, other] },
+          silent,
+          controller.signal,
+          f.dependencies,
+        ),
+      );
+      await busy.promise;
+      controller.abort();
+      await running;
+      expect(draining).toEqual([false, false]);
+      expect(f.events.filter((event) => event.includes("intake"))).toEqual([]);
+      expect(
+        f.events.filter((event) => event === "backend closed"),
+      ).toHaveLength(2);
+      expect(f.calls).toEqual(["other createSession", "other prompt"]);
+      if (!late) throw new Error("Late job was not seeded");
+      expect(status(path, late.key, late.id)).toBe("queued");
+    } finally {
+      await rm(dataDirectory, { recursive: true, force: true });
+    }
+  },
+  diskIntegrationTimeoutMs,
+);
 
 test("the dashboard socket serves the fleet and is removed on shutdown", async () => {
   const dataDirectory = await directory();

@@ -52,6 +52,8 @@ import { waitingSettingsPath } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 import { copyCrewDatabase } from "./fixtures/database-reuse";
 
+const diskIntegrationTimeoutMs = 30_000;
+
 async function boundedOutcome<T>(work: Promise<T>): Promise<T> {
   const stop = new AbortController();
   try {
@@ -2416,100 +2418,104 @@ test("worker control reserves across instances without blocking other slots", as
   }
 });
 
-test("two teams sharing one server isolate roots, results, mail and urgency", async () => {
-  const a = await fixture(customTeam);
-  const b = await fixture(customTeam);
-  const otherOptions = { ...b.options, namespace: "other-team" };
-  const other = await CrewEngine.open(
-    otherOptions,
-    a.client,
-    a.mailer,
-    a.agents,
-  );
-  const otherCaller = { ...b.captain(), sessionID: "ses_other_captain" };
-  a.sessions.set(otherCaller.sessionID, {
-    id: otherCaller.sessionID,
-    agent: customTeam.captain.id,
-    location: { directory: otherOptions.captainDirectory },
-  });
-  try {
-    const first = (
-      await a.engine.run(
-        { op: "dispatch", crew: "builder", text: "Team A" },
-        a.captain(),
-      )
-    ).task;
-    const second = (
+test(
+  "two teams sharing one server isolate roots, results, mail and urgency",
+  async () => {
+    const a = await fixture(customTeam);
+    const b = await fixture(customTeam);
+    const otherOptions = { ...b.options, namespace: "other-team" };
+    const other = await CrewEngine.open(
+      otherOptions,
+      a.client,
+      a.mailer,
+      a.agents,
+    );
+    const otherCaller = { ...b.captain(), sessionID: "ses_other_captain" };
+    a.sessions.set(otherCaller.sessionID, {
+      id: otherCaller.sessionID,
+      agent: customTeam.captain.id,
+      location: { directory: otherOptions.captainDirectory },
+    });
+    try {
+      const first = (
+        await a.engine.run(
+          { op: "dispatch", crew: "builder", text: "Team A" },
+          a.captain(),
+        )
+      ).task;
+      const second = (
+        await other.run(
+          { op: "dispatch", crew: "builder", text: "Team B" },
+          otherCaller,
+        )
+      ).task;
+      expect(second?.workerSessionID).not.toBe(first?.workerSessionID);
+      await expect(
+        other.run({ op: "status", taskID: first?.id }, otherCaller),
+      ).rejects.toThrow("does not own");
+      await expect(
+        other.authorize(a.worker(first?.workerSessionID ?? "")),
+      ).rejects.toThrow("assigned worker");
+      await expect(other.captain(a.captain())).rejects.toThrow("configured");
+      await a.engine.mail(
+        {
+          op: "send",
+          taskID: first?.id,
+          to: "captain",
+          key: "same",
+          text: "A private mail",
+        },
+        a.worker(first?.workerSessionID ?? ""),
+      );
+      await other.mail(
+        {
+          op: "send",
+          taskID: second?.id,
+          to: "captain",
+          key: "same",
+          text: "B private mail",
+        },
+        a.worker(second?.workerSessionID ?? ""),
+      );
+      expect(
+        (
+          await a.engine.mail({ op: "inbox", taskID: first?.id }, a.captain())
+        ).messages?.map((mail) => mail.text),
+      ).toEqual(["A private mail"]);
+      expect(
+        (
+          await other.mail({ op: "inbox", taskID: second?.id }, otherCaller)
+        ).messages?.map((mail) => mail.text),
+      ).toEqual(["B private mail"]);
       await other.run(
-        { op: "dispatch", crew: "builder", text: "Team B" },
+        { op: "urgent", taskID: second?.id, to: "builder", text: "B only" },
         otherCaller,
-      )
-    ).task;
-    expect(second?.workerSessionID).not.toBe(first?.workerSessionID);
-    await expect(
-      other.run({ op: "status", taskID: first?.id }, otherCaller),
-    ).rejects.toThrow("does not own");
-    await expect(
-      other.authorize(a.worker(first?.workerSessionID ?? "")),
-    ).rejects.toThrow("assigned worker");
-    await expect(other.captain(a.captain())).rejects.toThrow("configured");
-    await a.engine.mail(
-      {
-        op: "send",
-        taskID: first?.id,
-        to: "captain",
-        key: "same",
-        text: "A private mail",
-      },
-      a.worker(first?.workerSessionID ?? ""),
-    );
-    await other.mail(
-      {
-        op: "send",
-        taskID: second?.id,
-        to: "captain",
-        key: "same",
-        text: "B private mail",
-      },
-      a.worker(second?.workerSessionID ?? ""),
-    );
-    expect(
-      (
-        await a.engine.mail({ op: "inbox", taskID: first?.id }, a.captain())
-      ).messages?.map((mail) => mail.text),
-    ).toEqual(["A private mail"]);
-    expect(
-      (
-        await other.mail({ op: "inbox", taskID: second?.id }, otherCaller)
-      ).messages?.map((mail) => mail.text),
-    ).toEqual(["B private mail"]);
-    await other.run(
-      { op: "urgent", taskID: second?.id, to: "builder", text: "B only" },
-      otherCaller,
-    );
-    expect(
-      a.calls
-        .filter((call) => call.method === "synthetic")
-        .map((call) => call.sessionID),
-    ).toEqual([second?.workerSessionID ?? ""]);
-    await other.run(
-      { op: "complete", taskID: second?.id, result: "B result" },
-      a.worker(second?.workerSessionID ?? ""),
-    );
-    expect(
-      (await other.run({ op: "status", taskID: second?.id }, otherCaller)).task
-        ?.result,
-    ).toBe("B result");
-    expect(
-      (await a.engine.run({ op: "status", taskID: first?.id }, a.captain()))
-        .task?.result,
-    ).toBeNull();
-  } finally {
-    await other.close();
-    await a.close();
-    await b.close();
-  }
-});
+      );
+      expect(
+        a.calls
+          .filter((call) => call.method === "synthetic")
+          .map((call) => call.sessionID),
+      ).toEqual([second?.workerSessionID ?? ""]);
+      await other.run(
+        { op: "complete", taskID: second?.id, result: "B result" },
+        a.worker(second?.workerSessionID ?? ""),
+      );
+      expect(
+        (await other.run({ op: "status", taskID: second?.id }, otherCaller))
+          .task?.result,
+      ).toBe("B result");
+      expect(
+        (await a.engine.run({ op: "status", taskID: first?.id }, a.captain()))
+          .task?.result,
+      ).toBeNull();
+    } finally {
+      await other.close();
+      await a.close();
+      await b.close();
+    }
+  },
+  diskIntegrationTimeoutMs,
+);
 
 test("identity changes refuse rebinding; invalid and overlapping worktrees fail", async () => {
   const f = await fixture(customTeam);
