@@ -481,6 +481,14 @@
     "src/transcribers/azure-openai.ts": [
       "src/transcribers/azure-openai.ts",
       "src/transcription/azure-openai.ts"
+    ],
+    "src/settings-errors.ts": [
+      "src/settings-errors.ts",
+      "src/config/settings-errors.ts"
+    ],
+    "src/settings-legacy.ts": [
+      "src/settings-legacy.ts",
+      "src/config/settings-legacy.ts"
     ]
   },
   "slices": {

@@ -23,9 +23,7 @@
     "src/backend.ts",
     "src/config.ts",
     "src/main.ts",
-    "src/markdown-chunks.ts",
-    "src/settings-errors.ts",
-    "src/settings-legacy.ts"
+    "src/markdown-chunks.ts"
   ],
   "largestCycle": 3,
   "cycleComponents": [

@@ -17,7 +17,7 @@ import { apiToken } from "../src/dashboard/api/v1/token";
 import { runCli } from "../src/app/cli";
 import { configSchema } from "../src/config";
 import { restartRequired } from "../src/app/config-reload";
-import { decodeSettings } from "../src/settings-errors";
+import { decodeSettings } from "../src/config/settings-errors";
 import example from "../stargate.example.json";
 
 test("Fleet API bind is limited to supported private literal addresses", () => {

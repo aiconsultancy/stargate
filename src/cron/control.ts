@@ -14,7 +14,7 @@ import {
   isAllowedChannel,
   isAllowedUser,
 } from "../gateway/routing";
-import { legacySetting } from "../settings-legacy";
+import { legacySetting } from "../config/settings-legacy";
 
 const destination = {
   channel: legacySetting(cronChannel).optional(),

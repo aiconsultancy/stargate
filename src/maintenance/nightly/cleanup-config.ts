@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
 import { z } from "zod";
-import { legacySetting } from "../../settings-legacy";
+import { legacySetting } from "../../config/settings-legacy";
 import {
   settingsDefault,
   settingsRefine,

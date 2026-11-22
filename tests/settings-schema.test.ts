@@ -35,8 +35,8 @@ import { nightlyWindowSchema } from "../src/maintenance/nightly/instructions";
 import { piModelSchema, piProviderSchema } from "../src/backends/pi/pi-model";
 import { quotaConfigSchema } from "../src/quota/quota";
 import { quotaWatchSchema } from "../src/quota/quota-watch";
-import { decodeSettings } from "../src/settings-errors";
-import { legacySetting } from "../src/settings-legacy";
+import { decodeSettings } from "../src/config/settings-errors";
+import { legacySetting } from "../src/config/settings-legacy";
 import {
   settingsCheck,
   settingsDefault,

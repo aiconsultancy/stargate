@@ -6,7 +6,7 @@ import type {
 import {
   settingsAdvertisement,
   settingsInputAdvertisement,
-} from "../settings-legacy";
+} from "../config/settings-legacy";
 import {
   settingsDefault,
   settingsDiscriminatedUnion,
