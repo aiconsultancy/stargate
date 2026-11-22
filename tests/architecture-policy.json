@@ -510,6 +510,19 @@
     "src/crew/workspace.ts": [
       "src/crew/workspace.ts",
       "src/crew/workspace/workspace.ts"
+    ],
+    "src/crew/api.ts": ["src/crew/api.ts", "src/crew/history/api.ts"],
+    "src/crew/compaction.ts": [
+      "src/crew/compaction.ts",
+      "src/crew/history/compaction.ts"
+    ],
+    "src/crew/history-rpc.ts": [
+      "src/crew/history-rpc.ts",
+      "src/crew/history/history-rpc.ts"
+    ],
+    "src/crew/history.ts": [
+      "src/crew/history.ts",
+      "src/crew/history/history.ts"
     ]
   },
   "slices": {

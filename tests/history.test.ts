@@ -7,7 +7,7 @@ import {
   type HistorySession,
   type HistorySessions,
   historyInputSchema,
-} from "../src/crew/history";
+} from "../src/crew/history/history";
 
 const session = (id: string, title = id): HistorySession => ({
   id,

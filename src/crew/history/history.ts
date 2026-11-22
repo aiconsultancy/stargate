@@ -7,13 +7,13 @@ import type {
   SessionMessageInfo,
 } from "@opencode/client";
 import { Result, Schema } from "effect";
-import { decodeSettings } from "../config/settings-errors";
+import { decodeSettings } from "../../config/settings-errors";
 import {
   settingsDefault,
   settingsDiscriminatedUnion,
   settingsStruct,
-} from "../config/settings-schema";
-import { CrewError } from "./state";
+} from "../../config/settings-schema";
+import { CrewError } from "../state";
 
 const MAX_RESULTS = 20;
 const MAX_TEXT = 2000;

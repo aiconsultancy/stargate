@@ -59,7 +59,7 @@ import {
 } from "./crew-tool-input";
 export { crewInputBranches, crewInputSchema } from "./crew-tool-input";
 export type { CrewInput } from "./crew-tool-input";
-import { CrewHistoryRPC } from "./history-rpc";
+import { CrewHistoryRPC } from "./history/history-rpc";
 import { crewFingerprint } from "./identity";
 import { MesijClient, type MesijMessage } from "./mesij";
 import { crewMessageMetadataKey, resumeMessageID } from "./message-protocol";

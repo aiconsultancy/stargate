@@ -8,7 +8,10 @@ import {
 } from "../src/activity/activity";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
-import { historyInputBranches, historyInputSchema } from "../src/crew/history";
+import {
+  historyInputBranches,
+  historyInputSchema,
+} from "../src/crew/history/history";
 import { CrewIrc, outboxPageSchema } from "../src/crew/irc-rpc";
 import { messageOpenCodeInput } from "../src/crew/message-tool-input";
 import {

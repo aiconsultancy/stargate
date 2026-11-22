@@ -5,7 +5,10 @@ import { z } from "zod";
 import { postInputSchema } from "../src/captain-post/captain-post";
 import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
 import { crewInputSchema } from "../src/crew/engine";
-import { historyInputBranches, historyInputSchema } from "../src/crew/history";
+import {
+  historyInputBranches,
+  historyInputSchema,
+} from "../src/crew/history/history";
 import { journalInputSchema } from "../src/crew/journal";
 import {
   messageOpenCodeInput,

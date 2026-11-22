@@ -10,9 +10,9 @@ import {
   historyDescribeInputSchema,
   historyEntriesInputSchema,
   piHistoryPrefix,
-} from "../shared/session-history";
-import { CrewError, type CrewState } from "./state";
-import type { CrewMember, Team } from "./team";
+} from "../../shared/session-history";
+import { CrewError, type CrewState } from "../state";
+import type { CrewMember, Team } from "../team";
 
 const unavailable = "Pi history unavailable or cancelled.";
 interface HistoryReader {
