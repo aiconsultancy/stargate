@@ -1,8 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import { Result, Schema } from "effect";
 import { backendSchema, configSchema, secret } from "../src/config";
+import type { BotConfig } from "../src/config";
 import { botKey, chunks, routeEvent } from "../src/gateway/routing";
+import type { Identity } from "../src/gateway/routing";
+import type { notificationKey } from "../src/notifications/preferences/notifications";
 import { bot, event, identity } from "./fixtures";
+
+export type NotificationIdentityParity<
+  T extends ((<U>() => U extends Parameters<typeof notificationKey>[1]
+    ? 1
+    : 2) extends <U>() => U extends Identity ? 1 : 2
+    ? true
+    : false) = true,
+> = T;
+
+export type RoutingRegistrationCompatibility<
+  T extends Parameters<typeof routeEvent>[1] = BotConfig,
+> = T;
 
 describe("routing", () => {
   test("explicit user wildcard allows humans without widening other boundaries", () => {

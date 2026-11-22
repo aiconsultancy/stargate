@@ -18,7 +18,7 @@
     "src/store.ts"
   ],
   "sourceFiles": 259,
-  "sourceEdges": 1108,
+  "sourceEdges": 1106,
   "rootFiles": [
     "src/backend.ts",
     "src/config.ts",
@@ -28,14 +28,9 @@
     "src/settings-legacy.ts",
     "src/settings-schema.ts"
   ],
-  "largestCycle": 4,
+  "largestCycle": 3,
   "cycleComponents": [
-    [
-      "src/config.ts",
-      "src/notifications.ts",
-      "src/notify/binding.ts",
-      "src/routing.ts"
-    ],
+    ["src/config.ts", "src/notify/binding.ts"],
     ["src/crew/messaging.ts", "src/crew/reporting.ts", "src/crew/state.ts"]
   ],
   "cyclicEdges": [
@@ -44,11 +39,7 @@
     "src/crew/reporting.ts -> src/crew/state.ts",
     "src/crew/state.ts -> src/crew/messaging.ts",
     "src/crew/state.ts -> src/crew/reporting.ts",
-    "src/notifications.ts -> src/routing.ts",
-    "src/notify/binding.ts -> src/config.ts",
-    "src/notify/binding.ts -> src/routing.ts",
-    "src/routing.ts -> src/config.ts",
-    "src/routing.ts -> src/notifications.ts"
+    "src/notify/binding.ts -> src/config.ts"
   ],
   "crewPlugin": {
     "entry": "src/crew/plugin.ts",
@@ -253,7 +244,6 @@
     "direction:src/notification-control.ts -> src/bot-web.ts",
     "direction:src/notification-control.ts -> src/routing.ts",
     "direction:src/notifications.ts -> src/notification-store.ts",
-    "direction:src/notifications.ts -> src/routing.ts",
     "direction:src/notify/binding.ts -> src/routing.ts",
     "direction:src/notify/config.ts -> src/settings-schema.ts",
     "direction:src/notify/model.ts -> src/settings-schema.ts",

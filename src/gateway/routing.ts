@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { Result, Schema } from "effect";
 import { maxAttachments } from "../attachments/attachments";
-import type { BotConfig } from "../config";
 import { markdownChunks } from "../markdown-chunks";
 import { findMention, visibleText } from "../shared/mentions";
 import {
@@ -16,6 +15,31 @@ import {
   slackTimestamp,
 } from "../shared/reactions";
 import { settingsDefault, settingsPattern } from "../settings-schema";
+
+type RoutingRegistration = {
+  id: string;
+  backend: { type: string; sessionID?: string | undefined };
+  slack: { appId: string; inboundReactions?: boolean | undefined };
+  access: {
+    users: readonly string[];
+    deniedUsers: readonly string[];
+    channels: readonly string[];
+    deniedChannels: readonly string[];
+    mentionOnly: boolean;
+    peerCaptains?: boolean | undefined;
+    textMentions?:
+      | {
+          channels: readonly string[];
+          names: readonly string[];
+          muteBypassNames?: readonly string[] | undefined;
+        }
+      | undefined;
+  };
+  transcription?:
+    | { spokenMentions?: { channels: readonly string[] } | undefined }
+    | undefined;
+  slackReadReceipts?: boolean | undefined;
+};
 
 const eventSchema = Schema.Struct({
   type: Schema.Literals(["app_mention", "message"]),
@@ -72,14 +96,19 @@ const reactionEnvelopeSchema = Schema.Struct({
 
 export type Identity = { team: string; user: string };
 
-export function backendFingerprint(config: Pick<BotConfig, "backend">) {
+export function backendFingerprint<
+  T extends Pick<RoutingRegistration, "backend">,
+>(config: T) {
   // A pin selects execution identity, not a new Slack/outbox namespace.
   const backend = { ...config.backend };
   if (backend.type === "opencode") delete backend.sessionID;
   return createHash("sha256").update(JSON.stringify(backend)).digest("hex");
 }
 
-export function botKey(config: BotConfig, identity: Identity) {
+export function botKey<T extends RoutingRegistration>(
+  config: T,
+  identity: Identity,
+) {
   const fingerprint = backendFingerprint(config);
   return JSON.stringify([
     config.id,
@@ -98,14 +127,20 @@ function matchesId(rules: readonly string[], id: string) {
   return rules.includes("*") || rules.includes(id);
 }
 
-export function isAllowedUser(config: BotConfig, user: string) {
+export function isAllowedUser<T extends RoutingRegistration>(
+  config: T,
+  user: string,
+) {
   return (
     !matchesId(config.access.deniedUsers, user) &&
     matchesId(config.access.users, user)
   );
 }
 
-export function isAllowedChannel(config: BotConfig, channel: string) {
+export function isAllowedChannel<T extends RoutingRegistration>(
+  config: T,
+  channel: string,
+) {
   return (
     !matchesId(config.access.deniedChannels, channel) &&
     matchesId(config.access.channels, channel)
@@ -113,9 +148,9 @@ export function isAllowedChannel(config: BotConfig, channel: string) {
 }
 
 /** Candidate only. Slack intake must still prove target ownership and a human actor. */
-export function routeReaction(
+export function routeReaction<T extends RoutingRegistration>(
   raw: unknown,
-  config: BotConfig,
+  config: T,
   identity: Identity,
 ) {
   if (!config.slack.inboundReactions || config.access.mentionOnly) return;
@@ -149,9 +184,9 @@ export function routeReaction(
  * `peer` is a sender that Slack's directory proved to be a peer captain bot.
  * Without it, every bot message is rejected.
  */
-export function routeEvent(
+export function routeEvent<T extends RoutingRegistration>(
   raw: unknown,
-  config: BotConfig,
+  config: T,
   identity: Identity,
   peer?: PeerSender,
   notifications?: NotificationReader,

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { NotificationSnapshot } from "./notification-store";
-import type { Identity } from "../../gateway/routing";
+
+type Identity = { team: string; user: string };
 
 /** Slack preference identity deliberately excludes the backend fingerprint. */
 export function notificationKey<

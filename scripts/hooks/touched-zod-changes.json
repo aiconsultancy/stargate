@@ -12,7 +12,7 @@
   {
     "path": "src/notifications/preferences/notifications.ts",
     "issue": "NET-1787",
-    "reason": "Replace the BotConfig type dependency with the consumed Slack identity view."
+    "reason": "Use the two consumed Slack identity fields locally; Zod schemas unchanged."
   },
   {
     "path": "src/crew/pi-extension.ts",
