@@ -23,7 +23,7 @@ import type {
   SessionPromptInput,
   SessionSyntheticInput,
 } from "@opencode/client";
-import { Predicate, Result, Schema } from "effect";
+import { Result, Schema } from "effect";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
 import {
   drainNoticeID,
@@ -43,7 +43,6 @@ import {
   settingsPattern,
   settingsRecord,
   settingsRefine,
-  settingsStartsWith,
   settingsStruct,
 } from "../settings-schema";
 import {
@@ -52,6 +51,14 @@ import {
   type UpdateReceipt,
   type UpdateSnapshot,
 } from "../maintenance/update-notice";
+import {
+  crewInputSchema,
+  crewTaskID,
+  crewText,
+  type CrewInput,
+} from "./crew-tool-input";
+export { crewInputBranches, crewInputSchema } from "./crew-tool-input";
+export type { CrewInput } from "./crew-tool-input";
 import { CrewHistoryRPC } from "./history-rpc";
 import { crewFingerprint } from "./identity";
 import { MesijClient, type MesijMessage } from "./mesij";
@@ -69,21 +76,17 @@ import { crewPermissions } from "./policy";
 import { projectsSchema } from "./project-options";
 import {
   type AbandonInput,
-  abandonInputSchema,
   type ExecutionInspection,
   type InspectInput,
   type InspectionConnector,
   idleBoundary,
-  inspectInputSchema,
   observeExecution,
   observePlacement,
   type Placement,
   type ReconcileInput,
   type ResumeInput,
-  reconcileInputSchema,
   requireQuiescent,
   resumeAdmitted,
-  resumeInputSchema,
   sha256,
   verifyResult,
 } from "./reconciliation";
@@ -114,7 +117,6 @@ import {
   type WorkspaceCheckpoint,
   type WorkspaceInput,
   type WorkspaceInspection,
-  workspaceInputSchemas,
   workspaceRoot,
 } from "./workspace";
 
@@ -192,77 +194,6 @@ export const crewOptionsSchema = settingsStruct({
   }),
 );
 export type CrewOptions = typeof crewOptionsSchema.Type;
-const crewTaskID = Schema.String.check(
-  settingsStartsWith("task_"),
-  Schema.isMaxCodePoints(100),
-);
-const crewText = Schema.String.check(
-  Schema.isMinCodePoints(1),
-  Schema.isMaxCodePoints(64000),
-);
-export const crewInputBranches = Schema.Union([
-  settingsStruct({ op: Schema.Literal("roster") }),
-  inspectInputSchema,
-  reconcileInputSchema,
-  resumeInputSchema,
-  abandonInputSchema,
-  ...workspaceInputSchemas,
-  settingsStruct({
-    op: Schema.Literal("ensure"),
-    crew: Schema.optional(agentIDSchema),
-  }),
-  settingsStruct({
-    op: Schema.Literal("dispatch"),
-    crew: agentIDSchema,
-    text: crewText,
-    queue: Schema.Boolean.pipe(settingsDefault(false)),
-  }),
-  settingsStruct({
-    op: Schema.Literal("wait"),
-    taskID: crewTaskID,
-    afterNoticeID: Schema.Finite.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(0),
-    ).pipe(settingsDefault(0)),
-  }),
-  settingsStruct({ op: Schema.Literal("status"), taskID: crewTaskID }),
-  settingsStruct({
-    op: Schema.Literal("complete"),
-    taskID: crewTaskID,
-    result: crewText,
-  }),
-  settingsStruct({ op: Schema.Literal("compact"), crew: agentIDSchema }),
-  settingsStruct({
-    op: Schema.Literal("urgent"),
-    taskID: crewTaskID,
-    to: agentIDSchema,
-    text: crewText,
-  }),
-]);
-const crewBranchDecoders = new Map<
-  string,
-  (raw: unknown) => Result.Result<unknown, Schema.SchemaError>
->(
-  crewInputBranches.members.map((member) => [
-    String(member.fields.op.ast.literal),
-    Schema.decodeUnknownResult(member, { errors: "all" }),
-  ]),
-);
-// Native union sentinel optimization can otherwise hide an invalid literal
-// acknowledgement behind a root error. Delegate to the known branch first.
-export const crewInputSchema = Schema.Unknown.check(
-  Schema.makeFilter((raw) => {
-    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string")
-      return undefined;
-    const decode = crewBranchDecoders.get(raw["op"]);
-    if (!decode) return undefined;
-    const result = decode(raw);
-    return Result.isFailure(result) ? result.failure.issue : undefined;
-  }),
-).pipe(
-  Schema.decodeTo(settingsDiscriminatedUnion("op", crewInputBranches.members)),
-);
-export type CrewInput = typeof crewInputSchema.Type;
 const legacyMailInputSchema = settingsDiscriminatedUnion("op", [
   settingsStruct({
     op: Schema.Literal("inbox"),
