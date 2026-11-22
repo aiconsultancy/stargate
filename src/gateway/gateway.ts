@@ -293,7 +293,7 @@ export class Gateway {
     /** Host-wide maintenance drain: holds new turns, never running work. */
     private readonly drain?: DrainControl,
   ) {
-    this.meta = new MetaCommands(store, slack, metaOptions);
+    this.meta = new MetaCommands(store.meta, slack, metaOptions);
     drain?.attach({
       broadcast: (record, signal) => this.broadcastDrain(record, signal),
       ...(backend.resumeMaintenance

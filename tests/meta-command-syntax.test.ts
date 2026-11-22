@@ -8,7 +8,7 @@ test("update syntax matches the command help catalogue in order", async () => {
   const store = new Store(":memory:");
   try {
     let reply = "";
-    const commands = new MetaCommands(store, {
+    const commands = new MetaCommands(store.meta, {
       async post(_channel, _thread, text) {
         reply = text;
       },

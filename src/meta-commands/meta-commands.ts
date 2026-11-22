@@ -29,7 +29,7 @@ import {
   isAllowedUser,
 } from "../gateway/routing";
 import { settingsPattern, settingsRecord } from "../settings-schema";
-import type { ConfigPanelRecord, Store } from "../gateway/store";
+import type { ConfigPanelRecord, MetaRecords } from "./store";
 import { resolveWaiting, saveWaitingDelay } from "../gateway/waiting";
 
 const envelope = Schema.Struct({
@@ -388,7 +388,7 @@ export function configPanelRows(): readonly ConfigPanelRow[] {
 export class MetaCommands {
   private tail = Promise.resolve();
   constructor(
-    private readonly store: Store,
+    private readonly store: MetaRecords,
     private readonly slack: TransportDelivery,
     private readonly options: MetaOptions = {},
   ) {}

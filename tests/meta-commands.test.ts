@@ -10,6 +10,7 @@ import { CrewWaiting } from "../src/crew/waiting";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { MetaOptions } from "../src/meta-commands/meta-commands";
+import type { MetaRecords } from "../src/meta-commands/store";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";
 import { notificationKey } from "../src/notifications/preferences/notifications";
 import { PeerDirectory } from "../src/gateway/peers";
@@ -605,7 +606,7 @@ test("audit persists exact actor, clock, source and old/new settings, not raw me
   const f = await fixture();
   await f.gateway.receive(event("<@UBOT> /config waiting 3"));
   expect(
-    f.store.metaReceipt(notificationKey(f.config, identity), "C123:1.000"),
+    f.store.meta.metaReceipt(notificationKey(f.config, identity), "C123:1.000"),
   ).toEqual({
     registration: notificationKey(f.config, identity),
     message: "C123:1.000",
@@ -627,7 +628,7 @@ test("audit persists exact actor, clock, source and old/new settings, not raw me
   expect((await resolveWaiting(f.config)).delayMs).toBe(8000);
   expect(f.delivered).toHaveLength(1);
   expect(
-    reopened.metaReceipt(notificationKey(f.config, identity), "C123:1.000")
+    reopened.meta.metaReceipt(notificationKey(f.config, identity), "C123:1.000")
       ?.oldDelayMs,
   ).toBe(5000);
 });
@@ -642,7 +643,7 @@ test("Slack delivery failure retries the stored reply, never the applied write",
   await expect(f.gateway.receive(request)).rejects.toThrow("Slack down");
   expect((await resolveWaiting(f.config)).delayMs).toBe(3000);
   expect(
-    f.store.metaReceipt(notificationKey(f.config, identity), "C123:1.000")
+    f.store.meta.metaReceipt(notificationKey(f.config, identity), "C123:1.000")
       ?.delivered,
   ).toBe(0);
   await f.waiting.run({ seconds: 8 }, f.caller);
@@ -658,7 +659,7 @@ test("retained pending claim reports uncertainty after reopen, never reapplies",
   const f = await fixture();
   const registration = notificationKey(f.config, identity);
   expect(
-    f.store.claimMeta({
+    f.store.meta.claimMeta({
       registration,
       message: "C123:1.000",
       channel: "C123",
@@ -675,7 +676,7 @@ test("retained pending claim reports uncertainty after reopen, never reapplies",
   expect((await resolveWaiting(f.config)).delayMs).toBe(8000);
   expect(reply(f)).toContain("unconfirmed");
   expect(reply(f)).toContain("/config");
-  expect(reopened.metaReceipt(registration, "C123:1.000")?.state).toBe(
+  expect(reopened.meta.metaReceipt(registration, "C123:1.000")?.state).toBe(
     "pending",
   );
   noCaptainWork(f);
@@ -692,7 +693,7 @@ test("failed waiting write remains pending and cannot later overwrite a tool cha
   expect(reply(f)).toContain("unconfirmed");
   expect(reply(f)).not.toContain(blocker);
   expect(
-    f.store.metaReceipt(notificationKey(f.config, identity), "C123:1.000")
+    f.store.meta.metaReceipt(notificationKey(f.config, identity), "C123:1.000")
       ?.state,
   ).toBe("pending");
   f.config.backend.directory = f.directory;
@@ -712,7 +713,7 @@ test("simultaneous commands serialise old/new values outside the model queue", a
   ]);
   expect((await resolveWaiting(f.config)).delayMs).toBe(8000);
   expect(
-    f.store.metaReceipt(notificationKey(f.config, identity), "C123:2.000"),
+    f.store.meta.metaReceipt(notificationKey(f.config, identity), "C123:2.000"),
   ).toMatchObject({ oldDelayMs: 3000, newDelayMs: 8000 });
   noCaptainWork(f);
 });
@@ -908,7 +909,7 @@ test("binding change before queued admission withholds ACK and permits fresh-bin
   expect(failures).toHaveLength(2);
   expect(acks).toBe(0);
   expect(
-    f.store.metaReceipt(notificationKey(f.config, identity), "C123:2.000"),
+    f.store.meta.metaReceipt(notificationKey(f.config, identity), "C123:2.000"),
   ).toBeNull();
   expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
   expect(f.delivered).toEqual([]);
@@ -936,7 +937,7 @@ test("binding invalidation during waiting read releases only the proven-unwritte
   await expect(f.gateway.receive(request)).rejects.toThrow();
   expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
   expect(
-    f.store.metaReceipt(notificationKey(f.config, identity), "C123:1.000"),
+    f.store.meta.metaReceipt(notificationKey(f.config, identity), "C123:1.000"),
   ).toBeNull();
   expect(f.delivered).toEqual([]);
   await f.gateway.receive(request);
@@ -947,9 +948,9 @@ test("binding invalidation during waiting read releases only the proven-unwritte
 
 test("binding invalidation after apply retains the receipt and retries only its reply", async () => {
   const f = await fixture();
-  const apply = f.store.applyMeta.bind(f.store);
+  const apply = f.store.meta.applyMeta.bind(f.store.meta);
   let changed = false;
-  f.store.applyMeta = (...args: Parameters<Store["applyMeta"]>) => {
+  f.store.meta.applyMeta = (...args: Parameters<MetaRecords["applyMeta"]>) => {
     apply(...args);
     if (!changed) {
       changed = true;
@@ -961,7 +962,7 @@ test("binding invalidation after apply retains the receipt and retries only its 
   expect((await resolveWaiting(f.config)).delayMs).toBe(3000);
   expect(f.delivered).toEqual([]);
   expect(
-    f.store.metaReceipt(notificationKey(f.config, identity), "C123:1.000"),
+    f.store.meta.metaReceipt(notificationKey(f.config, identity), "C123:1.000"),
   ).toMatchObject({ state: "applied", delivered: 0 });
   await f.waiting.run({ seconds: 8 }, f.caller);
   await f.gateway.receive(request);
@@ -973,7 +974,7 @@ test("binding invalidation after apply retains the receipt and retries only its 
 test("confirmed uncertainty reply is delivered once while the receipt stays pending", async () => {
   const f = await fixture();
   const registration = notificationKey(f.config, identity);
-  f.store.claimMeta({
+  f.store.meta.claimMeta({
     registration,
     message: "C123:1.000",
     channel: "C123",
@@ -991,7 +992,7 @@ test("confirmed uncertainty reply is delivered once while the receipt stays pend
   });
   expect(f.delivered).toHaveLength(1);
   expect(reply(f)).toContain("unconfirmed");
-  expect(f.store.metaReceipt(registration, "C123:1.000")).toMatchObject({
+  expect(f.store.meta.metaReceipt(registration, "C123:1.000")).toMatchObject({
     state: "pending",
     delivered: 1,
   });
@@ -1002,7 +1003,7 @@ test("confirmed uncertainty reply is delivered once while the receipt stays pend
 test("failed uncertainty delivery retries the reply once, never the pending mutation", async () => {
   const f = await fixture();
   const registration = notificationKey(f.config, identity);
-  f.store.claimMeta({
+  f.store.meta.claimMeta({
     registration,
     message: "C123:1.000",
     channel: "C123",
@@ -1017,7 +1018,7 @@ test("failed uncertainty delivery retries the reply once, never the pending muta
   };
   const request = event("<@UBOT> /config waiting 3");
   await expect(f.gateway.receive(request)).rejects.toThrow("Slack unavailable");
-  expect(f.store.metaReceipt(registration, "C123:1.000")).toMatchObject({
+  expect(f.store.meta.metaReceipt(registration, "C123:1.000")).toMatchObject({
     state: "pending",
     delivered: 0,
   });

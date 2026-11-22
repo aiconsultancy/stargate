@@ -710,11 +710,13 @@
       "files": [
         "src/config-panel.ts",
         "src/meta-commands.ts",
-        "src/meta-commands/meta-command-syntax.ts"
+        "src/meta-commands/meta-command-syntax.ts",
+        "src/meta-commands/store.ts"
       ],
       "public": [
         "src/meta-commands.ts",
-        "src/meta-commands/meta-command-syntax.ts"
+        "src/meta-commands/meta-command-syntax.ts",
+        "src/meta-commands/store.ts"
       ],
       "neighbours": [
         "config",
