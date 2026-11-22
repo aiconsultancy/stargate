@@ -21,6 +21,7 @@ import {
   importClosure,
   normalizeGraph,
   sourceRootFiles,
+  sizeRegressions,
   type GraphBaseline,
   type ArchitecturePolicy,
   type SourceGraph,
@@ -51,6 +52,7 @@ test("source architecture introduces no new structural or boundary violations", 
   expect([
     ...graphRegressions(source, baseline, await sourceRootFiles(root)),
     ...exceptionRegressions(violations, baseline.exceptions),
+    ...(await sizeRegressions(root, policy, baseline.largeFiles)),
   ]).toEqual([]);
 });
 
@@ -298,6 +300,124 @@ describe("stable module identities", () => {
         ["src/renamed-root.ts"],
       ),
     ).toEqual(["root:src/renamed-root.ts"]);
+  });
+});
+
+describe("source size gate", () => {
+  for (const ending of ["\n", "\r\n"])
+    test(`counts physical lines with ${JSON.stringify(ending)}`, async () => {
+      const root = await fixture({ "src/alpha/entry.ts": "" });
+      for (const count of [999, 1000, 1001]) {
+        for (const finalTerminator of [false, true]) {
+          const source = Array.from({ length: count }, () => "// counted").join(
+            ending,
+          );
+          await writeFile(
+            join(root, "src/alpha/entry.ts"),
+            source + (finalTerminator ? ending : ""),
+          );
+          expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual(
+            count > 1000
+              ? [
+                  "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 > 1000",
+                ]
+              : [],
+          );
+        }
+      }
+    });
+
+  test("rejects a new 1001-line source module", async () => {
+    const root = await fixture({
+      "src/alpha/entry.ts": "// counted\n".repeat(1001),
+    });
+    expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([
+      "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 > 1000",
+    ]);
+  });
+
+  test("counts blanks and comments, but excludes tests", async () => {
+    const root = await fixture({
+      "src/alpha/entry.ts": "\n".repeat(500) + "// counted\n".repeat(501),
+      "tests/large.test.ts": "// not source\n".repeat(1001),
+    });
+    expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([
+      "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 > 1000",
+    ]);
+    await writeFile(join(root, "src/alpha/entry.ts"), "");
+    expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([]);
+    expect(
+      await sizeRegressions(root, fixturePolicy(), ["src/alpha/entry.ts"]),
+    ).toEqual(["stale:large-file:src/alpha/entry.ts"]);
+  });
+
+  test("exceptions are exact, reject duplicates, and become stale at 1000 or deletion", async () => {
+    const root = await fixture({
+      "src/alpha/entry.ts": "// counted\n".repeat(1001),
+    });
+    const allowed = ["src/alpha/entry.ts"];
+    expect(await sizeRegressions(root, fixturePolicy(), allowed)).toEqual([]);
+    expect(
+      await sizeRegressions(root, fixturePolicy(), [...allowed, ...allowed]),
+    ).toEqual(["duplicate:large-file:src/alpha/entry.ts"]);
+    await writeFile(join(root, "src/alpha/entry.ts"), "\n".repeat(1000));
+    expect(await sizeRegressions(root, fixturePolicy(), allowed)).toEqual([
+      "stale:large-file:src/alpha/entry.ts",
+    ]);
+    await rm(join(root, "src/alpha/entry.ts"));
+    await writeFile(join(root, "src/alpha/second.ts"), "\n".repeat(1001));
+    expect(await sizeRegressions(root, fixturePolicy(), allowed)).toEqual([
+      "new:large-file:src/alpha/second.ts:src/alpha/second.ts:1001 > 1000",
+      "stale:large-file:src/alpha/entry.ts",
+    ]);
+  });
+
+  test("approved renames retain only the exact stable Gateway exception", async () => {
+    const policy: ArchitecturePolicy = {
+      slices: {
+        gateway: {
+          layer: "gateway",
+          files: [
+            "src/gateway.ts",
+            "src/gateway/child.ts",
+            "src/other/gateway.ts",
+          ],
+          public: [],
+          neighbours: [],
+        },
+      },
+      aliases: {
+        "src/gateway.ts": ["src/gateway.ts", "src/gateway/gateway.ts"],
+      },
+    };
+    const root = await fixture({ "src/gateway.ts": "\n".repeat(1001) });
+    const allowed = ["src/gateway.ts"];
+    expect(await sizeRegressions(root, policy, allowed)).toEqual([]);
+    await mkdir(join(root, "src/gateway"));
+    await rename(
+      join(root, "src/gateway.ts"),
+      join(root, "src/gateway/gateway.ts"),
+    );
+    expect(await sizeRegressions(root, policy, allowed)).toEqual([]);
+    expect(await sizeRegressions(root, policy, [])).toEqual([
+      "new:large-file:src/gateway/gateway.ts:src/gateway.ts:1001 > 1000",
+    ]);
+    await writeFile(join(root, "src/gateway/child.ts"), "\n".repeat(1001));
+    await mkdir(join(root, "src/other"));
+    await writeFile(join(root, "src/other/gateway.ts"), "\n".repeat(1001));
+    expect(await sizeRegressions(root, policy, allowed)).toEqual([
+      "new:large-file:src/gateway/child.ts:src/gateway/child.ts:1001 > 1000",
+      "new:large-file:src/other/gateway.ts:src/other/gateway.ts:1001 > 1000",
+    ]);
+    await writeFile(join(root, "src/gateway.ts"), "");
+    await expect(sizeRegressions(root, policy, allowed)).rejects.toThrow(
+      "simultaneous aliases",
+    );
+    await rm(join(root, "src/gateway.ts"));
+    await writeFile(join(root, "src/gateway/unknown.ts"), "");
+    await expect(sizeRegressions(root, policy, allowed)).rejects.toThrow(
+      "unknown source path",
+    );
   });
 });
 
