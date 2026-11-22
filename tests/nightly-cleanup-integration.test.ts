@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Result, Schema } from "effect";
 import { configSchema } from "../src/config";
-import { cleanupProtection } from "../src/maintenance/nightly/cleanup-protection";
+import { cleanupProtection } from "../src/maintenance/nightly/cleanup/cleanup-protection";
 import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import type { Crew } from "../src/maintenance/nightly/crews";
 

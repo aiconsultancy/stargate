@@ -1,6 +1,6 @@
 import { dirname, resolve } from "node:path";
-import type { Config } from "../../config";
-import type { Crew } from "./crews";
+import type { Config } from "../../../config";
+import type { Crew } from "../crews";
 
 /** Runtime roots are protected even when operators configure an ancestor. */
 export function cleanupProtection(

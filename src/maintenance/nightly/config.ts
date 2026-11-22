@@ -15,7 +15,7 @@ import {
   settingsStruct,
   settingsURL,
 } from "../../config/settings-schema";
-import { cleanupSchema } from "./cleanup-config";
+import { cleanupSchema } from "./cleanup/cleanup-config";
 
 /** Strict `maintenance` section of stargate.json. Every component is opt-in. */
 const absolutePath = Schema.String.check(Schema.isMaxCodePoints(4096))

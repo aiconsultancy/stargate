@@ -12,15 +12,18 @@
     ],
     "src/nightly/cleanup-config.ts": [
       "src/nightly/cleanup-config.ts",
-      "src/maintenance/nightly/cleanup-config.ts"
+      "src/maintenance/nightly/cleanup-config.ts",
+      "src/maintenance/nightly/cleanup/cleanup-config.ts"
     ],
     "src/nightly/cleanup-protection.ts": [
       "src/nightly/cleanup-protection.ts",
-      "src/maintenance/nightly/cleanup-protection.ts"
+      "src/maintenance/nightly/cleanup-protection.ts",
+      "src/maintenance/nightly/cleanup/cleanup-protection.ts"
     ],
     "src/nightly/cleanup.ts": [
       "src/nightly/cleanup.ts",
-      "src/maintenance/nightly/cleanup.ts"
+      "src/maintenance/nightly/cleanup.ts",
+      "src/maintenance/nightly/cleanup/cleanup.ts"
     ],
     "src/nightly/cli.ts": [
       "src/nightly/cli.ts",

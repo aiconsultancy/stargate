@@ -59,7 +59,7 @@ rollback: only the guarded, explicitly configured paths are eligible.
   (including Pi workers) are always retained. Add any other permanent paths to
   `protectedPaths`.
 
-Scratch roots, [built-in protected names](../src/maintenance/nightly/cleanup.ts), inspection
+Scratch roots, [built-in protected names](../src/maintenance/nightly/cleanup/cleanup.ts), inspection
 files less than seven days old, and relay JSON files written today are retained. Use `protectedPaths` for
 other directories you want to retain.
 Use by a process is checked through Linux `/proc`: the executable
