@@ -105,7 +105,7 @@ import {
   summary,
   writeAlert,
   writeReport,
-} from "./report";
+} from "./reports/report";
 import { readState, updateState } from "./state";
 import { compareVersions, normalizeVersion } from "./versions";
 import {

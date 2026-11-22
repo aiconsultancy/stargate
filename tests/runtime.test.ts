@@ -9,7 +9,7 @@ import type { AgentBackend } from "../src/backends/backend";
 import { type BotConfig, botSchema } from "../src/config";
 import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import { readReady } from "../src/maintenance/nightly/ready";
-import { queueNotice } from "../src/maintenance/nightly/report";
+import { queueNotice } from "../src/maintenance/nightly/reports/report";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";
 import { notificationKey } from "../src/notifications/preferences/notifications";
 import { botKey, conversationKey } from "../src/gateway/routing";

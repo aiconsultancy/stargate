@@ -15,7 +15,7 @@ import {
   listReports,
   type Report,
   reportSchema,
-} from "./report";
+} from "./reports/report";
 import { readState } from "./state";
 import { compareVersions } from "./versions";
 import {

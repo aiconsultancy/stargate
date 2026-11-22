@@ -94,7 +94,8 @@
     ],
     "src/nightly/outbox.ts": [
       "src/nightly/outbox.ts",
-      "src/maintenance/nightly/outbox.ts"
+      "src/maintenance/nightly/outbox.ts",
+      "src/maintenance/nightly/reports/outbox.ts"
     ],
     "src/nightly/paths.ts": [
       "src/nightly/paths.ts",
@@ -114,7 +115,8 @@
     ],
     "src/nightly/report.ts": [
       "src/nightly/report.ts",
-      "src/maintenance/nightly/report.ts"
+      "src/maintenance/nightly/report.ts",
+      "src/maintenance/nightly/reports/report.ts"
     ],
     "src/nightly/run.ts": [
       "src/nightly/run.ts",

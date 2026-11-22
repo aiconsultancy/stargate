@@ -13,7 +13,7 @@ import { nightlyInstructions } from "./instructions";
 import { recoveryBudgetMs } from "./journal";
 import { packageDirectory } from "./ready";
 import { adoptRelease, layout } from "./release";
-import { reportSchema, summary } from "./report";
+import { reportSchema, summary } from "./reports/report";
 import {
   acceptCurrent,
   recoverInterruptedRun,

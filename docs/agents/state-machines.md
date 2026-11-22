@@ -128,7 +128,7 @@ Owners are `irc/client.ts`, `irc/ship.ts`, `irc/delivery.ts` and the
 | Summary outbox | `.json` → `.claimed` → `.sent`, `.failed` or `.refused`                                                                                  | Claim by rename before the post. A claimed summary is never posted again, also after a crash.                                   |
 
 Owners are `maintenance/nightly/run.ts`, `maintenance/nightly/journal.ts`, `maintenance/nightly/schedule/idle.ts`,
-`maintenance/nightly/plugin-digest.ts` and `maintenance/nightly/outbox.ts`. See [maintenance](../maintenance.md).
+`maintenance/nightly/plugin-digest.ts` and `maintenance/nightly/reports/outbox.ts`. See [maintenance](../maintenance.md).
 
 ## Transition regressions
 

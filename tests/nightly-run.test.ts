@@ -40,7 +40,7 @@ import {
   adoptRelease,
   linkedRelease,
 } from "../src/maintenance/nightly/release";
-import { reportSchema } from "../src/maintenance/nightly/report";
+import { reportSchema } from "../src/maintenance/nightly/reports/report";
 import {
   acceptCurrent,
   applyBudgetMs,

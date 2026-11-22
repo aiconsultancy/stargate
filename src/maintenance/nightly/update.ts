@@ -6,7 +6,7 @@ import { recoveryBudgetMs } from "./journal";
 import { maintenanceDirectory } from "./paths";
 import { packageDirectory } from "./ready";
 import { layout, readMetadata } from "./release";
-import { type Report, summary } from "./report";
+import { type Report, summary } from "./reports/report";
 import {
   type Dependencies,
   defaultDependencies,
