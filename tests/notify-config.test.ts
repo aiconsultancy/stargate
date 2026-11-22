@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
 import { configSchema } from "../src/config";
+import type { BotConfig } from "../src/config";
 import { ConfigReload, restartRequired } from "../src/app/config-reload";
 import { resolveDestinations } from "../src/notifications/ingest/binding";
+import type { SlackRegistration } from "../src/notifications/ingest/binding";
 import { producerCredentials } from "../src/notifications/ingest/config";
 import { checkCredentials } from "../src/app/setup";
 import { bot } from "./fixtures";
@@ -16,6 +18,10 @@ import {
   runtimeConfig,
   temporary,
 } from "./notify-runtime-fixture";
+
+export type NotificationRegistrationCompatibility<
+  T extends SlackRegistration["bot"] = BotConfig,
+> = T;
 
 test("disabled HTTP config validates without enabling the API", () => {
   const result = Schema.decodeUnknownResult(configSchema)({

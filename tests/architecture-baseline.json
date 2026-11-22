@@ -18,7 +18,7 @@
     "src/store.ts"
   ],
   "sourceFiles": 259,
-  "sourceEdges": 1106,
+  "sourceEdges": 1104,
   "rootFiles": [
     "src/backend.ts",
     "src/config.ts",
@@ -27,16 +27,13 @@
   ],
   "largestCycle": 3,
   "cycleComponents": [
-    ["src/config.ts", "src/notify/binding.ts"],
     ["src/crew/messaging.ts", "src/crew/reporting.ts", "src/crew/state.ts"]
   ],
   "cyclicEdges": [
-    "src/config.ts -> src/notify/binding.ts",
     "src/crew/messaging.ts -> src/crew/state.ts",
     "src/crew/reporting.ts -> src/crew/state.ts",
     "src/crew/state.ts -> src/crew/messaging.ts",
-    "src/crew/state.ts -> src/crew/reporting.ts",
-    "src/notify/binding.ts -> src/config.ts"
+    "src/crew/state.ts -> src/crew/reporting.ts"
   ],
   "crewPlugin": {
     "entry": "src/crew/plugin.ts",
@@ -132,8 +129,6 @@
       "src/meta-commands/meta-command-syntax.ts",
       "src/nightly/cleanup-config.ts",
       "src/nightly/config.ts",
-      "src/nightly/crews.ts",
-      "src/nightly/exec.ts",
       "src/nightly/files.ts",
       "src/nightly/versions.ts",
       "src/notification-control.ts",
