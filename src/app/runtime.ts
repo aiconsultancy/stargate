@@ -104,7 +104,8 @@ import {
   isAllowedChannel,
 } from "../gateway/routing";
 import { SlackConnection, type SlackInteractions } from "../slack/slack";
-import { Store } from "../gateway/store";
+import { openStore } from "./open-store";
+import { type Store } from "../gateway/store";
 import { TeamsRegistration } from "../teams/registration";
 import { createTranscriber } from "../transcription/azure-openai";
 import {
@@ -296,8 +297,8 @@ export function serve(
         pollMs: 250,
       };
       const store = yield* Effect.acquireRelease(
-        Effect.sync(
-          () => new Store(join(config.dataDirectory, "stargate.sqlite")),
+        Effect.sync(() =>
+          openStore(join(config.dataDirectory, "stargate.sqlite")),
         ),
         (store) => Effect.sync(() => store.close()),
       );

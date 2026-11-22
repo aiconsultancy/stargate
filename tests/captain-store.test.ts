@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { Store, TranscriptConflict } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { TranscriptConflict, type Store } from "../src/gateway/store";
 
 const stores: Store[] = [];
 afterEach(() => {
@@ -7,7 +8,7 @@ afterEach(() => {
 });
 
 test("captain cursor seeds only from its matching root's last started owner", () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   stores.push(store);
   store.enqueue({
     eventId: "old",
@@ -46,7 +47,7 @@ test("captain cursor seeds only from its matching root's last started owner", ()
 });
 
 test("captain response, cursor and explicit previous-source outbox commit atomically", () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   stores.push(store);
   const enqueue = (eventId: string, channel: string) => {
     store.enqueue({
@@ -113,7 +114,7 @@ test("captain response, cursor and explicit previous-source outbox commit atomic
 });
 
 test("persisted input anchors failed baselines and cannot cross bot namespaces", () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   stores.push(store);
   store.enqueue({
     eventId: "start",
@@ -140,7 +141,7 @@ test("persisted input anchors failed baselines and cannot cross bot namespaces",
 });
 
 test("serial ready selection keeps FIFO across sources during delivery backoff", () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   stores.push(store);
   for (const [eventId, conversation] of [
     ["reply", "a"],

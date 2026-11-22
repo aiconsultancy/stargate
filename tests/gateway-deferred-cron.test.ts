@@ -13,7 +13,7 @@ import {
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { failureText } from "../src/shared/request-failure";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 function fixture(path = ":memory:", pinned = false) {
-  let store = new Store(path);
+  let store = openStore(path);
   cleanup.push(() => store.close());
   const config = bot();
   config.threadContext = true;
@@ -144,7 +144,7 @@ function fixture(path = ":memory:", pinned = false) {
     async restart() {
       await gateway.close();
       store.close();
-      store = new Store(path);
+      store = openStore(path);
       gateway = createGateway();
     },
   };
@@ -543,7 +543,7 @@ test("legacy jobs migrate additively with immediate delivery as default", async 
   INSERT INTO jobs (eventId,botKey,conversation,channel,thread,user,text)
   VALUES ('C123:1.000','bot','conversation','C123','1.000','U123','legacy');`);
   legacy.close();
-  const store = new Store(path);
+  const store = openStore(path);
   cleanup.push(() => store.close());
   const job = store.ready("bot", Number.MAX_SAFE_INTEGER, 1)[0];
   expect(job).toMatchObject({

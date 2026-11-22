@@ -12,7 +12,7 @@ import type {
 import { installFleetTools } from "../src/fleet/plugin";
 import * as protocol from "../src/fleet/protocol";
 import { settingsIssues } from "../src/config/settings-schema";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 
 const target = {
   repository: "Owner/Repo",
@@ -309,7 +309,7 @@ test("binding reviewer defaults are fresh mutable arrays and nested rules stay s
 test("Store fleet makers preserve read101/write100 and immutable first-save behavior", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-fleet-schema-"));
   const path = join(directory, "state.sqlite");
-  const store = new Store(path);
+  const store = openStore(path);
   try {
     store.enqueue({
       eventId: "event",

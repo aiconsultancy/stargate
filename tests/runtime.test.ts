@@ -22,7 +22,7 @@ import {
 } from "../src/app/runtime";
 import { handleSlackRequest } from "../src/slack/slack";
 import type { ConnectionState } from "../src/slack/slack-connection";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { scopedUpdate } from "../src/maintenance/update-notice";
 import { bot, event, identity } from "./fixtures";
 
@@ -235,7 +235,7 @@ function harness(turn: Turn = async () => "Answer.") {
 }
 
 function seed(path: string, config: BotConfig, user = identity.user) {
-  const store = new Store(path);
+  const store = openStore(path);
   try {
     const key = botKey(config, { team: identity.team, user });
     const thread = `${Date.now()}.${store.ready(key, 0, 1).length}`;
@@ -258,7 +258,7 @@ function seed(path: string, config: BotConfig, user = identity.user) {
 }
 
 function status(path: string, key: string, id: number) {
-  const store = new Store(path);
+  const store = openStore(path);
   try {
     return store.jobStatus(key, id);
   } finally {
@@ -380,7 +380,7 @@ test("a failed worker stops the process with a restartable failure", async () =>
   const dataDirectory = await directory();
   try {
     const helper = bot();
-    const store = new Store(join(dataDirectory, "stargate.sqlite"));
+    const store = openStore(join(dataDirectory, "stargate.sqlite"));
     const key = botKey(helper, identity);
     const conversation = conversationKey(key, "C123", "1.000");
     store.enqueue({

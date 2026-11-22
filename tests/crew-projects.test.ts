@@ -36,7 +36,7 @@ import { teamSchema } from "../src/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
 import { CronStore } from "../src/cron/store";
 import { dashboardSource } from "../src/dashboard/dashboard-source";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, identity as dashboardIdentity } from "./fixtures";
 
 const diskIntegrationTimeoutMs = 30_000;
@@ -658,7 +658,7 @@ test("aggregate activity includes busy workers after the twenty-row project page
 test("engine aggregate counts member twenty-one before its own page limit and reaches the real dashboard source", async () => {
   const f = await fixture(21);
   const projects = await CrewProjects.open(f.options, f.factory);
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const cron = new CronStore(":memory:");
   try {
     await projects.run(

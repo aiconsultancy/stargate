@@ -35,7 +35,7 @@ import { IrcShip } from "../src/irc/ship";
 import { serve } from "../src/app/runtime";
 import { decodeSettings } from "../src/config/settings-errors";
 import { checkCredentials } from "../src/app/setup";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import example from "../stargate.example.json";
 import {
   ACCESS,
@@ -524,7 +524,7 @@ test("rear admiral intake: an answer reaches the dispatcher only past the regist
   }).start();
   cleanup.push(() => fake.stop());
   const directory = await tempDirectory();
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = Schema.decodeUnknownSync(ircSchema)({
     ...admiralIrc(fake.port),
@@ -628,7 +628,7 @@ test("captain intake: only the rear admiral's request passes the peer limit and 
   }).start();
   cleanup.push(() => fake.stop());
   const directory = await tempDirectory();
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = Schema.decodeUnknownSync(ircSchema)(captainIrc(fake.port));
   const ship = await IrcShip.create(config, store, silent, {

@@ -20,7 +20,7 @@ import {
   type SlackApp,
   serve,
 } from "../src/app/runtime";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 import { FakeIrcServer, until } from "./irc-fixture";
 
@@ -342,7 +342,7 @@ test("deny reload blocks a running turn's delivery without stopping its executio
   });
   expect((await f.reload.request()).status).toBe("applied");
   release.resolve();
-  const store = new Store(join(f.config.dataDirectory, "stargate.sqlite"));
+  const store = openStore(join(f.config.dataDirectory, "stargate.sqlite"));
   try {
     await until(
       () => {
@@ -426,7 +426,7 @@ test("IRC roster reload starts an added worker and retires only an idle removed 
   );
   await until(
     () => {
-      const store = new Store(join(f.config.dataDirectory, "stargate.sqlite"));
+      const store = openStore(join(f.config.dataDirectory, "stargate.sqlite"));
       try {
         const counts = store.queueCounts(key);
         return counts.queued + counts.running + counts.responding === 0;

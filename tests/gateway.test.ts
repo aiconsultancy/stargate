@@ -9,7 +9,8 @@ import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { PromptNotSubmitted } from "../src/shared/request-failure";
 import { handleSlackRequest } from "../src/slack/slack";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Store } from "../src/gateway/store";
 import { ThreadContextUnavailable } from "../src/gateway/thread-context";
 import { bot, event, identity } from "./fixtures";
 
@@ -25,7 +26,7 @@ afterEach(() => {
 });
 
 function fixture(config = bot()) {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   stores.push(store);
   const prompts: { session: string; text: string }[] = [];
   const titles: string[] = [];
@@ -698,7 +699,7 @@ test("shutdown lets a running turn record its interruption before resolving", as
 });
 
 test("a job that another writer finished during delivery is left as it is", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   stores.push(store);
   const lines: string[] = [];
   const posts: string[] = [];

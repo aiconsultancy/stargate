@@ -11,7 +11,7 @@ import type {
   HistorySession,
   SessionHistory,
 } from "../src/shared/session-history";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, identity } from "./fixtures";
 
 const signal = new AbortController().signal;
@@ -31,7 +31,7 @@ const session = (
 });
 
 function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const cronStore = new CronStore(":memory:");
   closers.push(
     () => store.close(),
@@ -472,7 +472,7 @@ describe("dashboard store accessors", () => {
   });
 
   test("session ownership is scoped to the bot namespace", () => {
-    const store = new Store(":memory:");
+    const store = openStore(":memory:");
     closers.push(() => store.close());
     const conversation = conversationKey("bot", "C123", "1.000");
     store.enqueue({

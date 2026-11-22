@@ -18,7 +18,8 @@ import {
   routeIrcMessage,
 } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const close: (() => unknown)[] = [];
@@ -306,7 +307,7 @@ test("only explicit invitations or confirmed own replies create durable thread p
   const directory = await mkdtemp(join(tmpdir(), "irc-human-store-"));
   close.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "state.sqlite");
-  let store = new Store(path);
+  let store = openStore(path);
   const cfg = config();
   const broad = route(cfg, "#command", "top-level", { msgid: "root" }, store);
   if (!broad) throw new Error("Missing broad input");
@@ -362,7 +363,7 @@ test("only explicit invitations or confirmed own replies create durable thread p
     true,
   );
   store.close();
-  store = new Store(path);
+  store = openStore(path);
   try {
     expect(
       route(
@@ -398,7 +399,7 @@ test("only explicit invitations or confirmed own replies create durable thread p
 });
 
 test("all-replies mode admits unknown opaque parents from verified humans; other channels and captains stay restricted", () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   try {
     const cfg = config("vance");
     const broad = route(cfg, "#starbase", "root", { msgid: "root" }, store);
@@ -522,7 +523,7 @@ async function liveFixture(multiline = false) {
   const directory = await mkdtemp(join(tmpdir(), "irc-human-live-"));
   close.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "state.sqlite");
-  let store = new Store(path);
+  let store = openStore(path);
   const prompts: {
     account: string;
     text: string;
@@ -634,7 +635,7 @@ async function liveFixture(multiline = false) {
     async restart(between?: () => void) {
       await stop();
       store.close();
-      store = new Store(path);
+      store = openStore(path);
       between?.();
       await start();
     },

@@ -14,7 +14,7 @@ import {
   type QuestionAnswer,
 } from "../src/questions/questions";
 import { settingsIssues } from "../src/config/settings-schema";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -40,7 +40,7 @@ async function fixture(
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-question-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "state.sqlite");
-  const store = new Store(path);
+  const store = openStore(path);
   cleanup.push(() => store.close());
   const config = (account: string) =>
     Schema.decodeUnknownSync(ircSchema)({

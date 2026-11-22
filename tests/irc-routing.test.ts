@@ -25,7 +25,8 @@ import {
 } from "../src/irc/routing";
 import { IrcShip, ircKey } from "../src/irc/ship";
 import { checkCredentials } from "../src/app/setup";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Store } from "../src/gateway/store";
 import { bot } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
@@ -441,7 +442,7 @@ test("irc routing: ship and peer senders are marked; access rechecks", () => {
 test("irc limits: peers per conversation, ship messages per channel", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const limits = {
     shipKeys: ["captain-key", "chief-key"],
@@ -682,7 +683,7 @@ test("irc casemapping: rfc1459 by default, ascii and strict per ISUPPORT", () =>
 test("irc casemapping: one folded channel key for caps, routing and denies", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-fold-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   // The crew spells the ship channel differently from the captain.
   const mixed = shipConfig({
@@ -767,7 +768,7 @@ test("irc namespace: host, port and network name select a new namespace", async 
   const keys = async (server: Record<string, unknown>) => {
     const ship = await IrcShip.create(
       shipConfig({ server }),
-      new Store(":memory:"),
+      openStore(":memory:"),
       pino({ level: "silent" }),
       {
         env: {
@@ -829,7 +830,7 @@ test("irc crew confinement: runtime checks use the negotiated CASEMAPPING", () =
 test("irc ship cap: per agent, times the ship agents configured in the channel", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-cap-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const [chiefConfig] = shipConfig().crew;
   if (!chiefConfig) throw new Error("missing crew fixture");
@@ -914,7 +915,7 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
 test("irc ship cap: a crew → captain DM is capped at per agent × 2", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-dm-cap-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const limits = {
     shipKeys: [captain.key, chief.key],
@@ -952,7 +953,7 @@ test("irc ship cap: a crew → captain DM is capped at per agent × 2", async ()
   expect(admitted).toBe(120);
   // 0 still turns ship messages off, in direct messages too.
   const off = shipConfig({ access: { shipTurnsPerAgentPerHour: 0 } });
-  const fresh = new Store(join(directory, "off.sqlite"));
+  const fresh = openStore(join(directory, "off.sqlite"));
   cleanup.push(() => fresh.close());
   const offLimits = {
     shipKeys: [captain.key],
@@ -1076,7 +1077,7 @@ test("irc all-call: reaches every ship agent in the channel, word-bounded", asyn
 test("irc all-call: ship senders count against the channel cap, people do not", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-allcall-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   // 1 per agent × 2 agents (captain + chief) = 2 ship messages an hour.
   const config = shipConfig({ access: { shipTurnsPerAgentPerHour: 1 } });
@@ -1275,7 +1276,7 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
       { ...context, config: generic },
     ),
   ).toBeUndefined();
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanup.push(() => store.close());
   const ship = await IrcShip.create(
     restricted,

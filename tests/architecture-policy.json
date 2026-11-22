@@ -580,9 +580,10 @@
         "src/runtime.ts",
         "src/service.ts",
         "src/setup.ts",
-        "src/status-report.ts"
+        "src/status-report.ts",
+        "src/app/open-store.ts"
       ],
-      "public": ["src/main.ts", "src/runtime.ts"],
+      "public": ["src/main.ts", "src/runtime.ts", "src/app/open-store.ts"],
       "neighbours": [
         "backends",
         "config",

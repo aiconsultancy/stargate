@@ -7,7 +7,8 @@ import type { AgentBackend, SteerResult } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { DrainControl } from "../src/maintenance/maintenance-drain";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const stores: Store[] = [];
@@ -22,7 +23,7 @@ function fixture(enabled = true, drain?: DrainControl) {
     throw new Error("Expected OpenCode config");
   config.backend.sessionID = "ses_captain";
   config.slack.steerThreadFollowUps = enabled;
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   stores.push(store);
   const writes: string[] = [];
   const posts: { thread: string; text: string }[] = [];
@@ -369,7 +370,7 @@ test("writing receipt recovery reads evidence only, without resubmitting or queu
 test("accepted-event receipt and deterministic native identity survive SQLite reopen", () => {
   const directory = mkdtempSync(join(tmpdir(), "stargate-followup-"));
   const path = join(directory, "store.sqlite");
-  let store = new Store(path);
+  let store = openStore(path);
   try {
     const input = {
       botKey: "bot",
@@ -391,7 +392,7 @@ test("accepted-event receipt and deterministic native identity survive SQLite re
     if (!receipt) throw new Error("Missing receipt");
     store.claimFollowUp(receipt);
     store.close();
-    store = new Store(path);
+    store = openStore(path);
     expect(store.admitFollowUp(followup, "ses_captain")).toBe(false);
     expect(store.followUps("bot")[0]).toMatchObject({
       nativeID: receipt.nativeID,

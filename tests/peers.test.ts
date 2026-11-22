@@ -20,7 +20,7 @@ import {
 } from "../src/gateway/peers";
 import { routeEvent } from "../src/gateway/routing";
 import { handleSlackRequest } from "../src/slack/slack";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
@@ -285,7 +285,7 @@ test("botSender reads only well-formed IDs, never text", () => {
 });
 
 function gatewayFixture(peerCaptains = true, pinned = true) {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanup.push(() => store.close());
   const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),

@@ -5,7 +5,7 @@ import type { AgentBackend } from "../src/backends/backend";
 import { botSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import type { Transcriber } from "../src/transcription/transcription";
 import { bot, event, identity } from "./fixtures";
 
@@ -19,7 +19,7 @@ function fixture(
   files?: TransportDelivery["files"],
 ) {
   const config = bot();
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const posts: string[] = [];
   const slack: TransportDelivery = {
     files,

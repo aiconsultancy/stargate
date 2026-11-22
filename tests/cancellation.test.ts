@@ -5,7 +5,8 @@ import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { MaintenanceNotice } from "../src/maintenance/maintenance";
 import { handleSlackRequest } from "../src/slack/slack";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const stores: Store[] = [];
@@ -14,7 +15,7 @@ afterEach(() => {
 });
 
 function fixture(channel = "C123") {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   stores.push(store);
   const config = bot();
   const started = Promise.withResolvers<AbortSignal>();

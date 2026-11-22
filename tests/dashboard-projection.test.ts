@@ -14,7 +14,7 @@ import {
   dashboardSource,
 } from "../src/dashboard/dashboard-source";
 import { conversationKey } from "../src/gateway/routing";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot } from "./fixtures";
 
 const cleanup: { close(): unknown }[] = [];
@@ -187,7 +187,7 @@ function registration(
 }
 
 test("shared captain display keeps both registration aliases and never unions conversation scope", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const cron = new CronStore(":memory:");
   cleanup.push(store, cron);
   const irc = registration("captain", "irc");
@@ -241,7 +241,7 @@ test("shared captain display keeps both registration aliases and never unions co
 });
 
 test("different tenants, endpoints or unpinned backends never acquire a display alias", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const cron = new CronStore(":memory:");
   cleanup.push(store, cron);
   for (const ships of [
@@ -278,7 +278,7 @@ test("different tenants, endpoints or unpinned backends never acquire a display 
 });
 
 test("a fleet request reads shared captain crew once and retries only a failed exact alias", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const cron = new CronStore(":memory:");
   cleanup.push(store, cron);
   const irc = registration("captain", "irc");
@@ -316,7 +316,7 @@ test("a fleet request reads shared captain crew once and retries only a failed e
 });
 
 test("retiring a pinned captain alias aborts its read and discards its late sample", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const cron = new CronStore(":memory:");
   cleanup.push(store, cron);
   const primary = registration("captain", "irc");
@@ -551,7 +551,7 @@ test("project labels never infer a crew checkout from the captain directory; pol
 });
 
 test("selected registration heading, title, breadcrumb and focus remain consistent", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const cron = new CronStore(":memory:");
   cleanup.push(store, cron);
   const irc = registration("captain", "irc");

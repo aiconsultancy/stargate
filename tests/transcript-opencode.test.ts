@@ -17,7 +17,7 @@ import { latestInput, TranscriptUnavailable } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, loadConfig } from "../src/config";
 import { botKey, conversationKey } from "../src/gateway/routing";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { repairThread } from "../src/ops/transcript";
 import { bot, identity } from "./fixtures";
 
@@ -303,7 +303,7 @@ test("repairThread resolves the namespace and protects existing state", async ()
     const parsed = (await loadConfig(path)).bots[0];
     if (!parsed) throw new Error("Invalid fixture");
     await mkdir(join(directory, "state"));
-    const store = new Store(join(directory, "state", "stargate.sqlite"));
+    const store = openStore(join(directory, "state", "stargate.sqlite"));
     const key = botKey(parsed, identity);
     const conversation = conversationKey(key, "C123", "1.000");
     for (const [eventId, response] of [

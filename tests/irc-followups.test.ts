@@ -5,7 +5,7 @@ import type { AgentBackend, SteerInput } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -16,7 +16,7 @@ afterEach(async () => {
 test("IRC same-root follow-up steers despite its unique msgid; other roots queue and final stays on original root", async () => {
   const fake = new FakeIrcServer({ accounts: { captain: "fixture" } }).start();
   cleanup.push(() => fake.stop());
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanup.push(() => store.close());
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "ship",

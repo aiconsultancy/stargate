@@ -21,7 +21,7 @@ import {
   parseMessage,
 } from "../src/irc/protocol";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { until } from "./irc-fixture";
 
 /**
@@ -243,7 +243,7 @@ test.skipIf(!available)(
     jack.send("JOIN #galactica");
     await jack.wait((m) => m.command === "JOIN", "jack joined");
 
-    const store = new Store(join(directory, "stargate.sqlite"));
+    const store = openStore(join(directory, "stargate.sqlite"));
     cleanup.push(() => store.close());
     const ship = await IrcShip.create(
       Schema.decodeUnknownSync(ircSchema)({

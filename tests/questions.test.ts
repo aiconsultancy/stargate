@@ -19,7 +19,8 @@ import {
   questionControl,
   questionText,
 } from "../src/questions/questions";
-import { type Incoming, Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Incoming } from "../src/gateway/store";
 import { bot, identity } from "./fixtures";
 import { FakeIrcServer, until } from "./irc-fixture";
 
@@ -70,7 +71,7 @@ async function fixture(
   const dir = await mkdtemp(join(tmpdir(), "stargate-questions-"));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, "state.sqlite");
-  let store = new Store(path);
+  let store = openStore(path);
   cleanup.push(() => store.close());
   store.enqueue(original);
   const job = store.queuedJob(original.botKey, original.eventId);
@@ -287,7 +288,7 @@ async function fixture(
     },
     restart() {
       store.close();
-      store = new Store(path);
+      store = openStore(path);
       bridge = make();
     },
   };

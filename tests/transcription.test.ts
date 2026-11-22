@@ -8,7 +8,7 @@ import { botSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { RequestFailure } from "../src/shared/request-failure";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { AzureOpenAITranscriber } from "../src/transcription/azure-openai";
 import {
   maxTranscriptCharacters,
@@ -474,7 +474,7 @@ function gatewayFixture(
   options: { configured?: boolean; supportsAttachments?: boolean } = {},
 ) {
   const f = provider();
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanup.push(() => store.close());
   const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),

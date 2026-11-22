@@ -11,7 +11,7 @@ import type { OutboxPage } from "../src/crew/irc-rpc";
 import { Gateway } from "../src/gateway/gateway";
 import type { CrewLink } from "../src/irc/crew-link";
 import { copyText, IrcShip } from "../src/irc/ship";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -83,7 +83,7 @@ async function setup(
   cleanup.push(() => fake.stop());
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-stargate-dm-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const store = new Store(join(directory, "stargate.sqlite"));
+  const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",

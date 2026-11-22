@@ -3,7 +3,7 @@ import pino from "pino";
 import { IrcClient } from "../src/irc/client";
 import { IrcDelivery } from "../src/irc/delivery";
 import { Filehost } from "../src/irc/filehost";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 
 class Wire extends IrcClient {
   tags = true;
@@ -63,7 +63,7 @@ class Wire extends IrcClient {
 test("IRC delivery retains the root on every retry unit, including unbatched plans", async () => {
   const wire = new Wire();
   wire.limits = { maxBytes: 4096, maxLines: 2 };
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   try {
     const progress = {
       plan: (unit: { job: number; part: number }, plan: string) =>

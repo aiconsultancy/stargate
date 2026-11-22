@@ -4,7 +4,8 @@ import type { AgentBackend, Transcript } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { type ReplyChunk, slackContent } from "../src/shared/slack-format";
-import { type Job, Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Job, type Store } from "../src/gateway/store";
 import { LiveReply } from "../src/gateway/streaming";
 import { bot, event, identity } from "./fixtures";
 
@@ -41,7 +42,7 @@ function gatewayWith(
   slack: TransportDelivery,
   options: { store?: Store; backend?: Partial<AgentBackend> } = {},
 ) {
-  const store = options.store ?? new Store(":memory:");
+  const store = options.store ?? openStore(":memory:");
   const backend: AgentBackend = {
     async createSession() {
       return "session";
@@ -139,7 +140,7 @@ test("a delivery without prepareReply still receives plain string chunks", async
 
 test("live previews prepare each whole snapshot once and hand chunks their content", async () => {
   const r = recorder();
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const gateway = new Gateway(
     bot(),
     identity,
@@ -189,7 +190,7 @@ test("live previews prepare each whole snapshot once and hand chunks their conte
 
 test("live previews update existing chunks with their classified content", async () => {
   const r = recorder();
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const gateway = new Gateway(
     bot(),
     identity,
@@ -275,7 +276,7 @@ test("transcript catch-up prepares each reply whole and persists its chunks", as
 });
 
 test("store text readers map prepared chunks to display text", () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const key = "bot";
   const chunks: ReplyChunk[] = [
     { text: "Prepared", content: slackContent("Prepared") },

@@ -15,7 +15,7 @@ import {
 } from "../src/notifications/preferences/notifications";
 import { PeerDirectory } from "../src/gateway/peers";
 import { handleSlackRequest } from "../src/slack/slack";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import type { Transcriber } from "../src/transcription/transcription";
 import { bot, event, identity } from "./fixtures";
 
@@ -37,7 +37,7 @@ function fixture() {
   };
   config.access.peerCaptains = true;
   const preferences = new NotificationStore(":memory:");
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const key = notificationKey(config, identity);
   let now = Date.parse("2026-11-17T10:00:00Z");
   let operation = 0;

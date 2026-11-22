@@ -18,7 +18,7 @@ import {
   statusKind,
 } from "../src/shared/request-failure";
 import { SlackConnection } from "../src/slack/slack";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { ThreadContextUnavailable } from "../src/gateway/thread-context";
 import { bot, event, identity } from "./fixtures";
 
@@ -76,7 +76,7 @@ test("default turn timeout is thirty minutes, with explicit values and the one-h
 test("failure delivery replaces a preview and retries durable cause without rerunning the backend", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-request-failure-"));
   const path = join(directory, "state.sqlite");
-  let store = new Store(path);
+  let store = openStore(path);
   let turns = 0;
   let sessions = 0;
   const backend: AgentBackend = {
@@ -124,7 +124,7 @@ test("failure delivery replaces a preview and retries durable cause without reru
     fail = false;
     // Reopen SQLite and the gateway: no in-memory failure state is required.
     store.close();
-    store = new Store(path);
+    store = openStore(path);
     const retry = new Gateway(
       bot(),
       identity,
@@ -150,7 +150,7 @@ test("failure delivery replaces a preview and retries durable cause without reru
 
 test("timeout, shutdown, and context failures have distinct durable causes and plain adapter fallback", async () => {
   for (const cause of ["timeout", "interrupted", "context"] as const) {
-    const store = new Store(":memory:");
+    const store = openStore(":memory:");
     const config = bot();
     config.turnTimeoutMs = 1;
     const shutdown = new AbortController();
@@ -352,7 +352,7 @@ test("the gateway reports the category in the card and in the log, never provide
     "https://user:pass@proxy.example/v1?key=secret",
     "claude-fable-5-2 are in cooldown",
   ];
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const lines: string[] = [];
   const cards: RequestFailure[] = [];
   const posts: string[] = [];
@@ -412,7 +412,7 @@ test("the gateway reports the category in the card and in the log, never provide
 });
 
 test("a failure without a category keeps the generic card and names no status", async () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const lines: string[] = [];
   const gateway = new Gateway(
     bot(),

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentBackend } from "../src/backends/backend";
 import { type NativeQuestion, Questions } from "../src/questions/questions";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 
 const q: NativeQuestion = {
   id: "form_1",
@@ -21,7 +21,7 @@ const q: NativeQuestion = {
 test("background question retains its case across expiry, ownership changes and an ambiguous write", async () => {
   const dir = await mkdtemp(join(tmpdir(), "stargate-background-"));
   const path = join(dir, "gateway.sqlite");
-  let store = new Store(path);
+  let store = openStore(path);
   let now = Date.now();
   const clock = spyOn(Date, "now").mockImplementation(() => now);
   let pending = true,
@@ -131,7 +131,7 @@ test("background question retains its case across expiry, ownership changes and 
       "attempted",
     );
     store.close();
-    store = new Store(path);
+    store = openStore(path);
     bridge = open();
     engineOnline = true;
     await poll();

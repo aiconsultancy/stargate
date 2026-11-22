@@ -10,7 +10,7 @@ import { ActivityDelivery } from "../src/activity/activity-delivery";
 import type { AgentBackend } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 const signal = () => new AbortController().signal;
@@ -42,7 +42,7 @@ function fixture(
   options: { finalizeTimeoutMs?: number } = {},
 ) {
   const config = bot();
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   let starts = 0;
   let allowed = true;
   const views: {
@@ -428,7 +428,7 @@ test("access revocation cancels reporting before another Slack update", async ()
 test("captain answer delivery does not wait for reporting or replay on retry", async () => {
   const config = bot();
   config.crewActivity = { detail: "summary", reporter: "twiki" };
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const blocked = Promise.withResolvers<ActivitySnapshot>();
   let captures = 0;
   let turns = 0;
@@ -493,7 +493,7 @@ test("captain answer delivery does not wait for reporting or replay on retry", a
 test("reporting transport failure cannot turn a successful answer into an error", async () => {
   const config = bot();
   config.crewActivity.detail = "summary";
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   const answers: string[] = [];
   const backend: AgentBackend = {
     async createSession() {

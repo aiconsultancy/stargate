@@ -3,7 +3,8 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
+import { type Store } from "../src/gateway/store";
 
 test("IRC reply parent migrates, survives reopen and stays scoped to the registration", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-thread-store-"));
@@ -20,7 +21,7 @@ test("IRC reply parent migrates, survives reopen and stays scoped to the registr
       INSERT INTO jobs (eventId,botKey,conversation,channel,thread,user,text)
       VALUES ('old','bot','old','#ship','old','jack','old');`);
     legacy.close();
-    store = new Store(path);
+    store = openStore(path);
     const input = {
       eventId: "#ship:request",
       botKey: "bot",
@@ -33,7 +34,7 @@ test("IRC reply parent migrates, survives reopen and stays scoped to the registr
     };
     store.enqueue(input);
     store.close();
-    store = new Store(path);
+    store = openStore(path);
     expect(
       store
         .ready("bot", Date.now(), 10)
@@ -49,7 +50,7 @@ test("IRC reply parent migrates, survives reopen and stays scoped to the registr
 });
 
 test("IRC reply parent follows both transcript outbox paths and Stop keeps the request", () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   try {
     store.enqueue({
       eventId: "#ship:request",

@@ -9,7 +9,7 @@ import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { RequestFailure } from "../src/shared/request-failure";
 import { conversationKey, routeEvent } from "../src/gateway/routing";
-import { Store } from "../src/gateway/store";
+import { openStore } from "../src/app/open-store";
 import {
   spokenMention,
   spokenMentionNote,
@@ -189,7 +189,7 @@ test("routing holds only unmentioned file messages in configured channels", () =
 });
 
 function fixture(options: Parameters<typeof config>[0] = {}) {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanup.push(() => store.close());
   const cfg = config(options);
   const logged: string[] = [];
@@ -391,7 +391,7 @@ test("a failed transcription, an oversize file or no media is ignored without a 
 });
 
 test("held and ignored messages never become a thread's delivery target", () => {
-  const store = new Store(":memory:");
+  const store = openStore(":memory:");
   cleanup.push(() => store.close());
   const key = "bot";
   const conversation = conversationKey(key, "C123", "1.000");
