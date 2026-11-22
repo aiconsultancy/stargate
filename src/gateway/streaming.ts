@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
-import type { SlackDelivery } from "./ports";
+import type { TransportDelivery } from "./ports";
 import { chunks } from "./routing";
 import { type ReplyChunk, replyText } from "../shared/slack-format";
 import type { Job, Store } from "./store";
@@ -33,7 +33,7 @@ export class LiveReply {
   constructor(
     private readonly job: Job,
     private readonly store: Store,
-    private readonly slack: SlackDelivery,
+    private readonly slack: TransportDelivery,
     signal: AbortSignal,
     private readonly log: Logger,
     options: LiveReplyOptions = {},

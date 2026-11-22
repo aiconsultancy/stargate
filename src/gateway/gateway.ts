@@ -34,7 +34,7 @@ import type {
   GatewayAccessContext,
   GatewayTransport,
   RequestOutcome,
-  SlackDelivery,
+  TransportDelivery,
 } from "./ports";
 import { maintenanceText, TurnBudget } from "../maintenance/maintenance";
 import { startMaintenanceDelivery } from "../maintenance/maintenance-delivery";
@@ -117,9 +117,6 @@ import {
 import { type TurnProgress, turnProgressText } from "../shared/turn-progress";
 import type { UpdateReceipt } from "../maintenance/update-notice";
 import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
-
-// Tests import the delivery port from the gateway entry; gateway-ports owns it.
-export type { SlackDelivery } from "./ports";
 
 // Catch-up retries read history only; they never prompt the agent.
 const retryCeilingMs = 5 * 60 * 1000;
@@ -278,7 +275,7 @@ export class Gateway {
     private readonly identity: Identity,
     private readonly store: Store,
     private readonly backend: AgentBackend,
-    private readonly slack: SlackDelivery,
+    private readonly slack: TransportDelivery,
     private readonly log: Logger,
     /** Present only when the bot configures transcription. */
     private transcriber?: Transcriber,

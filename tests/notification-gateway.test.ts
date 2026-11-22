@@ -3,7 +3,8 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import {
   NotificationStore,
   notificationInputSchema,
@@ -56,7 +57,7 @@ function fixture() {
     },
     async close() {},
   };
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       outputs.push(text);
       return "10.000";

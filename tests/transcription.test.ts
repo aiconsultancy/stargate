@@ -5,7 +5,8 @@ import pino from "pino";
 import type { Attachment } from "../src/attachments/attachments";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import type { RequestFailure } from "../src/shared/request-failure";
 import { Store } from "../src/gateway/store";
 import { AzureOpenAITranscriber } from "../src/transcription/azure-openai";
@@ -507,7 +508,7 @@ function gatewayFixture(
     },
     async close() {},
   };
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     files: {
       async download() {
         downloads++;

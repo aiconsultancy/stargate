@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import type { AgentBackend, SteerResult } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import type { DrainControl } from "../src/maintenance/maintenance-drain";
 import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
@@ -45,7 +46,7 @@ function fixture(enabled = true, drain?: DrainControl) {
     },
     async close() {},
   };
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(_channel, thread, text) {
       posts.push({ thread, text });
     },

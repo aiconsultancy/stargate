@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import type {
   DrainControl,
   DrainHandler,
@@ -54,7 +55,7 @@ function fixture(path: string, held: { value: boolean }) {
     identity,
     store,
     backend,
-    {} as SlackDelivery,
+    {} as TransportDelivery,
     pino({ enabled: false }),
     undefined,
     undefined,

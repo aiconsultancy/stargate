@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend, Transcript } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { type ReplyChunk, slackContent } from "../src/shared/slack-format";
 import { type Job, Store } from "../src/gateway/store";
 import { LiveReply } from "../src/gateway/streaming";
@@ -14,7 +15,7 @@ function recorder() {
   const prepared: { text: string; unbounded: boolean | undefined }[] = [];
   const posts: Post[] = [];
   const updates: { text: string; content: unknown }[] = [];
-  const slack: SlackDelivery & { failNext: number } = {
+  const slack: TransportDelivery & { failNext: number } = {
     failNext: 0,
     prepareReply(text, unbounded) {
       prepared.push({ text, unbounded });
@@ -37,7 +38,7 @@ function recorder() {
 }
 
 function gatewayWith(
-  slack: SlackDelivery,
+  slack: TransportDelivery,
   options: { store?: Store; backend?: Partial<AgentBackend> } = {},
 ) {
   const store = options.store ?? new Store(":memory:");

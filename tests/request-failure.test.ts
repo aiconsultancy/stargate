@@ -7,7 +7,8 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
 import { containsCredential } from "../src/lib/credentials";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import {
   BackendFailure,
   failureContent,
@@ -91,7 +92,7 @@ test("failure delivery replaces a preview and retries durable cause without reru
   };
   const writes: { cause: RequestFailure; ts?: string }[] = [];
   let fail = true;
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post() {
       throw new Error("must use failure hook");
     },

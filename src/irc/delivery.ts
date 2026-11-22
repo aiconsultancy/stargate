@@ -5,7 +5,7 @@ import type {
   DeliveryUnit,
   IrcTurnStatus,
   RequestOutcome,
-  SlackDelivery,
+  TransportDelivery,
 } from "../gateway/ports";
 import type { ReactionName } from "../shared/reactions";
 import { settingsStruct } from "../settings-schema";
@@ -137,7 +137,7 @@ function planTarget(channel: string) {
   return isIrcChannel(channel) ? channel : "n".repeat(32);
 }
 
-export class IrcDelivery implements SlackDelivery {
+export class IrcDelivery implements TransportDelivery {
   constructor(
     private readonly client: IrcClient,
     /** Wait for a reconnect before a delivery attempt fails. */

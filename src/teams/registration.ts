@@ -10,7 +10,7 @@ import type { FleetSource } from "../fleet/protocol";
 import { fleetResultSource } from "../fleet/results";
 import { fleetAuthority, fleetInstructions } from "../fleet/fleet-policy";
 import { fleetSourceReference } from "../fleet/fleet-source";
-import type { GatewayTransport, SlackDelivery } from "../gateway/ports";
+import type { GatewayTransport, TransportDelivery } from "../gateway/ports";
 import { backendFingerprint } from "../gateway/routing";
 import {
   settingsDefault,
@@ -141,7 +141,7 @@ export class TeamsRegistration {
   sourceRecorder: ((source: FleetSource) => void) | undefined;
   readonly key: string;
   readonly transport: GatewayTransport;
-  readonly delivery: SlackDelivery;
+  readonly delivery: TransportDelivery;
   private readonly db: Database;
   private readonly connector: Pick<ConnectorClient, "sendToConversation">;
   private server: Server | undefined;

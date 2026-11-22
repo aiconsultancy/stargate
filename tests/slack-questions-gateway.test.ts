@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { saveQuestionSettings } from "../src/questions/question-settings";
 import type { NativeQuestion } from "../src/questions/questions";
 import { Store } from "../src/gateway/store";
@@ -91,7 +92,7 @@ test.each([false, true])(
       },
     };
     const posts: { text: string; content: unknown }[] = [];
-    const slack: SlackDelivery = {
+    const slack: TransportDelivery = {
       async post(_c, _t, text, _stop, _unit, content) {
         posts.push({ text, content });
         return "3.000";

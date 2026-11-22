@@ -15,7 +15,7 @@ import {
   readConfigSnapshot,
   sameConfigSnapshot,
 } from "./config-panel";
-import type { SlackDelivery } from "../gateway/ports";
+import type { TransportDelivery } from "../gateway/ports";
 import type { NotificationPage } from "../notifications/preferences/notification-store";
 import { notificationKey } from "../notifications/preferences/notifications";
 import {
@@ -389,7 +389,7 @@ export class MetaCommands {
   private tail = Promise.resolve();
   constructor(
     private readonly store: Store,
-    private readonly slack: SlackDelivery,
+    private readonly slack: TransportDelivery,
     private readonly options: MetaOptions = {},
   ) {}
 

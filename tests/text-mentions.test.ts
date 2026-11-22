@@ -3,7 +3,8 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import {
   findMention,
   mentionRuleSchema,
@@ -212,7 +213,7 @@ function fixture() {
     async close() {},
   };
   const posts: string[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       posts.push(text);
     },

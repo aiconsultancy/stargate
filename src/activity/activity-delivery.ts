@@ -6,7 +6,7 @@ import type {
   CrewActivitySettings,
 } from "./activity";
 import type { AgentBackend } from "../backend";
-import type { SlackDelivery } from "../gateway/ports";
+import type { TransportDelivery } from "../gateway/ports";
 import type { Job, Store } from "../gateway/store";
 
 export type ActivityHandle = { finish(): void; cancel(): void };
@@ -52,7 +52,7 @@ export class ActivityDelivery {
 
   constructor(
     private readonly backend: AgentBackend,
-    private readonly slack: SlackDelivery,
+    private readonly slack: TransportDelivery,
     private readonly settings: () => CrewActivitySettings,
     private readonly allowed: (job: Job) => boolean,
     private readonly log: Logger,

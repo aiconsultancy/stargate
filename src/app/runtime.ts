@@ -60,7 +60,7 @@ import { fleetRequestAction } from "../fleet/permissions";
 import { FleetResults, fleetOrigin } from "../fleet/results";
 import { sendFleetAssignment } from "../fleet/fleet-irc";
 import { Gateway } from "../gateway/gateway";
-import type { SlackDelivery } from "../gateway/ports";
+import type { TransportDelivery } from "../gateway/ports";
 import { createHealthReader } from "../health/health";
 import { controlInteractions } from "../slack/interactions";
 import { type IrcRegistration, IrcShip, ircKey } from "../irc/ship";
@@ -136,7 +136,7 @@ export class RuntimeStopped extends Data.TaggedError("RuntimeStopped")<{
 }> {}
 
 /** One registration's Slack surface: intake, Web API delivery and modals. */
-export interface SlackApp extends SlackDelivery, CronDelivery {
+export interface SlackApp extends TransportDelivery, CronDelivery {
   notification?: NotificationSlack["notification"];
   identity(signal?: AbortSignal): Promise<Identity>;
   readonly connectionState?: ConnectionState;

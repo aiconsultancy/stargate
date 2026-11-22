@@ -7,7 +7,8 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
 import { CrewWaiting } from "../src/crew/waiting";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import type { MetaOptions } from "../src/meta-commands/meta-commands";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";
 import { notificationKey } from "../src/notifications/preferences/notifications";
@@ -48,7 +49,7 @@ async function fixture(options: MetaOptions = {}) {
     async close() {},
   };
   const delivered: { channel: string; thread: string; text: string }[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(channel, thread, text) {
       delivered.push({ channel, thread, text });
     },

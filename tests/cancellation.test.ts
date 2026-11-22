@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import type { MaintenanceNotice } from "../src/maintenance/maintenance";
 import { handleSlackRequest } from "../src/slack/slack";
 import { Store } from "../src/gateway/store";
@@ -46,7 +47,7 @@ function fixture(channel = "C123") {
     },
     async close() {},
   };
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(_channel, _thread, text, stopJob) {
       writes.push({ text, ...(stopJob === undefined ? {} : { stopJob }) });
       return "2.000";

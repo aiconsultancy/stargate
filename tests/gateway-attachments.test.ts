@@ -9,7 +9,8 @@ import type { Attachment } from "../src/attachments/attachments";
 import type { AgentBackend } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { routeEvent } from "../src/gateway/routing";
 import { Store } from "../src/gateway/store";
 import { publishedFileDirectory } from "./file-fixture";
@@ -101,7 +102,7 @@ async function fixture(pinned = false) {
     },
     async close() {},
   };
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     files: transport,
     async post(channel, thread, text) {
       posts.push({ channel, thread, text });

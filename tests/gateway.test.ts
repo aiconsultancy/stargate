@@ -5,7 +5,8 @@ import {
   latestInput,
   TranscriptUnavailable,
 } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { PromptNotSubmitted } from "../src/shared/request-failure";
 import { handleSlackRequest } from "../src/slack/slack";
 import { Store } from "../src/gateway/store";
@@ -35,7 +36,7 @@ function fixture(config = bot()) {
     async close() {},
   };
   const delivered: string[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(_channel: string, _thread: string, text: string) {
       delivered.push(text);
     },
