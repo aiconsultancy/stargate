@@ -6,7 +6,7 @@ import {
   settingsDefault,
   settingsRefine,
   settingsStruct,
-} from "../../settings-schema";
+} from "../../config/settings-schema";
 
 const path = Schema.String.check(Schema.isMinCodePoints(1))
   .check(Schema.isMaxCodePoints(4096))

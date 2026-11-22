@@ -22,7 +22,7 @@ import {
   historySessionPageSchema,
   historySessionsSchema,
 } from "../shared/session-history";
-import { settingsPattern, settingsStruct } from "../settings-schema";
+import { settingsPattern, settingsStruct } from "../config/settings-schema";
 import { updateSnapshotSchema } from "../maintenance/update-notice";
 import {
   fleetCrewStatusInputSchema,

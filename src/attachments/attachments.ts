@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { Result, Schema } from "effect";
-import { settingsPattern, settingsStruct } from "../settings-schema";
+import { settingsPattern, settingsStruct } from "../config/settings-schema";
 
 /** Bound memory use at each media trust boundary, before admission or upload. */
 export const maxAttachmentBytes = 10 * 1024 * 1024;

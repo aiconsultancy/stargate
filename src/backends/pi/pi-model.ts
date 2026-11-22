@@ -6,7 +6,7 @@ import {
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../../settings-schema";
+} from "../../config/settings-schema";
 
 /**
  * Pi Durable model selection, shared by Pi bot backends, Pi crew workers and

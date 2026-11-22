@@ -13,7 +13,7 @@ import {
   nativeQuestionSchema,
   type QuestionAnswer,
 } from "../src/questions/questions";
-import { settingsIssues } from "../src/settings-schema";
+import { settingsIssues } from "../src/config/settings-schema";
 import { Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 

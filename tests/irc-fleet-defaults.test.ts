@@ -12,7 +12,7 @@ import {
   routeIrcMessage,
   withinLimits,
 } from "../src/irc/routing";
-import { settingsIssues } from "../src/settings-schema";
+import { settingsIssues } from "../src/config/settings-schema";
 import { addBot, readConfiguration } from "../src/app/setup";
 
 const cleanup: string[] = [];

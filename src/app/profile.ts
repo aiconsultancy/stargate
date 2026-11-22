@@ -40,7 +40,7 @@ import {
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import { voiceInstructions } from "../transcription/transcription";
 
 const absolute = Schema.String.check(

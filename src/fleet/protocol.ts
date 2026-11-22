@@ -8,7 +8,7 @@ import {
   settingsRecord,
   settingsRefine,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 const fleetIdentifier = Schema.String.check(Schema.isMinCodePoints(1))
   .check(Schema.isMaxCodePoints(256))

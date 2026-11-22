@@ -10,7 +10,7 @@ import {
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 const accountEmails = Schema.mutable(Schema.Array(settingsEmail))
   .check(Schema.isMinLength(1))

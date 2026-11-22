@@ -1,7 +1,7 @@
 import { Result, Schema } from "effect";
 import { containsCredential, redactCredentials } from "../lib/credentials";
 import { cronArbiterSchema, cronModelSchema } from "./advanced";
-import { settingsStruct } from "../settings-schema";
+import { settingsStruct } from "../config/settings-schema";
 
 const modelFields = {
   model: Schema.optional(cronModelSchema),

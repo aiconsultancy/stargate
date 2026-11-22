@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { settingsStruct } from "../../settings-schema";
+import { settingsStruct } from "../../config/settings-schema";
 
 const bounded = (max: number) =>
   Schema.String.check(Schema.isMaxCodePoints(max));

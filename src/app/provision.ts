@@ -18,7 +18,7 @@ import {
   settingsPattern,
   settingsRefine,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import {
   addBot,
   buildManifest,

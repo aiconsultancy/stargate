@@ -13,7 +13,7 @@ import {
   settingsIssues,
   settingsStartsWith,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import {
   effectProjectKeySchema,
   effectProjectToolInput,

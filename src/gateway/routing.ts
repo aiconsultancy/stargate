@@ -14,7 +14,7 @@ import {
   inboundReactionSchema,
   slackTimestamp,
 } from "../shared/reactions";
-import { settingsDefault, settingsPattern } from "../settings-schema";
+import { settingsDefault, settingsPattern } from "../config/settings-schema";
 
 type RoutingRegistration = {
   id: string;

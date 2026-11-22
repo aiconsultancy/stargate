@@ -1,7 +1,7 @@
 import { Result, Schema, SchemaTransformation } from "effect";
 import type { BotConfig } from "../config";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
-import { settingsPattern } from "../settings-schema";
+import { settingsPattern } from "../config/settings-schema";
 
 export { cancellationNotice } from "../shared/request-failure";
 

@@ -98,7 +98,7 @@ references belong to the new adapter configuration. Integrate presence
 checks with `src/app/setup.ts:120-166` and `src/app/config-reload.ts:20-37`, without
 provider calls or logging resolved values. New notification/config input
 must reject unknown fields. The existing strict helper is
-`src/settings-schema.ts:12-35`; the API schema currently uses a Zod wrapper,
+`src/config/settings-schema.ts:12-35`; the API schema currently uses a Zod wrapper,
 so account for the separately pending migration rather than assuming it.
 
 Fleet CORS defaults are deliberately enabled for Subspace origins:

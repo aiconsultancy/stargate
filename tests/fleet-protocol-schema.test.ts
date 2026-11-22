@@ -11,7 +11,7 @@ import type {
 } from "effect/StandardSchema";
 import { installFleetTools } from "../src/fleet/plugin";
 import * as protocol from "../src/fleet/protocol";
-import { settingsIssues } from "../src/settings-schema";
+import { settingsIssues } from "../src/config/settings-schema";
 import { Store } from "../src/gateway/store";
 
 const target = {

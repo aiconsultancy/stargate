@@ -1,5 +1,5 @@
 import { Predicate, Result, Schema, type SchemaAST, SchemaIssue } from "effect";
-import { settingsIssues } from "./settings-schema";
+import { settingsIssues } from "./config/settings-schema";
 
 type Issue = ReturnType<typeof settingsIssues>["issues"][number];
 const pathOf = (issue: Issue): PropertyKey[] =>

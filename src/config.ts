@@ -37,7 +37,7 @@ import {
   settingsStruct,
   settingsURL,
   settingsUUID,
-} from "./settings-schema";
+} from "./config/settings-schema";
 import { transcriptionSchema } from "./transcription/transcription";
 import { waitingSchema } from "./gateway/waiting";
 

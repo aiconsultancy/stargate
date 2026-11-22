@@ -9,7 +9,7 @@ import {
   isAllowedChannel,
   isAllowedUser,
 } from "../gateway/routing";
-import { settingsPattern, settingsUUID } from "../settings-schema";
+import { settingsPattern, settingsUUID } from "../config/settings-schema";
 import { botDisplayName } from "../gateway/waiting";
 
 const id = Schema.String.check(

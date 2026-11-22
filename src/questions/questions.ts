@@ -12,7 +12,7 @@ import {
   settingsPattern,
   settingsRecord,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import type { Incoming, Job } from "../gateway/store-types";
 
 const option = settingsStruct({

@@ -7,7 +7,7 @@ import {
   settingsPattern,
   settingsStartsWith,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import type { MesijClient, MesijMessage } from "./mesij";
 import { CrewError, type CrewState, type CrewTask } from "./state";
 import type { CrewMember } from "./team";

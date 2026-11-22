@@ -8,7 +8,7 @@ import {
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 /** One transcript block in a prompt; longer speech is cut and marked. */
 export const maxTranscriptCharacters = 20_000;

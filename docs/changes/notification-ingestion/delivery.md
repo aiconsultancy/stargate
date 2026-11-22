@@ -145,7 +145,7 @@ delta; migration tests, reviews and probes are not repeated here.
   unchanged between these anchors. Their inspected contracts still apply.
   `mise.toml` and `package.json` also remain unchanged.
 - New notification boundaries use existing Effect helpers from
-  `src/settings-schema.ts`, including strict nested `settingsStruct` where
+  `src/config/settings-schema.ts`, including strict nested `settingsStruct` where
   required. Use current `.Type`/Result contracts and explicit mutability.
   Do not reintroduce Zod into migrated consumers or copy old `.safeParse`
   call shapes. Remaining API config compatibility is not a reason to use

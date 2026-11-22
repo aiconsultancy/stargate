@@ -18,7 +18,7 @@ import {
   readTaskResult,
 } from "../src/crew/result";
 import type { CrewTask } from "../src/crew/state";
-import { settingsIssues } from "../src/settings-schema";
+import { settingsIssues } from "../src/config/settings-schema";
 import { settingsCanonical } from "./settings-cases";
 
 const team = {

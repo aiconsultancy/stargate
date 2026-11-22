@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { Result, Schema, SchemaTransformation } from "effect";
-import { settingsPattern, settingsStruct } from "../settings-schema";
+import { settingsPattern, settingsStruct } from "../config/settings-schema";
 import { close, readBody, sendJson } from "../lib/http-util";
 import {
   listenOnUnixSocket,

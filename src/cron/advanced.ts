@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { legacySetting } from "../settings-legacy";
-import { settingsPattern, settingsStruct } from "../settings-schema";
+import { settingsPattern, settingsStruct } from "../config/settings-schema";
 
 const provider = Schema.Literals(["claude", "codex"]);
 const selector = {

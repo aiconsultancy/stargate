@@ -16,7 +16,7 @@ import {
   settingsPattern,
   settingsRefine,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 const providers = ["claude", "codex"] as const;
 const providerSchema = Schema.Literals(providers);

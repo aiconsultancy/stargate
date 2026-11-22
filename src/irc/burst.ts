@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { settingsStartsWith, settingsStruct } from "../settings-schema";
+import { settingsStartsWith, settingsStruct } from "../config/settings-schema";
 import type { Incoming } from "../gateway/store-types";
 import { validMsgid } from "./protocol";
 

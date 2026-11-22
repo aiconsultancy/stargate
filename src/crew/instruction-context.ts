@@ -1,6 +1,6 @@
 import { posix, win32 } from "node:path";
 import { Result, Schema } from "effect";
-import { settingsStruct } from "../settings-schema";
+import { settingsStruct } from "../config/settings-schema";
 
 const metadataSchema = settingsStruct({
   instruction: settingsStruct({

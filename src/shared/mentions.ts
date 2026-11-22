@@ -3,7 +3,7 @@ import {
   settingsCheck,
   settingsPattern,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 /**
  * Names that address a bot without a typed Slack mention, shared by spoken

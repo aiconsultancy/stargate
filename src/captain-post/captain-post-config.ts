@@ -5,7 +5,7 @@ import {
   settingsPattern,
   settingsRefine,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 /**
  * Opt-in `stargate_post`: the bot's captain may post to channels its access rules
