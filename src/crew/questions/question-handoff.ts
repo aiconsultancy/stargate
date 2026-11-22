@@ -7,7 +7,7 @@ import {
   type QuestionAnswer,
 } from "../../questions/questions";
 import { settingsStruct } from "../../config/settings-schema";
-import { messagePortableSchema as portable } from "../message-tool-input";
+import { messagePortableSchema as portable } from "../messaging/message-tool-input";
 import type { CrewTask } from "../execution/state";
 
 const id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));

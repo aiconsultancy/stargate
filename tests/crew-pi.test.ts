@@ -13,7 +13,11 @@ import {
 } from "../src/crew/execution/engine";
 import { canExpandCrew } from "../src/crew/execution/identity";
 import { piDefinitionPath } from "../src/crew/instructions";
-import type { MesijInbox, MesijMessage, MesijSend } from "../src/crew/mesij";
+import type {
+  MesijInbox,
+  MesijMessage,
+  MesijSend,
+} from "../src/crew/messaging/mesij";
 import type { PiCrewBinding } from "../src/crew/pi/pi-extension";
 import {
   PiCrewWorkers,

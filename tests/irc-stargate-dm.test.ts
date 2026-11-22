@@ -7,7 +7,7 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
-import type { OutboxPage } from "../src/crew/irc-rpc";
+import type { OutboxPage } from "../src/crew/messaging/irc-rpc";
 import { Gateway } from "../src/gateway/gateway";
 import type { CrewLink } from "../src/irc/crew-link";
 import { copyText, IrcShip } from "../src/irc/ship";

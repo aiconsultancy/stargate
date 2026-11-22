@@ -10,8 +10,8 @@ import {
   type CrewOptions,
   type CrewSessions,
 } from "../src/crew/execution/engine";
-import { IrcSessions } from "../src/crew/irc";
-import type { MesijClient, MesijMessage } from "../src/crew/mesij";
+import { IrcSessions } from "../src/crew/messaging/irc";
+import type { MesijClient, MesijMessage } from "../src/crew/messaging/mesij";
 import { teamSchema } from "../src/crew/team";
 import { outboxFixture, outboxNow } from "./fixtures/irc-outbox";
 

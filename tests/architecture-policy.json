@@ -2,6 +2,20 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "aliases": {
+    "src/crew/messaging.ts": [
+      "src/crew/messaging.ts",
+      "src/crew/messaging/messaging.ts"
+    ],
+    "src/crew/message-tool-input.ts": [
+      "src/crew/message-tool-input.ts",
+      "src/crew/messaging/message-tool-input.ts"
+    ],
+    "src/crew/mesij.ts": ["src/crew/mesij.ts", "src/crew/messaging/mesij.ts"],
+    "src/crew/irc.ts": ["src/crew/irc.ts", "src/crew/messaging/irc.ts"],
+    "src/crew/irc-rpc.ts": [
+      "src/crew/irc-rpc.ts",
+      "src/crew/messaging/irc-rpc.ts"
+    ],
     "src/crew/pi-worker.ts": [
       "src/crew/pi-worker.ts",
       "src/crew/pi/pi-worker.ts"

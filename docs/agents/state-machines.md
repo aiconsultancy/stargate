@@ -80,7 +80,7 @@ unavailable.
 | Crew waiting setting        | Authorize captain → persist delay or off → apply on next turn                                   | Workers cannot change captain settings.                                                                                              |
 
 Crew state belongs to `crew/execution/state.ts` and `crew/execution/engine.ts`. The other owners
-are `crew/mesij.ts`, `crew/compaction.ts`, `crew/controls/models.ts`, `crew/history.ts`,
+are `crew/messaging/mesij.ts`, `crew/compaction.ts`, `crew/controls/models.ts`, `crew/history.ts`,
 `crew/controls/waiting.ts`, and `profile.ts`.
 
 A dispatching reservation left after a process interruption does not prove SDK

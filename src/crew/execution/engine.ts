@@ -61,13 +61,17 @@ export { crewInputBranches, crewInputSchema } from "../input/crew-tool-input";
 export type { CrewInput } from "../input/crew-tool-input";
 import { CrewHistoryRPC } from "../history/history-rpc";
 import { crewFingerprint } from "./identity";
-import { MesijClient, type MesijMessage } from "../mesij";
+import { MesijClient, type MesijMessage } from "../messaging/mesij";
 import { crewMessageMetadataKey, resumeMessageID } from "../message-protocol";
-import { CrewMessaging, type MailRoute, mailInputSchema } from "../messaging";
+import {
+  CrewMessaging,
+  type MailRoute,
+  mailInputSchema,
+} from "../messaging/messaging";
 import { readInputOrigin } from "./origin";
 import { piCrewToolDefinitions } from "../pi/pi-extension";
 
-export { mailInputSchema } from "../messaging";
+export { mailInputSchema } from "../messaging/messaging";
 
 import { redactCredentials } from "../../lib/credentials";
 import { journalInputSchema } from "../reporting/journal";

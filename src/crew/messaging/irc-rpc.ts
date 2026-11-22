@@ -1,8 +1,8 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
-import { settingsPattern, settingsStruct } from "../config/settings-schema";
+import { settingsPattern, settingsStruct } from "../../config/settings-schema";
 import { messagePortableSchema } from "./message-tool-input";
-import { effectProjectKeySchema } from "./input/project-options";
+import { effectProjectKeySchema } from "../input/project-options";
 
 const sessionID = Schema.String.check(
   Schema.isMaxCodePoints(256),

@@ -23,7 +23,7 @@ import {
 } from "../src/crew/execution/engine";
 import { fleetCrewStatusSchema } from "../src/crew/reporting/fleet-status";
 import { journalInputSchema } from "../src/crew/reporting/journal";
-import type { MesijClient, MesijMessage } from "../src/crew/mesij";
+import type { MesijClient, MesijMessage } from "../src/crew/messaging/mesij";
 import plugin from "../src/crew/plugin";
 import {
   effectProjectKeySchema,

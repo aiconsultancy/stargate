@@ -9,7 +9,7 @@ import {
   type IrcConfig,
   secret,
 } from "../config";
-import { type OutboxPage, outboxMaxAgeMs } from "../crew/irc-rpc";
+import { type OutboxPage, outboxMaxAgeMs } from "../crew/messaging/irc-rpc";
 import {
   dispatchRequestTurn,
   ircDispatchOffer,

@@ -12,13 +12,13 @@ import {
   historyInputBranches,
   historyInputSchema,
 } from "../src/crew/history/history";
-import { CrewIrc, outboxPageSchema } from "../src/crew/irc-rpc";
-import { messageOpenCodeInput } from "../src/crew/message-tool-input";
+import { CrewIrc, outboxPageSchema } from "../src/crew/messaging/irc-rpc";
+import { messageOpenCodeInput } from "../src/crew/messaging/message-tool-input";
 import {
   dmInputSchema,
   mailInputBranches,
   mailInputSchema,
-} from "../src/crew/messaging";
+} from "../src/crew/messaging/messaging";
 import { piCrewExtension } from "../src/crew/pi/pi-extension";
 import { CrewReporting } from "../src/crew/reporting/report-rpc";
 import { waitingInputSchema } from "../src/crew/controls/waiting";
