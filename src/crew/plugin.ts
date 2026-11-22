@@ -49,8 +49,8 @@ import {
   CrewQuestionHandoff,
   CrewQuestionRpc,
   crewQuestionConsumerLeaseMs,
-} from "./question-handoff";
-import { CrewQuestions, crewQuestionInputSchema } from "./questions";
+} from "./questions/question-handoff";
+import { CrewQuestions, crewQuestionInputSchema } from "./questions/questions";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
 import { CrewError } from "./state";

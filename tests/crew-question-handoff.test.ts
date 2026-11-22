@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { CrewQuestionHandoff } from "../src/crew/question-handoff";
+import { CrewQuestionHandoff } from "../src/crew/questions/question-handoff";
 import type { CrewTask } from "../src/crew/state";
 import type { NativeQuestion } from "../src/questions/questions";
 
