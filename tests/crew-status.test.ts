@@ -15,13 +15,17 @@ import { MemberActivityStore } from "../src/crew/member-activity";
 import { teamSchema } from "../src/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
 import { CrewUI, crewStatusView } from "../src/slack/crew-ui";
-import type { CronView } from "../src/cron/ui";
+import type { CronView, SlackAck } from "../src/cron/ui";
 import { bot, identity } from "./fixtures";
 import {
   copyCrewDatabase,
   historyTaskID,
   statusHistoryFixture,
 } from "./fixtures/database-reuse";
+
+export type CrewUIAckCompatibility<
+  T extends SlackAck = Parameters<CrewUI["command"]>[1],
+> = T;
 
 async function fixture(history = false) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-member-status-"));

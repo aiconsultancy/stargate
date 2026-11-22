@@ -1,3 +1,4 @@
+import type { ViewsOpenArguments } from "@slack/web-api";
 import { Result, Schema } from "effect";
 import type { Logger } from "pino";
 import type { AgentBackend } from "../backends/backend";
@@ -8,7 +9,6 @@ import {
   type CrewStatusTask,
   crewStatusSchema,
 } from "../shared/crew-status";
-import type { CronView, SlackAck } from "../cron/ui";
 import {
   formatQuota,
   type QuotaSnapshot,
@@ -21,9 +21,12 @@ import {
 } from "../gateway/routing";
 import { settingsPattern } from "../config/settings-schema";
 
+type CrewView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
+type SlackAck = (payload?: Record<string, unknown>) => Promise<void>;
+
 export interface CrewUIApi {
-  open(triggerID: string, view: CronView): Promise<string>;
-  update(viewID: string, view: CronView): Promise<void>;
+  open(triggerID: string, view: CrewView): Promise<string>;
+  update(viewID: string, view: CrewView): Promise<void>;
 }
 const id = Schema.String.check(
   Schema.isMinCodePoints(1),
@@ -53,7 +56,7 @@ const section = (text: string) => ({
   type: "section" as const,
   text: plain(redactCredentials(text, 3000)),
 });
-function notice(text: string, title = "Crew activity"): CronView {
+function notice(text: string, title = "Crew activity"): CrewView {
   return {
     type: "modal",
     title: plain(title),
@@ -81,7 +84,7 @@ export function crewStatusView(
   status: CrewStatus,
   detail: boolean,
   now = Date.now(),
-): CronView {
+): CrewView {
   const blocks = [
     section(
       "Read-only snapshot. Stored running/ready state is not proof of live execution. No work is started, retried or repaired. Close and run /stargate crew [member] again to refresh. Times may be unknown for older tasks.",
@@ -153,7 +156,7 @@ export function crewStatusView(
 export function quotaStatusView(
   snapshot: QuotaSnapshot,
   now = Date.now(),
-): CronView {
+): CrewView {
   // At most 10 accounts x 16 windows. Group each account, not one block per row.
   const lines = formatQuota(snapshot, now);
   const blocks = [section(lines.slice(0, 2).join("\n"))];

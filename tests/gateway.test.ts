@@ -13,6 +13,12 @@ import { Store } from "../src/gateway/store";
 import { ThreadContextUnavailable } from "../src/gateway/thread-context";
 import { bot, event, identity } from "./fixtures";
 
+export type GatewayAckCompatibility<
+  T extends Parameters<typeof handleSlackRequest>[0]["ack"] = Parameters<
+    Gateway["configInteraction"]
+  >[1],
+> = T;
+
 const stores: Store[] = [];
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();

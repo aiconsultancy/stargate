@@ -1,7 +1,6 @@
 import type { ActivityWatch } from "../activity/activity";
 import type { Attachment } from "../attachments/attachments";
 import type { FleetCrewStatus } from "../crew/fleet-status";
-import type { PiCrewBinding } from "../crew/pi-extension";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
 import type { CronAdvanced, CronEvaluation } from "../cron/advanced";
 import type {
@@ -302,8 +301,19 @@ export interface AgentBackend {
   close(): Promise<void>;
 }
 
+type CrewBinding = {
+  authorize(conversationID: string): void;
+  run(
+    name: string,
+    input: unknown,
+    conversationID: string,
+    id: string,
+    signal: AbortSignal,
+  ): Promise<unknown>;
+};
+
 export type BackendContext = {
   dataDirectory: string;
-  crew?: PiCrewBinding;
+  crew?: CrewBinding;
   workingAgreement?: { path: string; owns(conversationID: string): boolean };
 };
