@@ -389,7 +389,7 @@ test("accepted Stop survives restart and failed delivery without replay", async 
   f.store.saveSession(f.job.conversation, "surviving-session");
   f.store.savePreview(f.job.id, 0, "2.000");
   expect(f.gateway.cancel(f.payload())).toBe(true);
-  expect(f.store.interruptedSessions(f.gateway.key)).toEqual([
+  expect(f.store.transcript.interruptedSessions(f.gateway.key)).toEqual([
     "surviving-session",
   ]);
   f.store.recover(f.gateway.key);

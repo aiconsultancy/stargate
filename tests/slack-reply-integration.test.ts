@@ -258,7 +258,10 @@ test("transcript catch-up prepares each reply whole and persists its chunks", as
   f.gateway.settle("session");
   await f.gateway.catchUp(f.signal);
   // Each settled reply is its own source; the batch is not concatenated.
-  const rows = f.store.transcriptRows(f.gateway.key, turn.conversation);
+  const rows = f.store.transcript.transcriptRows(
+    f.gateway.key,
+    turn.conversation,
+  );
   expect(rows.length).toBeGreaterThan(0);
   for (const row of rows)
     for (const chunk of row.response) expect(typeof chunk).toBe("object");
@@ -292,6 +295,6 @@ test("store text readers map prepared chunks to display text", () => {
   store.running(job.id);
   expect(store.respond(job.id, chunks)).toEqual(chunks);
   expect(store.scheduledResult(key, job.id)?.text).toBe("Prepared\n\nPlain");
-  expect(store.replies(key, "c")).toEqual([chunks]);
+  expect(store.transcript.replies(key, "c")).toEqual([chunks]);
   store.close();
 });

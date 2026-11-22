@@ -131,10 +131,9 @@ type CrewRead = {
  */
 export function dashboardSource(
   ships: readonly DashboardShip[],
-  store: Pick<
-    Store,
-    "queueCounts" | "recentJobs" | "sessionIDs" | "ownsSession"
-  >,
+  store: Pick<Store, "queueCounts" | "recentJobs"> & {
+    transcript: Pick<Store["transcript"], "sessionIDs" | "ownsSession">;
+  },
   cronStore: Pick<CronStore, "report" | "recentRuns">,
   now: () => number = Date.now,
   {
@@ -364,7 +363,7 @@ export function dashboardSource(
     for (let depth = 0; depth < MAX_DEPTH; depth++) {
       if (
         current === ship.backend.sessionID ||
-        store.ownsSession(ship.key, current)
+        store.transcript.ownsSession(ship.key, current)
       )
         return true;
       // Unreadable crew roots deny crew sessions; they never widen access.
@@ -395,7 +394,7 @@ export function dashboardSource(
       };
     const pinned = ship.backend.sessionID;
     // One row beyond the page shows that older conversation roots exist.
-    const mapped = store
+    const mapped = store.transcript
       .sessionIDs(ship.key, HISTORY_PAGE + 1)
       .filter((id) => id !== pinned);
     const capacity = HISTORY_PAGE - (pinned ? 1 : 0);

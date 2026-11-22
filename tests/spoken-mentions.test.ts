@@ -338,7 +338,7 @@ test("a voice message that does not name the bot leaves nothing behind", async (
   expect(JSON.stringify(f.store.recentJobs(f.gateway.key, 5))).not.toContain(
     "PRIVATE_TYPED",
   );
-  expect(f.store.inputFiles(1)).toEqual([]);
+  expect(f.store.attachmentRecords.inputFiles(1)).toEqual([]);
   expect(f.sessions).toEqual([]);
   // Slack redelivery of the same event is deduplicated: no second transcription.
   expect(f.gateway.accept(message({ text: "typed PRIVATE_TYPED" }))).toBe(
@@ -410,11 +410,15 @@ test("held and ignored messages never become a thread's delivery target", () => 
     user: "U789",
     gate: "spoken",
   });
-  expect(store.transcriptTarget(key, conversation)?.user).toBe("U123");
+  expect(store.transcript.transcriptTarget(key, conversation)?.user).toBe(
+    "U123",
+  );
   const id = store.queuedJob(key, "C123:1.100")?.id;
   if (id === undefined) throw new Error("Missing held job");
   store.discard(id);
-  expect(store.transcriptTarget(key, conversation)?.user).toBe("U123");
+  expect(store.transcript.transcriptTarget(key, conversation)?.user).toBe(
+    "U123",
+  );
   expect(store.enqueue({ ...base, eventId: "C123:1.100", user: "U789" })).toBe(
     false,
   );

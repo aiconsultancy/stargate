@@ -58,7 +58,7 @@ export class FleetResults {
     const { control, store, botKey, sessionID, account, backend } =
       this.options;
     if (!control.resultsEnabled) return;
-    for (const job of store.pendingFleetJobs(botKey)) {
+    for (const job of store.fleet.pendingFleetJobs(botKey)) {
       signal.throwIfAborted();
       if (job.fleet?.kind !== "assignment") continue;
       if (job.input)
@@ -92,7 +92,7 @@ export class FleetResults {
             signal.throwIfAborted();
           }
         }
-        store.saveMakers(job.id, makers);
+        store.fleet.saveMakers(job.id, makers);
       }
       const output = JSON.parse(job.response ?? "[]") as ReplyChunk[];
       const completion: FleetCompletion = {
@@ -111,7 +111,7 @@ export class FleetResults {
         humanApproval: false,
       };
       control.complete(job.botKey, job.eventId, completion);
-      store.fleetPublished(job.id);
+      store.fleet.fleetPublished(job.id);
     }
     for (const { origin, completion } of control.pendingResults()) {
       signal.throwIfAborted();

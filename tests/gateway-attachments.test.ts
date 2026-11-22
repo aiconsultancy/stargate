@@ -74,7 +74,7 @@ async function fixture(pinned = false) {
     async putUpload(_url, data) {
       expect(data).toEqual(png);
       expect(
-        store.attachments(
+        store.attachmentRecords.attachments(
           store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0]?.id ?? 1,
         )[0]?.phase,
       ).toBe("reserved");
@@ -173,7 +173,7 @@ test("attachment eval: Slack file-only request persists IDs and reaches agent as
   const request = f.source("D123", "", "1.000", [{ id: "FPROOF" }]);
   expect(f.gateway.accept(request)).toBe(true);
   expect(f.gateway.accept(request)).toBe(false);
-  expect(f.store.inputFiles(1)).toEqual(["FPROOF"]);
+  expect(f.store.attachmentRecords.inputFiles(1)).toEqual(["FPROOF"]);
   await f.drain();
   expect(f.prompts).toEqual([
     { text: "", files: [{ name: "proof.png", mime: "image/png", data: png }] },
@@ -229,7 +229,9 @@ for (const shared of [true, false]) {
     f.gateway.accept(f.source("D123", "Screen grab proof", "1.000"));
     await f.drain();
     expect(f.uploads).toHaveLength(1);
-    expect(f.store.attachments(1)[0]?.phase).toBe("completing");
+    expect(f.store.attachmentRecords.attachments(1)[0]?.phase).toBe(
+      "completing",
+    );
     await f.drain();
     expect(f.prompts).toHaveLength(1);
     expect(f.uploads).toHaveLength(1);
@@ -240,7 +242,7 @@ for (const shared of [true, false]) {
     expect(f.posts.map((post) => post.text).join("\n")).not.toContain(
       "file://",
     );
-    expect(f.store.attachments(1)[0]?.phase).toBe(
+    expect(f.store.attachmentRecords.attachments(1)[0]?.phase).toBe(
       shared ? "shared" : "unavailable",
     );
     if (!shared) expect(f.posts.at(-1)?.text).toContain("unconfirmed");
@@ -260,8 +262,8 @@ test("attachment eval: natural long captions are normalized before one-shot uplo
   expect(title).not.toContain("/");
   expect(title).not.toContain("\t");
   expect(title.length).toBeLessThanOrEqual(255);
-  expect(f.store.attachments(1)[0]?.title).toBe(title);
-  expect(f.store.attachments(1)[0]?.phase).toBe("shared");
+  expect(f.store.attachmentRecords.attachments(1)[0]?.title).toBe(title);
+  expect(f.store.attachmentRecords.attachments(1)[0]?.phase).toBe("shared");
   expect(f.posts.some((post) => post.text.includes("unavailable"))).toBe(false);
   expect(f.counters()).toEqual({ reservations: 1, puts: 1 });
 });
@@ -272,13 +274,15 @@ test("attachment eval: restart reconciles persisted upload without a second prom
   f.failCompletion(true);
   f.gateway.accept(f.source("D123", "Send proof", "1.000"));
   await f.drain();
-  const before = f.store.attachments(1)[0];
+  const before = f.store.attachmentRecords.attachments(1)[0];
   expect(before?.phase).toBe("completing");
   await f.gateway.close();
   f.closeStore();
   const reopened = new Store(f.database);
   cleanup.push(() => reopened.close());
-  expect(reopened.attachments(1)[0]?.fileID).toBe(before?.fileID);
+  expect(reopened.attachmentRecords.attachments(1)[0]?.fileID).toBe(
+    before?.fileID,
+  );
   const gateway = new Gateway(
     f.config,
     identity,
@@ -290,7 +294,7 @@ test("attachment eval: restart reconciles persisted upload without a second prom
   cleanup.push(() => gateway.close());
   for (const job of reopened.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20))
     await gateway.process(job, f.signal);
-  expect(reopened.attachments(1)[0]?.phase).toBe("shared");
+  expect(reopened.attachmentRecords.attachments(1)[0]?.phase).toBe("shared");
   expect(f.uploads).toHaveLength(1);
   expect(f.prompts).toHaveLength(1);
   expect(f.posts).toHaveLength(1);

@@ -325,13 +325,13 @@ test("Store fleet makers preserve read101/write100 and immutable first-save beha
     if (!job) throw new Error("Missing fixture job");
     expect(job.fleet).toEqual({ kind: "assignment", dispatchID: "dispatch" });
     expect(() =>
-      store.saveMakers(
+      store.fleet.saveMakers(
         job.id,
         Array.from({ length: 101 }, () => maker),
       ),
     ).toThrow();
-    store.saveMakers(job.id, [maker]);
-    store.saveMakers(job.id, [{ ...maker, agent: "different" }]);
+    store.fleet.saveMakers(job.id, [maker]);
+    store.fleet.saveMakers(job.id, [{ ...maker, agent: "different" }]);
     expect(store.jobByEvent("bot", "event")?.makers).toEqual([maker]);
     const db = new Database(path);
     try {

@@ -336,7 +336,7 @@ test("saved Stop dry-reads a summarizing capture without admitting a report", as
     });
     const job = store.ready("bot", Date.now(), 1)[0];
     if (!job) throw new Error("Missing job");
-    store.saveActivity(job.id, {
+    store.activityRecords.saveActivity(job.id, {
       capture: capture.id,
       ts: "box",
       revision: 0,
@@ -380,7 +380,7 @@ test("saved Stop dry-reads a summarizing capture without admitting a report", as
       () => ({ detail: "summary" }),
       () => true,
       pino({ enabled: false }),
-      { store },
+      { store: store.activityRecords },
     );
     await delivery.resume(job, "captain-a", f.caller().signal);
     await published.promise;

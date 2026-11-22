@@ -81,7 +81,9 @@ test("migration preserves old jobs and accepted Stop survives database reopen", 
     migrated.close();
     const reopened = new Store(path);
     try {
-      expect(reopened.interruptedSessions("bot")).toEqual(["session"]);
+      expect(reopened.transcript.interruptedSessions("bot")).toEqual([
+        "session",
+      ]);
       reopened.recover("bot");
       expect(reopened.ready("bot", 0, 1)[0]?.response).toContain(
         "stop request",
@@ -125,7 +127,9 @@ test("a reply is stored only for a running job", () => {
     expect(store.finish(id)).toBe(true);
     expect(() => store.respond(id, ["late"])).toThrow(JobTransitionRefused);
     expect(store.jobStatus("bot", id)).toBe("done");
-    expect(store.replies("bot", "thread-event")).toEqual([["reply"]]);
+    expect(store.transcript.replies("bot", "thread-event")).toEqual([
+      ["reply"],
+    ]);
   } finally {
     store.close();
   }

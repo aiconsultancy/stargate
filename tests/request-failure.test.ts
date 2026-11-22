@@ -390,7 +390,7 @@ test("the gateway reports the category in the card and in the log, never provide
     await gateway.process(job, new AbortController().signal);
     expect(cards).toEqual(["provider:quota:429:idle"]);
     expect(store.failure(job.id)).toBe("provider:quota:429:idle");
-    expect(store.replies(gateway.key, job.conversation)).toEqual([
+    expect(store.transcript.replies(gateway.key, job.conversation)).toEqual([
       [failureText("provider:quota:429:idle")],
     ]);
     const logged = lines.join("");
@@ -402,7 +402,7 @@ test("the gateway reports the category in the card and in the log, never provide
       logged,
       ...posts,
       ...cards.map((cause) => JSON.stringify(failureContent(cause))),
-      JSON.stringify(store.replies(gateway.key, job.conversation)),
+      JSON.stringify(store.transcript.replies(gateway.key, job.conversation)),
     ].join("\n");
     for (const secret of secrets) expect(visible).not.toContain(secret);
     expect(containsCredential(visible)).toBe(false);

@@ -273,7 +273,7 @@ test("attachment URLs are deduplicated while source snapshots remain separate an
   );
   const job = store.jobByEvent("captain", "#bridge:a");
   if (!job) throw new Error("Missing burst");
-  expect(store.inputFiles(job.id)).toEqual([
+  expect(store.attachmentRecords.inputFiles(job.id)).toEqual([
     "https://files.test/one",
     "https://files.test/two",
   ]);

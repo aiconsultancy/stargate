@@ -604,6 +604,8 @@
         "src/gateway.ts",
         "src/gateway/ports.ts",
         "src/gateway/store-types.ts",
+        "src/gateway/row-codec.ts",
+        "src/gateway/transcript-store.ts",
         "src/peers.ts",
         "src/routing.ts",
         "src/store.ts",
@@ -692,16 +694,29 @@
       "files": [
         "src/activity-delivery.ts",
         "src/activity-slack.ts",
-        "src/activity.ts"
+        "src/activity.ts",
+        "src/activity/store.ts"
       ],
-      "public": ["src/activity-delivery.ts", "src/activity.ts"],
+      "public": [
+        "src/activity-delivery.ts",
+        "src/activity.ts",
+        "src/activity/store.ts"
+      ],
       "contracts": ["src/activity.ts"],
       "neighbours": ["backends", "config", "gateway", "shared", "slack"]
     },
     "attachments": {
       "layer": "slices",
-      "files": ["src/attachment-delivery.ts", "src/attachments.ts"],
-      "public": ["src/attachment-delivery.ts", "src/attachments.ts"],
+      "files": [
+        "src/attachment-delivery.ts",
+        "src/attachments.ts",
+        "src/attachments/store.ts"
+      ],
+      "public": [
+        "src/attachment-delivery.ts",
+        "src/attachments.ts",
+        "src/attachments/store.ts"
+      ],
       "contracts": ["src/attachments.ts"],
       "neighbours": ["config", "gateway", "lib"]
     },
@@ -897,6 +912,7 @@
         "src/fleet/plugin.ts",
         "src/fleet/protocol.ts",
         "src/fleet/results.ts",
+        "src/fleet/store.ts",
         "src/fleet/reviews.ts"
       ],
       "public": [
@@ -906,7 +922,8 @@
         "src/fleet-policy.ts",
         "src/fleet-source.ts",
         "src/fleet/plugin.ts",
-        "src/fleet/protocol.ts"
+        "src/fleet/protocol.ts",
+        "src/fleet/store.ts"
       ],
       "contracts": [
         "src/dispatch/protocol.ts",

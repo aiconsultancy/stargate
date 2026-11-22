@@ -248,9 +248,9 @@ test("a confirmed activity post supplies local ownership and its exact running t
   expect(f.store.running(owner.id, owner.text)).toBe(true);
   f.store.saveInput(f.gateway.key, owner.id, "msg_original", "ses_captain");
   const progress = { capture: "capture", revision: 1, done: false };
-  f.store.saveActivity(owner.id, progress);
+  f.store.activityRecords.saveActivity(owner.id, progress);
   expect(await f.gateway.receive(reaction())).toBe(false);
-  f.store.saveActivity(owner.id, { ...progress, ts: "2.000" });
+  f.store.activityRecords.saveActivity(owner.id, { ...progress, ts: "2.000" });
   expect(await f.gateway.receive(reaction())).toBe(true);
   await f.gateway.pollFollowUps(signal);
   expect(f.steers.map(({ context }) => sourceLine(context))).toEqual([

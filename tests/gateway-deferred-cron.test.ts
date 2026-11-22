@@ -410,7 +410,7 @@ for (const pinned of [false, true]) {
     expect(result?.text).not.toContain("immediate question");
     expect(result?.text).not.toContain("stargate:react");
     expect(
-      f.store
+      f.store.transcript
         .transcriptRows(f.gateway.key, conversation)
         .every((row) => row.status === "done"),
     ).toBe(true);
@@ -461,7 +461,7 @@ test("deferred activity cannot start or resume and grants no maintenance permit"
     throw new Error("Unexpected deferred activity resume");
   };
   const id = f.enqueue();
-  f.store.saveActivity(id, {
+  f.store.activityRecords.saveActivity(id, {
     capture: "legacy-capture",
     revision: 0,
     done: false,
