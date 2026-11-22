@@ -13,6 +13,10 @@ const testFile = /\.test\.ts$/;
 // Files read at runtime have no import edge. Keep their readers in this table.
 const readers = [
   {
+    path: /^scripts\/test-compare(?:-report)?\.ts$/,
+    tests: /^tests\/test-compare\.test\.ts$/,
+  },
+  {
     path: /^tests\/architecture-(baseline|policy)\.json$/,
     tests: /^tests\/architecture\.test\.ts$/,
   },

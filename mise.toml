@@ -71,6 +71,10 @@ run = "bun run typecheck && bun run lint && bun scripts/hooks/affected-tests.ts"
 description = "Run tests"
 run = "bun test"
 
+[tasks.test-compare]
+description = "Measure repeated test failures and durations on one or two trees"
+run = "bun scripts/test-compare.ts"
+
 [tasks.architecture-refresh]
 description = "Preview architecture inventory; name closure additions explicitly; add --write to save"
 run = "bun scripts/refresh-architecture-baseline.ts --root ."

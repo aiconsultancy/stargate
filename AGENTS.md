@@ -37,6 +37,7 @@ typecheck, lint, and affected tests. Untrusted paths defer to hosted checks by
 default; selection errors still run the full suite. Set
 `STARGATE_UNTRUSTED_TESTS=full` to opt in to full tests for untrusted paths.
 Hosted **Quality checks** explicitly runs the full check before merge.
+For repeated failure measurements and load reporting, see [Repeated test comparisons](docs/development.md#repeated-test-comparisons).
 The affected-test limit defaults to 20 files. Larger selected sets are named
 and deferred to hosted Quality; typecheck and lint still run locally.
 Set `STARGATE_AFFECTED_TEST_LIMIT` to a nonnegative integer to change the

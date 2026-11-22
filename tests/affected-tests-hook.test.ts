@@ -483,6 +483,8 @@ describe("affected-tests hook", () => {
   );
 
   const readerCases: [string, string[]][] = [
+    ["scripts/test-compare.ts", ["tests/test-compare.test.ts"]],
+    ["scripts/test-compare-report.ts", ["tests/test-compare.test.ts"]],
     ["tests/architecture-baseline.json", ["tests/architecture.test.ts"]],
     ["tests/architecture-policy.json", ["tests/architecture.test.ts"]],
     [

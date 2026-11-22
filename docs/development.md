@@ -71,6 +71,116 @@ create independent repositories. An empty staged diff, as in CI's
 This is not full-suite evidence. CI's separate `check` step supplies that evidence.
 Use `mise run check` or `make check` to run the full suite locally when needed.
 
+### Repeated test comparisons
+
+Use `test-compare` when a timeout occurs once, or when a change might slow a
+test path. It measures observed failures and durations. It is not a commit
+gate or a way to identify the cause of a failure. A failure report must state
+the load average at the start of the test invocation, or say `unavailable`.
+
+Compare two refs with one test-file invocation per tree per pair:
+
+```sh
+mise run test-compare -- --base origin/main --candidate HEAD \
+  --file tests/irc-audit.test.ts --runs 40 --load ambient
+```
+
+Measure one working tree without a base:
+
+```sh
+mise run test-compare -- --file tests/irc-audit.test.ts --runs 20
+```
+
+`--candidate` accepts a commit ref or an existing Git tree directory. A path
+captures its tracked working files, including uncommitted edits. Stage new
+files before capture; ignored and untracked files are not copied. The default
+single tree is the caller's current working tree. Stop editing while it is
+captured. Results record the requested ref or path, its commit SHA and the
+exact snapshot tree ID. The command creates no commits and does not check out,
+reset, install into or clean the caller's tree.
+
+The command creates private clones under `$TMPDIR` (the platform temporary
+directory if unset). Each run restores its private source snapshot. It copies
+installed dependencies into the temporary workspace, with safe internal
+symlinks, and shares that private copy between compatible trees. The command
+does not fetch or install packages during preparation. Allow enough temporary
+disk space for the installed dependencies. The snapshot's `bun.lock` must match
+the installed source tree. Use `--dependencies /path/to/matching/tree` if it
+needs another existing install. External dependency symlinks are refused.
+Tests still execute trusted code; this is not an operating-system sandbox.
+
+Runs are ordered base, candidate, base, candidate. No runs execute in parallel.
+An optional `--lock /path/to/lock` holds a `flock` lock for each invocation;
+`STARGATE_TEST_COMPARE_LOCK` supplies the same default. The path must be outside
+source trees. No lock is configured
+by the repository. `flock` must be installed to use that option. Do not take
+the same lock outside the command and pass it again with `--lock`.
+
+Load modes:
+
+- `none` (default): add no load. This does not claim the host was quiet.
+- `ambient`: add no load and label the run as an ambient-host measurement.
+- `synthetic`: after lock admission, start one CPU worker and one I/O worker
+  that rewrites and syncs a private 1 MiB file at 20 ms intervals. Workers
+  stop before the run's lock is released. The command refuses this mode when
+  the starting 1-minute load exceeds 1.5 times the available core count, or
+  when load is unavailable. Use ambient instead, or set an explicit ceiling
+  with `--max-load NUMBER`. Do not add synthetic load to an already busy host.
+
+The command needs Linux `/proc` process identities and POSIX process groups.
+Unavailable identity facts fail closed before work starts. On normal exit,
+errors, SIGINT and
+SIGTERM, it kills and reaps its worker/test groups, checks that no group
+survives, then releases the lock and removes its temporary clones and load
+files. Each cleanup attempt bounds direct-child closure and group-disappearance
+waiting to one second, then repeats SIGKILL and reports an infrastructure
+failure if the group remains. Forced SIGKILL or machine failure cannot run
+cleanup handlers;
+synthetic workers also have an independent bounded lifetime. Tests remain
+responsible for subprocesses that deliberately leave their process group.
+
+Before any group signal, the command checks its recorded spawn leader and
+session. The first signal captures group-member PID/start-time identities;
+repeated signals require every current member to match that set and session.
+Unknown members, changed identities, or unreadable facts withhold the signal
+and return infrastructure exit 2. A child born after the first snapshot can
+be conservatively refused. Inspection and signalling are not atomic; the
+identity checks cannot exclude same-clock-tick reuse or privileged external
+changes between them. The command is not a process-isolation sandbox.
+Cleanup failures name group/member IDs, start times and unreadable facts,
+the workspace retained/removed state, and the lock release state in the
+error, JSON result, and Markdown summary. Confirm identities again before
+manual intervention; a reported foreign replacement is not an owned worker.
+
+Output is a retained directory outside source trees. Its default is a separate
+`test-compare-results-*` directory under `$TMPDIR`; use `--output DIR` for a
+new or empty directory elsewhere. It contains `results.json`, raw logs and
+JUnit reports for each run, and `summary.md`. Reports can contain complete test
+messages; do not use live credentials in tests or publish logs without review.
+Partial results are retained when measurement is interrupted.
+
+The command prints its rule before the first run: compare failed file-run
+counts. The verdict is candidate more, the same, fewer, or neither tree failed.
+Single-tree mode reports only its observed count. The summary includes failures
+out of completed runs, start-load ranges and each test's median, nearest-rank
+p95 and maximum duration. File and test durations come from Bun's JUnit
+reporter, not log scraping. Missing or invalid reports are infrastructure
+errors; a crashed runner is not counted as an ordinary failed test.
+
+The verdict makes no claim of statistical significance. Shared host load,
+run order and small samples can change the result. The command omits a rough
+sample-size estimate: that would require assumptions about independent trials
+and an effect size that these runs do not establish. Passing repetitions do
+not erase a previous failure or prove a cause.
+
+Exit 0 means measurement completed, even when tests failed. Infrastructure or
+usage errors exit nonzero; SIGINT/SIGTERM return 130/143 after successful group
+cleanup. Group cleanup failures return 2 even after a signal. Scripts can add
+`--fail-if-candidate-worse` to return 1 when a completed comparison finds more
+candidate failures. `--timeout-ms` bounds each test process (default five
+minutes, maximum thirty); `--runs` accepts 1 to 10000. Neither changes any
+test's own timeout. No commit hook or CI gate runs this command automatically.
+
 ### Local selection limit
 
 Pre-commit runs at most 20 selected test files by default. Set
