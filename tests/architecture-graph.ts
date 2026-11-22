@@ -1,4 +1,5 @@
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { isBuiltin } from "node:module";
 import {
   dirname,
   isAbsolute,
@@ -56,7 +57,7 @@ export interface ArchitecturePolicy {
 }
 
 /** IDs keep their first recorded spelling. No basename or content matching. */
-function sourceIdentities(
+export function sourceIdentities(
   files: Iterable<string>,
   policy: ArchitecturePolicy,
 ): ReadonlyMap<string, string> {
@@ -425,26 +426,53 @@ async function resolveSource(
   from: string,
   specifier: string,
   deleted: ReadonlySet<string>,
+  strictFile?: string,
 ) {
   if (isAbsolute(specifier) || specifier.startsWith("file:"))
     throw new Error(`${from}: absolute source import: ${specifier}`);
-  if (specifier.startsWith("."))
-    return resolveLocal(root, from, specifier, deleted);
+  if (specifier.startsWith(".")) {
+    try {
+      return await resolveLocal(root, from, specifier, deleted);
+    } catch (error) {
+      if (strictFile)
+        throw new Error(
+          `closure-addition:unresolved-import:${strictFile}:${specifier}`,
+        );
+      throw error;
+    }
+  }
   // Bun also resolves tsconfig paths and package.json imports. Bare package and
   // builtin imports are external; a local alias must not hide a source edge.
   let target: string;
   try {
     target = Bun.resolveSync(specifier, dirname(from));
   } catch {
+    if (strictFile)
+      throw new Error(
+        `closure-addition:unresolved-import:${strictFile}:${specifier}`,
+      );
     return undefined;
   }
-  if (!isAbsolute(target) || !inside(root, target)) return undefined;
+  if (!isAbsolute(target)) {
+    if (strictFile && !isBuiltin(specifier) && !specifier.startsWith("bun:"))
+      throw new Error(
+        `closure-addition:unresolved-import:${strictFile}:${specifier}`,
+      );
+    return undefined;
+  }
   const name = portable(relative(root, target));
   if (name.split("/").includes("node_modules")) return undefined;
+  if (!inside(root, target)) {
+    if (strictFile)
+      throw new Error(
+        `closure-addition:untracked-import:${strictFile}:${specifier}`,
+      );
+    return undefined;
+  }
   return name;
 }
 
-function importsOf(node: Node): string[] {
+function importsOf(node: Node, strictFile?: string): string[] {
   const imports = new Set<string>();
   const literal = (value: Node | undefined) => {
     if (
@@ -462,9 +490,17 @@ function importsOf(node: Node): string[] {
       isCallExpression(child) &&
       (child.expression.kind === SyntaxKind.ImportKeyword ||
         (isIdentifier(child.expression) && child.expression.text === "require"))
-    )
-      literal(child.arguments[0]);
-    else if (
+    ) {
+      const argument = child.arguments[0];
+      if (
+        strictFile &&
+        (!argument ||
+          (!isStringLiteral(argument) &&
+            !isNoSubstitutionTemplateLiteral(argument)))
+      )
+        throw new Error(`closure-addition:nonliteral-import:${strictFile}`);
+      literal(argument);
+    } else if (
       isImportEqualsDeclaration(child) &&
       isExternalModuleReference(child.moduleReference)
     )
@@ -480,6 +516,7 @@ export async function buildGraph(
   directory: string,
   directories: string[] = ["src"],
   deleted: ReadonlySet<string> = new Set(),
+  strictImports: ReadonlySet<string> = new Set(),
 ): Promise<SourceGraph> {
   const root = await realpath(directory);
   const files = (
@@ -515,9 +552,21 @@ export async function buildGraph(
           throw new Error(`Invalid source syntax: ${file}`);
         const edges = graph.get(portable(relative(root, file)));
         if (!edges) throw new Error(`Source not in graph: ${file}`);
-        for (const specifier of importsOf(source)) {
-          const target = await resolveSource(root, file, specifier, deleted);
+        const path = portable(relative(root, file));
+        const strictFile = strictImports.has(path) ? path : undefined;
+        for (const specifier of importsOf(source, strictFile)) {
+          const target = await resolveSource(
+            root,
+            file,
+            specifier,
+            deleted,
+            strictFile,
+          );
           if (!target) continue;
+          if (strictFile && !graph.has(target))
+            throw new Error(
+              `closure-addition:untracked-import:${strictFile}:${specifier}`,
+            );
           // Affected-test graphs retain imported data and known deleted targets.
           // The default architecture graph remains source-only.
           if (

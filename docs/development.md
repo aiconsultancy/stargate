@@ -150,7 +150,44 @@ It does not replace the architecture guards or the separate source-size check.
 Only `exceptions` are pruned; normal inventory refresh and guards stay intact.
 
 Use optional `--output PATH` for a JSON receipt outside the checkout, including
-in preview mode. Unknown and repeated options are errors.
+in preview mode. Unknown options and repeated single-value options are errors.
+
+### Named crew closure additions
+
+A slice extraction can put already-loaded code into another file. Jack's
+22 November 2026 decision permits that increase only when the PR names each
+new file and proves that its body was already loaded by the crew plugin.
+The tool cannot prove that code was moved rather than newly written.
+
+Name each new physical source file with repeatable
+`--allow-closure-addition FILE` arguments to `mise run architecture-refresh`.
+Preview first; add `--write` only after reviewing it. Names must exactly
+match the added member identities after the existing source alias mapping.
+Unused, duplicate, unknown and unnamed additions fail. Even an equal-count
+swap or an addition below an old count cap needs the explicit name.
+
+For each named file, the parser checks literal imports, re-exports and type
+imports, including literal dynamic imports and `require`. They must resolve
+to installed packages, built-ins or members of the base closure. A named
+addition cannot import another newly added member, even if both are named.
+Computed import/require calls and local non-source imports are refused.
+The ordinary graph resolver's source-path and symlink checks still apply.
+These checks do not prove body identity or account for arbitrary runtime
+loaders, filesystem reads, evaluation or package side effects. Those remain
+part of the PR's reviewer proof, with code movement and initialization order.
+
+Removals and named additions may combine, including a rename. Preview prints
+`closureAdditions` and `closureRemovals` separately, with each named file's
+logical identity, local import targets and passed checks. The same exact-set
+rule applies whether the total closure count rises, stays equal or falls.
+Without a new member identity, the existing no-option output is unchanged.
+
+The option changes no baseline format, exception permission, size permission,
+root or cycle allowance. All other checks remain required. A new slice file
+still needs normal slice membership and boundary classification in its PR.
+The architecture guard remains strict by identity; commit the measured
+baseline with the reviewed extraction. `--prune-stale` remains a separate,
+explicit operation on resolved exception identities.
 
 ### Strict baseline freshness
 

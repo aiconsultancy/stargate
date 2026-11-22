@@ -72,7 +72,7 @@ description = "Run tests"
 run = "bun test"
 
 [tasks.architecture-refresh]
-description = "Preview architecture inventory reductions; add --write to save"
+description = "Preview architecture inventory; name closure additions explicitly; add --write to save"
 run = "bun scripts/refresh-architecture-baseline.ts --root ."
 
 [tasks.strobe]
