@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { TurnProgress } from "../shared/turn-progress";
-import { type WaitingSettings, waitingPhrase } from "../gateway/waiting";
+import { waitingPhrase } from "../shared/waiting";
+import { type WaitingSettings } from "../config/waiting";
 import { isDefiniteRefusal, type OutgoingActivity } from "./connector";
 
 type Send = (

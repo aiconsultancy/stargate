@@ -10,7 +10,7 @@ import {
   isAllowedUser,
 } from "../gateway/routing";
 import { settingsPattern, settingsUUID } from "../config/settings-schema";
-import { botDisplayName } from "../gateway/waiting";
+import { botDisplayName } from "../shared/waiting";
 
 type PairingView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
 type SlackAck = (payload?: Record<string, unknown>) => Promise<void>;

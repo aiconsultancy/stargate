@@ -115,7 +115,8 @@ import {
 } from "../transcription/transcription";
 import { type TurnProgress, turnProgressText } from "../shared/turn-progress";
 import type { UpdateReceipt } from "../maintenance/update-notice";
-import { botDisplayName, resolveWaiting, waitingPhrase } from "./waiting";
+import { resolveWaiting } from "./waiting";
+import { botDisplayName, waitingPhrase } from "../shared/waiting";
 
 // Catch-up retries read history only; they never prompt the agent.
 const retryCeilingMs = 5 * 60 * 1000;
