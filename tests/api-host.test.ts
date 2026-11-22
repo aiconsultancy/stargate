@@ -381,6 +381,7 @@ test("absolute body deadlines return 503 after headers are ready despite trickli
     { requestMs: 100 },
   );
   let trickle: ReturnType<typeof setInterval> | undefined;
+  const held = holdTimeoutResponse();
   try {
     const body = await raw(
       host.socketPath,
@@ -393,6 +394,10 @@ test("absolute body deadlines return 503 after headers are ready despite trickli
       }),
     ]);
     trickle = setInterval(() => body.socket.write("a"), 15);
+    const { output, flush } = await held.queued;
+    expect(output.statusCode).toBe(503);
+    clearInterval(trickle);
+    flush();
     const response = await body.closed;
     expect(response).toContain("503");
     expect(response).toContain("request_timeout");
@@ -400,6 +405,7 @@ test("absolute body deadlines return 503 after headers are ready despite trickli
     expect(handle).not.toHaveBeenCalled();
     expect((await post(host.socketPath)).status).toBe(202);
   } finally {
+    held.restore();
     clearInterval(trickle);
     await host.close();
   }
