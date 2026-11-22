@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Predicate, Result, Schema } from "effect";
 import { z } from "zod";
 import { crewActivitySchema } from "../src/activity/activity";
-import { captainPostSchema } from "../src/captain-post/captain-post-config";
+import { captainPostSchema } from "../src/captain-post/config";
 import {
   backendSchema,
   botSchema,

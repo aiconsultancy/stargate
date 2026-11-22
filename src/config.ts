@@ -5,7 +5,7 @@ import { claudeBackendSchema, claudeToolNames } from "./backends/claude/config";
 import { codexBackendSchema } from "./backends/codex/config";
 import { crewActivitySchema } from "./activity/activity";
 import { apiV1ConfigSchema } from "./dashboard/api/v1/config";
-import { captainPostSchema } from "./captain-post/captain-post-config";
+import { captainPostSchema } from "./captain-post/config";
 import { cronjobsSchema } from "./cron/job-config";
 import { validateFleetPermissions } from "./fleet/permissions";
 import { fleetPolicySchema } from "./fleet/fleet-policy";
