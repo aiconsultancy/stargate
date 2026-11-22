@@ -202,6 +202,44 @@ describe("touched-zod hook", () => {
     }
   });
 
+  test("a stationary Zod consumer cannot rewrite a dynamic literal for a renamed target", async () => {
+    const root = await scenario();
+    try {
+      await mkdir(join(root, "src/old"));
+      await writeFile(join(root, "src/target.ts"), "export const value = 1;\n");
+      const before =
+        'import { z } from "zod";\n' +
+        "export const input = z.string();\n" +
+        "export async function load(value: string) {\n" +
+        "  const parsed = input.parse(value);\n" +
+        "  const target = await import('../target');\n" +
+        "  return { parsed, target };\n}\n";
+      await writeFile(join(root, "src/old/consumer.ts"), before);
+      git(root, "add", "-A");
+      git(root, "commit", "-m", "stationary dynamic consumer base");
+      const base = git(root, "rev-parse", "HEAD");
+      await mkdir(join(root, "src/next"));
+      await rename(
+        join(root, "src/target.ts"),
+        join(root, "src/next/target.ts"),
+      );
+      await writeFile(
+        join(root, "src/old/consumer.ts"),
+        before.replace("'../target'", "'../next/target'"),
+      );
+      git(root, "add", "-A");
+      git(root, "commit", "-m", "rename target only");
+      const changes = git(root, "diff", "--name-status", "-M", base, "HEAD");
+      expect(changes).toContain("M\tsrc/old/consumer.ts");
+      expect(changes).toContain("R100\tsrc/target.ts\tsrc/next/target.ts");
+      const result = runHook(root, base);
+      expect(result.status).toBe(1);
+      expect(result.output).toContain("src/old/consumer.ts");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("a retained Zod consumer follows a renamed import and reexport target", async () => {
     const root = await scenario();
     try {

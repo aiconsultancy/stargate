@@ -68,6 +68,8 @@ Keep backend adapters independent of Slack and preserve session isolation.
   requires an existing base file or Git-detected rename, with byte-identical
   source except relative static import/reexport and literal dynamic import
   paths that resolve to the same base file through the actual rename map.
+  Dynamic literal rewrites require the consumer itself to be renamed;
+  stationary consumers keep the previous declared-change requirement.
   New files/copies and extra
   Zod imports, sources or bindings are not exempt. Formatting, comments,
   logic edits and constant/helper extraction need a declared NET issue entry

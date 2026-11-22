@@ -137,7 +137,7 @@ function resolveRelative(
 
 type ModuleSpan = { start: number; end: number; value: string };
 
-function inspect(source: SourceFile) {
+function inspect(source: SourceFile, movableDynamicImports = false) {
   const modules: ModuleSpan[] = [];
   const zodDeclarations: string[] = [];
   let zod = false;
@@ -182,7 +182,8 @@ function inspect(source: SourceFile) {
     ) {
       module(
         node.arguments[0],
-        node.expression.kind === SyntaxKind.ImportKeyword,
+        movableDynamicImports &&
+          node.expression.kind === SyntaxKind.ImportKeyword,
         node,
       );
     }
@@ -242,8 +243,8 @@ function mechanical(
   headFiles: Map<string, string>,
   renames: Map<string, string>,
 ): boolean {
-  const old = inspect(before);
-  const next = inspect(after);
+  const old = inspect(before, oldPath !== newPath);
+  const next = inspect(after, oldPath !== newPath);
   if (
     !old.zod ||
     old.unknownLoader ||

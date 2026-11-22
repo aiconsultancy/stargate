@@ -46,6 +46,10 @@ environment switch or alternate CI mode that bypasses them.
   a path only when its target was renamed. A moved consumer can update paths to unchanged
   targets. The guard also checks unchanged relative paths in these
   files, so moving a consumer cannot silently select a different target.
+  Dynamic import literal contents can change only when the consumer itself
+  is a Git-detected rename. In-place consumers keep dynamic imports unchanged
+  through this exception, even when their target is renamed; a qualifying
+  declared change is still required for an in-place dynamic path rewrite.
 - Resolution supports regular `.ts` files through explicit `.ts` paths,
   extensionless paths and directory `index.ts` paths. Ambiguous file/index
   candidates, symlinks, aliases, package resolution and JS-to-TS mappings are
