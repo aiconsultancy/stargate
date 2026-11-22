@@ -2,6 +2,14 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "aliases": {
+    "src/crew/pi-worker.ts": [
+      "src/crew/pi-worker.ts",
+      "src/crew/pi/pi-worker.ts"
+    ],
+    "src/crew/pi-extension.ts": [
+      "src/crew/pi-extension.ts",
+      "src/crew/pi/pi-extension.ts"
+    ],
     "src/crew/state.ts": ["src/crew/state.ts", "src/crew/execution/state.ts"],
     "src/crew/shell-context.ts": [
       "src/crew/shell-context.ts",

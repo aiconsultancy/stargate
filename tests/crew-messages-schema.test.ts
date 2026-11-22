@@ -19,7 +19,7 @@ import {
   mailInputBranches,
   mailInputSchema,
 } from "../src/crew/messaging";
-import { piCrewExtension } from "../src/crew/pi-extension";
+import { piCrewExtension } from "../src/crew/pi/pi-extension";
 import { CrewReporting } from "../src/crew/reporting/report-rpc";
 import { waitingInputSchema } from "../src/crew/controls/waiting";
 import { crewLink } from "../src/irc/crew-link";

@@ -39,7 +39,7 @@ import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import { type BackendConfig, secret } from "../../config";
 import { redactCredentials } from "../../lib/credentials";
 import { workingAgreementNotice } from "../../crew/instructions";
-import { piCrewExtension } from "../../crew/pi-extension";
+import { piCrewExtension } from "../../crew/pi/pi-extension";
 import {
   type PiModelSettings,
   piClaudeProxyModel,

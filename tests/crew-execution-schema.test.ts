@@ -12,7 +12,7 @@ import {
   crewOptionsSchema,
 } from "../src/crew/execution/engine";
 import { crewMessageMetadataKey } from "../src/crew/message-protocol";
-import { piCrewExtension } from "../src/crew/pi-extension";
+import { piCrewExtension } from "../src/crew/pi/pi-extension";
 import { projectsSchema } from "../src/crew/input/project-options";
 import {
   CrewRecovery,
