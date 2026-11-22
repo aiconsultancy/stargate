@@ -66,10 +66,14 @@ import { controlInteractions } from "../slack/interactions";
 import { type IrcRegistration, IrcShip, ircKey } from "../irc/ship";
 import { templatesDirectory } from "../lib/installation-paths";
 import { DrainRuntime } from "../maintenance/maintenance-drain";
-import { discoverCrews } from "../nightly/crews";
-import { MaintenanceOutbox } from "../nightly/outbox";
-import type { Ready } from "../nightly/ready";
-import { packageDirectory, runningVersion, writeReady } from "../nightly/ready";
+import { discoverCrews } from "../maintenance/nightly/crews";
+import { MaintenanceOutbox } from "../maintenance/nightly/outbox";
+import type { Ready } from "../maintenance/nightly/ready";
+import {
+  packageDirectory,
+  runningVersion,
+  writeReady,
+} from "../maintenance/nightly/ready";
 import { NotificationStore } from "../notifications/preferences/notification-store";
 import { notificationKey } from "../notifications/preferences/notifications";
 import {

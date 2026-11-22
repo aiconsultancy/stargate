@@ -16,7 +16,7 @@ import {
   mentionNamesSchema,
   textMentionRuleSchema,
 } from "./shared/mentions";
-import { maintenanceSchema } from "./nightly/config";
+import { maintenanceSchema } from "./maintenance/nightly/config";
 import { notifyConfigError } from "./notifications/ingest/binding";
 import { notifySchema } from "./notifications/ingest/config";
 import {

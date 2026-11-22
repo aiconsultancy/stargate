@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import type { Config } from "../config";
+import type { Config } from "../../config";
 import type { CommandRunner } from "./exec";
 import { recoveryBudgetMs } from "./journal";
 import { maintenanceDirectory } from "./paths";

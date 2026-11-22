@@ -10,7 +10,7 @@ import {
 import { Effect } from "effect";
 import { OpenCodeBackend } from "../backends/opencode/opencode";
 import { postInputSchema } from "../captain-post/captain-post";
-import { cronOperationSchema } from "../cron-control";
+import { cronOperationSchema } from "../cron/control";
 import { abortable, resourceScope } from "../lib/effect";
 import {
   MaintenanceRPC,

@@ -127,8 +127,8 @@ Owners are `irc/client.ts`, `irc/ship.ts`, `irc/delivery.ts` and the
 | Update now     | Checks → transient unit → stage and verify → stop gateway → switch → restart → ready → commit                                            | No window, idle gate or cool-off. Stargate release only. Refuse a downgrade, a leftover journal and a known-bad release.        |
 | Summary outbox | `.json` → `.claimed` → `.sent`, `.failed` or `.refused`                                                                                  | Claim by rename before the post. A claimed summary is never posted again, also after a crash.                                   |
 
-Owners are `nightly/run.ts`, `nightly/journal.ts`, `nightly/idle.ts`,
-`nightly/plugin-digest.ts` and `nightly/outbox.ts`. See [maintenance](../maintenance.md).
+Owners are `maintenance/nightly/run.ts`, `maintenance/nightly/journal.ts`, `maintenance/nightly/idle.ts`,
+`maintenance/nightly/plugin-digest.ts` and `maintenance/nightly/outbox.ts`. See [maintenance](../maintenance.md).
 
 ## Transition regressions
 

@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { Config } from "@opencode/schema/config";
 import { Schema } from "effect";
-import { catalogRefs, upgradeGlobalCatalog } from "../src/nightly/catalog";
+import {
+  catalogRefs,
+  upgradeGlobalCatalog,
+} from "../src/maintenance/nightly/catalog";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 const text = json({

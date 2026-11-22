@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import type { Config } from "../config";
+import type { Config } from "../../config";
 import { globalCatalogPath } from "./catalog";
 import { discoverCrews } from "./crews";
 import { type CommandRunner, type Reason, StepError } from "./exec";

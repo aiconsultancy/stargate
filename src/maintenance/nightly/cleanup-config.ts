@@ -1,12 +1,12 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
 import { z } from "zod";
-import { legacySetting } from "../settings-legacy";
+import { legacySetting } from "../../settings-legacy";
 import {
   settingsDefault,
   settingsRefine,
   settingsStruct,
-} from "../settings-schema";
+} from "../../settings-schema";
 
 const path = Schema.String.check(Schema.isMinCodePoints(1))
   .check(Schema.isMaxCodePoints(4096))

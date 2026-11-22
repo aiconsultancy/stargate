@@ -95,7 +95,7 @@ and NET1771 syntax import retarget, the respective PRs can add these entries:
 ```json
 [
   {
-    "path": "src/nightly/ready.ts",
+    "path": "src/maintenance/nightly/ready.ts",
     "issue": "NET-1769",
     "reason": "Centralize the installation root."
   },
@@ -163,10 +163,10 @@ that owns their production boundary, rather than a separate test-only PR.
     `quota.ts`, `quota-watch.ts`, `health.ts`, `health-host.ts`,
     `notification-store.ts` and `notifications.ts`. Include report/UI consumers.
 16. Maintenance records and readiness. Migrate `maintenance.ts`,
-    `nightly/state.ts`, `nightly/ready.ts`, `nightly/journal.ts`,
-    `nightly/report.ts` and remaining maintenance configuration/record schemas.
+    `maintenance/nightly/state.ts`, `maintenance/nightly/ready.ts`, `maintenance/nightly/journal.ts`,
+    `maintenance/nightly/report.ts` and remaining maintenance configuration/record schemas.
 17. Maintenance execution and migration scripts. Migrate the remaining
-    `nightly/` validators and `scripts/bootstrap-stargate.ts` and
+    `maintenance/nightly/` validators and `scripts/bootstrap-stargate.ts` and
     `scripts/migrate-stargate-state.ts`.
 18. Dependency removal. Check for residual first-party Zod use in production,
     tests and tooling. Remove obsolete bridges and the direct Zod dependency.

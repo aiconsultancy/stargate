@@ -1,5 +1,5 @@
 import { dirname, isAbsolute } from "node:path";
-import { quote } from "../app/service";
+import { quote } from "../../app/service";
 import {
   addClock,
   timerCalendar,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Result, Schema } from "effect";
-import { maintenanceSchema } from "../src/nightly/config";
+import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import {
   currentWindow,
   nextWindow,
@@ -8,7 +8,7 @@ import {
   stableJitter,
   timerCalendar,
   windowMinutes,
-} from "../src/nightly/window";
+} from "../src/maintenance/nightly/window";
 
 const london = {
   start: "00:00",

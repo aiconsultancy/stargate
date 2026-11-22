@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import type { Config } from "../config";
+import type { Config } from "../../config";
 import { discoverCrews } from "./crews";
 import type { CommandRunner } from "./exec";
 import { proxyModels } from "./host";
