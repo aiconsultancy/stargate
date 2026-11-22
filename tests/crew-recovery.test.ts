@@ -8,7 +8,7 @@ import {
   type CrewSessions,
   type ResultConnector,
 } from "../src/crew/execution/engine";
-import type { MesijMessage } from "../src/crew/mesij";
+import type { MesijMessage } from "../src/crew/messaging/mesij";
 import type { ResultAPI, ResultMessage } from "../src/crew/execution/result";
 import type { CrewTask } from "../src/crew/execution/state";
 

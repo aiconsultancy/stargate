@@ -28,14 +28,14 @@ import { CrewCronExecution } from "./cron/cron-execution";
 import { CrewEngine } from "./execution/engine";
 import { CrewHistory, historyInputBranches } from "./history/history";
 import { workingAgreementContext } from "./instructions";
-import { CrewIrc } from "./irc-rpc";
+import { CrewIrc } from "./messaging/irc-rpc";
 import { journalInputSchema } from "./reporting/journal";
 import { CrewMaintenance } from "./controls/maintenance";
 import {
   messageOpenCodeInput,
   messagePortableSchema,
-} from "./message-tool-input";
-import { dmInputSchema, mailInputBranches } from "./messaging";
+} from "./messaging/message-tool-input";
+import { dmInputSchema, mailInputBranches } from "./messaging/messaging";
 import { CrewModels, modelToolInputSchema } from "./controls/models";
 import { nativeWait } from "./execution/native-wait";
 import { CrewNotifications } from "./controls/notifications";

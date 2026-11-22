@@ -31,7 +31,7 @@ import {
   fleetCrewStatusInputSchema,
   fleetCrewStatusSchema,
 } from "./fleet-status";
-import { messagePortableSchema } from "../message-tool-input";
+import { messagePortableSchema } from "../messaging/message-tool-input";
 
 // Clients require Standard Schema definitions; OpenCode still decodes and
 // encodes these Effect codecs directly, without caller parse options.

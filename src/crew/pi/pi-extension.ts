@@ -4,12 +4,12 @@ import { z } from "zod";
 import { quotaInputSchema } from "../../quota/quota";
 import { crewPiParameters, crewInputSchema } from "../input/crew-tool-input";
 import { journalInputSchema } from "../reporting/journal";
-import { messagePiParameters } from "../message-tool-input";
+import { messagePiParameters } from "../messaging/message-tool-input";
 import {
   dmInputSchema,
   mailInputBranches,
   mailInputSchema,
-} from "../messaging";
+} from "../messaging/messaging";
 import { CrewError } from "../execution/state";
 import { effectToolInputFields } from "../input/tool-input";
 

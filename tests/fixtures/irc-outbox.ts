@@ -5,7 +5,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { IrcSessions } from "../../src/crew/irc";
+import { IrcSessions } from "../../src/crew/messaging/irc";
 
 // Fixed clock shared by saved rows and retention-test operations, not wall time.
 export const outboxNow = 1_700_000_000_000;

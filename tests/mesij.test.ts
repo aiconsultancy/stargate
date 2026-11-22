@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { MesijClient, MesijError } from "../src/crew/mesij";
+import { MesijClient, MesijError } from "../src/crew/messaging/mesij";
 
 // Release checks run `bun test` with a minimal PATH and no mise; only the
 // real-binary tests need the pinned Mesij, so skip just those there.

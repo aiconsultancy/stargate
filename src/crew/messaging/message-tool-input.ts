@@ -6,13 +6,13 @@ import type {
 import {
   settingsAdvertisement,
   settingsInputAdvertisement,
-} from "../config/settings-legacy";
-import { settingsIssues } from "../config/settings-schema";
+} from "../../config/settings-legacy";
+import { settingsIssues } from "../../config/settings-schema";
 import {
   effectProjectKeySchema,
   effectProjectToolInput,
-} from "./input/project-options";
-import type { EffectToolInput } from "./input/tool-input";
+} from "../input/project-options";
+import type { EffectToolInput } from "../input/tool-input";
 
 function jsonTarget(
   json: Record<string, unknown>,

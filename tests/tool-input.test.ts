@@ -13,8 +13,11 @@ import { journalInputSchema } from "../src/crew/reporting/journal";
 import {
   messageOpenCodeInput,
   messagePortableSchema,
-} from "../src/crew/message-tool-input";
-import { mailInputBranches, mailInputSchema } from "../src/crew/messaging";
+} from "../src/crew/messaging/message-tool-input";
+import {
+  mailInputBranches,
+  mailInputSchema,
+} from "../src/crew/messaging/messaging";
 import {
   modelInputSchema,
   modelToolInputSchema,
