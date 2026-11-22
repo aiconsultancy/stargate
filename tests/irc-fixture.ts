@@ -1,4 +1,4 @@
-import { setTimeout as delay } from "node:timers/promises";
+import { onTestFinished } from "bun:test";
 import type { Socket, TCPSocketListener } from "bun";
 import {
   formatMessage,
@@ -636,17 +636,68 @@ export class FakeIrcServer {
   }
 }
 
-export async function until(
+export function until(
   check: () => boolean,
   timeoutMs = 3000,
   message = "condition",
+  options: { state?: () => unknown; signal?: AbortSignal } = {},
 ) {
-  const deadline = performance.now() + timeoutMs;
-  while (!check()) {
-    if (performance.now() > deadline)
-      throw new Error(`Timed out waiting for ${message}`);
-    await delay(10);
-  }
+  return new Promise<void>((resolve, reject) => {
+    const started = performance.now();
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => {
+      active = false;
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", stop);
+    };
+    // An ended test must neither reject later nor resume its stale body.
+    // Leave its await suspended, with no timer or predicate work remaining.
+    try {
+      onTestFinished(stop);
+    } catch (error) {
+      // The smoke script also imports this fixture outside the test runner.
+      if (
+        !(error instanceof Error) ||
+        !error.message.startsWith(
+          "Cannot use onTestFinished() outside of the test runner.",
+        )
+      )
+        throw error;
+    }
+    const poll = () => {
+      if (!active) return;
+      try {
+        const ready = check();
+        const state = options.state?.() ?? ready;
+        if (ready) {
+          stop();
+          resolve();
+          return;
+        }
+        const elapsed = performance.now() - started;
+        if (elapsed > timeoutMs) {
+          stop();
+          reject(
+            new Error(
+              `Timed out waiting for ${message} after ${Math.round(elapsed)} ms (limit ${timeoutMs} ms); last state: ${JSON.stringify(state)}`,
+            ),
+          );
+          return;
+        }
+        timer = setTimeout(poll, 10);
+      } catch (error) {
+        stop();
+        reject(error);
+      }
+    };
+    if (options.signal?.aborted) {
+      stop();
+      return;
+    }
+    options.signal?.addEventListener("abort", stop, { once: true });
+    poll();
+  });
 }
 
 export function lineOf(lines: readonly string[], command: string) {
