@@ -6,7 +6,7 @@ import { botToken, botWebClient } from "../slack/bot-web";
 import { type BotConfig, loadConfig } from "../config";
 import { type CronAdvanced, cronAdvancedFields } from "./advanced";
 import { CronStore } from "./store";
-import { cronChannel, cronUser } from "./job-config";
+import { cronChannel, cronUser } from "./config";
 import { cronjobNameSchema } from "./job-files";
 import { CronjobManager, cronRuntimeBinding } from "./job-manager";
 import {

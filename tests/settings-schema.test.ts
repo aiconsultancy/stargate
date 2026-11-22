@@ -21,7 +21,7 @@ import {
 } from "../src/config";
 import { objectToolInput } from "../src/crew/input/tool-input";
 import { cronOperationSchema } from "../src/cron/control";
-import { cronjobsSchema } from "../src/cron/job-config";
+import { cronjobsSchema } from "../src/cron/config";
 import { fleetControlSchema } from "../src/fleet/protocol";
 import { fleetPolicySchema } from "../src/fleet/fleet-policy";
 import { healthConfigSchema } from "../src/health/config";

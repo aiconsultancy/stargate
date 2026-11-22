@@ -419,7 +419,8 @@
     "src/cron.ts": ["src/cron.ts", "src/cron/index.ts"],
     "src/cronjob-config.ts": [
       "src/cronjob-config.ts",
-      "src/cron/job-config.ts"
+      "src/cron/job-config.ts",
+      "src/cron/config.ts"
     ],
     "src/cronjob-files.ts": ["src/cronjob-files.ts", "src/cron/job-files.ts"],
     "src/cronjob-manager.ts": [
