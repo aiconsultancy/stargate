@@ -70,7 +70,7 @@ function baseline() {
       note: { retain: true },
     },
     exceptions: [EXCEPTION],
-    largeFiles: ["src/permanently-exempt.ts"],
+    largeFiles: ["src/other/private.ts"],
     futureInventory: { version: 9, values: ["preserve", 42, null] },
   };
 }
@@ -97,7 +97,10 @@ async function formatter(root: string, body = "process.stdout.write(input);") {
   await chmod(join(root, path), 0o755);
 }
 
-async function fixture(prepare?: (value: Baseline) => void) {
+async function fixture(
+  prepare?: (value: Baseline) => void,
+  sources: Record<string, string> = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "stargate-architecture-refresh-"));
   temporary.push(root);
   const policy: ArchitecturePolicy = {
@@ -120,12 +123,13 @@ async function fixture(prepare?: (value: Baseline) => void) {
     "src/main.ts": 'import "./feature/entry";\n',
     "src/feature/entry.ts": 'import "./leaf"; import "../other/private";\n',
     "src/feature/leaf.ts": 'import "./entry";\n',
-    "src/other/private.ts": "export {};\n",
+    "src/other/private.ts": "export {};\n" + "// size fixture\n".repeat(1000),
     "AGENTS.md": "# Fixture\n",
     "README.md": "# Fixture\n",
     "CONTRIBUTING.md": "# Fixture\n",
     "docs/design.md": "# Fixture\n",
     ".gitignore": "node_modules/\n",
+    ...sources,
   });
   const original = baseline();
   prepare?.(original);
@@ -217,6 +221,138 @@ async function refusesClosureChange(
 }
 
 describe("architecture baseline refresh", () => {
+  for (const lines of [999, 1000, 1001]) {
+    test(`size pruning: listed file reduced to ${lines} lines`, async () => {
+      const { root, base, original } = await fixture(
+        (value) => value.largeFiles.push("src/feature/leaf.ts"),
+        {
+          "src/feature/leaf.ts":
+            'import "./entry";\n' + "// original oversized file\n".repeat(1000),
+        },
+      );
+      await files(root, {
+        "src/feature/leaf.ts":
+          'import "./entry";\n' + "// reduced file\n".repeat(lines - 1),
+      });
+      await formatter(root);
+      const before = await readFile(join(root, BASELINE), "utf8");
+      const pruned = lines <= 1000 ? ["src/feature/leaf.ts"] : [];
+      const kept = original.largeFiles.filter((file) => !pruned.includes(file));
+      const outside = await mkdtemp(join(tmpdir(), "stargate-size-preview-"));
+      temporary.push(outside);
+      const output = join(outside, "receipt.json");
+      const preview = run(root, base, "--prune-stale", "--output", output);
+      expect(preview.status).toBe(0);
+      expect(JSON.parse(preview.stdout)).toMatchObject({
+        write: false,
+        prunedLargeFiles: pruned,
+      });
+      expect(JSON.parse(await readFile(output, "utf8"))).toMatchObject({
+        largeFiles: kept,
+        prunedLargeFiles: pruned,
+      });
+      expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+      const noFlag = run(root, base, "--write");
+      if (pruned.length) {
+        expect(noFlag.status).not.toBe(0);
+        expect(noFlag.stderr).toContain("stale:large-file:src/feature/leaf.ts");
+        expect(noFlag.stdout).toBe("");
+        expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+      } else {
+        expect(noFlag.status).toBe(0);
+      }
+      const written = run(root, base, "--write", "--prune-stale");
+      expect(written.status).toBe(0);
+      expect(JSON.parse(written.stdout)).toMatchObject({
+        prunedLargeFiles: pruned,
+      });
+      const after = await readFile(join(root, BASELINE), "utf8");
+      expect(JSON.parse(after).largeFiles).toEqual(kept);
+      const second = run(root, base, "--write", "--prune-stale");
+      expect(second.status).toBe(0);
+      expect(JSON.parse(second.stdout)).toMatchObject({ prunedLargeFiles: [] });
+      expect(await readFile(join(root, BASELINE), "utf8")).toBe(after);
+      await noStagingFiles(root);
+    });
+  }
+
+  test("size pruning: listed absent file is refused without the flag and removed with it", async () => {
+    const { root, base, original } = await fixture((value) => {
+      value.largeFiles.push("src/no-longer-present.ts");
+    });
+    await formatter(root);
+    const before = await readFile(join(root, BASELINE), "utf8");
+    const noFlag = run(root, base, "--write");
+    expect(noFlag.status).not.toBe(0);
+    expect(noFlag.stderr).toContain(
+      "stale:large-file:src/no-longer-present.ts",
+    );
+    expect(noFlag.stdout).toBe("");
+    expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+    const result = run(root, base, "--write", "--prune-stale");
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      prunedLargeFiles: ["src/no-longer-present.ts"],
+    });
+    expect(
+      JSON.parse(await readFile(join(root, BASELINE), "utf8")).largeFiles,
+    ).toEqual(
+      original.largeFiles.filter((file) => file !== "src/no-longer-present.ts"),
+    );
+    await noStagingFiles(root);
+  });
+
+  test("size pruning: moved oversized alias keeps its logical entry and exact baseline bytes", async () => {
+    const { root, base, policy } = await fixture();
+    await formatter(root);
+    expect(run(root, base, "--write").status).toBe(0);
+    const before = await readFile(join(root, BASELINE), "utf8");
+    const source = await readFile(join(root, "src/other/private.ts"), "utf8");
+    await files(root, {
+      "src/other/moved-private.ts": source,
+      "src/feature/entry.ts":
+        'import "./leaf"; import "../other/moved-private";\n',
+    });
+    await rm(join(root, "src/other/private.ts"));
+    policy.aliases = {
+      "src/other/private.ts": [
+        "src/other/private.ts",
+        "src/other/moved-private.ts",
+      ],
+    };
+    await json(root, POLICY, policy);
+    for (const flags of [[], ["--prune-stale"]]) {
+      const result = run(root, base, "--write", ...flags);
+      expect(result.status).toBe(0);
+      if (flags.length)
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          prunedLargeFiles: [],
+        });
+      expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+    }
+    await noStagingFiles(root);
+  });
+
+  test("size pruning: an unlisted oversized file is never authorized", async () => {
+    const { root, base } = await fixture();
+    await files(root, {
+      "src/feature/leaf.ts":
+        'import "./entry";\n' + "// oversized\n".repeat(1000),
+    });
+    await formatter(root);
+    const before = await readFile(join(root, BASELINE), "utf8");
+    for (const flags of [[], ["--prune-stale"]]) {
+      const result = run(root, base, "--write", ...flags);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "unauthorized-large-file:src/feature/leaf.ts",
+      );
+      expect(result.stdout).toBe("");
+      expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+    }
+    await noStagingFiles(root);
+  });
+
   test("rejects added size permissions without writing", async () => {
     const { root, base, original } = await fixture();
     await files(root, {
