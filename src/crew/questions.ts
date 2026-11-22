@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Result, Schema } from "effect";
-import type { OpenCodeBackend } from "../backends/opencode/opencode";
+import type { AgentBackend } from "../backends/backend";
 import {
   type QuestionSettings,
   resolveQuestionSettings,
@@ -38,7 +38,7 @@ const decodeReceipt = Schema.decodeUnknownResult(
   Schema.Struct({ stored: Schema.Literal(true) }),
 );
 type QuestionBackend = Pick<
-  OpenCodeBackend,
+  Required<AgentBackend>,
   "pendingQuestions" | "questionBelongsToInput" | "replyQuestion"
 > & {
   outcome?: (

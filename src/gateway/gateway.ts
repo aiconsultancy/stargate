@@ -92,7 +92,6 @@ import {
   routeReaction,
   transcriptChunks,
 } from "./routing";
-import type { SocketRequest } from "../slack/slack";
 import { type ReplyChunk, replyText } from "../shared/slack-format";
 import { SlackQuestionControls } from "../questions/slack-questions";
 import {
@@ -761,7 +760,7 @@ export class Gateway {
   /** Configuration buttons share the typed-command owner and intake binding. */
   async configInteraction(
     body: unknown,
-    ack: SocketRequest["ack"],
+    ack: (payload?: Record<string, unknown>) => Promise<void>,
     open: () => boolean = () => true,
   ) {
     const bot = this.bot;

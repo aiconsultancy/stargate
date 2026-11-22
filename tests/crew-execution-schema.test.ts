@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Result, Schema } from "effect";
+import type { BackendContext } from "../src/backends/backend";
 import {
   crewOpenCodeInput,
   crewPiParameters,
@@ -20,6 +21,12 @@ import {
 import type { CrewTask } from "../src/crew/state";
 import { settingsIssues } from "../src/config/settings-schema";
 import { settingsCanonical } from "./settings-cases";
+
+export type BackendCrewCompatibility<
+  T extends Parameters<typeof piCrewExtension>[0] = NonNullable<
+    BackendContext["crew"]
+  >,
+> = T;
 
 const team = {
   captain: { id: "captain" },

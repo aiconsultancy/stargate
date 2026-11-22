@@ -104,7 +104,6 @@ import {
   isAllowedChannel,
 } from "../gateway/routing";
 import { SlackConnection, type SlackInteractions } from "../slack/slack";
-import type { ConnectionState } from "../slack/slack-connection";
 import { Store } from "../gateway/store";
 import { TeamsRegistration } from "../teams/registration";
 import { createTranscriber } from "../transcription/azure-openai";
@@ -143,7 +142,7 @@ export class RuntimeStopped extends Data.TaggedError("RuntimeStopped")<{
 export interface SlackApp extends TransportDelivery, CronDelivery {
   notification?: NotificationSlack["notification"];
   identity(signal?: AbortSignal): Promise<Identity>;
-  readonly connectionState?: ConnectionState;
+  readonly connectionState?: SlackConnection["connectionState"];
   watch?(): Promise<void>;
   start(
     accept: (body: unknown) => boolean | Promise<boolean>,
