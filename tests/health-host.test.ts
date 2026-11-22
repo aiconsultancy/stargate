@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Schema } from "effect";
-import { healthConfigSchema } from "../src/health/health-config";
+import { healthConfigSchema } from "../src/health/config";
 import {
   createHostHealthReader,
   type HostHealthSources,

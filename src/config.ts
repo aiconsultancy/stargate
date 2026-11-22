@@ -9,7 +9,7 @@ import { captainPostSchema } from "./captain-post/captain-post-config";
 import { cronjobsSchema } from "./cron/job-config";
 import { validateFleetPermissions } from "./fleet/permissions";
 import { fleetPolicySchema } from "./fleet/fleet-policy";
-import { healthConfigSchema } from "./health/health-config";
+import { healthConfigSchema } from "./health/config";
 import { createIrcConfig, ircAccount, ircChannel } from "./irc/config";
 import { fold, widestFold } from "./irc/protocol";
 import { textMentionRuleSchema } from "./shared/mentions";

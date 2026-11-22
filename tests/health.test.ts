@@ -7,7 +7,7 @@ import {
   createHealthReader,
   readStarfleetSnapshot,
 } from "../src/health/health";
-import { healthConfigSchema } from "../src/health/health-config";
+import { healthConfigSchema } from "../src/health/config";
 import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import { bot } from "./fixtures";
 

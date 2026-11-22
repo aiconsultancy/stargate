@@ -5,7 +5,7 @@ import type { AgentBackend } from "../backends/backend";
 import type { BotConfig, Config } from "../config";
 import { crewStatusSchema } from "../shared/crew-status";
 import type { CronReportRow } from "../cron/store";
-import { healthConfigSchema } from "./health-config";
+import { healthConfigSchema } from "./config";
 import {
   createHostHealthReader,
   hostHealthSchema,
