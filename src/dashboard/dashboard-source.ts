@@ -8,7 +8,6 @@ import {
 } from "../config";
 import type { FleetCrewStatus } from "../crew/fleet-status";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
-import type { CronStore } from "../cron/store";
 import type {
   DashboardCaptain,
   DashboardSource,
@@ -134,7 +133,10 @@ export function dashboardSource(
   store: Pick<Store, "queueCounts" | "recentJobs"> & {
     transcript: Pick<Store["transcript"], "sessionIDs" | "ownsSession">;
   },
-  cronStore: Pick<CronStore, "report" | "recentRuns">,
+  cronStore: {
+    report(botKey: string): ShipView["cron"]["jobs"];
+    recentRuns(botKey: string, limit?: number): ShipView["cron"]["runs"];
+  },
   now: () => number = Date.now,
   {
     fleetCrewReadMs = 1_000,

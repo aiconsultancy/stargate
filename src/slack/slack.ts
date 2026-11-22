@@ -1,12 +1,12 @@
 import { SocketModeClient } from "@slack/socket-mode";
 import { LogLevel, WebClient, type WebClientOptions } from "@slack/web-api";
+import type { ViewsOpenArguments } from "@slack/web-api";
 import { Result, Schema } from "effect";
 import type { Logger } from "pino";
 import type { ActivityView } from "../activity/activity";
 import { activityContent } from "../activity/activity-slack";
 import { stopBlock } from "../gateway/cancellation";
 import type { CrewUIApi } from "./crew-ui";
-import type { CronUIApi } from "../cron/ui";
 import type {
   ReactionTargetRequest,
   TransportDelivery,
@@ -31,6 +31,8 @@ import {
   loadThreadContext,
   type ThreadContextRequest,
 } from "../gateway/thread-context";
+
+type ModalView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
 
 function slackError(error: unknown, code: string) {
   return (
@@ -388,7 +390,11 @@ export class SlackConnection implements TransportDelivery {
     },
   };
 
-  readonly cronUI: CronUIApi = {
+  readonly cronUI: {
+    open(triggerId: string, view: ModalView): Promise<void>;
+    push(triggerId: string, view: ModalView): Promise<void>;
+    update(viewId: string, hash: string, view: ModalView): Promise<void>;
+  } = {
     open: async (triggerId, view) => {
       await this.web.views.open({ trigger_id: triggerId, view });
     },

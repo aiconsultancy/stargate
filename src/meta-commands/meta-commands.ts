@@ -13,10 +13,9 @@ import {
   configReplyTarget,
   configSnapshotSchema,
   readConfigSnapshot,
+  type MutePage,
   sameConfigSnapshot,
 } from "./config-panel";
-import type { TransportDelivery } from "../gateway/ports";
-import type { NotificationPage } from "../notifications/preferences/notification-store";
 import { notificationKey } from "../notifications/preferences/notifications";
 import {
   type QuestionSettings,
@@ -31,6 +30,30 @@ import {
 import { settingsPattern, settingsRecord } from "../config/settings-schema";
 import type { ConfigPanelRecord, MetaRecords } from "./store";
 import { resolveWaiting, saveWaitingDelay } from "../gateway/waiting";
+import type { SlackContent } from "../shared/slack-format";
+
+type MetaDelivery = {
+  ephemeral?(
+    channel: string,
+    user: string,
+    thread: string,
+    text: string,
+  ): Promise<void>;
+  post(
+    channel: string,
+    thread: string,
+    text: string,
+    stopJob?: number,
+    unit?: { allowed: () => boolean },
+  ): Promise<string> | Promise<void>;
+  update?(
+    channel: string,
+    ts: string,
+    text: string,
+    stopJob?: number,
+    content?: SlackContent,
+  ): Promise<boolean> | Promise<void>;
+};
 
 const envelope = Schema.Struct({
   api_app_id: Schema.String,
@@ -107,7 +130,7 @@ function unsafeMetadata(raw: unknown, depth = 0): boolean {
 }
 
 export interface MetaOptions {
-  listMutes?: () => NotificationPage | Promise<NotificationPage>;
+  listMutes?: () => MutePage | Promise<MutePage>;
   health?: (section?: string) => Promise<string>;
   now?: () => number;
   /** Authenticated directory evidence, not a payload's omission of is_bot. */
@@ -167,9 +190,7 @@ async function changeQuestions(
 /** A snapshot mismatch is proven before the shared waiting write. */
 class ConfigSnapshotChanged extends Error {}
 
-async function mutePage(
-  options: MetaOptions,
-): Promise<NotificationPage | undefined> {
+async function mutePage(options: MetaOptions): Promise<MutePage | undefined> {
   try {
     return await options.listMutes?.();
   } catch {
@@ -389,7 +410,7 @@ export class MetaCommands {
   private tail = Promise.resolve();
   constructor(
     private readonly store: MetaRecords,
-    private readonly slack: TransportDelivery,
+    private readonly slack: MetaDelivery,
     private readonly options: MetaOptions = {},
   ) {}
 

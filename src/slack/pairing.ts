@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
+import type { ViewsOpenArguments } from "@slack/web-api";
 import { Result, Schema } from "effect";
 import type { Logger } from "pino";
 import type { AgentBackend } from "../backends/backend";
 import type { BotConfig } from "../config";
-import type { CronUIApi, CronView, SlackAck } from "../cron/ui";
 import {
   type Identity,
   isAllowedChannel,
@@ -11,6 +11,13 @@ import {
 } from "../gateway/routing";
 import { settingsPattern, settingsUUID } from "../config/settings-schema";
 import { botDisplayName } from "../gateway/waiting";
+
+type PairingView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
+type SlackAck = (payload?: Record<string, unknown>) => Promise<void>;
+type PairingApi = {
+  open(triggerId: string, view: PairingView): Promise<void>;
+  update(viewId: string, hash: string, view: PairingView): Promise<void>;
+};
 
 const id = Schema.String.check(
   Schema.isMinCodePoints(1),
@@ -71,7 +78,7 @@ const section = (text: string) => ({
 });
 const warning =
   "This grants full server access for 30 days, not read-only or conversation-only access. Anyone with a URL can pair once before it expires. Generate only for your own trusted device. Slack receives the secret in this private modal.";
-function notice(text: string): CronView {
+function notice(text: string): PairingView {
   return {
     type: "modal",
     title: plain("OpenCode pairing"),
@@ -95,7 +102,7 @@ export class PairingUI {
     private config: BotConfig,
     private readonly identity: Identity,
     private readonly backend: Pick<AgentBackend, "pair">,
-    private readonly api: Pick<CronUIApi, "open" | "update">,
+    private readonly api: PairingApi,
     private readonly log: Logger,
     private readonly signal: AbortSignal,
     private readonly monotonicNow: () => number = () => performance.now(),
