@@ -18,7 +18,7 @@ import { type CleanupResult, runCleanup } from "./cleanup";
 import { cleanupProtection } from "./cleanup-protection";
 import { defaultCronHorizonMinutes, type MaintenanceConfig } from "./config";
 import { type Crew, crewDatabase, discoverCrews } from "./crews";
-import { type Clock, waitForMaintenanceDrain } from "./drain";
+import { type Clock, waitForMaintenanceDrain } from "./schedule/drain";
 import {
   type CommandRunner,
   processRunner,
@@ -50,7 +50,7 @@ import {
   queuedCrewTasks,
   queuedTaskAction,
   waitForIdle,
-} from "./idle";
+} from "./schedule/idle";
 import {
   backupDirectory,
   currentVersion,
@@ -115,9 +115,9 @@ import {
   type Occurrence,
   stableJitter,
   windowMinutes,
-} from "./window";
+} from "./schedule/window";
 
-export type { Clock } from "./drain";
+export type { Clock } from "./schedule/drain";
 export const systemClock: Clock = {
   now: () => Date.now(),
   sleep: (ms, signal) => delay(ms, undefined, { signal }),

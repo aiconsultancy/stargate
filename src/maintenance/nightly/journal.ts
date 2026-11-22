@@ -22,7 +22,7 @@ import {
   binaryPath,
   proxyModels,
 } from "./host";
-import type { IdleResult, IdleScope } from "./idle";
+import type { IdleResult, IdleScope } from "./schedule/idle";
 import { agentFile, managedFolder } from "./models";
 import type { OpenCodeControl } from "./opencode";
 import { maintenanceDirectory } from "./paths";

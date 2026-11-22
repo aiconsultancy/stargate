@@ -39,8 +39,8 @@ import {
   writeReport,
 } from "../src/maintenance/nightly/report";
 import { updateState } from "../src/maintenance/nightly/state";
-import { buildDroidUnits } from "../src/maintenance/nightly/timer";
-import { stableJitter } from "../src/maintenance/nightly/window";
+import { buildDroidUnits } from "../src/maintenance/nightly/schedule/timer";
+import { stableJitter } from "../src/maintenance/nightly/schedule/window";
 import { openStore } from "../src/app/open-store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";
 

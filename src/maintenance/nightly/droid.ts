@@ -17,7 +17,7 @@ import {
 } from "./droid-facts";
 import type { Reason } from "./exec";
 import { atomicWrite, readOptional } from "./files";
-import { queuedTaskAction } from "./idle";
+import { queuedTaskAction } from "./schedule/idle";
 import { Journal } from "./journal";
 import { maintenanceDirectory } from "./paths";
 import { noticeSchemaID, queueNotice, type Report, summary } from "./report";

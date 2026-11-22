@@ -40,7 +40,8 @@
     ],
     "src/nightly/drain.ts": [
       "src/nightly/drain.ts",
-      "src/maintenance/nightly/drain.ts"
+      "src/maintenance/nightly/drain.ts",
+      "src/maintenance/nightly/schedule/drain.ts"
     ],
     "src/nightly/droid-agent.ts": [
       "src/nightly/droid-agent.ts",
@@ -68,7 +69,8 @@
     ],
     "src/nightly/idle.ts": [
       "src/nightly/idle.ts",
-      "src/maintenance/nightly/idle.ts"
+      "src/maintenance/nightly/idle.ts",
+      "src/maintenance/nightly/schedule/idle.ts"
     ],
     "src/nightly/instructions.ts": [
       "src/nightly/instructions.ts",
@@ -124,7 +126,8 @@
     ],
     "src/nightly/timer.ts": [
       "src/nightly/timer.ts",
-      "src/maintenance/nightly/timer.ts"
+      "src/maintenance/nightly/timer.ts",
+      "src/maintenance/nightly/schedule/timer.ts"
     ],
     "src/nightly/update.ts": [
       "src/nightly/update.ts",
@@ -136,7 +139,8 @@
     ],
     "src/nightly/window.ts": [
       "src/nightly/window.ts",
-      "src/maintenance/nightly/window.ts"
+      "src/maintenance/nightly/window.ts",
+      "src/maintenance/nightly/schedule/window.ts"
     ],
     "src/activity-delivery.ts": [
       "src/activity-delivery.ts",
