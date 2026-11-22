@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -52,6 +59,154 @@ async function scenario() {
 }
 
 describe("touched-zod hook", () => {
+  test.each([
+    ["accepts real import", 0],
+    ["accepts re-export", 0],
+    ["added name", 1],
+    ["removed name", 1],
+    ["renamed name", 1],
+    ["reordered names", 1],
+    ["added import type", 1],
+    ["removed import type", 1],
+    ["wrong module", 1],
+    ["unchanged specifier", 1],
+    ["non-import code", 1],
+    ["added comment", 1],
+    ["existing comment", 1],
+    ["scanner unknown", 1],
+    ["unterminated token", 1],
+    ["stationary consumer", 1],
+    ["re-export alias", 1],
+    ["added export type", 1],
+  ] as const)("Pi formatter rename %s", async (kind, status) => {
+    const root = await scenario();
+    try {
+      // Exact Pi extension import that grows past 80 columns when moved.
+      const names = "dmInputSchema, mailInputBranches, mailInputSchema";
+      const reexport =
+        kind.includes("re-export") || kind === "added export type";
+      const keyword = reexport ? "export" : "import";
+      const type = kind === "removed import type" ? " type" : "";
+      const bindings =
+        kind === "existing comment"
+          ? names.replace("dmInputSchema,", "dmInputSchema, /* existing */")
+          : names;
+      const declaration = `${keyword}${type} { ${bindings} } from "./messaging";`;
+      const before = [
+        'import { z } from "zod";',
+        declaration,
+        "export const input = z.strictObject({",
+        "  text: z.string().min(1),",
+        "  limit: z.number().int().min(1).max(50),",
+        "  required: z.boolean().default(false),",
+        "});",
+        "export const output = z.strictObject({",
+        "  value: z.string().min(1),",
+        "  done: z.boolean(),",
+        "});",
+        "export const decode = (raw: unknown) => input.parse(raw);",
+        "export const result = (raw: unknown) => output.parse(raw);",
+        "",
+      ].join("\n");
+      await writeFile(join(root, "src/zod-file.ts"), before);
+      await writeFile(join(root, "src/messaging.ts"), "export {};\n");
+      await writeFile(join(root, "src/other.ts"), "export {};\n");
+      git(root, "add", "-A");
+      git(root, "commit", "-m", "Pi import fixture");
+      const base = git(root, "rev-parse", "HEAD");
+      const target =
+        kind === "stationary consumer"
+          ? "src/zod-file.ts"
+          : "src/moved/zod-file.ts";
+      const moves =
+        kind === "stationary consumer"
+          ? ["src/messaging.ts", "src/moved/messaging.ts"]
+          : ["src/zod-file.ts", target];
+      if (kind === "unchanged specifier")
+        moves.push("src/messaging.ts", "src/moved/messaging.ts");
+      const move = spawnSync(
+        process.execPath,
+        [join(import.meta.dir, "../scripts/move-modules.ts"), ...moves],
+        { cwd: root, encoding: "utf8", timeout: 30_000 },
+      );
+      expect(move.status, move.stderr).toBe(0);
+      const raw = await readFile(join(root, target), "utf8");
+      const format = spawnSync(
+        join(import.meta.dir, "../node_modules/.bin/oxfmt"),
+        [
+          "--config",
+          join(import.meta.dir, "../.oxfmtrc.json"),
+          "--stdin-filepath",
+          target,
+        ],
+        { cwd: root, input: raw, encoding: "utf8", timeout: 30_000 },
+      );
+      expect(format.status, format.stderr).toBe(0);
+      let after = format.stdout;
+      if (kind === "accepts real import") {
+        expect(raw).toContain(`import { ${names} } from "../messaging";`);
+        expect(after).toContain('  mailInputSchema,\n} from "../messaging";');
+      }
+      if (kind === "added name")
+        after = after.replace(
+          "  mailInputSchema,",
+          "  mailInputSchema,\n  extra,",
+        );
+      if (kind === "removed name")
+        after = after.replace("  mailInputSchema,\n", "");
+      if (kind === "renamed name")
+        after = after.replace("  mailInputSchema,", "  renamed,");
+      if (kind === "reordered names")
+        after = after.replace(
+          "  dmInputSchema,\n  mailInputBranches,",
+          "  mailInputBranches,\n  dmInputSchema,",
+        );
+      if (kind === "added import type")
+        after = after.replace("import {\n", "import type {\n");
+      if (kind === "removed import type")
+        after = after.replace("import type {\n", "import {\n");
+      if (kind === "wrong module")
+        after = after.replace('"../messaging"', '"../other"');
+      if (kind === "unchanged specifier")
+        after = after.replace(
+          declaration,
+          `import {\n  dmInputSchema,\n  mailInputBranches,\n  mailInputSchema,\n} from "./messaging";`,
+        );
+      if (kind === "non-import code")
+        after = after.replace(
+          "text: z.string().min(1)",
+          "text: z.string().min(2)",
+        );
+      if (kind === "added comment")
+        after = after.replace(
+          "  dmInputSchema,",
+          "  /* added */ dmInputSchema,",
+        );
+      if (kind === "scanner unknown")
+        after = after.replace("  dmInputSchema,", "  dmInputSchema,\u0000");
+      if (kind === "unterminated token")
+        after = after.replace('"../messaging";', '"../messaging');
+      if (kind === "re-export alias")
+        after = after.replace(
+          "  dmInputSchema,",
+          "  dmInputSchema as renamed,",
+        );
+      if (kind === "added export type")
+        after = after.replace("export {\n", "export type {\n");
+      await writeFile(join(root, target), after);
+      git(root, "add", "-A");
+      git(root, "commit", "-m", "formatted rename candidate");
+      if (kind !== "stationary consumer")
+        expect(
+          git(root, "diff", "--name-status", "-M", base, "HEAD"),
+        ).toContain("src/zod-file.ts\tsrc/moved/zod-file.ts");
+      const result = runHook(root, base);
+      expect(result.status, result.output).toBe(status);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("an actual rename permits only its relative import update", async () => {
     const root = await scenario();
     try {

@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { posix } from "node:path";
 import { Schema } from "effect";
 import {
+  createScanner,
   getTokenPosOfNode,
   isCallExpression,
   isExportDeclaration,
@@ -234,6 +235,65 @@ function declaredChange(
   );
 }
 
+/** Only mechanical() uses this: tokenize one static declaration, not the file. */
+function declarationTokens(source: SourceFile, node: Node, module: ModuleSpan) {
+  try {
+    const scanner = createScanner(
+      false,
+      source.languageVariant,
+      source.text,
+      getTokenPosOfNode(node, source),
+      node.end - getTokenPosOfNode(node, source),
+    );
+    let braceEnd: number | undefined;
+    const namedBrace = (child: Node): void => {
+      if (
+        child.kind === SyntaxKind.NamedImports ||
+        child.kind === SyntaxKind.NamedExports
+      )
+        braceEnd = child.end - 1;
+      child.forEachChild(namedBrace);
+    };
+    namedBrace(node);
+    const tokens: { kind: SyntaxKind; text: string; start: number }[] = [];
+    for (;;) {
+      const kind = scanner.scan();
+      if (scanner.isUnterminated() || kind === SyntaxKind.Unknown)
+        return undefined;
+      if (kind === SyntaxKind.EndOfFile) break;
+      // Never silently skip comments in a declaration whose layout changes.
+      if (
+        kind === SyntaxKind.SingleLineCommentTrivia ||
+        kind === SyntaxKind.MultiLineCommentTrivia
+      )
+        return undefined;
+      if (
+        kind === SyntaxKind.WhitespaceTrivia ||
+        kind === SyntaxKind.NewLineTrivia
+      )
+        continue;
+      tokens.push({
+        kind,
+        text:
+          scanner.getTokenStart() === module.start &&
+          scanner.getTokenEnd() === module.end
+            ? "<module>"
+            : scanner.getTokenText(),
+        start: scanner.getTokenStart(),
+      });
+    }
+    const close = tokens.findIndex(
+      (token) =>
+        token.kind === SyntaxKind.CloseBraceToken && token.start === braceEnd,
+    );
+    if (close > 0 && tokens[close - 1]?.kind === SyntaxKind.CommaToken)
+      tokens.splice(close - 1, 1);
+    return tokens.map(({ kind, text }) => [kind, text]);
+  } catch {
+    return undefined;
+  }
+}
+
 function mechanical(
   before: SourceFile,
   after: SourceFile,
@@ -259,11 +319,6 @@ function mechanical(
     const left = old.modules[index];
     const right = next.modules[index];
     if (!left || !right) return false;
-    if (
-      before.text.slice(oldCursor, left.start) !==
-      after.text.slice(newCursor, right.start)
-    )
-      return false;
     const oldRaw = before.text.slice(left.start, left.end);
     const newRaw = after.text.slice(right.start, right.end);
     if (/^\.\.?\//.test(left.value)) {
@@ -284,10 +339,48 @@ function mechanical(
       )
         return false;
     } else if (oldRaw !== newRaw) return false;
+    if (oldPath !== newPath && left.value !== right.value) {
+      const declaration = (source: SourceFile, span: ModuleSpan) =>
+        source.statements.find(
+          (node) =>
+            (isImportDeclaration(node) || isExportDeclaration(node)) &&
+            node.moduleSpecifier &&
+            getTokenPosOfNode(node.moduleSpecifier, source) === span.start &&
+            node.moduleSpecifier.end === span.end,
+        );
+      const oldDeclaration = declaration(before, left);
+      const newDeclaration = declaration(after, right);
+      if (oldDeclaration && newDeclaration) {
+        const oldTokens = declarationTokens(before, oldDeclaration, left);
+        const newTokens = declarationTokens(after, newDeclaration, right);
+        if (
+          oldTokens &&
+          newTokens &&
+          before.text.slice(
+            oldCursor,
+            getTokenPosOfNode(oldDeclaration, before),
+          ) ===
+            after.text.slice(
+              newCursor,
+              getTokenPosOfNode(newDeclaration, after),
+            ) &&
+          JSON.stringify(oldTokens) === JSON.stringify(newTokens)
+        ) {
+          oldCursor = oldDeclaration.end;
+          newCursor = newDeclaration.end;
+          continue;
+        }
+      }
+    }
+    if (
+      before.text.slice(oldCursor, left.start) !==
+      after.text.slice(newCursor, right.start)
+    )
+      return false;
     oldCursor = left.end;
     newCursor = right.end;
   }
-  // Preserve comments, whitespace and ASI-sensitive newlines byte-for-byte.
+  // Preserve every byte outside the verified declaration/literal spans.
   return before.text.slice(oldCursor) === after.text.slice(newCursor);
 }
 
