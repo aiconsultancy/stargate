@@ -220,7 +220,7 @@ const engine = Bun.spawn(
     cwd: captainDirectory,
     env: {
       HOME: home,
-      PATH: process.env.PATH,
+      PATH: process.env["PATH"],
       XDG_CONFIG_HOME: join(home, "config"),
       XDG_DATA_HOME: join(home, "data"),
       XDG_CACHE_HOME: join(home, "cache"),
@@ -264,7 +264,12 @@ try {
       };
   const client = OpenCode.make({
     baseUrl: endpoint.url,
-    headers: Service.headers(endpoint) ?? {},
+    headers:
+      Service.headers(
+        endpoint.auth
+          ? { url: endpoint.url, auth: endpoint.auth }
+          : { url: endpoint.url },
+      ) ?? {},
   });
   await wait(
     () => client.session.active().catch(() => undefined),
