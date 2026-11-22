@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CrewCaller } from "../src/crew/engine";
-import { CrewQuestions } from "../src/crew/questions";
+import { CrewQuestions } from "../src/crew/questions/questions";
 import { CrewError, CrewState } from "../src/crew/state";
 import { defaultTeam } from "../src/crew/team";
 import { saveQuestionSettings } from "../src/questions/question-settings";

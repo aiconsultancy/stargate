@@ -1,23 +1,23 @@
 import { createHash } from "node:crypto";
 import { Result, Schema } from "effect";
-import type { AgentBackend } from "../backends/backend";
+import type { AgentBackend } from "../../backends/backend";
 import {
   type QuestionSettings,
   resolveQuestionSettings,
-} from "../questions/question-settings";
+} from "../../questions/question-settings";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
   questionAnswer,
-} from "../questions/questions";
-import type { CrewCaller } from "./engine";
+} from "../../questions/questions";
+import type { CrewCaller } from "../engine";
 import {
   CrewError,
   type CrewQuestionOffer,
   type CrewState,
   type CrewTask,
-} from "./state";
-import type { Team } from "./team";
+} from "../state";
+import type { Team } from "../team";
 
 const token = Schema.String.check(Schema.isPattern(/^[a-f0-9]{32}$/));
 export const crewQuestionInputSchema = Schema.Union([

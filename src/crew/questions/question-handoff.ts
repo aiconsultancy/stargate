@@ -5,10 +5,10 @@ import {
   type NativeQuestion,
   nativeQuestionSchema,
   type QuestionAnswer,
-} from "../questions/questions";
-import { settingsStruct } from "../config/settings-schema";
-import { messagePortableSchema as portable } from "./message-tool-input";
-import type { CrewTask } from "./state";
+} from "../../questions/questions";
+import { settingsStruct } from "../../config/settings-schema";
+import { messagePortableSchema as portable } from "../message-tool-input";
+import type { CrewTask } from "../state";
 
 const id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
 const binding = settingsStruct({
