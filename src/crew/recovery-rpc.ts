@@ -3,7 +3,10 @@ import { JsonSchema, Predicate, Result, Schema } from "effect";
 import type { StandardJSONSchemaV1 } from "effect/StandardSchema";
 import { decodeSettings } from "../settings-errors";
 import { settingsInputAdvertisement } from "../settings-legacy";
-import { settingsDiscriminatedUnion, settingsStruct } from "../settings-schema";
+import {
+  settingsDiscriminatedUnion,
+  settingsStruct,
+} from "../config/settings-schema";
 import type { CrewEngine } from "./engine";
 import { effectProjectKeySchema } from "./project-options";
 import {

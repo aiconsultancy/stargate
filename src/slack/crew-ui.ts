@@ -19,7 +19,7 @@ import {
   isAllowedChannel,
   isAllowedUser,
 } from "../gateway/routing";
-import { settingsPattern } from "../settings-schema";
+import { settingsPattern } from "../config/settings-schema";
 
 export interface CrewUIApi {
   open(triggerID: string, view: CronView): Promise<string>;

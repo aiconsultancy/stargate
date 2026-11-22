@@ -13,7 +13,7 @@ import {
   settingsPattern,
   settingsStartsWith,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import { isNativeInstructionContext } from "./instruction-context";
 import {
   crewMessageMetadataKey,

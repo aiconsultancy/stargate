@@ -9,7 +9,7 @@ import {
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 export const agentIDSchema = Schema.String.check(
   settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/),

@@ -16,7 +16,7 @@ import {
   settingsDefault,
   settingsPattern,
   settingsUUID,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import type { Store } from "../gateway/store";
 import { botDisplayName, resolveWaiting } from "../gateway/waiting";
 import {

@@ -37,7 +37,7 @@ import {
   settingsDefault,
   settingsPattern,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import { SlackFiles, type SlackFilesFetch } from "../slack/slack-files";
 import { slackContent } from "../shared/slack-format";
 

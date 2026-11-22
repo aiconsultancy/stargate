@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Schema } from "effect";
-import { settingsDefault, settingsStruct } from "../settings-schema";
+import { settingsDefault, settingsStruct } from "../config/settings-schema";
 
 export const waitingDelaySchema = Schema.NullOr(
   Schema.Finite.check(Schema.isInt())

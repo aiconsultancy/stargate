@@ -1,6 +1,6 @@
 import { Predicate, Result, Schema, SchemaAST } from "effect";
 import { z } from "zod";
-import { settingsIssues } from "./settings-schema";
+import { settingsIssues } from "./config/settings-schema";
 
 // JSON has absent keys, not undefined. Canonical Effect JSON maps undefined
 // to null; legacy Zod advertisements did not. Project only the advertisement,

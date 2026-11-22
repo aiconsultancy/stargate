@@ -1,6 +1,6 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
-import { settingsPattern, settingsStruct } from "../settings-schema";
+import { settingsPattern, settingsStruct } from "../config/settings-schema";
 import { messagePortableSchema } from "./message-tool-input";
 import { effectProjectKeySchema } from "./project-options";
 

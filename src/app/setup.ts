@@ -27,7 +27,7 @@ import {
   checkProducerCredentials,
   type NotifyConfig,
 } from "../notifications/ingest/config";
-import { settingsIssues } from "../settings-schema";
+import { settingsIssues } from "../config/settings-schema";
 
 export function buildManifest(name = "Stargate") {
   if (!name.trim() || name.length > 80)

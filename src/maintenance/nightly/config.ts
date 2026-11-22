@@ -14,7 +14,7 @@ import {
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../../settings-schema";
+} from "../../config/settings-schema";
 import { cleanupSchema } from "./cleanup-config";
 
 /** Strict `maintenance` section of stargate.json. Every component is opt-in. */

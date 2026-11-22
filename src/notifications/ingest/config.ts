@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { settingsDefault, settingsStruct } from "../../settings-schema";
+import { settingsDefault, settingsStruct } from "../../config/settings-schema";
 import { Audience, Id, type Limits, Subscription, TopicPattern } from "./model";
 
 const positive = (max: number) =>

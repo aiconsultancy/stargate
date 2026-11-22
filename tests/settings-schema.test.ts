@@ -42,7 +42,7 @@ import {
   settingsDefault,
   settingsIssues,
   settingsStruct,
-} from "../src/settings-schema";
+} from "../src/config/settings-schema";
 import { transcriptionSchema } from "../src/transcription/transcription";
 import { waitingSchema } from "../src/gateway/waiting";
 import {

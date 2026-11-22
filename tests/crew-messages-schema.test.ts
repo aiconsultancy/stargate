@@ -20,7 +20,7 @@ import { piCrewExtension } from "../src/crew/pi-extension";
 import { CrewReporting } from "../src/crew/report-rpc";
 import { waitingInputSchema } from "../src/crew/waiting";
 import { crewLink } from "../src/irc/crew-link";
-import { settingsIssues } from "../src/settings-schema";
+import { settingsIssues } from "../src/config/settings-schema";
 
 test("mail and DM keep trim, code-point bounds, defaults and meaningful paths", async () => {
   const send = { op: "send", to: "captain", text: " 😀 " } as const;

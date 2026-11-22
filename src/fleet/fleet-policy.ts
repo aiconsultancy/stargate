@@ -5,7 +5,7 @@ import {
   settingsDefault,
   settingsRefine,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 /** An optional operating policy. Human authority is never an agent rank. */
 export const fleetPolicySchema = settingsStruct({

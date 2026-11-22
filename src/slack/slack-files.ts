@@ -12,7 +12,7 @@ import {
   settingsPattern,
   settingsRecord,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 export type SlackFilesFetch = (
   url: string | URL,

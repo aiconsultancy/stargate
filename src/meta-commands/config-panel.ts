@@ -14,7 +14,7 @@ import {
   settingsPattern,
   settingsStartsWith,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import type { SlackPanelContent } from "../shared/slack-format";
 import { resolveWaiting, waitingSettingsPath } from "../gateway/waiting";
 

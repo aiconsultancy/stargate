@@ -427,6 +427,10 @@
       "src/session-history.ts",
       "src/shared/session-history.ts"
     ],
+    "src/settings-schema.ts": [
+      "src/settings-schema.ts",
+      "src/config/settings-schema.ts"
+    ],
     "src/setup.ts": ["src/setup.ts", "src/app/setup.ts"],
     "src/slack-connection.ts": [
       "src/slack-connection.ts",
@@ -554,7 +558,8 @@
         "quota",
         "shared",
         "transcription"
-      ]
+      ],
+      "contracts": ["src/settings-schema.ts"]
     },
     "app": {
       "layer": "app",

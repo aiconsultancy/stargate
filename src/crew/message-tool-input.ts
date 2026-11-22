@@ -7,7 +7,7 @@ import {
   settingsAdvertisement,
   settingsInputAdvertisement,
 } from "../settings-legacy";
-import { settingsIssues } from "../settings-schema";
+import { settingsIssues } from "../config/settings-schema";
 import {
   effectProjectKeySchema,
   effectProjectToolInput,

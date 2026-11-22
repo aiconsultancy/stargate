@@ -8,7 +8,7 @@ import type {
   TransportDelivery,
 } from "../gateway/ports";
 import type { ReactionName } from "../shared/reactions";
-import { settingsStruct } from "../settings-schema";
+import { settingsStruct } from "../config/settings-schema";
 import {
   type TurnProgress,
   type TurnStage,

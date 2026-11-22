@@ -22,7 +22,7 @@ import { configSchema } from "../src/config";
 import type { CrewCaller } from "../src/crew/engine";
 import { CrewPost } from "../src/crew/post";
 import { CrewError } from "../src/crew/state";
-import { settingsIssues } from "../src/settings-schema";
+import { settingsIssues } from "../src/config/settings-schema";
 
 const directories: string[] = [];
 afterEach(async () => {

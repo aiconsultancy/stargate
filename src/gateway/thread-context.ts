@@ -1,5 +1,5 @@
 import { Result, Schema } from "effect";
-import { settingsPattern } from "../settings-schema";
+import { settingsPattern } from "../config/settings-schema";
 
 export const threadContextLimits = {
   pageSize: 50,

@@ -12,7 +12,7 @@ import {
   settingsDefault,
   settingsDiscriminatedUnion,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import { CrewError } from "./state";
 
 const MAX_RESULTS = 20;

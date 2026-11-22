@@ -8,7 +8,7 @@ import {
   settingsPattern,
   settingsStartsWith,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import { CrewError } from "./state";
 import { agentIDSchema } from "./team";
 

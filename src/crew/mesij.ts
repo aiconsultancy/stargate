@@ -5,7 +5,7 @@ import {
   settingsDefault,
   settingsPattern,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 const errors = {
   options: "Invalid Mesij options.",

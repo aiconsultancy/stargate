@@ -28,7 +28,7 @@ import {
   isAllowedChannel,
   isAllowedUser,
 } from "../gateway/routing";
-import { settingsPattern, settingsRecord } from "../settings-schema";
+import { settingsPattern, settingsRecord } from "../config/settings-schema";
 import type { ConfigPanelRecord, MetaRecords } from "./store";
 import { resolveWaiting, saveWaitingDelay } from "../gateway/waiting";
 

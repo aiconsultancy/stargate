@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { settingsPattern } from "../settings-schema";
+import { settingsPattern } from "../config/settings-schema";
 
 export const slackTimestamp = Schema.String.check(
   settingsPattern(/^\d{1,16}\.\d{1,6}$/),

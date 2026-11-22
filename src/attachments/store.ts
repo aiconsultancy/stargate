@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { Schema } from "effect";
-import { settingsPattern } from "../settings-schema";
+import { settingsPattern } from "../config/settings-schema";
 import type { PreparedAttachment, PublishedFile } from "./attachments";
 
 export type AttachmentDelivery = PublishedFile & {

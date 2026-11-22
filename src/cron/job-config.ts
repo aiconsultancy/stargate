@@ -5,7 +5,7 @@ import {
   settingsPattern,
   settingsRefine,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 
 export const cronChannel = Schema.String.check(
   settingsPattern(/^[CGD][A-Z0-9]+$/),

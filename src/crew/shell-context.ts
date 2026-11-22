@@ -1,5 +1,5 @@
 import { Result, Schema } from "effect";
-import { settingsPattern, settingsStruct } from "../settings-schema";
+import { settingsPattern, settingsStruct } from "../config/settings-schema";
 
 /** Minimal retained history fields; tool bodies and output remain opaque. */
 export interface ShellContextRecord {

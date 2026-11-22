@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { Result, Schema } from "effect";
-import { settingsStruct } from "../../settings-schema";
+import { settingsStruct } from "../../config/settings-schema";
 import {
   type Accepted,
   Audience,

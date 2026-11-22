@@ -15,7 +15,7 @@ import {
   settingsDiscriminatedUnion,
   settingsIssues,
   settingsStruct,
-} from "../settings-schema";
+} from "../config/settings-schema";
 import type { CrewCaller, WorkerModelPeer } from "./engine";
 import { effectProjectToolInput } from "./project-options";
 import { CrewError } from "./state";
