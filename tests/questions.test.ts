@@ -917,7 +917,7 @@ test("retention removes settled historical proofs together but preserves active 
     f.store.questions.questionByToken(original.botKey, token)?.outcome,
   ).toBe("uncertain");
   expect(
-    f.store.ircThreadRoot(original.botKey, "#ship", "published-question"),
+    f.store.irc.ircThreadRoot(original.botKey, "#ship", "published-question"),
   ).toBe("m1");
   f.store.respond(f.jobID, []);
   f.store.finish(f.jobID);
@@ -926,11 +926,11 @@ test("retention removes settled historical proofs together but preserves active 
     f.store.questions.questionByToken(original.botKey, token),
   ).toBeUndefined();
   expect(
-    f.store.ircThreadRoot(original.botKey, "#ship", "published-question"),
+    f.store.irc.ircThreadRoot(original.botKey, "#ship", "published-question"),
   ).toBeUndefined();
-  expect(f.store.ircThreadParticipating(original.botKey, "#ship", "m1")).toBe(
-    false,
-  );
+  expect(
+    f.store.irc.ircThreadParticipating(original.botKey, "#ship", "m1"),
+  ).toBe(false);
   const job = f.store.jobByInput(original.botKey, "msg_original");
   if (!job) throw new Error("Missing job");
   expect(f.store.questions.ownsQuestionSource(job)).toBe(false);
@@ -1671,10 +1671,10 @@ for (const activity of ["human", "publication"] as const) {
         ).toBe(true);
       f.store.pruneIrcHistory(original.botKey, Date.now());
       expect(
-        f.store.ircThreadParticipating(original.botKey, "#ship", "m1"),
+        f.store.irc.ircThreadParticipating(original.botKey, "#ship", "m1"),
       ).toBe(true);
       expect(
-        f.store.ircThreadRoot(
+        f.store.irc.ircThreadRoot(
           original.botKey,
           "#ship",
           activity === "human" ? "recent" : "old-bot-message",
@@ -1746,9 +1746,9 @@ test("recent participation preserves an older reply parent through cleanup and r
       fold: (value) => value.toLowerCase(),
       now: Date.now,
       threadRoot: (channel, id) =>
-        f.store.ircThreadRoot(original.botKey, channel, id),
+        f.store.irc.ircThreadRoot(original.botKey, channel, id),
       participating: (channel, root) =>
-        f.store.ircThreadParticipating(original.botKey, channel, root),
+        f.store.irc.ircThreadParticipating(original.botKey, channel, root),
     });
   };
   const clock = spyOn(Date, "now").mockReturnValue(start + 29 * 86_400_000);
@@ -1762,15 +1762,15 @@ test("recent participation preserves an older reply parent through cleanup and r
     clock.mockReturnValue(start + 31 * 86_400_000);
     f.store.pruneIrcHistory(original.botKey, Date.now());
     f.restart();
-    expect(f.store.ircThreadRoot(original.botKey, "#ship", "old-parent")).toBe(
-      "m1",
-    );
-    expect(f.store.ircThreadParticipating(original.botKey, "#ship", "m1")).toBe(
-      true,
-    );
+    expect(
+      f.store.irc.ircThreadRoot(original.botKey, "#ship", "old-parent"),
+    ).toBe("m1");
+    expect(
+      f.store.irc.ircThreadParticipating(original.botKey, "#ship", "m1"),
+    ).toBe(true);
     expect(route("after-restart")?.replyParent).toBe("m1");
     expect(
-      f.store.ircThreadRoot(original.botKey, "#foreign", "old-parent"),
+      f.store.irc.ircThreadRoot(original.botKey, "#foreign", "old-parent"),
     ).toBeUndefined();
     const metadata = new Database(f.path, { readonly: true });
     try {
@@ -1896,17 +1896,17 @@ test("durable Stop anchors retain the exact request rather than an older visible
     f.store.ircPublished(original.botKey, "#ship", "question-echo", "m1", "m1"),
   ).toBe(false);
   f.restart();
-  expect(f.store.ircThreadRoot(original.botKey, "#ship", "question-echo")).toBe(
-    "m1",
-  );
   expect(
-    f.store.ircRequestAnchor(original.botKey, "#ship", "question-echo"),
+    f.store.irc.ircThreadRoot(original.botKey, "#ship", "question-echo"),
+  ).toBe("m1");
+  expect(
+    f.store.irc.ircRequestAnchor(original.botKey, "#ship", "question-echo"),
   ).toBe("later");
   expect(
-    f.store.ircRequestAnchor(original.botKey, "#other", "question-echo"),
+    f.store.irc.ircRequestAnchor(original.botKey, "#other", "question-echo"),
   ).toBeUndefined();
   expect(
-    f.store.ircRequestAnchor("other-bot", "#ship", "question-echo"),
+    f.store.irc.ircRequestAnchor("other-bot", "#ship", "question-echo"),
   ).toBeUndefined();
 });
 
@@ -2004,7 +2004,7 @@ for (const botReply of [false, true]) {
         ),
       ).toBe(true);
       expect(
-        f.store.ircRequestAnchor(registration.key, "#ship", stopTarget),
+        f.store.irc.ircRequestAnchor(registration.key, "#ship", stopTarget),
       ).toBe("m1");
       expect(registration.client.requestAnchor(stopTarget)).toBeUndefined();
     }

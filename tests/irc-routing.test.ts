@@ -446,8 +446,8 @@ test("irc limits: peers per conversation, ship messages per channel", async () =
   cleanup.push(() => store.close());
   const limits = {
     shipKeys: ["captain-key", "chief-key"],
-    count: (input: Parameters<Store["turnsSince"]>[0]) =>
-      store.turnsSince(input),
+    count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
+      store.irc.turnsSince(input),
   };
   const admit = (
     member: IrcMember,
@@ -718,8 +718,8 @@ test("irc casemapping: one folded channel key for caps, routing and denies", asy
     );
   const limits = {
     shipKeys: [captainMember.key, crewMember.key],
-    count: (input: Parameters<Store["turnsSince"]>[0]) =>
-      store.turnsSince(input),
+    count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
+      store.irc.turnsSince(input),
   };
   const admit = (admission: ReturnType<typeof routeAs>) => {
     if (!admission) throw new Error("not routed");
@@ -853,8 +853,8 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
   const two = shipConfig({ access: {} });
   const limits = {
     shipKeys: [captain.key, chief.key],
-    count: (input: Parameters<Store["turnsSince"]>[0]) =>
-      store.turnsSince(input),
+    count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
+      store.irc.turnsSince(input),
   };
   let id = 0;
   const admitted = (config: IrcConfig, target: string, attempts: number) => {
@@ -919,8 +919,8 @@ test("irc ship cap: a crew → captain DM is capped at per agent × 2", async ()
   cleanup.push(() => store.close());
   const limits = {
     shipKeys: [captain.key, chief.key],
-    count: (input: Parameters<Store["turnsSince"]>[0]) =>
-      store.turnsSince(input),
+    count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
+      store.irc.turnsSince(input),
   };
   const dm = (config: IrcConfig, msgid: string) => {
     const admission = routeIrcMessage(
@@ -957,8 +957,8 @@ test("irc ship cap: a crew → captain DM is capped at per agent × 2", async ()
   cleanup.push(() => fresh.close());
   const offLimits = {
     shipKeys: [captain.key],
-    count: (input: Parameters<Store["turnsSince"]>[0]) =>
-      fresh.turnsSince(input),
+    count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
+      fresh.irc.turnsSince(input),
   };
   const admission = routeIrcMessage(
     message("galactica", "hello", { account: "galactica-chief", msgid: "x" }),
@@ -1083,8 +1083,8 @@ test("irc all-call: ship senders count against the channel cap, people do not", 
   const config = shipConfig({ access: { shipTurnsPerAgentPerHour: 1 } });
   const limits = {
     shipKeys: [captain.key, chief.key],
-    count: (input: Parameters<Store["turnsSince"]>[0]) =>
-      store.turnsSince(input),
+    count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
+      store.irc.turnsSince(input),
   };
   let id = 0;
   const call = (member: IrcMember, account: string) => {

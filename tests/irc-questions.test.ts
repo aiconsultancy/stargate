@@ -665,7 +665,7 @@ test("question replies resolve durable own-publication anchors after transport r
   database.close();
   if (!questionID) throw new Error("No question echo ID");
   await until(
-    () => f.store.ircThreadRoot(key, "#ship", questionID) === "m1",
+    () => f.store.irc.ircThreadRoot(key, "#ship", questionID) === "m1",
     2000,
     "question anchor persisted",
   );

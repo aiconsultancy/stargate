@@ -1266,16 +1266,20 @@
         "src/irc/routing.ts",
         "src/irc/ship.ts",
         "src/irc/status.ts",
-        "src/irc/text.ts"
+        "src/irc/text.ts",
+        "src/irc/store.ts",
+        "src/irc/store-contract.ts"
       ],
       "public": [
         "src/irc/client.ts",
         "src/irc/protocol.ts",
         "src/irc/routing.ts",
         "src/irc/ship.ts",
-        "src/irc/text.ts"
+        "src/irc/text.ts",
+        "src/irc/store.ts",
+        "src/irc/store-contract.ts"
       ],
-      "contracts": ["src/irc/protocol.ts"],
+      "contracts": ["src/irc/protocol.ts", "src/irc/store-contract.ts"],
       "neighbours": [
         "attachments",
         "backends",

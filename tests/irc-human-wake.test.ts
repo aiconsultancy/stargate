@@ -121,9 +121,10 @@ function route(
     joined: () => true,
     fold,
     now: () => 0,
-    threadRoot: (channel, id) => store?.ircThreadRoot(config.id, channel, id),
+    threadRoot: (channel, id) =>
+      store?.irc.ircThreadRoot(config.id, channel, id),
     participating: (channel, root) =>
-      store?.ircThreadParticipating(config.id, channel, root) ?? false,
+      store?.irc.ircThreadParticipating(config.id, channel, root) ?? false,
   });
 }
 
@@ -312,7 +313,9 @@ test("only explicit invitations or confirmed own replies create durable thread p
   const broad = route(cfg, "#command", "top-level", { msgid: "root" }, store);
   if (!broad) throw new Error("Missing broad input");
   expect(store.enqueueIrcHuman(broad, false)).toBe(true);
-  expect(store.ircThreadParticipating(cfg.id, "#command", "root")).toBe(false);
+  expect(store.irc.ircThreadParticipating(cfg.id, "#command", "root")).toBe(
+    false,
+  );
   expect(
     route(
       cfg,
@@ -349,7 +352,9 @@ test("only explicit invitations or confirmed own replies create durable thread p
       ?.replyParent,
   ).toBe("unknown");
   expect(store.enqueueIrcHuman(broad, true)).toBe(false);
-  expect(store.ircThreadParticipating(cfg.id, "#command", "root")).toBe(false);
+  expect(store.irc.ircThreadParticipating(cfg.id, "#command", "root")).toBe(
+    false,
+  );
   expect(store.ircPublished(cfg.id, "#command", "own-answer", "absent")).toBe(
     false,
   );
@@ -382,10 +387,12 @@ test("only explicit invitations or confirmed own replies create durable thread p
       route(cfg, "#command", "invited root", { "+reply": "unknown" }, store)
         ?.replyParent,
     ).toBe("unknown");
-    expect(store.ircThreadParticipating("other", "#command", "root")).toBe(
+    expect(store.irc.ircThreadParticipating("other", "#command", "root")).toBe(
       false,
     );
-    expect(store.ircThreadParticipating(cfg.id, "#other", "root")).toBe(false);
+    expect(store.irc.ircThreadParticipating(cfg.id, "#other", "root")).toBe(
+      false,
+    );
     for (const tags of [
       { "+draft/reply": "" },
       { "+reply": "bad\nroot" },
@@ -428,7 +435,9 @@ test("all-replies mode admits unknown opaque parents from verified humans; other
       text: "unknown reply",
     });
     expect(unknown?.threadInvitation).toBeUndefined();
-    expect(store.ircThreadRoot(cfg.id, "#starbase", "unknown")).toBeUndefined();
+    expect(
+      store.irc.ircThreadRoot(cfg.id, "#starbase", "unknown"),
+    ).toBeUndefined();
     expect(
       route(
         config(),
@@ -660,7 +669,7 @@ for (const multiline of [false, true])
       const primary = ship.registrations[0];
       if (!primary) throw new Error("Missing captain");
       expect(
-        f.store.ircThreadParticipating(primary.key, "#command", root),
+        f.store.irc.ircThreadParticipating(primary.key, "#command", root),
       ).toBe(false);
     }
     f.fake.say({ nick: "jac", account: "jac" }, "#command", "uninvited reply", {
@@ -788,7 +797,7 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
     if (!primary) throw new Error("Missing captain");
     if (primary.account === "vance") continue;
     await until(
-      () => f.store.ircThreadParticipating(primary.key, "#command", root),
+      () => f.store.irc.ircThreadParticipating(primary.key, "#command", root),
       5000,
       "actual broad response confirmed",
     );
@@ -814,13 +823,17 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
     const primary = ship.registrations[0];
     if (!primary) throw new Error("Missing captain");
     expect(
-      f.store.ircThreadParticipating(primary.key, "#command", "forged-root"),
+      f.store.irc.ircThreadParticipating(
+        primary.key,
+        "#command",
+        "forged-root",
+      ),
     ).toBe(false);
     expect(
-      f.store.ircThreadRoot(primary.key, "#command", "forged-own"),
+      f.store.irc.ircThreadRoot(primary.key, "#command", "forged-own"),
     ).toBeUndefined();
     expect(
-      f.store.ircThreadParticipating(primary.key, "#command", "wrong-root"),
+      f.store.irc.ircThreadParticipating(primary.key, "#command", "wrong-root"),
     ).toBe(false);
   }
   let missed = "";
@@ -841,7 +854,7 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
     const primary = ship.registrations[0];
     if (!primary) throw new Error("Missing captain");
     expect(
-      f.store.ircThreadParticipating(primary.key, "#command", missed),
+      f.store.irc.ircThreadParticipating(primary.key, "#command", missed),
     ).toBe(false);
   }
 });
