@@ -1,19 +1,8 @@
 import { Result, Schema } from "effect";
 import { containsCredential, redactCredentials } from "../lib/credentials";
-import { cronArbiterSchema, cronModelSchema } from "./advanced";
 import { settingsStruct } from "../config/settings-schema";
 
-const modelFields = {
-  model: Schema.optional(cronModelSchema),
-  arbiter: Schema.optional(cronArbiterSchema),
-};
-export const cronModelInputSchema = settingsStruct(modelFields);
-export const cronEvaluateInputSchema = settingsStruct({
-  ...modelFields,
-  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
-  // Accepted job text remains 12000; the gateway appends bounded quota evidence.
-  prompt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(14000)),
-});
+export { cronEvaluateInputSchema, cronModelInputSchema } from "./advanced";
 
 export const cronRisksSchema = settingsStruct({
   approval: Schema.Boolean,
