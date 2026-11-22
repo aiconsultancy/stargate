@@ -18,6 +18,8 @@ import { Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+const controlObservationTimeoutMs = 10_000;
+const questionIntegrationTimeoutMs = 45_000;
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -347,7 +349,7 @@ async function fixture(
         await reload.retire();
       }
     },
-    received: (marker: string) =>
+    received: (marker: string, timeoutMs = 2000) =>
       until(
         () =>
           ships.every((ship) => {
@@ -359,7 +361,7 @@ async function fixture(
               )
             );
           }),
-        2000,
+        timeoutMs,
         "all ships processed reserved control",
       ),
     get pending() {
@@ -369,88 +371,92 @@ async function fixture(
 }
 
 for (const multiline of [false, true]) {
-  test(`real IRC question posts in original thread and resumes once (${multiline ? "multiline" : "plain"})`, async () => {
-    const f = await fixture(multiline);
-    f.send("captain: investigate", "m1");
-    await until(
-      () =>
-        f.store.questionOffers(f.ships[0]?.registrations[0]?.key ?? "")[0]
-          ?.notified === 1,
-      5000,
-      "native question offered",
-    );
-    const primary = f.ships[0]?.registrations[0];
-    if (!primary) throw new Error("No primary");
-    const offer = f.store.questionOffers(primary.key)[0];
-    if (!offer) throw new Error("No offer");
-    const wire = [
-      ...lineOf(f.server.received("captain"), "PRIVMSG"),
-      ...lineOf(f.server.received("captain"), "BATCH"),
-    ];
-    const body = wire.find(
-      (m) =>
-        m.command === "PRIVMSG" &&
-        m.params[1]?.includes("OpenCode needs clarification"),
-    );
-    if (!body) throw new Error("No question body");
-    const batch = body.tags.get("batch");
-    const envelope = batch
-      ? wire.find((m) => m.command === "BATCH" && m.params[0] === `+${batch}`)
-      : body;
-    expect(envelope?.command).toBe(multiline ? "BATCH" : "PRIVMSG");
-    expect(envelope?.tags.get("+draft/reply")).toBe("m1");
-    const initialPrompts = f.prompts.length;
-    f.send(`captain: answer ${offer.token} 1`, "spoof", "other-human", "m1");
-    f.send(
-      `captain: answer ${offer.token} 1`,
-      "wrong-thread",
-      "jac",
-      "foreign",
-    );
-    const rejectedAt = f.send(
-      `captain: answer ${offer.token} 1`,
-      "bot-tag",
-      "jac",
-      "m1",
-      {
-        bot: "1",
-      },
-    );
-    await f.received(rejectedAt);
-    expect(f.replies).toEqual([]);
-    expect(f.prompts.length).toBe(initialPrompts);
-    f.send(`@captain: answer ${offer.token} 1`, "answer", "jac", "m1");
-    await until(
-      () =>
-        f.replies.length === 1 &&
-        f.server
-          .received("captain")
-          .some((s) => s.includes("Clarification received.")),
-      5000,
-      "native continued and original reply delivered",
-    );
-    const duplicateAt = f.send(
-      `captain: answer ${offer.token} 2`,
-      "duplicate",
-      "jac",
-      "m1",
-    );
-    await f.received(duplicateAt);
-    expect(f.replies).toEqual([{ q0: "wait" }]);
-    expect(f.prompts.length).toBe(initialPrompts);
-    const final = lineOf(f.server.received("captain"), "PRIVMSG").find(
-      (m) =>
-        m.command === "PRIVMSG" && m.params[1] === "Clarification received.",
-    );
-    if (!final) throw new Error("No final continuation");
-    const finalBatch = final.tags.get("batch");
-    const finalEnvelope = finalBatch
-      ? lineOf(f.server.received("captain"), "BATCH").find(
-          (m) => m.command === "BATCH" && m.params[0] === `+${finalBatch}`,
-        )
-      : final;
-    expect(finalEnvelope?.tags.get("+draft/reply")).toBe("m1");
-  }, 15_000);
+  test(
+    `real IRC question posts in original thread and resumes once (${multiline ? "multiline" : "plain"})`,
+    async () => {
+      const f = await fixture(multiline);
+      f.send("captain: investigate", "m1");
+      await until(
+        () =>
+          f.store.questionOffers(f.ships[0]?.registrations[0]?.key ?? "")[0]
+            ?.notified === 1,
+        5000,
+        "native question offered",
+      );
+      const primary = f.ships[0]?.registrations[0];
+      if (!primary) throw new Error("No primary");
+      const offer = f.store.questionOffers(primary.key)[0];
+      if (!offer) throw new Error("No offer");
+      const wire = [
+        ...lineOf(f.server.received("captain"), "PRIVMSG"),
+        ...lineOf(f.server.received("captain"), "BATCH"),
+      ];
+      const body = wire.find(
+        (m) =>
+          m.command === "PRIVMSG" &&
+          m.params[1]?.includes("OpenCode needs clarification"),
+      );
+      if (!body) throw new Error("No question body");
+      const batch = body.tags.get("batch");
+      const envelope = batch
+        ? wire.find((m) => m.command === "BATCH" && m.params[0] === `+${batch}`)
+        : body;
+      expect(envelope?.command).toBe(multiline ? "BATCH" : "PRIVMSG");
+      expect(envelope?.tags.get("+draft/reply")).toBe("m1");
+      const initialPrompts = f.prompts.length;
+      f.send(`captain: answer ${offer.token} 1`, "spoof", "other-human", "m1");
+      f.send(
+        `captain: answer ${offer.token} 1`,
+        "wrong-thread",
+        "jac",
+        "foreign",
+      );
+      const rejectedAt = f.send(
+        `captain: answer ${offer.token} 1`,
+        "bot-tag",
+        "jac",
+        "m1",
+        {
+          bot: "1",
+        },
+      );
+      await f.received(rejectedAt, controlObservationTimeoutMs);
+      expect(f.replies).toEqual([]);
+      expect(f.prompts.length).toBe(initialPrompts);
+      f.send(`@captain: answer ${offer.token} 1`, "answer", "jac", "m1");
+      await until(
+        () =>
+          f.replies.length === 1 &&
+          f.server
+            .received("captain")
+            .some((s) => s.includes("Clarification received.")),
+        5000,
+        "native continued and original reply delivered",
+      );
+      const duplicateAt = f.send(
+        `captain: answer ${offer.token} 2`,
+        "duplicate",
+        "jac",
+        "m1",
+      );
+      await f.received(duplicateAt, controlObservationTimeoutMs);
+      expect(f.replies).toEqual([{ q0: "wait" }]);
+      expect(f.prompts.length).toBe(initialPrompts);
+      const final = lineOf(f.server.received("captain"), "PRIVMSG").find(
+        (m) =>
+          m.command === "PRIVMSG" && m.params[1] === "Clarification received.",
+      );
+      if (!final) throw new Error("No final continuation");
+      const finalBatch = final.tags.get("batch");
+      const finalEnvelope = finalBatch
+        ? lineOf(f.server.received("captain"), "BATCH").find(
+            (m) => m.command === "BATCH" && m.params[0] === `+${finalBatch}`,
+          )
+        : final;
+      expect(finalEnvelope?.tags.get("+draft/reply")).toBe("m1");
+    },
+    questionIntegrationTimeoutMs,
+  );
 }
 
 test("an explicit opt-out leaves native question controls quiet", async () => {

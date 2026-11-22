@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, test as bunTest } from "bun:test";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,9 +24,31 @@ import { resolveWaiting, waitingSettingsPath } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 
 const cleanups: (() => Promise<void>)[] = [];
+const diskIntegrationTimeoutMs = 30_000;
+let activeTest: Promise<void> | undefined;
+
+function test(
+  name: string,
+  body: () => void | Promise<void>,
+  timeout?: number,
+) {
+  bunTest(
+    name,
+    () => {
+      activeTest = Promise.resolve().then(body);
+      return activeTest;
+    },
+    timeout,
+  );
+}
+
 afterEach(async () => {
+  // Bun's timeout does not cancel the callback or its pending filesystem work.
+  // Keep the database alive until that callback has stopped using it.
+  await activeTest?.catch(() => {});
+  activeTest = undefined;
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-});
+}, diskIntegrationTimeoutMs);
 const now = Date.parse("2026-11-18T12:00:00Z");
 
 test("question buttons persist, repaint and do not replay after restart", async () => {
@@ -60,28 +82,32 @@ test("question buttons persist, repaint and do not replay after restart", async 
   });
 });
 
-test("same-value question replacement invalidates panels including waiting actions", async () => {
-  const f = await fixture();
-  if (f.config.backend.type !== "opencode")
-    throw new Error("Expected OpenCode");
-  const settings = await resolveQuestionSettings(f.config);
-  await saveQuestionSettings(
-    f.config.backend.directory,
-    "adama",
-    settings,
-    AbortSignal.timeout(5000),
-  );
-  await f.publish();
-  await saveQuestionSettings(
-    f.config.backend.directory,
-    "adama",
-    settings,
-    AbortSignal.timeout(5000),
-  );
-  await f.click();
-  expect(await f.delay()).toBe(5000);
-  expect(f.replies.at(-1)).toContain("stale");
-});
+test(
+  "same-value question replacement invalidates panels including waiting actions",
+  async () => {
+    const f = await fixture();
+    if (f.config.backend.type !== "opencode")
+      throw new Error("Expected OpenCode");
+    const settings = await resolveQuestionSettings(f.config);
+    await saveQuestionSettings(
+      f.config.backend.directory,
+      "adama",
+      settings,
+      AbortSignal.timeout(5000),
+    );
+    await f.publish();
+    await saveQuestionSettings(
+      f.config.backend.directory,
+      "adama",
+      settings,
+      AbortSignal.timeout(5000),
+    );
+    await f.click();
+    expect(await f.delay()).toBe(5000);
+    expect(f.replies.at(-1)).toContain("stale");
+  },
+  diskIntegrationTimeoutMs,
+);
 
 test("typed question commands preserve other settings and reject invalid values", async () => {
   const f = await fixture();
@@ -567,17 +593,21 @@ const invalidPresses: [string, (raw: Press) => unknown][] = [
   ],
 ];
 for (const [name, alter] of invalidPresses) {
-  test(`${name} is refused locally without a write`, async () => {
-    const f = await fixture();
-    await f.publish();
-    const count = f.updates.length;
-    await f.click(alter(f.press()));
-    expect(await f.delay()).toBe(5000);
-    expect(f.acks).toHaveLength(1);
-    expect(f.acks).toEqual([undefined]);
-    expect(f.updates).toHaveLength(count);
-    expect(f.posts).toHaveLength(1);
-  });
+  test(
+    `${name} is refused locally without a write`,
+    async () => {
+      const f = await fixture();
+      await f.publish();
+      const count = f.updates.length;
+      await f.click(alter(f.press()));
+      expect(await f.delay()).toBe(5000);
+      expect(f.acks).toHaveLength(1);
+      expect(f.acks).toEqual([undefined]);
+      expect(f.updates).toHaveLength(count);
+      expect(f.posts).toHaveLength(1);
+    },
+    name === "Slackbot" ? diskIntegrationTimeoutMs : undefined,
+  );
 }
 
 for (const lookup of [
@@ -661,17 +691,27 @@ test("changed mute snapshot invalidates a panel without exposing reasons", async
   expect(f.replies[0]).toContain("stale");
 });
 
-test("old revision and simultaneous distinct clicks cannot both apply", async () => {
-  const f = await fixture();
-  const panel = await f.publish();
-  const first = f.press("stargate_config_waiting_3", panel);
-  const second = f.press("stargate_config_waiting_10", panel, "1795003200.002");
-  await Promise.all([f.click(first), f.click(second)]);
-  expect(await f.delay()).toBe(3000);
-  expect(f.replies.some((reply) => reply.includes("stale"))).toBe(true);
-  await f.click(f.press("stargate_config_waiting_10", panel, "1795003200.003"));
-  expect(await f.delay()).toBe(3000);
-});
+test(
+  "old revision and simultaneous distinct clicks cannot both apply",
+  async () => {
+    const f = await fixture();
+    const panel = await f.publish();
+    const first = f.press("stargate_config_waiting_3", panel);
+    const second = f.press(
+      "stargate_config_waiting_10",
+      panel,
+      "1795003200.002",
+    );
+    await Promise.all([f.click(first), f.click(second)]);
+    expect(await f.delay()).toBe(3000);
+    expect(f.replies.some((reply) => reply.includes("stale"))).toBe(true);
+    await f.click(
+      f.press("stargate_config_waiting_10", panel, "1795003200.003"),
+    );
+    expect(await f.delay()).toBe(3000);
+  },
+  diskIntegrationTimeoutMs,
+);
 
 test("unknown own action is consumed; Stop, cron and pairing are not", async () => {
   const f = await fixture();

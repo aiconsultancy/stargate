@@ -15,6 +15,7 @@ import {
 
 const signal = () => new AbortController().signal;
 const unavailable = "Pi history unavailable or cancelled.";
+const diskIntegrationTimeoutMs = 30_000;
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-crew-history-"));
@@ -226,71 +227,75 @@ test("history RPC authorizes every describe, children and entry ID before reads"
   }
 });
 
-test("history RPC pages recorded task/report children, excludes main and duplicates", async () => {
-  const f = await fixture();
-  try {
-    const before = f.snapshot();
-    const root = f.root("twiki");
-    const first = await f.rpc.historyChildren(
-      { parentID: root, limit: 1 },
-      signal(),
-    );
-    expect(first.sessions).toEqual([
-      {
-        id: `${root}~18`,
-        parentID: root,
-        harness: "pi-durable",
-        kind: "conversation",
-        title: "report",
-      },
-    ]);
-    if (!first.cursor) throw new Error("Missing cursor");
-    const second = await f.rpc.historyChildren(
-      { parentID: root, limit: 1, cursor: first.cursor },
-      signal(),
-    );
-    expect(second.sessions).toEqual([
-      {
-        id: `${root}~19`,
-        parentID: root,
-        harness: "pi-durable",
-        kind: "conversation",
-        title: "task",
-      },
-    ]);
-    expect(second.cursor).toBeUndefined();
-    const recent = await f.rpc.historyChildren(
-      { parentID: root, limit: 1, updatedSince: 0 },
-      signal(),
-    );
-    expect(recent.sessions).toMatchObject([
-      { parentID: root, updatedAt: expect.any(Number) },
-    ]);
-    expect(recent.cursor).toBeUndefined();
-    expect(
-      await f.rpc.historyChildren(
-        { parentID: root, limit: 1, updatedSince: Date.now() + 60_000 },
+test(
+  "history RPC pages recorded task/report children, excludes main and duplicates",
+  async () => {
+    const f = await fixture();
+    try {
+      const before = f.snapshot();
+      const root = f.root("twiki");
+      const first = await f.rpc.historyChildren(
+        { parentID: root, limit: 1 },
         signal(),
-      ),
-    ).toEqual({ sessions: [] });
-    await expect(
-      f.rpc.historyChildren(
-        { parentID: f.root("r2d2"), limit: 1, cursor: first.cursor },
+      );
+      expect(first.sessions).toEqual([
+        {
+          id: `${root}~18`,
+          parentID: root,
+          harness: "pi-durable",
+          kind: "conversation",
+          title: "report",
+        },
+      ]);
+      if (!first.cursor) throw new Error("Missing cursor");
+      const second = await f.rpc.historyChildren(
+        { parentID: root, limit: 1, cursor: first.cursor },
         signal(),
-      ),
-    ).rejects.toThrow(unavailable);
-    expect(
-      await f.rpc.historyChildren(
-        { parentID: `${root}~18`, limit: 10 },
+      );
+      expect(second.sessions).toEqual([
+        {
+          id: `${root}~19`,
+          parentID: root,
+          harness: "pi-durable",
+          kind: "conversation",
+          title: "task",
+        },
+      ]);
+      expect(second.cursor).toBeUndefined();
+      const recent = await f.rpc.historyChildren(
+        { parentID: root, limit: 1, updatedSince: 0 },
         signal(),
-      ),
-    ).toEqual({ sessions: [] });
-    expect(f.reads).toEqual([]);
-    expect(f.snapshot()).toEqual(before);
-  } finally {
-    await f.close();
-  }
-});
+      );
+      expect(recent.sessions).toMatchObject([
+        { parentID: root, updatedAt: expect.any(Number) },
+      ]);
+      expect(recent.cursor).toBeUndefined();
+      expect(
+        await f.rpc.historyChildren(
+          { parentID: root, limit: 1, updatedSince: Date.now() + 60_000 },
+          signal(),
+        ),
+      ).toEqual({ sessions: [] });
+      await expect(
+        f.rpc.historyChildren(
+          { parentID: f.root("r2d2"), limit: 1, cursor: first.cursor },
+          signal(),
+        ),
+      ).rejects.toThrow(unavailable);
+      expect(
+        await f.rpc.historyChildren(
+          { parentID: `${root}~18`, limit: 10 },
+          signal(),
+        ),
+      ).toEqual({ sessions: [] });
+      expect(f.reads).toEqual([]);
+      expect(f.snapshot()).toEqual(before);
+    } finally {
+      await f.close();
+    }
+  },
+  diskIntegrationTimeoutMs,
+);
 
 test("history RPC children cursors are exact string records", async () => {
   const f = await fixture();

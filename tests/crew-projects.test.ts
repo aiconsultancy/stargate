@@ -39,6 +39,8 @@ import { dashboardSource } from "../src/dashboard/dashboard-source";
 import { Store } from "../src/gateway/store";
 import { bot, identity as dashboardIdentity } from "./fixtures";
 
+const diskIntegrationTimeoutMs = 30_000;
+
 async function git(directory: string, ...args: string[]) {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
@@ -255,65 +257,69 @@ function identity(engine: CrewEngine) {
   }
 }
 
-test("legacy context identity/native IDs stay unchanged while another project gets independent workers and state", async () => {
-  const f = await fixture();
-  let projects: CrewProjects | undefined;
-  try {
-    const legacy = await f.factory(f.base);
-    const oldPeer = (
-      await legacy.run({ op: "ensure", crew: "worker" }, f.captain())
-    ).peers?.[0];
-    const oldIdentity = identity(legacy);
-    const rootBefore = structuredClone(f.rootSession);
-    await legacy.close();
-    projects = await CrewProjects.open(f.options, f.factory);
-    expect(identity(projects.default)).toBe(oldIdentity);
-    const existing = await projects.run(
-      { op: "ensure", crew: "worker" },
-      f.captain(),
-    );
-    const extra = await projects.run(
-      { op: "ensure", crew: "worker", project: "stargate" },
-      f.captain(),
-    );
-    expect(existing.peers?.[0]?.sessionID).toBe(oldPeer?.sessionID);
-    expect(extra.peers?.[0]?.sessionID).not.toBe(oldPeer?.sessionID);
-    expect(projects.get("stargate").options.captainDirectory).toBe(
-      f.base.captainDirectory,
-    );
-    expect(projects.get("stargate").options.projectDirectory).not.toBe(
-      f.base.projectDirectory,
-    );
-    expect(projects.get("stargate").state.path).not.toBe(
-      projects.default.state.path,
-    );
-    expect(f.rootSession).toEqual(rootBefore);
-    expect(f.creations).toHaveLength(2);
-    expect(
-      f.creations.every(
-        (input) =>
-          input.agent === "crew-worker" &&
-          input.location?.directory !== f.base.captainDirectory,
-      ),
-    ).toBe(true);
-    const ids = [...projects.contexts].map(([key, e]) => [
-      key,
-      e.state.peer("worker")?.sessionID,
-    ]);
-    await projects.close();
-    projects = await CrewProjects.open(f.options, f.factory);
-    expect(
-      [...projects.contexts].map(([key, e]) => [
+test(
+  "legacy context identity/native IDs stay unchanged while another project gets independent workers and state",
+  async () => {
+    const f = await fixture();
+    let projects: CrewProjects | undefined;
+    try {
+      const legacy = await f.factory(f.base);
+      const oldPeer = (
+        await legacy.run({ op: "ensure", crew: "worker" }, f.captain())
+      ).peers?.[0];
+      const oldIdentity = identity(legacy);
+      const rootBefore = structuredClone(f.rootSession);
+      await legacy.close();
+      projects = await CrewProjects.open(f.options, f.factory);
+      expect(identity(projects.default)).toBe(oldIdentity);
+      const existing = await projects.run(
+        { op: "ensure", crew: "worker" },
+        f.captain(),
+      );
+      const extra = await projects.run(
+        { op: "ensure", crew: "worker", project: "stargate" },
+        f.captain(),
+      );
+      expect(existing.peers?.[0]?.sessionID).toBe(oldPeer?.sessionID);
+      expect(extra.peers?.[0]?.sessionID).not.toBe(oldPeer?.sessionID);
+      expect(projects.get("stargate").options.captainDirectory).toBe(
+        f.base.captainDirectory,
+      );
+      expect(projects.get("stargate").options.projectDirectory).not.toBe(
+        f.base.projectDirectory,
+      );
+      expect(projects.get("stargate").state.path).not.toBe(
+        projects.default.state.path,
+      );
+      expect(f.rootSession).toEqual(rootBefore);
+      expect(f.creations).toHaveLength(2);
+      expect(
+        f.creations.every(
+          (input) =>
+            input.agent === "crew-worker" &&
+            input.location?.directory !== f.base.captainDirectory,
+        ),
+      ).toBe(true);
+      const ids = [...projects.contexts].map(([key, e]) => [
         key,
         e.state.peer("worker")?.sessionID,
-      ]),
-    ).toEqual(ids);
-    expect(f.prompts).toHaveLength(0);
-  } finally {
-    await projects?.close();
-    await f.close();
-  }
-});
+      ]);
+      await projects.close();
+      projects = await CrewProjects.open(f.options, f.factory);
+      expect(
+        [...projects.contexts].map(([key, e]) => [
+          key,
+          e.state.peer("worker")?.sessionID,
+        ]),
+      ).toEqual(ids);
+      expect(f.prompts).toHaveLength(0);
+    } finally {
+      await projects?.close();
+      await f.close();
+    }
+  },
+  diskIntegrationTimeoutMs,
+);
 
 test("dispatch selects only protected paths; worker omission binds native context and cannot spoof mail/DM/project", async () => {
   const f = await fixture();

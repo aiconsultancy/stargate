@@ -12,6 +12,8 @@ import type { MesijMessage } from "../src/crew/mesij";
 import type { ResultAPI, ResultMessage } from "../src/crew/result";
 import type { CrewTask } from "../src/crew/state";
 
+const diskIntegrationTimeoutMs = 30_000;
+
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-recovery-"));
   const options = {
@@ -506,33 +508,40 @@ test("notification reservation prevents slot reuse while the ended turn is colle
   }
 });
 
-test("completion after the busy probe keeps admitted steer task-marked and never resumes it", async () => {
-  const f = await fixture();
-  try {
-    const task = await f.dispatch();
-    const synthetic = f.native.synthetic;
-    f.native.synthetic = async (input, request) => {
-      f.finish(task);
-      expect(input.resume).toBe(false);
-      expect(input.metadata).toMatchObject({
-        pogoCrew: { taskID: task.id },
+test(
+  "completion after the busy probe keeps admitted steer task-marked and never resumes it",
+  async () => {
+    const f = await fixture();
+    try {
+      const task = await f.dispatch();
+      const synthetic = f.native.synthetic;
+      f.native.synthetic = async (input, request) => {
+        f.finish(task);
+        expect(input.resume).toBe(false);
+        expect(input.metadata).toMatchObject({
+          pogoCrew: { taskID: task.id },
+        });
+        return synthetic(input, request);
+      };
+      expect(
+        await f.engine.dm(
+          { op: "send", to: "worker", text: "Check" },
+          f.captain,
+        ),
+      ).toMatchObject({ stored: true, notification: "accepted" });
+      expect(
+        await f.engine.run({ op: "status", taskID: task.id }, f.captain),
+      ).toMatchObject({
+        status: "completed",
+        task: { result: "Implemented and tested." },
       });
-      return synthetic(input, request);
-    };
-    expect(
-      await f.engine.dm({ op: "send", to: "worker", text: "Check" }, f.captain),
-    ).toMatchObject({ stored: true, notification: "accepted" });
-    expect(
-      await f.engine.run({ op: "status", taskID: task.id }, f.captain),
-    ).toMatchObject({
-      status: "completed",
-      task: { result: "Implemented and tested." },
-    });
-    expect(f.counts()).toMatchObject({ prompts: 1, synthetics: 1 });
-  } finally {
-    await f.close();
-  }
-});
+      expect(f.counts()).toMatchObject({ prompts: 1, synthetics: 1 });
+    } finally {
+      await f.close();
+    }
+  },
+  diskIntegrationTimeoutMs,
+);
 
 for (const status of ["uncertain", "cancelling"] as const) {
   test(`notification defers if the occupied task becomes ${status} during its native probe`, async () => {

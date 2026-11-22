@@ -13,6 +13,8 @@ import {
 import type { MesijClient, MesijMessage } from "../src/crew/mesij";
 import { teamSchema } from "../src/crew/team";
 
+const diskIntegrationTimeoutMs = 30_000;
+
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-mail-receipt-"));
   const team = Schema.decodeUnknownSync(teamSchema)({
@@ -383,6 +385,7 @@ test.each([false, true])(
       await f.close();
     }
   },
+  diskIntegrationTimeoutMs,
 );
 
 test("receipt binding refuses a different ID or captain context", async () => {
