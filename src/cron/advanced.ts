@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { legacySetting } from "../settings-legacy";
+import { legacySetting } from "../config/settings-legacy";
 import { settingsPattern, settingsStruct } from "../config/settings-schema";
 
 const provider = Schema.Literals(["claude", "codex"]);

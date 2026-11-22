@@ -7,7 +7,7 @@ import type {
   SessionMessageInfo,
 } from "@opencode/client";
 import { Result, Schema } from "effect";
-import { decodeSettings } from "../settings-errors";
+import { decodeSettings } from "../config/settings-errors";
 import {
   settingsDefault,
   settingsDiscriminatedUnion,

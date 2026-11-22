@@ -26,7 +26,7 @@ import {
   secureLocalOrHttpsURL,
 } from "./backends/pi/pi-model";
 import { quotaWatchSchema } from "./quota/quota-watch";
-import { decodeSettings } from "./settings-errors";
+import { decodeSettings } from "./config/settings-errors";
 import {
   settingsCheck,
   settingsDefault,

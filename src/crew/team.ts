@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { piCrewBackendSchema } from "../config";
 import { isLocalhost } from "../lib/loopback";
-import { decodeSettings } from "../settings-errors";
+import { decodeSettings } from "../config/settings-errors";
 import {
   settingsCheck,
   settingsPattern,

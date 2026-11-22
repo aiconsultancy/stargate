@@ -14,7 +14,7 @@ import { CrewState } from "../src/crew/state";
 import { profileTeam, teamSchema } from "../src/crew/team";
 import { workspaceInputSchemas } from "../src/crew/workspace";
 import { renderProfile } from "../src/app/profile";
-import { decodeSettings } from "../src/settings-errors";
+import { decodeSettings } from "../src/config/settings-errors";
 
 const rawTeam = {
   captain: { id: "cain" },

@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 import { Effect, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
-import { legacySetting } from "../../../settings-legacy";
+import { legacySetting } from "../../../config/settings-legacy";
 import { isGitHubRepositoryName } from "./github-repository";
 import { isOriginPattern, isPrivateNetwork, parseApiListen } from "./network";
 

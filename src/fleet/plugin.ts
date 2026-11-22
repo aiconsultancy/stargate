@@ -8,7 +8,7 @@ import {
 } from "@opencode/plugin/promise/tool";
 import { JsonSchema, Schema } from "effect";
 import type { StandardJSONSchemaV1 } from "effect/StandardSchema";
-import { settingsInputAdvertisement } from "../settings-legacy";
+import { settingsInputAdvertisement } from "../config/settings-legacy";
 import { settingsDefault, settingsStruct } from "../config/settings-schema";
 import { fleetRequest } from "./client";
 import {

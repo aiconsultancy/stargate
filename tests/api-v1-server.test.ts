@@ -28,7 +28,7 @@ import type {
 } from "../src/dashboard/api/v1/types";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
-import { decodeSettings } from "../src/settings-errors";
+import { decodeSettings } from "../src/config/settings-errors";
 
 const member: V1CrewMember = {
   id: "engineer",

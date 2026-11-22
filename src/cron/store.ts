@@ -19,7 +19,7 @@ import {
 } from "./advanced";
 import { type CronInput, validateCronInput } from "./input";
 import { type QuotaObservation, quotaObservationSchema } from "../quota/quota";
-import { legacySetting } from "../settings-legacy";
+import { legacySetting } from "../config/settings-legacy";
 
 export type { CronEvaluation } from "./advanced";
 

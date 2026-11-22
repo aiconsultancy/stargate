@@ -1,8 +1,8 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { JsonSchema, Predicate, Result, Schema } from "effect";
 import type { StandardJSONSchemaV1 } from "effect/StandardSchema";
-import { decodeSettings } from "../settings-errors";
-import { settingsInputAdvertisement } from "../settings-legacy";
+import { decodeSettings } from "../config/settings-errors";
+import { settingsInputAdvertisement } from "../config/settings-legacy";
 import {
   settingsDiscriminatedUnion,
   settingsStruct,

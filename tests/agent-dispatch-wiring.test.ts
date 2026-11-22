@@ -33,7 +33,7 @@ import { formatMessage, parseMessage } from "../src/irc/protocol";
 import { ircResultJobAllowed } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
 import { serve } from "../src/app/runtime";
-import { decodeSettings } from "../src/settings-errors";
+import { decodeSettings } from "../src/config/settings-errors";
 import { checkCredentials } from "../src/app/setup";
 import { Store } from "../src/gateway/store";
 import example from "../stargate.example.json";
