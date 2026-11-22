@@ -8,7 +8,8 @@ import { canExpandCrew } from "./identity";
 import { IrcSessions } from "./irc";
 import { MemberActivityStore } from "./member-activity";
 import { MailRoutes } from "./messaging";
-import { queuedPendingTask, reportTask } from "./pending";
+import { CrewError, queuedPendingTask, reportTask } from "./pending";
+export { CrewError } from "./pending";
 import { ReportingStore } from "./reporting";
 export type CrewID = string;
 export type Peer = {
@@ -101,8 +102,6 @@ type AbandonExpected = Pick<
   CrewTask,
   "id" | "crewID" | "workerSessionID" | "originCaptainID" | "inputID"
 > & { status: AbandonableStatus; controlID: string | null };
-
-export class CrewError extends Error {}
 
 /** greybeard: bounded captain-selected queue; no background scheduler. */
 export const pendingTaskLimit = 100;

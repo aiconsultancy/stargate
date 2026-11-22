@@ -19,3 +19,5 @@ export const queuedPendingTask = "status='queued'";
  */
 export const reportTask = (column: string) =>
   `EXISTS (SELECT 1 FROM activity_report_tasks r WHERE r.taskID=${column})`;
+
+export class CrewError extends Error {}

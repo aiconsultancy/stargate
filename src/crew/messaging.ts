@@ -9,8 +9,64 @@ import {
   settingsStruct,
 } from "../config/settings-schema";
 import type { MesijClient, MesijMessage } from "./mesij";
-import { CrewError, type CrewState, type CrewTask } from "./state";
+import { CrewError } from "./pending";
+import type { JournalEntry } from "./journal";
 import type { CrewMember } from "./team";
+
+type MessagingTask = {
+  id: string;
+  originCaptainID: string;
+  status:
+    | "queued"
+    | "cancelled"
+    | "dispatching"
+    | "running"
+    | "completed"
+    | "cancelling"
+    | "uncertain"
+    | "abandoned";
+};
+type MessagingPeer = {
+  crewID: string;
+  sessionID: string;
+  status: "pending" | "ready";
+};
+interface MessagingState {
+  peerBySession(sessionID: string): MessagingPeer | null;
+  mailRoutes: MailRoutes;
+  statusRequest(id: string): {
+    id: string;
+    taskID: string;
+    captainID: string;
+    workerSessionID: string;
+    receiptID: string | null;
+  } | null;
+  task(id: string): MessagingTask | null;
+  captainLineage(id: string): boolean;
+  reservePeer(crewID: string): MessagingPeer;
+  captainRoute(id: string): string;
+  activeTask(crewID: string): MessagingTask | null;
+  ircSessions: {
+    enqueue(
+      item: {
+        id: string;
+        from: { role: "captain" | "crew"; id: string };
+        to: { role: "captain" | "crew"; id: string };
+        text: string;
+      },
+      now?: number,
+    ): void;
+  };
+  reporting: {
+    isReport(taskID: string): boolean;
+    journal: {
+      append(
+        input: Omit<JournalEntry, "id" | "created">,
+        replayKey: string,
+      ): JournalEntry;
+    };
+  };
+}
 
 type MailCaller = {
   sessionID: string;
@@ -27,19 +83,7 @@ interface MessagingHost {
     captainSessionID?: string | undefined;
     team: { captain: { id: string }; crew: CrewMember[] };
   };
-  state: Pick<
-    CrewState,
-    | "peerBySession"
-    | "mailRoutes"
-    | "statusRequest"
-    | "task"
-    | "captainLineage"
-    | "reservePeer"
-    | "captainRoute"
-    | "activeTask"
-    | "ircSessions"
-    | "reporting"
-  >;
+  state: MessagingState;
   authorizeMail(caller: MailCaller): Promise<MailCaller>;
   ircMember(sessionID: string): string | undefined;
   statusRequestRoute(id: string): MailRoute | null;
@@ -47,7 +91,7 @@ interface MessagingHost {
     caller: MailCaller,
     id?: string,
     historical?: boolean,
-  ): CrewTask | null;
+  ): MessagingTask | null;
   sameCaptain(stored: string | undefined, captainID: string): boolean;
   mailActor(sessionID: string): string;
   legacyStatusRoute(event: MesijMessage): MailRoute | null;

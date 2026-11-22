@@ -4,8 +4,23 @@ import type { ActivitySnapshot } from "../activity/activity";
 import { redactCredentials } from "../lib/credentials";
 import { JournalStore } from "./journal";
 import { reportTask } from "./pending";
-import { CrewError, type CrewState, type CrewTask } from "./state";
+import { CrewError } from "./pending";
 import type { CrewMember } from "./team";
+
+type ReportingTask = {
+  id: string;
+  crewID: string;
+  originCaptainID: string;
+  status:
+    | "queued"
+    | "cancelled"
+    | "dispatching"
+    | "running"
+    | "completed"
+    | "cancelling"
+    | "uncertain"
+    | "abandoned";
+};
 
 type ReportCaller = {
   sessionID: string;
@@ -16,17 +31,17 @@ type ReportCaller = {
 /** The existing engine implements this view; no callback wrappers or copies. */
 interface ReportingHost {
   options: { team: { captain: { id: string }; crew: CrewMember[] } };
-  state: Pick<CrewState, "reporting" | "task">;
+  state: { reporting: ReportingStore; task(id: string): ReportingTask | null };
   captain(caller: ReportCaller): Promise<void>;
   cancelReport(id: string, caller: ReportCaller): Promise<void>;
-  reportingTask(id: string): CrewTask | null;
+  reportingTask(id: string): ReportingTask | null;
   reporterFree(id: string, signal: AbortSignal): Promise<boolean>;
   queueReport(
     sessionID: string,
     reporter: string,
     captureID: string,
     text: string,
-  ): CrewTask;
+  ): ReportingTask;
   progressReport(id: string, caller: ReportCaller): Promise<void>;
 }
 
@@ -251,7 +266,7 @@ export class ReportingStore {
       .get(captureID)?.taskID;
   }
 
-  assignment(task: CrewTask, text: string) {
+  assignment<T extends ReportingTask>(task: T, text: string) {
     this.expire();
     if (this.isReport(task.id)) return;
     const captainID = this.captainRoute(task.originCaptainID);
@@ -292,7 +307,7 @@ export class ReportingStore {
       return;
   }
 
-  record(task: CrewTask, kind: Entry["kind"], text: string) {
+  record<T extends ReportingTask>(task: T, kind: Entry["kind"], text: string) {
     this.expire();
     if (this.isReport(task.id)) {
       const row = this.db
