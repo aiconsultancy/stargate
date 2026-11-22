@@ -18,7 +18,8 @@ import {
   settingsUUID,
 } from "../config/settings-schema";
 import type { Store } from "../gateway/store";
-import { botDisplayName, resolveWaiting } from "../gateway/waiting";
+import { resolveWaiting } from "../gateway/waiting";
+import { botDisplayName } from "../shared/waiting";
 import {
   BotFrameworkKeyStore,
   checkActivityBinding,

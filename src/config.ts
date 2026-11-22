@@ -37,7 +37,7 @@ import {
   settingsUUID,
 } from "./config/settings-schema";
 import { transcriptionSchema } from "./transcription/transcription";
-import { waitingSchema } from "./gateway/waiting";
+import { waitingSchema } from "./config/waiting";
 
 import { opencodeBackendSchema } from "./backends/opencode/config";
 
