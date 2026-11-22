@@ -64,7 +64,7 @@ description = "Run typecheck, lint, and tests"
 run = "bun run check"
 
 [tasks.check-affected]
-description = "Run typecheck, lint, and tests affected by the Git index"
+description = "Run typecheck, lint, and bounded tests affected by the Git index"
 run = "bun run typecheck && bun run lint && bun scripts/hooks/affected-tests.ts"
 
 [tasks.test]

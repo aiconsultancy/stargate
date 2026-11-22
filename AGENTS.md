@@ -37,6 +37,11 @@ typecheck, lint, and affected tests. Untrusted paths defer to hosted checks by
 default; selection errors still run the full suite. Set
 `STARGATE_UNTRUSTED_TESTS=full` to opt in to full tests for untrusted paths.
 Hosted **Quality checks** explicitly runs the full check before merge.
+The affected-test limit defaults to 20 files. Larger selected sets are named
+and deferred to hosted Quality; typecheck and lint still run locally.
+Set `STARGATE_AFFECTED_TEST_LIMIT` to a nonnegative integer to change the
+limit, or `STARGATE_FORCE_AFFECTED_TESTS=1` to run any selected set locally.
+This bound does not change untrusted full opt-in or error full fallbacks.
 Run `make hooks-install` once per clone. `make hooks` runs the pre-commit gate,
 including workflow and file hygiene checks, but does not replace the full CI
 gate. With no staged changes, affected tests report an explicit no-op.
