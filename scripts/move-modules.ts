@@ -247,12 +247,12 @@ function rewriteSpecifier(
   }
   const extension = posix.extname(specifier);
   const explicitExtension = extensions.includes(extension) ? extension : "";
-  let stem = target;
-  if (resolved.suffix) stem = stem.slice(0, -resolved.suffix.length);
-  if (resolved.index && posix.basename(stem) === "index")
-    stem = posix.dirname(stem);
-  else if (explicitExtension && resolved.suffix) stem += explicitExtension;
-  let result = relativeSpecifier(newFile, stem);
+  // Keep the filename while relativizing; its stem may name an ancestor folder.
+  let result = relativeSpecifier(newFile, target);
+  if (resolved.suffix) result = result.slice(0, -resolved.suffix.length);
+  if (resolved.index && posix.basename(result) === "index")
+    result = relativeSpecifier(newFile, posix.dirname(target));
+  else if (explicitExtension && resolved.suffix) result += explicitExtension;
   if (specifier.endsWith("/") && resolved.index)
     result += result.endsWith("/") ? "" : "/";
   if (resolveImport(after, newFile, result)?.path !== target)
