@@ -26,7 +26,7 @@ import {
   resumeInputSchema,
 } from "./reconciliation";
 import { agentIDSchema } from "./team";
-import { workspaceInputSchemas } from "./workspace";
+import { workspaceInputSchemas } from "./workspace/workspace";
 
 const crewTaskID = Schema.String.check(
   settingsStartsWith("task_"),

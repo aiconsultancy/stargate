@@ -31,7 +31,7 @@ import {
   projectKeySchema,
   projectsSchema,
 } from "../src/crew/project-options";
-import { CrewProjects } from "../src/crew/projects";
+import { CrewProjects } from "../src/crew/workspace/projects";
 import { teamSchema } from "../src/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
 import { CronStore } from "../src/cron/store";

@@ -1,23 +1,23 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Result, Schema } from "effect";
-import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
+import type { CrewStatus, CrewStatusInput } from "../../shared/crew-status";
 import {
   HISTORY_PAGE,
   type HistoryChildrenInput,
   type HistoryEntriesInput,
   type HistorySession,
-} from "../shared/session-history";
+} from "../../shared/session-history";
 import {
   type CrewCaller,
   type CrewEngine,
   type CrewOptions,
   crewOptionsSchema,
-} from "./engine";
-import type { FleetCrewStatus } from "./fleet-status";
-import { effectProjectKeySchema } from "./project-options";
-import { CrewError } from "./state";
-import { defaultTeam } from "./team";
+} from "../engine";
+import type { FleetCrewStatus } from "../fleet-status";
+import { effectProjectKeySchema } from "../project-options";
+import { CrewError } from "../state";
+import { defaultTeam } from "../team";
 import { projectRepository, workspaceRoot } from "./workspace";
 
 const decodeProjectKey = Schema.decodeUnknownResult(effectProjectKeySchema);

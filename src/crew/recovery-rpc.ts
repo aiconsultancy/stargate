@@ -14,7 +14,7 @@ import {
   inspectInputSchema,
   reconcileInputSchema,
 } from "./reconciliation";
-import { workspaceInputSchemas } from "./workspace";
+import { workspaceInputSchemas } from "./workspace/workspace";
 
 const recoveryBranches = [
   inspectInputSchema,
