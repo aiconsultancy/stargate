@@ -222,7 +222,7 @@ async function refusesClosureChange(
 
 describe("architecture baseline refresh", () => {
   for (const lines of [999, 1000, 1001]) {
-    test(`size pruning: listed file reduced to ${lines} lines`, async () => {
+    test(`size pruning: listed file reduced to ${lines} non-blank lines`, async () => {
       const { root, base, original } = await fixture(
         (value) => value.largeFiles.push("src/feature/leaf.ts"),
         {
@@ -232,7 +232,9 @@ describe("architecture baseline refresh", () => {
       );
       await files(root, {
         "src/feature/leaf.ts":
-          'import "./entry";\n' + "// reduced file\n".repeat(lines - 1),
+          'import "./entry";\n' +
+          "// reduced file\n".repeat(lines - 1) +
+          " \t\n".repeat(500),
       });
       await formatter(root);
       const before = await readFile(join(root, BASELINE), "utf8");

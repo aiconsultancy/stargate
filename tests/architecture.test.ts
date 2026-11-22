@@ -312,7 +312,7 @@ describe("stable module identities", () => {
 
 describe("source size gate", () => {
   for (const ending of ["\n", "\r\n"])
-    test(`counts physical lines with ${JSON.stringify(ending)}`, async () => {
+    test(`counts non-blank lines with ${JSON.stringify(ending)}`, async () => {
       const root = await fixture({ "src/alpha/entry.ts": "" });
       for (const count of [999, 1000, 1001]) {
         for (const finalTerminator of [false, true]) {
@@ -326,7 +326,7 @@ describe("source size gate", () => {
           expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual(
             count > 1000
               ? [
-                  "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 > 1000",
+                  "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 non-blank lines > 1000",
                 ]
               : [],
           );
@@ -334,23 +334,39 @@ describe("source size gate", () => {
       }
     });
 
-  test("rejects a new 1001-line source module", async () => {
+  test("rejects a new source module with 1001 non-blank lines", async () => {
     const root = await fixture({
       "src/alpha/entry.ts": "// counted\n".repeat(1001),
     });
     expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([
-      "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 > 1000",
+      "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 non-blank lines > 1000",
     ]);
   });
 
-  test("counts blanks and comments, but excludes tests", async () => {
+  test("ignores blank and whitespace-only lines, counts comments, and excludes tests", async () => {
     const root = await fixture({
-      "src/alpha/entry.ts": "\n".repeat(500) + "// counted\n".repeat(501),
+      "src/alpha/entry.ts": "",
       "tests/large.test.ts": "// not source\n".repeat(1001),
     });
-    expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([
-      "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 > 1000",
-    ]);
+    for (const ending of ["\n", "\r\n"]) {
+      const blanks = ["", " ", "\t", "\f", "\r", " \t\f\r"];
+      const padding = Array.from(
+        { length: 500 },
+        (_, index) => blanks[index % blanks.length] + ending,
+      ).join("");
+      await writeFile(
+        join(root, "src/alpha/entry.ts"),
+        padding + ("// counted" + ending).repeat(1000),
+      );
+      expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([]);
+      await writeFile(
+        join(root, "src/alpha/entry.ts"),
+        padding + ("// counted" + ending).repeat(1001),
+      );
+      expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([
+        "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 non-blank lines > 1000",
+      ]);
+    }
     await writeFile(join(root, "src/alpha/entry.ts"), "");
     expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([]);
     expect(
@@ -358,7 +374,23 @@ describe("source size gate", () => {
     ).toEqual(["stale:large-file:src/alpha/entry.ts"]);
   });
 
-  test("exceptions are exact, reject duplicates, and become stale at 1000 or deletion", async () => {
+  test("blank lines inside template literals do not count", async () => {
+    const template =
+      "export const text = `\n" + " \t\n".repeat(500) + "value`;\n";
+    const root = await fixture({
+      "src/alpha/entry.ts": template + "// counted\n".repeat(998),
+    });
+    expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([]);
+    await writeFile(
+      join(root, "src/alpha/entry.ts"),
+      template + "// counted\n".repeat(999),
+    );
+    expect(await sizeRegressions(root, fixturePolicy(), [])).toEqual([
+      "new:large-file:src/alpha/entry.ts:src/alpha/entry.ts:1001 non-blank lines > 1000",
+    ]);
+  });
+
+  test("exceptions are exact, reject duplicates, and become stale at 1000 non-blank lines or deletion", async () => {
     const root = await fixture({
       "src/alpha/entry.ts": "// counted\n".repeat(1001),
     });
@@ -367,14 +399,20 @@ describe("source size gate", () => {
     expect(
       await sizeRegressions(root, fixturePolicy(), [...allowed, ...allowed]),
     ).toEqual(["duplicate:large-file:src/alpha/entry.ts"]);
-    await writeFile(join(root, "src/alpha/entry.ts"), "\n".repeat(1000));
+    await writeFile(
+      join(root, "src/alpha/entry.ts"),
+      "// counted\n".repeat(1000) + "\n".repeat(500),
+    );
     expect(await sizeRegressions(root, fixturePolicy(), allowed)).toEqual([
       "stale:large-file:src/alpha/entry.ts",
     ]);
     await rm(join(root, "src/alpha/entry.ts"));
-    await writeFile(join(root, "src/alpha/second.ts"), "\n".repeat(1001));
+    await writeFile(
+      join(root, "src/alpha/second.ts"),
+      "// counted\n".repeat(1001),
+    );
     expect(await sizeRegressions(root, fixturePolicy(), allowed)).toEqual([
-      "new:large-file:src/alpha/second.ts:src/alpha/second.ts:1001 > 1000",
+      "new:large-file:src/alpha/second.ts:src/alpha/second.ts:1001 non-blank lines > 1000",
       "stale:large-file:src/alpha/entry.ts",
     ]);
   });
@@ -397,7 +435,9 @@ describe("source size gate", () => {
         "src/gateway.ts": ["src/gateway.ts", "src/gateway/gateway.ts"],
       },
     };
-    const root = await fixture({ "src/gateway.ts": "\n".repeat(1001) });
+    const root = await fixture({
+      "src/gateway.ts": "// counted\n".repeat(1001),
+    });
     const allowed = ["src/gateway.ts"];
     expect(await sizeRegressions(root, policy, allowed)).toEqual([]);
     await mkdir(join(root, "src/gateway"));
@@ -407,14 +447,20 @@ describe("source size gate", () => {
     );
     expect(await sizeRegressions(root, policy, allowed)).toEqual([]);
     expect(await sizeRegressions(root, policy, [])).toEqual([
-      "new:large-file:src/gateway/gateway.ts:src/gateway.ts:1001 > 1000",
+      "new:large-file:src/gateway/gateway.ts:src/gateway.ts:1001 non-blank lines > 1000",
     ]);
-    await writeFile(join(root, "src/gateway/child.ts"), "\n".repeat(1001));
+    await writeFile(
+      join(root, "src/gateway/child.ts"),
+      "// counted\n".repeat(1001),
+    );
     await mkdir(join(root, "src/other"));
-    await writeFile(join(root, "src/other/gateway.ts"), "\n".repeat(1001));
+    await writeFile(
+      join(root, "src/other/gateway.ts"),
+      "// counted\n".repeat(1001),
+    );
     expect(await sizeRegressions(root, policy, allowed)).toEqual([
-      "new:large-file:src/gateway/child.ts:src/gateway/child.ts:1001 > 1000",
-      "new:large-file:src/other/gateway.ts:src/other/gateway.ts:1001 > 1000",
+      "new:large-file:src/gateway/child.ts:src/gateway/child.ts:1001 non-blank lines > 1000",
+      "new:large-file:src/other/gateway.ts:src/other/gateway.ts:1001 non-blank lines > 1000",
     ]);
     await writeFile(join(root, "src/gateway.ts"), "");
     await expect(sizeRegressions(root, policy, allowed)).rejects.toThrow(

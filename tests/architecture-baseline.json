@@ -9,7 +9,6 @@
     "src/gateway.ts",
     "src/irc/client.ts",
     "src/irc/ship.ts",
-    "src/nightly/journal.ts",
     "src/nightly/run.ts",
     "src/questions.ts",
     "src/runtime.ts",

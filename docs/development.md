@@ -150,10 +150,20 @@ It does not replace the architecture guards or the separate source-size check.
 `--prune-stale` previews removals; exit 0 requires all other guards.
 `--write` applies them. `prunedExceptions` and `prunedLargeFiles` name each
 removed entry; reruns list none. The tool uses the source-size checker's
-existing measurement and alias mapping: a listed file at or below 1,000 lines,
-or an absent file, is stale; a moved file that is still oversized keeps its
+existing measurement and alias mapping: a listed file at or below 1,000 non-blank
+lines, or an absent file, is stale; a moved file that is still oversized keeps its
 logical entry. The tool never adds a size permission or changes the limit.
 Normal inventory refresh and all other guards stay intact.
+
+The source-size limit is **1,000 non-blank lines**. Split text at LF and count
+each line only when JavaScript `trim()` leaves a character. Empty lines and
+whitespace-only lines (including spaces, tabs, form feed and CR) do not count;
+comment lines do count. LF and CRLF give the same count, and a final newline
+does not add a line. This is a textual, not syntactic, measure: a blank line
+inside a template literal also does not count. The rule is simple and
+predictable; it does not measure a literal's runtime content or memory use.
+Listed identities still have no individual size cap. Prune an entry when it
+falls to 1,000 non-blank lines or fewer so that later growth is checked again.
 
 Use optional `--output PATH` for a JSON receipt outside the checkout, including
 in preview mode. Unknown options and repeated single-value options are errors.

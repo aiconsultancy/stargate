@@ -116,8 +116,8 @@ references or a complete file inventory.
 
 The current paths `src/main.ts`, `src/config.ts`, `src/crew/plugin.ts` and
 `src/fleet/plugin.ts` are fixed and must never move. Tests stay flat in `tests/`.
-`gateway.ts` has a permanent 1000-line exception. The O1 decision in
-[architecture review](architecture-review.md) is unchanged.
+`gateway.ts` has a permanent exception to the limit of 1,000 non-blank lines.
+The O1 decision in [architecture review](architecture-review.md) is unchanged.
 
 ### Dependency policy
 
