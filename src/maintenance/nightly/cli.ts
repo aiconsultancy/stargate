@@ -11,8 +11,8 @@ import { runDroid } from "./droid";
 import { processRunner } from "./exec";
 import { nightlyInstructions } from "./instructions";
 import { recoveryBudgetMs } from "./journal";
-import { packageDirectory } from "./ready";
-import { adoptRelease, layout } from "./release";
+import { packageDirectory } from "./update/ready";
+import { adoptRelease, layout } from "./update/release";
 import { reportSchema, summary } from "./reports/report";
 import {
   acceptCurrent,
@@ -25,7 +25,7 @@ import {
   buildMaintenanceUnits,
   timerName,
 } from "./schedule/timer";
-import { maintenanceUpdate, updateUnit } from "./update";
+import { maintenanceUpdate, updateUnit } from "./update/update";
 import {
   currentWindow,
   defaultInstallID,

@@ -37,7 +37,10 @@ import {
   type TextSink,
 } from "./backend";
 import { type BackendConfig, secret } from "../config";
-import { compareVersions, parseVersion } from "../maintenance/nightly/versions";
+import {
+  compareVersions,
+  parseVersion,
+} from "../maintenance/nightly/update/versions";
 import {
   AttachmentInputUnavailable,
   BackendFailure,

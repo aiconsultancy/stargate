@@ -1,9 +1,9 @@
 import { OpenCode } from "@opencode/client";
 import { Service } from "@opencode/client/service";
-import { CrewReporting } from "../../crew/report-rpc";
-import type { MaintenanceDrain } from "../maintenance-drain";
-import type { UpdateReceipt } from "../update-notice";
-import { StepError } from "./exec";
+import { CrewReporting } from "../../../crew/report-rpc";
+import type { MaintenanceDrain } from "../../maintenance-drain";
+import type { UpdateReceipt } from "../../update-notice";
+import { StepError } from "../exec";
 import type { ModelRef } from "./versions";
 
 /** The OpenCode server operations maintenance needs; tests use a fake. */

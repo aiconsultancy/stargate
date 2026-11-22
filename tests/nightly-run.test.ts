@@ -26,20 +26,20 @@ import {
   type CommandRunner,
   processRunner,
 } from "../src/maintenance/nightly/exec";
-import { probeModel } from "../src/maintenance/nightly/host";
+import { probeModel } from "../src/maintenance/nightly/update/host";
 import {
   backupDirectory,
   FileChanges,
   Journal,
   readJournalFile,
 } from "../src/maintenance/nightly/journal";
-import { applyLiveModels } from "../src/maintenance/nightly/model-step";
-import type { OpenCodeControl } from "../src/maintenance/nightly/opencode";
-import { writePluginDigest } from "../src/maintenance/nightly/plugin-digest";
+import { applyLiveModels } from "../src/maintenance/nightly/update/model-step";
+import type { OpenCodeControl } from "../src/maintenance/nightly/update/opencode";
+import { writePluginDigest } from "../src/maintenance/nightly/update/plugin-digest";
 import {
   adoptRelease,
   linkedRelease,
-} from "../src/maintenance/nightly/release";
+} from "../src/maintenance/nightly/update/release";
 import { reportSchema } from "../src/maintenance/nightly/reports/report";
 import {
   acceptCurrent,
@@ -54,8 +54,8 @@ import {
   maintenanceUpdate,
   type UpdateOptions,
   updateUnit,
-} from "../src/maintenance/nightly/update";
-import type { ModelRef } from "../src/maintenance/nightly/versions";
+} from "../src/maintenance/nightly/update/update";
+import type { ModelRef } from "../src/maintenance/nightly/update/versions";
 import { botKey } from "../src/gateway/routing";
 import { openStore } from "../src/app/open-store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";

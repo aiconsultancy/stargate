@@ -6,7 +6,7 @@ import {
   readArchive,
   validateArchive,
   verifyExtracted,
-} from "../src/maintenance/nightly/archive";
+} from "../src/maintenance/nightly/update/archive";
 import { type TarEntry, tarball } from "./tar";
 
 const root = "stargate-v1.0.0";

@@ -41,7 +41,7 @@ import {
   type ProxyCandidate,
   probeModel,
   proxyModels,
-} from "./host";
+} from "./update/host";
 import {
   checkIdle,
   describeRunningWork,
@@ -76,15 +76,15 @@ import {
   readModelInputs,
   type Session,
   selectModelUpgrades,
-} from "./model-step";
+} from "./update/model-step";
 import {
   connectOpenCode,
   type OpenCodeControl,
   openCodeCallMs,
-} from "./opencode";
+} from "./update/opencode";
 import { maintenanceDirectory } from "./paths";
-import { readPluginDigest } from "./plugin-digest";
-import { readReady, readyProcessAlive, waitReady } from "./ready";
+import { readPluginDigest } from "./update/plugin-digest";
+import { readReady, readyProcessAlive, waitReady } from "./update/ready";
 import {
   githubHeaders,
   githubToken,
@@ -94,7 +94,7 @@ import {
   pruneReleases,
   stageRelease,
   switchCurrent,
-} from "./release";
+} from "./update/release";
 import {
   type ComponentReport,
   type ModelChange,
@@ -107,7 +107,7 @@ import {
   writeReport,
 } from "./reports/report";
 import { readState, updateState } from "./state";
-import { compareVersions, normalizeVersion } from "./versions";
+import { compareVersions, normalizeVersion } from "./update/versions";
 import {
   currentWindow,
   defaultInstallID,

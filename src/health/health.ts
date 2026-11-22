@@ -17,7 +17,7 @@ import {
 } from "../maintenance/maintenance-drain";
 import { readReports, readUnit } from "../maintenance/nightly/droid-facts";
 import { type CommandRunner, processRunner } from "../maintenance/nightly/exec";
-import { readReady, readySchema } from "../maintenance/nightly/ready";
+import { readReady, readySchema } from "../maintenance/nightly/update/ready";
 import { reportSchema } from "../maintenance/nightly/reports/report";
 import { quotaSnapshotSchema } from "../quota/quota";
 import { botStatusReport } from "../app/status-report";

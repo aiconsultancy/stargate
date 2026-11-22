@@ -1,12 +1,12 @@
 import { realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import type { Config } from "../../config";
-import type { CommandRunner } from "./exec";
-import { recoveryBudgetMs } from "./journal";
-import { maintenanceDirectory } from "./paths";
+import type { Config } from "../../../config";
+import type { CommandRunner } from "../exec";
+import { recoveryBudgetMs } from "../journal";
+import { maintenanceDirectory } from "../paths";
 import { packageDirectory } from "./ready";
 import { layout, readMetadata } from "./release";
-import { type Report, summary } from "./reports/report";
+import { type Report, summary } from "../reports/report";
 import {
   type Dependencies,
   defaultDependencies,
@@ -15,8 +15,8 @@ import {
   runMaintenance,
   samePlugin,
   UpdateRefused,
-} from "./run";
-import { buildUpdateCommand } from "./schedule/timer";
+} from "../run";
+import { buildUpdateCommand } from "../schedule/timer";
 import { normalizeVersion } from "./versions";
 
 /**

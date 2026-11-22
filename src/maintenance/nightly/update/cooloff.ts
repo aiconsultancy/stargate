@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { fetchJSON, StepError } from "./exec";
+import { fetchJSON, StepError } from "../exec";
 import { compareVersions, normalizeVersion, parseVersion } from "./versions";
 
 /**

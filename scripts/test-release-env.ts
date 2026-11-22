@@ -6,7 +6,7 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { isolatedEnvironment } from "../src/maintenance/nightly/release";
+import { isolatedEnvironment } from "../src/maintenance/nightly/update/release";
 
 const cache = process.env["XDG_CACHE_HOME"] || join(homedir(), ".cache");
 await mkdir(cache, { recursive: true });

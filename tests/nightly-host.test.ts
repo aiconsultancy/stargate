@@ -19,7 +19,7 @@ import {
   cliProxyCandidate,
   cliProxyPrepare,
   npmInstallCommand,
-} from "../src/maintenance/nightly/host";
+} from "../src/maintenance/nightly/update/host";
 import { restoreCutoff } from "../src/maintenance/nightly/run";
 import { tarball } from "./tar";
 

@@ -4,11 +4,13 @@
   "aliases": {
     "src/nightly/archive.ts": [
       "src/nightly/archive.ts",
-      "src/maintenance/nightly/archive.ts"
+      "src/maintenance/nightly/archive.ts",
+      "src/maintenance/nightly/update/archive.ts"
     ],
     "src/nightly/catalog.ts": [
       "src/nightly/catalog.ts",
-      "src/maintenance/nightly/catalog.ts"
+      "src/maintenance/nightly/catalog.ts",
+      "src/maintenance/nightly/update/catalog.ts"
     ],
     "src/nightly/cleanup-config.ts": [
       "src/nightly/cleanup-config.ts",
@@ -35,7 +37,8 @@
     ],
     "src/nightly/cooloff.ts": [
       "src/nightly/cooloff.ts",
-      "src/maintenance/nightly/cooloff.ts"
+      "src/maintenance/nightly/cooloff.ts",
+      "src/maintenance/nightly/update/cooloff.ts"
     ],
     "src/nightly/crews.ts": [
       "src/nightly/crews.ts",
@@ -68,7 +71,8 @@
     ],
     "src/nightly/host.ts": [
       "src/nightly/host.ts",
-      "src/maintenance/nightly/host.ts"
+      "src/maintenance/nightly/host.ts",
+      "src/maintenance/nightly/update/host.ts"
     ],
     "src/nightly/idle.ts": [
       "src/nightly/idle.ts",
@@ -85,15 +89,18 @@
     ],
     "src/nightly/model-step.ts": [
       "src/nightly/model-step.ts",
-      "src/maintenance/nightly/model-step.ts"
+      "src/maintenance/nightly/model-step.ts",
+      "src/maintenance/nightly/update/model-step.ts"
     ],
     "src/nightly/models.ts": [
       "src/nightly/models.ts",
-      "src/maintenance/nightly/models.ts"
+      "src/maintenance/nightly/models.ts",
+      "src/maintenance/nightly/update/models.ts"
     ],
     "src/nightly/opencode.ts": [
       "src/nightly/opencode.ts",
-      "src/maintenance/nightly/opencode.ts"
+      "src/maintenance/nightly/opencode.ts",
+      "src/maintenance/nightly/update/opencode.ts"
     ],
     "src/nightly/outbox.ts": [
       "src/nightly/outbox.ts",
@@ -106,15 +113,18 @@
     ],
     "src/nightly/plugin-digest.ts": [
       "src/nightly/plugin-digest.ts",
-      "src/maintenance/nightly/plugin-digest.ts"
+      "src/maintenance/nightly/plugin-digest.ts",
+      "src/maintenance/nightly/update/plugin-digest.ts"
     ],
     "src/nightly/ready.ts": [
       "src/nightly/ready.ts",
-      "src/maintenance/nightly/ready.ts"
+      "src/maintenance/nightly/ready.ts",
+      "src/maintenance/nightly/update/ready.ts"
     ],
     "src/nightly/release.ts": [
       "src/nightly/release.ts",
-      "src/maintenance/nightly/release.ts"
+      "src/maintenance/nightly/release.ts",
+      "src/maintenance/nightly/update/release.ts"
     ],
     "src/nightly/report.ts": [
       "src/nightly/report.ts",
@@ -136,11 +146,13 @@
     ],
     "src/nightly/update.ts": [
       "src/nightly/update.ts",
-      "src/maintenance/nightly/update.ts"
+      "src/maintenance/nightly/update.ts",
+      "src/maintenance/nightly/update/update.ts"
     ],
     "src/nightly/versions.ts": [
       "src/nightly/versions.ts",
-      "src/maintenance/nightly/versions.ts"
+      "src/maintenance/nightly/versions.ts",
+      "src/maintenance/nightly/update/versions.ts"
     ],
     "src/nightly/window.ts": [
       "src/nightly/window.ts",
