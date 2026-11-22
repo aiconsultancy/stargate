@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { CrewTask } from "./state";
 
 /** Owner-approved stable OpenCode MESSAGE key, not a session/config/tool alias. */
 export const crewMessageMetadataKey = "pogoCrew";
@@ -14,7 +13,11 @@ export function taskEnvelopePayload(text: string | undefined) {
   return prefix === undefined ? undefined : line.slice(prefix.length);
 }
 
-type TaskBinding = Pick<CrewTask, "id" | "inputID" | "originCaptainID">;
+type TaskBinding = {
+  id: string;
+  inputID: string;
+  originCaptainID: string;
+};
 
 export function resumeMessageID(task: TaskBinding, idleAt: number): string {
   const binding = JSON.stringify([

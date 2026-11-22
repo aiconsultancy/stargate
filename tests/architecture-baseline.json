@@ -285,7 +285,6 @@
     "direction:src/crew/fleet-status.ts -> src/crew/project-options.ts",
     "direction:src/crew/fleet-status.ts -> src/settings-legacy.ts",
     "direction:src/crew/identity.ts -> src/settings-schema.ts",
-    "direction:src/crew/message-protocol.ts -> src/crew/state.ts",
     "direction:src/crew/report-rpc.ts -> src/crew/message-tool-input.ts",
     "direction:src/crew/report-rpc.ts -> src/cron-decision.ts",
     "direction:src/crew/report-rpc.ts -> src/maintenance-drain.ts",
@@ -340,7 +339,6 @@
     "direction:src/question-settings.ts -> src/config.ts",
     "direction:src/questions.ts -> src/gateway/store-types.ts",
     "direction:src/reactions.ts -> src/settings-schema.ts",
-    "direction:src/request-failure.ts -> src/cancellation.ts",
     "direction:src/routing.ts -> src/markdown-chunks.ts",
     "direction:src/slack-format.ts -> src/markdown-chunks.ts",
     "direction:src/slack-questions.ts -> src/gateway/ports.ts",
@@ -415,7 +413,6 @@
     "private:src/profile.ts -> src/crew/instructions.ts",
     "private:src/profile.ts -> src/crew/policy.ts",
     "private:src/profile.ts -> src/nightly/instructions.ts",
-    "private:src/request-failure.ts -> src/cancellation.ts",
     "private:src/runtime.ts -> src/api/v1/diff.ts",
     "private:src/runtime.ts -> src/api/v1/gateway.ts",
     "private:src/runtime.ts -> src/api/v1/projection.ts",
@@ -456,7 +453,6 @@
     "rule-three:extract:src/waiting.ts",
     "shared-dependency:src/mentions.ts -> src/settings-schema.ts",
     "shared-dependency:src/reactions.ts -> src/settings-schema.ts",
-    "shared-dependency:src/request-failure.ts -> src/cancellation.ts",
     "shared-dependency:src/slack-format.ts -> src/markdown-chunks.ts"
   ]
 }

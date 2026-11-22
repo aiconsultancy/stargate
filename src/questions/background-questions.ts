@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
-import type { NativeQuestion } from "./questions";
 
 export type BackgroundCase = {
   reference: string;
@@ -36,7 +35,14 @@ export class BackgroundCases {
       PRIMARY KEY(ship,session,form))`);
   }
 
-  remember(ship: string, owner: string, q: NativeQuestion) {
+  remember<
+    Question extends {
+      sessionID: string;
+      id: string;
+      inputID: string;
+      fingerprint: string;
+    },
+  >(ship: string, owner: string, q: Question) {
     this.db
       .query(
         "INSERT INTO background_questions(ship,session,form,input,fingerprint,owner,reference) VALUES(?,?,?,?,?,?,?) ON CONFLICT(ship,session,form) DO UPDATE SET owner=excluded.owner, reference=excluded.reference, token=NULL, expires=0, state='new' WHERE owner!=excluded.owner AND state IN ('new','alerted') AND input=excluded.input AND fingerprint=excluded.fingerprint",

@@ -2,10 +2,33 @@ import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import type { ActivitySnapshot } from "../activity/activity";
 import { redactCredentials } from "../lib/credentials";
-import type { CrewCaller, CrewEngine } from "./engine";
 import { JournalStore } from "./journal";
 import { reportTask } from "./pending";
-import { CrewError, type CrewTask } from "./state";
+import { CrewError, type CrewState, type CrewTask } from "./state";
+import type { CrewMember } from "./team";
+
+type ReportCaller = {
+  sessionID: string;
+  agent: string;
+  signal: AbortSignal;
+};
+
+/** The existing engine implements this view; no callback wrappers or copies. */
+interface ReportingHost {
+  options: { team: { captain: { id: string }; crew: CrewMember[] } };
+  state: Pick<CrewState, "reporting" | "task">;
+  captain(caller: ReportCaller): Promise<void>;
+  cancelReport(id: string, caller: ReportCaller): Promise<void>;
+  reportingTask(id: string): CrewTask | null;
+  reporterFree(id: string, signal: AbortSignal): Promise<boolean>;
+  queueReport(
+    sessionID: string,
+    reporter: string,
+    captureID: string,
+    text: string,
+  ): CrewTask;
+  progressReport(id: string, caller: ReportCaller): Promise<void>;
+}
 
 // Active requests renew this lease on each read; only abandoned captures expire.
 const captureLease = 90_000;
@@ -357,7 +380,7 @@ export class CrewReporter {
   >();
   private closed = false;
 
-  constructor(private readonly engine: CrewEngine) {}
+  constructor(private readonly engine: ReportingHost) {}
 
   private get store() {
     return this.engine.state.reporting;
@@ -366,7 +389,7 @@ export class CrewReporter {
   private async verify(
     sessionID: string,
     signal: AbortSignal,
-  ): Promise<CrewCaller> {
+  ): Promise<ReportCaller> {
     signal.throwIfAborted();
     if (this.closed) throw new CrewError("Activity reporter is closing.");
     const caller = {
@@ -454,7 +477,7 @@ export class CrewReporter {
     return true;
   }
 
-  private advance(capture: Capture, caller: CrewCaller) {
+  private advance(capture: Capture, caller: ReportCaller) {
     if (capture.status !== "summarizing" || this.jobs.has(capture.id)) return;
     if (Date.now() >= capture.deadline) {
       this.store.terminal(
