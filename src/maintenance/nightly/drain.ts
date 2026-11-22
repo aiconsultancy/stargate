@@ -1,6 +1,10 @@
 import type { MaintenanceDrain } from "../maintenance-drain";
 import { checkIdle, type IdleInput, type IdleResult } from "./idle";
-import type { Clock } from "./run";
+
+export type Clock = {
+  now(): number;
+  sleep(ms: number, signal: AbortSignal): Promise<void>;
+};
 
 /** One bounded wait within the existing maintenance runner, not a scheduler. */
 export async function waitForMaintenanceDrain(input: {

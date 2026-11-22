@@ -1,5 +1,7 @@
-import { cancellationNotice } from "../gateway/cancellation";
 import { slackContent } from "./slack-format";
+
+export const cancellationNotice =
+  "Stargate received your stop request. Work may have run; existing effects may remain. The request was not repeated. Check agent state before trying again.";
 
 export class AttachmentInputUnavailable extends Error {}
 export class PromptNotSubmitted extends Error {}

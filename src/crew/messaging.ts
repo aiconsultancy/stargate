@@ -8,9 +8,57 @@ import {
   settingsStartsWith,
   settingsStruct,
 } from "../settings-schema";
-import type { CrewCaller, CrewEngine } from "./engine";
 import type { MesijClient, MesijMessage } from "./mesij";
-import { CrewError } from "./state";
+import { CrewError, type CrewState, type CrewTask } from "./state";
+import type { CrewMember } from "./team";
+
+type MailCaller = {
+  sessionID: string;
+  agent: string;
+  signal: AbortSignal;
+  id?: string;
+  messageID?: string;
+};
+
+/** Consumer view only; pass the same caller object, including host brands. */
+interface MessagingHost {
+  options: {
+    namespace: string;
+    captainSessionID?: string | undefined;
+    team: { captain: { id: string }; crew: CrewMember[] };
+  };
+  state: Pick<
+    CrewState,
+    | "peerBySession"
+    | "mailRoutes"
+    | "statusRequest"
+    | "task"
+    | "captainLineage"
+    | "reservePeer"
+    | "captainRoute"
+    | "activeTask"
+    | "ircSessions"
+    | "reporting"
+  >;
+  authorizeMail(caller: MailCaller): Promise<MailCaller>;
+  ircMember(sessionID: string): string | undefined;
+  statusRequestRoute(id: string): MailRoute | null;
+  mailTask(
+    caller: MailCaller,
+    id?: string,
+    historical?: boolean,
+  ): CrewTask | null;
+  sameCaptain(stored: string | undefined, captainID: string): boolean;
+  mailActor(sessionID: string): string;
+  legacyStatusRoute(event: MesijMessage): MailRoute | null;
+  roster(): { id: string; name: string }[];
+  notifyMail(
+    route: MailRoute,
+    caller: MailCaller,
+    text: string,
+    delivery: "steer" | "queue",
+  ): Promise<string>;
+}
 
 const taskID = Schema.String.check(
   settingsStartsWith("task_"),
@@ -237,11 +285,11 @@ export class MailRoutes {
 /** One durable inbox; DM adds only a native notification receipt. */
 export class CrewMessaging {
   constructor(
-    private readonly engine: CrewEngine,
+    private readonly engine: MessagingHost,
     private readonly mailer: Pick<MesijClient, "register" | "send" | "inbox">,
   ) {}
 
-  async run(raw: unknown, caller: CrewCaller, direct = false) {
+  async run(raw: unknown, caller: MailCaller, direct = false) {
     const parsed = direct
       ? Schema.decodeUnknownResult(dmInputSchema)(raw)
       : Schema.decodeUnknownResult(mailInputSchema)(raw);

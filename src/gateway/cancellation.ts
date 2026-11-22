@@ -3,8 +3,7 @@ import type { BotConfig } from "../config";
 import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
 import { settingsPattern } from "../settings-schema";
 
-export const cancellationNotice =
-  "Stargate received your stop request. Work may have run; existing effects may remain. The request was not repeated. Check agent state before trying again.";
+export { cancellationNotice } from "../shared/request-failure";
 
 const timestamp = Schema.String.check(settingsPattern(/^\d+\.\d+$/));
 const actionSchema = Schema.Struct({

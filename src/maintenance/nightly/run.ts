@@ -18,7 +18,7 @@ import { type CleanupResult, runCleanup } from "./cleanup";
 import { cleanupProtection } from "./cleanup-protection";
 import { defaultCronHorizonMinutes, type MaintenanceConfig } from "./config";
 import { type Crew, crewDatabase, discoverCrews } from "./crews";
-import { waitForMaintenanceDrain } from "./drain";
+import { type Clock, waitForMaintenanceDrain } from "./drain";
 import {
   type CommandRunner,
   processRunner,
@@ -117,10 +117,7 @@ import {
   windowMinutes,
 } from "./window";
 
-export type Clock = {
-  now(): number;
-  sleep(ms: number, signal: AbortSignal): Promise<void>;
-};
+export type { Clock } from "./drain";
 export const systemClock: Clock = {
   now: () => Date.now(),
   sleep: (ms, signal) => delay(ms, undefined, { signal }),
