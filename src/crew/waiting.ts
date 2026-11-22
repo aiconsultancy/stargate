@@ -1,6 +1,6 @@
 import { Result, Schema } from "effect";
 import { settingsStruct } from "../settings-schema";
-import { saveWaitingDelay } from "../waiting";
+import { saveWaitingDelay } from "../gateway/waiting";
 import type { CrewCaller } from "./engine";
 import { CrewError } from "./state";
 

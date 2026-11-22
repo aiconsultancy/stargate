@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import pino from "pino";
-import { dashboardHandler } from "../src/dashboard";
-import { dashboardBranding } from "../src/dashboard-branding";
-import type { DashboardSource } from "../src/dashboard-model";
+import { dashboardHandler } from "../src/dashboard/dashboard";
+import { dashboardBranding } from "../src/dashboard/dashboard-branding";
+import type { DashboardSource } from "../src/dashboard/dashboard-model";
 
 const source: DashboardSource = {
   fleet: async () => ({ generatedAt: 1, ships: [] }),

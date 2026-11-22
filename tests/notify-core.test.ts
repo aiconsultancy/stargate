@@ -7,15 +7,18 @@ import type {
   Destination,
   NotificationInput,
   Source,
-} from "../src/notify/model";
+} from "../src/notifications/ingest/model";
 import {
   makeNotifications,
   type NotificationCore,
   type NotificationOptions,
   type NotificationTiming,
-} from "../src/notify/notifications";
-import type { NotificationSink, SinkOutcome } from "../src/notify/sink";
-import { NotifyStore } from "../src/notify/store";
+} from "../src/notifications/ingest/notifications";
+import type {
+  NotificationSink,
+  SinkOutcome,
+} from "../src/notifications/ingest/sink";
+import { NotifyStore } from "../src/notifications/ingest/store";
 
 const source: Source = {
   adapter: "http",

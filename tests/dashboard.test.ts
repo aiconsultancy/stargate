@@ -17,9 +17,9 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { dashboardHandler, startDashboard } from "../src/dashboard";
-import type { DashboardSource } from "../src/dashboard-model";
-import type { Ownership } from "../src/teams/unix-socket";
+import { dashboardHandler, startDashboard } from "../src/dashboard/dashboard";
+import type { DashboardSource } from "../src/dashboard/dashboard-model";
+import type { Ownership } from "../src/lib/unix-socket";
 
 const html =
   '<!doctype html><style>body { color: red; }</style><script>console.log("ok");</script>';

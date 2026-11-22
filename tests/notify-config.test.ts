@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
 import { configSchema } from "../src/config";
-import { ConfigReload, restartRequired } from "../src/config-reload";
-import { resolveDestinations } from "../src/notify/binding";
-import { producerCredentials } from "../src/notify/config";
-import { checkCredentials } from "../src/setup";
+import { ConfigReload, restartRequired } from "../src/app/config-reload";
+import { resolveDestinations } from "../src/notifications/ingest/binding";
+import { producerCredentials } from "../src/notifications/ingest/config";
+import { checkCredentials } from "../src/app/setup";
 import { bot } from "./fixtures";
 import {
   notificationConfig,

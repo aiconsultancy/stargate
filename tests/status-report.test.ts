@@ -2,12 +2,12 @@ import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCli } from "../src/cli";
+import { runCli } from "../src/app/cli";
 import {
   botStatusReport,
   statusReport,
   summarizeLog,
-} from "../src/status-report";
+} from "../src/app/status-report";
 import { bot } from "./fixtures";
 
 const now = Date.parse("2026-11-16T12:00:00Z");

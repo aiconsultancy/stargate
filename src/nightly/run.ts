@@ -12,8 +12,8 @@ import {
   maintenanceDrainDirectory,
   readDrainParticipants,
   writeMaintenanceDrain,
-} from "../maintenance-drain";
-import { isAllowedChannel } from "../routing";
+} from "../maintenance/maintenance-drain";
+import { isAllowedChannel } from "../gateway/routing";
 import { type CleanupResult, runCleanup } from "./cleanup";
 import { cleanupProtection } from "./cleanup-protection";
 import { defaultCronHorizonMinutes, type MaintenanceConfig } from "./config";

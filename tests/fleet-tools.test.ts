@@ -31,7 +31,7 @@ import {
   type FleetSource,
   fleetControlSchema,
 } from "../src/fleet/protocol";
-import { sendFleetAssignment } from "../src/fleet-irc";
+import { sendFleetAssignment } from "../src/fleet/fleet-irc";
 import {
   authenticateActivityRequest,
   BotFrameworkKeyStore,

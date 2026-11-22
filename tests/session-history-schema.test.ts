@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { OpenCode } from "@opencode/client";
 import { Effect, Exit, Predicate, Schema } from "effect";
-import { OpenCodeHistory } from "../src/backends/opencode-history";
+import { OpenCodeHistory } from "../src/backends/opencode/opencode-history";
 import { CrewReporting } from "../src/crew/report-rpc";
 import {
   HISTORY_PAGE,
@@ -11,7 +11,7 @@ import {
   historyPartSchema,
   historySessionSchema,
   historySessionsSchema,
-} from "../src/session-history";
+} from "../src/shared/session-history";
 
 type HistoryMethod = Extract<
   keyof typeof CrewReporting.methods,

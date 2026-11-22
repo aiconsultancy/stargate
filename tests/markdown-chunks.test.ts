@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { chunks } from "../src/routing";
-import { prepareSlackReply, replyText } from "../src/slack-format";
+import { chunks } from "../src/gateway/routing";
+import { prepareSlackReply, replyText } from "../src/shared/slack-format";
 
 describe("Markdown reply chunks", () => {
   test("keeps short replies unchanged and prefers paragraph boundaries", () => {
@@ -137,7 +137,7 @@ test("an unmatched code span crossing a fence cannot hang chunking", () => {
       process.execPath,
       "-e",
       `
-    import { chunks } from "./src/routing";
+    import { chunks } from "./src/gateway/routing";
     const parts = chunks("p".repeat(1500) + " \\\`\\n\\\`\\\`\\\`\\n" + "x".repeat(2792));
     if (parts.some(part => Array.from(part).length > 2800)) process.exit(2);
   `,

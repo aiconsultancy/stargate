@@ -1,13 +1,13 @@
 import { createServer, type Server } from "node:http";
 import { Result, Schema, SchemaTransformation } from "effect";
 import { settingsPattern, settingsStruct } from "../settings-schema";
-import { close, readBody, sendJson } from "../teams/http-util";
+import { close, readBody, sendJson } from "../lib/http-util";
 import {
   listenOnUnixSocket,
   type Ownership,
   type SocketIdentity,
   unlinkOwnSocket,
-} from "../teams/unix-socket";
+} from "../lib/unix-socket";
 import { FleetLedger } from "./ledger";
 import {
   type FleetPermissionRule,

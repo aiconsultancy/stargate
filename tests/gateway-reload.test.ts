@@ -3,9 +3,9 @@ import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import { Store } from "../src/store";
-import type { Transcriber } from "../src/transcription";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Store } from "../src/gateway/store";
+import type { Transcriber } from "../src/transcription/transcription";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

@@ -13,7 +13,7 @@ import { inspectInputSchema } from "../src/crew/reconciliation";
 import { CrewState } from "../src/crew/state";
 import { profileTeam, teamSchema } from "../src/crew/team";
 import { workspaceInputSchemas } from "../src/crew/workspace";
-import { renderProfile } from "../src/profile";
+import { renderProfile } from "../src/app/profile";
 import { decodeSettings } from "../src/settings-errors";
 
 const rawTeam = {

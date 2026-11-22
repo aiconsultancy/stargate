@@ -129,14 +129,14 @@ The captain's verified receipt in `inputs.md` establishes merged main and
 Quality success. Immutable source comparison dispositions the integration
 delta; migration tests, reviews and probes are not repeated here.
 
-- `src/runtime.ts` replaces Zod human-identity parsing with
+- `src/app/runtime.ts` replaces Zod human-identity parsing with
   `Schema.decodeUnknownResult` and `Result.isSuccess`. Startup, API and
   finalizer ownership remain unchanged; historical line numbers below refer
   to 71fc, not the shifted b9 lines.
-- `src/routing.ts` and `src/peers.ts` now use Effect Schema/Result and current
+- `src/gateway/routing.ts` and `src/gateway/peers.ts` now use Effect Schema/Result and current
   inferred values. `Identity` remains `{ team, user }`; peer admission and
   allow/deny policy remain unchanged. Use their current helpers and types.
-- `src/store.ts` uses `settingsStruct`, `typeof schema.Type`, Effect decoding
+- `src/gateway/store.ts` uses `settingsStruct`, `typeof schema.Type`, Effect decoding
   and explicit mutable arrays for its persisted activity/file/burst values.
   Its tables and transaction ownership did not change. The new notification
   store stays separate and follows these current schema/type conventions.
@@ -156,12 +156,12 @@ Before each build, check only later relevant main changes against b9.
 
 ### Extend the actual API, not R7's empty-host sketch
 
-`src/api/v1/server.ts:startApiV1Server` already owns a Bun listener, Fleet
+`src/dashboard/api/v1/server.ts:startApiV1Server` already owns a Bun listener, Fleet
 source, host metrics, event streams, operator bearer authentication and CORS.
-`src/api/v1/config.ts:apiV1ConfigSchema` already occupies top-level `api`.
+`src/dashboard/api/v1/config.ts:apiV1ConfigSchema` already occupies top-level `api`.
 It requires `listen`; omission of `api` means off. `api.enabled` is currently
 an unknown key, explicitly rejected by `tests/api-v1-config.test.ts`.
-`src/runtime.ts:982-1011` starts this owner once.
+`src/app/runtime.ts:982-1011` starts this owner once.
 
 The smallest compatible config extension is `api.listen: "unix"`, selecting
 `<dataDirectory>/api.sock`. Existing private TCP `listen` strings retain their
@@ -197,10 +197,10 @@ absolute header lifetime, connection ceiling or route-slot settlement.
 Use the existing `node:http` precedent from `src/teams/http.ts` for the common
 API listener mechanics, retaining `startApiV1Server` as the public entry point.
 Extract Fleet request handling without changing its policy or response shape.
-One new `src/api/server.ts` owns either TCP or Unix, never both. This replaces
+One new `src/dashboard/api/server.ts` owns either TCP or Unix, never both. This replaces
 the API's underlying listener; it does not start a competing host.
 
-Reuse `src/teams/unix-socket.ts` ownership checks and identity cleanup. Its
+Reuse `src/lib/unix-socket.ts` ownership checks and identity cleanup. Its
 current mode check is hardcoded to 0660. Add only a caller-selectable private
 mode with existing defaults unchanged; API requests 0600 under umask 0177.
 Do not copy the dashboard's unconditional stale-path unlink. Test live sockets,
@@ -229,15 +229,15 @@ event stream or apply a notification request deadline to its entire lifetime.
 
 ### Keep each state model separate
 
-`src/notification-store.ts` and `notifications.sqlite` store mute preferences.
-They are unrelated to new `src/notify/` and `notify.sqlite`.
+`src/notifications/preferences/notification-store.ts` and `notifications.sqlite` store mute preferences.
+They are unrelated to new `src/notifications/ingest/` and `notify.sqlite`.
 `Store.jobs`, cron, nightly outboxes and Fleet delegation state have different
 replay semantics. Reuse SQLite/Effect patterns, not their tables or row types.
 Notification retries must never become retries of agent work.
 
-`src/runtime.ts:lockInstance` holds `instance.sqlite` exclusively.
+`src/app/runtime.ts:lockInstance` holds `instance.sqlite` exclusively.
 Acquire the new database only under that existing lock, with private file
-and directory checks. Follow `src/cron-store.ts:165-183` for no-follow,
+and directory checks. Follow `src/cron/store.ts:165-183` for no-follow,
 regular-file open and mode 0600 before WAL/SHM creation. Programmatic `serve`
 must be safe without relying on `start` having set process umask. Preserve
 the file on unknown schema, corruption or startup failure. Use versioned,
@@ -269,7 +269,7 @@ Aliases that resolve to one physical binding produce one destination row.
 
 `routeEvent` admits bot events only for verified peer captains, and still
 checks user and channel allows/denies and rejects the receiver's own user.
-Use those same access helpers in `src/notify/binding.ts`; do not alter intake.
+Use those same access helpers in `src/notifications/ingest/binding.ts`; do not alter intake.
 The notification path has no `Gateway.receive` or backend reference.
 
 `config check` currently performs no Slack calls and has no resolved workspace
@@ -327,23 +327,23 @@ affect send-time checks. A revoked or conflicting row is dropped, never moved.
 Proposed new modules are deliberately small. Implementation can combine
 adjacent pure helpers within its task boundary; no plugin framework is needed.
 
-- `src/api/route.ts`, unit 01: trusted static exact-route descriptor,
+- `src/dashboard/api/route.ts`, unit 01: trusted static exact-route descriptor,
   header-only authorization, per-route limits and Promise handler with signal.
   No notification import.
-- `src/notify/model.ts`, unit 02: strict input, source scope/audience, resolved
+- `src/notifications/ingest/model.ts`, unit 02: strict input, source scope/audience, resolved
   destination, accepted result and typed failures.
-- `src/notify/notifications.ts`, unit 02: Effect
+- `src/notifications/ingest/notifications.ts`, unit 02: Effect
   `Notifications.publish(source, input)` and scoped service construction.
   Success follows commit; bounded dropping queue plus Deferred results.
-- `src/notify/store.ts`, unit 02: synchronous admit, claim, settle, recover,
+- `src/notifications/ingest/store.ts`, unit 02: synchronous admit, claim, settle, recover,
   prune and close transactions. One database owner, two tables, no transports.
-- `src/notify/sink.ts`, unit 02: Promise `allowed`/`send`, frozen destination,
+- `src/notifications/ingest/sink.ts`, unit 02: Promise `allowed`/`send`, frozen destination,
   signal and sent/refused/unknown outcome. Unit 03 implements Slack.
-- `src/notify/config.ts` and `binding.ts`, unit 03: config, subscriptions,
+- `src/notifications/ingest/config.ts` and `binding.ts`, unit 03: config, subscriptions,
   credential references, physical binding and echo policy.
-- `src/notify/http.ts` and `slack.ts`, unit 03: header authentication and HTTP
+- `src/notifications/ingest/http.ts` and `slack.ts`, unit 03: header authentication and HTTP
   mapping; separate literal Slack projection and outcome mapping.
-- `src/runtime.ts`, unit 03: lock, store lifetime, connected registrations,
+- `src/app/runtime.ts`, unit 03: lock, store lifetime, connected registrations,
   core scope, route composition and shutdown order. One integration writer.
 
 One admission fiber serializes offers. Store operations are synchronous atomic

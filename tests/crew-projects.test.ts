@@ -33,10 +33,10 @@ import {
 } from "../src/crew/project-options";
 import { CrewProjects } from "../src/crew/projects";
 import { teamSchema } from "../src/crew/team";
-import { crewStatusSchema } from "../src/crew-status";
-import { CronStore } from "../src/cron-store";
-import { dashboardSource } from "../src/dashboard-source";
-import { Store } from "../src/store";
+import { crewStatusSchema } from "../src/shared/crew-status";
+import { CronStore } from "../src/cron/store";
+import { dashboardSource } from "../src/dashboard/dashboard-source";
+import { Store } from "../src/gateway/store";
 import { bot, identity as dashboardIdentity } from "./fixtures";
 
 async function git(directory: string, ...args: string[]) {

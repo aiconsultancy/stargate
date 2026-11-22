@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { controlInteractions } from "../src/interactions";
+import { controlInteractions } from "../src/slack/interactions";
 
 test("configuration buttons use the existing interaction path without consuming Stop or cron", async () => {
   const calls: string[] = [];

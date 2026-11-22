@@ -4,7 +4,7 @@ import {
   reactionInstructions,
   reactionNames,
   silentDirective,
-} from "../src/reactions";
+} from "../src/shared/reactions";
 
 test("normal questions and concrete-item keywords do not trigger reactions", () => {
   for (const text of [

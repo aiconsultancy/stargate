@@ -6,8 +6,11 @@ import type { CrewCaller } from "../src/crew/engine";
 import { CrewQuestions } from "../src/crew/questions";
 import { CrewError, CrewState } from "../src/crew/state";
 import { defaultTeam } from "../src/crew/team";
-import { saveQuestionSettings } from "../src/question-settings";
-import type { NativeQuestion, QuestionAnswer } from "../src/questions";
+import { saveQuestionSettings } from "../src/questions/question-settings";
+import type {
+  NativeQuestion,
+  QuestionAnswer,
+} from "../src/questions/questions";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {

@@ -1,31 +1,31 @@
 import { existsSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { Result, Schema, SchemaTransformation } from "effect";
-import { crewActivitySchema } from "./activity";
-import { apiV1ConfigSchema } from "./api/v1/config";
-import { captainPostSchema } from "./captain-post-config";
-import { cronjobsSchema } from "./cronjob-config";
+import { crewActivitySchema } from "./activity/activity";
+import { apiV1ConfigSchema } from "./dashboard/api/v1/config";
+import { captainPostSchema } from "./captain-post/captain-post-config";
+import { cronjobsSchema } from "./cron/job-config";
 import { validateFleetPermissions } from "./fleet/permissions";
 import { fleetControlSchema } from "./fleet/protocol";
-import { fleetPolicySchema } from "./fleet-policy";
-import { healthConfigSchema } from "./health-config";
+import { fleetPolicySchema } from "./fleet/fleet-policy";
+import { healthConfigSchema } from "./health/health-config";
 import { fold, widestFold } from "./irc/protocol";
-import { isLoopbackAddress } from "./loopback";
+import { isLoopbackAddress } from "./lib/loopback";
 import {
   mentionNameSchema,
   mentionNamesSchema,
   textMentionRuleSchema,
-} from "./mentions";
+} from "./shared/mentions";
 import { maintenanceSchema } from "./nightly/config";
-import { notifyConfigError } from "./notify/binding";
-import { notifySchema } from "./notify/config";
+import { notifyConfigError } from "./notifications/ingest/binding";
+import { notifySchema } from "./notifications/ingest/config";
 import {
   piModelSchema,
   piProviderSchema,
   piThinkingLevelSchema,
   secureLocalOrHttpsURL,
-} from "./pi-model";
-import { quotaWatchSchema } from "./quota-watch";
+} from "./backends/pi/pi-model";
+import { quotaWatchSchema } from "./quota/quota-watch";
 import { decodeSettings } from "./settings-errors";
 import {
   settingsCheck,
@@ -38,8 +38,8 @@ import {
   settingsURL,
   settingsUUID,
 } from "./settings-schema";
-import { transcriptionSchema } from "./transcription";
-import { waitingSchema } from "./waiting";
+import { transcriptionSchema } from "./transcription/transcription";
+import { waitingSchema } from "./gateway/waiting";
 
 const absolutePath = Schema.String.check(
   settingsRefine(isAbsolute, { message: "Use an absolute path" }),

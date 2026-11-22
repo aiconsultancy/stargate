@@ -7,20 +7,20 @@ import { Writable } from "node:stream";
 import { Effect, Schema } from "effect";
 import pino from "pino";
 import { z } from "zod";
-import { apiToken } from "../src/api/v1/token";
+import { apiToken } from "../src/dashboard/api/v1/token";
 import type { AgentBackend } from "../src/backend";
 import { type Config, configSchema, ircSchema } from "../src/config";
-import { ConfigReload, readReloadCandidate } from "../src/config-reload";
-import type { CrewStatus } from "../src/crew-status";
+import { ConfigReload, readReloadCandidate } from "../src/app/config-reload";
+import type { CrewStatus } from "../src/shared/crew-status";
 import { IrcShip, ircKey } from "../src/irc/ship";
-import { botKey } from "../src/routing";
+import { botKey } from "../src/gateway/routing";
 import {
   listenForReload,
   type RuntimeDependencies,
   type SlackApp,
   serve,
-} from "../src/runtime";
-import { Store } from "../src/store";
+} from "../src/app/runtime";
+import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 import { FakeIrcServer, until } from "./irc-fixture";
 

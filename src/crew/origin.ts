@@ -2,8 +2,8 @@ import {
   closesBoundaryContext,
   type InputBoundaryRecord,
   resolveBoundaryContext,
-} from "../input-boundary";
-import { InputBoundaryReader } from "../input-origin";
+} from "../backends/opencode/input-boundary";
+import { InputBoundaryReader } from "../backends/opencode/input-origin";
 import type { ResultAPI } from "./result";
 
 /** Resolve the tool's retained turn, not whichever input is newest now. */

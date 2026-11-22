@@ -339,7 +339,7 @@ records hold only the marker and start time. See [Codex backend](codex.md).
 the capture. OpenCode implements it through the location-scoped Stargate reporting
 RPC. Other adapters remain compatible without it. The gateway manages report
 delivery separately from answer delivery, with its own deadline and access
-rechecks. See [crew activity](crew-activity.md) and [`activity.ts`](../src/activity.ts).
+rechecks. See [crew activity](crew-activity.md) and [`activity.ts`](../src/activity/activity.ts).
 `resumeActivity` reopens a saved capture through read/finish/cancel, not start.
 The gateway persists its Slack timestamp, capture ID, revision and done flag
 in `jobs.activity`. Post-response loops have a separate bound and survive
@@ -369,10 +369,10 @@ and the captain can still respond while a worker is paused.
 `history` is an optional read-only adapter capability for the
 [fleet dashboard](dashboard.md). It returns session metadata, child sessions
 and transcript pages in one harness-independent shape
-([`session-history.ts`](../src/session-history.ts)). OpenCode reads its
+([`session-history.ts`](../src/shared/session-history.ts)). OpenCode reads its
 server API and asks the crew plugin for crew roots and Pi crew transcripts.
 Pi Durable reads its own store. Adapters answer what they are asked;
-[`dashboard-source.ts`](../src/dashboard-source.ts) decides which sessions
+[`dashboard-source.ts`](../src/dashboard/dashboard-source.ts) decides which sessions
 belong to a bot. The dashboard listens on a Unix socket in the private data
 directory, so Stargate still opens no network port.
 
@@ -652,7 +652,7 @@ still duplicate a reply.
 
 ### Targeted repair
 
-`repairThread` in `src/transcript.ts` is an operator helper, not a CLI
+`repairThread` in `src/ops/transcript.ts` is an operator helper, not a CLI
 command. It resolves one bot's current namespace for one thread and compares
 settled public replies after a native message ID with stored Slack replies.
 A dry run reports the missing IDs, `requeued` failed outbox rows in scope,
@@ -668,7 +668,7 @@ The cursor moves to the repaired head even when it was earlier. Replies that
 `since`, are not delivered later. Run it only against a reviewed thread:
 
 ```sh
-bun -e 'import { repairThread } from "./src/transcript";
+bun -e 'import { repairThread } from "./src/ops/transcript";
 console.log(JSON.stringify(await repairThread({
   config: "stargate.json", bot: "captain", channel: "D123", thread: "1.000",
   since: "msg_INPUT_ID", apply: false,

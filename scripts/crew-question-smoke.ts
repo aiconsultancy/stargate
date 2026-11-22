@@ -11,7 +11,7 @@ import { CrewQuestionGateway } from "../src/irc/crew-question-gateway";
 import {
   questionSettingsPath,
   saveQuestionSettings,
-} from "../src/question-settings";
+} from "../src/questions/question-settings";
 
 const standalone = process.argv.includes("--standalone");
 const loseAck = process.argv.includes("--lose-ack");

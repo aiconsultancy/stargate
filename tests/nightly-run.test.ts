@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
 import { CrewState } from "../src/crew/state";
-import { CronStore } from "../src/cron-store";
+import { CronStore } from "../src/cron/store";
 import {
   type CommandResult,
   type CommandRunner,
@@ -53,8 +53,8 @@ import {
   updateUnit,
 } from "../src/nightly/update";
 import type { ModelRef } from "../src/nightly/versions";
-import { botKey } from "../src/routing";
-import { Store } from "../src/store";
+import { botKey } from "../src/gateway/routing";
+import { Store } from "../src/gateway/store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";
 import { tarball } from "./tar";
 

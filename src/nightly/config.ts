@@ -1,12 +1,12 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
-import { isLocalhost } from "../loopback";
+import { isLocalhost } from "../lib/loopback";
 import {
   piModelSchema,
   piProviderSchema,
   piProxyModel,
   piProxyModels,
-} from "../pi-model";
+} from "../backends/pi/pi-model";
 import {
   settingsCheck,
   settingsDefault,

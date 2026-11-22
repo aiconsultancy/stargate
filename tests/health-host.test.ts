@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import { Schema } from "effect";
-import { healthConfigSchema } from "../src/health-config";
+import { healthConfigSchema } from "../src/health/health-config";
 import {
   createHostHealthReader,
   type HostHealthSources,
-} from "../src/health-host";
+} from "../src/health/health-host";
 
 test("host snapshots expose safe process leaders and growth only after a baseline", async () => {
   let tick = 0;

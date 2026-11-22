@@ -6,11 +6,11 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { Effect } from "effect";
 import pino from "pino";
-import { ConfigReload, readReloadCandidate } from "../src/config-reload";
+import { ConfigReload, readReloadCandidate } from "../src/app/config-reload";
 import { readReady } from "../src/nightly/ready";
-import { NotifyStore } from "../src/notify/store";
-import { lockInstance, serve } from "../src/runtime";
-import { SlackConnection } from "../src/slack";
+import { NotifyStore } from "../src/notifications/ingest/store";
+import { lockInstance, serve } from "../src/app/runtime";
+import { SlackConnection } from "../src/slack/slack";
 import {
   envelope,
   producerToken,

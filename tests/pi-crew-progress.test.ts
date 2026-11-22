@@ -15,7 +15,7 @@ import type {
   SubmissionRecord,
 } from "@earendil-works/pi-durable";
 import { Schema } from "effect";
-import { PiDurableBackend } from "../src/backends/pi-durable";
+import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
 import { CrewState, type CrewTask } from "../src/crew/state";
 import { teamSchema } from "../src/crew/team";

@@ -3,7 +3,7 @@ import pino from "pino";
 import { IrcClient } from "../src/irc/client";
 import { IrcDelivery } from "../src/irc/delivery";
 import { Filehost } from "../src/irc/filehost";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 
 class Wire extends IrcClient {
   tags = true;

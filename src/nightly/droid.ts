@@ -3,7 +3,7 @@ import { appendFile, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { Config } from "../config";
-import { redactCredentials } from "../credentials";
+import { redactCredentials } from "../lib/credentials";
 import type { MaintenanceConfig } from "./config";
 import { type DroidAgent, type DroidTools, openPiDroid } from "./droid-agent";
 import {

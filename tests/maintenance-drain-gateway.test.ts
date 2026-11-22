@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import type { DrainControl, DrainHandler } from "../src/maintenance-drain";
-import { Store } from "../src/store";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import type {
+  DrainControl,
+  DrainHandler,
+} from "../src/maintenance/maintenance-drain";
+import { Store } from "../src/gateway/store";
 import { bot, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

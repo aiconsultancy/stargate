@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { CronScheduler } from "../src/cron";
-import { CronStore } from "../src/cron-store";
-import { Gateway } from "../src/gateway";
-import { Store } from "../src/store";
+import { CronScheduler } from "../src/cron/index";
+import { CronStore } from "../src/cron/store";
+import { Gateway } from "../src/gateway/gateway";
+import { Store } from "../src/gateway/store";
 import { bot, identity } from "./fixtures";
 
 test("a due cron prompt runs through the existing gateway and replies in its scheduled thread", async () => {

@@ -8,15 +8,18 @@ import {
   Error as ToolError,
 } from "@opencode/plugin/promise/tool";
 import { Effect } from "effect";
-import { OpenCodeBackend } from "../backends/opencode";
-import { postInputSchema } from "../captain-post";
+import { OpenCodeBackend } from "../backends/opencode/opencode";
+import { postInputSchema } from "../captain-post/captain-post";
 import { cronOperationSchema } from "../cron-control";
-import { abortable, resourceScope } from "../effect";
-import { MaintenanceRPC, maintenancePlanSchema } from "../maintenance";
-import { activeMaintenanceDrain } from "../maintenance-drain";
-import { notificationInputSchema } from "../notification-store";
-import { quotaInputSchema } from "../quota";
-import { noticeTools } from "../update-notice";
+import { abortable, resourceScope } from "../lib/effect";
+import {
+  MaintenanceRPC,
+  maintenancePlanSchema,
+} from "../maintenance/maintenance";
+import { activeMaintenanceDrain } from "../maintenance/maintenance-drain";
+import { notificationInputSchema } from "../notifications/preferences/notification-store";
+import { quotaInputSchema } from "../quota/quota";
+import { noticeTools } from "../maintenance/update-notice";
 import { connectHistoryAPI, historyVisible } from "./api";
 import { compactOnServer } from "./compaction";
 import { crewOpenCodeInput } from "./crew-tool-input";

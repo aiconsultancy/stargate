@@ -1,15 +1,19 @@
 import { lstat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { OpenCodeBackend } from "./backends/opencode";
-import { botToken, botWebClient } from "./bot-web";
+import { OpenCodeBackend } from "./backends/opencode/opencode";
+import { botToken, botWebClient } from "./slack/bot-web";
 import { type BotConfig, loadConfig } from "./config";
-import { type CronAdvanced, cronAdvancedFields } from "./cron-advanced";
-import { CronStore } from "./cron-store";
-import { cronChannel, cronUser } from "./cronjob-config";
-import { cronjobNameSchema } from "./cronjob-files";
-import { CronjobManager, cronRuntimeBinding } from "./cronjob-manager";
-import { type Identity, isAllowedChannel, isAllowedUser } from "./routing";
+import { type CronAdvanced, cronAdvancedFields } from "./cron/advanced";
+import { CronStore } from "./cron/store";
+import { cronChannel, cronUser } from "./cron/job-config";
+import { cronjobNameSchema } from "./cron/job-files";
+import { CronjobManager, cronRuntimeBinding } from "./cron/job-manager";
+import {
+  type Identity,
+  isAllowedChannel,
+  isAllowedUser,
+} from "./gateway/routing";
 import { legacySetting } from "./settings-legacy";
 
 const destination = {

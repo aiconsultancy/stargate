@@ -29,15 +29,15 @@ PR #77 / b19 was not treated as merged or inspected as current main.
 Current main already has a private Fleet HTTP listener:
 
 - `src/config.ts:1152-1155` owns top-level `api`.
-- `src/api/v1/config.ts:5-30` requires `listen`; it has no `enabled` or
+- `src/dashboard/api/v1/config.ts:5-30` requires `listen`; it has no `enabled` or
   Unix-socket setting. Omission disables the API. Existing configurations
   must not require a new `enabled: true` to keep working.
-- `src/api/v1/server.ts:78-128,130-217` owns the Bun listener, Fleet source,
-  host sampler and event streams. `src/api/v1/host.ts` is host metrics,
+- `src/dashboard/api/v1/server.ts:78-128,130-217` owns the Bun listener, Fleet source,
+  host sampler and event streams. `src/dashboard/api/v1/host.ts` is host metrics,
   not an unused HTTP-host filename.
-- `src/runtime.ts:982-1011` acquires this server once, before worker startup.
+- `src/app/runtime.ts:982-1011` acquires this server once, before worker startup.
   A bind failure fails startup. The same runtime separately owns dashboard
-  and Teams listeners at `src/runtime.ts:944-981`.
+  and Teams listeners at `src/app/runtime.ts:944-981`.
 
 R7's `api.enabled`, default `api.sock`, no-TCP and no-`/api/...` assumptions
 at R7:110-144 conflict with this source. Its slice 1a at R7:769 cannot be
@@ -52,7 +52,7 @@ The existing Fleet paths are exactly:
 - `GET/HEAD /api/v1/ships/{id}/crew/{member}`
 - `GET/HEAD /api/v1/events`
 
-Source: `src/api/v1/server.ts:168-209`. Preserve those paths and their
+Source: `src/dashboard/api/v1/server.ts:168-209`. Preserve those paths and their
 encoded-ID handling. Register notification POST mounts separately under
 `/v1/notifications/<mount>`, R7:135-142,511-512. Reserve `/api/v1/...`
 for Fleet and `/api/messages` for Teams. Do not reinterpret Fleet paths
@@ -62,8 +62,8 @@ and return fixed 404 for disabled notification mounts.
 
 Existing Fleet TCP binds accept literal private addresses only; they do
 not accept wildcard/public binds. CIDR checks use the actual peer, not
-forwarded headers. Preserve `src/api/v1/network.ts:3-11,58-99` and
-`src/api/v1/server.ts:140-141`.
+forwarded headers. Preserve `src/dashboard/api/v1/network.ts:3-11,58-99` and
+`src/dashboard/api/v1/server.ts:140-141`.
 
 The plan must state how Unix-only notification admission and legacy Fleet
 TCP configuration coexist. A conservative implementation can add an
@@ -79,7 +79,7 @@ existing Fleet exposure alone is not producer-route approval.
 
 The current server applies peer checks, Fleet CORS/preflight, a GET/HEAD
 method gate and one Fleet bearer check before route selection.
-See `src/api/v1/server.ts:33-59,136-168`.
+See `src/dashboard/api/v1/server.ts:33-59,136-168`.
 Adding POST to that global method list is insufficient and risks sharing
 operator authority with producers.
 
@@ -91,18 +91,18 @@ producer identity. Do not implement an "operator OR producer" authenticator.
 Reject ambiguous producer credentials and cross-role credential reuse,
 including different environment names resolving to the same secret.
 
-`src/api/v1/token.ts:10-35,39-85` already owns private token creation and
-rotation. `src/cli.ts:501-509` exposes the existing operator token command.
+`src/dashboard/api/v1/token.ts:10-35,39-85` already owns private token creation and
+rotation. `src/app/cli.ts:501-509` exposes the existing operator token command.
 Reuse this owner; do not make a second Fleet API token. Producer credential
 references belong to the new adapter configuration. Integrate presence
-checks with `src/setup.ts:120-166` and `src/config-reload.ts:20-37`, without
+checks with `src/app/setup.ts:120-166` and `src/app/config-reload.ts:20-37`, without
 provider calls or logging resolved values. New notification/config input
 must reject unknown fields. The existing strict helper is
 `src/settings-schema.ts:12-35`; the API schema currently uses a Zod wrapper,
 so account for the separately pending migration rather than assuming it.
 
 Fleet CORS defaults are deliberately enabled for Subspace origins:
-`src/api/v1/network.ts:102-127`, `src/api/v1/server.ts:142-155`.
+`src/dashboard/api/v1/network.ts:102-127`, `src/dashboard/api/v1/server.ts:142-155`.
 Preserve those responses for Fleet, including token-free GET preflight.
 Notification routes must not inherit them. Recommend rejecting browser
 `Origin` on notification POSTs, with bearer-only machine requests and no
@@ -111,7 +111,7 @@ cookies/CORS. No new operator write, config or health routes are needed.
 Existing HTTP limits are not the R7 host contract. `idleTimeout: 30`, a
 20-second read signal and eight event streams do not implement bounded
 producer bodies, absolute pre-body lifetimes or reserved route capacity.
-See `src/api/v1/server.ts:130-183` and `src/api/v1/events.ts:26-29,144-183`.
+See `src/dashboard/api/v1/server.ts:130-183` and `src/dashboard/api/v1/events.ts:26-29,144-183`.
 The host adaptation needs streamed byte counting, per-route/source limits,
 bounded rejected-request disposal, header/connection limits and a global
 budget that leaves operator capacity available. Keep timed-out work in its
@@ -121,12 +121,12 @@ apply a 20-second notification deadline to the existing event stream.
 ## 3. Socket protection exists, but neither helper is a drop-in
 
 For a Unix transport, keep the private directory and mode 0600 contract.
-`src/dashboard.ts:354-382` uses the instance lock, checks the old path is a
+`src/dashboard/dashboard.ts:354-382` uses the instance lock, checks the old path is a
 socket, unlinks it, binds through Bun and chmods to 0600. Its comment relies
 on exclusive directory ownership and Bun's path removal on stop; this is
 not an identity-checked cleanup implementation.
 
-The stronger reusable checks are in `src/teams/unix-socket.ts`:
+The stronger reusable checks are in `src/lib/unix-socket.ts`:
 
 - `127-185`: normalized path and directory/ancestor ownership checks.
 - `234-262`: refuse symlink, non-socket, foreign/live or replaced socket.
@@ -142,14 +142,14 @@ for the new socket and never unlink an arbitrary occupied path.
 
 ## 4. Store and runtime lifetimes must join the existing scope
 
-`src/runtime.ts:91-99,238-260` takes `instance.sqlite`'s exclusive lock
+`src/app/runtime.ts:91-99,238-260` takes `instance.sqlite`'s exclusive lock
 before opening stores. Add private `notify.sqlite` inside this ownership,
-never a second instance lock or entries in `jobs`. `src/cron-store.ts:165-183`
+never a second instance lock or entries in `jobs`. `src/cron/store.ts:165-183`
 provides the better privacy pattern: no-follow regular-file open, mode 0600
 before WAL/SHM, WAL, busy timeout and foreign keys. The older primary store
-opens SQLite directly at `src/store.ts:307-315`; do not copy that as the
+opens SQLite directly at `src/gateway/store.ts:307-315`; do not copy that as the
 whole new-file privacy contract. `start()` sets umask 0077 at
-`src/runtime.ts:1365-1366`, but programmatic `serve()` callers need safe
+`src/app/runtime.ts:1365-1366`, but programmatic `serve()` callers need safe
 store construction too.
 
 R7:182-206,217-276,701-726 supplies the new store rules. Keep them local:
@@ -162,7 +162,7 @@ in-memory in R7:728-729; persistent retry counters are row attempts.
 
 Runtime shutdown currently closes all Slack intake, interrupts the worker
 FiberMap, then releases the API host, backends, stores and instance lock.
-Relevant ordering is `src/runtime.ts:298-318,982-1024,1196-1205`.
+Relevant ordering is `src/app/runtime.ts:298-318,982-1024,1196-1205`.
 An API finalizer at its existing acquisition point therefore runs after
 workers stop. A new producer route must close admission at the first intake
 gate, before notification worker interruption, rather than relying only on
@@ -170,7 +170,7 @@ the existing late API finalizer. Otherwise requests can reach a stopped
 admission worker. Resolve every queued publish waiter, keep committed data,
 stop claims, abort/drain sends, then close the notification store.
 
-`src/effect.ts:3-47` is the correct Promise settlement bridge. It waits for
+`src/lib/effect.ts:3-47` is the correct Promise settlement bridge. It waits for
 the Promise after abort. It cannot bound a sink that never settles.
 The plan needs a concrete bounded process-exit path for that R7:274-276
 case. Merely timing out a finalizer and closing SQLite is unsafe; an old
@@ -178,23 +178,23 @@ attempt could still write or be replayed in the same live process. Keep
 the lock/store owned until local users settle or the process terminates.
 
 Maintenance drain holds new agent turns while existing reply deliveries
-can finish: `src/gateway.ts:1102-1120`; steering separately checks the hold
+can finish: `src/gateway/gateway.ts:1102-1120`; steering separately checks the hold
 at `599-616`. The drain controller's API is
-`src/maintenance-drain.ts:423-436,493-518`. Do not add notification work to
+`src/maintenance/maintenance-drain.ts:423-436,493-518`. Do not add notification work to
 agent admission, change the drain marker, readiness criteria or steering.
 The notification runtime must have its own producer shutdown gate.
 
 ## 5. Reuse the Slack registration, add a request-scoped send
 
 The runtime already resolves Slack team/user identities and rejects duplicate
-registrations at `src/runtime.ts:435-454`. Reuse those identities and each
+registrations at `src/app/runtime.ts:435-454`. Reuse those identities and each
 registration's existing `SlackConnection`. Freeze bot ID, configured app ID,
 authenticated workspace/user, channel and audiences. Do not use `botKey`
-for this binding: `src/routing.ts:43-58` also hashes backend settings, which
+for this binding: `src/gateway/routing.ts:43-58` also hashes backend settings, which
 R7 explicitly excludes from notification identity.
 
 `announce()` only checks abort before a shared-client send:
-`src/slack.ts:182-224`. It does not satisfy the sink contract. The existing
+`src/slack/slack.ts:182-224`. It does not satisfy the sink contract. The existing
 request-scoped `historyWeb(signal)` at `114-127` combines request abort with
 the SDK fetch signal while retaining timeout 15 seconds, zero retries and
 rate-limit rejection at `107-112`. `activity()` already uses that pattern
@@ -204,8 +204,8 @@ Preserve test injection through constructor `webOptions` at `84-90`.
 
 Use `slackContent(text, "plain")`, not `prepareReply`, for literal output.
 Its escaped fallback and `plain_text` block are at
-`src/slack-format.ts:346-369`. Keep `mrkdwn: false`, `parse: "none"` and
-unfurls disabled, as at `src/slack.ts:191-203`. One concatenated title/body/
+`src/shared/slack-format.ts:346-369`. Keep `mrkdwn: false`, `parse: "none"` and
+unfurls disabled, as at `src/slack/slack.ts:191-203`. One concatenated title/body/
 URL can exceed a section's text limit; the projection must bound each
 literal block while keeping one logical send attempt and the stored
 signature unchanged. Do not infer transport safety from plain formatting
@@ -214,11 +214,11 @@ or abort after dispatch is unknown, not proof of non-send.
 
 ## 6. Echo exclusion needs identities and current access, not bot rejection
 
-`src/routing.ts:102-118` admits verified peer captains when enabled and both
+`src/gateway/routing.ts:102-118` admits verified peer captains when enabled and both
 user/channel rules pass. It rejects the receiver's own bot. Peer directory
 verification uses live same-workspace bot identity and captain-name checks
-at `src/peers.ts:75-115`. Plain text can still contain a configured captain
-name, which routing recognizes at `src/routing.ts:128-155`. Therefore
+at `src/gateway/peers.ts:75-115`. Plain text can still contain a configured captain
+name, which routing recognizes at `src/gateway/routing.ts:128-155`. Therefore
 ordinary bot rejection, escaped mentions, mention-only access or current
 mute state cannot prove notification output is inert.
 
@@ -230,19 +230,19 @@ chat unchanged. Use the same fail-closed predicate immediately before send.
 There is a concrete offline-information gap: config has app ID and token
 references, but not authenticated team/user or captain-name proof
 (`src/config.ts:375-405`). `checkCredentials` checks local references only
-(`src/setup.ts:120-166`); actual identity arrives at runtime
-(`src/slack.ts:148-153`). The plan must specify how offline `config check`
+(`src/app/setup.ts:120-166`); actual identity arrives at runtime
+(`src/slack/slack.ts:148-153`). The plan must specify how offline `config check`
 rejects potential conflicts. A conservative rejection when another
 peer-enabled registration can share the destination channel avoids adding
 network calls or new identity configuration. Startup can additionally use
 resolved identities. Unknown peer qualification must not become permission.
 
-Live access reload remains allowed at `src/config-reload.ts:89-118` and
-updates current bot references at `src/runtime.ts:687-695`. A sink that
+Live access reload remains allowed at `src/app/config-reload.ts:89-118` and
+updates current bot references at `src/app/runtime.ts:687-695`. A sink that
 captures startup access will miss new denies or echo conflicts. Read the
 current registration set synchronously at send admission. Notify topology,
 sources and limits remain restart-only under the existing top-level diff
-rule at `src/config-reload.ts:98-103`; do not widen that reload allowlist.
+rule at `src/app/config-reload.ts:98-103`; do not widen that reload allowlist.
 
 ## Verification seams for the author
 
@@ -271,9 +271,9 @@ These are source-backed test entry points, not evidence of tests run here.
 - Echo: extend `tests/peers.test.ts:184-273` with multi-registration notify
   conflicts and access reload. Assert no Gateway/backend calls from accepted
   notifications and preserve ordinary peer admission.
-- Version: preserve `src/api/v1/gateway.ts:30-42` installed-release, checkout
+- Version: preserve `src/dashboard/api/v1/gateway.ts:30-42` installed-release, checkout
   tag, package fallback; retain `tests/api-v1-gateway-version.test.ts`.
-  Preserve feature reporting at `src/api/v1/features.ts:41-52` if adding an
+  Preserve feature reporting at `src/dashboard/api/v1/features.ts:41-52` if adding an
   explicit enable flag. Do not bump dependencies or release versions.
 
 ## Minimum decisions for the completed plan

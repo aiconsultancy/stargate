@@ -2,20 +2,20 @@ import { afterEach, expect, test } from "bun:test";
 import { Writable } from "node:stream";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import type { Attachment } from "../src/attachments";
+import type { Attachment } from "../src/attachments/attachments";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import type { RequestFailure } from "../src/request-failure";
-import { Store } from "../src/store";
-import { AzureOpenAITranscriber } from "../src/transcribers/azure-openai";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import type { RequestFailure } from "../src/shared/request-failure";
+import { Store } from "../src/gateway/store";
+import { AzureOpenAITranscriber } from "../src/transcription/azure-openai";
 import {
   maxTranscriptCharacters,
   type Transcriber,
   TranscriptionUnavailable,
   transcribeMedia,
   transcriptionSchema,
-} from "../src/transcription";
+} from "../src/transcription/transcription";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
@@ -646,7 +646,7 @@ test("a failed transcription admits no agent turn and asks the user to type", as
 });
 
 test("the transcription notice asks for typed text and names the formats", async () => {
-  const { failureText } = await import("../src/request-failure");
+  const { failureText } = await import("../src/shared/request-failure");
   const text = failureText("transcription");
   expect(text).toContain("No agent turn was started");
   expect(text).toContain("Please type your message");

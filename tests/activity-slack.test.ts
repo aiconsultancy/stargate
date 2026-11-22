@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
-import type { ActivityView } from "../src/activity";
-import { activityContent } from "../src/activity-slack";
-import { SlackConnection } from "../src/slack";
+import type { ActivityView } from "../src/activity/activity";
+import { activityContent } from "../src/activity/activity-slack";
+import { SlackConnection } from "../src/slack/slack";
 
 function view(overrides: Partial<ActivityView> = {}): ActivityView {
   return {

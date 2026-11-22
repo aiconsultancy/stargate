@@ -10,8 +10,8 @@ import { ircSchema } from "../src/config";
 import { IrcClient } from "../src/irc/client";
 import { clientPem } from "../src/irc/client-pem";
 import { IrcShip, ircKey } from "../src/irc/ship";
-import { checkCredentials } from "../src/setup";
-import { Store } from "../src/store";
+import { checkCredentials } from "../src/app/setup";
+import { Store } from "../src/gateway/store";
 
 const openssl =
   spawnSync("openssl", ["version"], { stdio: "ignore" }).status === 0;

@@ -718,7 +718,7 @@ a Stop cannot be undone.
   notice stays fail-closed on IRC.
 - **Redaction.** `draft/message-redaction` is not used: Ergo ships with
   redaction disabled. The extension point is the optional `remove` method
-  of the delivery interface (`SlackDelivery.remove` in `src/gateway.ts`),
+  of the delivery interface (`SlackDelivery.remove` in `src/gateway/gateway.ts`),
   which `IrcDelivery` does not implement; a `REDACT <target> <msgid>`
   version would go there, used only when the server offers the capability.
 - **Buttons and interactive controls.** Stop is a reaction

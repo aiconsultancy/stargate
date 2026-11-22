@@ -272,30 +272,21 @@
     "src/credentials.ts": ["src/credentials.ts", "src/lib/credentials.ts"],
     "src/crew-status.ts": ["src/crew-status.ts", "src/shared/crew-status.ts"],
     "src/crew-ui.ts": ["src/crew-ui.ts", "src/slack/crew-ui.ts"],
-    "src/cron-advanced.ts": [
-      "src/cron-advanced.ts",
-      "src/cron/cron-advanced.ts"
-    ],
-    "src/cron-control.ts": ["src/cron-control.ts", "src/cron/cron-control.ts"],
-    "src/cron-decision.ts": [
-      "src/cron-decision.ts",
-      "src/cron/cron-decision.ts"
-    ],
-    "src/cron-input.ts": ["src/cron-input.ts", "src/cron/cron-input.ts"],
-    "src/cron-store.ts": ["src/cron-store.ts", "src/cron/cron-store.ts"],
-    "src/cron-ui.ts": ["src/cron-ui.ts", "src/cron/cron-ui.ts"],
-    "src/cron.ts": ["src/cron.ts", "src/cron/cron.ts"],
+    "src/cron-advanced.ts": ["src/cron-advanced.ts", "src/cron/advanced.ts"],
+    "src/cron-control.ts": ["src/cron-control.ts", "src/cron/control.ts"],
+    "src/cron-decision.ts": ["src/cron-decision.ts", "src/cron/decision.ts"],
+    "src/cron-input.ts": ["src/cron-input.ts", "src/cron/input.ts"],
+    "src/cron-store.ts": ["src/cron-store.ts", "src/cron/store.ts"],
+    "src/cron-ui.ts": ["src/cron-ui.ts", "src/cron/ui.ts"],
+    "src/cron.ts": ["src/cron.ts", "src/cron/index.ts"],
     "src/cronjob-config.ts": [
       "src/cronjob-config.ts",
-      "src/cron/cronjob-config.ts"
+      "src/cron/job-config.ts"
     ],
-    "src/cronjob-files.ts": [
-      "src/cronjob-files.ts",
-      "src/cron/cronjob-files.ts"
-    ],
+    "src/cronjob-files.ts": ["src/cronjob-files.ts", "src/cron/job-files.ts"],
     "src/cronjob-manager.ts": [
       "src/cronjob-manager.ts",
-      "src/cron/cronjob-manager.ts"
+      "src/cron/job-manager.ts"
     ],
     "src/dashboard-branding.ts": [
       "src/dashboard-branding.ts",
@@ -482,7 +473,11 @@
       "src/update-notice.ts",
       "src/maintenance/update-notice.ts"
     ],
-    "src/waiting.ts": ["src/waiting.ts", "src/gateway/waiting.ts"]
+    "src/waiting.ts": ["src/waiting.ts", "src/gateway/waiting.ts"],
+    "src/transcribers/azure-openai.ts": [
+      "src/transcribers/azure-openai.ts",
+      "src/transcription/azure-openai.ts"
+    ]
   },
   "slices": {
     "lib": {

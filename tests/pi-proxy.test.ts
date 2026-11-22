@@ -21,12 +21,12 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Schema } from "effect";
-import { PiDurableBackend } from "../src/backends/pi-durable";
+import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piCrewBackendSchema, piDurableBackendSchema } from "../src/config";
 import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi-worker";
 import { CrewState, type CrewTask } from "../src/crew/state";
 import { teamSchema } from "../src/crew/team";
-import { BackendFailure } from "../src/request-failure";
+import { BackendFailure } from "../src/shared/request-failure";
 
 const apiKeyEnv = "STARGATE_PI_PROXY_TEST_KEY";
 const model = "openai/opencode-go/deepseek-v4.1-flash";

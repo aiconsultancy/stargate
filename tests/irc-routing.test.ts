@@ -24,8 +24,8 @@ import {
   withinLimits,
 } from "../src/irc/routing";
 import { IrcShip, ircKey } from "../src/irc/ship";
-import { checkCredentials } from "../src/setup";
-import { Store } from "../src/store";
+import { checkCredentials } from "../src/app/setup";
+import { Store } from "../src/gateway/store";
 import { bot } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

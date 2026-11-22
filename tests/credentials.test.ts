@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { containsCredential, redactCredentials } from "../src/credentials";
+import { containsCredential, redactCredentials } from "../src/lib/credentials";
 
 const samples: [text: string, secret: string][] = [
   ["xoxb-111-slack", "111-slack"],

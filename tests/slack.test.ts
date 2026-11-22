@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
-import { stopBlock } from "../src/cancellation";
-import { crewStatusView } from "../src/crew-ui";
-import { handleSlackRequest, SlackConnection } from "../src/slack";
-import { replyText, type SlackPanelContent } from "../src/slack-format";
+import { stopBlock } from "../src/gateway/cancellation";
+import { crewStatusView } from "../src/slack/crew-ui";
+import { handleSlackRequest, SlackConnection } from "../src/slack/slack";
+import { replyText, type SlackPanelContent } from "../src/shared/slack-format";
 
 test("trusted configuration blocks survive the existing post and update transport", async () => {
   const calls: { path: string; data: URLSearchParams }[] = [];

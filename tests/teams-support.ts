@@ -5,7 +5,7 @@ import { Schema } from "effect";
 import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import type { AgentBackend, PendingPermission } from "../src/backend";
 import { teamsSchema } from "../src/config";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import {
   BOT_FRAMEWORK_ISSUER,
   BOT_FRAMEWORK_OPENID_URL,

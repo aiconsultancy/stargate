@@ -27,15 +27,15 @@ import { startAgentDispatch } from "../src/dispatch/start";
 import { fleetRequest } from "../src/fleet/client";
 import { FleetControl, type FleetControlOptions } from "../src/fleet/control";
 import type { DispatchOffer } from "../src/fleet/protocol";
-import { fleetPermissions } from "../src/fleet-policy";
+import { fleetPermissions } from "../src/fleet/fleet-policy";
 import { IrcUnavailable } from "../src/irc/client";
 import { formatMessage, parseMessage } from "../src/irc/protocol";
 import { ircResultJobAllowed } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
-import { serve } from "../src/runtime";
+import { serve } from "../src/app/runtime";
 import { decodeSettings } from "../src/settings-errors";
-import { checkCredentials } from "../src/setup";
-import { Store } from "../src/store";
+import { checkCredentials } from "../src/app/setup";
+import { Store } from "../src/gateway/store";
 import example from "../stargate.example.json";
 import {
   ACCESS,

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { ExperimentalGenerateTextInput } from "@opencode/client";
 import { Result, Schema } from "effect";
 import type { BackendContext } from "../src/backend";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { type BackendConfig, backendSchema } from "../src/config";
 import {
   CrewCronExecution,
@@ -19,8 +19,8 @@ import {
   cronDecision,
   cronEvaluateInputSchema,
   cronModelInputSchema,
-} from "../src/cron-decision";
-import { cronjobPrompt } from "../src/cronjob-manager";
+} from "../src/cron/decision";
+import { cronjobPrompt } from "../src/cron/job-manager";
 
 const risks = {
   approval: false,

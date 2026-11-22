@@ -2,12 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CronStore } from "../src/cron-store";
+import { CronStore } from "../src/cron/store";
 import {
   QuotaReader,
   quotaObservationSchema,
   quotaSnapshotSchema,
-} from "../src/quota";
+} from "../src/quota/quota";
 
 test("cron identities survive credential reordering, disabling, removal and restart without leaking into public quota", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-quota-identity-"));

@@ -11,7 +11,7 @@ import {
 } from "../src/crew/engine";
 import type { MesijInbox, MesijMessage, MesijSend } from "../src/crew/mesij";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
-import type { MaintenanceDrain } from "../src/maintenance-drain";
+import type { MaintenanceDrain } from "../src/maintenance/maintenance-drain";
 
 const cleanup: (() => unknown)[] = [];
 afterEach(async () => {

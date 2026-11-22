@@ -15,7 +15,7 @@ import {
   type NotificationInput,
   NotificationStore,
   notificationInputSchema,
-} from "../src/notification-store";
+} from "../src/notifications/preferences/notification-store";
 
 const now = Date.parse("2026-11-17T12:00:00Z");
 const until = "2026-11-17T13:00:00.000Z";

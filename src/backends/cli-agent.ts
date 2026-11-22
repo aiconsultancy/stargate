@@ -7,8 +7,8 @@ import { readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { Attachment } from "../attachments";
-import { AttachmentInputUnavailable } from "../request-failure";
+import type { Attachment } from "../attachments/attachments";
+import { AttachmentInputUnavailable } from "../shared/request-failure";
 
 /**
  * Non-secret variables an agent CLI inherits. Everything else in Stargate's

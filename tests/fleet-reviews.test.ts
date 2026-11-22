@@ -35,7 +35,7 @@ import {
 } from "../src/fleet/protocol";
 import { reviewContextPrompt } from "../src/fleet/reviews";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import { FakeIrcServer, until } from "./irc-fixture";
 
 const close: (() => Promise<unknown> | unknown)[] = [];

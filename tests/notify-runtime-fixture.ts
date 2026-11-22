@@ -11,8 +11,8 @@ import {
   type SlackApp,
   serve,
   start,
-} from "../src/runtime";
-import { SlackConnection } from "../src/slack";
+} from "../src/app/runtime";
+import { SlackConnection } from "../src/slack/slack";
 import { bot } from "./fixtures";
 
 export const producerToken = "fixture-notification-producer-credential-0001";

@@ -37,7 +37,7 @@ if (import.meta.main) {
   const { mkdtemp, rm, access } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { CrewState } = await import("../../src/crew/state");
-  const { Store } = await import("../../src/store");
+  const { Store } = await import("../../src/gateway/store");
   const directory = await mkdtemp(join(tmpdir(), "database-reuse-build-"));
   const assets = [crewSchemaFixture, statusHistoryFixture, nightlyStoreFixture];
   const paths = assets.map((asset) =>

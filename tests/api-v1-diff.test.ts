@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { diffEvents, type V1EventSnapshot } from "../src/api/v1/diff";
-import type { V1CrewContext, V1Task } from "../src/api/v1/types";
+import { diffEvents, type V1EventSnapshot } from "../src/dashboard/api/v1/diff";
+import type { V1CrewContext, V1Task } from "../src/dashboard/api/v1/types";
 
 const at = 4_000;
 const task = (

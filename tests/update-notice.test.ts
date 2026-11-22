@@ -6,7 +6,7 @@ import {
   buildUpdateSnapshot,
   noticeTools,
   UpdateNotices,
-} from "../src/update-notice";
+} from "../src/maintenance/update-notice";
 import { bot } from "./fixtures";
 
 const config = {

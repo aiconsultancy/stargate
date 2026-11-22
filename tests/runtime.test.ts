@@ -10,20 +10,20 @@ import { type BotConfig, botSchema } from "../src/config";
 import { maintenanceSchema } from "../src/nightly/config";
 import { readReady } from "../src/nightly/ready";
 import { queueNotice } from "../src/nightly/report";
-import { NotificationStore } from "../src/notification-store";
-import { notificationKey } from "../src/notifications";
-import { botKey, conversationKey } from "../src/routing";
+import { NotificationStore } from "../src/notifications/preferences/notification-store";
+import { notificationKey } from "../src/notifications/preferences/notifications";
+import { botKey, conversationKey } from "../src/gateway/routing";
 import {
   lockInstance,
   type RuntimeDependencies,
   RuntimeStopped,
   type SlackApp,
   serve,
-} from "../src/runtime";
-import { handleSlackRequest } from "../src/slack";
-import type { ConnectionState } from "../src/slack-connection";
-import { Store } from "../src/store";
-import { scopedUpdate } from "../src/update-notice";
+} from "../src/app/runtime";
+import { handleSlackRequest } from "../src/slack/slack";
+import type { ConnectionState } from "../src/slack/slack-connection";
+import { Store } from "../src/gateway/store";
+import { scopedUpdate } from "../src/maintenance/update-notice";
 import { bot, event, identity } from "./fixtures";
 
 const silent = pino({ level: "silent" });

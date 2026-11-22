@@ -7,13 +7,13 @@ import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { ircSchema } from "../src/config";
 import { FleetLedger } from "../src/fleet/ledger";
 import { fleetOrigin } from "../src/fleet/results";
-import { fleetSourceReference } from "../src/fleet-source";
-import { Gateway } from "../src/gateway";
+import { fleetSourceReference } from "../src/fleet/fleet-source";
+import { Gateway } from "../src/gateway/gateway";
 import { ircBurstLimits } from "../src/irc/burst";
 import { fold, formatMessage, parseMessage } from "../src/irc/protocol";
 import { routeIrcStop } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
-import { type Incoming, Store } from "../src/store";
+import { type Incoming, Store } from "../src/gateway/store";
 import { FakeIrcServer, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];

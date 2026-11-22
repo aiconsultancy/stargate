@@ -50,7 +50,7 @@ an independent L3 reviewer checks the exact resulting diff and evidence.
 
 New:
 
-- `src/notify/config.ts`, `binding.ts`, `http.ts`, `slack.ts`.
+- `src/notifications/ingest/config.ts`, `binding.ts`, `http.ts`, `slack.ts`.
 - `tests/notify-config.test.ts`, `tests/notify-http.test.ts`,
   `tests/notify-slack.test.ts`, `tests/notify-runtime.test.ts`,
   `tests/notify-runtime-fixture.ts`.
@@ -59,8 +59,8 @@ New:
 
 Existing bounded integration:
 
-- `src/config.ts`, `src/setup.ts`, `src/config-reload.ts`, `src/cli.ts`.
-- `src/runtime.ts`, `src/slack.ts`; task-01 route composition signature only
+- `src/config.ts`, `src/app/setup.ts`, `src/app/config-reload.ts`, `src/app/cli.ts`.
+- `src/app/runtime.ts`, `src/slack/slack.ts`; task-01 route composition signature only
   if its actual consumer needs a small correction.
 - Existing runtime, reload, config, CLI, setup and Slack tests as needed;
   their exact paths are in the regression command below.

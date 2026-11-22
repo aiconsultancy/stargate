@@ -48,7 +48,7 @@ listed, not tool results, descriptions or schemas. Current meta-command syntax
 comes from the existing command table. A failed tool-list read preserves the
 previous known list instead of claiming that tools were removed.
 
-The source-owned flag list in `src/update-notice.ts` supplies current on/off
+The source-owned flag list in `src/maintenance/update-notice.ts` supplies current on/off
 states. Add future notice-worthy flags there and document their defaults in
 the changelog. Access rules, model selections and native permissions contribute
 to a configuration digest but are not copied into prose. Environment values,

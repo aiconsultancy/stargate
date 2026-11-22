@@ -7,7 +7,7 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { ircSchema } from "../src/config";
-import { Gateway } from "../src/gateway";
+import { Gateway } from "../src/gateway/gateway";
 import { parseMessage } from "../src/irc/protocol";
 import { routeIrcMessage } from "../src/irc/routing";
 import { IrcShip } from "../src/irc/ship";
@@ -18,8 +18,8 @@ import {
   questionAnswer,
   questionControl,
   questionText,
-} from "../src/questions";
-import { type Incoming, Store } from "../src/store";
+} from "../src/questions/questions";
+import { type Incoming, Store } from "../src/gateway/store";
 import { bot, identity } from "./fixtures";
 import { FakeIrcServer, until } from "./irc-fixture";
 

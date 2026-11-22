@@ -8,9 +8,9 @@ import { SessionMessage } from "@opencode/schema";
 import { Schema } from "effect";
 import pino from "pino";
 import { ircSchema } from "../src/config";
-import { Gateway } from "../src/gateway";
+import { Gateway } from "../src/gateway/gateway";
 import { IrcShip } from "../src/irc/ship";
-import { Store } from "../src/store";
+import { Store } from "../src/gateway/store";
 import { FakeIrcServer } from "../tests/irc-fixture";
 
 const binary = process.argv[2];
@@ -167,7 +167,7 @@ try {
     "fields",
     exact.fields.map((f) => f.key),
   );
-  const { OpenCodeBackend } = await import("../src/backends/opencode");
+  const { OpenCodeBackend } = await import("../src/backends/opencode/opencode");
   let promptPosts = 0;
   let answerPosts = 0;
   let discardPrompt = false;

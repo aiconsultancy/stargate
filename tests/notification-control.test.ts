@@ -10,9 +10,9 @@ import { CrewError } from "../src/crew/state";
 import {
   type NotificationDependencies,
   runNotificationOperation,
-} from "../src/notification-control";
-import { NotificationStore } from "../src/notification-store";
-import { notificationKey } from "../src/notifications";
+} from "../src/notifications/preferences/notification-control";
+import { NotificationStore } from "../src/notifications/preferences/notification-store";
+import { notificationKey } from "../src/notifications/preferences/notifications";
 import { bot, identity } from "./fixtures";
 
 const directories: string[] = [];

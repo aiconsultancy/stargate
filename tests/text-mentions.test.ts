@@ -3,16 +3,20 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend, PromptSourceContext } from "../src/backend";
 import { botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
 import {
   findMention,
   mentionRuleSchema,
   textMentionInstructions,
   textMentionNote,
-} from "../src/mentions";
-import { PeerDirectory, type PeerSender, peerTurnsPerHour } from "../src/peers";
-import { routeEvent } from "../src/routing";
-import { Store } from "../src/store";
+} from "../src/shared/mentions";
+import {
+  PeerDirectory,
+  type PeerSender,
+  peerTurnsPerHour,
+} from "../src/gateway/peers";
+import { routeEvent } from "../src/gateway/routing";
+import { Store } from "../src/gateway/store";
 import { identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

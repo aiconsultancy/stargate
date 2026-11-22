@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { buildUnit, serviceName } from "../src/service";
+import { buildUnit, serviceName } from "../src/app/service";
 
 test("unit defaults to the installed gateway entrypoint", () => {
   const entrypoint = fileURLToPath(new URL("../src/main.ts", import.meta.url));

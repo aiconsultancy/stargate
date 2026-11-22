@@ -4,27 +4,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OpenCode } from "@opencode/client";
 import { Schema } from "effect";
-import { diffEvents } from "../src/api/v1/diff";
-import { createEventStreams } from "../src/api/v1/events";
-import type { ApiV1Config } from "../src/api/v1/features";
-import { createApiV1Source } from "../src/api/v1/projection";
-import { startApiV1Server } from "../src/api/v1/server";
-import { apiToken } from "../src/api/v1/token";
+import { diffEvents } from "../src/dashboard/api/v1/diff";
+import { createEventStreams } from "../src/dashboard/api/v1/events";
+import type { ApiV1Config } from "../src/dashboard/api/v1/features";
+import { createApiV1Source } from "../src/dashboard/api/v1/projection";
+import { startApiV1Server } from "../src/dashboard/api/v1/server";
+import { apiToken } from "../src/dashboard/api/v1/token";
 import type {
   V1Git,
   V1QueueCounts,
   V1RequestProgress,
   V1Task,
-} from "../src/api/v1/types";
+} from "../src/dashboard/api/v1/types";
 import type { AgentBackend } from "../src/backend";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, configSchema } from "../src/config";
-import type { CrewStatus, CrewStatusInput } from "../src/crew-status";
-import { type DashboardShip, dashboardSource } from "../src/dashboard-source";
+import type { CrewStatus, CrewStatusInput } from "../src/shared/crew-status";
+import {
+  type DashboardShip,
+  dashboardSource,
+} from "../src/dashboard/dashboard-source";
 import type {
   HistoryChildrenInput,
   HistorySession,
-} from "../src/session-history";
+} from "../src/shared/session-history";
 import { bot, identity } from "./fixtures";
 
 const signal = new AbortController().signal;

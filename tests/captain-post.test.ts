@@ -17,7 +17,7 @@ import {
   type PostDependencies,
   postInputSchema,
   runCaptainPost,
-} from "../src/captain-post";
+} from "../src/captain-post/captain-post";
 import { configSchema } from "../src/config";
 import type { CrewCaller } from "../src/crew/engine";
 import { CrewPost } from "../src/crew/post";
@@ -678,7 +678,7 @@ test("concurrent same-key retries never upload one file twice", async () => {
 });
 
 test("an abandoned upload claim is reclaimed only after its lease expires", async () => {
-  const { CaptainPostStore } = await import("../src/captain-post");
+  const { CaptainPostStore } = await import("../src/captain-post/captain-post");
   const store = new CaptainPostStore(":memory:");
   store.admit(
     "bot",

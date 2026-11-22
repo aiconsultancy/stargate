@@ -2,14 +2,14 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCli } from "../src/cli";
+import { runCli } from "../src/app/cli";
 import {
   addBot,
   buildManifest,
   checkCredentials,
   manifestUrl,
   readConfiguration,
-} from "../src/setup";
+} from "../src/app/setup";
 
 const temporary: string[] = [];
 afterEach(async () => {

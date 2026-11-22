@@ -9,13 +9,13 @@ import { z } from "zod";
 import type { AgentBackend } from "../src/backend";
 import { configSchema } from "../src/config";
 import { type IrcRegistration, IrcShip } from "../src/irc/ship";
-import { conversationKey } from "../src/routing";
-import { type RuntimeDependencies, serve } from "../src/runtime";
-import { Store } from "../src/store";
+import { conversationKey } from "../src/gateway/routing";
+import { type RuntimeDependencies, serve } from "../src/app/runtime";
+import { Store } from "../src/gateway/store";
 import {
   flockCommand,
   setDefaultLockCommandForTests,
-} from "../src/teams/unix-socket";
+} from "../src/lib/unix-socket";
 import { bot } from "./fixtures";
 import { FakeIrcServer } from "./irc-fixture";
 

@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { configSchema, ircSchema } from "../src/config";
-import { restartRequired } from "../src/config-reload";
-import { checkCredentials } from "../src/setup";
+import { restartRequired } from "../src/app/config-reload";
+import { checkCredentials } from "../src/app/setup";
 
 const backend = {
   type: "opencode",

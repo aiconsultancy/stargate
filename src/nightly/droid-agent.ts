@@ -16,8 +16,8 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { z } from "zod";
-import { piModels } from "../backends/pi-durable";
-import type { PiModelSettings } from "../pi-model";
+import { piModels } from "../backends/pi/pi-durable";
+import type { PiModelSettings } from "../backends/pi/pi-model";
 import { atomicWrite, readOptional } from "./files";
 
 /**

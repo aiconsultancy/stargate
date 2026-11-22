@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { chmod, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { inspectAttachment } from "../src/attachments";
+import { inspectAttachment } from "../src/attachments/attachments";
 import { ordinaryFileDirectory, publishedFileDirectory } from "./file-fixture";
 
 test("hidden release temp keeps ordinary files visible and publisher scratch private", async () => {

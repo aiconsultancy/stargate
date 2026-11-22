@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import type { MaintenanceNotice } from "../src/maintenance";
-import { handleSlackRequest } from "../src/slack";
-import { Store } from "../src/store";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import type { MaintenanceNotice } from "../src/maintenance/maintenance";
+import { handleSlackRequest } from "../src/slack/slack";
+import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const stores: Store[] = [];

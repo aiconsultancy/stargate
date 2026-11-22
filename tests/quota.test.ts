@@ -7,7 +7,7 @@ import {
   parseQuotaWindows,
   QuotaReader,
   quotaConfigSchema,
-} from "../src/quota";
+} from "../src/quota/quota";
 
 const now = Date.parse("2026-11-09T20:00:00Z");
 const reset = "2026-11-10T00:00:00Z";

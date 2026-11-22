@@ -25,7 +25,7 @@ import type { SessionMoveInput, SessionUpdateInput } from "@opencode/client";
 import { Schema } from "effect";
 import { z } from "zod";
 import { backendSchema } from "../src/config";
-import { backendFingerprint } from "../src/routing";
+import { backendFingerprint } from "../src/gateway/routing";
 
 const mapping = z.strictObject({
   from: z.string().min(1),

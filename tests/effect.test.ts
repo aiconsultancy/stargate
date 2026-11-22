@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Effect, Exit, Fiber } from "effect";
-import { abortable, resourceScope, runAbortable } from "../src/effect";
+import { abortable, resourceScope, runAbortable } from "../src/lib/effect";
 
 test("interruption aborts the Promise and waits until it settles", async () => {
   const events: string[] = [];

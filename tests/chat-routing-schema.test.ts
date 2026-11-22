@@ -1,10 +1,16 @@
 import { expect, test } from "bun:test";
 import { Result, Schema } from "effect";
-import { configActionSchema, configSnapshotSchema } from "../src/config-panel";
+import {
+  configActionSchema,
+  configSnapshotSchema,
+} from "../src/meta-commands/config-panel";
 import { ircBurstMessageSchema } from "../src/irc/burst";
-import type { QuestionSettings } from "../src/question-settings";
-import { nativeQuestionSchema, questionAnswer } from "../src/questions";
-import { envelopeSchema } from "../src/routing";
+import type { QuestionSettings } from "../src/questions/question-settings";
+import {
+  nativeQuestionSchema,
+  questionAnswer,
+} from "../src/questions/questions";
+import { envelopeSchema } from "../src/gateway/routing";
 import { activitySchema } from "../src/teams/registration";
 import { activity } from "./teams-support";
 

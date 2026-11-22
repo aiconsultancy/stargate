@@ -2,16 +2,19 @@ import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import type { AgentBackend } from "../src/backend";
-import type { CrewStatus } from "../src/crew-status";
-import { CronStore } from "../src/cron-store";
-import type { DashboardTransport } from "../src/dashboard-model";
+import type { CrewStatus } from "../src/shared/crew-status";
+import { CronStore } from "../src/cron/store";
+import type { DashboardTransport } from "../src/dashboard/dashboard-model";
 import {
   dashboardCrewMembers,
   dashboardCrewSummary,
-} from "../src/dashboard-projection";
-import { type DashboardShip, dashboardSource } from "../src/dashboard-source";
-import { conversationKey } from "../src/routing";
-import { Store } from "../src/store";
+} from "../src/dashboard/dashboard-projection";
+import {
+  type DashboardShip,
+  dashboardSource,
+} from "../src/dashboard/dashboard-source";
+import { conversationKey } from "../src/gateway/routing";
+import { Store } from "../src/gateway/store";
 import { bot } from "./fixtures";
 
 const cleanup: { close(): unknown }[] = [];

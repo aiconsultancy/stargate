@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { Schema } from "effect";
-import { OpenCodeBackend } from "../src/backends/opencode";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
-import { BackendFailure } from "../src/request-failure";
+import { BackendFailure } from "../src/shared/request-failure";
 
 type Assistant = {
   type?: "assistant" | "user";

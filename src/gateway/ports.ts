@@ -3,17 +3,17 @@
  * import their contracts from this file; it never imports `gateway.ts`.
  */
 
-import type { ActivityView } from "../activity";
-import type { AttachmentTransport } from "../attachment-delivery";
+import type { ActivityView } from "../activity/activity";
+import type { AttachmentTransport } from "../attachments/attachment-delivery";
 import type { PromptSourceContext } from "../backend";
-import type { QuestionPort } from "../questions";
-import type { ReactionName } from "../reactions";
-import type { RequestFailure } from "../request-failure";
-import type { Identity } from "../routing";
-import type { ReplyChunk, SlackContent } from "../slack-format";
+import type { QuestionPort } from "../questions/questions";
+import type { ReactionName } from "../shared/reactions";
+import type { RequestFailure } from "../shared/request-failure";
+import type { Identity } from "./routing";
+import type { ReplyChunk, SlackContent } from "../shared/slack-format";
 import type { Incoming, Job } from "./store-types";
-import type { ThreadContext, ThreadContextRequest } from "../thread-context";
-import type { TurnProgress } from "../turn-progress";
+import type { ThreadContext, ThreadContextRequest } from "./thread-context";
+import type { TurnProgress } from "../shared/turn-progress";
 
 /** One stored reply chunk of one job. */
 export type DeliveryUnit = {

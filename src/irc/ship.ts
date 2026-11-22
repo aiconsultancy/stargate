@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { type PromptSourceContext, sourceLine } from "../backend";
-import { operatorControl } from "../background-questions";
+import { operatorControl } from "../questions/background-questions";
 import {
   type BackendConfig,
   effectiveIrcConfig,
@@ -17,14 +17,14 @@ import {
 } from "../dispatch/irc";
 import { dispatchTag } from "../dispatch/protocol";
 import type { DispatchOffer, FleetSource } from "../fleet/protocol";
-import { fleetAuthority, fleetInstructions } from "../fleet-policy";
-import { fleetSourceReference } from "../fleet-source";
-import type { GatewayConfig } from "../gateway";
+import { fleetAuthority, fleetInstructions } from "../fleet/fleet-policy";
+import { fleetSourceReference } from "../fleet/fleet-source";
+import type { GatewayConfig } from "../gateway/gateway";
 import type { GatewayTransport } from "../gateway/ports";
-import { questionControl, questionFingerprint } from "../questions";
-import { backendFingerprint, type Identity } from "../routing";
-import type { Incoming, Store } from "../store";
-import { turnProgressText } from "../turn-progress";
+import { questionControl, questionFingerprint } from "../questions/questions";
+import { backendFingerprint, type Identity } from "../gateway/routing";
+import type { Incoming, Store } from "../gateway/store";
+import { turnProgressText } from "../shared/turn-progress";
 import { ctcp, IrcAudit, sensitive, serviceNick } from "./audit";
 import { ircBurstEligible } from "./burst";
 import {

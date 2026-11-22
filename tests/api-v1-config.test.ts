@@ -2,17 +2,21 @@ import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cpuTotals, cpuUsage, memAvailableBytes } from "../src/api/v1/host";
+import {
+  cpuTotals,
+  cpuUsage,
+  memAvailableBytes,
+} from "../src/dashboard/api/v1/host";
 import {
   defaultCorsOrigins,
   originMatcher,
   parseApiListen,
   peerAddress,
-} from "../src/api/v1/network";
-import { apiToken } from "../src/api/v1/token";
-import { runCli } from "../src/cli";
+} from "../src/dashboard/api/v1/network";
+import { apiToken } from "../src/dashboard/api/v1/token";
+import { runCli } from "../src/app/cli";
 import { configSchema } from "../src/config";
-import { restartRequired } from "../src/config-reload";
+import { restartRequired } from "../src/app/config-reload";
 import { decodeSettings } from "../src/settings-errors";
 import example from "../stargate.example.json";
 

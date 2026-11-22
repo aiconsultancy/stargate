@@ -9,7 +9,7 @@ import {
   OpenCodeHistory,
   type OpenCodeHistoryClient,
   type OpenCodeHistoryReporting,
-} from "../src/backends/opencode-history";
+} from "../src/backends/opencode/opencode-history";
 import { CrewReporting } from "../src/crew/report-rpc";
 import {
   HISTORY_PARTS,
@@ -17,7 +17,7 @@ import {
   type HistoryEntriesInput,
   historyEntriesInputSchema,
   historyEntryPageSchema,
-} from "../src/session-history";
+} from "../src/shared/session-history";
 
 const failure =
   "Session history unavailable or cancelled; raw details withheld.";

@@ -1,15 +1,15 @@
 import { createHash } from "node:crypto";
 import { Result, Schema } from "effect";
-import type { OpenCodeBackend } from "../backends/opencode";
+import type { OpenCodeBackend } from "../backends/opencode/opencode";
 import {
   type QuestionSettings,
   resolveQuestionSettings,
-} from "../question-settings";
+} from "../questions/question-settings";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
   questionAnswer,
-} from "../questions";
+} from "../questions/questions";
 import type { CrewCaller } from "./engine";
 import {
   CrewError,

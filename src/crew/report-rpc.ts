@@ -1,18 +1,18 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
-import { activitySnapshotSchema } from "../activity";
-import { crewStatusInputSchema, crewStatusSchema } from "../crew-status";
-import { cronEvaluationSchema, cronModelSchema } from "../cron-advanced";
+import { activitySnapshotSchema } from "../activity/activity";
+import { crewStatusInputSchema, crewStatusSchema } from "../shared/crew-status";
+import { cronEvaluationSchema, cronModelSchema } from "../cron/advanced";
 import {
   cronEvaluateInputSchema,
   cronModelInputSchema,
-} from "../cron-decision";
-import { maintenanceDrainSchema } from "../maintenance-drain";
+} from "../cron/decision";
+import { maintenanceDrainSchema } from "../maintenance/maintenance-drain";
 import {
   quotaInputSchema,
   quotaObservationSchema,
   quotaSnapshotSchema,
-} from "../quota";
+} from "../quota/quota";
 import {
   exactStruct,
   historyChildrenInputSchema,
@@ -21,9 +21,9 @@ import {
   historyEntryPageSchema,
   historySessionPageSchema,
   historySessionsSchema,
-} from "../session-history";
+} from "../shared/session-history";
 import { settingsPattern, settingsStruct } from "../settings-schema";
-import { updateSnapshotSchema } from "../update-notice";
+import { updateSnapshotSchema } from "../maintenance/update-notice";
 import {
   fleetCrewStatusInputSchema,
   fleetCrewStatusSchema,

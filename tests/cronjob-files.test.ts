@@ -19,7 +19,7 @@ import {
   readCronjob,
   renderCronjob,
   writeCronjob,
-} from "../src/cronjob-files";
+} from "../src/cron/job-files";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
 const basic = `---

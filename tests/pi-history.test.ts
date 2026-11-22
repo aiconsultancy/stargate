@@ -21,12 +21,12 @@ import {
   mapPiHistory,
   piSessionHistory,
   readPiHistory,
-} from "../src/backends/pi-history";
+} from "../src/backends/pi/pi-history";
 import {
   HISTORY_PARTS,
   HISTORY_TEXT,
   historyEntryPageSchema,
-} from "../src/session-history";
+} from "../src/shared/session-history";
 
 function assistant(content: AssistantMessage["content"]): AssistantMessage {
   return {

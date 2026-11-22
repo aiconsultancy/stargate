@@ -1,8 +1,8 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
 import { z } from "zod";
-import { crewStatusSchema } from "../crew-status";
-import { exactStruct } from "../session-history";
+import { crewStatusSchema } from "../shared/crew-status";
+import { exactStruct } from "../shared/session-history";
 import { legacySetting } from "../settings-legacy";
 import { effectProjectKeySchema } from "./project-options";
 import { agentIDSchema } from "./team";

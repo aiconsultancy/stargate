@@ -39,13 +39,13 @@ import {
   trustedPath,
   trustedUtilities,
 } from "../src/backends/codex-paths";
-import { runCli } from "../src/cli";
+import { runCli } from "../src/app/cli";
 import { backendSchema, codexBackendSchema, ircSchema } from "../src/config";
 import {
   AttachmentInputUnavailable,
   BackendFailure,
-} from "../src/request-failure";
-import { backendFingerprint } from "../src/routing";
+} from "../src/shared/request-failure";
+import { backendFingerprint } from "../src/gateway/routing";
 import { toolchain } from "./codex-toolchain";
 
 const apiKeyEnv = "STARGATE_CODEX_TEST_PROXY_KEY";

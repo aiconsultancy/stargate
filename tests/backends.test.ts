@@ -12,14 +12,14 @@ import type {
 } from "@earendil-works/pi-durable";
 import { Schema } from "effect";
 import { latestInput } from "../src/backend";
-import { OpenCodeBackend } from "../src/backends/opencode";
-import { PiDurableBackend, piPartialText } from "../src/backends/pi-durable";
+import { OpenCodeBackend } from "../src/backends/opencode/opencode";
+import { PiDurableBackend, piPartialText } from "../src/backends/pi/pi-durable";
 import { backendSchema } from "../src/config";
 import {
   PendingBackendQuestion,
   PromptNotSubmitted,
-} from "../src/request-failure";
-import type { TurnProgress, TurnStage } from "../src/turn-progress";
+} from "../src/shared/request-failure";
+import type { TurnProgress, TurnStage } from "../src/shared/turn-progress";
 
 test("OpenCode V2 creates, queues, waits and reads paginated replies", async () => {
   const requests: { path: string; body: unknown }[] = [];

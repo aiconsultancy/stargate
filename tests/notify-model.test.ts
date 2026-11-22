@@ -6,12 +6,12 @@ import {
   notificationLimits,
   type Source,
   utcMillis,
-} from "../src/notify/model";
-import { signature } from "../src/notify/signature";
+} from "../src/notifications/ingest/model";
+import { signature } from "../src/notifications/ingest/signature";
 import {
   resolveSubscriptions,
   topicMatches,
-} from "../src/notify/subscriptions";
+} from "../src/notifications/ingest/subscriptions";
 
 const source: Source = {
   adapter: "http",

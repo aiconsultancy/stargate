@@ -6,8 +6,8 @@ import { teamsSchema } from "../src/config";
 import type { OutgoingActivity as Outgoing } from "../src/teams/connector";
 import { TeamsPresence, type TeamsWaiting } from "../src/teams/presence";
 import { allowedActivity, TeamsRegistration } from "../src/teams/registration";
-import type { TurnProgress as Progress } from "../src/turn-progress";
-import { saveWaitingDelay, waitingPhrase } from "../src/waiting";
+import type { TurnProgress as Progress } from "../src/shared/turn-progress";
+import { saveWaitingDelay, waitingPhrase } from "../src/gateway/waiting";
 import {
   activity,
   HUMAN,

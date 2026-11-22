@@ -42,10 +42,13 @@ import {
   teamSchema,
 } from "../src/crew/team";
 import { CrewWaiting } from "../src/crew/waiting";
-import { Gateway } from "../src/gateway";
-import { Store } from "../src/store";
-import { buildUpdateSnapshot, noticeTools } from "../src/update-notice";
-import { waitingSettingsPath } from "../src/waiting";
+import { Gateway } from "../src/gateway/gateway";
+import { Store } from "../src/gateway/store";
+import {
+  buildUpdateSnapshot,
+  noticeTools,
+} from "../src/maintenance/update-notice";
+import { waitingSettingsPath } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 import { copyCrewDatabase } from "./fixtures/database-reuse";
 

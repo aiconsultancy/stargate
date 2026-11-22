@@ -3,21 +3,24 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { buildConfigPanel, readConfigSnapshot } from "../src/config-panel";
+import {
+  buildConfigPanel,
+  readConfigSnapshot,
+} from "../src/meta-commands/config-panel";
 import { CrewWaiting } from "../src/crew/waiting";
-import type { SlackDelivery } from "../src/gateway";
+import type { SlackDelivery } from "../src/gateway/gateway";
 import {
   configPanelRows,
   MetaCommands,
   type MetaOptions,
-} from "../src/meta-commands";
-import { notificationKey } from "../src/notifications";
+} from "../src/meta-commands/meta-commands";
+import { notificationKey } from "../src/notifications/preferences/notifications";
 import {
   resolveQuestionSettings,
   saveQuestionSettings,
-} from "../src/question-settings";
-import { Store } from "../src/store";
-import { resolveWaiting, waitingSettingsPath } from "../src/waiting";
+} from "../src/questions/question-settings";
+import { Store } from "../src/gateway/store";
+import { resolveWaiting, waitingSettingsPath } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 
 const cleanups: (() => Promise<void>)[] = [];

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { Schema } from "effect";
-import { PiDurableBackend, piModels } from "../src/backends/pi-durable";
+import { PiDurableBackend, piModels } from "../src/backends/pi/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
 import { teamSchema } from "../src/crew/team";
 

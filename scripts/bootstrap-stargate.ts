@@ -12,7 +12,7 @@ import {
   switchCurrent,
   verifyOrigin,
 } from "../src/nightly/release";
-import { loadEnvironment } from "../src/runtime";
+import { loadEnvironment } from "../src/app/runtime";
 
 export async function bootstrapRelease(
   input: Parameters<typeof stageRelease>[0] & { commit: string },

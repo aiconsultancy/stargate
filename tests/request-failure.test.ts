@@ -6,8 +6,8 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
-import { containsCredential } from "../src/credentials";
-import { Gateway, type SlackDelivery } from "../src/gateway";
+import { containsCredential } from "../src/lib/credentials";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
 import {
   BackendFailure,
   failureContent,
@@ -15,10 +15,10 @@ import {
   providerFailure,
   type RequestFailure,
   statusKind,
-} from "../src/request-failure";
-import { SlackConnection } from "../src/slack";
-import { Store } from "../src/store";
-import { ThreadContextUnavailable } from "../src/thread-context";
+} from "../src/shared/request-failure";
+import { SlackConnection } from "../src/slack/slack";
+import { Store } from "../src/gateway/store";
+import { ThreadContextUnavailable } from "../src/gateway/thread-context";
 import { bot, event, identity } from "./fixtures";
 
 test("failures use one accessible collapsed box with a safe cause and next action", () => {

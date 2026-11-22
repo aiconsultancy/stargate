@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import { saveQuestionSettings } from "../src/question-settings";
-import type { NativeQuestion } from "../src/questions";
-import { Store } from "../src/store";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { saveQuestionSettings } from "../src/questions/question-settings";
+import type { NativeQuestion } from "../src/questions/questions";
+import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => Promise<void> | void)[] = [];

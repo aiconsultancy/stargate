@@ -24,14 +24,18 @@ import type {
   SessionSyntheticInput,
 } from "@opencode/client";
 import { Predicate, Result, Schema } from "effect";
-import type { CrewStatus, CrewStatusInput } from "../crew-status";
+import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
 import {
   drainNoticeID,
   drainNoticePhase,
   drainNoticeText,
   type MaintenanceDrain,
-} from "../maintenance-drain";
-import { QuotaReader, quotaConfigSchema, quotaInputSchema } from "../quota";
+} from "../maintenance/maintenance-drain";
+import {
+  QuotaReader,
+  quotaConfigSchema,
+  quotaInputSchema,
+} from "../quota/quota";
 import {
   settingsCheck,
   settingsDefault,
@@ -47,7 +51,7 @@ import {
   scopedUpdate,
   type UpdateReceipt,
   type UpdateSnapshot,
-} from "../update-notice";
+} from "../maintenance/update-notice";
 import { CrewHistoryRPC } from "./history-rpc";
 import { crewFingerprint } from "./identity";
 import { MesijClient, type MesijMessage } from "./mesij";
@@ -58,7 +62,7 @@ import { piCrewToolDefinitions } from "./pi-extension";
 
 export { mailInputSchema } from "./messaging";
 
-import { redactCredentials } from "../credentials";
+import { redactCredentials } from "../lib/credentials";
 import { journalInputSchema } from "./journal";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";

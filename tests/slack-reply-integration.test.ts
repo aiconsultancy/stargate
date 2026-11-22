@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend, Transcript } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway";
-import { type ReplyChunk, slackContent } from "../src/slack-format";
-import { type Job, Store } from "../src/store";
-import { LiveReply } from "../src/streaming";
+import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { type ReplyChunk, slackContent } from "../src/shared/slack-format";
+import { type Job, Store } from "../src/gateway/store";
+import { LiveReply } from "../src/gateway/streaming";
 import { bot, event, identity } from "./fixtures";
 
 type Post = { text: string; content: unknown; unit: unknown };

@@ -1,13 +1,13 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { OpenCode, type OpenCodeClient } from "@opencode/client";
-import { OpenCodeBackend } from "../backends/opencode";
+import { OpenCodeBackend } from "../backends/opencode/opencode";
 import { type BackendConfig, secret } from "../config";
 import {
   type CrewQuestionReceipt,
   CrewQuestionRpc,
   type CrewQuestionWork,
 } from "../crew/question-handoff";
-import { questionFingerprint } from "../questions";
+import { questionFingerprint } from "../questions/questions";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
 

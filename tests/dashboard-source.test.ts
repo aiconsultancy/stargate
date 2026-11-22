@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { AgentBackend } from "../src/backend";
-import type { CrewStatus } from "../src/crew-status";
-import { CronStore } from "../src/cron-store";
-import { type DashboardShip, dashboardSource } from "../src/dashboard-source";
-import { botKey, conversationKey } from "../src/routing";
-import type { HistorySession, SessionHistory } from "../src/session-history";
-import { Store } from "../src/store";
+import type { CrewStatus } from "../src/shared/crew-status";
+import { CronStore } from "../src/cron/store";
+import {
+  type DashboardShip,
+  dashboardSource,
+} from "../src/dashboard/dashboard-source";
+import { botKey, conversationKey } from "../src/gateway/routing";
+import type {
+  HistorySession,
+  SessionHistory,
+} from "../src/shared/session-history";
+import { Store } from "../src/gateway/store";
 import { bot, identity } from "./fixtures";
 
 const signal = new AbortController().signal;

@@ -3,9 +3,9 @@ import type {
   Destination,
   NotificationInput,
   Source,
-} from "../src/notify/model";
-import type { NotificationSink } from "../src/notify/sink";
-import { NotifyStore } from "../src/notify/store";
+} from "../src/notifications/ingest/model";
+import type { NotificationSink } from "../src/notifications/ingest/sink";
+import { NotifyStore } from "../src/notifications/ingest/store";
 
 const path = process.argv[2];
 const point = process.argv[3];

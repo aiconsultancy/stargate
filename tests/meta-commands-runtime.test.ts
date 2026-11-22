@@ -5,11 +5,15 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import pino from "pino";
 import { z } from "zod";
-import { NotificationStore } from "../src/notification-store";
-import { notificationKey } from "../src/notifications";
-import { type RuntimeDependencies, type SlackApp, serve } from "../src/runtime";
-import type { SlackInteractions } from "../src/slack";
-import { resolveWaiting } from "../src/waiting";
+import { NotificationStore } from "../src/notifications/preferences/notification-store";
+import { notificationKey } from "../src/notifications/preferences/notifications";
+import {
+  type RuntimeDependencies,
+  type SlackApp,
+  serve,
+} from "../src/app/runtime";
+import type { SlackInteractions } from "../src/slack/slack";
+import { resolveWaiting } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 
 test("runtime binds registration-scoped reads and authenticated panel actions without captain work", async () => {

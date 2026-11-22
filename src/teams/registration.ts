@@ -8,17 +8,17 @@ import type { AgentBackend, PendingPermission } from "../backend";
 import type { TeamsConfig } from "../config";
 import type { FleetSource } from "../fleet/protocol";
 import { fleetResultSource } from "../fleet/results";
-import { fleetAuthority, fleetInstructions } from "../fleet-policy";
-import { fleetSourceReference } from "../fleet-source";
+import { fleetAuthority, fleetInstructions } from "../fleet/fleet-policy";
+import { fleetSourceReference } from "../fleet/fleet-source";
 import type { GatewayTransport, SlackDelivery } from "../gateway/ports";
-import { backendFingerprint } from "../routing";
+import { backendFingerprint } from "../gateway/routing";
 import {
   settingsDefault,
   settingsPattern,
   settingsUUID,
 } from "../settings-schema";
-import type { Store } from "../store";
-import { botDisplayName, resolveWaiting } from "../waiting";
+import type { Store } from "../gateway/store";
+import { botDisplayName, resolveWaiting } from "../gateway/waiting";
 import {
   BotFrameworkKeyStore,
   checkActivityBinding,
@@ -34,7 +34,7 @@ import {
   listenOnUnixSocket,
   type SocketIdentity,
   unlinkOwnSocket,
-} from "./unix-socket";
+} from "../lib/unix-socket";
 
 const account = Schema.Struct({
   id: Schema.String.check(Schema.isMinCodePoints(1)),
