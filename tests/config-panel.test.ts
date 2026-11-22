@@ -7,7 +7,7 @@ import {
   buildConfigPanel,
   readConfigSnapshot,
 } from "../src/meta-commands/config-panel";
-import { CrewWaiting } from "../src/crew/waiting";
+import { CrewWaiting } from "../src/crew/controls/waiting";
 import type { TransportDelivery } from "../src/gateway/ports";
 import {
   configPanelRows,

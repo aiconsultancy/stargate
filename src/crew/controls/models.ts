@@ -15,11 +15,11 @@ import {
   settingsDiscriminatedUnion,
   settingsIssues,
   settingsStruct,
-} from "../config/settings-schema";
-import type { CrewCaller, WorkerModelPeer } from "./engine";
-import { effectProjectToolInput } from "./project-options";
-import { CrewError } from "./state";
-import { agentIDSchema, defaultModelProviders, type Team } from "./team";
+} from "../../config/settings-schema";
+import type { CrewCaller, WorkerModelPeer } from "../engine";
+import { effectProjectToolInput } from "../project-options";
+import { CrewError } from "../state";
+import { agentIDSchema, defaultModelProviders, type Team } from "../team";
 
 const target = agentIDSchema.pipe(settingsDefault("captain"));
 const modelBranches = Schema.Union([

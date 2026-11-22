@@ -15,7 +15,10 @@ import {
   messagePortableSchema,
 } from "../src/crew/message-tool-input";
 import { mailInputBranches, mailInputSchema } from "../src/crew/messaging";
-import { modelInputSchema, modelToolInputSchema } from "../src/crew/models";
+import {
+  modelInputSchema,
+  modelToolInputSchema,
+} from "../src/crew/controls/models";
 import { projectToolInput } from "../src/crew/project-options";
 import * as toolInputs from "../src/crew/tool-input";
 import { objectToolInput } from "../src/crew/tool-input";

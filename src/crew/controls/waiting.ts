@@ -1,8 +1,8 @@
 import { Result, Schema } from "effect";
-import { settingsStruct } from "../config/settings-schema";
-import { saveWaitingDelay } from "../gateway/waiting";
-import type { CrewCaller } from "./engine";
-import { CrewError } from "./state";
+import { settingsStruct } from "../../config/settings-schema";
+import { saveWaitingDelay } from "../../gateway/waiting";
+import type { CrewCaller } from "../engine";
+import { CrewError } from "../state";
 
 export const waitingInputSchema = settingsStruct({
   seconds: Schema.Union([
