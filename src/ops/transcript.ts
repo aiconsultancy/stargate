@@ -65,7 +65,10 @@ export async function repairTranscript(input: {
     input.channel,
     input.thread,
   );
-  const target = input.store.transcriptTarget(input.botKey, conversation);
+  const target = input.store.transcript.transcriptTarget(
+    input.botKey,
+    conversation,
+  );
   if (!target) throw new Error("No mapped conversation for this bot thread");
   const read = await input.backend
     .transcript(
@@ -81,7 +84,10 @@ export async function repairTranscript(input: {
     : read.entries;
   if (input.only && entries.length !== new Set(input.only).size)
     throw new Error("Some requested messages are not settled public replies");
-  const rows = input.store.transcriptRows(input.botKey, conversation);
+  const rows = input.store.transcript.transcriptRows(
+    input.botKey,
+    conversation,
+  );
   const scope = new Set(entries.map((entry) => `transcript:${entry.id}`));
   const requeue = rows.filter(
     (row) => row.status === "failed" && scope.has(row.eventId),
@@ -89,7 +95,7 @@ export async function repairTranscript(input: {
   // Requeued rows deliver their stored text, so that text counts as sent.
   const sent = comparable(
     [
-      ...input.store.replies(input.botKey, conversation),
+      ...input.store.transcript.replies(input.botKey, conversation),
       ...requeue.map((row) => row.response),
     ]
       .map(replySource)
@@ -186,15 +192,17 @@ export async function repairThread(input: {
   }
   const store = new Store(path);
   try {
-    const keys = store.threadBots(input.channel, input.thread).filter((key) => {
-      const parts: unknown = JSON.parse(key);
-      return (
-        Array.isArray(parts) &&
-        parts[0] === bot.id &&
-        parts[1] === bot.slack.appId &&
-        parts[4] === backendFingerprint(bot)
-      );
-    });
+    const keys = store.transcript
+      .threadBots(input.channel, input.thread)
+      .filter((key) => {
+        const parts: unknown = JSON.parse(key);
+        return (
+          Array.isArray(parts) &&
+          parts[0] === bot.id &&
+          parts[1] === bot.slack.appId &&
+          parts[4] === backendFingerprint(bot)
+        );
+      });
     const [botKey] = keys;
     if (!botKey || keys.length !== 1)
       throw new Error("Expected one current bot namespace for this thread");

@@ -98,7 +98,7 @@ function fixture(
     pino({ enabled: false }),
     {
       ...options,
-      store,
+      store: store.activityRecords,
       wait: async (_ms, stop) => {
         waiting.resolve();
         if (stop.aborted) throw new Error("aborted");
@@ -186,14 +186,14 @@ test("restart and terminal late refresh reuse persisted capture and Slack timest
       () => ({ detail: "summary" }),
       () => true,
       pino({ enabled: false }),
-      { store: f.store },
+      { store: f.store.activityRecords },
     );
   try {
     await f.delivery.start(f.job, "captain", signal(), signal());
     await f.waiting;
     await f.delivery.close();
     expect(cancels).toBe(0);
-    expect(f.store.activity(f.job.id)).toMatchObject({
+    expect(f.store.activityRecords.activity(f.job.id)).toMatchObject({
       capture: "report-1",
       ts: "report-message",
       done: false,
@@ -209,7 +209,7 @@ test("restart and terminal late refresh reuse persisted capture and Slack timest
     await f.written[1]?.promise;
     await resumed.close();
     expect(f.views[1]?.ts).toBe("report-message");
-    expect(f.store.activity(f.job.id)?.done).toBe(true);
+    expect(f.store.activityRecords.activity(f.job.id)?.done).toBe(true);
     expect(f.starts).toBe(1);
     expect(finishes).toBe(1);
     current = {
@@ -252,14 +252,16 @@ test("missing saved capture stops retries without opening a new capture", async 
   };
   const f = fixture(watch);
   try {
-    f.store.saveActivity(f.job.id, {
+    f.store.activityRecords.saveActivity(f.job.id, {
       capture: "missing",
       revision: -1,
       done: false,
     });
     const saved = Promise.withResolvers<void>();
-    const save = f.store.saveActivity.bind(f.store);
-    f.store.saveActivity = (id, progress) => {
+    const save = f.store.activityRecords.saveActivity.bind(
+      f.store.activityRecords,
+    );
+    f.store.activityRecords.saveActivity = (id, progress) => {
       save(id, progress);
       if (progress.done) saved.resolve();
     };
@@ -267,7 +269,7 @@ test("missing saved capture stops retries without opening a new capture", async 
     await f.delivery.resume(f.job, "captain", signal());
     await saved.promise;
     await f.delivery.close();
-    expect(f.store.activity(f.job.id)?.done).toBe(true);
+    expect(f.store.activityRecords.activity(f.job.id)?.done).toBe(true);
     expect(f.starts).toBe(0);
     expect(f.views).toEqual([]);
   } finally {
@@ -289,7 +291,7 @@ test("a saved Stop never starts a summary if native cancellation was unconfirmed
     async cancel() {},
   });
   try {
-    f.store.saveActivity(f.job.id, {
+    f.store.activityRecords.saveActivity(f.job.id, {
       capture: "report-1",
       ts: "report-message",
       revision: 1,

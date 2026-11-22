@@ -7,7 +7,8 @@ import type {
 } from "./activity";
 import type { AgentBackend } from "../backend";
 import type { TransportDelivery } from "../gateway/ports";
-import type { Job, Store } from "../gateway/store";
+import type { Job } from "../gateway/store";
+import type { ActivityRecords } from "./store";
 
 export type ActivityHandle = { finish(): void; cancel(): void };
 type Pending = {
@@ -24,7 +25,7 @@ type Options = {
   startupTimeoutMs?: number;
   finalizeTimeoutMs?: number;
   settleIntervalMs?: number;
-  store?: Store;
+  store?: Pick<ActivityRecords, "activity" | "saveActivity">;
   wait?: (ms: number, signal: AbortSignal) => Promise<void>;
 };
 

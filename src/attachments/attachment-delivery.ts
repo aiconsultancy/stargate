@@ -9,7 +9,8 @@ import {
 } from "./attachments";
 import type { BackendConfig } from "../config";
 import { isLocalhost } from "../lib/loopback";
-import type { Job, Store } from "../gateway/store";
+import type { Job } from "../gateway/store";
+import type { AttachmentRecords } from "./store";
 
 /** Slack-style three-step upload: reserve, put, then complete in a thread. */
 export interface UploadTransport {
@@ -138,7 +139,7 @@ function scratchRoot(path: string) {
 export async function deliverAttachments(
   job: Job,
   context: {
-    store: Pick<Store, "attachments" | "saveAttachments">;
+    store: Pick<AttachmentRecords, "attachments" | "saveAttachments">;
     /** Undefined while the transport cannot move files. */
     transport: AttachmentTransport | undefined;
     /** The agent's files are on this host; see `agentFilesLocal`. */

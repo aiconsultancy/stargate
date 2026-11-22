@@ -1,17 +1,12 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { Result, Schema } from "effect";
-import type {
-  PreparedAttachment,
-  PublishedFile,
-} from "../attachments/attachments";
+import { ActivityRecords } from "../activity/store";
+import type { PublishedFile } from "../attachments/attachments";
+import { AttachmentRecords } from "../attachments/store";
 import { BackgroundCases } from "../questions/background-questions";
 import { cancellationNotice } from "./cancellation";
-import {
-  fleetJobSchema,
-  nativeMakerSchema,
-  type NativeMaker,
-} from "../fleet/protocol";
+import { fleetJobSchema } from "../fleet/protocol";
 import {
   type IrcBurstMessage,
   ircBurstEligible,
@@ -20,13 +15,15 @@ import {
   ircBurstText,
 } from "../irc/burst";
 import { validMsgid } from "../irc/protocol";
+import { FleetRecords } from "../fleet/store";
+import { decodeJob, decodeStoredJob, type StoredJob } from "./row-codec";
+import { TranscriptRecords } from "./transcript-store";
 import { MetaRecords } from "../meta-commands/store";
 import { notificationContextSchema } from "../notifications/preferences/notifications";
 import type { QuestionOffer } from "../questions/questions";
 import { QuestionRecords } from "../questions/store";
 import { inboundReactionSchema } from "../shared/reactions";
 import { failureText, type RequestFailure } from "../shared/request-failure";
-import { settingsPattern, settingsStruct } from "../settings-schema";
 import type { ReplyChunk } from "../shared/slack-format";
 import { type Incoming, type Job, type JobStatus } from "./store-types";
 import type { TurnProgress } from "../shared/turn-progress";
@@ -98,67 +95,6 @@ export type ThreadFollowUp = {
   payload: string;
 };
 
-type StoredJob = Omit<
-  Job,
-  "deferDelivery" | "fleet" | "makers" | "notification" | "slackReaction"
-> & {
-  deferDelivery: number;
-  fleet_context: string | null;
-  makers: string | null;
-  fleet_exported: number;
-  notification_context: string | null;
-  notification_held: number;
-  slack_reaction: string | null;
-};
-
-function decodeStoredJob(row: StoredJob): Job {
-  const {
-    fleet_context,
-    makers,
-    fleet_exported: _exported,
-    notification_context,
-    notification_held: _notificationHeld,
-    slack_reaction,
-    ...job
-  } = row;
-  return {
-    ...job,
-    deferDelivery: row.deferDelivery === 1,
-    ...(slack_reaction
-      ? {
-          slackReaction: Schema.decodeUnknownSync(inboundReactionSchema)(
-            JSON.parse(slack_reaction),
-          ),
-        }
-      : {}),
-    ...(notification_context
-      ? {
-          notification: notificationContextSchema.parse(
-            JSON.parse(notification_context),
-          ),
-        }
-      : {}),
-    ...(fleet_context
-      ? {
-          fleet: Schema.decodeUnknownSync(fleetJobSchema)(
-            JSON.parse(fleet_context),
-          ),
-        }
-      : {}),
-    ...(makers
-      ? {
-          makers: Schema.decodeUnknownSync(
-            Schema.mutable(Schema.Array(nativeMakerSchema)),
-          )(JSON.parse(makers)),
-        }
-      : {}),
-  };
-}
-
-function decodeJob(row: StoredJob | null): Job | null {
-  return row && decodeStoredJob(row);
-}
-
 export type CaptainCursor = {
   cursor: string | undefined;
   owner: number | null;
@@ -177,28 +113,6 @@ export type CaptainTranscript = {
     files?: PublishedFile[];
   }[];
 };
-
-export type AttachmentDelivery = PublishedFile & {
-  title?: string;
-  prepared?: PreparedAttachment;
-  phase?:
-    | "reserved"
-    | "uploading"
-    | "uploaded"
-    | "completing"
-    | "shared"
-    | "unavailable";
-  fileID?: string;
-  noticeSent?: boolean;
-};
-
-const activityProgress = settingsStruct({
-  ts: Schema.optional(Schema.String),
-  capture: Schema.String,
-  revision: Schema.Int,
-  done: Schema.Boolean,
-});
-export type ActivityProgress = typeof activityProgress.Type;
 
 /**
  * `respond` was called for a job that is not running. Nothing was written:
@@ -224,6 +138,10 @@ export class Store {
   readonly backgroundCases: BackgroundCases;
   readonly questions: QuestionRecords;
   readonly meta: MetaRecords;
+  readonly attachmentRecords: AttachmentRecords;
+  readonly activityRecords: ActivityRecords;
+  readonly fleet: FleetRecords<StoredJob, Job>;
+  readonly transcript: TranscriptRecords;
   private readonly db: Database;
   readonly updateNotices: UpdateNotices;
   constructor(path: string) {
@@ -421,6 +339,10 @@ export class Store {
     );
     this.questions = new QuestionRecords(this.db);
     this.meta = new MetaRecords(this.db);
+    this.attachmentRecords = new AttachmentRecords(this.db);
+    this.activityRecords = new ActivityRecords(this.db);
+    this.fleet = new FleetRecords(this.db, decodeStoredJob);
+    this.transcript = new TranscriptRecords(this.db);
   }
 
   enqueue(input: Incoming): boolean {
@@ -752,64 +674,6 @@ export class Store {
       }).length;
   }
 
-  inputFiles(id: number): string[] {
-    const row = this.db
-      .query<{ input_files: string | null }, [number]>(
-        "SELECT input_files FROM jobs WHERE id=?",
-      )
-      .get(id);
-    return row?.input_files
-      ? // Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
-        Schema.decodeUnknownSync(
-          Schema.mutable(
-            Schema.Array(
-              Schema.String.check(
-                Schema.isMaxCodePoints(2048),
-                settingsPattern(/^(?:F[A-Z0-9]+|https?:\/\/\S+)$/),
-              ),
-            ),
-          ).check(Schema.isMaxLength(10)),
-        )(JSON.parse(row.input_files))
-      : [];
-  }
-
-  attachments(id: number): AttachmentDelivery[] {
-    const row = this.db
-      .query<{ output_files: string | null }, [number]>(
-        "SELECT output_files FROM jobs WHERE id=?",
-      )
-      .get(id);
-    return row?.output_files
-      ? (JSON.parse(row.output_files) as AttachmentDelivery[])
-      : [];
-  }
-
-  saveAttachments(id: number, files: readonly AttachmentDelivery[]) {
-    this.db
-      .query("UPDATE jobs SET output_files=? WHERE id=?")
-      .run(JSON.stringify(files), id);
-  }
-
-  activity(id: number): ActivityProgress | undefined {
-    const raw = this.db
-      .query<{ activity: string | null }, [number]>(
-        "SELECT activity FROM jobs WHERE id=?",
-      )
-      .get(id)?.activity;
-    return raw
-      ? Schema.decodeUnknownSync(activityProgress)(JSON.parse(raw))
-      : undefined;
-  }
-
-  saveActivity(id: number, progress: ActivityProgress) {
-    this.db
-      .query("UPDATE jobs SET activity=? WHERE id=?")
-      .run(
-        JSON.stringify(Schema.decodeUnknownSync(activityProgress)(progress)),
-        id,
-      );
-  }
-
   latestActivity(botKey: string, conversation: string): Job | null {
     return decodeJob(
       this.db
@@ -1002,67 +866,6 @@ export class Store {
       .run(conversation, id, cursor ?? null);
   }
 
-  transcriptCursor(conversation: string): string | undefined {
-    return (
-      this.db
-        .query<{ cursor: string | null }, [string]>(
-          "SELECT cursor FROM sessions WHERE conversation=?",
-        )
-        .get(conversation)?.cursor ?? undefined
-    );
-  }
-
-  /** Seed a missing cursor without moving an existing one. */
-  baselineTranscript(conversation: string, cursor: string) {
-    this.db
-      .query(
-        "UPDATE sessions SET cursor=? WHERE conversation=? AND cursor IS NULL",
-      )
-      .run(cursor, conversation);
-    return this.transcriptCursor(conversation);
-  }
-
-  /** Every mapped conversation of this bot namespace, or one session's. */
-  transcripts(botKey: string, session?: string): string[] {
-    // Separate statements keep the session_id index usable for settle events.
-    return this.db
-      .query<{ conversation: string }, string[]>(
-        `SELECT s.conversation FROM sessions s
-      WHERE ${session === undefined ? "" : "s.session_id=? AND"} EXISTS
-      (SELECT 1 FROM jobs j WHERE j.conversation=s.conversation AND j.botKey=?)`,
-      )
-      .all(...(session === undefined ? [] : [session]), botKey)
-      .map((row) => row.conversation);
-  }
-
-  /** The mapped session plus the latest request's source and delivery mode. */
-  transcriptTarget(botKey: string, conversation: string) {
-    const row = this.db
-      .query<
-        {
-          session: string;
-          cursor: string | null;
-          channel: string;
-          thread: string;
-          replyParent: string | null;
-          user: string;
-          deferDelivery: number;
-        },
-        [string, string]
-      >(`SELECT s.session_id AS session, s.cursor, j.channel, j.thread, j.replyParent, j.user,j.deferDelivery
-      FROM sessions s JOIN jobs j ON j.conversation=s.conversation
-      WHERE j.botKey=? AND s.conversation=? AND (j.gate IS NULL OR j.gate='admitted') AND j.failure IS NOT 'muted'
-      ORDER BY j.id DESC LIMIT 1`)
-      .get(botKey, conversation);
-    return (
-      row && {
-        ...row,
-        cursor: row.cursor ?? undefined,
-        deferDelivery: row.deferDelivery === 1,
-      }
-    );
-  }
-
   unfinished(conversation: string) {
     return (
       this.db
@@ -1070,41 +873,6 @@ export class Store {
         AND status IN (${unfinishedJobs}) LIMIT 1`)
         .get(conversation) !== null
     );
-  }
-
-  /** Bot keys with requests in one Slack thread, for targeted repair. */
-  threadBots(channel: string, thread: string): string[] {
-    return this.db
-      .query<{ botKey: string }, [string, string]>(
-        "SELECT DISTINCT botKey FROM jobs WHERE channel=? AND thread=?",
-      )
-      .all(channel, thread)
-      .map((row) => row.botKey);
-  }
-
-  /** Persisted reply chunks, including replies that are still delivering. */
-  replies(botKey: string, conversation: string): ReplyChunk[][] {
-    return this.db
-      .query<{ response: string }, [string, string]>(`SELECT response FROM jobs
-      WHERE botKey=? AND conversation=? AND response IS NOT NULL
-      AND status IN ('responding','done') ORDER BY id`)
-      .all(botKey, conversation)
-      .map((row) => JSON.parse(row.response) as ReplyChunk[]);
-  }
-
-  /** This thread's `transcript:*` outbox rows, for targeted repair. */
-  transcriptRows(botKey: string, conversation: string) {
-    return this.db
-      .query<
-        { eventId: string; status: JobStatus; response: string | null },
-        [string, string]
-      >(`SELECT eventId, status, response FROM jobs WHERE botKey=?
-      AND conversation=? AND eventId LIKE 'transcript:%' ORDER BY id`)
-      .all(botKey, conversation)
-      .map((row) => ({
-        ...row,
-        response: JSON.parse(row.response ?? "[]") as ReplyChunk[],
-      }));
   }
 
   /**
@@ -1126,7 +894,10 @@ export class Store {
     requeue?: string[];
   }): number | undefined {
     return this.db.transaction(() => {
-      const target = this.transcriptTarget(input.botKey, input.conversation);
+      const target = this.transcript.transcriptTarget(
+        input.botKey,
+        input.conversation,
+      );
       if (
         !target ||
         this.db
@@ -1300,38 +1071,6 @@ export class Store {
         )
         .get(botKey, eventId, botKey, eventId),
     );
-  }
-
-  pendingFleetJobs(botKey: string): Job[] {
-    return this.db
-      .query<StoredJob, [string]>(
-        "SELECT * FROM jobs WHERE botKey=? AND json_extract(fleet_context,'$.kind')='assignment' AND fleet_exported=0 ORDER BY id LIMIT 100",
-      )
-      .all(botKey)
-      .map(decodeStoredJob);
-  }
-
-  fleetPublished(id: number) {
-    this.db
-      .query(
-        "UPDATE jobs SET fleet_exported=1 WHERE id=? AND json_extract(fleet_context,'$.kind')='assignment'",
-      )
-      .run(id);
-  }
-
-  saveMakers(id: number, makers: NativeMaker[]) {
-    this.db
-      .query("UPDATE jobs SET makers=? WHERE id=? AND makers IS NULL")
-      .run(
-        JSON.stringify(
-          Schema.decodeUnknownSync(
-            Schema.mutable(Schema.Array(nativeMakerSchema)).check(
-              Schema.isMaxLength(100),
-            ),
-          )(makers),
-        ),
-        id,
-      );
   }
 
   /** Outbound IRC root of this registration's request; legacy rows stay plain. */
@@ -2148,17 +1887,6 @@ export class Store {
     })();
   }
 
-  interruptedSessions(botKey: string): string[] {
-    return this.db
-      .query<
-        { session_id: string },
-        [string]
-      >(`SELECT DISTINCT s.session_id FROM sessions s
-      JOIN jobs j ON j.conversation=s.conversation WHERE j.botKey=? AND j.status='running'`)
-      .all(botKey)
-      .map((row) => row.session_id);
-  }
-
   /** Operator view: per-status totals for one bot namespace. */
   queueCounts(botKey: string): Record<JobStatus, number> {
     const counts = { queued: 0, running: 0, responding: 0, done: 0, failed: 0 };
@@ -2188,30 +1916,6 @@ export class Store {
       >(`SELECT id,status,channel,thread,user,failure,deferDelivery FROM jobs
       WHERE botKey=? ORDER BY id DESC LIMIT ?`)
       .all(botKey, limit);
-  }
-
-  /** Native sessions this bot namespace has used, most recently used first. */
-  sessionIDs(botKey: string, limit: number): string[] {
-    return this.db
-      .query<
-        { session_id: string },
-        [string, number]
-      >(`SELECT s.session_id FROM sessions s
-      JOIN jobs j ON j.conversation=s.conversation WHERE j.botKey=?
-      GROUP BY s.session_id ORDER BY MAX(j.id) DESC LIMIT ?`)
-      .all(botKey, limit)
-      .map((row) => row.session_id);
-  }
-
-  /** True only when this bot namespace has a request mapped to the session. */
-  ownsSession(botKey: string, sessionID: string): boolean {
-    return (
-      this.db
-        .query(`SELECT 1 FROM sessions s
-      JOIN jobs j ON j.conversation=s.conversation
-      WHERE s.session_id=? AND j.botKey=? LIMIT 1`)
-        .get(sessionID, botKey) !== null
-    );
   }
 
   close() {

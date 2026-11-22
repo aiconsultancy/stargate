@@ -42,7 +42,7 @@ test("captain cursor seeds only from its matching root's last started owner", ()
     owner: null,
   });
   expect(store.session("source")).toBe("captain");
-  expect(store.transcriptCursor("source")).toBe("head");
+  expect(store.transcript.transcriptCursor("source")).toBe("head");
 });
 
 test("captain response, cursor and explicit previous-source outbox commit atomically", () => {
@@ -105,7 +105,7 @@ test("captain response, cursor and explicit previous-source outbox commit atomic
     }),
   ).toThrow(TranscriptConflict);
   expect(store.jobStatus("bot", stale.id)).toBe("running");
-  expect(store.replies("bot", "C123")).toEqual([["current answer"]]);
+  expect(store.transcript.replies("bot", "C123")).toEqual([["current answer"]]);
   expect(store.captainCursor("bot", "pin")).toEqual({
     cursor: "head",
     owner: current.id,

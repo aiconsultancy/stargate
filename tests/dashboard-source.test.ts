@@ -485,10 +485,10 @@ describe("dashboard store accessors", () => {
       text: "hello",
     });
     store.saveSession(conversation, "ses_one");
-    expect(store.ownsSession("bot", "ses_one")).toBe(true);
-    expect(store.ownsSession("other", "ses_one")).toBe(false);
-    expect(store.ownsSession("bot", "ses_two")).toBe(false);
-    expect(store.sessionIDs("bot", 10)).toEqual(["ses_one"]);
+    expect(store.transcript.ownsSession("bot", "ses_one")).toBe(true);
+    expect(store.transcript.ownsSession("other", "ses_one")).toBe(false);
+    expect(store.transcript.ownsSession("bot", "ses_two")).toBe(false);
+    expect(store.transcript.sessionIDs("bot", 10)).toEqual(["ses_one"]);
     expect(store.queueCounts("bot").queued).toBe(1);
   });
 });

@@ -308,7 +308,7 @@ test("Stop keeps settled public text and later results without rerunning", async
     }),
   ).toBe(true);
   await work;
-  expect(f.store.replies(f.gateway.key, job.conversation)).toEqual([
+  expect(f.store.transcript.replies(f.gateway.key, job.conversation)).toEqual([
     ["Interrupted public text.", cancellationNotice],
   ]);
   expect(f.failures).toEqual(["cancelled"]);
@@ -533,9 +533,9 @@ test("repair queues only missing public replies of the exact thread, once", asyn
   await f.settle("session-1");
   expect(f.texts().slice(before)).toHaveLength(4);
   expect(other.texts()).toHaveLength(1);
-  expect(f.store.transcriptTarget(f.gateway.key, conversation)?.cursor).toBe(
-    merged,
-  );
+  expect(
+    f.store.transcript.transcriptTarget(f.gateway.key, conversation)?.cursor,
+  ).toBe(merged);
 });
 
 test("catch-up failures retry with bounded backoff and keep the cursor", async () => {
@@ -548,7 +548,7 @@ test("catch-up failures retry with bounded backoff and keep the cursor", async (
   await f.drain();
   const conversation = conversationKey(f.gateway.key, "C123", "1.000");
   const cursor = () =>
-    f.store.transcriptTarget(f.gateway.key, conversation)?.cursor;
+    f.store.transcript.transcriptTarget(f.gateway.key, conversation)?.cursor;
   const before = cursor();
   f.native.add("CI passed after an outage.");
   let failures = 12;
@@ -680,7 +680,7 @@ test("a lost cursor stops catch-up, then the next request re-anchors at its own 
   f.gateway.accept(event());
   await f.drain();
   const conversation = conversationKey(f.gateway.key, "C123", "1.000");
-  const lost = f.store.transcriptCursor(conversation);
+  const lost = f.store.transcript.transcriptCursor(conversation);
   f.native.log.pop(); // A revert removes the cursor message.
   f.native.add("Unplaceable continuation.");
   const start = Date.now();
@@ -693,7 +693,7 @@ test("a lost cursor stops catch-up, then the next request re-anchors at its own 
   } finally {
     setSystemTime();
   }
-  expect(f.store.transcriptCursor(conversation)).toBe(lost);
+  expect(f.store.transcript.transcriptCursor(conversation)).toBe(lost);
   let written = false;
   f.native.beforeRead = () => {
     // Written after the streamed answer; a post-prompt head baseline skips it.
@@ -855,7 +855,9 @@ test("a silent turn posts nothing, advances the cursor and is never replayed", a
   expect(f.texts()).toEqual(["First answer."]);
   expect(f.failures).toEqual([]);
   const conversation = conversationKey(f.gateway.key, "C123", "1.000");
-  expect(f.store.transcriptCursor(conversation)).toBe(f.native.log.at(-1)?.id);
+  expect(f.store.transcript.transcriptCursor(conversation)).toBe(
+    f.native.log.at(-1)?.id,
+  );
   await f.settle("session-1");
   expect(f.posts).toHaveLength(1);
   // The next turn delivers its own text only.
@@ -880,7 +882,7 @@ test("silence covers one assistant message; other public text of the turn is kep
   const job = pending(f);
   await f.gateway.process(job, f.signal);
   expect(f.texts()).toEqual(["Checked the thread."]);
-  expect(f.store.attachments(job.id)).toEqual([]);
+  expect(f.store.attachmentRecords.attachments(job.id)).toEqual([]);
 });
 
 test("a silent background continuation and an unsettled follow-up cause no post or status", async () => {
@@ -916,7 +918,7 @@ test("a deleted native session stops background probes and keeps its mapping", a
   f.gateway.accept(event());
   await f.drain();
   const conversation = conversationKey(f.gateway.key, "C123", "1.000");
-  const cursor = f.store.transcriptCursor(conversation);
+  const cursor = f.store.transcript.transcriptCursor(conversation);
   f.native.beforeRead = () => {
     throw new TranscriptUnavailable("session");
   };
@@ -932,7 +934,7 @@ test("a deleted native session stops background probes and keeps its mapping", a
     setSystemTime();
   }
   expect(f.store.session(conversation)).toBe("session-1");
-  expect(f.store.transcriptCursor(conversation)).toBe(cursor);
+  expect(f.store.transcript.transcriptCursor(conversation)).toBe(cursor);
 });
 
 test("repair requeues a failed outbox row and refuses conflicting rows atomically", async () => {
@@ -944,7 +946,7 @@ test("repair requeues a failed outbox row and refuses conflicting rows atomicall
   f.gateway.accept(event());
   await f.drain();
   const conversation = conversationKey(f.gateway.key, "C123", "1.000");
-  const since = f.store.transcriptCursor(conversation) ?? "";
+  const since = f.store.transcript.transcriptCursor(conversation) ?? "";
   f.native.add("Lost in delivery.");
   f.gateway.settle("session-1");
   await f.gateway.catchUp(f.signal);
@@ -976,7 +978,7 @@ test("repair requeues a failed outbox row and refuses conflicting rows atomicall
     queued: 0,
   });
   // A delivering row with different text for a missing reply is a conflict.
-  const cursor = f.store.transcriptCursor(conversation) ?? "";
+  const cursor = f.store.transcript.transcriptCursor(conversation) ?? "";
   const conflicting = f.native.add("Conflicting reply.");
   f.store.appendTranscript({
     botKey: f.gateway.key,
@@ -992,7 +994,7 @@ test("repair requeues a failed outbox row and refuses conflicting rows atomicall
   expect(f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10)).toEqual(
     rows,
   );
-  expect(f.store.transcriptCursor(conversation)).toBe(cursor);
+  expect(f.store.transcript.transcriptCursor(conversation)).toBe(cursor);
 });
 
 test("repair deduplicates prepared replies using original Markdown source", async () => {

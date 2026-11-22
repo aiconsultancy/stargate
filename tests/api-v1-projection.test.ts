@@ -270,8 +270,10 @@ function fixture(
     {
       queueCounts: (key) => queue.get(key) ?? counts,
       recentJobs: () => [],
-      sessionIDs: () => [],
-      ownsSession: () => false,
+      transcript: {
+        sessionIDs: () => [],
+        ownsSession: () => false,
+      },
     },
     { report: () => [], recentRuns: () => [] },
     now,

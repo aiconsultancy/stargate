@@ -354,7 +354,7 @@ export class Gateway {
         ) &&
         this.allowed(job),
       log,
-      { store },
+      { store: this.store.activityRecords },
     );
   }
 
@@ -441,7 +441,7 @@ export class Gateway {
     const phase = drainNoticePhase(record);
     const text = drainNoticeText(record);
     const sessions = new Set<string>();
-    for (const conversation of this.store.transcripts(this.key)) {
+    for (const conversation of this.store.transcript.transcripts(this.key)) {
       const session = this.store.session(conversation);
       if (session) sessions.add(session);
     }
@@ -1148,7 +1148,7 @@ export class Gateway {
     );
     const interrupted = this.backend.sessionID
       ? []
-      : this.store.interruptedSessions(this.key);
+      : this.store.transcript.interruptedSessions(this.key);
     if (this.backend.sessionID) {
       const input = this.store.interruptedInput(this.key);
       if (
@@ -1181,7 +1181,7 @@ export class Gateway {
       if (job) await this.activity.resume(job, this.backend.sessionID, signal);
       return;
     }
-    for (const conversation of this.store.transcripts(this.key)) {
+    for (const conversation of this.store.transcript.transcripts(this.key)) {
       const job = this.store.latestActivity(this.key, conversation);
       const session = this.store.session(conversation);
       if (job && session) await this.activity.resume(job, session, signal);
@@ -1248,7 +1248,10 @@ export class Gateway {
         this.queueTranscript(this.key);
       return;
     }
-    for (const conversation of this.store.transcripts(this.key, session))
+    for (const conversation of this.store.transcript.transcripts(
+      this.key,
+      session,
+    ))
       if (!this.unavailable.has(conversation))
         this.queueTranscript(conversation);
   }
@@ -1354,7 +1357,10 @@ export class Gateway {
   private async transcriptCatchUp(conversation: string, shutdown: AbortSignal) {
     if (this.backend.sessionID)
       return this.captainCatchUp(this.backend.sessionID, shutdown);
-    const target = this.store.transcriptTarget(this.key, conversation);
+    const target = this.store.transcript.transcriptTarget(
+      this.key,
+      conversation,
+    );
     if (!target || !this.backend.transcript || !this.allowed(target))
       return true;
     const signal = AbortSignal.any([
@@ -1370,7 +1376,7 @@ export class Gateway {
       signal,
     );
     if (target.cursor === undefined) {
-      this.store.baselineTranscript(conversation, read.cursor);
+      this.store.transcript.baselineTranscript(conversation, read.cursor);
       return true;
     }
     if (read.cursor === target.cursor) return true;
@@ -1491,7 +1497,7 @@ export class Gateway {
     signal: AbortSignal,
   ) {
     if (!this.backend.transcript) return;
-    const from = this.store.transcriptCursor(conversation);
+    const from = this.store.transcript.transcriptCursor(conversation);
     if (from !== undefined) return from;
     try {
       const { cursor } = await this.backend.transcript(
@@ -1499,7 +1505,7 @@ export class Gateway {
         undefined,
         signal,
       );
-      return this.store.baselineTranscript(conversation, cursor);
+      return this.store.transcript.baselineTranscript(conversation, cursor);
     } catch (error) {
       if (signal.aborted) throw error;
       // No cursor exists yet, so the prompt reply cannot be delivered twice.
@@ -1599,7 +1605,7 @@ export class Gateway {
         AbortSignal.timeout(snapshot.config.turnTimeoutMs),
       ]);
       const files = await this.slack.files.download(
-        this.store.inputFiles(job.id),
+        this.store.attachmentRecords.inputFiles(job.id),
         job.channel,
         signal,
       );
@@ -1945,7 +1951,7 @@ export class Gateway {
               signal,
               shutdown,
             );
-          const fileIDs = this.store.inputFiles(job.id);
+          const fileIDs = this.store.attachmentRecords.inputFiles(job.id);
           let inputFiles: Attachment[] = [];
           // A spoken-mention gate already transcribed this message.
           if (heard) {
@@ -2322,7 +2328,7 @@ export class Gateway {
       await deliverAttachments(
         job,
         {
-          store: this.store,
+          store: this.store.attachmentRecords,
           transport: this.slack.files,
           local: agentFilesLocal(this.config.backend),
           notify: (text) =>
@@ -2341,7 +2347,9 @@ export class Gateway {
       if (job.attempts >= 7) {
         if (
           allowed(job) &&
-          this.store.attachments(job.id).some((file) => file.phase !== "shared")
+          this.store.attachmentRecords
+            .attachments(job.id)
+            .some((file) => file.phase !== "shared")
         )
           await this.slack
             .post(
