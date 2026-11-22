@@ -27,6 +27,7 @@ import {
   documentationViolations,
   importClosure,
   normalizeGraph,
+  sizeRegressions,
   sourceIdentities,
   sourceRootFiles,
   type ArchitecturePolicy,
@@ -73,7 +74,7 @@ const rootArg = values.get("--root");
 const baseArg = values.get("--base");
 if (!rootArg || !baseArg || !/^[a-f0-9]{40}$/.test(baseArg)) {
   throw new Error(
-    "Usage: bun scripts/refresh-architecture-baseline.ts --root PATH --base COMMIT [--output PATH] [--write] [--prune-stale] [--allow-closure-addition FILE ...]",
+    "Usage: bun scripts/refresh-architecture-baseline.ts --root PATH --base COMMIT [--output PATH] [--write] [--prune-stale] [--allow-closure-addition FILE ...]\n--prune-stale removes stale exception and large-file entries.",
   );
 }
 const root = await realpath(resolve(rootArg));
@@ -165,6 +166,23 @@ if (new Set(working.exceptions).size !== working.exceptions.length)
 subset(violations, working.exceptions, "new");
 if (!flags.has("--prune-stale"))
   subset(working.exceptions, violations, "stale");
+const sizeFailures = await sizeRegressions(root, policy, working.largeFiles);
+const staleSizePrefix = "stale:large-file:";
+const staleLargeFiles = new Set(
+  sizeFailures
+    .filter((failure) => failure.startsWith(staleSizePrefix))
+    .map((failure) => failure.slice(staleSizePrefix.length)),
+);
+errors.push(
+  ...sizeFailures
+    .filter(
+      (failure) =>
+        !flags.has("--prune-stale") || !failure.startsWith(staleSizePrefix),
+    )
+    .map((failure) =>
+      failure.replace(/^new:large-file:/, "unauthorized-large-file:"),
+    ),
+);
 if (inventory.largestCycle > baseline.largestCycle)
   errors.push(
     `largest-cycle:${inventory.largestCycle} > ${baseline.largestCycle}`,
@@ -236,10 +254,17 @@ const prunedExceptions = flags.has("--prune-stale")
 const exceptions = flags.has("--prune-stale")
   ? working.exceptions.filter((item) => measuredExceptions.has(item))
   : working.exceptions;
+const prunedLargeFiles = flags.has("--prune-stale")
+  ? working.largeFiles.filter((item) => staleLargeFiles.has(item))
+  : [];
+const largeFiles = flags.has("--prune-stale")
+  ? working.largeFiles.filter((item) => !staleLargeFiles.has(item))
+  : working.largeFiles;
 const next: Inventory = {
   ...working,
   ...inventory,
   exceptions,
+  largeFiles,
 };
 if (flags.has("--write")) {
   const formatter = Bun.spawn(
@@ -294,7 +319,9 @@ const result = {
   inventory,
   cycleComponents,
   exceptions,
-  ...(flags.has("--prune-stale") ? { prunedExceptions } : {}),
+  ...(flags.has("--prune-stale")
+    ? { largeFiles, prunedExceptions, prunedLargeFiles }
+    : {}),
   ...(allowedClosureFiles.length
     ? {
         closureAdditions,
@@ -318,7 +345,9 @@ console.log(
     cyclicEdges: inventory.cyclicEdges.length,
     crewClosure: inventory.crewPlugin.members.length,
     exceptions: exceptions.length,
-    ...(flags.has("--prune-stale") ? { prunedExceptions } : {}),
+    ...(flags.has("--prune-stale")
+      ? { largeFiles: largeFiles.length, prunedExceptions, prunedLargeFiles }
+      : {}),
     ...(allowedClosureFiles.length
       ? {
           closureAdditions,

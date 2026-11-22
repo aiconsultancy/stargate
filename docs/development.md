@@ -140,14 +140,20 @@ The tool reuses the architecture test's graph reader. It measures unstaged and
 untracked source files too. It compares roots, cyclic edges, largest cycle and
 crew-plugin closure size with the baseline at `--base`, a full 40-character
 ancestor commit hash. Module and edge totals are informational, not caps.
-Provenance, unknown fields and `largeFiles` remain unchanged. Without pruning,
-stale exceptions remain errors; new or duplicate exceptions always fail.
+Provenance and unknown fields remain unchanged. Without pruning, stale
+exceptions and stale `largeFiles` entries are errors. New or duplicate
+exceptions always fail. Unauthorized size permissions and unlisted oversized
+files also fail, with or without pruning.
 The tool cannot grant permissions, approve new exceptions or raise base caps.
 It does not replace the architecture guards or the separate source-size check.
 
 `--prune-stale` previews removals; exit 0 requires all other guards.
-`--write` applies them; `prunedExceptions` names each; reruns list none.
-Only `exceptions` are pruned; normal inventory refresh and guards stay intact.
+`--write` applies them. `prunedExceptions` and `prunedLargeFiles` name each
+removed entry; reruns list none. The tool uses the source-size checker's
+existing measurement and alias mapping: a listed file at or below 1,000 lines,
+or an absent file, is stale; a moved file that is still oversized keeps its
+logical entry. The tool never adds a size permission or changes the limit.
+Normal inventory refresh and all other guards stay intact.
 
 Use optional `--output PATH` for a JSON receipt outside the checkout, including
 in preview mode. Unknown options and repeated single-value options are errors.
@@ -187,7 +193,7 @@ root or cycle allowance. All other checks remain required. A new slice file
 still needs normal slice membership and boundary classification in its PR.
 The architecture guard remains strict by identity; commit the measured
 baseline with the reviewed extraction. `--prune-stale` remains a separate,
-explicit operation on resolved exception identities.
+explicit operation on resolved exception and stale large-file identities.
 
 ### Strict baseline freshness
 
