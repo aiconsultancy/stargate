@@ -56,10 +56,10 @@ export interface ArchitecturePolicy {
 }
 
 /** IDs keep their first recorded spelling. No basename or content matching. */
-export function normalizeGraph(
-  graph: SourceGraph,
+function sourceIdentities(
+  files: Iterable<string>,
   policy: ArchitecturePolicy,
-): SourceGraph {
+): ReadonlyMap<string, string> {
   const owners = new Map<string, string>();
   const paths = new Map<string, string>();
   const validPath = (path: string) =>
@@ -92,14 +92,24 @@ export function normalizeGraph(
     }
   }
   const physical = new Map<string, string>();
-  for (const path of graph.keys()) {
+  const identities = new Map<string, string>();
+  for (const path of files) {
     const id = paths.get(path);
     if (!id) throw new Error(`unknown source path: ${path}`);
     const previous = physical.get(id);
     if (previous)
       throw new Error(`simultaneous aliases: ${id}: ${previous}, ${path}`);
     physical.set(id, path);
+    identities.set(path, id);
   }
+  return identities;
+}
+
+export function normalizeGraph(
+  graph: SourceGraph,
+  policy: ArchitecturePolicy,
+): SourceGraph {
+  const paths = sourceIdentities(graph.keys(), policy);
   const normalized = new Map<string, Set<string>>();
   for (const [path, imports] of graph) {
     const id = paths.get(path);
@@ -114,6 +124,38 @@ export function normalizeGraph(
     normalized.set(id, edges);
   }
   return normalized;
+}
+
+export async function sizeRegressions(
+  root: string,
+  policy: ArchitecturePolicy,
+  largeFiles: string[],
+): Promise<string[]> {
+  const files = (await sourceFiles(join(root, "src"))).map((file) =>
+    portable(relative(root, file)),
+  );
+  const identities = sourceIdentities(files, policy);
+  const oversized = new Set<string>();
+  const allowed = new Set<string>();
+  const failures: string[] = [];
+  for (const id of largeFiles) {
+    if (allowed.has(id)) failures.push(`duplicate:large-file:${id}`);
+    allowed.add(id);
+  }
+  for (const [path, id] of identities) {
+    const source = await readFile(join(root, path), "utf8");
+    // Count physical lines, including blanks/comments, without a phantom line
+    // after a final LF. CRLF has the same number of LF terminators as LF.
+    const lines = source.split("\n").length - Number(source.endsWith("\n"));
+    const count = source.length === 0 ? 0 : lines;
+    if (count <= 1000) continue;
+    oversized.add(id);
+    if (!allowed.has(id))
+      failures.push(`new:large-file:${path}:${id}:${count} > 1000`);
+  }
+  for (const id of allowed)
+    if (!oversized.has(id)) failures.push(`stale:large-file:${id}`);
+  return failures.sort();
 }
 
 const layers = [

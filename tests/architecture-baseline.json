@@ -1,6 +1,22 @@
 {
   "sourceCommit": "b28d7b1cc6f48137715f21de1136e0b1edbfb434",
   "measurementStatus": "measured NET-1769 on main after NET-1771, NET-1772 and NET-1773; crew closure unchanged",
+  "largeFiles": [
+    "src/backends/opencode.ts",
+    "src/config.ts",
+    "src/crew/engine.ts",
+    "src/crew/state.ts",
+    "src/cron-store.ts",
+    "src/dispatch/dispatcher.ts",
+    "src/gateway.ts",
+    "src/irc/client.ts",
+    "src/irc/ship.ts",
+    "src/nightly/journal.ts",
+    "src/nightly/run.ts",
+    "src/questions.ts",
+    "src/runtime.ts",
+    "src/store.ts"
+  ],
   "sourceFiles": 252,
   "sourceEdges": 1096,
   "rootFiles": [
