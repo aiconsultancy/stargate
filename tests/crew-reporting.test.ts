@@ -7,7 +7,7 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import { activitySnapshotSchema } from "../src/activity/activity";
 import { ActivityDelivery } from "../src/activity/activity-delivery";
-import type { AgentBackend, TextSink } from "../src/backend";
+import type { AgentBackend, TextSink } from "../src/backends/backend";
 import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
 import { redactCredentials } from "../src/lib/credentials";

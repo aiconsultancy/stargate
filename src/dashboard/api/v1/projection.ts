@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import { Semaphore } from "effect";
-import type { AgentBackend } from "../../../backend";
+import type { AgentBackend } from "../../../backends/backend";
 import { ircFeedbackDefaults } from "../../../config";
 import { redactCredentials } from "../../../lib/credentials";
 import type { FleetCrewStatus } from "../../../crew/fleet-status";

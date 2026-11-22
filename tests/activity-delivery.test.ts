@@ -7,7 +7,7 @@ import type {
   CrewActivitySettings,
 } from "../src/activity/activity";
 import { ActivityDelivery } from "../src/activity/activity-delivery";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { Store } from "../src/gateway/store";

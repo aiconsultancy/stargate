@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { Schema } from "effect";
 import { z } from "zod";
-import type { AgentBackend } from "../backend";
+import type { AgentBackend } from "../backends/backend";
 import type { BotConfig, Config } from "../config";
 import { crewStatusSchema } from "../shared/crew-status";
 import type { CronReportRow } from "../cron/store";

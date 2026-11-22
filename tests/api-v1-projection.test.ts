@@ -16,7 +16,7 @@ import type {
   V1RequestProgress,
   V1Task,
 } from "../src/dashboard/api/v1/types";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, configSchema } from "../src/config";
 import type { CrewStatus, CrewStatusInput } from "../src/shared/crew-status";

@@ -35,7 +35,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Option, Schema, SchemaTransformation } from "effect";
 import type { Attachment } from "../../attachments/attachments";
-import type { AgentBackend, BackendContext, TextSink } from "../../backend";
+import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import { type BackendConfig, secret } from "../../config";
 import { redactCredentials } from "../../lib/credentials";
 import { workingAgreementNotice } from "../../crew/instructions";

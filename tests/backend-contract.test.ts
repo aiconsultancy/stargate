@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 
 test("backend contract has no executable dependency on adapters or factory", async () => {
   const source = await readFile(
-    new URL("../src/backend.ts", import.meta.url),
+    new URL("../src/backends/backend.ts", import.meta.url),
     "utf8",
   );
   const transpiler = new Bun.Transpiler({ loader: "ts" });

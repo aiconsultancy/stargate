@@ -8,7 +8,7 @@ import {
   type AgentBackend,
   type PromptSourceContext,
   sourceLine,
-} from "../src/backend";
+} from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import { IrcShip } from "../src/irc/ship";

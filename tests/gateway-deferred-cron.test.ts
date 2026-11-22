@@ -9,7 +9,7 @@ import {
   latestInput,
   type PromptSourceContext,
   TranscriptUnavailable,
-} from "../src/backend";
+} from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { failureText } from "../src/shared/request-failure";

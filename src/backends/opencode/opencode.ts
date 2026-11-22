@@ -29,7 +29,7 @@ import {
   type Transcript,
   type TranscriptEntry,
   TranscriptUnavailable,
-} from "../../backend";
+} from "../backend";
 import { type BackendConfig, secret } from "../../config";
 import { redactCredentials } from "../../lib/credentials";
 import {

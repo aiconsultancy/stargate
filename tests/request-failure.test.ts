@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { botSchema } from "../src/config";
 import { containsCredential } from "../src/lib/credentials";
 import { Gateway } from "../src/gateway/gateway";

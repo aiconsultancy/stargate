@@ -9,7 +9,10 @@ import {
   maxAttachmentBytes,
   UploadRefused,
 } from "../src/attachments/attachments";
-import type { AgentBackend, PromptSourceContext } from "../src/backend";
+import type {
+  AgentBackend,
+  PromptSourceContext,
+} from "../src/backends/backend";
 import { type IrcConfig, ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import { Filehost, filehostURL } from "../src/irc/filehost";

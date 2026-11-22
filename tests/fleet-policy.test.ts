@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Result, Schema } from "effect";
-import { sourceLine } from "../src/backend";
+import { sourceLine } from "../src/backends/backend";
 import { configSchema, ircSchema } from "../src/config";
 import {
   fleetAuthority,

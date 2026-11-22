@@ -4,7 +4,7 @@ import {
   type AgentBackend,
   latestInput,
   TranscriptUnavailable,
-} from "../src/backend";
+} from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { PromptNotSubmitted } from "../src/shared/request-failure";

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import pino from "pino";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { MaintenanceNotice } from "../src/maintenance/maintenance";

@@ -6,7 +6,7 @@ import { Writable } from "node:stream";
 import { Effect, Result, Schema } from "effect";
 import pino from "pino";
 import { z } from "zod";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { configSchema } from "../src/config";
 import { type IrcRegistration, IrcShip } from "../src/irc/ship";
 import { conversationKey } from "../src/gateway/routing";

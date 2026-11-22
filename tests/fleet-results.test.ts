@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend, PromptSourceContext } from "../src/backend";
+import type {
+  AgentBackend,
+  PromptSourceContext,
+} from "../src/backends/backend";
 import { ircSchema, teamsSchema } from "../src/config";
 import { fleetRequest } from "../src/fleet/client";
 import { FleetControl, type FleetControlOptions } from "../src/fleet/control";

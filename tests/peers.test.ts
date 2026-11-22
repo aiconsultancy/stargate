@@ -2,7 +2,10 @@ import { afterEach, expect, test } from "bun:test";
 import { Writable } from "node:stream";
 import { Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend, PromptSourceContext } from "../src/backend";
+import type {
+  AgentBackend,
+  PromptSourceContext,
+} from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, botSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";

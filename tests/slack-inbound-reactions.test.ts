@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { type AgentBackend, type SteerInput, sourceLine } from "../src/backend";
+import {
+  type AgentBackend,
+  type SteerInput,
+  sourceLine,
+} from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";

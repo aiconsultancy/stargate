@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import { sourceLine } from "../src/backend";
+import { sourceLine } from "../src/backends/backend";
 import { configSchema, type IrcConfig, ircSchema } from "../src/config";
 import {
   casemapping,

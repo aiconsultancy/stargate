@@ -11,7 +11,7 @@ import type {
   Observer,
 } from "@earendil-works/pi-durable";
 import { Schema } from "effect";
-import { latestInput } from "../src/backend";
+import { latestInput } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { PiDurableBackend, piPartialText } from "../src/backends/pi/pi-durable";
 import { backendSchema } from "../src/config";

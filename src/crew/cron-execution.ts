@@ -8,7 +8,7 @@ import type {
   SessionGetInput,
 } from "@opencode/client";
 import { Schema } from "effect";
-import type { BackendContext } from "../backend";
+import type { BackendContext } from "../backends/backend";
 import { PiDurableBackend } from "../backends/pi/pi-durable";
 import type { BackendConfig } from "../config";
 import {

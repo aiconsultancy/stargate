@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import type { AgentBackend } from "../backend";
+import type { AgentBackend } from "../backends/backend";
 import type { MaintenanceNotice } from "./maintenance";
 
 type Input = {

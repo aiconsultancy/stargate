@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
 import pino from "pino";
-import type { AgentBackend } from "../src/backend";
+import type { AgentBackend } from "../src/backends/backend";
 import { type BotConfig, botSchema } from "../src/config";
 import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import { readReady } from "../src/maintenance/nightly/ready";

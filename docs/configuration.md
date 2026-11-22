@@ -293,6 +293,6 @@ CLI gets a minimal environment and a private `CODEX_HOME`. See
 
 Use `backend.type: "module"`, an absolute `module` path, and an `options`
 object. The module exports `createBackend(options, context)` and returns
-[`AgentBackend`](../src/backend.ts). Context contains a private data directory.
+[`AgentBackend`](../src/backends/backend.ts). Context contains a private data directory.
 Modules are trusted code with the process's full privileges.
 See the [architecture guide](design.md).

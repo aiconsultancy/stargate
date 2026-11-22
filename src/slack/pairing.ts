@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Result, Schema } from "effect";
 import type { Logger } from "pino";
-import type { AgentBackend } from "../backend";
+import type { AgentBackend } from "../backends/backend";
 import type { BotConfig } from "../config";
 import type { CronUIApi, CronView, SlackAck } from "../cron/ui";
 import {

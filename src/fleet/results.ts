@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Result, Schema } from "effect";
-import type { AgentBackend, PromptSourceContext } from "../backend";
+import type { AgentBackend, PromptSourceContext } from "../backends/backend";
 import { type ReplyChunk, replyText } from "../shared/slack-format";
 import type { Job, Store } from "../gateway/store";
 import type { FleetControl } from "./control";

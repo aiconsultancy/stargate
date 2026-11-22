@@ -10,7 +10,7 @@ import {
   type TextSink,
   type Transcript,
   TranscriptUnavailable,
-} from "../src/backend";
+} from "../src/backends/backend";
 import { cancellationNotice } from "../src/gateway/cancellation";
 import type { BotConfig } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";

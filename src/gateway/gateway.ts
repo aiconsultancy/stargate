@@ -25,7 +25,7 @@ import {
   type Transcript,
   type TranscriptEntry,
   TranscriptUnavailable,
-} from "../backend";
+} from "../backends/backend";
 import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "../config";
 import { abortable, runAbortable } from "../lib/effect";
