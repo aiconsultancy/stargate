@@ -3,7 +3,7 @@ import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { loadConfig } from "../src/config";
-import { processRunner } from "../src/nightly/exec";
+import { processRunner } from "../src/maintenance/nightly/exec";
 import {
   githubHeaders,
   githubToken,
@@ -11,7 +11,7 @@ import {
   stageRelease,
   switchCurrent,
   verifyOrigin,
-} from "../src/nightly/release";
+} from "../src/maintenance/nightly/release";
 import { loadEnvironment } from "../src/app/runtime";
 
 export async function bootstrapRelease(

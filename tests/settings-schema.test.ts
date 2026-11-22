@@ -20,7 +20,7 @@ import {
   teamsSchema,
 } from "../src/config";
 import { objectToolInput } from "../src/crew/tool-input";
-import { cronOperationSchema } from "../src/cron-control";
+import { cronOperationSchema } from "../src/cron/control";
 import { cronjobsSchema } from "../src/cron/job-config";
 import { fleetControlSchema } from "../src/fleet/protocol";
 import { fleetPolicySchema } from "../src/fleet/fleet-policy";
@@ -29,9 +29,9 @@ import {
   mentionNameSchema,
   textMentionRuleSchema,
 } from "../src/shared/mentions";
-import { cleanupSchema } from "../src/nightly/cleanup-config";
-import { maintenanceSchema } from "../src/nightly/config";
-import { nightlyWindowSchema } from "../src/nightly/instructions";
+import { cleanupSchema } from "../src/maintenance/nightly/cleanup-config";
+import { maintenanceSchema } from "../src/maintenance/nightly/config";
+import { nightlyWindowSchema } from "../src/maintenance/nightly/instructions";
 import { piModelSchema, piProviderSchema } from "../src/backends/pi/pi-model";
 import { quotaConfigSchema } from "../src/quota/quota";
 import { quotaWatchSchema } from "../src/quota/quota-watch";

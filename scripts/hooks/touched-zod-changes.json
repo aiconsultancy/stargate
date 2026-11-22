@@ -1,20 +1,5 @@
 [
   {
-    "path": "src/nightly/ready.ts",
-    "issue": "NET-1769",
-    "reason": "Centralize the installation root without changing ready schemas."
-  },
-  {
-    "path": "src/cron-control.ts",
-    "issue": "NET-1783",
-    "reason": "The formatter re-wraps one import after the gateway move."
-  },
-  {
-    "path": "src/nightly/cli.ts",
-    "issue": "NET-1784",
-    "reason": "Retarget the literal runtime import after the app move."
-  },
-  {
     "path": "src/ops/agent-profile-switch.ts",
     "issue": "NET-1784",
     "reason": "Correct the operator CLI usage path after the Stage 2 move"

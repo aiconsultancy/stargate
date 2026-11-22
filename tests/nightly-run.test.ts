@@ -25,19 +25,22 @@ import {
   type CommandResult,
   type CommandRunner,
   processRunner,
-} from "../src/nightly/exec";
-import { probeModel } from "../src/nightly/host";
+} from "../src/maintenance/nightly/exec";
+import { probeModel } from "../src/maintenance/nightly/host";
 import {
   backupDirectory,
   FileChanges,
   Journal,
   readJournalFile,
-} from "../src/nightly/journal";
-import { applyLiveModels } from "../src/nightly/model-step";
-import type { OpenCodeControl } from "../src/nightly/opencode";
-import { writePluginDigest } from "../src/nightly/plugin-digest";
-import { adoptRelease, linkedRelease } from "../src/nightly/release";
-import { reportSchema } from "../src/nightly/report";
+} from "../src/maintenance/nightly/journal";
+import { applyLiveModels } from "../src/maintenance/nightly/model-step";
+import type { OpenCodeControl } from "../src/maintenance/nightly/opencode";
+import { writePluginDigest } from "../src/maintenance/nightly/plugin-digest";
+import {
+  adoptRelease,
+  linkedRelease,
+} from "../src/maintenance/nightly/release";
+import { reportSchema } from "../src/maintenance/nightly/report";
 import {
   acceptCurrent,
   applyBudgetMs,
@@ -45,14 +48,14 @@ import {
   recoverInterruptedRun,
   runMaintenance,
   UpdateRefused,
-} from "../src/nightly/run";
-import { readState, updateState } from "../src/nightly/state";
+} from "../src/maintenance/nightly/run";
+import { readState, updateState } from "../src/maintenance/nightly/state";
 import {
   maintenanceUpdate,
   type UpdateOptions,
   updateUnit,
-} from "../src/nightly/update";
-import type { ModelRef } from "../src/nightly/versions";
+} from "../src/maintenance/nightly/update";
+import type { ModelRef } from "../src/maintenance/nightly/versions";
 import { botKey } from "../src/gateway/routing";
 import { Store } from "../src/gateway/store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";

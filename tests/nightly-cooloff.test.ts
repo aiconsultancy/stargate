@@ -4,7 +4,7 @@ import {
   npmCandidate,
   selectGitHubRelease,
   selectNpmVersion,
-} from "../src/nightly/cooloff";
+} from "../src/maintenance/nightly/cooloff";
 
 const now = Date.parse("2026-11-12T00:10:00Z");
 const hoursAgo = (hours: number) =>

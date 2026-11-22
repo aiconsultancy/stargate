@@ -5,15 +5,15 @@ import { access, mkdir, realpath, rename } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { type Config, pinnedSessionIDs } from "../config";
+import { type Config, pinnedSessionIDs } from "../../config";
 import {
   claimMaintenanceDrain,
   type MaintenanceDrain,
   maintenanceDrainDirectory,
   readDrainParticipants,
   writeMaintenanceDrain,
-} from "../maintenance/maintenance-drain";
-import { isAllowedChannel } from "../gateway/routing";
+} from "../maintenance-drain";
+import { isAllowedChannel } from "../../gateway/routing";
 import { type CleanupResult, runCleanup } from "./cleanup";
 import { cleanupProtection } from "./cleanup-protection";
 import { defaultCronHorizonMinutes, type MaintenanceConfig } from "./config";

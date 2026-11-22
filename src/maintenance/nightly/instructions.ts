@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { settingsPattern, settingsStruct } from "../settings-schema";
+import { settingsPattern, settingsStruct } from "../../settings-schema";
 import { timeZoneSchema } from "./config";
 
 export const nightlyWindowSchema = settingsStruct({

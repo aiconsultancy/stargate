@@ -8,7 +8,7 @@ import {
   readStarfleetSnapshot,
 } from "../src/health/health";
 import { healthConfigSchema } from "../src/health/health-config";
-import { maintenanceSchema } from "../src/nightly/config";
+import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import { bot } from "./fixtures";
 
 const now = Date.parse("2026-11-18T12:00:00Z");

@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { z } from "zod";
 import { configSchema } from "../src/config";
-import { maintenanceSchema } from "../src/nightly/config";
-import { recoveryBudgetMs, undoBounds } from "../src/nightly/journal";
-import { MaintenanceOutbox } from "../src/nightly/outbox";
+import { maintenanceSchema } from "../src/maintenance/nightly/config";
+import {
+  recoveryBudgetMs,
+  undoBounds,
+} from "../src/maintenance/nightly/journal";
+import { MaintenanceOutbox } from "../src/maintenance/nightly/outbox";
 import {
   limits,
   queueNotice,
@@ -15,13 +18,13 @@ import {
   reportSchema,
   summary,
   writeReport,
-} from "../src/nightly/report";
+} from "../src/maintenance/nightly/report";
 import {
   buildMaintenanceUnits,
   buildUpdateCommand,
   startTimeoutMinutes,
-} from "../src/nightly/timer";
-import { occurrence } from "../src/nightly/window";
+} from "../src/maintenance/nightly/timer";
+import { occurrence } from "../src/maintenance/nightly/window";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-report-"));
 afterAll(() => rm(root, { recursive: true, force: true }));

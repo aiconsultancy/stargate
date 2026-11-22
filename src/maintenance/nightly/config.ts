@@ -1,12 +1,12 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
-import { isLocalhost } from "../lib/loopback";
+import { isLocalhost } from "../../lib/loopback";
 import {
   piModelSchema,
   piProviderSchema,
   piProxyModel,
   piProxyModels,
-} from "../backends/pi/pi-model";
+} from "../../backends/pi/pi-model";
 import {
   settingsCheck,
   settingsDefault,
@@ -14,7 +14,7 @@ import {
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../settings-schema";
+} from "../../settings-schema";
 import { cleanupSchema } from "./cleanup-config";
 
 /** Strict `maintenance` section of stargate.json. Every component is opt-in. */

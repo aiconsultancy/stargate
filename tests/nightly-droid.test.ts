@@ -16,21 +16,31 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
 import { CrewState } from "../src/crew/state";
-import { maintenanceSchema } from "../src/nightly/config";
+import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import {
   type DroidDependencies,
   droidDirectory,
   runDroid,
-} from "../src/nightly/droid";
-import type { DroidAgent, DroidTools } from "../src/nightly/droid-agent";
-import { openPiDroid } from "../src/nightly/droid-agent";
-import { digestReport } from "../src/nightly/droid-facts";
-import type { CommandResult, CommandRunner } from "../src/nightly/exec";
-import type { OpenCodeControl } from "../src/nightly/opencode";
-import { type Report, writeAlert, writeReport } from "../src/nightly/report";
-import { updateState } from "../src/nightly/state";
-import { buildDroidUnits } from "../src/nightly/timer";
-import { stableJitter } from "../src/nightly/window";
+} from "../src/maintenance/nightly/droid";
+import type {
+  DroidAgent,
+  DroidTools,
+} from "../src/maintenance/nightly/droid-agent";
+import { openPiDroid } from "../src/maintenance/nightly/droid-agent";
+import { digestReport } from "../src/maintenance/nightly/droid-facts";
+import type {
+  CommandResult,
+  CommandRunner,
+} from "../src/maintenance/nightly/exec";
+import type { OpenCodeControl } from "../src/maintenance/nightly/opencode";
+import {
+  type Report,
+  writeAlert,
+  writeReport,
+} from "../src/maintenance/nightly/report";
+import { updateState } from "../src/maintenance/nightly/state";
+import { buildDroidUnits } from "../src/maintenance/nightly/timer";
+import { stableJitter } from "../src/maintenance/nightly/window";
 import { Store } from "../src/gateway/store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";
 

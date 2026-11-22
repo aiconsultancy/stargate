@@ -2,7 +2,7 @@ import { mkdir, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { type Config, loadConfig } from "../config";
+import { type Config, loadConfig } from "../../config";
 import { runCleanup } from "./cleanup";
 import { cleanupProtection } from "./cleanup-protection";
 import type { MaintenanceConfig } from "./config";
@@ -214,7 +214,7 @@ export async function maintenanceCli(
     console.log(JSON.stringify(z.toJSONSchema(reportSchema), null, 2));
     return 0;
   }
-  const { loadEnvironment } = await import("../app/runtime");
+  const { loadEnvironment } = await import("../../app/runtime");
   await loadEnvironment(options.configPath);
   const config = await loadConfig(options.configPath);
   if (operation === "cleanup") {

@@ -24,13 +24,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { bootstrapRelease } from "../scripts/bootstrap-stargate";
-import { maintenanceSchema } from "../src/nightly/config";
+import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import {
   type CommandOptions,
   type CommandRunner,
   processRunner,
-} from "../src/nightly/exec";
-import { readReady, waitReady, writeReady } from "../src/nightly/ready";
+} from "../src/maintenance/nightly/exec";
+import {
+  readReady,
+  waitReady,
+  writeReady,
+} from "../src/maintenance/nightly/ready";
 import {
   adoptRelease,
   githubHeaders,
@@ -43,7 +47,7 @@ import {
   type StargateReleaseConfig,
   stageRelease,
   switchCurrent,
-} from "../src/nightly/release";
+} from "../src/maintenance/nightly/release";
 import { tarball } from "./tar";
 
 let directory: string;

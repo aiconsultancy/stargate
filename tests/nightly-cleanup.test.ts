@@ -21,12 +21,15 @@ import {
   runCleanup as cleanup,
   cleanupPathUse,
   scratchBatch,
-} from "../src/nightly/cleanup";
+} from "../src/maintenance/nightly/cleanup";
 import {
   cleanupResultSchema,
   cleanupSchema,
-} from "../src/nightly/cleanup-config";
-import { type CommandRunner, processRunner } from "../src/nightly/exec";
+} from "../src/maintenance/nightly/cleanup-config";
+import {
+  type CommandRunner,
+  processRunner,
+} from "../src/maintenance/nightly/exec";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-cleanup-"));
 // Even epoch day: oversized scratch batches start with the first window.

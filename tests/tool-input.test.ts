@@ -16,7 +16,7 @@ import { modelInputSchema, modelToolInputSchema } from "../src/crew/models";
 import { projectToolInput } from "../src/crew/project-options";
 import * as toolInputs from "../src/crew/tool-input";
 import { objectToolInput } from "../src/crew/tool-input";
-import { cronOperationSchema } from "../src/cron-control";
+import { cronOperationSchema } from "../src/cron/control";
 import { notificationInputSchema } from "../src/notifications/preferences/notification-store";
 import { quotaInputSchema } from "../src/quota/quota";
 

@@ -12,7 +12,7 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
-import type { Crew } from "../nightly/crews";
+import type { Crew } from "./nightly/crews";
 import type { UpdateReceipt } from "./update-notice";
 
 /**

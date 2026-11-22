@@ -10,7 +10,7 @@ import {
   type CronServices,
   type ScheduledInput,
 } from "../src/cron/index";
-import { runCronOperation } from "../src/cron-control";
+import { runCronOperation } from "../src/cron/control";
 import { validateCronInput } from "../src/cron/input";
 import { CronStore } from "../src/cron/store";
 import { parseCronjob, renderCronjob } from "../src/cron/job-files";

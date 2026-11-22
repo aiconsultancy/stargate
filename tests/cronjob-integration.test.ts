@@ -11,7 +11,7 @@ import {
   type ScheduledInput,
   type SchedulerGateway,
 } from "../src/cron/index";
-import { runCronOperation } from "../src/cron-control";
+import { runCronOperation } from "../src/cron/control";
 import { CronStore } from "../src/cron/store";
 import {
   type CronjobDefinition,
