@@ -1,4 +1,10 @@
-import { afterEach, expect, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,10 +26,24 @@ import {
 import { IrcShip } from "../src/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";
-import { FakeIrcServer, lineOf, until } from "./irc-fixture";
+import { FakeIrcServer, lineOf, until as pollUntil } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+// Two fresh opens (10 s each), two joins (5 s each), four reply waits
+// (5 s each), and close/scheduling (10 s). Predicate deadlines stay 5 s.
+setDefaultTimeout(60_000);
+let polling = new AbortController();
+beforeEach(() => {
+  polling = new AbortController();
+});
+function until(...args: Parameters<typeof pollUntil>) {
+  return pollUntil(args[0], args[1], args[2], {
+    ...args[3],
+    signal: polling.signal,
+  });
+}
 afterEach(async () => {
+  polling.abort();
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
@@ -197,15 +217,24 @@ async function setup(
   cleanup.push(close);
   const [captain, chief] = ship.registrations;
   if (!captain || !chief) throw new Error("missing registration");
+  const joined = () => ({
+    captainShip: captain.client.inChannel("#ship-galactica"),
+    chiefShip: chief.client.inChannel("#ship-galactica"),
+    captainAudit:
+      config.audit === undefined || options.captainInvited === false
+        ? "not required"
+        : captain.client.inChannel("#agent-dms"),
+  });
   await until(
-    () =>
-      captain.client.inChannel("#ship-galactica") &&
-      chief.client.inChannel("#ship-galactica") &&
-      (config.audit === undefined ||
-        options.captainInvited === false ||
-        captain.client.inChannel("#agent-dms")),
+    () => {
+      const state = joined();
+      return (
+        state.captainShip && state.chiefShip && state.captainAudit !== false
+      );
+    },
     5000,
     "connections joined",
+    { state: joined },
   );
   return {
     fake,
@@ -252,7 +281,9 @@ function mirror(fake: FakeIrcServer) {
 }
 
 async function mirrored(fake: FakeIrcServer, entry: string) {
-  await until(() => mirror(fake).includes(entry), 5000, `mirror: ${entry}`);
+  await until(() => mirror(fake).includes(entry), 5000, `mirror: ${entry}`, {
+    state: () => ({ entries: mirror(fake).length }),
+  });
 }
 
 test("irc audit: line format for incoming and outgoing DMs", () => {
@@ -500,7 +531,7 @@ test("irc audit: the audit channel is never a conversation and never loops", asy
   ).toBe(false);
 });
 
-test("irc audit: a multiline DM is one entry; long entries split like replies", async () => {
+test("irc audit: a multiline DM is one entry", async () => {
   const multi = await setup({
     multiline: true,
     answer: () => "Line one.\nLine two.",
@@ -532,9 +563,9 @@ test("irc audit: a multiline DM is one entry; long entries split like replies", 
       .filter((line) => line.includes("#agent-dms"))
       .join("\n"),
   ).not.toContain("hunter2");
-  await multi.close();
+}, 30_000); // One fresh open (10 s), join (5 s), two replies (10 s), margin (5 s).
 
-  // Without multiline, a long entry splits into whole IRC lines.
+test("irc audit: long entries split into whole IRC lines without multiline", async () => {
   const plain = await setup();
   const long = `report ${"fuel nominal ".repeat(38)}end`;
   plain.fake.say(jack, captainAccount, long);
@@ -551,7 +582,7 @@ test("irc audit: a multiline DM is one entry; long entries split like replies", 
   expect(lines.join(" ")).toBe(`[dm] jack → galactica-captain: ${long}`);
   for (const line of plain.fake.received(captainAccount))
     expect(utf8Bytes(line) + 2).toBeLessThanOrEqual(512);
-});
+}, 30_000); // One fresh open (10 s), join (5 s), reply (5 s), margin (10 s).
 
 test("irc audit: a failed or full mirror never blocks the DM reply", async () => {
   const refused = await setup({
@@ -938,7 +969,7 @@ test("irc audit: an entry that expires in the send queue counts as dropped", asy
   fake.say(jack, captainAccount, "after the backlog");
   await mirrored(fake, "[dm] jack → galactica-captain: after the backlog");
   expect(logs.join("\n")).not.toContain("during the backlog");
-}, 15_000);
+}, 35_000); // Open (10 s), join/drop/mirror (3 * 5 s), delay (2 s), margin (8 s).
 
 test("irc audit: dmPolicy redirect points every DM to the ship channel", async () => {
   const { fake, store, captain, chief, prompts } = await setup({
