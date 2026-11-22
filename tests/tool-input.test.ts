@@ -3,7 +3,7 @@ import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
 import { postInputSchema } from "../src/captain-post/captain-post";
-import { crewOpenCodeInput } from "../src/crew/crew-tool-input";
+import { crewOpenCodeInput } from "../src/crew/input/crew-tool-input";
 import { crewInputSchema } from "../src/crew/engine";
 import {
   historyInputBranches,
@@ -19,9 +19,9 @@ import {
   modelInputSchema,
   modelToolInputSchema,
 } from "../src/crew/controls/models";
-import { projectToolInput } from "../src/crew/project-options";
-import * as toolInputs from "../src/crew/tool-input";
-import { objectToolInput } from "../src/crew/tool-input";
+import { projectToolInput } from "../src/crew/input/project-options";
+import * as toolInputs from "../src/crew/input/tool-input";
+import { objectToolInput } from "../src/crew/input/tool-input";
 import { cronOperationSchema } from "../src/cron/control";
 import { notificationInputSchema } from "../src/notifications/preferences/notification-store";
 import { quotaInputSchema } from "../src/quota/quota";

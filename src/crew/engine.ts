@@ -56,9 +56,9 @@ import {
   crewTaskID,
   crewText,
   type CrewInput,
-} from "./crew-tool-input";
-export { crewInputBranches, crewInputSchema } from "./crew-tool-input";
-export type { CrewInput } from "./crew-tool-input";
+} from "./input/crew-tool-input";
+export { crewInputBranches, crewInputSchema } from "./input/crew-tool-input";
+export type { CrewInput } from "./input/crew-tool-input";
 import { CrewHistoryRPC } from "./history/history-rpc";
 import { crewFingerprint } from "./identity";
 import { MesijClient, type MesijMessage } from "./mesij";
@@ -73,7 +73,7 @@ import { redactCredentials } from "../lib/credentials";
 import { journalInputSchema } from "./journal";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
-import { projectsSchema } from "./project-options";
+import { projectsSchema } from "./input/project-options";
 import {
   type AbandonInput,
   type ExecutionInspection,

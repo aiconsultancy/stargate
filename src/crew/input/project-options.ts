@@ -12,8 +12,8 @@ import {
   settingsRecord,
   settingsRefine,
   settingsStruct,
-} from "../config/settings-schema";
-import { agentIDSchema } from "./team";
+} from "../../config/settings-schema";
+import { agentIDSchema } from "../team";
 import {
   type EffectToolInput,
   effectToolInputFields,

@@ -6,14 +6,14 @@ import type {
 import {
   settingsAdvertisement,
   settingsInputAdvertisement,
-} from "../config/settings-legacy";
+} from "../../config/settings-legacy";
 import {
   settingsDefault,
   settingsDiscriminatedUnion,
   settingsIssues,
   settingsStartsWith,
   settingsStruct,
-} from "../config/settings-schema";
+} from "../../config/settings-schema";
 import {
   effectProjectKeySchema,
   effectProjectToolInput,
@@ -24,9 +24,9 @@ import {
   inspectInputSchema,
   reconcileInputSchema,
   resumeInputSchema,
-} from "./reconciliation";
-import { agentIDSchema } from "./team";
-import { workspaceInputSchemas } from "./workspace/workspace";
+} from "../reconciliation";
+import { agentIDSchema } from "../team";
+import { workspaceInputSchemas } from "../workspace/workspace";
 
 const crewTaskID = Schema.String.check(
   settingsStartsWith("task_"),

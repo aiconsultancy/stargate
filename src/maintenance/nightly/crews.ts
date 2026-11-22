@@ -3,7 +3,7 @@ import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { Config } from "../../config";
-import { projectKeySchema } from "../../crew/project-options";
+import { projectKeySchema } from "../../crew/input/project-options";
 import { StepError } from "./exec";
 
 /**

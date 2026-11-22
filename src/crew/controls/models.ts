@@ -17,7 +17,7 @@ import {
   settingsStruct,
 } from "../../config/settings-schema";
 import type { CrewCaller, WorkerModelPeer } from "../engine";
-import { effectProjectToolInput } from "../project-options";
+import { effectProjectToolInput } from "../input/project-options";
 import { CrewError } from "../state";
 import { agentIDSchema, defaultModelProviders, type Team } from "../team";
 

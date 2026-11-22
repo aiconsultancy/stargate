@@ -11,8 +11,8 @@ import { settingsIssues } from "../config/settings-schema";
 import {
   effectProjectKeySchema,
   effectProjectToolInput,
-} from "./project-options";
-import type { EffectToolInput } from "./tool-input";
+} from "./input/project-options";
+import type { EffectToolInput } from "./input/tool-input";
 
 function jsonTarget(
   json: Record<string, unknown>,

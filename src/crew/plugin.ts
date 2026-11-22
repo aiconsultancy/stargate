@@ -22,7 +22,7 @@ import { quotaInputSchema } from "../quota/quota";
 import { noticeTools } from "../maintenance/update-notice";
 import { connectHistoryAPI, historyVisible } from "./history/api";
 import { compactOnServer } from "./history/compaction";
-import { crewOpenCodeInput } from "./crew-tool-input";
+import { crewOpenCodeInput } from "./input/crew-tool-input";
 import { CrewCron } from "./cron/cron";
 import { CrewCronExecution } from "./cron/cron-execution";
 import { CrewEngine } from "./engine";
@@ -40,7 +40,10 @@ import { CrewModels, modelToolInputSchema } from "./controls/models";
 import { nativeWait } from "./native-wait";
 import { CrewNotifications } from "./controls/notifications";
 import { CrewPost } from "./controls/post";
-import { effectProjectToolInput, projectToolInput } from "./project-options";
+import {
+  effectProjectToolInput,
+  projectToolInput,
+} from "./input/project-options";
 import { CrewProjects } from "./workspace/projects";
 import {
   CrewQuestionHandoff,
@@ -51,7 +54,7 @@ import { CrewQuestions, crewQuestionInputSchema } from "./questions";
 import { CrewRecovery, runRecoveryOperator } from "./recovery-rpc";
 import { CrewReporting } from "./report-rpc";
 import { CrewError } from "./state";
-import { objectToolInput } from "./tool-input";
+import { objectToolInput } from "./input/tool-input";
 import { CrewWaiting, waitingInputSchema } from "./controls/waiting";
 
 // greybeard: configured shared workers; only explicit DM wakes a captain.
