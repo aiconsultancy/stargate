@@ -1,4 +1,4 @@
-import { expect, mock, test } from "bun:test";
+import { expect, mock, spyOn, test } from "bun:test";
 import { existsSync, lstatSync, watch } from "node:fs";
 import {
   chmod,
@@ -10,7 +10,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { createServer, request } from "node:http";
+import { createServer, request, ServerResponse } from "node:http";
 import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -165,6 +165,25 @@ async function raw(
 const wire = (headers: string, body = "", target = path) =>
   `POST ${target} HTTP/1.1\r\nHost: localhost\r\n${headers}\r\n${body}`;
 
+function holdTimeoutResponse() {
+  const queued = Promise.withResolvers<{
+    output: ServerResponse;
+    flush(): void;
+  }>();
+  const original = ServerResponse.prototype.end;
+  const end = spyOn(ServerResponse.prototype, "end").mockImplementation(
+    function (this: ServerResponse, ...args: unknown[]) {
+      const flush = () => {
+        Reflect.apply(original, this, args);
+      };
+      if (this.statusCode !== 503) flush();
+      else queued.resolve({ output: this, flush });
+      return this;
+    },
+  );
+  return { queued: queued.promise, restore: () => end.mockRestore() };
+}
+
 test("exact notification routes isolate authority, reject aliases and read no rejected body", async () => {
   const handle = mock(route().handle);
   const host = await fixture([route({ handle })]);
@@ -317,7 +336,7 @@ test("body bytes are counted for chunked input and framing errors never reach ha
   }
 });
 
-test("absolute header/body deadlines close trickling connections and enforce header bytes", async () => {
+test("absolute header deadlines close trickling connections and enforce header bytes", async () => {
   const handle = mock(route().handle);
   const host = await fixture([route({ handle })], {
     headersMs: 80,
@@ -336,13 +355,6 @@ test("absolute header/body deadlines close trickling connections and enforce hea
       ),
     );
     expect(await huge.closed).not.toContain("202");
-    const body = await raw(
-      host.socketPath,
-      wire("Authorization: Bearer producer\r\nContent-Length: 16\r\n"),
-    );
-    trickle = setInterval(() => body.socket.write("a"), 15);
-    expect(await body.closed).toContain("503");
-    clearInterval(trickle);
     expect(handle).not.toHaveBeenCalled();
     expect((await post(host.socketPath)).status).toBe(202);
   } finally {
@@ -350,6 +362,105 @@ test("absolute header/body deadlines close trickling connections and enforce hea
     await host.close();
   }
 });
+
+test("absolute body deadlines return 503 after headers are ready despite trickling input", async () => {
+  const headersReady = Promise.withResolvers<void>();
+  const authorize = route().authorize;
+  const handle = mock(route().handle);
+  const host = await fixture(
+    [
+      route({
+        handle,
+        authorize: (headers) => {
+          const result = authorize(headers);
+          headersReady.resolve();
+          return result;
+        },
+      }),
+    ],
+    { requestMs: 100 },
+  );
+  let trickle: ReturnType<typeof setInterval> | undefined;
+  const held = holdTimeoutResponse();
+  try {
+    const body = await raw(
+      host.socketPath,
+      wire("Authorization: Bearer producer\r\nContent-Length: 16\r\n"),
+    );
+    await Promise.race([
+      headersReady.promise,
+      body.closed.then(() => {
+        throw new Error("Body fixture closed before its headers were ready");
+      }),
+    ]);
+    trickle = setInterval(() => body.socket.write("a"), 15);
+    const { output, flush } = await held.queued;
+    expect(output.statusCode).toBe(503);
+    clearInterval(trickle);
+    flush();
+    const response = await body.closed;
+    expect(response).toContain("503");
+    expect(response).toContain("request_timeout");
+    clearInterval(trickle);
+    expect(handle).not.toHaveBeenCalled();
+    expect((await post(host.socketPath)).status).toBe(202);
+  } finally {
+    held.restore();
+    clearInterval(trickle);
+    await host.close();
+  }
+});
+
+test.each(["finish", "flush bound"])(
+  "timeout aborts work before flushing 503 and closes on %s",
+  async (closeOn) => {
+    const entered = Promise.withResolvers<AbortSignal>();
+    const settle = Promise.withResolvers<Response>();
+    const host = await fixture(
+      [
+        route({
+          handle: async (_request, _caller, signal) => {
+            entered.resolve(signal);
+            return settle.promise;
+          },
+        }),
+      ],
+      { requestMs: 30 },
+    );
+    const held = holdTimeoutResponse();
+    const timers = spyOn(globalThis, "setTimeout");
+    try {
+      const client = await raw(
+        host.socketPath,
+        wire("Authorization: Bearer producer\r\nContent-Length: 0\r\n"),
+      );
+      const signal = await entered.promise;
+      const { output, flush } = await held.queued;
+      expect(signal.aborted).toBe(true);
+      expect(output.destroyed).toBe(false);
+      if (closeOn === "finish") {
+        flush();
+        const response = await client.closed;
+        expect(response).toContain("503");
+        expect(response).toContain("request_timeout");
+      } else {
+        const bound = timers.mock.calls.find(([, delay]) => delay === 100);
+        expect(bound).toBeDefined();
+        const expire = bound?.[0];
+        if (typeof expire !== "function")
+          throw new Error("Missing bounded timeout-response cleanup");
+        expire();
+        expect(await client.closed).toBe("");
+      }
+      expect(output.destroyed).toBe(true);
+    } finally {
+      timers.mockRestore();
+      held.restore();
+      settle.resolve(new Response());
+      await host.close();
+    }
+  },
+);
 
 test("handler failures return a fixed error without stopping other requests", async () => {
   let fail = true;

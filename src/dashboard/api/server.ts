@@ -23,6 +23,8 @@ const maxHeaders = 16 * 1024;
 const maxNotificationWork = 8;
 export const maxFleetReads = 8;
 const maxFleetStreams = 8;
+// A small timeout response may drain, but cannot retain a socket indefinitely.
+const timeoutFlushMs = 100;
 
 function failure(status: number, code: string) {
   return Response.json(
@@ -234,11 +236,24 @@ export async function startApiServer(options: Options) {
     const streaming =
       fleet && path === "/api/v1/events" && request.method === "GET";
     const duration = Math.min(requestMs, route?.limits.timeoutMs ?? requestMs);
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearFlush = () => {
+      if (flushTimer) clearTimeout(flushTimer);
+    };
+    const destroy = () => {
+      clearFlush();
+      request.socket.destroy();
+    };
+    const abort = () => {
+      if (!flushTimer) destroy();
+    };
+    request.socket.once("close", clearFlush);
     // Fleet streams keep their independent heartbeat/idle lifetime.
     const timer = streaming
       ? undefined
       : setTimeout(() => {
           if (!output.headersSent && !output.destroyed) {
+            flushTimer = setTimeout(destroy, timeoutFlushMs);
             output.writeHead(503, {
               "Content-Type": "application/json; charset=utf-8",
               "Cache-Control": "no-store",
@@ -254,10 +269,9 @@ export async function startApiServer(options: Options) {
             );
           }
           controller.abort();
-          output.destroy();
+          if (!flushTimer) output.destroy();
         }, duration);
-    const destroy = () => request.socket.destroy();
-    signal.addEventListener("abort", destroy, { once: true });
+    signal.addEventListener("abort", abort, { once: true });
     output.once("finish", destroy);
     let admitted = false;
     try {
@@ -336,7 +350,7 @@ export async function startApiServer(options: Options) {
         );
     } finally {
       if (timer) clearTimeout(timer);
-      signal.removeEventListener("abort", destroy);
+      signal.removeEventListener("abort", abort);
       output.off("close", closed);
       request.off("aborted", disconnected);
       producers.delete(controller);
