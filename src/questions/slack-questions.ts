@@ -1,6 +1,5 @@
 import { Schema } from "effect";
 import type { BotConfig } from "../config";
-import type { TransportDelivery } from "../gateway/ports";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
@@ -14,8 +13,32 @@ import {
   isAllowedChannel,
   isAllowedUser,
 } from "../gateway/routing";
-import type { SlackPanelContent } from "../shared/slack-format";
+import type { SlackContent, SlackPanelContent } from "../shared/slack-format";
 import type { Job, Store } from "../gateway/store";
+
+type QuestionDelivery = {
+  post(
+    channel: string,
+    thread: string,
+    text: string,
+    stopJob?: number,
+    unit?: { allowed: () => boolean },
+    content?: SlackContent,
+  ): Promise<string> | Promise<void>;
+  update?(
+    channel: string,
+    ts: string,
+    text: string,
+    stopJob?: number,
+    content?: SlackContent,
+  ): Promise<boolean> | Promise<void>;
+  ephemeral?(
+    channel: string,
+    user: string,
+    thread: string,
+    text: string,
+  ): Promise<void>;
+};
 
 const prefix = "stargate_question_";
 const timestamp = Schema.String.check(Schema.isPattern(/^\d{1,16}\.\d{1,6}$/));
@@ -244,7 +267,7 @@ export class SlackQuestionControls {
   private tail = Promise.resolve();
   constructor(
     private readonly store: Store,
-    private readonly slack: TransportDelivery,
+    private readonly slack: QuestionDelivery,
     private readonly bot: () => BotConfig | undefined,
     private readonly identity: Identity,
     private readonly isHuman: (user: string) => Promise<boolean>,

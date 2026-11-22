@@ -1,12 +1,28 @@
-import type { IrcClient } from "../irc/client";
 import { ircParts } from "../irc/text";
 
 /** An assignment is one IRC message: never several independently actionable turns. */
 export async function sendFleetAssignment(
-  client: Pick<
-    IrcClient,
-    "waitReady" | "budget" | "multiline" | "privmsg" | "sendBatch"
-  >,
+  client: {
+    waitReady(timeoutMs: number, signal?: AbortSignal): Promise<void>;
+    budget(
+      command: string,
+      target: string,
+      tags: Record<string, string>,
+    ): number;
+    readonly multiline: { maxBytes: number; maxLines: number } | undefined;
+    privmsg(
+      target: string,
+      text: string,
+      tags?: Record<string, string>,
+      guard?: () => boolean,
+    ): Promise<void>;
+    sendBatch(
+      target: string,
+      lines: readonly { text: string; concat: boolean }[],
+      tags?: Record<string, string>,
+      guard?: () => boolean,
+    ): Promise<void>;
+  },
   channel: string,
   text: string,
   allowed: () => boolean,

@@ -27,7 +27,7 @@ import {
   type HistorySession,
   type SessionHistory,
 } from "../shared/session-history";
-import type { Store } from "../gateway/store";
+import type { RequestFailure } from "../shared/request-failure";
 
 export type DashboardShip = {
   bot: Pick<
@@ -130,8 +130,19 @@ type CrewRead = {
  */
 export function dashboardSource(
   ships: readonly DashboardShip[],
-  store: Pick<Store, "queueCounts" | "recentJobs"> & {
-    transcript: Pick<Store["transcript"], "sessionIDs" | "ownsSession">;
+  store: {
+    queueCounts(botKey: string): ShipView["queue"]["counts"];
+    recentJobs(
+      botKey: string,
+      limit: number,
+    ): (Pick<
+      ShipView["queue"]["recent"][number],
+      "id" | "status" | "channel" | "thread" | "user"
+    > & { failure: RequestFailure | null; deferDelivery: number })[];
+    transcript: {
+      sessionIDs(botKey: string, limit: number): string[];
+      ownsSession(botKey: string, sessionID: string): boolean;
+    };
   },
   cronStore: {
     report(botKey: string): ShipView["cron"]["jobs"];
