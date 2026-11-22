@@ -5,7 +5,7 @@ import type { Config } from "../../config";
 import { discoverCrews } from "./crews";
 import type { CommandRunner } from "./exec";
 import { proxyModels } from "./host";
-import { queuedCrewTasks } from "./idle";
+import { queuedCrewTasks } from "./schedule/idle";
 import { Journal, journalEntries } from "./journal";
 import { maintenanceDirectory } from "./paths";
 import { readReady, readyProcessAlive } from "./ready";
@@ -23,7 +23,7 @@ import {
   nextWindow,
   previousWindow,
   stableJitter,
-} from "./window";
+} from "./schedule/window";
 
 /**
  * Read-only facts for the maintenance droid. Everything here is collected by

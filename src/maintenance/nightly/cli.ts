@@ -20,14 +20,18 @@ import {
   runMaintenance,
   UpdateRefused,
 } from "./run";
-import { buildDroidUnits, buildMaintenanceUnits, timerName } from "./timer";
+import {
+  buildDroidUnits,
+  buildMaintenanceUnits,
+  timerName,
+} from "./schedule/timer";
 import { maintenanceUpdate, updateUnit } from "./update";
 import {
   currentWindow,
   defaultInstallID,
   nextWindow,
   stableJitter,
-} from "./window";
+} from "./schedule/window";
 
 export const maintenanceHelp = `Usage: stargate maintenance <command> [--config PATH] [options]
 Commands:

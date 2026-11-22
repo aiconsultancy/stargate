@@ -8,7 +8,7 @@ import {
   stableJitter,
   timerCalendar,
   windowMinutes,
-} from "../src/maintenance/nightly/window";
+} from "../src/maintenance/nightly/schedule/window";
 
 const london = {
   start: "00:00",

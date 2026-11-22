@@ -18,7 +18,7 @@ import {
   type IdleInput,
   queuedCrewTasks,
   waitForIdle,
-} from "../src/maintenance/nightly/idle";
+} from "../src/maintenance/nightly/schedule/idle";
 import type { OpenCodeControl } from "../src/maintenance/nightly/opencode";
 import { bounds } from "../src/maintenance/nightly/run";
 import { openStore } from "../src/app/open-store";

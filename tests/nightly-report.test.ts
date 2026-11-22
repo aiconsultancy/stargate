@@ -23,8 +23,8 @@ import {
   buildMaintenanceUnits,
   buildUpdateCommand,
   startTimeoutMinutes,
-} from "../src/maintenance/nightly/timer";
-import { occurrence } from "../src/maintenance/nightly/window";
+} from "../src/maintenance/nightly/schedule/timer";
+import { occurrence } from "../src/maintenance/nightly/schedule/window";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-report-"));
 afterAll(() => rm(root, { recursive: true, force: true }));

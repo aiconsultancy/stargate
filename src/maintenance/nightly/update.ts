@@ -16,7 +16,7 @@ import {
   samePlugin,
   UpdateRefused,
 } from "./run";
-import { buildUpdateCommand } from "./timer";
+import { buildUpdateCommand } from "./schedule/timer";
 import { normalizeVersion } from "./versions";
 
 /**

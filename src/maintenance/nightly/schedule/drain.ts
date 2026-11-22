@@ -1,4 +1,4 @@
-import type { MaintenanceDrain } from "../maintenance-drain";
+import type { MaintenanceDrain } from "../../maintenance-drain";
 import { checkIdle, type IdleInput, type IdleResult } from "./idle";
 
 export type Clock = {
