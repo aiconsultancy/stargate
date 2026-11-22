@@ -41,7 +41,7 @@ import { nativeWait } from "./native-wait";
 import { CrewNotifications } from "./notifications";
 import { CrewPost } from "./post";
 import { effectProjectToolInput, projectToolInput } from "./project-options";
-import { CrewProjects } from "./projects";
+import { CrewProjects } from "./workspace/projects";
 import {
   CrewQuestionHandoff,
   CrewQuestionRpc,

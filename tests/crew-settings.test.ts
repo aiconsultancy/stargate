@@ -12,7 +12,7 @@ import { projectsSchema } from "../src/crew/project-options";
 import { inspectInputSchema } from "../src/crew/reconciliation";
 import { CrewState } from "../src/crew/state";
 import { profileTeam, teamSchema } from "../src/crew/team";
-import { workspaceInputSchemas } from "../src/crew/workspace";
+import { workspaceInputSchemas } from "../src/crew/workspace/workspace";
 import { renderProfile } from "../src/app/profile";
 import { decodeSettings } from "../src/config/settings-errors";
 

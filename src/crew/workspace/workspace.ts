@@ -8,9 +8,9 @@ import {
   settingsPattern,
   settingsStartsWith,
   settingsStruct,
-} from "../config/settings-schema";
-import { CrewError } from "./state";
-import { agentIDSchema } from "./team";
+} from "../../config/settings-schema";
+import { CrewError } from "../state";
+import { agentIDSchema } from "../team";
 
 const expected = settingsStruct({
   head: Schema.String.check(settingsPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/)),

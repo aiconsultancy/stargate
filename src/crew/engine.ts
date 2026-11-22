@@ -118,7 +118,7 @@ import {
   type WorkspaceInput,
   type WorkspaceInspection,
   workspaceRoot,
-} from "./workspace";
+} from "./workspace/workspace";
 
 const decodeJournalInput = Schema.decodeUnknownResult(journalInputSchema, {
   onExcessProperty: "error",

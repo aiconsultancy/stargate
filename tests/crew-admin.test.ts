@@ -24,7 +24,7 @@ import type {
 } from "../src/crew/reconciliation";
 import { runRecoveryOperator } from "../src/crew/recovery-rpc";
 import type { CrewTask } from "../src/crew/state";
-import { gitProcessOptions } from "../src/crew/workspace";
+import { gitProcessOptions } from "../src/crew/workspace/workspace";
 import { crewStatusSchema } from "../src/shared/crew-status";
 
 const crew = ["bosun", "chief", "roslin"] as const;
