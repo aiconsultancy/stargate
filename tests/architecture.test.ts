@@ -59,7 +59,7 @@ test("source architecture introduces no new structural or boundary violations", 
   ]).toEqual([]);
   expect(
     staleGraphBaseline(source, baseline, roots),
-    'Architecture baseline is stale. Refresh and commit the lowered baseline in this PR: mise run architecture-refresh -- --base "$(git merge-base origin/main HEAD)" --write. Do not raise caps or add permissions to accept a regression.',
+    'Architecture baseline is stale. Refresh and commit the lowered baseline in this PR: mise run architecture-refresh -- --base "$(git merge-base origin/main HEAD)" --write. Do not raise caps or add permissions to accept a regression. --allow-closure-addition is only for files holding only code the closure already loaded, with a decision recorded for this change; otherwise remove the added import.',
   ).toEqual([]);
 });
 

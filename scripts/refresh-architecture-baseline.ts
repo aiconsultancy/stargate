@@ -27,6 +27,7 @@ import {
   documentationViolations,
   importClosure,
   normalizeGraph,
+  sourceIdentities,
   sourceRootFiles,
   type ArchitecturePolicy,
 } from "../tests/architecture-graph";
@@ -47,10 +48,18 @@ interface Inventory {
 const argv = process.argv.slice(2);
 const flags = new Set<string>();
 const values = new Map<string, string>();
+const allowedClosureFiles: string[] = [];
 for (let index = 0; index < argv.length; index++) {
   const argument = argv[index];
   if (!argument) throw new Error("Missing argument");
-  if (argument === "--write" || argument === "--prune-stale") {
+  if (argument === "--allow-closure-addition") {
+    const file = argv[++index];
+    if (!file || file.startsWith("--"))
+      throw new Error(`Invalid option: ${argument}`);
+    if (allowedClosureFiles.includes(file))
+      throw new Error(`duplicate-closure-addition:${file}`);
+    allowedClosureFiles.push(file);
+  } else if (argument === "--write" || argument === "--prune-stale") {
     if (flags.has(argument)) throw new Error(`Duplicate option: ${argument}`);
     flags.add(argument);
   } else if (["--root", "--base", "--output"].includes(argument)) {
@@ -64,7 +73,7 @@ const rootArg = values.get("--root");
 const baseArg = values.get("--base");
 if (!rootArg || !baseArg || !/^[a-f0-9]{40}$/.test(baseArg)) {
   throw new Error(
-    "Usage: bun scripts/refresh-architecture-baseline.ts --root PATH --base COMMIT [--output PATH] [--write] [--prune-stale]",
+    "Usage: bun scripts/refresh-architecture-baseline.ts --root PATH --base COMMIT [--output PATH] [--write] [--prune-stale] [--allow-closure-addition FILE ...]",
   );
 }
 const root = await realpath(resolve(rootArg));
@@ -111,7 +120,13 @@ const baseline = JSON.parse(
   await git("show", `${base}:tests/architecture-baseline.json`),
 ) as Inventory;
 const policy = JSON.parse(policyBytes) as ArchitecturePolicy;
-const graph = normalizeGraph(await buildGraph(root), policy);
+const source = await buildGraph(
+  root,
+  ["src"],
+  new Set(),
+  new Set(allowedClosureFiles),
+);
+const graph = normalizeGraph(source, policy);
 const cycleComponents = components(graph).filter(
   (group) => group.length > 1 || graph.get(group[0] ?? "")?.has(group[0] ?? ""),
 );
@@ -155,7 +170,60 @@ if (inventory.largestCycle > baseline.largestCycle)
     `largest-cycle:${inventory.largestCycle} > ${baseline.largestCycle}`,
   );
 const closureCap = baseline.crewPlugin.members.length;
-if (inventory.crewPlugin.members.length > closureCap)
+const previousMembers = new Set(baseline.crewPlugin.members);
+const addedMembers = inventory.crewPlugin.members.filter(
+  (file) => !previousMembers.has(file),
+);
+const currentMembers = new Set(inventory.crewPlugin.members);
+const removedMembers = baseline.crewPlugin.members
+  .filter((file) => !currentMembers.has(file))
+  .sort();
+const identities =
+  addedMembers.length || allowedClosureFiles.length
+    ? sourceIdentities(source.keys(), policy)
+    : new Map<string, string>();
+const namedMembers = new Set(
+  allowedClosureFiles.map((file) => identities.get(file)),
+);
+for (const identity of addedMembers) {
+  if (!namedMembers.has(identity)) {
+    const file =
+      [...identities].find(([, id]) => id === identity)?.[0] ?? identity;
+    errors.push(
+      `closure-addition:unnamed:${identity}; --allow-closure-addition ${file} is only for a file holding only code the closure already loaded, with a decision recorded for this change; otherwise remove the import that added it.`,
+    );
+  }
+}
+const closureAdditions = [];
+const closureReviewRequired =
+  "Not checked: that bodies are moved, not new, or that packages were already used by the closure. Put this proof in the PR for the reviewer to verify.";
+for (const file of [...allowedClosureFiles].sort()) {
+  const identity = identities.get(file);
+  if (!identity) {
+    errors.push(`closure-addition:unknown-file:${file}`);
+    continue;
+  }
+  if (!addedMembers.includes(identity))
+    errors.push(`closure-addition:not-added:${file}`);
+  const imports = [...(graph.get(identity) ?? [])].sort();
+  for (const target of imports)
+    if (!previousMembers.has(target))
+      errors.push(`closure-addition:new-import:${file} -> ${target}`);
+  closureAdditions.push({
+    file,
+    identity,
+    imports,
+    checks: [
+      "added-member",
+      "imports-resolve",
+      "imports-in-base-closure-or-package",
+    ],
+  });
+}
+if (
+  !allowedClosureFiles.length &&
+  inventory.crewPlugin.members.length > closureCap
+)
   errors.push(
     `crew-closure:${inventory.crewPlugin.members.length} > ${closureCap}`,
   );
@@ -227,6 +295,13 @@ const result = {
   cycleComponents,
   exceptions,
   ...(flags.has("--prune-stale") ? { prunedExceptions } : {}),
+  ...(allowedClosureFiles.length
+    ? {
+        closureAdditions,
+        closureRemovals: removedMembers,
+        closureReviewRequired,
+      }
+    : {}),
   violations,
   errors,
 };
@@ -244,6 +319,13 @@ console.log(
     crewClosure: inventory.crewPlugin.members.length,
     exceptions: exceptions.length,
     ...(flags.has("--prune-stale") ? { prunedExceptions } : {}),
+    ...(allowedClosureFiles.length
+      ? {
+          closureAdditions,
+          closureRemovals: removedMembers,
+          closureReviewRequired,
+        }
+      : {}),
     errors,
   }),
 );
