@@ -145,14 +145,17 @@ export async function sizeRegressions(
   }
   for (const [path, id] of identities) {
     const source = await readFile(join(root, path), "utf8");
-    // Count physical lines, including blanks/comments, without a phantom line
-    // after a final LF. CRLF has the same number of LF terminators as LF.
-    const lines = source.split("\n").length - Number(source.endsWith("\n"));
-    const count = source.length === 0 ? 0 : lines;
+    // Count non-blank lines textually: trim whitespace, but count comments.
+    // This also ignores blank template-literal lines and a final LF/CRLF.
+    const count = source
+      .split("\n")
+      .filter((line) => line.trim().length > 0).length;
     if (count <= 1000) continue;
     oversized.add(id);
     if (!allowed.has(id))
-      failures.push(`new:large-file:${path}:${id}:${count} > 1000`);
+      failures.push(
+        `new:large-file:${path}:${id}:${count} non-blank lines > 1000`,
+      );
   }
   for (const id of allowed)
     if (!oversized.has(id)) failures.push(`stale:large-file:${id}`);

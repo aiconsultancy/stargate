@@ -68,6 +68,12 @@ Follow the current runtime boundaries and future slice rules in
 [the architecture design](docs/design.md#source-layout-and-boundary-rules).
 Keep backend adapters independent of Slack and preserve session isolation.
 
+Source modules have a limit of 1,000 non-blank lines, except exact identities in
+the architecture baseline's `largeFiles`. The measure is textual: ignore
+empty and whitespace-only lines, including inside template literals; count
+comments. LF and CRLF count equally, and a final newline adds no line. See
+[the size measure](docs/development.md#architecture-inventory-refresh).
+
 ## Engineering
 
 - Use strict TypeScript and Effect Schema at new or migrated input boundaries.
