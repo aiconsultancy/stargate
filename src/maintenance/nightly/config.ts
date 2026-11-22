@@ -6,7 +6,7 @@ import {
   piProviderSchema,
   piProxyModel,
   piProxyModels,
-} from "../../backends/pi/pi-model";
+} from "../../backends/pi/config";
 import {
   settingsCheck,
   settingsDefault,

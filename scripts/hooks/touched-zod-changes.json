@@ -10,6 +10,11 @@
     "reason": "Formatter-wrapped import of the schedule move at 80 columns; names and schemas unchanged."
   },
   {
+    "path": "src/maintenance/nightly/droid-agent.ts",
+    "issue": "NET-1789",
+    "reason": "Retarget only the Pi configuration import after its rename; Zod declarations and all bodies unchanged."
+  },
+  {
     "path": "src/maintenance/nightly/run.ts",
     "issue": "NET-1787",
     "reason": "Move the two-method Clock type to drain and preserve its run re-export; schemas unchanged."

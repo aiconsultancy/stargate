@@ -20,16 +20,16 @@ import { maintenanceSchema } from "./maintenance/nightly/config";
 import { notifyConfigError } from "./notifications/ingest/binding";
 import { notifySchema } from "./notifications/ingest/config";
 import {
-  piModelSchema,
-  piProviderSchema,
-  piThinkingLevelSchema,
-  secureLocalOrHttpsURL,
-} from "./backends/pi/pi-model";
+  piCrewBackendSchema,
+  piDurableBackendSchema,
+} from "./backends/pi/config";
 import { quotaWatchSchema } from "./quota/quota-watch";
 import { decodeSettings } from "./config/settings-errors";
 import {
   absolutePath,
   envName,
+  piProviderSchema,
+  secureLocalOrHttpsURL,
   settingsCheck,
   settingsDefault,
   settingsDiscriminatedUnion,
@@ -54,22 +54,7 @@ const channelRule = Schema.Union([
   Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
 ]);
 
-export const piDurableBackendSchema = settingsStruct({
-  type: Schema.Literal("pi-durable"),
-  directory: absolutePath,
-  model: piModelSchema,
-  provider: Schema.optional(piProviderSchema),
-  thinkingLevel: Schema.optional(piThinkingLevelSchema),
-  systemPrompt: Schema.String.pipe(
-    settingsDefault("You are a helpful assistant responding in Slack."),
-  ),
-  tools: Schema.Literals(["none", "coding"]).pipe(settingsDefault("none")),
-});
-
-const { directory: _piDirectory, ...piCrewBackendFields } =
-  piDurableBackendSchema.fields;
-/** Crew working directories are supplied by the configured worktree map. */
-export const piCrewBackendSchema = settingsStruct(piCrewBackendFields);
+export { piCrewBackendSchema, piDurableBackendSchema };
 
 /**
  * Built-in Claude Code tools that a `claude` backend may enable. Others, such

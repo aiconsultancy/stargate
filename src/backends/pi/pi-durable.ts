@@ -45,7 +45,7 @@ import {
   piClaudeProxyModel,
   piProxyModel,
   piProxyModels,
-} from "./pi-model";
+} from "./config";
 import {
   BackendFailure,
   type BackendFailureKind,

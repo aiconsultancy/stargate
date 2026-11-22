@@ -1,11 +1,16 @@
 import { MODEL_THINKING_LEVELS } from "@earendil-works/pi-ai/providers/model-schema";
 import { Schema } from "effect";
-import { isLoopbackHost } from "../../lib/loopback";
 import {
+  absolutePath,
+  piProviderSchema,
+  settingsDefault,
   settingsPattern,
-  settingsRefine,
   settingsStruct,
-  settingsURL,
+} from "../../config/settings-schema";
+
+export {
+  piProviderSchema,
+  secureLocalOrHttpsURL,
 } from "../../config/settings-schema";
 
 /**
@@ -22,47 +27,34 @@ export const piProxyModels: readonly string[] = [
   piClaudeProxyModel,
 ];
 
-const envName = Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/));
-
-export const secureLocalOrHttpsURL = settingsURL.check(
-  settingsRefine(
-    (value) => {
-      const url = new URL(value);
-      const loopback = isLoopbackHost(url.hostname);
-      return (
-        (url.protocol === "https:" || (url.protocol === "http:" && loopback)) &&
-        !url.username &&
-        !url.password &&
-        !url.search &&
-        !url.hash &&
-        !value.includes("?") &&
-        !value.includes("#")
-      );
-    },
-    {
-      message:
-        "Use HTTPS or loopback HTTP without credentials, query, or fragment",
-    },
-  ),
-);
-
 export const piModelSchema = Schema.String.check(
   settingsPattern(/^(openai|anthropic)\/.+$/, {
     message: "Use openai/model-id or anthropic/model-id",
   }),
 );
 
-/** Explicit proxy endpoint; the key is an environment reference, never a value. */
-export const piProviderSchema = settingsStruct({
-  baseURL: secureLocalOrHttpsURL,
-  apiKeyEnv: envName,
-});
-
 /**
  * Pi thinking level from the pinned SDK's own enum. Unset keeps Pi's default
  * `off`; the selected model must support the level (see `piModels`).
  */
 export const piThinkingLevelSchema = Schema.Literals(MODEL_THINKING_LEVELS);
+
+export const piDurableBackendSchema = settingsStruct({
+  type: Schema.Literal("pi-durable"),
+  directory: absolutePath,
+  model: piModelSchema,
+  provider: Schema.optional(piProviderSchema),
+  thinkingLevel: Schema.optional(piThinkingLevelSchema),
+  systemPrompt: Schema.String.pipe(
+    settingsDefault("You are a helpful assistant responding in Slack."),
+  ),
+  tools: Schema.Literals(["none", "coding"]).pipe(settingsDefault("none")),
+});
+
+const { directory: _piDirectory, ...piCrewBackendFields } =
+  piDurableBackendSchema.fields;
+/** Crew working directories are supplied by the configured worktree map. */
+export const piCrewBackendSchema = settingsStruct(piCrewBackendFields);
 
 export type PiModelSettings = {
   model: string;
