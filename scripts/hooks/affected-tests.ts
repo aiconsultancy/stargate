@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -136,17 +136,15 @@ async function affected(existing: Set<string>) {
   if (!changes.length) return { selected, graphTests, mappedTests, untrusted };
 
   const root = mkdtempSync(join(tmpdir(), "stargate-affected-"));
+  let terminationStatus: number | undefined;
   const terminate = (status: number) => {
-    try {
-      rmSync(root, { recursive: true, force: true });
-    } finally {
-      process.exit(status);
-    }
+    // Let in-flight filesystem operations and Git children settle before rm.
+    terminationStatus ??= status;
   };
   const term = () => terminate(143);
   const interrupt = () => terminate(130);
-  process.once("SIGTERM", term);
-  process.once("SIGINT", interrupt);
+  process.on("SIGTERM", term);
+  process.on("SIGINT", interrupt);
   try {
     // Both snapshots use the hook's Git namespace. Only HEAD gets a private
     // index; never clear the original Git environment before reading the index.
@@ -156,7 +154,11 @@ async function affected(existing: Set<string>) {
     };
     git(["read-tree", "HEAD"], headEnv);
     await snapshot(join(root, "head"), headEnv);
+    if (terminationStatus !== undefined)
+      return { selected, graphTests, mappedTests, untrusted };
     await snapshot(join(root, "index"), process.env);
+    if (terminationStatus !== undefined)
+      return { selected, graphTests, mappedTests, untrusted };
     const { buildGraph, importClosure } =
       await import("../../tests/architecture-graph");
     const directories = ["src", "tests", "scripts", "perf"];
@@ -211,6 +213,7 @@ async function affected(existing: Set<string>) {
     } finally {
       process.off("SIGTERM", term);
       process.off("SIGINT", interrupt);
+      if (terminationStatus !== undefined) process.exit(terminationStatus);
     }
   }
 }

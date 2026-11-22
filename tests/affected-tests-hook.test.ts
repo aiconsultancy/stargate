@@ -58,12 +58,12 @@ async function scenario() {
   return root;
 }
 
-function run(root: string, extra: NodeJS.ProcessEnv = {}) {
+function run(root: string, extra: NodeJS.ProcessEnv = {}, hook = HOOK) {
   const env = { ...process.env };
   delete env["STARGATE_UNTRUSTED_TESTS"];
   delete env["STARGATE_AFFECTED_TEST_LIMIT"];
   delete env["STARGATE_FORCE_AFFECTED_TESTS"];
-  return spawnSync(process.execPath, [HOOK], {
+  return spawnSync(process.execPath, [hook], {
     cwd: root,
     encoding: "utf8",
     timeout: 30_000,
@@ -96,7 +96,138 @@ function untrustedPaths(output: string): Set<string> {
   return new Set(value);
 }
 
+async function pendingSnapshot(
+  root: string,
+  signals: string[],
+  phase: "head" | "index",
+  fail: boolean,
+) {
+  const hook = join(root, "scripts/controlled-hook.ts");
+  const done = join(root, "writer-done");
+  const snapshots = join(root, "snapshots");
+  await mkdir(snapshots);
+  // EOF also releases the child: an old handler exits before its queued write.
+  const writer = `
+    const { mkdir, writeFile, rename } = await import("node:fs/promises");
+    const [target, done] = process.argv.slice(1);
+    const released = new Promise(resolve => {
+      process.stdin.once("data", resolve);
+      process.stdin.once("end", resolve);
+      process.stdin.resume();
+    });
+    process.stdout.write("ready");
+    await released;
+    await mkdir(target, { recursive: true });
+    await writeFile(done + ".pending", target);
+    await rename(done + ".pending", done);
+    if (process.env.CONTROL_WRITER_FAILURE === "1") process.exitCode = 7;
+  `;
+  const control = `
+    let writer;
+    let delivered = 0;
+    function afterSignal() {
+      delivered++;
+      const next = ${JSON.stringify(signals)}[delivered];
+      if (next) setImmediate(() => process.kill(process.pid, next));
+      else writer.stdin.end("release");
+    }
+    async function mkdir(path, options) {
+      if (!path.endsWith(${JSON.stringify(`/${phase}/src`)})) return nativeMkdir(path, options);
+      writer = spawn(process.execPath, ["-e", ${JSON.stringify(writer)}, path, ${JSON.stringify(done)}]);
+      const settled = new Promise((resolve, reject) => {
+        writer.once("exit", code => code === 0 ? resolve() : reject(new Error("writer failed")));
+        writer.once("error", reject);
+      });
+      await new Promise(resolve => writer.stdout.once("data", resolve));
+      process.kill(process.pid, ${JSON.stringify(signals[0])});
+      await settled;
+    }
+  `;
+  let source = await readFile(HOOK, "utf8");
+  const rewrites: [string, string][] = [
+    ["import { spawnSync }", "import { spawn, spawnSync }"],
+    [
+      "import { mkdir, rm, symlink }",
+      "import { mkdir as nativeMkdir, rm, symlink }",
+    ],
+    ["async function snapshot(", `${control}\nasync function snapshot(`],
+    [
+      "const term = () => terminate(143);",
+      "const term = () => { terminate(143); afterSignal(); };",
+    ],
+    [
+      "const interrupt = () => terminate(130);",
+      "const interrupt = () => { terminate(130); afterSignal(); };",
+    ],
+  ];
+  for (const [before, after] of rewrites) {
+    expect(source.split(before)).toHaveLength(2);
+    source = source.replace(before, after);
+  }
+  await writeFile(hook, source);
+  const result = run(
+    root,
+    { TMPDIR: snapshots, CONTROL_WRITER_FAILURE: fail ? "1" : "0" },
+    hook,
+  );
+  // Child EOF completion, not a sleep, orders the late-write assertion.
+  const target = await readFile(done, "utf8").catch(async () => {
+    const { watch } = await import("node:fs");
+    await new Promise<void>((resolve, reject) => {
+      const watcher = watch(root, () => {
+        if (!existsSync(done)) return;
+        watcher.close();
+        resolve();
+      });
+      watcher.once("error", reject);
+      if (existsSync(done)) {
+        watcher.close();
+        resolve();
+      }
+    });
+    return readFile(done, "utf8");
+  });
+  const snapshot = dirname(dirname(target));
+  expect(dirname(snapshot)).toBe(snapshots);
+  return { result, snapshot };
+}
+
 describe("affected-tests hook", () => {
+  test.each([
+    ["single INT", ["SIGINT"], 130, "head", false],
+    ["single TERM", ["SIGTERM"], 143, "head", false],
+    ["double INT", ["SIGINT", "SIGINT"], 130, "head", false],
+    ["double TERM", ["SIGTERM", "SIGTERM"], 143, "head", false],
+    ["mixed INT first", ["SIGINT", "SIGTERM", "SIGINT"], 130, "head", false],
+    ["mixed TERM first", ["SIGTERM", "SIGINT", "SIGTERM"], 143, "head", false],
+    ["second snapshot INT", ["SIGINT"], 130, "index", false],
+    ["second snapshot TERM", ["SIGTERM"], 143, "index", false],
+    ["writer error INT", ["SIGINT"], 130, "head", true],
+    ["writer error TERM", ["SIGTERM"], 143, "head", true],
+  ] as const)(
+    "%s waits for the in-flight snapshot write before cleanup",
+    async (_name, signals, status, phase, fail) => {
+      const root = await scenario();
+      try {
+        await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
+        git(root, "add", "src/leaf.ts");
+        const { result, snapshot } = await pendingSnapshot(
+          root,
+          [...signals],
+          phase,
+          fail,
+        );
+        expect(result.status).toBe(status);
+        expect(existsSync(snapshot)).toBe(false);
+        expect(result.stdout).toBe("");
+        expect(result.stderr).toBe("");
+        expect(existsSync(join(root, "ran"))).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   test.each([
     [3, true],
     [2, true],
