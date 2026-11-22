@@ -25,16 +25,9 @@
     "src/main.ts",
     "src/markdown-chunks.ts"
   ],
-  "largestCycle": 3,
-  "cycleComponents": [
-    ["src/crew/messaging.ts", "src/crew/reporting.ts", "src/crew/state.ts"]
-  ],
-  "cyclicEdges": [
-    "src/crew/messaging.ts -> src/crew/state.ts",
-    "src/crew/reporting.ts -> src/crew/state.ts",
-    "src/crew/state.ts -> src/crew/messaging.ts",
-    "src/crew/state.ts -> src/crew/reporting.ts"
-  ],
+  "largestCycle": 0,
+  "cycleComponents": [],
+  "cyclicEdges": [],
   "crewPlugin": {
     "entry": "src/crew/plugin.ts",
     "members": [
