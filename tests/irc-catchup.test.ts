@@ -101,7 +101,7 @@ test("irc catch-up: messages sent while Stargate was stopped are admitted once",
   const first = await run(fake, store);
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "just chatting");
   await until(
-    () => store.ircCursor(first.captain.key, "#galactica") !== undefined,
+    () => store.irc.ircCursor(first.captain.key, "#galactica") !== undefined,
     3000,
     "cursor",
   );
@@ -109,7 +109,7 @@ test("irc catch-up: messages sent while Stargate was stopped are admitted once",
   // CHATHISTORY AFTER excludes an event in the cursor's same millisecond.
   await until(
     () => {
-      const cursor = store.ircCursor(first.captain.key, "#galactica");
+      const cursor = store.irc.ircCursor(first.captain.key, "#galactica");
       return cursor !== undefined && Date.now() > Date.parse(cursor);
     },
     3000,
@@ -196,7 +196,7 @@ test("irc catch-up: bounded age, no backlog on a first start, switch off", async
   expect(first.prompts).toEqual([]);
   await first.close();
   // A cursor 2 days old: only the last 24 hours are replayed.
-  store.saveIrcCursor(
+  store.irc.saveIrcCursor(
     first.captain.key,
     "#galactica",
     new Date(Date.now() - 48 * hour).toISOString(),

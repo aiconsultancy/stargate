@@ -8,13 +8,13 @@ import { BackgroundCases } from "../questions/background-questions";
 import { cancellationNotice } from "./cancellation";
 import { fleetJobSchema } from "../fleet/protocol";
 import {
-  type IrcBurstMessage,
   ircBurstEligible,
   ircBurstLimits,
   ircBurstMessageSchema,
   ircBurstText,
 } from "../irc/burst";
 import { validMsgid } from "../irc/protocol";
+import type { IrcBurstMessage, IrcOperations } from "../irc/store-contract";
 import { FleetRecords } from "../fleet/store";
 import { decodeJob, decodeStoredJob, type StoredJob } from "./row-codec";
 import { TranscriptRecords } from "./transcript-store";
@@ -142,9 +142,10 @@ export class Store {
   readonly activityRecords: ActivityRecords;
   readonly fleet: FleetRecords<StoredJob, Job>;
   readonly transcript: TranscriptRecords;
+  readonly irc: IrcOperations;
   private readonly db: Database;
   readonly updateNotices: UpdateNotices;
-  constructor(path: string) {
+  constructor(path: string, createIrcRecords: (db: Database) => IrcOperations) {
     this.db = new Database(path, { create: true, strict: true });
     this.backgroundCases = new BackgroundCases(this.db);
     this.updateNotices = new UpdateNotices(this.db);
@@ -343,6 +344,7 @@ export class Store {
     this.activityRecords = new ActivityRecords(this.db);
     this.fleet = new FleetRecords(this.db, decodeStoredJob);
     this.transcript = new TranscriptRecords(this.db);
+    this.irc = createIrcRecords(this.db);
   }
 
   enqueue(input: Incoming): boolean {
@@ -438,7 +440,7 @@ export class Store {
         !input.files?.length;
       if (!eligible && !this.enqueue(input)) return false;
       if (transport === "irc") {
-        this.ircThreadMessage(
+        this.irc.ircThreadMessage(
           input.botKey,
           input.channel,
           input.thread,
@@ -452,9 +454,13 @@ export class Store {
             .run(owner.id);
         if (
           invited ||
-          this.ircThreadParticipating(input.botKey, input.channel, root(input))
+          this.irc.ircThreadParticipating(
+            input.botKey,
+            input.channel,
+            root(input),
+          )
         )
-          this.joinIrcThread(input.botKey, input.channel, root(input));
+          this.irc.joinIrcThread(input.botKey, input.channel, root(input));
       }
       this.db
         .query(`INSERT INTO thread_followups
@@ -603,33 +609,6 @@ export class Store {
           : `irc follow-up ${message}`;
       })
       .join("\n");
-  }
-
-  /**
-   * Admitted messages of one sender kind received at or after `since` (ms),
-   * in these registrations and in one conversation or channel. IRC only:
-   * Slack rows carry no `received` time.
-   */
-  turnsSince(input: {
-    botKeys: readonly string[];
-    sender: "captain" | "crew";
-    since: number;
-    scope: { conversation: string } | { channel: string };
-  }): number {
-    if (!input.botKeys.length) return 0;
-    const keys = input.botKeys.map(() => "?").join(",");
-    const [column, value] =
-      "conversation" in input.scope
-        ? ["conversation", input.scope.conversation]
-        : ["channel", input.scope.channel];
-    return (
-      this.db
-        .query<{ n: number }, (string | number)[]>(
-          `SELECT COUNT(*) AS n FROM jobs WHERE sender=? AND received>=?
-        AND ${column}=? AND botKey IN (${keys})`,
-        )
-        .get(input.sender, input.since, value, ...input.botKeys)?.n ?? 0
-    );
   }
 
   /**
@@ -1073,22 +1052,6 @@ export class Store {
     );
   }
 
-  /** Outbound IRC root of this registration's request; legacy rows stay plain. */
-  ircReplyParent(botKey: string, thread: string): string | undefined {
-    return (
-      this.db
-        .query<
-          { replyParent: string | null },
-          [string, string, string, string]
-        >(
-          `SELECT replyParent FROM jobs WHERE botKey=? AND thread=?
-           UNION ALL SELECT COALESCE(json_extract(payload,'$.replyParent'),json_extract(payload,'$.thread')) AS replyParent
-           FROM thread_followups WHERE botKey=? AND transport='irc' AND json_extract(payload,'$.thread')=? LIMIT 1`,
-        )
-        .get(botKey, thread, botKey, thread)?.replyParent ?? undefined
-    );
-  }
-
   /** New opt-in human intake: persist ancestry and explicit invitation atomically. */
   enqueueIrcHuman(input: Incoming, invited: boolean): boolean {
     const root = input.replyParent ?? input.thread;
@@ -1096,12 +1059,17 @@ export class Store {
       throw new Error("IRC human thread identity is invalid");
     return this.db.transaction(() => {
       if (!this.enqueue(input)) return false;
-      this.ircThreadMessage(input.botKey, input.channel, input.thread, root);
+      this.irc.ircThreadMessage(
+        input.botKey,
+        input.channel,
+        input.thread,
+        root,
+      );
       if (
         invited ||
-        this.ircThreadParticipating(input.botKey, input.channel, root)
+        this.irc.ircThreadParticipating(input.botKey, input.channel, root)
       )
-        this.joinIrcThread(input.botKey, input.channel, root);
+        this.irc.joinIrcThread(input.botKey, input.channel, root);
       return true;
     })();
   }
@@ -1196,7 +1164,7 @@ export class Store {
         now < burst.deadline &&
         now < burst.maximum
       ) {
-        const messages = this.ircBurstMessages(latest.id);
+        const messages = this.irc.ircBurstMessages(latest.id);
         const combined = [...messages, message];
         const files = [...new Set(combined.flatMap((item) => item.files))];
         const text = ircBurstText(combined);
@@ -1222,7 +1190,7 @@ export class Store {
             this.db
               .query("UPDATE irc_bursts SET deadline=? WHERE job=?")
               .run(deadline, latest.id);
-            this.saveIrcBurstMessage(
+            this.irc.saveIrcBurstMessage(
               latest.id,
               combined.length - 1,
               input.botKey,
@@ -1230,7 +1198,7 @@ export class Store {
             );
             if (options.trackThreads) {
               const root = latest.replyParent ?? latest.thread;
-              this.ircThreadMessage(
+              this.irc.ircThreadMessage(
                 input.botKey,
                 input.channel,
                 input.thread,
@@ -1238,7 +1206,7 @@ export class Store {
                 latest.thread,
               );
               if (options.invited)
-                this.joinIrcThread(input.botKey, input.channel, root);
+                this.irc.joinIrcThread(input.botKey, input.channel, root);
             }
             return true;
           }
@@ -1259,85 +1227,9 @@ export class Store {
           "INSERT INTO irc_bursts(job,policy,deadline,maximum) VALUES(?,?,?,?)",
         )
         .run(job.id, options.policy, deadline, now + ircBurstLimits.waitMs);
-      this.saveIrcBurstMessage(job.id, 0, input.botKey, message);
+      this.irc.saveIrcBurstMessage(job.id, 0, input.botKey, message);
       return true;
     })();
-  }
-
-  /** Original accepted text and source labels, retained across restarts. */
-  ircBurstMessages(job: number): IrcBurstMessage[] {
-    return this.db
-      .query<{ message: string }, [number]>(
-        "SELECT message FROM irc_burst_messages WHERE job=? ORDER BY ordinal",
-      )
-      .all(job)
-      .map(({ message }) =>
-        Schema.decodeUnknownSync(ircBurstMessageSchema)(JSON.parse(message)),
-      );
-  }
-
-  /** Stop can resolve a grouped member without changing ordinary thread state. */
-  ircBurstRequest(
-    botKey: string,
-    channel: string,
-    msgid: string,
-  ): string | undefined {
-    return this.db
-      .query<{ thread: string }, [string, string, string]>(
-        `SELECT j.thread FROM irc_burst_messages b JOIN jobs j ON j.id=b.job AND j.botKey=b.botKey
-         WHERE b.botKey=? AND b.eventId=? AND j.channel=?`,
-      )
-      .get(botKey, `${channel}:${msgid}`, channel)?.thread;
-  }
-
-  private saveIrcBurstMessage(
-    job: number,
-    ordinal: number,
-    botKey: string,
-    message: IrcBurstMessage,
-  ) {
-    this.db
-      .query(
-        "INSERT INTO irc_burst_messages(botKey,eventId,job,ordinal,message) VALUES(?,?,?,?,?)",
-      )
-      .run(botKey, message.eventId, job, ordinal, JSON.stringify(message));
-  }
-
-  ircThreadRoot(
-    botKey: string,
-    channel: string,
-    msgid: string,
-  ): string | undefined {
-    return this.db
-      .query<{ root: string }, [string, string, string]>(
-        "SELECT root FROM irc_thread_messages WHERE botKey=? AND channel=? AND msgid=?",
-      )
-      .get(botKey, channel, msgid)?.root;
-  }
-
-  ircThreadParticipating(
-    botKey: string,
-    channel: string,
-    root: string,
-  ): boolean {
-    return (
-      this.db
-        .query(
-          "SELECT 1 FROM irc_thread_memberships WHERE botKey=? AND channel=? AND root=?",
-        )
-        .get(botKey, channel, root) !== null
-    );
-  }
-
-  /** Exact original request of a locally correlated own echo, never its root. */
-  ircRequestAnchor(botKey: string, channel: string, msgid: string) {
-    return (
-      this.db
-        .query<{ request: string | null }, [string, string, string]>(
-          "SELECT request FROM irc_thread_messages WHERE botKey=? AND channel=? AND msgid=?",
-        )
-        .get(botKey, channel, msgid)?.request ?? undefined
-    );
   }
 
   /** Called only for an exact locally-correlated, SASL-account-confirmed own echo. */
@@ -1367,37 +1259,12 @@ export class Store {
       const root = job.replyParent ?? job.thread;
       if (!validMsgid(root) || (wireRoot !== undefined && wireRoot !== root))
         return false;
-      const prior = this.ircRequestAnchor(botKey, channel, msgid);
+      const prior = this.irc.ircRequestAnchor(botKey, channel, msgid);
       if (prior !== undefined && prior !== request) return false;
-      this.ircThreadMessage(botKey, channel, msgid, root, request);
-      this.joinIrcThread(botKey, channel, root);
+      this.irc.ircThreadMessage(botKey, channel, msgid, root, request);
+      this.irc.joinIrcThread(botKey, channel, root);
       return true;
     })();
-  }
-
-  private ircThreadMessage(
-    botKey: string,
-    channel: string,
-    msgid: string,
-    root: string,
-    request?: string,
-  ) {
-    const existing = this.ircThreadRoot(botKey, channel, msgid);
-    if (existing !== undefined && existing !== root)
-      throw new Error("IRC thread ancestry conflict");
-    this.db
-      .query(
-        "INSERT INTO irc_thread_messages(botKey,channel,msgid,root,recorded,request) VALUES (?,?,?,?,?,?) ON CONFLICT(botKey,channel,msgid) DO UPDATE SET recorded=excluded.recorded,request=COALESCE(irc_thread_messages.request,excluded.request)",
-      )
-      .run(botKey, channel, msgid, root, Date.now(), request ?? null);
-  }
-
-  private joinIrcThread(botKey: string, channel: string, root: string) {
-    this.db
-      .query(
-        "INSERT INTO irc_thread_memberships(botKey,channel,root,recorded) VALUES (?,?,?,?) ON CONFLICT(botKey,channel,root) DO UPDATE SET recorded=excluded.recorded",
-      )
-      .run(botKey, channel, root, Date.now());
   }
 
   jobStatus(botKey: string, id: number): JobStatus | undefined {
@@ -1640,70 +1507,6 @@ export class Store {
     this.db
       .query("UPDATE delivery_units SET plan=? WHERE job=? AND part=?")
       .run(plan, job, part);
-  }
-
-  /**
-   * Newest IRC server time seen in one target (folded channel, or "" for
-   * direct messages) of one registration: CHATHISTORY catch-up resumes
-   * after it.
-   */
-  ircCursor(botKey: string, target: string): string | undefined {
-    return (
-      this.db
-        .query<{ time: string }, [string, string]>(
-          "SELECT time FROM irc_cursors WHERE botKey=? AND target=?",
-        )
-        .get(botKey, target)?.time ?? undefined
-    );
-  }
-
-  /** Moves forward only, unless `replace` (operator repair and tests). */
-  saveIrcCursor(botKey: string, target: string, time: string, replace = false) {
-    this.db
-      .query(`INSERT INTO irc_cursors (botKey,target,time) VALUES (?,?,?)
-      ON CONFLICT(botKey,target) DO UPDATE SET time=excluded.time
-      WHERE ? OR excluded.time > irc_cursors.time`)
-      .run(botKey, target, time, replace ? 1 : 0);
-  }
-
-  /**
-   * A stargate_dm receipt ID that this process copies to IRC: recorded before
-   * the IRC copy is sent, so the recipient connection recognises it and
-   * never admits it as a second turn. Kept 7 days.
-   */
-  markStargateDmCopy(id: string, now = Date.now()) {
-    this.db.transaction(() => {
-      this.db
-        .query("INSERT OR IGNORE INTO irc_stargate_dm VALUES (?,?)")
-        .run(id, now);
-      this.db
-        .query("DELETE FROM irc_stargate_dm WHERE sent<?")
-        .run(now - 7 * 24 * 60 * 60_000);
-    })();
-  }
-
-  stargateDmCopy(id: string) {
-    return (
-      this.db.query("SELECT 1 FROM irc_stargate_dm WHERE id=?").get(id) !== null
-    );
-  }
-
-  /** Last crew-plugin outbox sequence handled for one ship (its captain). */
-  stargateDmCursor(botKey: string): number | undefined {
-    return (
-      this.db
-        .query<{ sequence: number }, [string]>(
-          "SELECT sequence FROM irc_stargate_dm_cursor WHERE botKey=?",
-        )
-        .get(botKey)?.sequence ?? undefined
-    );
-  }
-
-  saveStargateDmCursor(botKey: string, sequence: number) {
-    this.db
-      .query(`INSERT INTO irc_stargate_dm_cursor VALUES (?,?)
-      ON CONFLICT(botKey) DO UPDATE SET sequence=excluded.sequence`)
-      .run(botKey, sequence);
   }
 
   deliveredUnits(job: number, part: number, done: number) {

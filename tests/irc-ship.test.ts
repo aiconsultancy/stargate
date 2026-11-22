@@ -285,7 +285,7 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
   expect(backends.captain.prompts).toHaveLength(2);
   const keys = ship.registrations.map((registration) => registration.key);
   expect(
-    store.turnsSince({
+    store.irc.turnsSince({
       botKeys: keys,
       sender: "crew",
       since: 0,

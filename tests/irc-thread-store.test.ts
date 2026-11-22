@@ -40,9 +40,9 @@ test("IRC reply parent migrates, survives reopen and stays scoped to the registr
         .ready("bot", Date.now(), 10)
         .find((job) => job.thread === "request"),
     ).toMatchObject({ thread: "request", replyParent: input.replyParent });
-    expect(store.ircReplyParent("bot", "request")).toBe(input.replyParent);
-    expect(store.ircReplyParent("other", "request")).toBeUndefined();
-    expect(store.ircReplyParent("bot", "old")).toBeUndefined();
+    expect(store.irc.ircReplyParent("bot", "request")).toBe(input.replyParent);
+    expect(store.irc.ircReplyParent("other", "request")).toBeUndefined();
+    expect(store.irc.ircReplyParent("bot", "old")).toBeUndefined();
   } finally {
     store?.close();
     await rm(directory, { recursive: true, force: true });
