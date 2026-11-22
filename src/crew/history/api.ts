@@ -1,10 +1,10 @@
 import { resolve } from "node:path";
 import { OpenCode } from "@opencode/client";
 import { Service } from "@opencode/client/service";
-import type { CrewSession } from "./engine";
+import type { CrewSession } from "../engine";
 import type { HistorySession } from "./history";
-import { CrewError, type Peer } from "./state";
-import type { Team } from "./team";
+import { CrewError, type Peer } from "../state";
+import type { Team } from "../team";
 
 export function historyVisible(
   options: {

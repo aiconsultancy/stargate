@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { HistoryError } from "../src/crew/history";
+import { HistoryError } from "../src/crew/history/history";
 import { CrewError } from "../src/crew/pending";
 import { MissingTaskResult } from "../src/crew/result";
 import { CrewError as StateCrewError } from "../src/crew/state";

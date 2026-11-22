@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { SessionCompactInput } from "@opencode/client";
 import { connectHistoryAPI } from "./api";
-import type { CrewSessions } from "./engine";
-import { CrewError } from "./state";
-import type { Team } from "./team";
+import type { CrewSessions } from "../engine";
+import { CrewError } from "../state";
+import type { Team } from "../team";
 
 type CompactionType =
   | "session.compaction.started"
