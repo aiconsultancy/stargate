@@ -1,10 +1,11 @@
 import { z } from "zod";
-import type { BotConfig } from "../../config";
 import type { NotificationSnapshot } from "./notification-store";
 import type { Identity } from "../../gateway/routing";
 
 /** Slack preference identity deliberately excludes the backend fingerprint. */
-export function notificationKey(bot: BotConfig, identity: Identity) {
+export function notificationKey<
+  T extends { id: string; slack: { appId: string } },
+>(bot: T, identity: Identity) {
   return JSON.stringify([
     bot.id,
     bot.slack.appId,

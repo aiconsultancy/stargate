@@ -302,6 +302,13 @@ export type CrewSession = Pick<
   permissions?: unknown;
   time?: Pick<SessionInfo["time"], "updated" | "busy" | "idle">;
 };
+export type CrewSessionParity<
+  T extends ((<U>() => U extends CrewSession ? 1 : 2) extends <
+    U,
+  >() => U extends Parameters<InspectionConnector>[0] ? 1 : 2
+    ? true
+    : false) = true,
+> = T;
 export type WorkerModelPeer = Peer & Pick<CrewSession, "model">;
 export type ResultConnector = (
   session: CrewSession,

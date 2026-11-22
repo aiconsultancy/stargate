@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { CrewCaller } from "./engine";
 import type { CrewMember } from "./team";
 
 export function managedPrompt(text: string) {
@@ -41,7 +40,11 @@ export function workingAgreementNotice(path: string) {
 
 export function workingAgreementContext(
   path: string,
-  authorize: (caller: CrewCaller) => Promise<void>,
+  authorize: (caller: {
+    sessionID: string;
+    agent: string;
+    signal: AbortSignal;
+  }) => Promise<void>,
 ) {
   const notice = workingAgreementNotice(path);
   return async (event: {

@@ -8,5 +8,10 @@
     "path": "src/ops/agent-profile-switch.ts",
     "issue": "NET-1784",
     "reason": "Correct the operator CLI usage path after the Stage 2 move"
+  },
+  {
+    "path": "src/notifications/preferences/notifications.ts",
+    "issue": "NET-1787",
+    "reason": "Replace the BotConfig type dependency with the consumed Slack identity view."
   }
 ]

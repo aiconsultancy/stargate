@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Schema } from "effect";
-import type { BotConfig } from "../config";
 import { settingsDefault, settingsStruct } from "../settings-schema";
 
 export const waitingDelaySchema = Schema.NullOr(
@@ -18,6 +17,14 @@ export const waitingSchema = settingsStruct({
     .pipe(settingsDefault(10000)),
 });
 export type WaitingSettings = typeof waitingSchema.Type;
+type WaitingRegistration = {
+  id: string;
+  displayName?: string | undefined;
+  waiting: WaitingSettings;
+  backend:
+    | { type: "opencode"; directory: string; agent?: string | undefined }
+    | { type: "pi-durable" | "claude" | "codex" | "module" };
+};
 const overrideSchema = settingsStruct({ delayMs: waitingDelaySchema });
 
 /** Shared captain workspace settings, isolated by configured agent identity. */
@@ -27,9 +34,9 @@ export function waitingSettingsPath(directory: string, agent: string): string {
 }
 
 /** Cosmetic settings fail back to config; corrupt files never fail a turn. */
-export async function resolveWaiting(
-  bot: Pick<BotConfig, "backend" | "waiting">,
-): Promise<WaitingSettings> {
+export async function resolveWaiting<
+  T extends Pick<WaitingRegistration, "backend" | "waiting">,
+>(bot: T): Promise<WaitingSettings> {
   const backend = bot.backend;
   if (backend.type !== "opencode" || !backend.agent) return bot.waiting;
   try {
@@ -69,9 +76,9 @@ export async function saveWaitingDelay(
   }
 }
 
-export function botDisplayName(
-  bot: Pick<BotConfig, "displayName" | "backend" | "id">,
-): string {
+export function botDisplayName<
+  T extends Pick<WaitingRegistration, "displayName" | "backend" | "id">,
+>(bot: T): string {
   return (
     bot.displayName ??
     (bot.backend.type === "opencode" ? bot.backend.agent : undefined) ??

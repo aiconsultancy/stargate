@@ -1,9 +1,13 @@
 import type { Database } from "bun:sqlite";
 import { redactCredentials } from "../lib/credentials";
 import { type CrewStatusTask, crewAssignmentText } from "../shared/crew-status";
-import type { CrewTask } from "./state";
 
 type Activity = Omit<CrewStatusTask, "id" | "status">;
+type ActivityTask = {
+  id: string;
+  crewID: string;
+  status: CrewStatusTask["status"];
+};
 
 /** Independent of turn captures: includes the reporter's own work.
  * greybeard: latest visible snapshot, not a transcript or Pi session browser.
@@ -24,7 +28,7 @@ export class MemberActivityStore {
     `);
   }
 
-  assignment(task: CrewTask, text: string, report = false) {
+  assignment<T extends ActivityTask>(task: T, text: string, report = false) {
     const now = Date.now();
     this.db
       .query(`INSERT INTO member_activity
@@ -44,7 +48,7 @@ export class MemberActivityStore {
     this.trim(task.crewID);
   }
 
-  phase(task: CrewTask, phase: string) {
+  phase<T extends ActivityTask>(task: T, phase: string) {
     const now = Date.now();
     const terminal = [
       "completed",
@@ -84,7 +88,7 @@ export class MemberActivityStore {
       .run(safe, Date.now(), taskID, safe);
   }
 
-  task(task: Pick<CrewTask, "id" | "status">): CrewStatusTask {
+  task(task: Pick<ActivityTask, "id" | "status">): CrewStatusTask {
     const activity = this.db
       .query<Activity, [string]>(`SELECT kind,summary,phase,
       progress,createdAt,startedAt,updatedAt,finishedAt
@@ -126,7 +130,7 @@ export class MemberActivityStore {
 
   read(crewID: string) {
     const queued = this.db
-      .query<Pick<CrewTask, "id" | "status">, [string]>(
+      .query<Pick<ActivityTask, "id" | "status">, [string]>(
         `SELECT id,status FROM pending_tasks WHERE crewID=? AND status='queued'
        ORDER BY sequence LIMIT 5`,
       )
@@ -144,7 +148,7 @@ export class MemberActivityStore {
       FROM pending_tasks p LEFT JOIN member_activity a ON a.taskID=p.id
       WHERE p.crewID=? AND p.status='cancelled'`;
     const recent = this.db
-      .query<Pick<CrewTask, "id" | "status">, [string, string]>(
+      .query<Pick<ActivityTask, "id" | "status">, [string, string]>(
         `SELECT id,status FROM (${terminal}) ORDER BY time DESC,sequence DESC LIMIT 8`,
       )
       .all(crewID, crewID)

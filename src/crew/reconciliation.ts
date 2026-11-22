@@ -5,6 +5,7 @@ import type {
   SessionGetInput,
   SessionInboxCancelInput,
   SessionMessageInfo,
+  SessionInfo,
 } from "@opencode/client";
 import { Schema } from "effect";
 import {
@@ -13,7 +14,6 @@ import {
   settingsStartsWith,
   settingsStruct,
 } from "../settings-schema";
-import type { CrewSession } from "./engine";
 import { isNativeInstructionContext } from "./instruction-context";
 import {
   crewMessageMetadataKey,
@@ -27,6 +27,14 @@ import {
 } from "./shell-context";
 import { CrewError, type CrewTask } from "./state";
 import { agentIDSchema } from "./team";
+
+type CrewSession = Pick<
+  SessionInfo,
+  "id" | "parentID" | "agent" | "location" | "metadata" | "outcome" | "model"
+> & {
+  permissions?: unknown;
+  time?: Pick<SessionInfo["time"], "updated" | "busy" | "idle">;
+};
 
 const id = Schema.String.check(
   Schema.isMinCodePoints(1),
