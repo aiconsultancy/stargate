@@ -49,6 +49,11 @@ must pass every configured check.
 `make init` requires a real terminal and collects tokens without echoing them.
 Pass non-secret CLI options through `ARGS`, or `mise run TASK -- OPTIONS`.
 
+Use `mise run architecture-refresh -- --base "$(git merge-base origin/main HEAD)"`
+to preview the working-tree architecture inventory. Add `--write` to save it.
+The tool cannot approve new exceptions or increase base caps. See
+[development](docs/development.md#architecture-inventory-refresh).
+
 ## Code boundaries
 
 Follow the current runtime boundaries and future slice rules in

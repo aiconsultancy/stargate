@@ -71,6 +71,10 @@ run = "bun run typecheck && bun run lint && bun scripts/hooks/affected-tests.ts"
 description = "Run tests"
 run = "bun test"
 
+[tasks.architecture-refresh]
+description = "Preview architecture inventory reductions; add --write to save"
+run = "bun scripts/refresh-architecture-baseline.ts --root ."
+
 [tasks.strobe]
 description = "Run the project-pinned Strobe CLI"
 run = "bun x --no-install strobe"
