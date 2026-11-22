@@ -8,7 +8,8 @@ import type {
 } from "../src/activity/activity";
 import { ActivityDelivery } from "../src/activity/activity-delivery";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
 
@@ -68,7 +69,7 @@ function fixture(
     },
     async close() {},
   };
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post() {},
     async activity(channel, thread, view, ts) {
       views.push({ channel, thread, view, ...(ts ? { ts } : {}) });

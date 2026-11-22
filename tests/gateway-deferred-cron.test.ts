@@ -10,7 +10,8 @@ import {
   type PromptSourceContext,
   TranscriptUnavailable,
 } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { failureText } from "../src/shared/request-failure";
 import { Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";
@@ -28,7 +29,7 @@ function fixture(path = ":memory:", pinned = false) {
   config.waiting.delayMs = 0;
   const calls: string[] = [];
   const posts: { channel: string; thread: string; text: string }[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(channel, thread, text) {
       calls.push("post");
       posts.push({ channel, thread, text });

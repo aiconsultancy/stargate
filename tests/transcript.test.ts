@@ -13,7 +13,8 @@ import {
 } from "../src/backend";
 import { cancellationNotice } from "../src/gateway/cancellation";
 import type { BotConfig } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import type { RequestFailure } from "../src/shared/request-failure";
 import { conversationKey } from "../src/gateway/routing";
 import { prepareSlackReply } from "../src/shared/slack-format";
@@ -109,7 +110,7 @@ function fixture(
   const posts: { channel: string; thread: string; text: string }[] = [];
   const updates: string[] = [];
   const failures: RequestFailure[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(channel, thread, text) {
       posts.push({ channel, thread, text });
       return `${posts.length + 100}.000`;

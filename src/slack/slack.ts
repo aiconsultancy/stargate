@@ -7,7 +7,10 @@ import { activityContent } from "../activity/activity-slack";
 import { stopBlock } from "../gateway/cancellation";
 import type { CrewUIApi } from "./crew-ui";
 import type { CronUIApi } from "../cron/ui";
-import type { ReactionTargetRequest, SlackDelivery } from "../gateway/ports";
+import type {
+  ReactionTargetRequest,
+  TransportDelivery,
+} from "../gateway/ports";
 import type { DisplayPayload } from "../notifications/ingest/model";
 import type { SinkOutcome } from "../notifications/ingest/sink";
 import {
@@ -101,7 +104,7 @@ export async function handleSlackRequest(
   }
 }
 
-export class SlackConnection implements SlackDelivery {
+export class SlackConnection implements TransportDelivery {
   readonly files: SlackFiles;
   private readonly socket;
   private readonly web;

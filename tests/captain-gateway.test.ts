@@ -16,7 +16,8 @@ import {
 } from "../src/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { failureText } from "../src/shared/request-failure";
 import {
   backendFingerprint,
@@ -56,7 +57,7 @@ function fixture(store = new Store(":memory:"), ownStore = true) {
     async close() {},
   };
   const posts: { channel: string; thread: string; text: string }[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(channel, thread, text) {
       posts.push({ channel, thread, text });
     },
@@ -462,7 +463,7 @@ test("shell cursor reanchors after restart and reconnect; text and files keep or
   cleanup.push(() => reopened.close());
   f.restartParser();
   const uploads: { channel: string; thread: string }[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     ...f.slack,
     files: {
       async download() {
@@ -1274,7 +1275,7 @@ for (const cause of ["transcription", "attachments"] as const) {
     ).cursor;
     expect(f.history.pop()?.id).toBe(lost);
     f.add("assistant", privateReply);
-    const slack: SlackDelivery = {
+    const slack: TransportDelivery = {
       ...f.slack,
       files: {
         async download() {

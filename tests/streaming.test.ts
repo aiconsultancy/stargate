@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { slackContent } from "../src/shared/slack-format";
 import { Store } from "../src/gateway/store";
 import { LiveReply } from "../src/gateway/streaming";
@@ -12,7 +13,7 @@ test("text reaches Slack before generation completes, then updates in place", as
   const visible = Promise.withResolvers<void>();
   const finish = Promise.withResolvers<void>();
   const writes: string[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       writes.push(text);
       visible.resolve();
@@ -79,7 +80,7 @@ function liveFixture(delayMs: number | null = 5000) {
     Promise.withResolvers<void>(),
   );
   const timers: { ms: number; signal: AbortSignal; resolve: () => void }[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       writes.push(text);
       written[writes.length - 1]?.resolve();
@@ -217,7 +218,7 @@ function gatewayFixture() {
   const store = new Store(":memory:");
   const messages = new Map<string, string>();
   let calls = 0;
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       const ts = String(messages.size + 1);
       messages.set(ts, text);

@@ -34,7 +34,7 @@ export type ReactionTargetRequest = {
   signal: AbortSignal;
 };
 
-export interface SlackDelivery {
+export interface TransportDelivery {
   /** Undefined (or absent) while the transport cannot move files. */
   readonly files?: AttachmentTransport | undefined;
   /** Replace a preview when ts is set; false means it was removed. */

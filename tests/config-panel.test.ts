@@ -8,7 +8,7 @@ import {
   readConfigSnapshot,
 } from "../src/meta-commands/config-panel";
 import { CrewWaiting } from "../src/crew/waiting";
-import type { SlackDelivery } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import {
   configPanelRows,
   MetaCommands,
@@ -219,7 +219,7 @@ async function fixture(options: MetaOptions = {}) {
   const acks: (Record<string, unknown> | undefined)[] = [];
   const replies: string[] = [];
   const order: string[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     async post(channel, thread, text, _stop, _unit, content) {
       order.push("post");
       posts.push({ channel, thread, text, content });

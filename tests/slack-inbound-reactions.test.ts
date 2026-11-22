@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import { type AgentBackend, type SteerInput, sourceLine } from "../src/backend";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";
 import type { NotificationReader } from "../src/notifications/preferences/notifications";
 import { botKey } from "../src/gateway/routing";
@@ -451,7 +452,7 @@ test("Slack fallback uses an exact message returned by the API, never claimed it
       },
       async close() {},
     },
-    slack satisfies SlackDelivery,
+    slack satisfies TransportDelivery,
     log,
   );
   const valid = result;

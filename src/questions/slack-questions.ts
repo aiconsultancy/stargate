@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import type { BotConfig } from "../config";
-import type { SlackDelivery } from "../gateway/ports";
+import type { TransportDelivery } from "../gateway/ports";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
@@ -244,7 +244,7 @@ export class SlackQuestionControls {
   private tail = Promise.resolve();
   constructor(
     private readonly store: Store,
-    private readonly slack: SlackDelivery,
+    private readonly slack: TransportDelivery,
     private readonly bot: () => BotConfig | undefined,
     private readonly identity: Identity,
     private readonly isHuman: (user: string) => Promise<boolean>,

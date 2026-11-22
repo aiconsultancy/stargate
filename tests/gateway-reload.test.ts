@@ -3,7 +3,8 @@ import { Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backend";
 import { botSchema } from "../src/config";
-import { Gateway, type SlackDelivery } from "../src/gateway/gateway";
+import { Gateway } from "../src/gateway/gateway";
+import type { TransportDelivery } from "../src/gateway/ports";
 import { Store } from "../src/gateway/store";
 import type { Transcriber } from "../src/transcription/transcription";
 import { bot, event, identity } from "./fixtures";
@@ -15,12 +16,12 @@ afterEach(async () => {
 function fixture(
   prompt: AgentBackend["prompt"] = async () => "Answer.",
   transcriber?: Transcriber,
-  files?: SlackDelivery["files"],
+  files?: TransportDelivery["files"],
 ) {
   const config = bot();
   const store = new Store(":memory:");
   const posts: string[] = [];
-  const slack: SlackDelivery = {
+  const slack: TransportDelivery = {
     files,
     async post(_channel, _thread, text) {
       posts.push(text);
