@@ -10,6 +10,7 @@ import type { TransportDelivery } from "../src/gateway/ports";
 import type { RequestFailure } from "../src/shared/request-failure";
 import { openStore } from "../src/app/open-store";
 import { AzureOpenAITranscriber } from "../src/transcription/azure-openai";
+import { createTranscriber } from "../src/transcription/startup";
 import {
   maxTranscriptCharacters,
   type Transcriber,
@@ -20,6 +21,21 @@ import {
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+test("startup constructs the configured transcription provider", () => {
+  const transcriber = createTranscriber({
+    provider: {
+      type: "azure-openai",
+      endpoint: "https://example.openai.azure.com",
+      deployment: "startup-fixture",
+      apiVersion: "2024-06-01",
+      auth: "managedIdentity",
+    },
+    timeoutMs: 120_000,
+  });
+  expect(transcriber).toBeInstanceOf(AzureOpenAITranscriber);
+  expect(transcriber.label).toBe("Azure OpenAI deployment startup-fixture");
+});
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });

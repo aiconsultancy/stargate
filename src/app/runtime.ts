@@ -107,7 +107,7 @@ import { SlackConnection, type SlackInteractions } from "../slack/slack";
 import { openStore } from "./open-store";
 import { type Store } from "../gateway/store";
 import { TeamsRegistration } from "../teams/registration";
-import { createTranscriber } from "../transcription/azure-openai";
+import { createTranscriber } from "../transcription/startup";
 import {
   buildUpdateSnapshot,
   type UpdateReceipt,
