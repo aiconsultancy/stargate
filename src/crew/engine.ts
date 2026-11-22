@@ -70,7 +70,7 @@ import { piCrewToolDefinitions } from "./pi-extension";
 export { mailInputSchema } from "./messaging";
 
 import { redactCredentials } from "../lib/credentials";
-import { journalInputSchema } from "./journal";
+import { journalInputSchema } from "./reporting/journal";
 import { PiCrewWorkers, type PiWorkerFactory } from "./pi-worker";
 import { crewPermissions } from "./policy";
 import { projectsSchema } from "./input/project-options";
@@ -90,7 +90,7 @@ import {
   sha256,
   verifyResult,
 } from "./reconciliation";
-import { CrewReporter } from "./reporting";
+import { CrewReporter } from "./reporting/reporting";
 import { MissingTaskResult, type ResultAPI, readTaskResult } from "./result";
 import {
   type AbandonableStatus,

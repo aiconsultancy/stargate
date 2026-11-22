@@ -1,11 +1,11 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
 import { z } from "zod";
-import { crewStatusSchema } from "../shared/crew-status";
-import { exactStruct } from "../shared/session-history";
-import { legacySetting } from "../config/settings-legacy";
-import { effectProjectKeySchema } from "./input/project-options";
-import { agentIDSchema } from "./team";
+import { crewStatusSchema } from "../../shared/crew-status";
+import { exactStruct } from "../../shared/session-history";
+import { legacySetting } from "../../config/settings-legacy";
+import { effectProjectKeySchema } from "../input/project-options";
+import { agentIDSchema } from "../team";
 
 const directory = Schema.String.check(
   Schema.isBetweenCodePoints(1, 4096),

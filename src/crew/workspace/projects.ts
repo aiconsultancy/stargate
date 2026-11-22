@@ -14,7 +14,7 @@ import {
   type CrewOptions,
   crewOptionsSchema,
 } from "../engine";
-import type { FleetCrewStatus } from "../fleet-status";
+import type { FleetCrewStatus } from "../reporting/fleet-status";
 import { effectProjectKeySchema } from "../input/project-options";
 import { CrewError } from "../state";
 import { defaultTeam } from "../team";

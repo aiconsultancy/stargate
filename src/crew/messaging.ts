@@ -10,7 +10,7 @@ import {
 } from "../config/settings-schema";
 import type { MesijClient, MesijMessage } from "./mesij";
 import { CrewError } from "./pending";
-import type { JournalEntry } from "./journal";
+import type { JournalEntry } from "./reporting/journal";
 import type { CrewMember } from "./team";
 
 type MessagingTask = {

@@ -35,10 +35,10 @@ import { redactCredentials } from "../../lib/credentials";
 import {
   type FleetCrewStatus,
   fleetCrewStatusSchema,
-} from "../../crew/fleet-status";
+} from "../../crew/reporting/fleet-status";
 import { isNativeInstructionContext } from "../../crew/instruction-context";
 import { crewMessageMetadataKey } from "../../crew/message-protocol";
-import { CrewReporting } from "../../crew/report-rpc";
+import { CrewReporting } from "../../crew/reporting/report-rpc";
 import {
   type CrewStatusInput,
   crewStatusSchema,

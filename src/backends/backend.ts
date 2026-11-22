@@ -1,6 +1,6 @@
 import type { ActivityWatch } from "../activity/activity";
 import type { Attachment } from "../attachments/attachments";
-import type { FleetCrewStatus } from "../crew/fleet-status";
+import type { FleetCrewStatus } from "../crew/reporting/fleet-status";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
 import type { CronAdvanced, CronEvaluation } from "../cron/advanced";
 import type {

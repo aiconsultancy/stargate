@@ -1,11 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import type { ActivitySnapshot } from "../activity/activity";
-import { redactCredentials } from "../lib/credentials";
+import type { ActivitySnapshot } from "../../activity/activity";
+import { redactCredentials } from "../../lib/credentials";
 import { JournalStore } from "./journal";
-import { reportTask } from "./pending";
-import { CrewError } from "./pending";
-import type { CrewMember } from "./team";
+import { reportTask } from "../pending";
+import { CrewError } from "../pending";
+import type { CrewMember } from "../team";
 
 type ReportingTask = {
   id: string;

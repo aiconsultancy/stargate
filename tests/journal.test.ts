@@ -1,7 +1,10 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { Result, Schema } from "effect";
-import { JournalStore, journalInputSchema } from "../src/crew/journal";
+import {
+  JournalStore,
+  journalInputSchema,
+} from "../src/crew/reporting/journal";
 
 test("journal input keeps strict branches, defaults, trim and Unicode bounds", () => {
   const parse = Schema.decodeUnknownSync(journalInputSchema, {

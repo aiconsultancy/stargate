@@ -3,7 +3,7 @@ import { Effect, Predicate, Schema } from "effect";
 import { z } from "zod";
 import { quotaInputSchema } from "../quota/quota";
 import { crewPiParameters, crewInputSchema } from "./input/crew-tool-input";
-import { journalInputSchema } from "./journal";
+import { journalInputSchema } from "./reporting/journal";
 import { messagePiParameters } from "./message-tool-input";
 import { dmInputSchema, mailInputBranches, mailInputSchema } from "./messaging";
 import { CrewError } from "./state";

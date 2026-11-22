@@ -20,7 +20,7 @@ import {
   mailInputSchema,
 } from "../src/crew/messaging";
 import { piCrewExtension } from "../src/crew/pi-extension";
-import { CrewReporting } from "../src/crew/report-rpc";
+import { CrewReporting } from "../src/crew/reporting/report-rpc";
 import { waitingInputSchema } from "../src/crew/controls/waiting";
 import { crewLink } from "../src/irc/crew-link";
 import { settingsIssues } from "../src/config/settings-schema";
