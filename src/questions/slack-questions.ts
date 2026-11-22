@@ -12,7 +12,7 @@ import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../gateway/routing";
+} from "../shared/registration";
 import type { SlackContent, SlackPanelContent } from "../shared/slack-format";
 import type { Job, Store } from "../gateway/store";
 

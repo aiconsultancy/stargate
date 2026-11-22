@@ -694,7 +694,8 @@
         "src/session-history.ts",
         "src/slack-format.ts",
         "src/turn-progress.ts",
-        "src/shared/waiting.ts"
+        "src/shared/waiting.ts",
+        "src/shared/registration.ts"
       ],
       "public": [
         "src/crew-status.ts",
@@ -704,7 +705,8 @@
         "src/session-history.ts",
         "src/slack-format.ts",
         "src/turn-progress.ts",
-        "src/shared/waiting.ts"
+        "src/shared/waiting.ts",
+        "src/shared/registration.ts"
       ],
       "neighbours": ["config", "gateway", "slack"]
     },
@@ -962,7 +964,15 @@
       "retained": {
         "src/cron-store.ts": "store"
       },
-      "neighbours": ["backends", "config", "gateway", "lib", "quota", "slack"]
+      "neighbours": [
+        "backends",
+        "config",
+        "gateway",
+        "lib",
+        "quota",
+        "slack",
+        "shared"
+      ]
     },
     "notifications/preferences": {
       "layer": "slices",
@@ -976,7 +986,7 @@
       "retained": {
         "src/notification-store.ts": "store"
       },
-      "neighbours": ["config", "gateway", "slack"]
+      "neighbours": ["config", "gateway", "slack", "shared"]
     },
     "notifications/ingest": {
       "layer": "slices",
@@ -1072,7 +1082,8 @@
         "cron",
         "gateway",
         "lib",
-        "meta-commands"
+        "meta-commands",
+        "shared"
       ]
     },
     "quota": {

@@ -13,7 +13,7 @@ import {
   readDrainParticipants,
   writeMaintenanceDrain,
 } from "../maintenance-drain";
-import { isAllowedChannel } from "../../gateway/routing";
+import { isAllowedChannel } from "../../shared/registration";
 import { type CleanupResult, runCleanup } from "./cleanup/cleanup";
 import { cleanupProtection } from "./cleanup/cleanup-protection";
 import { defaultCronHorizonMinutes, type MaintenanceConfig } from "./config";

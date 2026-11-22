@@ -14,7 +14,7 @@ import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../gateway/routing";
+} from "../shared/registration";
 
 export type CronModelResolver = (
   input: Pick<CronAdvanced, "model" | "arbiter">,
