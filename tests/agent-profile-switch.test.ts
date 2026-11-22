@@ -306,6 +306,9 @@ test("CLI documents idle default and rejects contradictory flags without service
     });
   const help = run(["--help"]);
   const usage = await new Response(help.stdout).text();
+  expect(usage).toContain(
+    "Usage: bun run src/ops/agent-profile-switch.ts PROFILE",
+  );
   expect(usage).toContain("--hot");
   expect(usage).toContain(
     "Requires idle sessions and no pending requests by default.",

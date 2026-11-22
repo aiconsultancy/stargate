@@ -13,5 +13,10 @@
     "path": "src/nightly/cli.ts",
     "issue": "NET-1784",
     "reason": "Retarget the literal runtime import after the app move."
+  },
+  {
+    "path": "src/ops/agent-profile-switch.ts",
+    "issue": "NET-1784",
+    "reason": "Correct the operator CLI usage path after the Stage 2 move"
   }
 ]

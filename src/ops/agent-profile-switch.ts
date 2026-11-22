@@ -455,7 +455,7 @@ if (import.meta.main) {
     });
     if (values.help) {
       console.log(
-        "Usage: bun run src/agent-profile-switch.ts PROFILE [--config-dir PATH] [--directory PATH] [--service-file PATH] [--hot | --require-idle]\nRequires idle sessions and no pending requests by default. --hot explicitly enables warning-and-proceed reload during active work. All loaded locations are affected.",
+        "Usage: bun run src/ops/agent-profile-switch.ts PROFILE [--config-dir PATH] [--directory PATH] [--service-file PATH] [--hot | --require-idle]\nRequires idle sessions and no pending requests by default. --hot explicitly enables warning-and-proceed reload during active work. All loaded locations are affected.",
       );
     } else {
       if (positionals.length !== 1 || !positionals[0])
