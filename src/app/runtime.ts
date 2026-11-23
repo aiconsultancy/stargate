@@ -178,8 +178,8 @@ export type RuntimeDependencies = {
   drain?: { directory?: string };
   /** Tests only: agent dispatch's Subspace API transport and environment. */
   agentDispatch?: { fetch?: typeof fetch; env?: NodeJS.ProcessEnv };
-  /** Tests only: Subspace agent identity's API transport and environment. */
-  subspaceAgents?: Pick<SubspaceAgentsHost, "fetch" | "env">;
+  /** Tests only: Subspace agent identity's API transport, environment and socket lock. */
+  subspaceAgents?: Pick<SubspaceAgentsHost, "fetch" | "env" | "ownership">;
   /** Isolated notification fixtures only; not operator configuration. */
   notification?: {
     environment?: NodeJS.ProcessEnv;
@@ -263,7 +263,8 @@ const defaultConnectionTiming = { outageMs: 600_000, pollMs: 250 } as const;
 /**
  * Officers' Subspace API identity, only when `subspaceAgents.enabled` is
  * true: the module is loaded then and not otherwise. Absent or disabled,
- * nothing is created, opened, logged or contacted.
+ * nothing is created, opened, logged or contacted, and every backend
+ * configuration passes through unchanged.
  */
 function subspaceAgents(
   config: ServeConfig,
@@ -272,7 +273,10 @@ function subspaceAgents(
 ) {
   const section = config.subspaceAgents;
 
-  if (!section?.enabled) return Effect.void;
+  if (!section?.enabled)
+    return Effect.succeed(
+      (registration: { backend: BackendConfig }) => registration.backend,
+    );
 
   return Effect.acquireRelease(
     Effect.promise(async () =>
@@ -284,6 +288,11 @@ function subspaceAgents(
       }),
     ),
     (started) => Effect.promise(() => started.close()),
+  ).pipe(
+    Effect.map(
+      (started) => (registration: { id: string; backend: BackendConfig }) =>
+        started.backend(registration.id, registration.backend),
+    ),
   );
 }
 
@@ -356,8 +365,8 @@ export function serve(
           }),
       );
 
-      // Officers' Subspace API keys, only when that section is enabled.
-      yield* subspaceAgents(config, log, dependencies);
+      // Unchanged backend configuration unless Subspace agents are enabled.
+      const bridged = yield* subspaceAgents(config, log, dependencies);
 
       // Registered before any worker starts; a failure never stops the gateway.
       const drain = dependencies.drain
@@ -568,7 +577,7 @@ export function serve(
         const resource = yield* Effect.acquireRelease(
           Effect.promise(async () =>
             ownedBackend(
-              await dependencies.backend(teams.backend, { dataDirectory }),
+              await dependencies.backend(bridged(teams), { dataDirectory }),
             ),
           ),
           (resource) => release(teamLog, "Teams backend", resource.close),
@@ -667,7 +676,7 @@ export function serve(
         const resource = yield* Effect.acquireRelease(
           Effect.promise(async () =>
             ownedBackend(
-              await dependencies.backend(bot.backend, { dataDirectory }),
+              await dependencies.backend(bridged(bot), { dataDirectory }),
             ),
           ),
           (resource) => release(botLog, "Resource", resource.close),
@@ -969,7 +978,7 @@ export function serve(
         await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
 
         const resource = ownedBackend(
-          await dependencies.backend(registration.backend, { dataDirectory }),
+          await dependencies.backend(bridged(registration), { dataDirectory }),
         );
 
         try {

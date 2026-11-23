@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { chmod, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { Effect, Schema } from "effect";
 import type { AgentBackend } from "../src/backends/backend";
 import { type BackendConfig, type BotConfig, botSchema } from "../src/config";
@@ -16,12 +16,17 @@ import { until } from "./irc-fixture";
 import {
   ENROLMENT_TOKEN,
   StubApi,
+  bearer,
   captain,
   capturedLog,
+  childDirectory,
   enrolled,
+  overSocket,
+  ownership,
   privateDirectory,
   removeDirectories,
   section,
+  verifyAgentToken,
 } from "./subspace-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -114,6 +119,7 @@ async function runGateway(
     },
     subspaceAgents: {
       env,
+      ownership,
       fetch: (async (...args: Parameters<typeof fetch>) => {
         fetches.calls++;
 
@@ -155,14 +161,25 @@ async function runGateway(
   return { outcome, dataDirectory: directory, backends, fetches, lines, stop };
 }
 
+async function officerSocket() {
+  const sockets = await privateDirectory("sg-");
+
+  return join(await childDirectory(sockets, "captain-a", 0o700), "a.sock");
+}
+
 for (const variant of ["absent", "enabled: false"] as const)
   test(`runtime: subspaceAgents ${variant} creates, opens, logs and contacts nothing`, async () => {
     const stub = stubApi();
+    const socketPath = await officerSocket();
 
     const gateway = await runGateway(
       variant === "absent"
         ? undefined
-        : section(stub.url, [captain("captain-a")], { enabled: false }),
+        : section(
+            stub.url,
+            [captain("captain-a", { registration: "captain-a", socketPath })],
+            { enabled: false },
+          ),
     );
 
     expect(gateway.outcome).toBe("started");
@@ -172,19 +189,42 @@ for (const variant of ["absent", "enabled: false"] as const)
     expect(existsSync(join(gateway.dataDirectory, "subspace-agents"))).toBe(
       false,
     );
+    expect(existsSync(socketPath)).toBe(false);
     expect(gateway.lines.join("\n")).not.toMatch(/[Ss]ubspace/);
     // The backend receives its configuration exactly as written.
     expect(gateway.backends).toEqual([slackBot(claude).backend]);
     await gateway.stop();
   });
 
-test("runtime: enabled, keys are made and enrolment runs in the background", async () => {
+test("runtime: enabled, keys are made, the socket signs, enrolment runs in the background and a Claude officer gets the bridge", async () => {
   const stub = stubApi();
-  const gateway = await runGateway(section(stub.url, [captain("captain-a")]));
+  const socketPath = await officerSocket();
+
+  const gateway = await runGateway(
+    section(stub.url, [
+      captain("captain-a", { registration: "captain-a", socketPath }),
+    ]),
+  );
 
   expect(gateway.outcome).toBe("started");
-  // Backends are unchanged.
-  expect(gateway.backends).toEqual([slackBot(claude).backend]);
+  expect(gateway.backends).toEqual([
+    {
+      ...slackBot(claude).backend,
+      mcpServers: {
+        subspace: {
+          type: "stdio",
+          command: process.execPath,
+          args: [
+            resolve("src/main.ts"),
+            "subspace",
+            "mcp",
+            "--socket",
+            socketPath,
+          ],
+        },
+      },
+    } as BackendConfig,
+  ]);
   await until(
     () => stub.requests.some((request) => request.path === enrol),
     3000,
@@ -200,13 +240,22 @@ test("runtime: enabled, keys are made and enrolment runs in the background", asy
   const key = parseBundle(await readFile(bundle, "utf8"));
 
   expect(((await stat(bundle)).mode & 0o777).toString(8)).toBe("600");
+  expect((await overSocket(socketPath, "GET", "/api/v1/me")).status).toBe(200);
+
+  const [forwarded] = stub.requests.filter((request) => request.path !== enrol);
+
   expect(
-    JSON.parse(
-      stub.requests.find((request) => request.path === enrol)?.body ?? "{}",
-    ),
-  ).toMatchObject({ name: "captain-a", certificate: key.certificate });
+    (
+      await verifyAgentToken(
+        bearer(forwarded ?? ({ headers: {} } as never)),
+        key.certificate,
+        stub.url,
+      )
+    ).payload.sub,
+  ).toBe(key.fingerprint);
   expect(gateway.lines.join("\n")).toContain("Subspace agent identity enabled");
   await gateway.stop();
+  expect(existsSync(socketPath)).toBe(false);
 });
 
 test("runtime: a bundle others can read stops start-up and says why", async () => {

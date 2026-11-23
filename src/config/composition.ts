@@ -381,8 +381,14 @@ const subspaceOfficerSchema = settingsStruct({
   ircNick: Schema.optional(
     Schema.String.check(settingsPattern(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)),
   ),
+  /** A registration whose gateway-launched (Claude) backend gets the bridge. */
+  registration: Schema.optional(
+    Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  ),
   /** Key and certificate; default `<stateDirectory>/<name>.pem`. */
   bundlePath: Schema.optional(normalisedPath),
+  /** This officer's signing proxy; absent opens no endpoint for it. */
+  socketPath: Schema.optional(normalisedPath),
 }).check(
   settingsCheck((officer, context) => {
     if ((officer.rank === "captain") !== (officer.ship !== undefined))
@@ -395,8 +401,9 @@ const subspaceOfficerSchema = settingsStruct({
 );
 
 /**
- * Optional Subspace API agent identity: one key per officer, enrolled with
- * the API. Absent or `enabled: false` loads, opens and contacts nothing.
+ * Optional Subspace API agent identity (docs/subspace-agents.md): one key
+ * per officer, enrolled with the API, and a signing proxy per officer.
+ * Absent or `enabled: false` loads, opens and contacts nothing.
  */
 export const subspaceAgentsSchema = settingsStruct({
   enabled: Schema.Boolean.pipe(settingsDefault(false)),
@@ -477,6 +484,7 @@ const repeated = (values: readonly string[]) =>
 /** Cross-checks of an enabled section; a disabled one names nothing that must exist. */
 function subspaceAgentsIssues(
   section: SubspaceAgentsConfig,
+  registrations: readonly { id: string; backend: BackendConfig }[],
 ): [PropertyKey[], string][] {
   const issues: [PropertyKey[], string][] = [];
   const officers = section.officers;
@@ -486,6 +494,45 @@ function subspaceAgentsIssues(
 
   if (repeated(officers.flatMap((officer) => officer.bundlePath ?? [])))
     issues.push([["officers"], "Each officer needs its own bundlePath"]);
+
+  if (
+    repeated(
+      officers.flatMap((officer) =>
+        officer.socketPath ? [dirname(officer.socketPath)] : [],
+      ),
+    )
+  )
+    issues.push([
+      ["officers"],
+      "Each officer's socketPath needs its own directory",
+    ]);
+
+  if (repeated(officers.flatMap((officer) => officer.registration ?? [])))
+    issues.push([["officers"], "A registration can belong to one officer"]);
+
+  for (const [index, officer] of officers.entries()) {
+    if (officer.registration === undefined) continue;
+
+    const backend = registrations.find(
+      (registration) => registration.id === officer.registration,
+    )?.backend;
+
+    if (!backend)
+      issues.push([
+        ["officers", index, "registration"],
+        "Name a Slack, IRC or Teams registration",
+      ]);
+    else if (backend.type === "claude" && !officer.socketPath)
+      issues.push([
+        ["officers", index, "socketPath"],
+        "A Claude officer needs socketPath for its MCP bridge",
+      ]);
+    else if (backend.type === "claude" && backend.mcpServers?.["subspace"])
+      issues.push([
+        ["officers", index, "registration"],
+        "Remove the registration's own subspace MCP server; Stargate adds it",
+      ]);
+  }
 
   return issues;
 }
@@ -664,7 +711,11 @@ const configCheck = (liveNotificationPolicy = false) =>
       }
 
       if (subspaceAgents?.enabled)
-        for (const [path, message] of subspaceAgentsIssues(subspaceAgents))
+        for (const [path, message] of subspaceAgentsIssues(subspaceAgents, [
+          ...bots,
+          ...irc,
+          ...teams,
+        ]))
           context.addIssue({
             code: "custom",
             path: ["subspaceAgents", ...path],

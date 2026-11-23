@@ -36,7 +36,8 @@
         "rank": "captain",
         "ship": "example-ship",
         "model": "example-model",
-        "ircNick": "example-captain"
+        "ircNick": "example-captain",
+        "socketPath": "/run/stargate/subspace/example-captain/api.sock"
       }
     ]
   },

@@ -3,6 +3,7 @@ import { X509Certificate, createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { decodeJwt, decodeProtectedHeader } from "jose";
 import { configSchema } from "../src/config";
 import { decodeSettings } from "../src/config/settings-errors";
 import { checkCredentials } from "../src/app/setup";
@@ -13,6 +14,7 @@ import {
   parseBundle,
 } from "../src/subspace/certificate";
 import { enrolOfficers } from "../src/subspace/enrol";
+import { mintAgentToken } from "../src/subspace/token";
 import { clientPem } from "../src/transports/irc/client-pem";
 import example from "../stargate.example.json";
 import {
@@ -24,6 +26,7 @@ import {
   privateDirectory,
   removeDirectories,
   section,
+  verifyAgentToken,
 } from "./subspace-fixture";
 
 const cleanup: (() => unknown)[] = [];
@@ -50,6 +53,14 @@ const ircCaptain = (id: string, backend: Record<string, unknown>) => ({
   channels: ["#example"],
   access: { allowedAccounts: ["example-human"] },
   backend,
+});
+
+const claudeBackend = (more: Record<string, unknown> = {}) => ({
+  type: "claude",
+  directory: "/workspace",
+  model: "claude-example",
+  provider: { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv: "PROXY_KEY" },
+  ...more,
 });
 
 const enabledRaw = (more: Record<string, unknown> = {}) => ({
@@ -104,18 +115,64 @@ test("configuration: absent by default, disabled in the example, with defaults",
 });
 
 test("configuration: a disabled section is not cross-checked; an enabled one is", () => {
-  const officers = [captain("example-a"), captain("EXAMPLE-A")];
+  const officers = [captain("example-captain", { registration: "missing" })];
 
   expect(
     refusal({
       subspaceAgents: { ...enabledRaw({ officers }), enabled: false },
     }),
   ).toBe("accepted");
+  expect(refusal({ subspaceAgents: enabledRaw({ officers }) })).toContain(
+    "Name a Slack, IRC or Teams registration",
+  );
+
+  const irc = [ircCaptain("example-captain", claudeBackend())];
+
+  expect(
+    refusal({
+      irc,
+      subspaceAgents: enabledRaw({
+        officers: [
+          captain("example-captain", { registration: "example-captain" }),
+        ],
+      }),
+    }),
+  ).toContain("A Claude officer needs socketPath for its MCP bridge");
+
+  expect(
+    refusal({
+      irc: [
+        ircCaptain(
+          "example-captain",
+          claudeBackend({
+            mcpServers: {
+              subspace: { type: "stdio", command: "/usr/local/bin/example" },
+            },
+          }),
+        ),
+      ],
+      subspaceAgents: enabledRaw({
+        officers: [
+          captain("example-captain", {
+            registration: "example-captain",
+            socketPath: "/run/stargate/subspace/example-captain/api.sock",
+          }),
+        ],
+      }),
+    }),
+  ).toContain("Remove the registration's own subspace MCP server");
 
   for (const [officers, message] of [
     [
       [captain("example-a"), captain("EXAMPLE-A")],
       "Officer names must be unique",
+    ],
+    [
+      [
+        captain("example-a", { socketPath: "/run/example/shared/a.sock" }),
+        captain("example-b", { socketPath: "/run/example/shared/b.sock" }),
+      ],
+      "Each officer's socketPath needs its own directory",
     ],
     [
       [
@@ -139,6 +196,9 @@ test("configuration: officer fields, headers and the enrolment source are bounde
       officers: [{ ...captain("example-admiral"), rank: "rearAdmiral" }],
     }),
     enabledRaw({ officers: [captain("../escape")] }),
+    enabledRaw({
+      officers: [captain("example-captain", { socketPath: "relative.sock" })],
+    }),
     enabledRaw({
       officers: [captain("example-captain", { bundlePath: "/srv/../x.pem" })],
     }),
@@ -269,6 +329,52 @@ test("keys: Ed25519 and P-256 certificates verify, name the officer and are clie
       `${bundleText(generateAgentKey("x")).split("-----BEGIN CERTIFICATE")[0]}${generateAgentKey("y").certificate}`,
     ),
   ).toThrow("does not match");
+});
+
+test("agent token: header and claims per the contract, verified with the certificate", async () => {
+  for (const algorithm of ["ed25519", "ecdsa-p256"] as const) {
+    const key = generateAgentKey("example-captain", algorithm);
+    const audience = "https://subspace.example.test";
+    const first = mintAgentToken(key, audience);
+    const second = mintAgentToken(key, audience);
+
+    const { payload, protectedHeader } = await verifyAgentToken(
+      first,
+      key.certificate,
+      audience,
+    );
+
+    expect(protectedHeader).toEqual({
+      alg: algorithm === "ed25519" ? "EdDSA" : "ES256",
+      typ: "subspace-agent+jwt",
+      kid: key.fingerprint,
+    });
+    expect(payload.sub).toBe(key.fingerprint);
+    expect(payload.aud).toBe(audience);
+    expect(payload.iss).toBe("subspace-agent");
+    expect((payload.exp ?? 0) - (payload.iat ?? 0)).toBeGreaterThan(0);
+    expect((payload.exp ?? 0) - (payload.iat ?? 0)).toBeLessThanOrEqual(300);
+    expect(Math.abs((payload.iat ?? 0) - Date.now() / 1000)).toBeLessThan(5);
+    expect(typeof payload.jti).toBe("string");
+    expect(decodeJwt(second).jti).not.toBe(payload.jti);
+    // Another officer's certificate does not verify it.
+    await expect(
+      verifyAgentToken(
+        first,
+        generateAgentKey("other", algorithm).certificate,
+        audience,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      verifyAgentToken(first, key.certificate, "https://other.example.test"),
+    ).rejects.toThrow();
+  }
+
+  expect(
+    decodeProtectedHeader(
+      mintAgentToken(generateAgentKey("x"), "https://a.example"),
+    ).alg,
+  ).toBe("EdDSA");
 });
 
 test("enrolment: a private bundle and record, the contract's request, then nothing on a re-run", async () => {

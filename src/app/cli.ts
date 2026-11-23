@@ -46,7 +46,7 @@ Commands:
   cron              List, add, run, remove, or report cronjobs
   config check      Validate config, Slack token and IRC credential references
   api token         Print the Fleet API bearer token
-  subspace          Optional officer keys for the Subspace API
+  subspace          Optional officer keys and Subspace API signing proxy
   maintenance       Nightly self-update and host maintenance (plan/run/timer)
   manifest          Print Slack manifest JSON and prefilled creation URL
   status            Read-only capability and recent incident report
@@ -156,14 +156,21 @@ List and report accept no input or job selector. Output is JSON.
 Uses configured cronjobs directory and destination; no prompt CLI arguments.
 ${common}`,
   maintenance: `${maintenanceHelp}\n${common}`,
-  subspace: `Usage: stargate subspace enrol [--config PATH] [--name OFFICER] [--rotate]
-Optional Subspace API agent identity. Nothing here runs unless
-subspaceAgents.enabled is true in the configuration.
-Gives each configured officer a private key and certificate and enrols it
-with the API, using the configured one-time enrolment token. An officer
-already enrolled with its bundle is left alone. --rotate enrols a new key,
-replaces the bundle and reports the old fingerprint so an administrator can
-revoke it. Prints JSON; never key material or tokens.\n${common}`,
+  subspace: `Usage: stargate subspace <enrol|mcp|request> [options]
+Optional Subspace API agent identity; see docs/subspace-agents.md. Nothing
+here runs unless subspaceAgents.enabled is true in the configuration.
+  enrol [--config PATH] [--name OFFICER] [--rotate]
+      Give each configured officer a private key and certificate and enrol
+      it with the API, using the configured one-time enrolment token. An
+      officer already enrolled with its bundle is left alone. --rotate enrols
+      a new key, replaces the bundle and reports the old fingerprint so an
+      administrator can revoke it. Prints JSON; never key material or tokens.
+  mcp --socket PATH
+      Stdio MCP server for a harness, run as the officer's own user. Relays
+      MCP to the API's /mcp endpoint through the officer's signing socket.
+  request --socket PATH [--method METHOD] [--input FILE|-] /api/v1/...
+      One REST call through the officer's socket. A JSON body comes from
+      --input (- for stdin); the answer goes to stdout. Exit 1 unless 2xx.\n${common}`,
   manifest: `Usage: stargate manifest [--name NAME] [--json]
 --name NAME  Slack app display name (default: Stargate; 1–80 characters)
 --json       Print only JSON for scripts; otherwise include prefilled URL
@@ -246,6 +253,8 @@ function parseCli(args: string[]) {
     now: { type: "boolean" },
     foreground: { type: "boolean" },
     "retry-failed": { type: "boolean" },
+    socket: { type: "string" },
+    method: { type: "string" },
   } as const;
 
   const input = { args, allowPositionals: true, strict: true } as const;
@@ -523,6 +532,9 @@ export async function runCli(args: string[]): Promise<CliResult> {
       operation: p[1],
       positionals: p.slice(2),
       configPath,
+      socket: v.socket,
+      method: v.method,
+      input: v.input,
       name: v.name,
       rotate: v.rotate,
     });
@@ -679,6 +691,8 @@ async function readCronFile(path: string): Promise<unknown> {
 
 const subspaceOptions: Record<string, readonly string[]> = {
   enrol: ["name", "rotate"],
+  mcp: ["socket"],
+  request: ["socket", "method", "input"],
 };
 
 function commandOptions(
