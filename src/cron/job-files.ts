@@ -2,43 +2,65 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import { dirname, join, parse, resolve, sep } from "node:path";
-import { z } from "zod";
-import { cronAdvancedFields } from "./advanced";
+import { Result, Schema } from "effect";
+import {
+  settingsDefault,
+  settingsPattern,
+  settingsStruct,
+} from "../config/settings-schema";
+import { cronAdvancedOptions } from "./advanced";
 import { validateCronInput } from "./input";
 
 const maxBytes = 64 * 1024;
-const safeId = z
-  .string()
-  .max(64)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-export const cronjobNameSchema = safeId.refine(
-  (name) => !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(name),
+
+const safeId = Schema.String.check(
+  Schema.isMaxCodePoints(64),
+  settingsPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
 );
-const frontmatterSchema = z.strictObject({
+
+export const cronjobNameSchema = safeId.check(
+  Schema.makeFilter(
+    (name) => !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(name),
+  ),
+);
+
+const frontmatterSchema = settingsStruct({
   name: cronjobNameSchema,
-  description: z.string().trim().min(1).max(1000),
-  schedule: z.string().optional(),
-  ...cronAdvancedFields,
-  timezone: z.string().default("UTC"),
-  skills: z.array(safeId).max(100).default([]),
-  enabled: z.boolean().default(true),
-  report: z.enum(["immediate", "daily"]).default("immediate"),
-  slack: z
-    .strictObject({
-      channel: z.string().regex(/^[CGD][A-Z0-9]+$/),
-      user: z.string().regex(/^[UW][A-Z0-9]+$/),
-    })
-    .optional(),
+  description: Schema.Trim.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(1000),
+  ),
+  schedule: Schema.optional(Schema.String),
+  ...cronAdvancedOptions,
+  timezone: Schema.String.pipe(settingsDefault("UTC")),
+  skills: Schema.mutable(Schema.Array(safeId))
+    .check(Schema.isMaxLength(100))
+    .pipe(settingsDefault([])),
+  enabled: Schema.Boolean.pipe(settingsDefault(true)),
+  report: Schema.Literals(["immediate", "daily"]).pipe(
+    settingsDefault("immediate"),
+  ),
+  slack: Schema.optional(
+    settingsStruct({
+      channel: Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
+      user: Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
+    }),
+  ),
 });
 
-export type CronjobDefinition = z.infer<typeof frontmatterSchema> & {
+export type CronjobDefinition = typeof frontmatterSchema.Type & {
   prompt: string;
 };
 
+const decodeName = Schema.decodeUnknownResult(cronjobNameSchema);
+const decodeFrontmatter = Schema.decodeUnknownResult(frontmatterSchema);
+
 function validName(name: string): string {
-  const result = cronjobNameSchema.safeParse(name);
-  if (!result.success) throw new Error("Invalid cronjob name.");
-  return result.data;
+  const result = decodeName(name);
+
+  if (Result.isFailure(result)) throw new Error("Invalid cronjob name.");
+
+  return result.success;
 }
 
 /** Parser failures never include supplied YAML or prompt text. */
@@ -48,23 +70,32 @@ export function parseCronjob(
   now: number,
 ): CronjobDefinition {
   validName(name);
+
   if (Buffer.byteLength(text) > maxBytes)
     throw new Error("Cronjob file exceeds size limit.");
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+
   if (!match) throw new Error("Invalid cronjob frontmatter delimiters.");
   let yaml: unknown;
+
   try {
     yaml = Bun.YAML.parse(match[1] ?? "");
   } catch {
     throw new Error("Invalid cronjob YAML.");
   }
-  const parsed = frontmatterSchema.safeParse(yaml);
-  if (!parsed.success) throw new Error("Invalid cronjob frontmatter fields.");
-  const metadata = parsed.data;
+
+  const parsed = decodeFrontmatter(yaml);
+
+  if (Result.isFailure(parsed))
+    throw new Error("Invalid cronjob frontmatter fields.");
+  const metadata = parsed.success;
+
   if (metadata.name !== name) throw new Error("Cronjob folder name mismatch.");
   const body = text.slice(match[0].length);
+
   if (body.length > 12_000)
     throw new Error("Cronjob prompt exceeds size limit.");
+
   const { input } = validateCronInput(
     {
       name,
@@ -78,9 +109,10 @@ export function parseCronjob(
     },
     now,
   );
+
   return {
     ...metadata,
-    ...(input.expression ? { schedule: input.expression } : {}),
+    ...(input.expression && { schedule: input.expression }),
     timezone: input.timezone,
     prompt: input.prompt,
   };
@@ -92,11 +124,13 @@ export function renderCronjob(
   },
 ): string {
   const { prompt, ...metadata } = definition;
-  const parsed = frontmatterSchema.safeParse(metadata);
-  if (!parsed.success || typeof prompt !== "string")
+  const parsed = decodeFrontmatter(metadata);
+
+  if (Result.isFailure(parsed) || typeof prompt !== "string")
     throw new Error("Invalid cronjob definition.");
+
   // One delimiter newline belongs to the format, not to the Markdown body.
-  return `---\n${Bun.YAML.stringify(parsed.data).trimEnd()}\n---\n${prompt}`;
+  return `---\n${Bun.YAML.stringify(parsed.success).trimEnd()}\n---\n${prompt}`;
 }
 
 function hasCode(error: unknown, code: string): boolean {
@@ -107,11 +141,13 @@ function hasCode(error: unknown, code: string): boolean {
 async function directory(path: string, create = false): Promise<void> {
   const absolute = resolve(path);
   let current = parse(absolute).root;
+
   for (const part of absolute
     .slice(current.length)
     .split(sep)
     .filter(Boolean)) {
     current = join(current, part);
+
     if (create) {
       try {
         await mkdir(current, { mode: 0o700 });
@@ -119,7 +155,9 @@ async function directory(path: string, create = false): Promise<void> {
         if (!hasCode(error, "EEXIST")) throw error;
       }
     }
+
     const stat = await lstat(current);
+
     if (!stat.isDirectory() || stat.isSymbolicLink())
       throw new Error("Unsafe cronjob directory.");
   }
@@ -135,14 +173,17 @@ export async function readCronjob(
   await directory(job);
   const path = join(job, "CRONJOB.md");
   const stat = await lstat(path);
+
   if (!stat.isFile() || stat.isSymbolicLink())
     throw new Error("Unsafe cronjob file.");
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+
   try {
     if (!(await handle.stat()).isFile())
       throw new Error("Unsafe cronjob file.");
     const buffer = Buffer.alloc(maxBytes + 1);
     let length = 0;
+
     while (length < buffer.length) {
       const { bytesRead } = await handle.read(
         buffer,
@@ -150,10 +191,13 @@ export async function readCronjob(
         buffer.length - length,
         null,
       );
+
       if (!bytesRead) break;
       length += bytesRead;
     }
+
     if (length > maxBytes) throw new Error("Cronjob file exceeds size limit.");
+
     return parseCronjob(buffer.subarray(0, length).toString("utf8"), name, now);
   } finally {
     await handle.close();
@@ -167,23 +211,32 @@ export async function listCronjobNames(root: string): Promise<string[]> {
     if (hasCode(error, "ENOENT")) return [];
     throw error;
   }
+
   const names: string[] = [];
+
   for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (!cronjobNameSchema.safeParse(entry.name).success) continue;
+    if (Result.isFailure(decodeName(entry.name))) continue;
+
     if (entry.isSymbolicLink()) throw new Error("Unsafe cronjob directory.");
+
     if (!entry.isDirectory()) continue;
     await directory(join(root, entry.name));
+
     try {
       const file = await lstat(join(root, entry.name, "CRONJOB.md"));
+
       if (file.isSymbolicLink() || !file.isFile())
         throw new Error("Unsafe cronjob file.");
     } catch (error) {
       if (!hasCode(error, "ENOENT")) throw error;
     }
+
     names.push(entry.name);
+
     if (names.length > 100) throw new Error("Too many cronjob directories.");
   }
-  return names.sort();
+
+  return names.toSorted();
 }
 
 export async function writeCronjob(
@@ -199,21 +252,25 @@ export async function writeCronjob(
   const path = join(job, "CRONJOB.md");
   const temporary = join(dirname(path), `.cronjob-${randomUUID()}`);
   const handle = await open(temporary, "wx", 0o600);
+
   try {
     try {
       await handle.writeFile(renderCronjob(normalized));
     } finally {
       await handle.close();
     }
+
     try {
       // Publish complete bytes without replacing an existing definition.
       await link(temporary, path);
     } catch (error) {
       if (!hasCode(error, "EEXIST")) throw error;
       const existing = await readCronjob(root, normalized.name, now);
+
       if (renderCronjob(existing) !== renderCronjob(normalized))
         throw new Error("Cronjob already exists with a different definition.");
     }
+
     return path;
   } finally {
     await unlink(temporary);

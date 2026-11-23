@@ -19,8 +19,7 @@ import {
   piDurableBackendSchema,
   teamsSchema,
 } from "../src/config";
-import { objectToolInput } from "../src/crew/input/tool-input";
-import { cronOperationSchema } from "../src/cron/control";
+import { cronToolInput } from "../src/crew/cron/cron";
 import { cronjobsSchema } from "../src/cron/config";
 import { fleetControlSchema } from "../src/fleet/protocol";
 import { fleetPolicySchema } from "../src/fleet/fleet-policy";
@@ -428,8 +427,11 @@ test("legacy defaults bypass input transforms and shallow-copy only their contai
 });
 
 test("installed OpenCode cron tool advertisement matches its supported fields", () => {
-  const advertisement = z.toJSONSchema(objectToolInput(cronOperationSchema));
-  expect(Object.keys(advertisement.properties ?? {})).toEqual([
+  const advertisement = cronToolInput()["~standard"].jsonSchema.input({
+    target: "draft-2020-12",
+  });
+
+  expect(Object.keys(advertisement["properties"] ?? {})).toEqual([
     "op",
     "channel",
     "user",

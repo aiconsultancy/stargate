@@ -112,8 +112,8 @@ approval. Review and focused tests must establish scope and preserved behavior.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**. Twelve migration PRs are
-merged. That leaves six component batches. One contingency split can bring the
+The revised target is **18 migration PRs in total**. Fourteen migration PRs
+are merged. That leaves four component batches. One contingency split can bring the
 total to 19, still below 20. Report a proposed
 budget change before opening another PR; do not weaken verification to fit it.
 
@@ -142,6 +142,8 @@ Completed:
 - [Crew messages, history and local RPC](https://github.com/aiconsultancy/stargate/pull/71).
 - [Fleet protocols](https://github.com/aiconsultancy/stargate/pull/72).
 - [Chat routing and interaction envelopes](https://github.com/aiconsultancy/stargate/pull/77).
+- [Files and delivery](https://github.com/aiconsultancy/stargate/pull/84).
+- Cron operations and records (batch 14).
 
 The first batch-6 timing pair failed at +18.27%. Its diagnostic pair measured
 +2.63% with retained coverage; this is not a performance repair. The earlier
@@ -149,16 +151,12 @@ batch-4 first-pair +10.9% failure also remains recorded.
 
 ## Remaining component batches
 
-The numbers include the twelve completed PRs. Batch 13 is next, not merged.
+The numbers include the fourteen completed PRs. The landing order of the rest
+is 17, 16, 15, 18.
 File names identify primary scope, not a restriction against updating a coupled
 consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
 
-13. Files and delivery. Migrate `attachments.ts`, `slack-files.ts`,
-    `captain-post.ts`, the remaining plan schema in `irc/delivery.ts`,
-    `crew/controls/post.ts` and the coupled post registration in `crew/plugin.ts`.
-14. Cron operations and records. Migrate `cron-control.ts`, `cron-store.ts`,
-    `cron-ui.ts`, `cron.ts` and `cronjob-files.ts`.
 15. Status, quota and notifications. Migrate `crew-status.ts`, `status-report.ts`,
     `quota.ts`, `quota-watch.ts`, `health.ts`, `health-host.ts`,
     `notification-store.ts` and `notifications.ts`. Include report/UI consumers.
@@ -192,11 +190,15 @@ Remove each bridge with its owning container:
 - Fleet identifiers, repositories and review-worker settings now compose
   directly into native runtime protocol/control records. Batch 11 removes
   their four bridges with the actual parents.
-- Cron destination identifiers in `cron-control.ts`: batch 14.
+- Batch 14 composes the cron destination, advanced options, evaluation and
+  quota-event settings natively and removes their bridges.
 - Cleanup paths in maintenance result records: batch 16.
 
-The cron tool's JSON advertisement remains derived from the setting codec,
-including when the existing tool-input projection selects a transform's input.
+The `stargate_cron` tool input (`crew/cron/cron.ts`) derives its JSON
+advertisement from the native operation fields; the bytes equal the earlier Zod
+advertisement. A present field must match that field of one operation and an
+unknown field fails; only then the operation decoder reports its issues. The
+handler applies the branch defaults.
 Settings defaults retain the legacy decoded-value fallback and shallow-copy
 semantics. They must not re-run input transforms or validate the fallback as
 an input. Configuration string limits count Unicode code points; a regex keeps

@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-import { legacySetting } from "../config/settings-legacy";
 import { settingsPattern, settingsStruct } from "../config/settings-schema";
 
 const provider = Schema.Literals(["claude", "codex"]);
@@ -79,12 +78,15 @@ export const cronEvaluateInputSchema = settingsStruct({
   ),
 });
 
-export const cronAdvancedSchema = settingsStruct({
+/** Advanced option fields for composition into the cron input structs. */
+export const cronAdvancedOptions = {
   trigger: Schema.optional(cronTriggerSchema),
   model: Schema.optional(cronModelSchema),
   once: Schema.optional(Schema.Boolean),
   arbiter: Schema.optional(cronArbiterSchema),
-});
+};
+
+export const cronAdvancedSchema = settingsStruct(cronAdvancedOptions);
 
 export type CronAdvanced = typeof cronAdvancedSchema.Type;
 
@@ -95,13 +97,6 @@ export const cronEvaluationSchema = settingsStruct({
 });
 
 export type CronEvaluation = typeof cronEvaluationSchema.Type;
-
-export const cronAdvancedFields = {
-  trigger: legacySetting(cronTriggerSchema).optional(),
-  model: legacySetting(cronModelSchema).optional(),
-  once: legacySetting(Schema.Boolean).optional(),
-  arbiter: legacySetting(cronArbiterSchema).optional(),
-};
 
 export function usesAdvancedCron(input: CronAdvanced): boolean {
   return (

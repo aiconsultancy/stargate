@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Result, Schema } from "effect";
 import {
   type CronjobDefinition,
   cronjobNameSchema,
@@ -22,6 +23,9 @@ import {
 } from "../src/cron/job-files";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
+
+const validName = (name: unknown) =>
+  Result.isSuccess(Schema.decodeUnknownResult(cronjobNameSchema)(name));
 
 const basic = `---
 name: daily-report
@@ -119,13 +123,13 @@ describe("cronjob files", () => {
       "com1",
       "a".repeat(65),
     ]) {
-      expect(cronjobNameSchema.safeParse(name).success).toBe(false);
+      expect(validName(name)).toBe(false);
       expect(() => parseCronjob(basic, name, now)).toThrow(
         "Invalid cronjob name",
       );
     }
 
-    expect(cronjobNameSchema.safeParse("a".repeat(64)).success).toBe(true);
+    expect(validName("a".repeat(64))).toBe(true);
     expect(() => parseCronjob(basic, "different-name", now)).toThrow(
       "mismatch",
     );
