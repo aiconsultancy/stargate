@@ -20,6 +20,7 @@ import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import {
   type DroidDependencies,
   droidDirectory,
+  droidScrubber,
   runDroid,
 } from "../src/maintenance/nightly/droid/droid";
 import type {
@@ -35,6 +36,8 @@ import type {
 import type { OpenCodeControl } from "../src/maintenance/nightly/update/opencode";
 import {
   type Report,
+  noticeSchemaID,
+  queueNotice,
   writeAlert,
   writeReport,
 } from "../src/maintenance/nightly/reports/report";
@@ -1561,5 +1564,122 @@ describe("droid crew queue notes", () => {
     );
     const everything = [...agentPrompts, status, post?.text ?? ""].join("\n");
     expect(everything).not.toContain("private task text");
+  });
+});
+
+describe("droid post length after redaction", () => {
+  test("a reply that ends with Bearer before the tail is still posted within 2,800 code points", async () => {
+    const { config, path } = await install();
+
+    for (const unit of ["stargate.service", "opencode2.service", "cpa.service"])
+      host.units[unit] = { LoadState: "loaded", ActiveState: "failed" };
+    const captain = join(host.dir, "captain");
+    const stateDirectory = join(captain, ".local", "stargate-crew");
+    await mkdir(join(captain, ".opencode"), { recursive: true });
+    await writeFile(
+      join(captain, ".opencode", "opencode.json"),
+      `${JSON.stringify({
+        plugins: [
+          {
+            package: join(host.dir, "plugin"),
+            options: {
+              namespace: "ship",
+              stateDirectory,
+              captainDirectory: captain,
+              worktrees: {},
+              team: { crew: [] },
+            },
+          },
+        ],
+      })}\n`,
+    );
+    const state = await CrewState.open(stateDirectory, "ship", "fingerprint");
+
+    try {
+      for (const crew of ["chief", "bosun", "cook", "pilot", "medic"])
+        state.enqueue(state.reservePeer(crew), "ses_e49d787old", "task text");
+    } finally {
+      state.close();
+    }
+
+    // The deterministic post has the same header and tail as the model post.
+    const preview = await runDroid(
+      {
+        config,
+        configPath: path,
+        signal: AbortSignal.timeout(30_000),
+        preview: true,
+      },
+      deps(),
+    );
+
+    const shown = preview.text ?? "";
+    const header = shown.slice(0, shown.indexOf("\n"));
+    const tail = shown.slice(shown.indexOf("Droid actions:"));
+    // The body fills its room exactly, so the composed post is 2,798 long.
+    const room = 2800 - header.length - tail.length - 4;
+    expect(room).toBeLessThan(1800);
+    const filler = "The gateway restarted twice. ".repeat(100);
+    const reply = `${filler.slice(0, room - 7)} Bearer`;
+    expect(reply).toHaveLength(room);
+
+    const result = await check(config, path, deps(scripted(async () => reply)));
+
+    expect(result).toMatchObject({ posted: true, model: true });
+    const [post] = await posts(config);
+    const text = post?.text ?? "";
+    // "Bearer" + "\nDroid" across the join is still redacted (not changed here).
+    const redacted = `${header}\n${filler.slice(0, room - 7)} [REDACTED AUTHORIZATION] actions:${tail.slice("Droid actions:".length)}`;
+    expect(Array.from(redacted).length).toBeGreaterThan(2800);
+    expect(text).toBe(`${Array.from(redacted).slice(0, 2799).join("")}…`);
+    expect(Array.from(text)).toHaveLength(2800);
+    expect(result.text).toBe(text);
+  });
+
+  test("the cut is the last step: no post is longer than the notice allows", async () => {
+    const { config } = await install();
+    const fixture = "fictional-test-value".repeat(2);
+    const scrub = droidScrubber(config, { OPENAI_API_KEY: fixture });
+    const tail = "\nDroid actions: none.\nChecks: all clear.";
+    const directory = await mkdtemp(join(base, "notice-"));
+
+    // Redaction matches at the join, around the limit, in UTF-16 and astral text.
+    for (let length = 2770; length <= 2830; length++)
+      for (const unit of ["a", "😀"]) {
+        const body = `${unit.repeat(length - 7)} Bearer`;
+        const redacted = Array.from(scrub.text(`${body}${tail}`));
+        const text = scrub.fit(redacted.join(""), 2800);
+
+        // The join match is still redacted; the cut only removes its end.
+        expect(redacted.join("")).toContain("[REDACTED AUTHORIZATION]");
+        expect(text).toBe(
+          redacted.length > 2800
+            ? `${redacted.slice(0, 2799).join("")}…`
+            : redacted.join(""),
+        );
+        expect(Array.from(text).length).toBeLessThanOrEqual(2800);
+        // A cut never leaves half of a surrogate pair.
+        expect(text).not.toMatch(
+          /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/,
+        );
+        await queueNotice(config.dataDirectory, {
+          schema: noticeSchemaID,
+          channel: "C123",
+          text,
+          report: `droid-${length}-${unit === "a" ? "a" : "e"}.json`,
+        });
+      }
+
+    // A post within the limit is returned as it is.
+    const within = `${"😀".repeat(2799)}!`;
+    expect(Array.from(within)).toHaveLength(2800);
+    expect(scrub.fit(within, 2800)).toBe(within);
+
+    // A cut that ends in a prefix of a configured secret removes the prefix.
+    const lead = "x".repeat(2799 - 20);
+    const cut = scrub.fit(`${lead}${fixture.slice(0, 20)}-and-more-text`, 2800);
+    expect(cut).toBe(`${lead}[REDACTED]…`);
+    expect(cut).not.toContain(fixture.slice(0, 12));
+    await rm(directory, { recursive: true, force: true });
   });
 });
