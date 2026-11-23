@@ -8,8 +8,8 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
-import { ircNote } from "../src/irc/routing";
-import { IrcShip } from "../src/irc/ship";
+import { ircNote } from "../src/transports/irc/routing";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, until } from "./irc-fixture";
 

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parseEnv } from "node:util";
 import { LogLevel, WebClient } from "@slack/web-api";
-import { type BotConfig, secret } from "../config";
+import { type BotConfig, secret } from "../../config";
 
 export type BotFetch = (
   url: string | URL,

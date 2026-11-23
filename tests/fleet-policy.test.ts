@@ -8,13 +8,13 @@ import {
   fleetPermissions,
   fleetPolicySchema,
 } from "../src/fleet/fleet-policy";
-import { parseMessage } from "../src/irc/protocol";
+import { parseMessage } from "../src/transports/irc/protocol";
 import {
   type IrcMember,
   ircCrewInstructions,
   ircInstructions,
   routeIrcMessage,
-} from "../src/irc/routing";
+} from "../src/transports/irc/routing";
 
 const policy = Schema.decodeUnknownSync(fleetPolicySchema)({
   role: "rear_admiral",

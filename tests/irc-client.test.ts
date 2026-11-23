@@ -6,9 +6,9 @@ import {
   IrcClient,
   type IrcClientOptions,
   IrcUnavailable,
-} from "../src/irc/client";
-import { IrcDelivery } from "../src/irc/delivery";
-import { type IrcMessage, utf8Bytes } from "../src/irc/protocol";
+} from "../src/transports/irc/client";
+import { IrcDelivery } from "../src/transports/irc/delivery";
+import { type IrcMessage, utf8Bytes } from "../src/transports/irc/protocol";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];

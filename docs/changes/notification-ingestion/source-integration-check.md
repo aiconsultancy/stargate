@@ -194,7 +194,7 @@ for this binding: `src/gateway/routing.ts:43-58` also hashes backend settings, w
 R7 explicitly excludes from notification identity.
 
 `announce()` only checks abort before a shared-client send:
-`src/slack/slack.ts:182-224`. It does not satisfy the sink contract. The existing
+`src/transports/slack/slack.ts:182-224`. It does not satisfy the sink contract. The existing
 request-scoped `historyWeb(signal)` at `114-127` combines request abort with
 the SDK fetch signal while retaining timeout 15 seconds, zero retries and
 rate-limit rejection at `107-112`. `activity()` already uses that pattern
@@ -205,7 +205,7 @@ Preserve test injection through constructor `webOptions` at `84-90`.
 Use `slackContent(text, "plain")`, not `prepareReply`, for literal output.
 Its escaped fallback and `plain_text` block are at
 `src/shared/slack-format.ts:346-369`. Keep `mrkdwn: false`, `parse: "none"` and
-unfurls disabled, as at `src/slack/slack.ts:191-203`. One concatenated title/body/
+unfurls disabled, as at `src/transports/slack/slack.ts:191-203`. One concatenated title/body/
 URL can exceed a section's text limit; the projection must bound each
 literal block while keeping one logical send attempt and the stored
 signature unchanged. Do not infer transport safety from plain formatting
@@ -231,7 +231,7 @@ There is a concrete offline-information gap: config has app ID and token
 references, but not authenticated team/user or captain-name proof
 (`src/config.ts:375-405`). `checkCredentials` checks local references only
 (`src/app/setup.ts:120-166`); actual identity arrives at runtime
-(`src/slack/slack.ts:148-153`). The plan must specify how offline `config check`
+(`src/transports/slack/slack.ts:148-153`). The plan must specify how offline `config check`
 rejects potential conflicts. A conservative rejection when another
 peer-enabled registration can share the destination channel avoids adding
 network calls or new identity configuration. Startup can additionally use

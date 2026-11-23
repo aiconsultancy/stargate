@@ -7,8 +7,8 @@ import {
   sourceNick,
   tagBytes,
   utf8Bytes,
-} from "../src/irc/protocol";
-import { ircLines, plainText } from "../src/irc/text";
+} from "../src/transports/irc/protocol";
+import { ircLines, plainText } from "../src/transports/irc/text";
 
 test("irc parse: tags, escapes, source, middle and trailing params", () => {
   const message = parseMessage(

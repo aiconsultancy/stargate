@@ -15,10 +15,10 @@ import type {
 } from "../src/backends/backend";
 import { type IrcConfig, ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
-import { Filehost, filehostURL } from "../src/irc/filehost";
-import { fold, parseMessage } from "../src/irc/protocol";
-import { routeIrcMessage } from "../src/irc/routing";
-import { IrcShip } from "../src/irc/ship";
+import { Filehost, filehostURL } from "../src/transports/irc/filehost";
+import { fold, parseMessage } from "../src/transports/irc/protocol";
+import { routeIrcMessage } from "../src/transports/irc/routing";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import type { Transcriber } from "../src/transcription/transcription";
 import { publishedFileDirectory } from "./file-fixture";

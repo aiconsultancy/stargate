@@ -20,15 +20,15 @@ import {
 import { FleetResults, fleetOrigin } from "../src/fleet/results";
 import { sendFleetAssignment } from "../src/fleet/fleet-irc";
 import { Gateway } from "../src/gateway/gateway";
-import { IrcShip } from "../src/irc/ship";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";
 import {
   authenticateActivityRequest,
   BotFrameworkKeyStore,
-} from "../src/teams/botframework-auth";
-import type { OutgoingActivity } from "../src/teams/connector";
-import { TeamsRegistration } from "../src/teams/registration";
+} from "../src/transports/teams/botframework-auth";
+import type { OutgoingActivity } from "../src/transports/teams/connector";
+import { TeamsRegistration } from "../src/transports/teams/registration";
 import { FakeIrcServer, until } from "./irc-fixture";
 import {
   APP_ID,

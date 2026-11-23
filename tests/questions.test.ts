@@ -8,9 +8,9 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
-import { parseMessage } from "../src/irc/protocol";
-import { routeIrcMessage } from "../src/irc/routing";
-import { IrcShip } from "../src/irc/ship";
+import { parseMessage } from "../src/transports/irc/protocol";
+import { routeIrcMessage } from "../src/transports/irc/routing";
+import { IrcShip } from "../src/transports/irc/ship";
 import {
   type NativeQuestion,
   nativeQuestionSchema,

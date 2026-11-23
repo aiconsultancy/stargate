@@ -20,8 +20,8 @@ import {
   type SlackApp,
   serve,
 } from "../src/app/runtime";
-import { handleSlackRequest } from "../src/slack/slack";
-import type { ConnectionState } from "../src/slack/slack-connection";
+import { handleSlackRequest } from "../src/transports/slack/slack";
+import type { ConnectionState } from "../src/transports/slack/slack-connection";
 import { openStore } from "../src/app/open-store";
 import { scopedUpdate } from "../src/maintenance/update-notice";
 import { bot, event, identity } from "./fixtures";

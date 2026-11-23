@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import pino from "pino";
-import { SlackConnection } from "../src/slack/slack";
-import { SlackSocket } from "../src/slack/slack-connection";
+import { SlackConnection } from "../src/transports/slack/slack";
+import { SlackSocket } from "../src/transports/slack/slack-connection";
 
 const log = pino({ enabled: false });
 const timing = { retryMs: 1, maxRetryMs: 2, outageMs: 100, attemptMs: 10 };

@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
-import { IrcClient } from "../src/irc/client";
-import { IrcDelivery } from "../src/irc/delivery";
-import { Filehost } from "../src/irc/filehost";
+import { IrcClient } from "../src/transports/irc/client";
+import { IrcDelivery } from "../src/transports/irc/delivery";
+import { Filehost } from "../src/transports/irc/filehost";
 import { openStore } from "../src/app/open-store";
 
 class Wire extends IrcClient {

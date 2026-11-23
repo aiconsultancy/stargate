@@ -11,7 +11,7 @@ import type { AgentBackend } from "../src/backends/backend";
 import { type Config, configSchema, ircSchema } from "../src/config";
 import { ConfigReload, readReloadCandidate } from "../src/app/config-reload";
 import type { CrewStatus } from "../src/shared/crew-status";
-import { IrcShip, ircKey } from "../src/irc/ship";
+import { IrcShip, ircKey } from "../src/transports/irc/ship";
 import { botKey } from "../src/gateway/routing";
 import {
   listenForReload,

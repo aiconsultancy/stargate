@@ -3,7 +3,7 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import { botSchema } from "../src/config";
 import { isAllowedUser } from "../src/gateway/routing";
-import { SlackConnection } from "../src/slack/slack";
+import { SlackConnection } from "../src/transports/slack/slack";
 import {
   loadThreadContext,
   type ThreadContextRequest,

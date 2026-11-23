@@ -19,7 +19,7 @@ import {
   peerTurnsPerHour,
 } from "../src/gateway/peers";
 import { routeEvent } from "../src/gateway/routing";
-import { handleSlackRequest } from "../src/slack/slack";
+import { handleSlackRequest } from "../src/transports/slack/slack";
 import { openStore } from "../src/app/open-store";
 import { bot, identity } from "./fixtures";
 

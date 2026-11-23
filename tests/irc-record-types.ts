@@ -1,5 +1,5 @@
-import type { ircBurstMessageSchema } from "../src/irc/burst";
-import type { IrcBurstMessage } from "../src/irc/store-contract";
+import type { ircBurstMessageSchema } from "../src/transports/irc/burst";
+import type { IrcBurstMessage } from "../src/transports/irc/store-contract";
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2

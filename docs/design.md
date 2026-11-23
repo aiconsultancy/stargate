@@ -53,8 +53,8 @@ the exclusive process lock, cancellation, and resource cleanup.
 No shared agent implementation depends on Slack. No Slack implementation
 depends on a particular agent protocol. The gateway takes a
 `GatewayTransport` (namespace, access recheck, source line, sender note);
-Slack supplies `slackTransport`, and `src/irc/` supplies the IRC one with its
-own client, admission rules and line delivery. Teams uses the same durable worker
+Slack supplies `slackTransport`. The IRC adapter in `src/transports/irc/` has
+its own client, admission rules and line delivery. Teams uses the same durable worker
 with authenticated Bot Framework intake, stored conversation references and
 Connector delivery. See [IRC transport](irc.md) and [Teams transport](teams.md).
 Opt-in [fleet tools](fleet-tools.md) keep native session permissions, original
@@ -100,8 +100,8 @@ references or a complete file inventory.
 | `shared/`                                                     | Shared domain helpers and types                                                                                                                                     |
 | `config/`                                                     | Configuration                                                                                                                                                       |
 | `gateway/`                                                    | Turn engine only: gateway, ports, routing, store core, streaming, request-failure, turn-progress, cancellation, thread-context, reactions, mentions, peers, waiting |
-| `slack/`                                                      | Transport only: connection, format, files, interactions, bot-web, pairing, crew-ui                                                                                  |
-| `irc/`, `teams/`                                              | Transport implementations                                                                                                                                           |
+| `transports/slack/`                                           | Transport only: connection, format, files, interactions, bot-web, pairing, crew-ui                                                                                  |
+| `transports/irc/`, `transports/teams/`                        | Transport implementations                                                                                                                                           |
 | `questions/`                                                  | questions, background-questions, question-settings, slack-questions                                                                                                 |
 | `activity/`                                                   | activity, activity-delivery, activity-slack                                                                                                                         |
 | `attachments/`                                                | attachments, attachment-delivery                                                                                                                                    |
@@ -118,6 +118,9 @@ The current paths `src/main.ts`, `src/config.ts`, `src/crew/plugin.ts` and
 `src/fleet/plugin.ts` are fixed and must never move. Tests stay flat in `tests/`.
 `gateway.ts` has a permanent exception to the limit of 1,000 non-blank lines.
 The O1 decision in [architecture review](architecture-review.md) is unchanged.
+
+The `transports/` directory groups IRC, Slack and Teams for navigation.
+They remain three separate slices with unchanged dependency rules.
 
 ### Dependency policy
 

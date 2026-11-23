@@ -113,7 +113,8 @@ Owners are `cron.ts`, `cron-store.ts`, `cron-ui.ts`, `provision.ts`,
 | Stop reaction          | Active turn → Stop requested → settled                                                               | The transport checks who may stop. The gateway then settles the turn as for a Slack Stop.                                                  |
 | `stargate_dm` copy     | Receipt recorded → copy sent → recognised by the recipient connection                                | Record the receipt ID before the copy is sent, so the copy is never admitted as a second turn.                                             |
 
-Owners are `irc/client.ts`, `irc/ship.ts`, `irc/delivery.ts` and the
+Owners are `src/transports/irc/client.ts`, `src/transports/irc/ship.ts`,
+`src/transports/irc/delivery.ts` and the
 `irc_cursors`, `delivery_units` and `irc_stargate_dm` tables in `store.ts`.
 
 ## Maintenance

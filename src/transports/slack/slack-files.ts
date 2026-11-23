@@ -7,12 +7,12 @@ import {
   maxAttachmentBytes,
   maxAttachmentTotalBytes,
   maxAttachments,
-} from "../attachments/attachments";
+} from "../../attachments/attachments";
 import {
   settingsPattern,
   settingsRecord,
   settingsStruct,
-} from "../config/settings-schema";
+} from "../../config/settings-schema";
 
 export type SlackFilesFetch = (
   url: string | URL,

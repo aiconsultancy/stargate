@@ -12,10 +12,14 @@ import { FleetLedger } from "../src/fleet/ledger";
 import { fleetOrigin } from "../src/fleet/results";
 import { fleetSourceReference } from "../src/fleet/fleet-source";
 import { Gateway } from "../src/gateway/gateway";
-import { ircBurstLimits } from "../src/irc/burst";
-import { fold, formatMessage, parseMessage } from "../src/irc/protocol";
-import { routeIrcStop } from "../src/irc/routing";
-import { IrcShip } from "../src/irc/ship";
+import { ircBurstLimits } from "../src/transports/irc/burst";
+import {
+  fold,
+  formatMessage,
+  parseMessage,
+} from "../src/transports/irc/protocol";
+import { routeIrcStop } from "../src/transports/irc/routing";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { type Incoming, type Store } from "../src/gateway/store";
 import { FakeIrcServer, until } from "./irc-fixture";

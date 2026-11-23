@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import { Result, Schema } from "effect";
-import { botToken, botWebClient } from "../../slack/bot-web";
+import { botToken, botWebClient } from "../../transports/slack/bot-web";
 import { type BotConfig, loadConfig } from "../../config";
 import {
   NotificationStore,

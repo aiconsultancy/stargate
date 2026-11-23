@@ -11,13 +11,17 @@ import type {
 import { type IrcConfig, ircSchema } from "../src/config";
 import { ircDashboardShip } from "../src/dashboard/dashboard-source";
 import { Gateway } from "../src/gateway/gateway";
-import { fold, formatMessage, parseMessage } from "../src/irc/protocol";
+import {
+  fold,
+  formatMessage,
+  parseMessage,
+} from "../src/transports/irc/protocol";
 import {
   type IrcMember,
   ircResultJobAllowed,
   routeIrcMessage,
-} from "../src/irc/routing";
-import { IrcShip } from "../src/irc/ship";
+} from "../src/transports/irc/routing";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";

@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
-import { maxAttachments } from "../attachments/attachments";
+import { maxAttachments } from "../../attachments/attachments";
 import {
   type IrcConfig,
   defaultAllCallWords,
   effectiveIrcConfig,
-} from "../config";
-import { fleetAuthority, ircPullRequestGuidance } from "../fleet/fleet-policy";
-import { findMention } from "../shared/mentions";
-import { defaultIrcPeerTurnsPerHour, peerWindowMs } from "../gateway/peers";
-import type { Incoming, Job } from "../gateway/store";
+} from "../../config";
+import {
+  fleetAuthority,
+  ircPullRequestGuidance,
+} from "../../fleet/fleet-policy";
+import { findMention } from "../../shared/mentions";
+import { defaultIrcPeerTurnsPerHour, peerWindowMs } from "../../gateway/peers";
+import type { Incoming, Job } from "../../gateway/store";
 import { type IrcMessage, cleanText, fold, validMsgid } from "./protocol";
 
 export { validMsgid } from "./protocol";

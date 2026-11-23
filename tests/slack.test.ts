@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
-import { stopBlock } from "../src/slack/slack";
-import { crewStatusView } from "../src/slack/crew-ui";
-import { handleSlackRequest, SlackConnection } from "../src/slack/slack";
+import { stopBlock } from "../src/transports/slack/slack";
+import { crewStatusView } from "../src/transports/slack/crew-ui";
+import {
+  handleSlackRequest,
+  SlackConnection,
+} from "../src/transports/slack/slack";
 import { replyText, type SlackPanelContent } from "../src/shared/slack-format";
 
 test("trusted configuration blocks survive the existing post and update transport", async () => {

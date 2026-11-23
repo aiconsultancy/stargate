@@ -12,7 +12,7 @@ import {
   serve,
   start,
 } from "../src/app/runtime";
-import { SlackConnection } from "../src/slack/slack";
+import { SlackConnection } from "../src/transports/slack/slack";
 import { bot } from "./fixtures";
 
 export const producerToken = "fixture-notification-producer-credential-0001";

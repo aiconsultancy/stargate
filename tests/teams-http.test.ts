@@ -1,13 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { request, type Server } from "node:http";
-import { AuthError, type VerifiedToken } from "../src/teams/botframework-auth";
+import {
+  AuthError,
+  type VerifiedToken,
+} from "../src/transports/teams/botframework-auth";
 import {
   createTeamsListener,
   HEADERS_TIMEOUT_MS,
   MAX_ACTIVITY_BYTES,
   REQUEST_TIMEOUT_MS,
   type TeamsListenerOptions,
-} from "../src/teams/http";
+} from "../src/transports/teams/http";
 import { close } from "../src/lib/http-util";
 
 const token: VerifiedToken = { claims: {}, endorsements: ["msteams"] };

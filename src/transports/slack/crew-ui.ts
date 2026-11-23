@@ -1,25 +1,25 @@
 import type { ViewsOpenArguments } from "@slack/web-api";
 import { Result, Schema } from "effect";
 import type { Logger } from "pino";
-import type { AgentBackend } from "../backends/backend";
-import type { BotConfig } from "../config";
-import { redactCredentials } from "../lib/credentials";
+import type { AgentBackend } from "../../backends/backend";
+import type { BotConfig } from "../../config";
+import { redactCredentials } from "../../lib/credentials";
 import {
   type CrewStatus,
   type CrewStatusTask,
   crewStatusSchema,
-} from "../shared/crew-status";
+} from "../../shared/crew-status";
 import {
   type QuotaSnapshot,
   formatQuota,
   quotaSnapshotSchema,
-} from "../quota/quota";
+} from "../../quota/quota";
 import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../gateway/routing";
-import { settingsPattern } from "../config/settings-schema";
+} from "../../gateway/routing";
+import { settingsPattern } from "../../config/settings-schema";
 
 type CrewView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
 

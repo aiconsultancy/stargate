@@ -5,13 +5,17 @@ import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { effectiveIrcConfig, ircSchema } from "../src/config";
 import { fleetInstructions } from "../src/fleet/fleet-policy";
-import { fold, formatMessage, parseMessage } from "../src/irc/protocol";
+import {
+  fold,
+  formatMessage,
+  parseMessage,
+} from "../src/transports/irc/protocol";
 import {
   type IrcMember,
   ircResultJobAllowed,
   routeIrcMessage,
   withinLimits,
-} from "../src/irc/routing";
+} from "../src/transports/irc/routing";
 import { settingsIssues } from "../src/config/settings-schema";
 import { addBot, readConfiguration } from "../src/app/setup";
 

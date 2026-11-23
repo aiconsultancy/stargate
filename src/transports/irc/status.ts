@@ -1,4 +1,4 @@
-import { waitingPhrase } from "../shared/waiting";
+import { waitingPhrase } from "../../shared/waiting";
 
 export type StatusResult =
   | { kind: "ok" }

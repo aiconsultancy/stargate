@@ -7,7 +7,7 @@ import { Effect, Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { configSchema } from "../src/config";
-import { type IrcRegistration, IrcShip } from "../src/irc/ship";
+import { type IrcRegistration, IrcShip } from "../src/transports/irc/ship";
 import { conversationKey } from "../src/gateway/routing";
 import { type RuntimeDependencies, serve } from "../src/app/runtime";
 import { openStore } from "../src/app/open-store";

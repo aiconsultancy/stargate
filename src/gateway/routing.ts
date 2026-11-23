@@ -15,7 +15,7 @@ export {
 
 import { Result, Schema } from "effect";
 import { maxAttachments } from "../attachments/attachments";
-import { markdownChunks } from "../slack/markdown-chunks";
+import { markdownChunks } from "../transports/slack/markdown-chunks";
 import { findMention, visibleText } from "../shared/mentions";
 import {
   type NotificationContext,

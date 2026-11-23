@@ -1,8 +1,8 @@
 import { Result, Schema } from "effect";
-import { fleetPolicySchema } from "../fleet/fleet-policy";
-import { fleetControlSchema } from "../fleet/protocol";
-import { mentionNameSchema, mentionNamesSchema } from "../shared/mentions";
-import { isLoopbackAddress } from "../lib/loopback";
+import { fleetPolicySchema } from "../../fleet/fleet-policy";
+import { fleetControlSchema } from "../../fleet/protocol";
+import { mentionNameSchema, mentionNamesSchema } from "../../shared/mentions";
+import { isLoopbackAddress } from "../../lib/loopback";
 import { fold, widestFold } from "./protocol";
 import {
   absolutePath,
@@ -13,7 +13,7 @@ import {
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../config/settings-schema";
+} from "../../config/settings-schema";
 
 const lower = (value: string) => fold(value);
 

@@ -17,7 +17,7 @@ import {
   type RequestFailure,
   statusKind,
 } from "../src/shared/request-failure";
-import { SlackConnection } from "../src/slack/slack";
+import { SlackConnection } from "../src/transports/slack/slack";
 import { openStore } from "../src/app/open-store";
 import { ThreadContextUnavailable } from "../src/gateway/thread-context";
 import { bot, event, identity } from "./fixtures";

@@ -22,7 +22,7 @@ import {
 import { piCrewExtension } from "../src/crew/pi/pi-extension";
 import { CrewReporting } from "../src/crew/reporting/report-rpc";
 import { waitingInputSchema } from "../src/crew/controls/waiting";
-import { crewLink } from "../src/irc/crew-link";
+import { crewLink } from "../src/transports/irc/crew-link";
 import { settingsIssues } from "../src/config/settings-schema";
 
 test("mail and DM keep trim, code-point bounds, defaults and meaningful paths", async () => {

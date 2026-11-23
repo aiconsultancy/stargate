@@ -13,14 +13,14 @@ import type {
 } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
-import { IrcClient } from "../src/irc/client";
-import { IrcDelivery } from "../src/irc/delivery";
+import { IrcClient } from "../src/transports/irc/client";
+import { IrcDelivery } from "../src/transports/irc/delivery";
 import {
   formatMessage,
   type IrcMessage,
   parseMessage,
-} from "../src/irc/protocol";
-import { IrcShip } from "../src/irc/ship";
+} from "../src/transports/irc/protocol";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { until } from "./irc-fixture";
 

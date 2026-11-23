@@ -2,15 +2,15 @@ import { randomUUID } from "node:crypto";
 import type { ViewsOpenArguments } from "@slack/web-api";
 import { Result, Schema } from "effect";
 import type { Logger } from "pino";
-import type { AgentBackend } from "../backends/backend";
-import type { BotConfig } from "../config";
+import type { AgentBackend } from "../../backends/backend";
+import type { BotConfig } from "../../config";
 import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../gateway/routing";
-import { settingsPattern, settingsUUID } from "../config/settings-schema";
-import { botDisplayName } from "../shared/waiting";
+} from "../../gateway/routing";
+import { settingsPattern, settingsUUID } from "../../config/settings-schema";
+import { botDisplayName } from "../../shared/waiting";
 
 type PairingView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
 

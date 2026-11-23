@@ -1,8 +1,8 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { setTimeout as delay } from "node:timers/promises";
 import pino from "pino";
-import { IrcClient, type IrcClientOptions } from "../src/irc/client";
-import { IrcDelivery } from "../src/irc/delivery";
+import { IrcClient, type IrcClientOptions } from "../src/transports/irc/client";
+import { IrcDelivery } from "../src/transports/irc/delivery";
 import { FakeIrcServer, until } from "./irc-fixture";
 
 const cleanup: (() => Promise<void> | void)[] = [];

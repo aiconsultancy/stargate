@@ -7,9 +7,9 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
-import { fold, parseMessage } from "../src/irc/protocol";
-import { routeIrcStop } from "../src/irc/routing";
-import { IrcShip } from "../src/irc/ship";
+import { fold, parseMessage } from "../src/transports/irc/protocol";
+import { routeIrcStop } from "../src/transports/irc/routing";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 

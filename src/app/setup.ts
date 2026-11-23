@@ -22,7 +22,7 @@ import {
   configSchema,
   reloadConfigSchema,
 } from "../config";
-import { clientPem } from "../irc/client-pem";
+import { clientPem } from "../transports/irc/client-pem";
 import {
   type NotifyConfig,
   checkProducerCredentials,

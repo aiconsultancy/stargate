@@ -8,7 +8,7 @@ import {
   notificationOutcome,
   slackNotificationSink,
 } from "../src/notifications/ingest/slack";
-import { SlackConnection } from "../src/slack/slack";
+import { SlackConnection } from "../src/transports/slack/slack";
 import { bot } from "./fixtures";
 import { notificationConfig } from "./notify-runtime-fixture";
 

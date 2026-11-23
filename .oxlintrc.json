@@ -886,11 +886,11 @@
         "src/dashboard/api/v1/projection.ts",
         "src/dashboard/dashboard-source.ts",
         "src/gateway/gateway.ts",
-        "src/irc/config.ts",
-        "src/irc/ship.ts",
         "src/maintenance/nightly/cleanup/cleanup.ts",
         "src/maintenance/nightly/journal.ts",
-        "src/maintenance/nightly/run.ts"
+        "src/maintenance/nightly/run.ts",
+        "src/transports/irc/config.ts",
+        "src/transports/irc/ship.ts"
       ],
       "rules": {
         "eslint/max-lines-per-function": [
@@ -912,13 +912,13 @@
         "src/captain-post/captain-post.ts",
         "src/crew/messaging/messaging.ts",
         "src/gateway/gateway.ts",
-        "src/irc/client.ts",
-        "src/irc/routing.ts",
-        "src/irc/ship.ts",
         "src/maintenance/nightly/cli.ts",
         "src/maintenance/nightly/journal.ts",
         "src/maintenance/nightly/run.ts",
-        "src/ops/agent-profile-switch.ts"
+        "src/ops/agent-profile-switch.ts",
+        "src/transports/irc/client.ts",
+        "src/transports/irc/routing.ts",
+        "src/transports/irc/ship.ts"
       ],
       "rules": { "eslint/max-statements": ["error", { "max": 185 }] }
     },
@@ -934,13 +934,13 @@
         "src/dashboard/api/v1/git.ts",
         "src/dashboard/api/v1/projection.ts",
         "src/gateway/gateway.ts",
-        "src/irc/client.ts",
-        "src/irc/delivery.ts",
         "src/questions/questions.ts",
         "src/questions/slack-questions.ts",
-        "src/slack/crew-ui.ts",
-        "src/slack/pairing.ts",
-        "src/teams/presence.ts"
+        "src/transports/irc/client.ts",
+        "src/transports/irc/delivery.ts",
+        "src/transports/slack/crew-ui.ts",
+        "src/transports/slack/pairing.ts",
+        "src/transports/teams/presence.ts"
       ],
       "rules": { "eslint/max-params": ["error", { "max": 13 }] }
     },
@@ -965,17 +965,17 @@
         "src/fleet/protocol.ts",
         "src/gateway/gateway.ts",
         "src/gateway/routing.ts",
-        "src/irc/client.ts",
-        "src/irc/config.ts",
-        "src/irc/routing.ts",
-        "src/irc/ship.ts",
         "src/maintenance/nightly/cli.ts",
         "src/maintenance/nightly/journal.ts",
         "src/maintenance/nightly/run.ts",
         "src/maintenance/nightly/update/archive.ts",
         "src/meta-commands/meta-commands.ts",
         "src/questions/questions.ts",
-        "src/questions/slack-questions.ts"
+        "src/questions/slack-questions.ts",
+        "src/transports/irc/client.ts",
+        "src/transports/irc/config.ts",
+        "src/transports/irc/routing.ts",
+        "src/transports/irc/ship.ts"
       ],
       "rules": { "eslint/complexity": ["error", { "max": 169 }] }
     },
@@ -984,19 +984,19 @@
         "src/backends/pi/pi-durable.ts",
         "src/gateway/cancellation.ts",
         "src/gateway/routing.ts",
-        "src/irc/config.ts",
-        "src/irc/delivery.ts",
         "src/maintenance/nightly/config.ts",
-        "src/questions/questions.ts"
+        "src/questions/questions.ts",
+        "src/transports/irc/config.ts",
+        "src/transports/irc/delivery.ts"
       ],
       "rules": { "unicorn/max-nested-calls": ["error", { "max": 9 }] }
     },
     {
       "files": [
         "src/backends/claude.ts",
-        "src/irc/client.ts",
         "src/notifications/ingest/model.ts",
-        "src/shared/request-failure.ts"
+        "src/shared/request-failure.ts",
+        "src/transports/irc/client.ts"
       ],
       "rules": { "eslint/max-classes-per-file": ["error", { "max": 5 }] }
     },
@@ -1408,7 +1408,7 @@
       }
     },
     {
-      "files": ["src/slack/slack.ts"],
+      "files": ["src/transports/slack/slack.ts"],
       "rules": {
         "typescript/no-unnecessary-boolean-literal-compare": "off"
       }
@@ -1439,7 +1439,7 @@
       }
     },
     {
-      "files": ["src/teams/registration.ts"],
+      "files": ["src/transports/teams/registration.ts"],
       "rules": {
         "typescript/await-thenable": "off"
       }
@@ -1490,7 +1490,7 @@
         "src/gateway/gateway.ts",
         "src/maintenance/nightly/droid/droid.ts",
         "src/meta-commands/meta-commands.ts",
-        "src/teams/images.ts"
+        "src/transports/teams/images.ts"
       ],
       "rules": {
         "typescript/require-await": "off"

@@ -13,7 +13,10 @@ import type { TransportDelivery } from "../src/gateway/ports";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";
 import type { NotificationReader } from "../src/notifications/preferences/notifications";
 import { botKey } from "../src/gateway/routing";
-import { handleSlackRequest, SlackConnection } from "../src/slack/slack";
+import {
+  handleSlackRequest,
+  SlackConnection,
+} from "../src/transports/slack/slack";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";

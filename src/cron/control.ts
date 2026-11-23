@@ -2,7 +2,7 @@ import { lstat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Predicate, Result, Schema } from "effect";
 import { OpenCodeBackend } from "../backends/opencode/opencode";
-import { botToken, botWebClient } from "../slack/bot-web";
+import { botToken, botWebClient } from "../transports/slack/bot-web";
 import { type BotConfig, loadConfig } from "../config";
 import { type CronAdvanced, cronAdvancedOptions } from "./advanced";
 import { CronStore } from "./store";

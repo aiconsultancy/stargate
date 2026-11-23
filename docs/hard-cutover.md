@@ -64,7 +64,7 @@ Never normalize the old input with the new schema.
   fingerprint]`. Keep its first four values exactly unchanged.
 - IRC `ircKey` is JSON of `["irc", registration ID, lower-case host, port,
   folded configured network or null, folded account, fingerprint]`.
-  Read `src/irc/ship.ts`; keep every value except the fingerprint unchanged.
+  Read `src/transports/irc/ship.ts`; keep every value except the fingerprint unchanged.
 - Map stored keys in `jobs`, `ignored_events`, `captain_cursors`,
   `irc_cursors`, `irc_stargate_dm_cursor`, `cron_schedules` and
   `cron_daily_reports`. Map the first JSON element of `sessions.conversation`

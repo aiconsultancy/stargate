@@ -4,22 +4,22 @@ import { chmodSync } from "node:fs";
 import type { Server } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { Result, Schema } from "effect";
-import type { AgentBackend, PendingPermission } from "../backends/backend";
-import type { TeamsConfig } from "../config";
-import type { FleetSource } from "../fleet/protocol";
-import { fleetResultSource } from "../fleet/results";
-import { fleetAuthority, fleetInstructions } from "../fleet/fleet-policy";
-import { fleetSourceReference } from "../fleet/fleet-source";
-import type { GatewayTransport, TransportDelivery } from "../gateway/ports";
-import { backendFingerprint } from "../gateway/routing";
+import type { AgentBackend, PendingPermission } from "../../backends/backend";
+import type { TeamsConfig } from "../../config";
+import type { FleetSource } from "../../fleet/protocol";
+import { fleetResultSource } from "../../fleet/results";
+import { fleetAuthority, fleetInstructions } from "../../fleet/fleet-policy";
+import { fleetSourceReference } from "../../fleet/fleet-source";
+import type { GatewayTransport, TransportDelivery } from "../../gateway/ports";
+import { backendFingerprint } from "../../gateway/routing";
 import {
   settingsDefault,
   settingsPattern,
   settingsUUID,
-} from "../config/settings-schema";
-import type { Store } from "../gateway/store";
-import { resolveWaiting } from "../gateway/waiting";
-import { botDisplayName } from "../shared/waiting";
+} from "../../config/settings-schema";
+import type { Store } from "../../gateway/store";
+import { resolveWaiting } from "../../gateway/waiting";
+import { botDisplayName } from "../../shared/waiting";
 import {
   BotFrameworkKeyStore,
   checkActivityBinding,
@@ -35,7 +35,7 @@ import {
   type SocketIdentity,
   listenOnUnixSocket,
   unlinkOwnSocket,
-} from "../lib/unix-socket";
+} from "../../lib/unix-socket";
 
 const account = Schema.Struct({
   id: Schema.String.check(Schema.isMinCodePoints(1)),

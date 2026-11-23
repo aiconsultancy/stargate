@@ -3,33 +3,36 @@ import { LogLevel, WebClient, type WebClientOptions } from "@slack/web-api";
 import type { ViewsOpenArguments } from "@slack/web-api";
 import { Result, Schema } from "effect";
 import type { Logger } from "pino";
-import type { ActivityView } from "../activity/activity";
-import { activityContent } from "../activity/activity-slack";
+import type { ActivityView } from "../../activity/activity";
+import { activityContent } from "../../activity/activity-slack";
 import type { CrewUIApi } from "./crew-ui";
 import type {
   ReactionTargetRequest,
   TransportDelivery,
-} from "../gateway/ports";
-import type { DisplayPayload } from "../notifications/ingest/model";
-import type { SinkOutcome } from "../notifications/ingest/sink";
+} from "../../gateway/ports";
+import type { DisplayPayload } from "../../notifications/ingest/model";
+import type { SinkOutcome } from "../../notifications/ingest/sink";
 import {
   notificationContent,
   notificationOutcome,
-} from "../notifications/ingest/slack";
-import { type ReactionName, slackTimestamp } from "../shared/reactions";
-import { type RequestFailure, failureContent } from "../shared/request-failure";
-import type { Identity } from "../gateway/routing";
+} from "../../notifications/ingest/slack";
+import { type ReactionName, slackTimestamp } from "../../shared/reactions";
+import {
+  type RequestFailure,
+  failureContent,
+} from "../../shared/request-failure";
+import type { Identity } from "../../gateway/routing";
 import { SlackSocket, retrySlack } from "./slack-connection";
 import { SlackFiles, type SlackFilesFetch } from "./slack-files";
 import {
   type SlackContent,
   prepareSlackReply,
   slackContent,
-} from "../shared/slack-format";
+} from "../../shared/slack-format";
 import {
   type ThreadContextRequest,
   loadThreadContext,
-} from "../gateway/thread-context";
+} from "../../gateway/thread-context";
 
 type ModalView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
 

@@ -1,11 +1,11 @@
 import { OpenCode } from "@opencode/client";
 import { Schema } from "effect";
-import { type BackendConfig, secret } from "../config";
+import { type BackendConfig, secret } from "../../config";
 import {
   CrewIrc,
   type OutboxPage,
   outboxPageSchema,
-} from "../crew/messaging/irc-rpc";
+} from "../../crew/messaging/irc-rpc";
 
 /**
  * Stargate's IRC ship → its team's crew plugin, through the OpenCode server at

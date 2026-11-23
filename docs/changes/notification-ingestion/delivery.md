@@ -194,7 +194,7 @@ body or exposes either credential.
 
 Current `Bun.serve` sets an idle timeout but does not establish the approved
 absolute header lifetime, connection ceiling or route-slot settlement.
-Use the existing `node:http` precedent from `src/teams/http.ts` for the common
+Use the existing `node:http` precedent from `src/transports/teams/http.ts` for the common
 API listener mechanics, retaining `startApiV1Server` as the public entry point.
 Extract Fleet request handling without changing its policy or response shape.
 One new `src/dashboard/api/server.ts` owns either TCP or Unix, never both. This replaces

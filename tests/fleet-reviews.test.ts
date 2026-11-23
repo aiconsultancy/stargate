@@ -33,7 +33,7 @@ import {
   reviewProofSchema,
 } from "../src/fleet/protocol";
 import { reviewContextPrompt } from "../src/fleet/reviews";
-import { IrcShip } from "../src/irc/ship";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, until } from "./irc-fixture";
 

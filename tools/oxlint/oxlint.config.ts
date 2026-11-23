@@ -23,7 +23,7 @@ import { defineConfig } from "oxlint";
 //   typescript/no-this-alias: Effect idiom `const gateway = this` inside
 //     generator functions (they cannot be arrows).
 //   unicorn/no-misleading-character-class: false positive on the intended
-//     skin-tone range in src/irc/routing.ts.
+//     skin-tone range in src/transports/irc/routing.ts.
 //   unicorn/no-useless-spread, unicorn/no-useless-fallback-in-spread,
 //   unicorn/prefer-string-starts-ends-with: accepted repo style.
 export default defineConfig({
